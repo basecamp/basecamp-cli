@@ -283,6 +283,8 @@ _register_client() {
   # (refresh_token is often restricted to pre-registered clients)
   local grant_types='["authorization_code"]'
 
+  # BC3 DCR only supports public clients (no client_secret)
+  # Account discovery uses /internal/accounts endpoint instead of introspection
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/json" \
@@ -456,22 +458,29 @@ _discover_accounts() {
   local token
   token=$(get_access_token) || return 1
 
-  local introspection_endpoint
-  introspection_endpoint=$(_introspection_endpoint)
+  # BC3 uses /internal/accounts for account discovery
+  # This returns all accounts the authenticated user has access to
+  local accounts_endpoint="$BCQ_BASE_URL/internal/accounts"
 
-  if [[ -z "$introspection_endpoint" ]]; then
-    debug "No introspection endpoint available"
+  debug "Discovering accounts from: $accounts_endpoint"
+
+  local response http_code
+  response=$(curl -s -w '\n%{http_code}' \
+    -H "Authorization: Bearer $token" \
+    -H "User-Agent: $BCQ_USER_AGENT" \
+    -H "Accept: application/json" \
+    "$accounts_endpoint")
+
+  http_code=$(echo "$response" | tail -n1)
+  response=$(echo "$response" | sed '$d')
+
+  if [[ "$http_code" != "200" ]]; then
+    debug "Account discovery failed (HTTP $http_code): $response"
     return 1
   fi
 
-  local response
-  response=$(curl -s \
-    -H "Authorization: Bearer $token" \
-    -H "User-Agent: $BCQ_USER_AGENT" \
-    "$introspection_endpoint")
-
   local accounts
-  accounts=$(echo "$response" | jq '[.accounts[] | select(.product == "bc3") | {id: .id, name: .name, href: .href}]')
+  accounts=$(echo "$response" | jq '[.[] | {id: .id, name: .name, href: ("'"$BCQ_BASE_URL"'/" + (.id | tostring))}]')
 
   if [[ "$accounts" != "[]" ]] && [[ "$accounts" != "null" ]]; then
     save_accounts "$accounts"
