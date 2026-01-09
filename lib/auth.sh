@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+# auth.sh - OAuth 2.1 authentication with Dynamic Client Registration
+
+
+# OAuth Configuration
+
+BCQ_AUTH_BASE="https://launchpad.37signals.com"
+BCQ_AUTH_AUTHORIZE="$BCQ_AUTH_BASE/authorization/new"
+BCQ_AUTH_TOKEN="$BCQ_AUTH_BASE/authorization/token"
+BCQ_AUTH_INTROSPECT="$BCQ_AUTH_BASE/authorization.json"
+BCQ_DCR_ENDPOINT="$BCQ_AUTH_BASE/oauth/clients"
+
+BCQ_REDIRECT_PORT="${BCQ_REDIRECT_PORT:-8976}"
+BCQ_REDIRECT_URI="http://127.0.0.1:$BCQ_REDIRECT_PORT/callback"
+
+BCQ_CLIENT_NAME="bcq CLI"
+BCQ_CLIENT_URI="https://github.com/basecamp/bcq"
+
+
+# Auth Commands
+
+cmd_auth() {
+  local action="${1:-status}"
+  shift || true
+
+  case "$action" in
+    login) _auth_login "$@" ;;
+    logout) _auth_logout "$@" ;;
+    status) _auth_status "$@" ;;
+    refresh) _auth_refresh "$@" ;;
+    --help|-h) _help_auth ;;
+    *)
+      die "Unknown auth action: $action" $EXIT_USAGE "Run: bcq auth --help"
+      ;;
+  esac
+}
+
+
+# Login Flow
+
+_auth_login() {
+  local no_browser=false
+
+  # Parse login-specific flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-browser)
+        no_browser=true
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  info "Starting authentication..."
+
+  # Check for existing valid token
+  if get_access_token &>/dev/null && ! is_token_expired; then
+    info "Already authenticated. Use 'bcq auth logout' first to re-authenticate."
+    _auth_status
+    return 0
+  fi
+
+  # Get or register client
+  local client_id client_secret
+  if ! _load_client; then
+    info "Registering OAuth client..."
+    _register_client || die "Failed to register OAuth client" $EXIT_AUTH
+  fi
+  _load_client
+
+  # Generate PKCE challenge
+  local code_verifier code_challenge
+  code_verifier=$(_generate_code_verifier)
+  code_challenge=$(_generate_code_challenge "$code_verifier")
+
+  # Generate state for CSRF protection
+  local state
+  state=$(_generate_state)
+
+  # Build authorization URL
+  local auth_url
+  auth_url="$BCQ_AUTH_AUTHORIZE?type=web_server"
+  auth_url+="&client_id=$client_id"
+  auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
+  auth_url+="&code_challenge=$code_challenge"
+  auth_url+="&code_challenge_method=S256"
+  auth_url+="&state=$state"
+
+  local auth_code
+
+  if [[ "$no_browser" == "true" ]]; then
+    # Headless mode: user manually visits URL and enters code
+    echo "Visit this URL to authorize:"
+    echo
+    echo "  $auth_url"
+    echo
+    read -rp "Enter the authorization code: " auth_code
+    if [[ -z "$auth_code" ]]; then
+      die "No authorization code provided" $EXIT_AUTH
+    fi
+  else
+    # Browser mode: open browser and wait for callback
+    info "Opening browser for authorization..."
+    info "If browser doesn't open, visit: $auth_url"
+
+    # Open browser
+    _open_browser "$auth_url"
+
+    # Start local server to receive callback
+    auth_code=$(_wait_for_callback "$state") || die "Authorization failed" $EXIT_AUTH
+  fi
+
+  # Exchange code for tokens
+  info "Exchanging authorization code..."
+  _exchange_code "$auth_code" "$code_verifier" "$client_id" "$client_secret" || \
+    die "Token exchange failed" $EXIT_AUTH
+
+  # Discover accounts
+  info "Discovering accounts..."
+  _discover_accounts || warn "Could not discover accounts"
+
+  # Select account if multiple
+  _select_account
+
+  info "Authentication successful!"
+  _auth_status
+}
+
+_auth_logout() {
+  local creds_file
+  creds_file=$(get_credentials_path)
+
+  if [[ -f "$creds_file" ]]; then
+    rm -f "$creds_file"
+    info "Logged out successfully"
+  else
+    info "Not logged in"
+  fi
+}
+
+_auth_status() {
+  local format
+  format=$(get_format)
+
+  local auth_status="unauthenticated"
+  local user_email=""
+  local account_id=""
+  local account_name=""
+  local expires_at=""
+  local token_status="none"
+
+  if get_access_token &>/dev/null; then
+    auth_status="authenticated"
+    token_status="valid"
+
+    local creds
+    creds=$(load_credentials)
+    expires_at=$(echo "$creds" | jq -r '.expires_at // 0')
+
+    if is_token_expired; then
+      token_status="expired"
+    fi
+
+    local accounts
+    accounts=$(load_accounts)
+    account_id=$(get_account_id)
+
+    if [[ -n "$account_id" ]] && [[ "$accounts" != "[]" ]]; then
+      account_name=$(echo "$accounts" | jq -r --arg id "$account_id" \
+        '.[] | select(.id == ($id | tonumber)) | .name // empty')
+    fi
+  fi
+
+  if [[ "$format" == "json" ]]; then
+    jq -n \
+      --arg status "$auth_status" \
+      --arg token_status "$token_status" \
+      --arg account_id "$account_id" \
+      --arg account_name "$account_name" \
+      --arg expires_at "$expires_at" \
+      '{
+        status: $status,
+        token: $token_status,
+        account: {
+          id: (if $account_id != "" then ($account_id | tonumber) else null end),
+          name: (if $account_name != "" then $account_name else null end)
+        },
+        expires_at: (if $expires_at != "" and $expires_at != "0" then ($expires_at | tonumber) else null end)
+      }'
+  else
+    echo "## Authentication Status"
+    echo
+    if [[ "$auth_status" == "authenticated" ]]; then
+      echo "Status: ✓ Authenticated"
+      [[ -n "$account_name" ]] && echo "Account: $account_name (#$account_id)" || true
+      [[ "$token_status" == "expired" ]] && echo "Token: ⚠ Expired (will refresh on next request)" || true
+    else
+      echo "Status: ✗ Not authenticated"
+      echo
+      echo "Run: bcq auth login"
+    fi
+  fi
+}
+
+_auth_refresh() {
+  if refresh_token; then
+    info "Token refreshed successfully"
+    _auth_status
+  else
+    die "Token refresh failed. Run: bcq auth login" $EXIT_AUTH
+  fi
+}
+
+
+# OAuth Helpers
+
+_register_client() {
+  # Dynamic Client Registration (DCR)
+  # Note: This requires Basecamp to support DCR endpoint
+  local response
+  response=$(curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n \
+      --arg name "$BCQ_CLIENT_NAME" \
+      --arg uri "$BCQ_CLIENT_URI" \
+      --arg redirect "$BCQ_REDIRECT_URI" \
+      '{
+        client_name: $name,
+        client_uri: $uri,
+        redirect_uris: [$redirect],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "client_secret_basic"
+      }')" \
+    "$BCQ_DCR_ENDPOINT")
+
+  local client_id client_secret
+  client_id=$(echo "$response" | jq -r '.client_id // empty')
+  client_secret=$(echo "$response" | jq -r '.client_secret // empty')
+
+  if [[ -z "$client_id" ]]; then
+    debug "DCR response: $response"
+    return 1
+  fi
+
+  ensure_global_config_dir
+  jq -n \
+    --arg client_id "$client_id" \
+    --arg client_secret "$client_secret" \
+    '{client_id: $client_id, client_secret: $client_secret}' \
+    > "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
+
+  chmod 600 "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
+}
+
+_load_client() {
+  local client_file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
+  if [[ ! -f "$client_file" ]]; then
+    return 1
+  fi
+
+  client_id=$(jq -r '.client_id' "$client_file")
+  client_secret=$(jq -r '.client_secret' "$client_file")
+
+  [[ -n "$client_id" ]] && [[ -n "$client_secret" ]]
+}
+
+_generate_code_verifier() {
+  # Generate random 43-128 character string for PKCE
+  openssl rand -base64 32 | tr -d '=+/' | cut -c1-43
+}
+
+_generate_code_challenge() {
+  local verifier="$1"
+  # S256: BASE64URL(SHA256(verifier))
+  echo -n "$verifier" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '='
+}
+
+_generate_state() {
+  openssl rand -hex 16
+}
+
+_open_browser() {
+  local url="$1"
+
+  case "$(uname -s)" in
+    Darwin) open "$url" ;;
+    Linux)
+      if command -v xdg-open &>/dev/null; then
+        xdg-open "$url"
+      elif command -v gnome-open &>/dev/null; then
+        gnome-open "$url"
+      else
+        warn "Could not open browser automatically"
+      fi
+      ;;
+    MINGW*|CYGWIN*) start "$url" ;;
+    *) warn "Could not open browser automatically" ;;
+  esac
+}
+
+_wait_for_callback() {
+  local expected_state="$1"
+  local timeout=120
+
+  # Simple HTTP server using netcat
+  info "Waiting for authorization (timeout: ${timeout}s)..."
+
+  local response
+  response=$(timeout "$timeout" bash -c '
+    while true; do
+      request=$(echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h1>Authorization successful!</h1><p>You can close this window.</p></body></html>" | nc -l '"$BCQ_REDIRECT_PORT"' 2>/dev/null | head -1)
+      if [[ "$request" == *"GET /callback"* ]]; then
+        echo "$request"
+        break
+      fi
+    done
+  ') || die "Authorization timed out" $EXIT_AUTH
+
+  # Parse callback URL
+  local query_string
+  query_string=$(echo "$response" | sed -n 's/.*GET \/callback?\([^ ]*\).*/\1/p')
+
+  local code state
+  code=$(echo "$query_string" | tr '&' '\n' | grep '^code=' | cut -d= -f2)
+  state=$(echo "$query_string" | tr '&' '\n' | grep '^state=' | cut -d= -f2)
+
+  if [[ "$state" != "$expected_state" ]]; then
+    die "State mismatch - possible CSRF attack" $EXIT_AUTH
+  fi
+
+  if [[ -z "$code" ]]; then
+    local error
+    error=$(echo "$query_string" | tr '&' '\n' | grep '^error=' | cut -d= -f2)
+    die "Authorization failed: ${error:-unknown error}" $EXIT_AUTH
+  fi
+
+  echo "$code"
+}
+
+_exchange_code() {
+  local code="$1"
+  local code_verifier="$2"
+  local client_id="$3"
+  local client_secret="$4"
+
+  local response
+  response=$(curl -s -X POST \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=authorization_code" \
+    -d "code=$code" \
+    -d "redirect_uri=$BCQ_REDIRECT_URI" \
+    -d "client_id=$client_id" \
+    -d "client_secret=$client_secret" \
+    -d "code_verifier=$code_verifier" \
+    "$BCQ_AUTH_TOKEN")
+
+  local access_token refresh_token expires_in
+  access_token=$(echo "$response" | jq -r '.access_token // empty')
+  refresh_token=$(echo "$response" | jq -r '.refresh_token // empty')
+  expires_in=$(echo "$response" | jq -r '.expires_in // 7200')
+
+  if [[ -z "$access_token" ]]; then
+    debug "Token response: $response"
+    return 1
+  fi
+
+  local expires_at
+  expires_at=$(($(date +%s) + expires_in))
+
+  local creds
+  creds=$(jq -n \
+    --arg access_token "$access_token" \
+    --arg refresh_token "$refresh_token" \
+    --argjson expires_at "$expires_at" \
+    '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at}')
+
+  save_credentials "$creds"
+}
+
+_discover_accounts() {
+  local token
+  token=$(get_access_token) || return 1
+
+  local response
+  response=$(curl -s \
+    -H "Authorization: Bearer $token" \
+    -H "User-Agent: $BCQ_USER_AGENT" \
+    "$BCQ_AUTH_INTROSPECT")
+
+  local accounts
+  accounts=$(echo "$response" | jq '[.accounts[] | select(.product == "bc3") | {id: .id, name: .name, href: .href}]')
+
+  if [[ "$accounts" != "[]" ]] && [[ "$accounts" != "null" ]]; then
+    save_accounts "$accounts"
+    return 0
+  fi
+
+  return 1
+}
+
+_select_account() {
+  local accounts
+  accounts=$(load_accounts)
+
+  local count
+  count=$(echo "$accounts" | jq 'length')
+
+  if [[ "$count" -eq 0 ]]; then
+    warn "No Basecamp accounts found"
+    return
+  fi
+
+  if [[ "$count" -eq 1 ]]; then
+    local account_id account_name
+    account_id=$(echo "$accounts" | jq -r '.[0].id')
+    account_name=$(echo "$accounts" | jq -r '.[0].name')
+    set_global_config "account_id" "$account_id"
+    info "Selected account: $account_name (#$account_id)"
+    return
+  fi
+
+  # Multiple accounts - let user choose
+  echo "Multiple Basecamp accounts found:"
+  echo
+  echo "$accounts" | jq -r 'to_entries | .[] | "  \(.key + 1). \(.value.name) (#\(.value.id))"'
+  echo
+
+  local choice
+  read -rp "Select account (1-$count): " choice
+
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
+    local account_id account_name
+    account_id=$(echo "$accounts" | jq -r ".[$((choice - 1))].id")
+    account_name=$(echo "$accounts" | jq -r ".[$((choice - 1))].name")
+    set_global_config "account_id" "$account_id"
+    info "Selected account: $account_name (#$account_id)"
+  else
+    warn "Invalid choice, using first account"
+    local account_id
+    account_id=$(echo "$accounts" | jq -r '.[0].id')
+    set_global_config "account_id" "$account_id"
+  fi
+}
+
+
+# URL encoding helper
+
+urlencode() {
+  local string="$1"
+  local strlen=${#string}
+  local encoded=""
+  local pos c o
+
+  for (( pos=0 ; pos<strlen ; pos++ )); do
+    c=${string:$pos:1}
+    case "$c" in
+      [-_.~a-zA-Z0-9]) o="$c" ;;
+      *) printf -v o '%%%02x' "'$c" ;;
+    esac
+    encoded+="$o"
+  done
+  echo "$encoded"
+}
