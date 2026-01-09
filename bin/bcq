@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# bcq - Basecamp Query CLI
+# Agent-first CLI for Basecamp API interaction
+#
+# Usage: bcq <command> [options]
+# Run 'bcq' with no arguments for quick-start guide
+
+set -euo pipefail
+
+# Determine script location for loading libs
+BCQ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BCQ_VERSION="0.1.0"
+
+# Load libraries
+source "$BCQ_ROOT/lib/core.sh"
+source "$BCQ_ROOT/lib/config.sh"
+source "$BCQ_ROOT/lib/api.sh"
+source "$BCQ_ROOT/lib/auth.sh"
+
+# Load command handlers
+for cmd_file in "$BCQ_ROOT/lib/commands"/*.sh; do
+  [[ -f "$cmd_file" ]] && source "$cmd_file"
+done
+
+
+main() {
+  # Parse global flags first
+  parse_global_flags "$@"
+  shift $GLOBAL_FLAGS_CONSUMED
+
+  # No arguments → quick-start
+  if [[ $# -eq 0 ]]; then
+    cmd_quick_start
+    exit 0
+  fi
+
+  local command="$1"
+  shift
+
+  case "$command" in
+    # Core commands
+    projects)   cmd_projects "$@" ;;
+    todos)      cmd_todos "$@" ;;
+    todolists)  cmd_todolists "$@" ;;
+    search)     cmd_search "$@" ;;
+    show)       cmd_show "$@" ;;
+    people)     cmd_people "$@" ;;
+    me)         cmd_me "$@" ;;
+
+    # Action shortcuts
+    todo)       cmd_todo_create "$@" ;;
+    done)       cmd_todo_complete "$@" ;;
+    comment)    cmd_comment "$@" ;;
+    assign)     cmd_assign "$@" ;;
+
+    # Auth & config
+    auth)       cmd_auth "$@" ;;
+    config)     cmd_config "$@" ;;
+
+    # MCP server
+    mcp)        cmd_mcp "$@" ;;
+
+    # Meta
+    version)    echo "bcq $BCQ_VERSION" ;;
+    help|--help|-h)
+      cmd_help "$@"
+      ;;
+
+    *)
+      json_error "Unknown command: $command" "usage" \
+        "Run 'bcq' for available commands"
+      exit 1
+      ;;
+  esac
+}
+
+# Run main with all arguments
+main "$@"
