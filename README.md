@@ -72,6 +72,7 @@ bcq --md projects
 ~/.config/basecamp/
 ├── config.json        # Global defaults
 ├── credentials.json   # OAuth tokens (0600)
+├── client.json        # DCR client registration
 └── accounts.json      # Discovered accounts
 
 .basecamp/
@@ -79,6 +80,23 @@ bcq --md projects
 ```
 
 Config hierarchy: global → local → environment → flags
+
+## Environment
+
+Point `bcq` at different Basecamp instances using `BCQ_BASE_URL`:
+
+```bash
+# Production (default)
+bcq projects
+
+# Local development
+BCQ_BASE_URL=http://3.basecamp.localhost:3001 bcq auth login
+
+# Staging/beta
+BCQ_BASE_URL=https://3.staging.basecampapi.com bcq auth login
+```
+
+OAuth endpoints are discovered automatically via `.well-known/oauth-authorization-server` (RFC 8414).
 
 ## Testing
 

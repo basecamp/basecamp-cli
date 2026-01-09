@@ -4,8 +4,8 @@
 
 
 # Configuration
+# BCQ_BASE_URL is set in core.sh - used for both API and OAuth discovery
 
-BCQ_API_BASE="${BCQ_API_BASE:-https://3.basecampapi.com}"
 BCQ_USER_AGENT="bcq/$BCQ_VERSION (https://github.com/basecamp/bcq)"
 BCQ_MAX_RETRIES="${BCQ_MAX_RETRIES:-5}"
 BCQ_BASE_DELAY="${BCQ_BASE_DELAY:-1}"
@@ -51,7 +51,7 @@ api_get() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_API_BASE/$account_id$path"
+  local url="$BCQ_BASE_URL/$account_id$path"
   _api_request GET "$url" "$token" "" "$@"
 }
 
@@ -64,7 +64,7 @@ api_post() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_API_BASE/$account_id$path"
+  local url="$BCQ_BASE_URL/$account_id$path"
   _api_request POST "$url" "$token" "$body" "$@"
 }
 
@@ -77,7 +77,7 @@ api_put() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_API_BASE/$account_id$path"
+  local url="$BCQ_BASE_URL/$account_id$path"
   _api_request PUT "$url" "$token" "$body" "$@"
 }
 
@@ -89,7 +89,7 @@ api_delete() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_API_BASE/$account_id$path"
+  local url="$BCQ_BASE_URL/$account_id$path"
   _api_request DELETE "$url" "$token" "" "$@"
 }
 
@@ -242,6 +242,9 @@ refresh_token() {
 
   debug "Refreshing token..."
 
+  local token_endpoint
+  token_endpoint=$(_token_endpoint)
+
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -249,7 +252,7 @@ refresh_token() {
     -d "refresh_token=$refresh_token" \
     -d "client_id=$client_id" \
     -d "client_secret=$client_secret" \
-    "https://launchpad.37signals.com/authorization/token")
+    "$token_endpoint")
 
   local new_access_token new_refresh_token expires_in
   new_access_token=$(echo "$response" | jq -r '.access_token // empty')

@@ -1,20 +1,66 @@
 #!/usr/bin/env bash
 # auth.sh - OAuth 2.1 authentication with Dynamic Client Registration
+# Uses .well-known/oauth-authorization-server discovery (RFC 8414)
 
 
 # OAuth Configuration
-
-BCQ_AUTH_BASE="https://launchpad.37signals.com"
-BCQ_AUTH_AUTHORIZE="$BCQ_AUTH_BASE/authorization/new"
-BCQ_AUTH_TOKEN="$BCQ_AUTH_BASE/authorization/token"
-BCQ_AUTH_INTROSPECT="$BCQ_AUTH_BASE/authorization.json"
-BCQ_DCR_ENDPOINT="$BCQ_AUTH_BASE/oauth/clients"
 
 BCQ_REDIRECT_PORT="${BCQ_REDIRECT_PORT:-8976}"
 BCQ_REDIRECT_URI="http://127.0.0.1:$BCQ_REDIRECT_PORT/callback"
 
 BCQ_CLIENT_NAME="bcq CLI"
 BCQ_CLIENT_URI="https://github.com/basecamp/bcq"
+
+# Cached OAuth server metadata (populated by _ensure_oauth_config)
+declare -g _BCQ_OAUTH_CONFIG=""
+
+
+# OAuth Discovery (RFC 8414)
+
+_discover_oauth_config() {
+  # Fetch OAuth 2.1 server metadata from .well-known endpoint
+  local discovery_url="$BCQ_BASE_URL/.well-known/oauth-authorization-server"
+
+  debug "Discovering OAuth config from: $discovery_url"
+
+  local response
+  response=$(curl -s -f "$discovery_url") || {
+    die "Failed to discover OAuth configuration from $discovery_url" $EXIT_AUTH \
+      "Ensure BCQ_BASE_URL points to a valid Basecamp instance"
+  }
+
+  # Validate required fields
+  local authorization_endpoint token_endpoint
+  authorization_endpoint=$(echo "$response" | jq -r '.authorization_endpoint // empty')
+  token_endpoint=$(echo "$response" | jq -r '.token_endpoint // empty')
+
+  if [[ -z "$authorization_endpoint" ]] || [[ -z "$token_endpoint" ]]; then
+    debug "Discovery response: $response"
+    die "Invalid OAuth discovery response - missing required endpoints" $EXIT_AUTH
+  fi
+
+  _BCQ_OAUTH_CONFIG="$response"
+  debug "OAuth config discovered successfully"
+}
+
+_ensure_oauth_config() {
+  # Lazily fetch and cache OAuth config
+  if [[ -z "$_BCQ_OAUTH_CONFIG" ]]; then
+    _discover_oauth_config
+  fi
+}
+
+_get_oauth_endpoint() {
+  local key="$1"
+  _ensure_oauth_config
+  echo "$_BCQ_OAUTH_CONFIG" | jq -r ".$key // empty"
+}
+
+# Convenience accessors for OAuth endpoints
+_authorization_endpoint() { _get_oauth_endpoint "authorization_endpoint"; }
+_token_endpoint() { _get_oauth_endpoint "token_endpoint"; }
+_registration_endpoint() { _get_oauth_endpoint "registration_endpoint"; }
+_introspection_endpoint() { _get_oauth_endpoint "introspection_endpoint"; }
 
 
 # Auth Commands
@@ -63,6 +109,9 @@ _auth_login() {
     return 0
   fi
 
+  # Pre-fetch OAuth config (avoids repeated discovery in subshells)
+  _ensure_oauth_config
+
   # Get or register client
   local client_id client_secret
   if ! _load_client; then
@@ -80,9 +129,10 @@ _auth_login() {
   local state
   state=$(_generate_state)
 
-  # Build authorization URL
-  local auth_url
-  auth_url="$BCQ_AUTH_AUTHORIZE?type=web_server"
+  # Build authorization URL (using discovered endpoint)
+  local auth_endpoint auth_url
+  auth_endpoint=$(_authorization_endpoint)
+  auth_url="$auth_endpoint?response_type=code"
   auth_url+="&client_id=$client_id"
   auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
   auth_url+="&code_challenge=$code_challenge"
@@ -218,8 +268,21 @@ _auth_refresh() {
 # OAuth Helpers
 
 _register_client() {
-  # Dynamic Client Registration (DCR)
-  # Note: This requires Basecamp to support DCR endpoint
+  # Dynamic Client Registration (DCR) using discovered endpoint
+  local registration_endpoint
+  registration_endpoint=$(_registration_endpoint)
+
+  if [[ -z "$registration_endpoint" ]]; then
+    die "OAuth server does not support Dynamic Client Registration" $EXIT_AUTH \
+      "The server's .well-known/oauth-authorization-server does not include registration_endpoint"
+  fi
+
+  debug "Registering client at: $registration_endpoint"
+
+  # DCR clients typically only get authorization_code grant
+  # (refresh_token is often restricted to pre-registered clients)
+  local grant_types='["authorization_code"]'
+
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/json" \
@@ -227,15 +290,16 @@ _register_client() {
       --arg name "$BCQ_CLIENT_NAME" \
       --arg uri "$BCQ_CLIENT_URI" \
       --arg redirect "$BCQ_REDIRECT_URI" \
+      --argjson grants "$grant_types" \
       '{
         client_name: $name,
         client_uri: $uri,
         redirect_uris: [$redirect],
-        grant_types: ["authorization_code", "refresh_token"],
+        grant_types: $grants,
         response_types: ["code"],
-        token_endpoint_auth_method: "client_secret_basic"
+        token_endpoint_auth_method: "none"
       }')" \
-    "$BCQ_DCR_ENDPOINT")
+    "$registration_endpoint")
 
   local client_id client_secret
   client_id=$(echo "$response" | jq -r '.client_id // empty')
@@ -246,10 +310,13 @@ _register_client() {
     return 1
   fi
 
+  debug "Registered client_id: $client_id"
+
   ensure_global_config_dir
+  # Public clients may not have a client_secret
   jq -n \
     --arg client_id "$client_id" \
-    --arg client_secret "$client_secret" \
+    --arg client_secret "${client_secret:-}" \
     '{client_id: $client_id, client_secret: $client_secret}' \
     > "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
 
@@ -263,9 +330,10 @@ _load_client() {
   fi
 
   client_id=$(jq -r '.client_id' "$client_file")
-  client_secret=$(jq -r '.client_secret' "$client_file")
+  client_secret=$(jq -r '.client_secret // ""' "$client_file")
 
-  [[ -n "$client_id" ]] && [[ -n "$client_secret" ]]
+  # Only client_id is required (public clients may not have secret)
+  [[ -n "$client_id" ]]
 }
 
 _generate_code_verifier() {
@@ -347,6 +415,9 @@ _exchange_code() {
   local client_id="$3"
   local client_secret="$4"
 
+  local token_endpoint
+  token_endpoint=$(_token_endpoint)
+
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -356,7 +427,7 @@ _exchange_code() {
     -d "client_id=$client_id" \
     -d "client_secret=$client_secret" \
     -d "code_verifier=$code_verifier" \
-    "$BCQ_AUTH_TOKEN")
+    "$token_endpoint")
 
   local access_token refresh_token expires_in
   access_token=$(echo "$response" | jq -r '.access_token // empty')
@@ -385,11 +456,19 @@ _discover_accounts() {
   local token
   token=$(get_access_token) || return 1
 
+  local introspection_endpoint
+  introspection_endpoint=$(_introspection_endpoint)
+
+  if [[ -z "$introspection_endpoint" ]]; then
+    debug "No introspection endpoint available"
+    return 1
+  fi
+
   local response
   response=$(curl -s \
     -H "Authorization: Bearer $token" \
     -H "User-Agent: $BCQ_USER_AGENT" \
-    "$BCQ_AUTH_INTROSPECT")
+    "$introspection_endpoint")
 
   local accounts
   accounts=$(echo "$response" | jq '[.accounts[] | select(.product == "bc3") | {id: .id, name: .name, href: .href}]')

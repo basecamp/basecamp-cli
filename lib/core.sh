@@ -3,6 +3,13 @@
 # Output formatting, response envelope, global flags
 
 
+# Environment Configuration
+# Set BCQ_BASE_URL to your Basecamp instance
+# All OAuth endpoints discovered via .well-known/oauth-authorization-server
+
+BCQ_BASE_URL="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+
+
 # Global State
 
 BCQ_FORMAT="${BCQ_FORMAT:-auto}"    # Output format: auto, json, md
