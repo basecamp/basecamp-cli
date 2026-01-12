@@ -199,6 +199,20 @@ is_token_expired() {
   (( now > expires_at - 60 ))
 }
 
+get_token_scope() {
+  local creds
+  creds=$(load_credentials)
+  local scope
+  scope=$(echo "$creds" | jq -r '.scope // empty')
+
+  if [[ -z "$scope" ]]; then
+    echo "unknown"
+    return 1
+  fi
+
+  echo "$scope"
+}
+
 
 # Account Management
 

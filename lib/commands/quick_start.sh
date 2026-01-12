@@ -236,8 +236,14 @@ SUBCOMMANDS
   logout            Clear stored credentials
   status            Show authentication status
 
+OPTIONS (for login)
+  --scope <scope>   Request 'full' (read+write) or 'read' (read-only) access
+                    Default: full. Use 'read' for least-privilege access.
+  --no-browser      Manual authorization code entry (headless mode)
+
 EXAMPLES
-  bcq auth login
+  bcq auth login                   Full access (default)
+  bcq auth login --scope read      Read-only access
   bcq auth status
 EOF
 }

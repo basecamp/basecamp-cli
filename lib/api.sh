@@ -161,6 +161,15 @@ _api_request() {
         die "Authentication failed" $EXIT_AUTH "Run: bcq auth login"
         ;;
       403)
+        # Check if this is likely a scope issue (write operation with read-only token)
+        if [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
+          local current_scope
+          current_scope=$(get_token_scope 2>/dev/null || echo "unknown")
+          if [[ "$current_scope" == "read" ]]; then
+            die "Permission denied: read-only token cannot perform write operations" $EXIT_FORBIDDEN \
+              "Re-authenticate with full scope: bcq auth login --scope full"
+          fi
+        fi
         die "Permission denied" $EXIT_FORBIDDEN \
           "You don't have access to this resource"
         ;;

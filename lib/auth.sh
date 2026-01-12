@@ -86,6 +86,7 @@ cmd_auth() {
 
 _auth_login() {
   local no_browser=false
+  local scope="full"  # Default to full (read+write) scope
 
   # Parse login-specific flags
   while [[ $# -gt 0 ]]; do
@@ -93,6 +94,18 @@ _auth_login() {
       --no-browser)
         no_browser=true
         shift
+        ;;
+      --scope)
+        shift
+        case "${1:-}" in
+          full|read)
+            scope="$1"
+            shift
+            ;;
+          *)
+            die "Invalid scope: ${1:-}. Use 'full' or 'read'" $EXIT_USAGE
+            ;;
+        esac
         ;;
       *)
         shift
@@ -139,7 +152,7 @@ _auth_login() {
   auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
   auth_url+="&code_challenge=$code_challenge"
   auth_url+="&code_challenge_method=S256"
-  auth_url+="&scope=full"  # Request full (read+write) access
+  auth_url+="&scope=$scope"  # Default: full (read+write), use --scope read for read-only
   auth_url+="&state=$state"
 
   local auth_code
@@ -204,6 +217,7 @@ _auth_status() {
   local account_name=""
   local expires_at=""
   local token_status="none"
+  local scope=""
 
   if get_access_token &>/dev/null; then
     auth_status="authenticated"
@@ -212,6 +226,7 @@ _auth_status() {
     local creds
     creds=$(load_credentials)
     expires_at=$(echo "$creds" | jq -r '.expires_at // 0')
+    scope=$(echo "$creds" | jq -r '.scope // empty')
 
     if is_token_expired; then
       token_status="expired"
@@ -234,9 +249,11 @@ _auth_status() {
       --arg account_id "$account_id" \
       --arg account_name "$account_name" \
       --arg expires_at "$expires_at" \
+      --arg scope "$scope" \
       '{
         status: $status,
         token: $token_status,
+        scope: (if $scope != "" then $scope else null end),
         account: {
           id: (if $account_id != "" then ($account_id | tonumber) else null end),
           name: (if $account_name != "" then $account_name else null end)
@@ -249,6 +266,13 @@ _auth_status() {
     if [[ "$auth_status" == "authenticated" ]]; then
       echo "Status: ✓ Authenticated"
       [[ -n "$account_name" ]] && echo "Account: $account_name (#$account_id)" || true
+      if [[ -n "$scope" ]]; then
+        if [[ "$scope" == "read" ]]; then
+          echo "Scope: $scope (read-only)"
+        else
+          echo "Scope: $scope (read+write)"
+        fi
+      fi
       [[ "$token_status" == "expired" ]] && echo "Token: ⚠ Expired (will refresh on next request)" || true
     else
       echo "Status: ✗ Not authenticated"
@@ -453,10 +477,11 @@ _exchange_code() {
     --data-urlencode "code_verifier=$code_verifier" \
     "$token_endpoint")
 
-  local access_token refresh_token expires_in
+  local access_token refresh_token expires_in scope
   access_token=$(echo "$response" | jq -r '.access_token // empty')
   refresh_token=$(echo "$response" | jq -r '.refresh_token // empty')
   expires_in=$(echo "$response" | jq -r '.expires_in // 7200')
+  scope=$(echo "$response" | jq -r '.scope // empty')
 
   if [[ -z "$access_token" ]]; then
     debug "Token response: $response"
@@ -471,7 +496,8 @@ _exchange_code() {
     --arg access_token "$access_token" \
     --arg refresh_token "$refresh_token" \
     --argjson expires_at "$expires_at" \
-    '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at}')
+    --arg scope "$scope" \
+    '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at, scope: $scope}')
 
   save_credentials "$creds"
 }

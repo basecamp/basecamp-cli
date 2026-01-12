@@ -51,12 +51,22 @@ bcq auth status
 # Login via OAuth (opens browser)
 bcq auth login
 
+# Login with explicit scope for least-privilege
+bcq auth login --scope read    # Read-only access
+bcq auth login --scope full    # Full read+write access (default)
+
 # Show current user
 bcq me
 ```
 
 Authentication uses OAuth 2.1 with DCR. Tokens are stored in `~/.config/basecamp/`.
-BCQ requests full (read+write) scope by default. Users can choose read-only on the consent screen.
+
+**Scope options:**
+- `full` (default): Read and write access to all resources
+- `read`: Read-only access - cannot create, update, or delete
+
+When requesting `full` scope, users can downgrade to `read` on the Basecamp consent screen.
+If a read-only token attempts a write operation, bcq will show a clear error with re-auth hint.
 
 ---
 

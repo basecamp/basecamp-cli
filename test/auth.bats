@@ -68,3 +68,66 @@ load test_helper
 
   [[ "$perms" == "600" ]]
 }
+
+
+# Scope handling
+
+@test "bcq auth status shows read-only for read scope" {
+  create_credentials "test-token" "$(($(date +%s) + 3600))" "read"
+  create_accounts
+  create_global_config '{"account_id": "99999"}'
+
+  export BASECAMP_ACCESS_TOKEN="test-token"
+
+  run bcq --md auth status
+  assert_success
+  assert_output_contains "read-only"
+}
+
+@test "bcq auth status shows read+write for full scope" {
+  create_credentials "test-token" "$(($(date +%s) + 3600))" "full"
+  create_accounts
+  create_global_config '{"account_id": "99999"}'
+
+  export BASECAMP_ACCESS_TOKEN="test-token"
+
+  run bcq --md auth status
+  assert_success
+  assert_output_contains "read+write"
+}
+
+@test "bcq auth status JSON includes scope" {
+  create_credentials "test-token" "$(($(date +%s) + 3600))" "read"
+  create_accounts
+  create_global_config '{"account_id": "99999"}'
+
+  export BASECAMP_ACCESS_TOKEN="test-token"
+
+  run bcq auth status --json
+  assert_success
+  is_valid_json
+  assert_json_value ".scope" "read"
+}
+
+@test "get_token_scope returns scope from credentials" {
+  create_credentials "test-token" "$(($(date +%s) + 3600))" "read"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  local scope
+  scope=$(get_token_scope)
+
+  [[ "$scope" == "read" ]]
+}
+
+@test "get_token_scope returns unknown when no scope stored" {
+  create_credentials "test-token" "$(($(date +%s) + 3600))"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  run get_token_scope
+  assert_failure
+  assert_output_contains "unknown"
+}

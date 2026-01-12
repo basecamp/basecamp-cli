@@ -63,6 +63,15 @@ assert_failure() {
   fi
 }
 
+assert_exit_code() {
+  local expected="$1"
+  if [[ "$status" -ne "$expected" ]]; then
+    echo "Expected exit code $expected, got $status"
+    echo "Output: $output"
+    return 1
+  fi
+}
+
 assert_output_contains() {
   local expected="$1"
   if [[ "$output" != *"$expected"* ]]; then
@@ -121,11 +130,18 @@ create_local_config() {
 create_credentials() {
   local access_token="${1:-test-token}"
   local expires_at="${2:-$(($(date +%s) + 3600))}"
+  local scope="${3:-}"
+
+  local scope_field=""
+  if [[ -n "$scope" ]]; then
+    scope_field="\"scope\": \"$scope\","
+  fi
 
   cat > "$TEST_HOME/.config/basecamp/credentials.json" << EOF
 {
   "access_token": "$access_token",
   "refresh_token": "test-refresh-token",
+  $scope_field
   "expires_at": $expires_at
 }
 EOF
