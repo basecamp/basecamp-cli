@@ -6,9 +6,6 @@ cmd_todolists() {
   die "Command 'todolists' not yet implemented" $EXIT_USAGE
 }
 
-cmd_search() {
-  die "Command 'search' not yet implemented" $EXIT_USAGE
-}
 
 cmd_show() {
   die "Command 'show' not yet implemented" $EXIT_USAGE

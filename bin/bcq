@@ -44,6 +44,7 @@ main() {
     todolists)  cmd_todolists "$@" ;;
     cards)      cmd_cards "$@" ;;
     campfire)   cmd_campfire "$@" ;;
+    recordings) cmd_recordings "$@" ;;
     search)     cmd_search "$@" ;;
     show)       cmd_show "$@" ;;
     people)     cmd_people "$@" ;;

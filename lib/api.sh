@@ -200,17 +200,38 @@ api_get_all() {
   local path="$1"
   local max_pages="${2:-100}"
 
+  local token account_id
+  token=$(ensure_auth)
+  account_id=$(ensure_account_id)
+
   local all_results="[]"
   local page=1
-  local page_path="$path"
+  local url="$BCQ_API_URL/$account_id$path"
 
-  [[ "$page_path" != *.json ]] && page_path="$page_path.json"
+  [[ "$url" != *.json ]] && url="$url.json"
+
+  local headers_file
+  headers_file=$(mktemp)
+  trap "rm -f '$headers_file'" RETURN
 
   while (( page <= max_pages )); do
-    debug "Fetching page $page"
+    debug "Fetching page $page: $url"
 
-    local response
-    response=$(api_get "$page_path")
+    local output http_code response
+    output=$(curl -s \
+      -H "Authorization: Bearer $token" \
+      -H "User-Agent: $BCQ_USER_AGENT" \
+      -H "Content-Type: application/json" \
+      -D "$headers_file" \
+      -w '\n%{http_code}' \
+      "$url")
+
+    http_code=$(echo "$output" | tail -n1)
+    response=$(echo "$output" | sed '$d')
+
+    if [[ "$http_code" != "200" ]]; then
+      die "API request failed (HTTP $http_code)" $EXIT_API
+    fi
 
     if [[ "$all_results" == "[]" ]]; then
       all_results="$response"
@@ -218,8 +239,16 @@ api_get_all() {
       all_results=$(echo "$all_results" "$response" | jq -s '.[0] + .[1]')
     fi
 
-    # TODO: Parse Link header for next page
-    break
+    # Parse Link header for next page (RFC 5988)
+    local next_url
+    next_url=$(grep -i '^Link:' "$headers_file" | sed -n 's/.*<\([^>]*\)>; rel="next".*/\1/p' | tr -d '\r')
+
+    if [[ -z "$next_url" ]]; then
+      break
+    fi
+
+    url="$next_url"
+    ((page++))
   done
 
   echo "$all_results"

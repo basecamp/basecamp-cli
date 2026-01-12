@@ -301,3 +301,37 @@ EXAMPLES
   bcq people pingable           Pingable people
 EOF
 }
+
+_help_recordings() {
+  cat << 'EOF'
+bcq recordings - List recordings across projects
+
+USAGE
+  bcq recordings [type] [options]
+
+TYPES (required)
+  todos             Todo items
+  messages          Message board posts
+  documents         Documents
+  comments          Comments
+  cards             Kanban cards
+  uploads           Uploaded files
+
+OPTIONS
+  --type, -t        Recording type (or use shorthand above)
+  --project, -p     Filter by project ID(s)
+  --status, -s      active (default), archived, or trashed
+  --sort            created_at or updated_at (default)
+  --direction       desc (default) or asc
+  --limit, -n       Limit results
+
+EXAMPLES
+  bcq recordings todos                     Recent todos across all projects
+  bcq recordings messages --project 123    Messages in specific project
+  bcq recordings comments --limit 20       Last 20 comments
+  bcq search todos --project 123           Alias for recordings
+
+NOTE: Basecamp API doesn't have full-text search. Use jq to filter results:
+  bcq recordings todos -q | jq '.[] | select(.content | test("bug"; "i"))'
+EOF
+}
