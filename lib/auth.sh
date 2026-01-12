@@ -479,30 +479,30 @@ _discover_accounts() {
   local token
   token=$(get_access_token) || return 1
 
-  # BC3 uses /internal/accounts for account discovery
-  # This returns all accounts the authenticated user has access to
-  local accounts_endpoint="$BCQ_BASE_URL/internal/accounts"
+  # Authorization self-introspection - returns token info including accessible accounts
+  # Uses API host since DCR clients are untrusted and only allowed on API endpoints
+  local authorization_endpoint="$BCQ_API_URL/authorization.json"
 
-  debug "Discovering accounts from: $accounts_endpoint"
+  debug "Fetching authorization from: $authorization_endpoint"
 
   local response http_code
   response=$(curl -s -w '\n%{http_code}' \
     -H "Authorization: Bearer $token" \
     -H "User-Agent: $BCQ_USER_AGENT" \
     -H "Accept: application/json" \
-    "$accounts_endpoint")
+    "$authorization_endpoint")
 
   http_code=$(echo "$response" | tail -n1)
   response=$(echo "$response" | sed '$d')
 
   if [[ "$http_code" != "200" ]]; then
-    debug "Account discovery failed (HTTP $http_code): $response"
+    debug "Authorization fetch failed (HTTP $http_code): $response"
     return 1
   fi
 
   local accounts
-  # Use queenbee_id for URLs (that's the ID in the URL path like /181900405/projects)
-  accounts=$(echo "$response" | jq '[.[] | {id: .queenbee_id, name: .name, href: ("'"$BCQ_BASE_URL"'/" + (.queenbee_id | tostring))}]')
+  # Extract accounts from authorization response; queenbee_id is used in URLs
+  accounts=$(echo "$response" | jq '[.accounts[] | {id: .queenbee_id, name: .name, href: .href}]')
 
   if [[ "$accounts" != "[]" ]] && [[ "$accounts" != "null" ]]; then
     save_accounts "$accounts"
