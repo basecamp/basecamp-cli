@@ -78,10 +78,10 @@ _todos_list() {
   if [[ -n "$todolist" ]]; then
     path="/buckets/$project/todolists/$todolist/todos.json"
   else
-    # Get all todolists and their todos
-    path="/buckets/$project/todosets.json"
-    local todoset
-    todoset=$(api_get "$path" | jq -r '.[0].id // empty')
+    # Get todoset ID from project dock
+    local project_data todoset
+    project_data=$(api_get "/projects/$project.json")
+    todoset=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
 
     if [[ -z "$todoset" ]]; then
       die "No todoset found in project $project" $EXIT_NOT_FOUND
@@ -284,9 +284,10 @@ cmd_todo_create() {
   fi
 
   if [[ -z "$todolist" ]]; then
-    # Get first todolist in project
-    local todoset
-    todoset=$(api_get "/buckets/$project/todosets.json" | jq -r '.[0].id // empty')
+    # Get first todolist from project's todoset
+    local project_data todoset
+    project_data=$(api_get "/projects/$project.json")
+    todoset=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
     if [[ -n "$todoset" ]]; then
       todolist=$(api_get "/buckets/$project/todosets/$todoset/todolists.json" | jq -r '.[0].id // empty')
     fi
