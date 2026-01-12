@@ -530,30 +530,35 @@ _select_account() {
     account_name=$(echo "$accounts" | jq -r '.[0].name')
     set_global_config "account_id" "$account_id"
     info "Selected account: $account_name (#$account_id)"
-    return
+  elif [[ "$count" -gt 1 ]]; then
+    # Multiple accounts - let user choose
+    echo "Multiple Basecamp accounts found:"
+    echo
+    echo "$accounts" | jq -r 'to_entries | .[] | "  \(.key + 1). \(.value.name) (#\(.value.id))"'
+    echo
+
+    local choice
+    read -rp "Select account (1-$count): " choice
+
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
+      local account_id account_name
+      account_id=$(echo "$accounts" | jq -r ".[$((choice - 1))].id")
+      account_name=$(echo "$accounts" | jq -r ".[$((choice - 1))].name")
+      set_global_config "account_id" "$account_id"
+      info "Selected account: $account_name (#$account_id)"
+    else
+      warn "Invalid choice, using first account"
+      local account_id
+      account_id=$(echo "$accounts" | jq -r '.[0].id')
+      set_global_config "account_id" "$account_id"
+    fi
   fi
 
-  # Multiple accounts - let user choose
-  echo "Multiple Basecamp accounts found:"
-  echo
-  echo "$accounts" | jq -r 'to_entries | .[] | "  \(.key + 1). \(.value.name) (#\(.value.id))"'
-  echo
-
-  local choice
-  read -rp "Select account (1-$count): " choice
-
-  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
-    local account_id account_name
-    account_id=$(echo "$accounts" | jq -r ".[$((choice - 1))].id")
-    account_name=$(echo "$accounts" | jq -r ".[$((choice - 1))].name")
-    set_global_config "account_id" "$account_id"
-    info "Selected account: $account_name (#$account_id)"
-  else
-    warn "Invalid choice, using first account"
-    local account_id
-    account_id=$(echo "$accounts" | jq -r '.[0].id')
-    set_global_config "account_id" "$account_id"
-  fi
+  # Save the API URLs so bcq knows which server to talk to
+  # This ensures tokens obtained from dev servers talk to dev servers
+  set_global_config "base_url" "$BCQ_BASE_URL"
+  set_global_config "api_url" "$BCQ_API_URL"
+  debug "Saved API URLs: base=$BCQ_BASE_URL api=$BCQ_API_URL"
 }
 
 

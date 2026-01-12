@@ -11,8 +11,11 @@
 # In development, they may differ:
 #   BCQ_BASE_URL=http://3.basecamp.localhost:3001    (web app, has login cookies)
 #   BCQ_API_URL=http://3.basecampapi.localhost:3001  (API host for untrusted clients)
-
-BCQ_BASE_URL="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+#
+# URL resolution priority:
+#   1. Environment variables (BCQ_BASE_URL, BCQ_API_URL)
+#   2. Stored config from auth (remembers which server issued the token)
+#   3. Production defaults
 
 # Derive API URL from BASE_URL if not set
 # Replaces "basecamp" with "basecampapi" in the hostname
@@ -21,6 +24,27 @@ _derive_api_url() {
   echo "$base" | sed 's/basecamp\([^a-z]\)/basecampapi\1/; s/basecamp$/basecampapi/'
 }
 
+# Load URLs from config if not set via environment
+# This happens early, before full config loading
+_load_url_config() {
+  local config_file="${XDG_CONFIG_HOME:-$HOME/.config}/basecamp/config.json"
+  if [[ -f "$config_file" ]]; then
+    local base_url api_url
+    base_url=$(jq -r '.base_url // empty' "$config_file" 2>/dev/null) || true
+    api_url=$(jq -r '.api_url // empty' "$config_file" 2>/dev/null) || true
+    if [[ -z "${BCQ_BASE_URL:-}" ]] && [[ -n "$base_url" ]]; then
+      BCQ_BASE_URL="$base_url"
+    fi
+    if [[ -z "${BCQ_API_URL:-}" ]] && [[ -n "$api_url" ]]; then
+      BCQ_API_URL="$api_url"
+    fi
+  fi
+}
+
+_load_url_config
+
+# Apply defaults if still not set
+BCQ_BASE_URL="${BCQ_BASE_URL:-https://3.basecampapi.com}"
 BCQ_API_URL="${BCQ_API_URL:-$(_derive_api_url "$BCQ_BASE_URL")}"
 
 

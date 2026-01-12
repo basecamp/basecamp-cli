@@ -155,3 +155,67 @@ load test_helper
   result=$(get_project_id)
   [[ "$result" == "88888" ]]
 }
+
+
+# API URL configuration
+
+@test "loads base_url from config" {
+  create_global_config '{"base_url": "http://dev.example.com"}'
+  unset BCQ_BASE_URL
+  unset BCQ_API_URL
+
+  source "$BCQ_ROOT/lib/core.sh"
+
+  [[ "$BCQ_BASE_URL" == "http://dev.example.com" ]]
+}
+
+@test "loads api_url from config" {
+  create_global_config '{"api_url": "http://api.example.com"}'
+  unset BCQ_BASE_URL
+  unset BCQ_API_URL
+
+  source "$BCQ_ROOT/lib/core.sh"
+
+  [[ "$BCQ_API_URL" == "http://api.example.com" ]]
+}
+
+@test "environment BCQ_BASE_URL overrides config" {
+  create_global_config '{"base_url": "http://from-config.com"}'
+  export BCQ_BASE_URL="http://from-env.com"
+  unset BCQ_API_URL
+
+  source "$BCQ_ROOT/lib/core.sh"
+
+  [[ "$BCQ_BASE_URL" == "http://from-env.com" ]]
+}
+
+@test "environment BCQ_API_URL overrides config" {
+  create_global_config '{"api_url": "http://from-config.com"}'
+  export BCQ_API_URL="http://from-env.com"
+  unset BCQ_BASE_URL
+
+  source "$BCQ_ROOT/lib/core.sh"
+
+  [[ "$BCQ_API_URL" == "http://from-env.com" ]]
+}
+
+@test "defaults to production when no config" {
+  unset BCQ_BASE_URL
+  unset BCQ_API_URL
+
+  source "$BCQ_ROOT/lib/core.sh"
+
+  [[ "$BCQ_BASE_URL" == "https://3.basecampapi.com" ]]
+  [[ "$BCQ_API_URL" == "https://3.basecampapi.com" ]]
+}
+
+@test "derives api_url from base_url" {
+  create_global_config '{"base_url": "http://3.basecamp.localhost:3001"}'
+  unset BCQ_BASE_URL
+  unset BCQ_API_URL
+
+  source "$BCQ_ROOT/lib/core.sh"
+
+  [[ "$BCQ_BASE_URL" == "http://3.basecamp.localhost:3001" ]]
+  [[ "$BCQ_API_URL" == "http://3.basecampapi.localhost:3001" ]]
+}
