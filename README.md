@@ -129,8 +129,11 @@ OAuth endpoints are discovered automatically via `.well-known/oauth-authorizatio
 ## Testing
 
 ```bash
-bats test/*.bats
+./test/run.sh         # Run all tests
+bats test/*.bats      # Alternative: run bats directly
 ```
+
+Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `brew install bats-core`.
 
 ## License
 

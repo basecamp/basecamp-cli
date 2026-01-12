@@ -31,9 +31,12 @@ Key endpoints used by bcq:
 ## Testing
 
 ```bash
-bats test/*.bats      # Run all tests
+./test/run.sh         # Run all tests
+bats test/*.bats      # Alternative: run bats directly
 bats test/auth.bats   # Run auth tests only
 ```
+
+Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `brew install bats-core`.
 
 ## OAuth Development
 
