@@ -60,8 +60,8 @@ json_ok() {
   local data="$1"
   local summary="${2:-}"
   local breadcrumbs="${3:-[]}"
-  local context="${4:-{}}"
-  local meta="${5:-{}}"
+  local context="${4:-"{}"}"
+  local meta="${5:-"{}"}"
 
   jq -n \
     --argjson data "$data" \
