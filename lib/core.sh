@@ -4,10 +4,24 @@
 
 
 # Environment Configuration
-# Set BCQ_BASE_URL to your Basecamp instance
-# All OAuth endpoints discovered via .well-known/oauth-authorization-server
+# BCQ_BASE_URL - Web app URL for OAuth flows (authorization, login)
+# BCQ_API_URL  - API URL for resource access (projects, todos, etc.)
+#
+# In production, these are the same (3.basecampapi.com handles both).
+# In development, they may differ:
+#   BCQ_BASE_URL=http://3.basecamp.localhost:3001    (web app, has login cookies)
+#   BCQ_API_URL=http://3.basecampapi.localhost:3001  (API host for untrusted clients)
 
 BCQ_BASE_URL="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+
+# Derive API URL from BASE_URL if not set
+# Replaces "basecamp" with "basecampapi" in the hostname
+_derive_api_url() {
+  local base="$1"
+  echo "$base" | sed 's/basecamp\([^a-z]\)/basecampapi\1/; s/basecamp$/basecampapi/'
+}
+
+BCQ_API_URL="${BCQ_API_URL:-$(_derive_api_url "$BCQ_BASE_URL")}"
 
 
 # Global State

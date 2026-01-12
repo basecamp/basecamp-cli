@@ -4,7 +4,8 @@
 
 
 # Configuration
-# BCQ_BASE_URL is set in core.sh - used for both API and OAuth discovery
+# BCQ_API_URL is set in core.sh - used for API resource access
+# BCQ_BASE_URL is used for OAuth (separate in development)
 
 BCQ_USER_AGENT="bcq/$BCQ_VERSION (https://github.com/basecamp/bcq)"
 BCQ_MAX_RETRIES="${BCQ_MAX_RETRIES:-5}"
@@ -51,7 +52,7 @@ api_get() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_BASE_URL/$account_id$path"
+  local url="$BCQ_API_URL/$account_id$path"
   _api_request GET "$url" "$token" "" "$@"
 }
 
@@ -64,7 +65,7 @@ api_post() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_BASE_URL/$account_id$path"
+  local url="$BCQ_API_URL/$account_id$path"
   _api_request POST "$url" "$token" "$body" "$@"
 }
 
@@ -77,7 +78,7 @@ api_put() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_BASE_URL/$account_id$path"
+  local url="$BCQ_API_URL/$account_id$path"
   _api_request PUT "$url" "$token" "$body" "$@"
 }
 
@@ -89,7 +90,7 @@ api_delete() {
   token=$(ensure_auth)
   account_id=$(ensure_account_id)
 
-  local url="$BCQ_BASE_URL/$account_id$path"
+  local url="$BCQ_API_URL/$account_id$path"
   _api_request DELETE "$url" "$token" "" "$@"
 }
 
