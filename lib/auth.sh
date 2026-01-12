@@ -124,6 +124,8 @@ _auth_login() {
   local code_verifier code_challenge
   code_verifier=$(_generate_code_verifier)
   code_challenge=$(_generate_code_challenge "$code_verifier")
+  debug "Generated code_verifier: $code_verifier"
+  debug "Generated code_challenge: $code_challenge"
 
   # Generate state for CSRF protection
   local state
@@ -339,8 +341,17 @@ _load_client() {
 }
 
 _generate_code_verifier() {
-  # Generate random 43-128 character string for PKCE
-  openssl rand -base64 32 | tr -d '=+/' | cut -c1-43
+  # Generate random 43-128 character string for PKCE (RFC 7636)
+  # Use extra bytes to ensure we have enough after removing invalid chars
+  # Valid chars: [A-Za-z0-9._~-]
+  local verifier
+  while true; do
+    verifier=$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=' | cut -c1-43)
+    if [[ ${#verifier} -ge 43 ]]; then
+      echo "$verifier"
+      return
+    fi
+  done
 }
 
 _generate_code_challenge() {
@@ -398,6 +409,12 @@ _wait_for_callback() {
   code=$(echo "$query_string" | tr '&' '\n' | grep '^code=' | cut -d= -f2)
   state=$(echo "$query_string" | tr '&' '\n' | grep '^state=' | cut -d= -f2)
 
+  # URL decode the code (may contain encoded characters)
+  code=$(printf '%b' "${code//%/\\x}")
+
+  debug "Received auth code: $code"
+  debug "Received state: $state"
+
   if [[ "$state" != "$expected_state" ]]; then
     die "State mismatch - possible CSRF attack" $EXIT_AUTH
   fi
@@ -420,15 +437,19 @@ _exchange_code() {
   local token_endpoint
   token_endpoint=$(_token_endpoint)
 
+  debug "Exchanging code at: $token_endpoint"
+  debug "Code verifier: $code_verifier"
+  debug "Code verifier length: ${#code_verifier}"
+
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "grant_type=authorization_code" \
-    -d "code=$code" \
-    -d "redirect_uri=$BCQ_REDIRECT_URI" \
-    -d "client_id=$client_id" \
-    -d "client_secret=$client_secret" \
-    -d "code_verifier=$code_verifier" \
+    --data-urlencode "grant_type=authorization_code" \
+    --data-urlencode "code=$code" \
+    --data-urlencode "redirect_uri=$BCQ_REDIRECT_URI" \
+    --data-urlencode "client_id=$client_id" \
+    --data-urlencode "client_secret=$client_secret" \
+    --data-urlencode "code_verifier=$code_verifier" \
     "$token_endpoint")
 
   local access_token refresh_token expires_in
@@ -480,7 +501,8 @@ _discover_accounts() {
   fi
 
   local accounts
-  accounts=$(echo "$response" | jq '[.[] | {id: .id, name: .name, href: ("'"$BCQ_BASE_URL"'/" + (.id | tostring))}]')
+  # Use queenbee_id for URLs (that's the ID in the URL path like /181900405/projects)
+  accounts=$(echo "$response" | jq '[.[] | {id: .queenbee_id, name: .name, href: ("'"$BCQ_BASE_URL"'/" + (.queenbee_id | tostring))}]')
 
   if [[ "$accounts" != "[]" ]] && [[ "$accounts" != "null" ]]; then
     save_accounts "$accounts"
