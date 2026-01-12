@@ -139,6 +139,7 @@ _auth_login() {
   auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
   auth_url+="&code_challenge=$code_challenge"
   auth_url+="&code_challenge_method=S256"
+  auth_url+="&scope=full"  # Request full (read+write) access
   auth_url+="&state=$state"
 
   local auth_code

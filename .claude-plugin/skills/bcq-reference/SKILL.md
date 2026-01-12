@@ -56,6 +56,7 @@ bcq me
 ```
 
 Authentication uses OAuth 2.1 with DCR. Tokens are stored in `~/.config/basecamp/`.
+BCQ requests full (read+write) scope by default. Users can choose read-only on the consent screen.
 
 ---
 
