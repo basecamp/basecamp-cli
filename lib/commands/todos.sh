@@ -234,7 +234,7 @@ _todos_show_md() {
 
 
 cmd_todo_create() {
-  local content="$1"
+  local content="${1:-}"
   shift || true
 
   local project="" todolist="" assignee="" due=""
