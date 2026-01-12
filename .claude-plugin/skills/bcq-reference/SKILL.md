@@ -2,7 +2,7 @@
 name: bcq-reference
 description: |
   Command reference for bcq (Basecamp CLI). Use when needing to interact with
-  Basecamp: list projects, manage todos, add comments, check auth status.
+  Basecamp: list projects, manage todos, cards, campfire chat, add comments.
   Covers all bcq commands with examples and output patterns.
 triggers:
   - basecamp
@@ -11,6 +11,10 @@ triggers:
   - create todo
   - add comment
   - basecamp api
+  - card table
+  - kanban
+  - campfire
+  - chat message
 ---
 
 # bcq Command Reference
@@ -142,9 +146,70 @@ bcq done 123 456 789
 
 ---
 
+## Cards (Card Tables)
+
+Card Tables are Kanban-style boards with columns and cards.
+
+### List Cards
+
+```bash
+bcq cards --in <project_id>
+bcq cards --in <project_id> --column "In Progress"
+```
+
+### Create Card
+
+```bash
+bcq card "Card title" --in <project_id>
+bcq card "Card title" --in <project_id> --column "Inbox"
+```
+
+### Move Card
+
+```bash
+bcq cards move <card_id> --to "Done"
+```
+
+### Show Card
+
+```bash
+bcq cards <card_id>
+```
+
+---
+
+## Campfire (Chat)
+
+Campfire is the real-time chat feature.
+
+### Post Message
+
+```bash
+bcq campfire post "Hello team!" --in <project_id>
+bcq campfire <campfire_id> post "Message here"
+```
+
+### View Messages
+
+```bash
+bcq campfire messages --in <project_id>
+bcq campfire <campfire_id> messages --limit 50
+```
+
+### Thought Stream Pattern
+
+```bash
+# Narrate work in progress
+bcq campfire post "[10:30] Starting security triage. 7 reports in inbox."
+bcq campfire post "[10:35] Processing #3481234 - confirmed SSRF"
+bcq campfire post "[10:45] ✓ Complete. VALID - Tier 4 ($500)"
+```
+
+---
+
 ## Comments
 
-Add comments to any Basecamp recording (todo, message, document, etc.).
+Add comments to any Basecamp recording (todo, message, document, card, etc.).
 
 ```bash
 bcq comment "Comment text" --on <recording_id>
