@@ -1,0 +1,12 @@
+{
+  "name": "bcq",
+  "version": "0.1.0",
+  "description": "Basecamp CLI for agent-first project management",
+  "author": "37signals",
+  "homepage": "https://github.com/basecamp/bcq",
+  "skills": [
+    "skills/bcq-reference",
+    "skills/bcq-todos",
+    "skills/bcq-projects"
+  ]
+}
