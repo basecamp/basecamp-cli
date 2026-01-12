@@ -17,8 +17,14 @@ Requires: `bash 4+`, `curl`, `jq`
 # Authenticate (opens browser)
 bcq auth login
 
-# Or headless mode
+# Request read-only access (least-privilege)
+bcq auth login --scope read
+
+# Headless mode (manual code entry)
 bcq auth login --no-browser
+
+# Check auth status
+bcq auth status
 
 # Orient yourself
 bcq
@@ -64,6 +70,28 @@ bcq --md projects
   "context": {...},
   "meta": {...}
 }
+```
+
+## Authentication
+
+bcq uses OAuth 2.1 with Dynamic Client Registration (DCR). On first login, it registers itself as an OAuth client and opens your browser for authorization.
+
+**Scope options:**
+- `full` (default): Read and write access to all resources
+- `read`: Read-only access — cannot create, update, or delete
+
+```bash
+bcq auth login              # Full access (default)
+bcq auth login --scope read # Read-only access
+bcq auth status             # Shows current scope
+```
+
+When requesting `full` scope, you can downgrade to `read` on the Basecamp consent screen.
+
+If a read-only token attempts a write operation, bcq shows a clear error:
+```
+Error: Permission denied: read-only token cannot perform write operations
+Hint: Re-authenticate with full scope: bcq auth login --scope full
 ```
 
 ## Configuration
