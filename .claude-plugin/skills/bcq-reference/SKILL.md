@@ -117,8 +117,9 @@ bcq todos --in <project_id> --list <todolist_id>
 bcq todos --in <project_id> --status completed
 bcq todos --in <project_id> --status active
 
-# Filter by assignee
+# Filter by assignee (use "me" for current user)
 bcq todos --in <project_id> --assignee <person_id>
+bcq todos --in <project_id> --assignee me
 ```
 
 ### Show Todo
@@ -134,7 +135,11 @@ bcq todos <todo_id>
 bcq todo "Content here" --in <project_id>
 bcq todo "Content here" --in <project_id> --list <todolist_id>
 bcq todo "Content here" --in <project_id> --due 2025-01-15
+bcq todo "Content here" --in <project_id> --due tomorrow
+bcq todo "Content here" --in <project_id> --assignee me
 ```
+
+**Date formats:** `today`, `tomorrow`, `+3` (3 days), `next week`, `YYYY-MM-DD`
 
 **Output:**
 ```json
@@ -234,6 +239,24 @@ bcq comment "Fixed in commit abc123" --on 12345
 
 # Link a PR
 bcq comment "PR: https://github.com/org/repo/pull/42" --on 12345
+```
+
+---
+
+## People
+
+```bash
+# List all people
+bcq people
+
+# People on a specific project
+bcq people --project <project_id>
+
+# Show person details
+bcq people show <person_id>
+
+# List pingable people (can receive direct messages)
+bcq people pingable
 ```
 
 ---

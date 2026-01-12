@@ -48,6 +48,44 @@ BCQ_BASE_URL="${BCQ_BASE_URL:-https://3.basecampapi.com}"
 BCQ_API_URL="${BCQ_API_URL:-$(_derive_api_url "$BCQ_BASE_URL")}"
 
 
+# Date Parsing
+
+parse_date() {
+  local input="$1"
+
+  case "$input" in
+    today)
+      date +%Y-%m-%d
+      ;;
+    tomorrow)
+      date -v+1d +%Y-%m-%d 2>/dev/null || date -d "+1 day" +%Y-%m-%d
+      ;;
+    yesterday)
+      date -v-1d +%Y-%m-%d 2>/dev/null || date -d "-1 day" +%Y-%m-%d
+      ;;
+    "next week"|nextweek)
+      date -v+7d +%Y-%m-%d 2>/dev/null || date -d "+7 days" +%Y-%m-%d
+      ;;
+    "next month"|nextmonth)
+      date -v+1m +%Y-%m-%d 2>/dev/null || date -d "+1 month" +%Y-%m-%d
+      ;;
+    +[0-9]*)
+      # +N days format (e.g., +3 for 3 days from now)
+      local days="${input#+}"
+      date -v+"${days}"d +%Y-%m-%d 2>/dev/null || date -d "+${days} days" +%Y-%m-%d
+      ;;
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+      # Already in YYYY-MM-DD format
+      echo "$input"
+      ;;
+    *)
+      # Try to parse with date command, otherwise return as-is
+      date -j -f "%Y-%m-%d" "$input" +%Y-%m-%d 2>/dev/null || echo "$input"
+      ;;
+  esac
+}
+
+
 # Global State
 
 BCQ_FORMAT="${BCQ_FORMAT:-auto}"    # Output format: auto, json, md

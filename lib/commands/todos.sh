@@ -107,12 +107,9 @@ _todos_list() {
 
     # Filter by assignee
     if [[ -n "$assignee" ]]; then
-      if [[ "$assignee" == "me" ]]; then
-        # TODO: Get current user ID and filter
-        :
-      else
-        all_todos=$(echo "$all_todos" | jq --arg assignee "$assignee" '[.[] | select(.assignees[]?.id == ($assignee | tonumber))]')
-      fi
+      local assignee_id
+      assignee_id=$(resolve_assignee "$assignee")
+      all_todos=$(echo "$all_todos" | jq --arg assignee "$assignee_id" '[.[] | select(.assignees[]?.id == ($assignee | tonumber))]')
     fi
 
     local count
@@ -302,10 +299,16 @@ cmd_todo_create() {
   payload=$(jq -n --arg content "$content" '{content: $content}')
 
   if [[ -n "$due" ]]; then
-    payload=$(echo "$payload" | jq --arg due "$due" '. + {due_on: $due}')
+    local due_date
+    due_date=$(parse_date "$due")
+    payload=$(echo "$payload" | jq --arg due "$due_date" '. + {due_on: $due}')
   fi
 
-  # TODO: Handle assignee lookup
+  if [[ -n "$assignee" ]]; then
+    local assignee_id
+    assignee_id=$(resolve_assignee "$assignee")
+    payload=$(echo "$payload" | jq --argjson ids "[$assignee_id]" '. + {assignee_ids: $ids}')
+  fi
 
   local response
   response=$(api_post "/buckets/$project/todolists/$todolist/todos.json" "$payload")

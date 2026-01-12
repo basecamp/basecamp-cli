@@ -5,6 +5,7 @@
   "author": "37signals",
   "homepage": "https://github.com/basecamp/bcq",
   "skills": [
+    "skills/basecamp-command",
     "skills/bcq-reference",
     "skills/bcq-todos",
     "skills/bcq-projects"

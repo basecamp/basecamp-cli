@@ -278,3 +278,26 @@ EXAMPLES
   bcq config project               Interactive project picker
 EOF
 }
+
+_help_people() {
+  cat << 'EOF'
+bcq people - List and show people
+
+USAGE
+  bcq people [subcommand] [options]
+
+SUBCOMMANDS
+  list              List all people (default)
+  show <id>         Show person details
+  pingable          List people who can receive pings
+
+OPTIONS
+  --project, -p     Limit to people on a specific project
+
+EXAMPLES
+  bcq people                    List all people
+  bcq people --project 123      People on project
+  bcq people show 456           Show person details
+  bcq people pingable           Pingable people
+EOF
+}

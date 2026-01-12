@@ -14,11 +14,6 @@ cmd_show() {
   die "Command 'show' not yet implemented" $EXIT_USAGE
 }
 
-cmd_people() {
-  die "Command 'people' not yet implemented" $EXIT_USAGE
-}
-
-
 
 cmd_assign() {
   die "Command 'assign' not yet implemented" $EXIT_USAGE
