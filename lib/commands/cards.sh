@@ -33,10 +33,12 @@ _cards_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --column|-c)
+        [[ -z "${2:-}" ]] && die "--column requires a value" $EXIT_USAGE
         column="$2"
         shift 2
         ;;
@@ -192,10 +194,12 @@ _cards_create() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --column|-c)
+        [[ -z "${2:-}" ]] && die "--column requires a value" $EXIT_USAGE
         column="$2"
         shift 2
         ;;
@@ -277,10 +281,12 @@ _cards_move() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --to|-t)
+        [[ -z "${2:-}" ]] && die "--to requires a column name" $EXIT_USAGE
         target_column="$2"
         shift 2
         ;;
       --project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;

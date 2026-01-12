@@ -128,8 +128,18 @@ _api_request() {
     curl_args+=("$@")
     curl_args+=("$url")
 
-    local output
-    output=$(curl "${curl_args[@]}")
+    local output curl_exit
+    output=$(curl "${curl_args[@]}") || curl_exit=$?
+
+    if [[ -n "${curl_exit:-}" ]]; then
+      case "$curl_exit" in
+        6)  die "Could not resolve host" $EXIT_NETWORK ;;
+        7)  die "Connection refused" $EXIT_NETWORK ;;
+        28) die "Connection timed out" $EXIT_NETWORK ;;
+        35) die "SSL/TLS handshake failed" $EXIT_NETWORK ;;
+        *)  die "Network error (curl exit $curl_exit)" $EXIT_NETWORK ;;
+      esac
+    fi
 
     http_code=$(echo "$output" | tail -n1)
     response=$(echo "$output" | sed '$d')
@@ -217,14 +227,23 @@ api_get_all() {
   while (( page <= max_pages )); do
     debug "Fetching page $page: $url"
 
-    local output http_code response
+    local output http_code response curl_exit
     output=$(curl -s \
       -H "Authorization: Bearer $token" \
       -H "User-Agent: $BCQ_USER_AGENT" \
       -H "Content-Type: application/json" \
       -D "$headers_file" \
       -w '\n%{http_code}' \
-      "$url")
+      "$url") || curl_exit=$?
+
+    if [[ -n "${curl_exit:-}" ]]; then
+      case "$curl_exit" in
+        6)  die "Could not resolve host" $EXIT_NETWORK ;;
+        7)  die "Connection refused" $EXIT_NETWORK ;;
+        28) die "Connection timed out" $EXIT_NETWORK ;;
+        *)  die "Network error (curl exit $curl_exit)" $EXIT_NETWORK ;;
+      esac
+    fi
 
     http_code=$(echo "$output" | tail -n1)
     response=$(echo "$output" | sed '$d')
@@ -284,14 +303,19 @@ refresh_token() {
   local token_endpoint
   token_endpoint=$(_token_endpoint)
 
-  local response
+  local response curl_exit
   response=$(curl -s -X POST \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=refresh_token" \
     -d "refresh_token=$refresh_token" \
     -d "client_id=$client_id" \
     -d "client_secret=$client_secret" \
-    "$token_endpoint")
+    "$token_endpoint") || curl_exit=$?
+
+  if [[ -n "${curl_exit:-}" ]]; then
+    debug "Token refresh network error (curl exit $curl_exit)"
+    return 1
+  fi
 
   local new_access_token new_refresh_token expires_in
   new_access_token=$(echo "$response" | jq -r '.access_token // empty')

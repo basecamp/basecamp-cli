@@ -37,6 +37,7 @@ _people_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project|--in|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project_id="$2"
         shift 2
         ;;

@@ -10,10 +10,12 @@ cmd_comment() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --on|-r)
+        [[ -z "${2:-}" ]] && die "--on requires a recording ID" $EXIT_USAGE
         recording_id="$2"
         shift 2
         ;;
       --project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;

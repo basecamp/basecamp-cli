@@ -311,7 +311,7 @@ _register_client() {
   local grant_types='["authorization_code"]'
 
   # BC3 DCR only supports public clients (no client_secret)
-  # Account discovery uses /internal/accounts endpoint instead of introspection
+  # Account discovery uses /authorization.json self-introspection endpoint
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/json" \
@@ -410,13 +410,26 @@ _open_browser() {
 
 _wait_for_callback() {
   local expected_state="$1"
-  local timeout=120
+  local timeout_secs=120
 
-  # Simple HTTP server using netcat
-  info "Waiting for authorization (timeout: ${timeout}s)..."
+  # Check dependencies
+  if ! command -v nc &>/dev/null; then
+    die "netcat (nc) is required for OAuth callback" $EXIT_USAGE \
+      "Install: brew install netcat (macOS) or apt install netcat (Linux)"
+  fi
+
+  if ! command -v timeout &>/dev/null && ! command -v gtimeout &>/dev/null; then
+    die "timeout is required for OAuth callback" $EXIT_USAGE \
+      "Install: brew install coreutils (macOS, provides gtimeout)"
+  fi
+
+  local timeout_cmd="timeout"
+  command -v timeout &>/dev/null || timeout_cmd="gtimeout"
+
+  info "Waiting for authorization (timeout: ${timeout_secs}s)..."
 
   local response
-  response=$(timeout "$timeout" bash -c '
+  response=$("$timeout_cmd" "$timeout_secs" bash -c '
     while true; do
       request=$(echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h1>Authorization successful!</h1><p>You can close this window.</p></body></html>" | nc -l '"$BCQ_REDIRECT_PORT"' 2>/dev/null | head -1)
       if [[ "$request" == *"GET /callback"* ]]; then

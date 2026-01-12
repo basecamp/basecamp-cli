@@ -27,6 +27,7 @@ _projects_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --status)
+        [[ -z "${2:-}" ]] && die "--status requires a value" $EXIT_USAGE
         status="$2"
         shift 2
         ;;

@@ -35,18 +35,22 @@ _todos_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --list|--todolist|-l)
+        [[ -z "${2:-}" ]] && die "--list requires a value" $EXIT_USAGE
         todolist="$2"
         shift 2
         ;;
       --assignee|-a)
+        [[ -z "${2:-}" ]] && die "--assignee requires a value" $EXIT_USAGE
         assignee="$2"
         shift 2
         ;;
       --status|-s)
+        [[ -z "${2:-}" ]] && die "--status requires a value" $EXIT_USAGE
         status="$2"
         shift 2
         ;;

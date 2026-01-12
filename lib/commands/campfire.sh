@@ -43,6 +43,7 @@ _campfires_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
@@ -110,14 +111,17 @@ _campfire_messages() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --campfire|-c)
+        [[ -z "${2:-}" ]] && die "--campfire requires a value" $EXIT_USAGE
         campfire_id="$2"
         shift 2
         ;;
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --limit|-n)
+        [[ -z "${2:-}" ]] && die "--limit requires a value" $EXIT_USAGE
         limit="$2"
         shift 2
         ;;
@@ -194,10 +198,12 @@ _campfire_post() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --campfire|-c)
+        [[ -z "${2:-}" ]] && die "--campfire requires a value" $EXIT_USAGE
         campfire_id="$2"
         shift 2
         ;;
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;

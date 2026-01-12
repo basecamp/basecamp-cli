@@ -29,26 +29,32 @@ _recordings_list() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --type|-t)
+        [[ -z "${2:-}" ]] && die "--type requires a value" $EXIT_USAGE
         type="$2"
         shift 2
         ;;
       --project|--in|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --status|-s)
+        [[ -z "${2:-}" ]] && die "--status requires a value" $EXIT_USAGE
         status="$2"
         shift 2
         ;;
       --sort)
+        [[ -z "${2:-}" ]] && die "--sort requires a value" $EXIT_USAGE
         sort="$2"
         shift 2
         ;;
       --direction|--dir)
+        [[ -z "${2:-}" ]] && die "--direction requires a value" $EXIT_USAGE
         direction="$2"
         shift 2
         ;;
       --limit|-n)
+        [[ -z "${2:-}" ]] && die "--limit requires a value" $EXIT_USAGE
         limit="$2"
         shift 2
         ;;

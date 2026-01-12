@@ -373,11 +373,17 @@ parse_global_flags() {
         shift
         ;;
       --project|-p)
+        if [[ -z "${2:-}" ]]; then
+          die "--project requires a value" $EXIT_USAGE
+        fi
         BCQ_PROJECT="$2"
         (( GLOBAL_FLAGS_CONSUMED += 2 ))
         shift 2
         ;;
       --account|-a)
+        if [[ -z "${2:-}" ]]; then
+          die "--account requires a value" $EXIT_USAGE
+        fi
         BCQ_ACCOUNT="$2"
         (( GLOBAL_FLAGS_CONSUMED += 2 ))
         shift 2
