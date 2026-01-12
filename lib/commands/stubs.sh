@@ -18,13 +18,7 @@ cmd_people() {
   die "Command 'people' not yet implemented" $EXIT_USAGE
 }
 
-cmd_me() {
-  die "Command 'me' not yet implemented" $EXIT_USAGE
-}
 
-cmd_comment() {
-  die "Command 'comment' not yet implemented" $EXIT_USAGE
-}
 
 cmd_assign() {
   die "Command 'assign' not yet implemented" $EXIT_USAGE
