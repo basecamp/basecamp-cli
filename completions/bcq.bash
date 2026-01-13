@@ -6,7 +6,7 @@ _bcq_completions() {
   _init_completion || return
 
   local commands="
-    auth config help version
+    auth config help version self-update
     projects todos todolists todolistgroups todosets
     todo done reopen assign unassign
     messages message messageboards messagetypes

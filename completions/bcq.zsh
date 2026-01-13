@@ -47,6 +47,7 @@ _bcq() {
     'subscriptions:Notification subscriptions'
     'lineup:Account-wide lineup markers'
     'mcp:MCP server mode'
+    'self-update:Update bcq (installer installs only)'
   )
 
   local -a auth_commands

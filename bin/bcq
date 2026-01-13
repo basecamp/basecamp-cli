@@ -46,10 +46,22 @@ _self_update() {
   local force=false
   [[ "${1:-}" == "--force" ]] && force=true
 
-  # Detect install type
-  if [[ "$BCQ_ROOT" == /opt/homebrew/* ]] || [[ "$BCQ_ROOT" == /usr/local/Cellar/* ]]; then
+  # Detect Homebrew/Linuxbrew install
+  if [[ "$BCQ_ROOT" == /opt/homebrew/* ]] || \
+     [[ "$BCQ_ROOT" == /usr/local/Cellar/* ]] || \
+     [[ "$BCQ_ROOT" == /home/linuxbrew/.linuxbrew/* ]]; then
     die "Homebrew installation detected" $EXIT_USAGE \
       "Update with: brew upgrade bcq"
+  fi
+
+  # Also check via brew --prefix if available
+  if command -v brew &>/dev/null; then
+    local brew_prefix
+    brew_prefix=$(brew --prefix 2>/dev/null)
+    if [[ -n "$brew_prefix" ]] && [[ "$BCQ_ROOT" == "$brew_prefix"/* ]]; then
+      die "Homebrew installation detected" $EXIT_USAGE \
+        "Update with: brew upgrade bcq"
+    fi
   fi
 
   if [[ ! -d "$BCQ_ROOT/.git" ]]; then
@@ -59,23 +71,32 @@ _self_update() {
 
   cd "$BCQ_ROOT"
 
+  # Detect current branch or detached HEAD
+  local branch
+  branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+
+  if [[ -z "$branch" ]]; then
+    die "Detached HEAD state" $EXIT_USAGE \
+      "Checkout a branch first: git checkout main"
+  fi
+
   # Check for local modifications
   if [[ "$force" != "true" ]] && ! git diff --quiet HEAD 2>/dev/null; then
     die "Local modifications detected" $EXIT_USAGE \
       "Commit or stash changes first, or use: bcq self-update --force"
   fi
 
-  echo "Updating bcq..."
+  echo "Updating bcq ($branch)..."
 
   local before after
   before=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
-  git fetch origin main --quiet
+  git fetch origin "$branch" --quiet 2>/dev/null || git fetch origin --quiet
 
   # Try fast-forward first, fall back to reset if --force
-  if ! git merge --ff-only origin/main --quiet 2>/dev/null; then
+  if ! git merge --ff-only "origin/$branch" --quiet 2>/dev/null; then
     if [[ "$force" == "true" ]]; then
-      git reset --hard origin/main --quiet
+      git reset --hard "origin/$branch" --quiet
     else
       die "Cannot fast-forward" $EXIT_USAGE \
         "Local commits exist. Use: bcq self-update --force"
