@@ -7,8 +7,11 @@ cmd_projects() {
   shift || true
 
   case "$action" in
+    create) _projects_create "$@" ;;
+    delete|destroy|trash) _projects_delete "$@" ;;
     list) _projects_list "$@" ;;
     get|show) _projects_show "$@" ;;
+    update) _projects_update "$@" ;;
     --help|-h) _help_projects ;;
     *)
       # If it looks like an ID, show that project
@@ -125,4 +128,131 @@ _projects_show_md() {
   fi
 
   md_breadcrumbs "$breadcrumbs"
+}
+
+_projects_create() {
+  local name="${1:-}"
+  shift || true
+  local description=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --description|--desc|-d)
+        [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
+        description="$2"
+        shift 2
+        ;;
+      *)
+        if [[ -z "$name" ]]; then
+          name="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$name" ]]; then
+    die "Project name required" $EXIT_USAGE "Usage: bcq projects create \"name\" [--description \"desc\"]"
+  fi
+
+  local payload
+  payload=$(jq -n --arg name "$name" '{name: $name}')
+
+  if [[ -n "$description" ]]; then
+    payload=$(echo "$payload" | jq --arg desc "$description" '. + {description: $desc}')
+  fi
+
+  local response
+  response=$(api_post "/projects.json" "$payload")
+
+  local project_id
+  project_id=$(echo "$response" | jq -r '.id')
+  local summary="Created project #$project_id: $name"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq projects $project_id" "View project")" \
+    "$(breadcrumb "todos" "bcq todos --in $project_id" "List todos")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+_projects_update() {
+  local project_id="" name="" description=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name|-n)
+        [[ -z "${2:-}" ]] && die "--name requires a value" $EXIT_USAGE
+        name="$2"
+        shift 2
+        ;;
+      --description|--desc|-d)
+        [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
+        description="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$project_id" ]]; then
+          project_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$project_id" ]]; then
+    die "Project ID required" $EXIT_USAGE "Usage: bcq projects update <id> --name \"new name\""
+  fi
+
+  if [[ -z "$name" ]] && [[ -z "$description" ]]; then
+    die "Name or description required" $EXIT_USAGE "Use --name and/or --description"
+  fi
+
+  local payload="{}"
+  [[ -n "$name" ]] && payload=$(echo "$payload" | jq --arg n "$name" '. + {name: $n}')
+  [[ -n "$description" ]] && payload=$(echo "$payload" | jq --arg d "$description" '. + {description: $d}')
+
+  local response
+  response=$(api_put "/projects/$project_id.json" "$payload")
+
+  local summary="Updated project #$project_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq projects $project_id" "View project")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+_projects_delete() {
+  local project_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$project_id" ]]; then
+          project_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$project_id" ]]; then
+    die "Project ID required" $EXIT_USAGE "Usage: bcq projects delete <id>"
+  fi
+
+  api_delete "/projects/$project_id.json" >/dev/null
+
+  local summary="Trashed project #$project_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "list" "bcq projects" "List projects")"
+  )
+
+  output '{}' "$summary" "$bcs"
 }
