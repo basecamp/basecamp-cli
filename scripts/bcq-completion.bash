@@ -27,7 +27,7 @@ _bcq_completions() {
   local todolists_actions="list show"
   local messages_actions="list show create post"
   local campfire_actions="list messages post"
-  local cards_actions="list show create move"
+  local cards_actions="list columns show create move"
   local people_actions="list show pingable"
   local recordings_actions="list todos messages documents comments cards uploads"
   local auth_actions="login logout status"

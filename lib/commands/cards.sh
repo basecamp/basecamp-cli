@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 # cards.sh - Card Table commands
 
+# Resolve column by ID or name. IDs are stable; names can change.
+# Usage: resolve_column "$columns_json" "$id_or_name"
+# Returns: column ID or empty string
+_resolve_column() {
+  local columns="$1"
+  local identifier="$2"
+
+  # If it looks like an ID (numeric), try direct match first
+  if [[ "$identifier" =~ ^[0-9]+$ ]]; then
+    local by_id
+    by_id=$(echo "$columns" | jq -r --arg id "$identifier" '.[] | select(.id == ($id | tonumber)) | .id // empty')
+    if [[ -n "$by_id" ]]; then
+      echo "$by_id"
+      return
+    fi
+  fi
+
+  # Fall back to name match
+  echo "$columns" | jq -r --arg name "$identifier" '.[] | select(.title == $name) | .id // empty'
+}
+
 cmd_cards() {
   local action="${1:-list}"
 
@@ -13,6 +34,7 @@ cmd_cards() {
 
   case "$action" in
     list) _cards_list "$@" ;;
+    columns) _cards_columns "$@" ;;
     get|show) _cards_show "$@" ;;
     create) _cards_create "$@" ;;
     move) _cards_move "$@" ;;
@@ -77,11 +99,11 @@ _cards_list() {
   # Get cards from all columns or specific column
   local all_cards="[]"
   if [[ -n "$column" ]]; then
-    # Get cards from specific column
+    # Get cards from specific column (accepts ID or name)
     local column_id
-    column_id=$(echo "$columns_response" | jq -r --arg name "$column" '.[] | select(.title == $name) | .id // empty')
+    column_id=$(_resolve_column "$columns_response" "$column")
     if [[ -z "$column_id" ]]; then
-      die "Column '$column' not found" $EXIT_NOT_FOUND
+      die "Column '$column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
     fi
     all_cards=$(api_get "/buckets/$project/card_tables/lists/$column_id/cards.json" 2>/dev/null || echo '[]')
   else
@@ -100,9 +122,9 @@ _cards_list() {
 
   local bcs
   bcs=$(breadcrumbs \
-    "$(breadcrumb "create" "bcq card create \"title\" --in $project" "Create card")" \
+    "$(breadcrumb "create" "bcq card \"title\" --in $project" "Create card")" \
     "$(breadcrumb "show" "bcq cards <id>" "Show card details")" \
-    "$(breadcrumb "columns" "bcq columns --in $project" "List columns")"
+    "$(breadcrumb "columns" "bcq cards columns --in $project" "List columns with IDs")"
   )
 
   output "$all_cards" "$summary" "$bcs" "_cards_list_md"
@@ -126,6 +148,73 @@ _cards_list_md() {
     echo "|---|-------|--------|-----------|"
     echo "$data" | jq -r '.[] | "| \(.id) | \(.title // .content | .[0:40]) | \(.parent.title // "-") | \([.assignees[]?.name] | join(", ") | if . == "" then "-" else . end) |"'
   fi
+  echo
+  md_breadcrumbs "$breadcrumbs"
+}
+
+_cards_columns() {
+  local project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified. Use --in <project>" $EXIT_USAGE
+  fi
+
+  # Get card table from project dock
+  local project_data card_table_id
+  project_data=$(api_get "/projects/$project.json")
+  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
+
+  if [[ -z "$card_table_id" ]]; then
+    die "No card table found in project $project" $EXIT_NOT_FOUND
+  fi
+
+  # Get card table with embedded columns (lists)
+  local card_table_data columns
+  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+  columns=$(echo "$card_table_data" | jq '.lists // []')
+
+  local count
+  count=$(echo "$columns" | jq 'length')
+  local summary="$count columns"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "cards" "bcq cards --in $project --column <id>" "List cards in column")" \
+    "$(breadcrumb "create" "bcq card \"title\" --in $project --column <id>" "Create card in column")"
+  )
+
+  output "$columns" "$summary" "$bcs" "_cards_columns_md"
+}
+
+_cards_columns_md() {
+  local data="$1"
+  local summary="$2"
+  local breadcrumbs="$3"
+
+  echo "## Card Table Columns ($summary)"
+  echo
+  echo "| ID | Name | Cards |"
+  echo "|----|------|-------|"
+  echo "$data" | jq -r '.[] | "| \(.id) | \(.title) | \(.cards_count // "-") |"'
+  echo
+  echo "*Use column ID for stability (names can change)*"
   echo
   md_breadcrumbs "$breadcrumbs"
 }
@@ -244,10 +333,10 @@ _cards_create() {
 
   local column_id
   if [[ -n "$column" ]]; then
-    # Find column by name
-    column_id=$(echo "$columns" | jq -r --arg name "$column" '.[] | select(.title == $name) | .id // empty')
+    # Find column by ID or name
+    column_id=$(_resolve_column "$columns" "$column")
     if [[ -z "$column_id" ]]; then
-      die "Column '$column' not found" $EXIT_NOT_FOUND
+      die "Column '$column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
     fi
   else
     # Use first column (Inbox/Triage)
@@ -326,10 +415,10 @@ _cards_move() {
   local card_table_data columns column_id
   card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
   columns=$(echo "$card_table_data" | jq '.lists // []')
-  column_id=$(echo "$columns" | jq -r --arg name "$target_column" '.[] | select(.title == $name) | .id // empty')
+  column_id=$(_resolve_column "$columns" "$target_column")
 
   if [[ -z "$column_id" ]]; then
-    die "Column '$target_column' not found" $EXIT_NOT_FOUND
+    die "Column '$target_column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
   fi
 
   # Move card to column via moves endpoint
@@ -383,14 +472,15 @@ Manage cards in Card Tables (Kanban boards).
 ### Actions
 
     list              List cards (default)
+    columns           List columns with stable IDs
     show <id>         Show card details
     create "title"    Create a new card
     move <id>         Move card to another column
 
 ### Options
 
-    --in, -p <project>    Project ID
-    --column, -c <name>   Filter by or target column
+    --in, -p <project>      Project ID
+    --column, -c <id|name>  Filter by or target column (ID preferred for stability)
 
 ### Examples
 
