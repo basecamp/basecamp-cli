@@ -140,7 +140,7 @@ cmd_help() {
 
 _help_main() {
   cat << 'EOF'
-bcq - Basecamp Query CLI
+bcq - Basecamp Query Tool
 
 USAGE
   bcq <command> [options]
@@ -150,6 +150,7 @@ COMMANDS
     projects        List projects
     todos           List todos
     todolists       List todolists
+    messages        List messages
     search          Search across projects
     show            Show details of a resource
     people          List people
@@ -158,6 +159,7 @@ COMMANDS
   Actions
     todo            Create a todo
     done            Complete a todo
+    message         Post a message
     comment         Add a comment
     assign          Assign a todo
 
@@ -172,7 +174,7 @@ GLOBAL FLAGS
   --json, -j        Force JSON output
   --md, -m          Force Markdown output
   --quiet, -q       Minimal output
-  --verbose, -v     Debug output
+  --verbose, -v     Debug output (shows curl commands)
   --project, -p     Override project context
   --account, -a     Override account context
 

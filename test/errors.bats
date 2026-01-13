@@ -200,6 +200,24 @@ load test_helper
   assert_output_contains "Search query required"
 }
 
+@test "messages without project shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq messages
+  assert_failure
+  assert_output_contains "No project specified"
+}
+
+@test "message without subject shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq message
+  assert_failure
+  assert_output_contains "Message subject required"
+}
+
 # Search JSON cleanliness
 
 @test "search --json outputs clean JSON to stdout" {

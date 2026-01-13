@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bcq-completion.bash - Tab completion for bcq CLI
+# bcq-completion.bash - Tab completion for bcq
 #
 # Installation:
 #   source /path/to/bcq-completion.bash
@@ -19,12 +19,13 @@ _bcq_completions() {
   }
 
   # Top-level commands
-  local commands="projects todos todolists todo done comment campfire cards card people recordings search show assign unassign me auth config help"
+  local commands="projects todos todolists messages message todo done comment campfire cards card people recordings search show assign unassign me auth config help"
 
   # Subcommands by resource
   local projects_actions="list show"
   local todos_actions="list show create complete"
   local todolists_actions="list show"
+  local messages_actions="list show create post"
   local campfire_actions="list messages post"
   local cards_actions="list show create move"
   local people_actions="list show pingable"

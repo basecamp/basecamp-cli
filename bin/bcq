@@ -61,6 +61,7 @@ main() {
     projects)   cmd_projects "$@" ;;
     todos)      cmd_todos "$@" ;;
     todolists)  cmd_todolists "$@" ;;
+    messages)   cmd_messages "$@" ;;
     cards)      cmd_cards "$@" ;;
     campfire)   cmd_campfire "$@" ;;
     recordings) cmd_recordings "$@" ;;
@@ -72,6 +73,7 @@ main() {
     # Action shortcuts
     todo)       cmd_todo_create "$@" ;;
     done)       cmd_todo_complete "$@" ;;
+    message)    cmd_message "$@" ;;
     card)       cmd_card "$@" ;;
     comment)    cmd_comment "$@" ;;
     assign)     cmd_assign "$@" ;;
