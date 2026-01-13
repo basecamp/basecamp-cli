@@ -17,6 +17,9 @@ cmd_messages() {
     list) _messages_list "$@" ;;
     get|show) _messages_show "$@" ;;
     create|post) _messages_create "$@" ;;
+    pin) _messages_pin "$@" ;;
+    unpin) _messages_unpin "$@" ;;
+    update) _messages_update "$@" ;;
     --help|-h) _help_messages ;;
     *)
       if [[ "$action" =~ ^[0-9]+$ ]]; then
@@ -241,6 +244,156 @@ _messages_create() {
   )
 
   output "$response" "$summary" "$bcs"
+}
+
+_messages_update() {
+  local message_id="" project="" subject="" content=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --subject|-s)
+        [[ -z "${2:-}" ]] && die "--subject requires a value" $EXIT_USAGE
+        subject="$2"
+        shift 2
+        ;;
+      --content|--body|-b)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
+        content="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$message_id" ]]; then
+          message_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$message_id" ]]; then
+    die "Message ID required" $EXIT_USAGE "Usage: bcq messages update <id> --subject \"new\" --in <project>"
+  fi
+
+  if [[ -z "$subject" ]] && [[ -z "$content" ]]; then
+    die "Subject or content required" $EXIT_USAGE "Use --subject and/or --content"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  local payload="{}"
+  [[ -n "$subject" ]] && payload=$(echo "$payload" | jq --arg s "$subject" '. + {subject: $s}')
+  [[ -n "$content" ]] && payload=$(echo "$payload" | jq --arg c "$content" '. + {content: $c}')
+
+  local response
+  response=$(api_put "/buckets/$project/messages/$message_id.json" "$payload")
+
+  local summary="Updated message #$message_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq messages $message_id --in $project" "View message")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+_messages_pin() {
+  local message_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$message_id" ]]; then
+          message_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$message_id" ]]; then
+    die "Message ID required" $EXIT_USAGE "Usage: bcq messages pin <id> --in <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  api_post "/buckets/$project/recordings/$message_id/pin.json" "{}" >/dev/null
+
+  local summary="Pinned message #$message_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "unpin" "bcq messages unpin $message_id --in $project" "Unpin message")" \
+    "$(breadcrumb "show" "bcq messages $message_id --in $project" "View message")"
+  )
+
+  output '{}' "$summary" "$bcs"
+}
+
+_messages_unpin() {
+  local message_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$message_id" ]]; then
+          message_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$message_id" ]]; then
+    die "Message ID required" $EXIT_USAGE "Usage: bcq messages unpin <id> --in <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  api_delete "/buckets/$project/recordings/$message_id/pin.json" >/dev/null
+
+  local summary="Unpinned message #$message_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "pin" "bcq messages pin $message_id --in $project" "Pin message")" \
+    "$(breadcrumb "show" "bcq messages $message_id --in $project" "View message")"
+  )
+
+  output '{}' "$summary" "$bcs"
 }
 
 
