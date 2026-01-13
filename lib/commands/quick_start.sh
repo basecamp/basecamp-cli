@@ -217,6 +217,7 @@ OPTIONS
   --list <list>     Filter by todolist (ID or name)
   --assignee <who>  Filter by assignee (me, ID, or @handle)
   --status <s>      Filter by status (active, completed)
+  --overdue         Show only overdue todos (past due, not completed)
   --json, -j        JSON output
 
 EXAMPLES

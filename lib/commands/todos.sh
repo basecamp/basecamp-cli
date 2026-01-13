@@ -30,7 +30,7 @@ cmd_todos() {
 }
 
 _todos_list() {
-  local project="" todolist="" assignee="" status=""
+  local project="" todolist="" assignee="" status="" overdue=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -53,6 +53,10 @@ _todos_list() {
         [[ -z "${2:-}" ]] && die "--status requires a value" $EXIT_USAGE
         status="$2"
         shift 2
+        ;;
+      --overdue)
+        overdue="true"
+        shift
         ;;
       --all)
         assignee=""
@@ -117,6 +121,13 @@ _todos_list() {
         die "Invalid assignee: $assignee" $EXIT_USAGE "Use numeric person ID or 'me'"
       fi
       all_todos=$(echo "$all_todos" | jq --arg assignee "$assignee_id" '[.[] | select(.assignees[]?.id == ($assignee | tonumber))]')
+    fi
+
+    # Filter by overdue
+    if [[ "$overdue" == "true" ]]; then
+      local today
+      today=$(date +%Y-%m-%d)
+      all_todos=$(echo "$all_todos" | jq --arg today "$today" '[.[] | select(.due_on != null and .due_on < $today and .completed == false)]')
     fi
 
     local count

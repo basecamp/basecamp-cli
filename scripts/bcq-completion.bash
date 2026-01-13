@@ -53,7 +53,7 @@ _bcq_completions() {
       if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "$todos_actions $project_flags" -- "$cur"))
       else
-        COMPREPLY=($(compgen -W "$project_flags --list --assignee --status $global_flags" -- "$cur"))
+        COMPREPLY=($(compgen -W "$project_flags --list --assignee --status --overdue $global_flags" -- "$cur"))
       fi
       ;;
     todolists)
