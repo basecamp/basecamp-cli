@@ -19,59 +19,72 @@ BCQ_ACCOUNTS_FILE="accounts.json"
 
 
 # Config Loading
+# Uses JSON string instead of associative arrays for bash 3.2 compatibility
 
-declare -A _BCQ_CONFIG
+_BCQ_CONFIG='{}'
 
 _load_config_file() {
   local file="$1"
   if [[ -f "$file" ]]; then
     debug "Loading config from $file"
-    while IFS='=' read -r key value; do
-      _BCQ_CONFIG["$key"]="$value"
-    done < <(jq -r 'to_entries | .[] | "\(.key)=\(.value)"' "$file" 2>/dev/null || true)
+    local file_config
+    file_config=$(jq -c '.' "$file" 2>/dev/null || echo '{}')
+    _BCQ_CONFIG=$(echo "$_BCQ_CONFIG" | jq -c --argjson new "$file_config" '. * $new')
   fi
 }
 
+_set_config_value() {
+  local key="$1"
+  local value="$2"
+  _BCQ_CONFIG=$(echo "$_BCQ_CONFIG" | jq -c --arg k "$key" --arg v "$value" '.[$k] = $v')
+}
+
 load_config() {
-  _BCQ_CONFIG=()
+  _BCQ_CONFIG='{}'
 
   # Layer 1: Global config
   _load_config_file "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CONFIG_FILE"
 
   # Layer 2: Local config (walk up directory tree)
   local dir="$PWD"
-  local local_configs=()
+  local local_configs=""
   while [[ "$dir" != "/" ]]; do
     if [[ -f "$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
-      local_configs+=("$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE")
+      local_configs="$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE:$local_configs"
     fi
     dir="$(dirname "$dir")"
   done
 
   # Apply local configs from root to current (so closer overrides)
-  for ((i=${#local_configs[@]}-1; i>=0; i--)); do
-    _load_config_file "${local_configs[$i]}"
+  # Split on : and process in reverse order (already reversed above)
+  local IFS=':'
+  for cfg in $local_configs; do
+    [[ -n "$cfg" ]] && _load_config_file "$cfg"
   done
 
   # Layer 3: Environment variables
-  [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && _BCQ_CONFIG["account_id"]="$BASECAMP_ACCOUNT_ID" || true
-  [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && _BCQ_CONFIG["project_id"]="$BASECAMP_PROJECT_ID" || true
-  [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && _BCQ_CONFIG["access_token"]="$BASECAMP_ACCESS_TOKEN" || true
+  [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && _set_config_value "account_id" "$BASECAMP_ACCOUNT_ID" || true
+  [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && _set_config_value "project_id" "$BASECAMP_PROJECT_ID" || true
+  [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && _set_config_value "access_token" "$BASECAMP_ACCESS_TOKEN" || true
 
   # Layer 4: Command-line flags (already handled in global flag parsing)
-  [[ -n "${BCQ_ACCOUNT:-}" ]] && _BCQ_CONFIG["account_id"]="$BCQ_ACCOUNT" || true
-  [[ -n "${BCQ_PROJECT:-}" ]] && _BCQ_CONFIG["project_id"]="$BCQ_PROJECT" || true
+  [[ -n "${BCQ_ACCOUNT:-}" ]] && _set_config_value "account_id" "$BCQ_ACCOUNT" || true
+  [[ -n "${BCQ_PROJECT:-}" ]] && _set_config_value "project_id" "$BCQ_PROJECT" || true
 }
 
 get_config() {
   local key="$1"
   local default="${2:-}"
-  echo "${_BCQ_CONFIG[$key]:-$default}"
+  local value
+  value=$(echo "$_BCQ_CONFIG" | jq -r --arg k "$key" '.[$k] // empty')
+  echo "${value:-$default}"
 }
 
 has_config() {
   local key="$1"
-  [[ -n "${_BCQ_CONFIG[$key]:-}" ]]
+  local value
+  value=$(echo "$_BCQ_CONFIG" | jq -r --arg k "$key" '.[$k] // empty')
+  [[ -n "$value" ]]
 }
 
 
@@ -101,7 +114,7 @@ set_global_config() {
     jq -n --arg key "$key" --arg value "$value" '{($key): $value}' > "$file"
   fi
 
-  _BCQ_CONFIG["$key"]="$value"
+  _set_config_value "$key" "$value"
 }
 
 set_local_config() {
@@ -120,7 +133,7 @@ set_local_config() {
     jq -n --arg key "$key" --arg value "$value" '{($key): $value}' > "$file"
   fi
 
-  _BCQ_CONFIG["$key"]="$value"
+  _set_config_value "$key" "$value"
 }
 
 unset_config() {
@@ -141,7 +154,7 @@ unset_config() {
     mv "$tmp" "$file"
   fi
 
-  unset "_BCQ_CONFIG[$key]"
+  _BCQ_CONFIG=$(echo "$_BCQ_CONFIG" | jq -c --arg k "$key" 'del(.[$k])')
 }
 
 
@@ -259,15 +272,11 @@ save_accounts() {
 # Config Display
 
 get_effective_config() {
-  local result='{}'
-  for key in "${!_BCQ_CONFIG[@]}"; do
-    if [[ "$key" == "access_token" ]] || [[ "$key" == "refresh_token" ]]; then
-      result=$(echo "$result" | jq --arg key "$key" '.[$key] = "***"')
-    else
-      result=$(echo "$result" | jq --arg key "$key" --arg value "${_BCQ_CONFIG[$key]}" '.[$key] = $value')
-    fi
-  done
-  echo "$result"
+  # Mask sensitive values in the config JSON
+  echo "$_BCQ_CONFIG" | jq -c '
+    if has("access_token") then .access_token = "***" else . end |
+    if has("refresh_token") then .refresh_token = "***" else . end
+  '
 }
 
 get_config_source() {
