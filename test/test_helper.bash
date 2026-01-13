@@ -90,6 +90,15 @@ assert_output_not_contains() {
   fi
 }
 
+assert_output_starts_with() {
+  local expected="$1"
+  if [[ "${output:0:${#expected}}" != "$expected" ]]; then
+    echo "Expected output to start with: $expected"
+    echo "Actual output starts with: ${output:0:20}"
+    return 1
+  fi
+}
+
 assert_json_value() {
   local path="$1"
   local expected="$2"

@@ -106,18 +106,24 @@ _todolists_list_md() {
 
 
 _todolists_show() {
-  local todolist_id="$1"
-  shift || true
-  local project=""
+  local todolist_id="" project=""
 
+  # Parse all arguments in single pass
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --project|-p)
+      --project|--in|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq todolists --help"
+        ;;
       *)
+        # Positional: todolist ID
+        if [[ -z "$todolist_id" ]]; then
+          todolist_id="$1"
+        fi
         shift
         ;;
     esac

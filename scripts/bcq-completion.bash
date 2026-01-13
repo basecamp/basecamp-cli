@@ -19,15 +19,16 @@ _bcq_completions() {
   }
 
   # Top-level commands
-  local commands="projects todos todo done comment campfire cards card people recordings search auth config help"
+  local commands="projects todos todolists todo done comment campfire cards card people recordings search show assign unassign me auth config help"
 
   # Subcommands by resource
   local projects_actions="list show"
   local todos_actions="list show create complete"
+  local todolists_actions="list show"
   local campfire_actions="list messages post"
   local cards_actions="list show create move"
   local people_actions="list show pingable"
-  local recordings_actions="list"
+  local recordings_actions="list todos messages documents comments cards uploads"
   local auth_actions="login logout status"
   local config_actions="show init set unset project"
 
@@ -52,6 +53,13 @@ _bcq_completions() {
         COMPREPLY=($(compgen -W "$todos_actions $project_flags" -- "$cur"))
       else
         COMPREPLY=($(compgen -W "$project_flags --list --assignee --status $global_flags" -- "$cur"))
+      fi
+      ;;
+    todolists)
+      if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$todolists_actions $project_flags" -- "$cur"))
+      else
+        COMPREPLY=($(compgen -W "$project_flags $global_flags" -- "$cur"))
       fi
       ;;
     todo)
@@ -79,6 +87,15 @@ _bcq_completions() {
       ;;
     card)
       COMPREPLY=($(compgen -W "$project_flags --column $global_flags" -- "$cur"))
+      ;;
+    show)
+      COMPREPLY=($(compgen -W "todo todolist message comment card document $project_flags --type $global_flags" -- "$cur"))
+      ;;
+    assign|unassign)
+      COMPREPLY=($(compgen -W "--to $project_flags $global_flags" -- "$cur"))
+      ;;
+    me)
+      COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
       ;;
     people)
       if [[ $cword -eq 2 ]]; then

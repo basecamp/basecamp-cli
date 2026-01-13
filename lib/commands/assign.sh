@@ -53,8 +53,8 @@ cmd_assign() {
   assignee_id=$(resolve_assignee "$assignee")
 
   if [[ -z "$assignee_id" ]] || [[ "$assignee_id" == "null" ]]; then
-    die "Could not resolve assignee: $assignee" $EXIT_NOT_FOUND \
-      "Use person ID, email, or 'me'"
+    die "Invalid assignee: $assignee" $EXIT_USAGE \
+      "Use numeric person ID or 'me'"
   fi
 
   # Get current todo to preserve existing assignees
@@ -138,6 +138,10 @@ cmd_unassign() {
   # Resolve assignee to ID
   local assignee_id
   assignee_id=$(resolve_assignee "$assignee")
+
+  if [[ -z "$assignee_id" ]]; then
+    die "Invalid assignee: $assignee" $EXIT_USAGE "Use numeric person ID or 'me'"
+  fi
 
   # Get current todo
   local current_todo current_assignees

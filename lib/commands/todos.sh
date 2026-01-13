@@ -113,6 +113,9 @@ _todos_list() {
     if [[ -n "$assignee" ]]; then
       local assignee_id
       assignee_id=$(resolve_assignee "$assignee")
+      if [[ -z "$assignee_id" ]]; then
+        die "Invalid assignee: $assignee" $EXIT_USAGE "Use numeric person ID or 'me'"
+      fi
       all_todos=$(echo "$all_todos" | jq --arg assignee "$assignee_id" '[.[] | select(.assignees[]?.id == ($assignee | tonumber))]')
     fi
 
@@ -311,6 +314,9 @@ cmd_todo_create() {
   if [[ -n "$assignee" ]]; then
     local assignee_id
     assignee_id=$(resolve_assignee "$assignee")
+    if [[ -z "$assignee_id" ]]; then
+      die "Invalid assignee: $assignee" $EXIT_USAGE "Use numeric person ID or 'me'"
+    fi
     payload=$(echo "$payload" | jq --argjson ids "[$assignee_id]" '. + {assignee_ids: $ids}')
   fi
 

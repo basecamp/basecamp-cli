@@ -3,23 +3,10 @@
 
 
 cmd_show() {
-  local type="${1:-}"
-  local id="${2:-}"
-  local project=""
+  local type="" id="" project=""
+  local positionals=()
 
-  # Parse arguments - support both "show todo 123" and "show 123"
-  if [[ "$type" =~ ^[0-9]+$ ]]; then
-    # First arg is ID, no type specified
-    id="$type"
-    type=""
-    shift
-  elif [[ -n "$type" ]] && [[ ! "$type" =~ ^- ]]; then
-    shift
-    if [[ -n "$id" ]] && [[ ! "$id" =~ ^- ]]; then
-      shift
-    fi
-  fi
-
+  # Parse all arguments in single pass
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project|-p)
@@ -36,15 +23,26 @@ cmd_show() {
         _help_show
         return
         ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq show --help"
+        ;;
       *)
-        # Positional: might be ID
-        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$id" ]]; then
-          id="$1"
-        fi
+        # Collect positional arguments
+        positionals+=("$1")
         shift
         ;;
     esac
   done
+
+  # Process positionals: [type] <id>
+  if [[ ${#positionals[@]} -eq 1 ]]; then
+    # Single positional - must be ID
+    id="${positionals[0]}"
+  elif [[ ${#positionals[@]} -ge 2 ]]; then
+    # Two positionals - type and ID
+    type="${positionals[0]}"
+    id="${positionals[1]}"
+  fi
 
   if [[ -z "$id" ]]; then
     die "Recording ID required" $EXIT_USAGE "Usage: bcq show [type] <id> [--project <id>]"

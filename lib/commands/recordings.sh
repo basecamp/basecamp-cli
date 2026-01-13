@@ -115,7 +115,7 @@ _recordings_list() {
   if [[ "$format" == "json" ]]; then
     local bcs
     bcs=$(breadcrumbs \
-      "$(breadcrumb "show" "bcq show <id>" "Show recording details")"
+      "$(breadcrumb "show" "bcq show <id> --project <bucket.id>" "Show recording (use bucket.id from result)")"
     )
     json_ok "$response" "$summary" "$bcs"
   else
@@ -163,10 +163,10 @@ _recordings_table() {
 }
 
 
-# Update stubs.sh to remove search stub and add recordings alias
+# Search is an alias for recordings with a note about API limitations
 cmd_search() {
   info "Note: Basecamp API doesn't have full-text search."
   info "Using recordings filter instead..."
-  echo
+  info ""
   cmd_recordings "$@"
 }

@@ -130,7 +130,9 @@ _people_pingable() {
 }
 
 
-# Resolve "me" to current user's person ID
+# Resolve assignee to person ID
+# Accepts: "me" or numeric ID
+# Returns: numeric ID or empty string on error
 resolve_assignee() {
   local assignee="$1"
 
@@ -138,7 +140,10 @@ resolve_assignee() {
     local profile
     profile=$(api_get "/my/profile.json")
     echo "$profile" | jq -r '.id'
-  else
+  elif [[ "$assignee" =~ ^[0-9]+$ ]]; then
     echo "$assignee"
+  else
+    # Invalid format - return empty to signal error
+    echo ""
   fi
 }

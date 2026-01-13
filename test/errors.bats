@@ -158,6 +158,54 @@ load test_helper
 }
 
 
+# Show command argument parsing
+
+@test "show handles flags before positional" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # Should not treat --project value as ID
+  run bcq show --project 123 todo 456
+  # Will fail on API call, but should parse correctly (not "Invalid assignee")
+  assert_output_not_contains "Unknown option"
+}
+
+@test "todolists show handles --in flag" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq todolists show --in 123 456
+  # Will fail on API call, but should parse correctly
+  assert_output_not_contains "Unknown option"
+}
+
+# Assignee validation
+
+@test "invalid assignee format shows clear error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123, "todolist_id": 456}'
+
+  run bcq todo "test" --assignee "john@example.com"
+  assert_failure
+  assert_output_contains "Invalid assignee"
+  assert_output_contains "numeric person ID"
+}
+
+# Search JSON cleanliness
+
+@test "search --json outputs clean JSON to stdout" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # The info messages should go to stderr, stdout should be empty or JSON only
+  run bash -c "bcq search todos --json 2>/dev/null"
+  # If there's output, it should be valid JSON (starts with { or [)
+  if [[ -n "$output" ]]; then
+    assert_output_starts_with '{'
+  fi
+}
+
+
 # JSON error envelope structure
 
 @test "error returns proper JSON envelope" {
