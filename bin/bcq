@@ -72,6 +72,7 @@ main() {
     search)     cmd_search "$@" ;;
     show)       cmd_show "$@" ;;
     subscriptions) cmd_subscriptions "$@" ;;
+    schedule)   cmd_schedule "$@" ;;
     people)     cmd_people "$@" ;;
     me)         cmd_me "$@" ;;
     webhooks)   cmd_webhooks "$@" ;;
