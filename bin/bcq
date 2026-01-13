@@ -7,6 +7,25 @@
 
 set -euo pipefail
 
+# Require bash 4+ for associative arrays
+if ((BASH_VERSINFO[0] < 4)); then
+  echo "bcq requires bash 4.0 or later (found: $BASH_VERSION)" >&2
+  echo "" >&2
+  if [[ "$(uname)" == "Darwin" ]]; then
+    echo "macOS ships with bash 3.2. Install modern bash via Homebrew:" >&2
+    echo "  brew install bash" >&2
+    echo "" >&2
+    echo "Then run bcq with:" >&2
+    echo "  /opt/homebrew/bin/bash $(realpath "$0") [args]" >&2
+    echo "" >&2
+    echo "Or add to your shell config (~/.zshrc or ~/.bash_profile):" >&2
+    echo "  alias bcq='/opt/homebrew/bin/bash $HOME/Work/basecamp/bcq/bin/bcq'" >&2
+  else
+    echo "Install bash 4+ from your package manager." >&2
+  fi
+  exit 1
+fi
+
 # Determine script location for loading libs
 BCQ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BCQ_VERSION="0.1.0"
