@@ -66,6 +66,7 @@ main() {
     checkins)   cmd_checkins "$@" ;;
     comments)   cmd_comments "$@" ;;
     docs)       cmd_docs "$@" ;;
+    events)     cmd_events "$@" ;;
     files)      cmd_files "$@" ;;
     me)         cmd_me "$@" ;;
     messages)   cmd_messages "$@" ;;
