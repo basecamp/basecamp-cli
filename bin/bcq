@@ -69,6 +69,7 @@ main() {
     events)     cmd_events "$@" ;;
     files)      cmd_files "$@" ;;
     forwards)   cmd_forwards "$@" ;;
+    lineup)     cmd_lineup "$@" ;;
     me)         cmd_me "$@" ;;
     messages)   cmd_messages "$@" ;;
     messageboards) cmd_messageboards "$@" ;;
