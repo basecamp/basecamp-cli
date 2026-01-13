@@ -77,10 +77,12 @@ main() {
     vaults)     cmd_vaults "$@" ;;
     uploads)    cmd_uploads "$@" ;;
     docs)       cmd_docs "$@" ;;
+    comments)   cmd_comments "$@" ;;
 
     # Action shortcuts
     todo)       cmd_todo_create "$@" ;;
     done)       cmd_todo_complete "$@" ;;
+    reopen)     cmd_todo_uncomplete "$@" ;;
     message)    cmd_message "$@" ;;
     card)       cmd_card "$@" ;;
     comment)    cmd_comment "$@" ;;
