@@ -33,11 +33,12 @@ cmd_cards() {
   shift || true
 
   case "$action" in
-    list) _cards_list "$@" ;;
     columns) _cards_columns "$@" ;;
-    get|show) _cards_show "$@" ;;
     create) _cards_create "$@" ;;
+    get|show) _cards_show "$@" ;;
+    list) _cards_list "$@" ;;
     move) _cards_move "$@" ;;
+    update) _cards_update "$@" ;;
     --help|-h) _help_cards ;;
     *)
       if [[ "$action" =~ ^[0-9]+$ ]]; then
@@ -440,22 +441,120 @@ _cards_move() {
   output "$response" "$summary" "$bcs"
 }
 
+_cards_update() {
+  local card_id="" project="" title="" content="" due="" assignees=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project|-p|--in)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --title|-t)
+        [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
+        title="$2"
+        shift 2
+        ;;
+      --content|--body|-b)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
+        content="$2"
+        shift 2
+        ;;
+      --due|-d)
+        [[ -z "${2:-}" ]] && die "--due requires a value" $EXIT_USAGE
+        due="$2"
+        shift 2
+        ;;
+      --assignee|-a)
+        [[ -z "${2:-}" ]] && die "--assignee requires a value" $EXIT_USAGE
+        assignees="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$card_id" ]]; then
+          card_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$card_id" ]]; then
+    die "Card ID required" $EXIT_USAGE "Usage: bcq cards update <id> --title \"new title\""
+  fi
+
+  if [[ -z "$title" ]] && [[ -z "$content" ]] && [[ -z "$due" ]] && [[ -z "$assignees" ]]; then
+    die "At least one field required" $EXIT_USAGE "Use --title, --content, --due, or --assignee"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
+  fi
+
+  local payload="{}"
+  [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')
+  [[ -n "$content" ]] && payload=$(echo "$payload" | jq --arg c "$content" '. + {content: $c}')
+
+  if [[ -n "$due" ]]; then
+    local due_date
+    due_date=$(parse_date "$due")
+    payload=$(echo "$payload" | jq --arg d "$due_date" '. + {due_on: $d}')
+  fi
+
+  if [[ -n "$assignees" ]]; then
+    local assignee_id
+    assignee_id=$(resolve_assignee "$assignees")
+    if [[ -z "$assignee_id" ]]; then
+      die "Invalid assignee: $assignees" $EXIT_USAGE "Use numeric person ID or 'me'"
+    fi
+    payload=$(echo "$payload" | jq --argjson ids "[$assignee_id]" '. + {assignee_ids: $ids}')
+  fi
+
+  local response
+  response=$(api_put "/buckets/$project/card_tables/cards/$card_id.json" "$payload")
+
+  local summary="Updated card #$card_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq cards $card_id --in $project" "View card")" \
+    "$(breadcrumb "list" "bcq cards --in $project" "List cards")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
 # Shortcut for creating cards
 cmd_card() {
   local action="${1:-}"
 
-  if [[ "$action" == "create" ]]; then
-    shift
-    _cards_create "$@"
-  elif [[ "$action" == "move" ]]; then
-    shift
-    _cards_move "$@"
-  elif [[ "$action" =~ ^[0-9]+$ ]]; then
-    _cards_show "$@"
-  else
-    # Assume it's a title for create
-    _cards_create "$@"
-  fi
+  case "$action" in
+    create)
+      shift
+      _cards_create "$@"
+      ;;
+    move)
+      shift
+      _cards_move "$@"
+      ;;
+    update)
+      shift
+      _cards_update "$@"
+      ;;
+    *)
+      if [[ "$action" =~ ^[0-9]+$ ]]; then
+        _cards_show "$@"
+      else
+        # Assume it's a title for create
+        _cards_create "$@"
+      fi
+      ;;
+  esac
 }
 
 _help_cards() {
@@ -471,16 +570,21 @@ Manage cards in Card Tables (Kanban boards).
 
 ### Actions
 
-    list              List cards (default)
     columns           List columns with stable IDs
-    show <id>         Show card details
     create "title"    Create a new card
+    list              List cards (default)
     move <id>         Move card to another column
+    show <id>         Show card details
+    update <id>       Update card attributes
 
 ### Options
 
     --in, -p <project>      Project ID
     --column, -c <id|name>  Filter by or target column (ID preferred for stability)
+    --title, -t <text>      Card title (for update)
+    --content, -b <text>    Card description (for update)
+    --due, -d <date>        Due date (for update)
+    --assignee, -a <id>     Assignee ID or 'me' (for update)
 
 ### Examples
 
@@ -493,6 +597,9 @@ Manage cards in Card Tables (Kanban boards).
     # Create card
     bcq card "New feature" --in 12345
     bcq card "Bug fix" --in 12345 --column "Inbox"
+
+    # Update card
+    bcq cards update 67890 --title "Updated title" --due tomorrow
 
     # Move card
     bcq cards move 67890 --to "Done"
