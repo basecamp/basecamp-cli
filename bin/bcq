@@ -64,6 +64,7 @@ main() {
     projects)   cmd_projects "$@" ;;
     todos)      cmd_todos "$@" ;;
     todolists)  cmd_todolists "$@" ;;
+    todolistgroups) cmd_todolistgroups "$@" ;;
     messages)   cmd_messages "$@" ;;
     cards)      cmd_cards "$@" ;;
     campfire)   cmd_campfire "$@" ;;
