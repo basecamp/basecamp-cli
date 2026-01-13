@@ -6,11 +6,11 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 18 | ~110 |
-| 🔶 Partial | 2 | ~8 |
-| ⬜ Not started | 14 | ~45 |
+| ✅ Implemented | 27 | ~130 |
+| 🔶 Partial | 2 | ~6 |
+| ⬜ Not started | 5 | ~15 |
 | ⏭️ Skip | 8 | ~20 |
-| **Total** | **42** | **~180** |
+| **Total** | **42** | **~170** |
 
 ## Coverage by Section
 
@@ -25,7 +25,7 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin |
 | message_boards | 3 | - | 🔶 | low | Container, accessed via project dock |
-| message_types | 9 | - | ⬜ | low | Announcement categories |
+| message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
 | campfires | 14 | `campfire` | ✅ | - | list, messages, post, line show/delete |
 | comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update |
 | **Cards (Kanban)** |
@@ -44,32 +44,32 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update |
 | attachments | 1 | - | ⬜ | medium | Attachment metadata |
 | **Schedule** |
-| schedules | 4 | - | ⬜ | medium | Schedule container |
-| schedule_entries | 9 | - | ⬜ | medium | Calendar events |
-| events | 3 | - | ⬜ | low | Event occurrences |
+| schedules | 2 | `schedule` | ✅ | - | Schedule container + settings |
+| schedule_entries | 5 | `schedule` | ✅ | - | list, show, create, update, occurrences |
+| events | 1 | `events` | ✅ | - | Recording change audit trail |
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | - | list, show, create, update, delete |
 | **Templates** |
-| templates | 15 | - | ⬜ | low | Project templates |
+| templates | 7 | `templates` | ✅ | - | list, show, create, update, delete, construct, construction |
 | **Time Tracking** |
-| timesheets | 9 | - | ⬜ | medium | Time entries |
+| timesheets | 6 | `timesheet` | ✅ | - | list, show, create, update, delete |
 | **Subscriptions** |
-| subscriptions | 8 | - | ⬜ | low | Notification subscriptions |
+| subscriptions | 4 | `subscriptions` | ✅ | - | show, subscribe, unsubscribe, add/remove |
 | **Check-ins (Automatic)** |
-| questionnaires | 3 | - | ⬜ | low | Check-in questions container |
-| questions | 6 | - | ⬜ | low | Check-in questions |
-| question_answers | 6 | - | ⬜ | low | Check-in answers |
+| questionnaires | 2 | `checkins` | ✅ | - | Container for check-in questions |
+| questions | 5 | `checkins` | ✅ | - | list, show, create, update |
+| question_answers | 4 | `checkins` | ✅ | - | list, show |
 | **Inbox (Email Forwards)** |
-| inboxes | 3 | - | ⬜ | low | Email forward inbox |
-| inbox_replies | 6 | - | ⬜ | low | Replies to forwards |
-| forwards | 6 | - | ⬜ | low | Forwarded emails |
+| inboxes | 1 | `forwards` | ✅ | - | Inbox container |
+| forwards | 2 | `forwards` | ✅ | - | list, show |
+| inbox_replies | 2 | `forwards` | ✅ | - | list replies, show reply |
 | **Client Portal** |
-| client_approvals | 6 | - | ⏭️ | skip | Client-specific |
-| client_correspondences | 6 | - | ⏭️ | skip | Client-specific |
-| client_replies | 6 | - | ⏭️ | skip | Client-specific |
-| client_visibility | 1 | - | ⏭️ | skip | Client-specific |
+| client_approvals | 6 | - | ⏭️ | skip | Client portal only (see notes) |
+| client_correspondences | 6 | - | ⏭️ | skip | Client portal only (see notes) |
+| client_replies | 6 | - | ⏭️ | skip | Client portal only (see notes) |
+| client_visibility | 1 | - | ⏭️ | skip | Client portal only (see notes) |
 | **Chatbots** |
-| chatbots | 10 | - | ⏭️ | skip | Integration-specific |
+| chatbots | 10 | - | ⏭️ | skip | Requires chatbot key, not OAuth (see notes) |
 | **Other** |
 | lineup_markers | 3 | - | ⏭️ | skip | Lineup feature markers |
 | basecamps | 0 | - | ⏭️ | skip | Reference only |
@@ -84,10 +84,28 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 ## Next Up (Medium Priority)
 
-1. **schedules** (4 endpoints) - Schedule container
-2. **schedule_entries** (9 endpoints) - Calendar events
-3. **timesheets** (9 endpoints) - Time entries
-4. **card_table_steps** (4 endpoints) - Workflow steps on cards
+1. **card_table_steps** (4 endpoints) - Workflow steps on cards
+2. **attachments** (1 endpoint) - Attachment metadata
+
+## Skipped Sections
+
+### Client Portal (`client_*`)
+
+The client portal endpoints (`client_approvals`, `client_correspondences`, `client_replies`, `client_visibility`) are specific to client-facing features. They require:
+- Projects with client access enabled
+- Client users (external to the organization)
+- Specific client workflow context
+
+These are unlikely to be needed in typical developer/agent workflows and add complexity without broad utility.
+
+### Chatbots
+
+The chatbots API uses a **chatbot key** for authentication rather than OAuth tokens. This is a fundamentally different auth model:
+- Chatbot keys are per-integration, not per-user
+- They're designed for automated integrations (Slack bots, etc.)
+- bcq uses OAuth for user-scoped access
+
+Supporting chatbot auth would require a separate configuration path. If chatbot functionality is needed, a dedicated chatbot-specific tool would be more appropriate.
 
 ## Implementation Notes
 
