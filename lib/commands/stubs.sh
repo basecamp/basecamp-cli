@@ -1,20 +1,6 @@
 #!/usr/bin/env bash
-# stubs.sh - Placeholder commands (not yet implemented)
+# stubs.sh - Config and MCP commands (partial implementations)
 
-
-cmd_todolists() {
-  die "Command 'todolists' not yet implemented" $EXIT_USAGE
-}
-
-
-cmd_show() {
-  die "Command 'show' not yet implemented" $EXIT_USAGE
-}
-
-
-cmd_assign() {
-  die "Command 'assign' not yet implemented" $EXIT_USAGE
-}
 
 cmd_config() {
   local action="${1:-show}"
@@ -112,9 +98,86 @@ _config_unset() {
 }
 
 _config_project() {
-  # Interactive project picker - requires API
-  die "Interactive project picker not yet implemented" $EXIT_USAGE \
-    "Use: bcq config set project_id <id>"
+  # Interactive project picker
+  local projects
+  projects=$(api_get "/projects.json")
+
+  local count
+  count=$(echo "$projects" | jq 'length')
+
+  if [[ "$count" -eq 0 ]]; then
+    die "No projects found" $EXIT_NOT_FOUND
+  fi
+
+  echo "Available projects:"
+  echo
+  echo "$projects" | jq -r 'to_entries[] | "\(.key + 1). \(.value.name) (#\(.value.id))"'
+  echo
+
+  read -rp "Select project (1-$count): " selection
+
+  if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt "$count" ]]; then
+    die "Invalid selection" $EXIT_USAGE
+  fi
+
+  local project_id project_name
+  project_id=$(echo "$projects" | jq -r ".[$((selection - 1))].id")
+  project_name=$(echo "$projects" | jq -r ".[$((selection - 1))].name")
+
+  set_local_config "project_id" "$project_id"
+  info "Set project_id = $project_id ($project_name)"
+
+  # Optionally select default todolist
+  read -rp "Select default todolist? (y/N): " select_todolist
+  if [[ "$select_todolist" =~ ^[Yy] ]]; then
+    _config_todolist "$project_id"
+  fi
+}
+
+
+_config_todolist() {
+  local project_id="$1"
+
+  # Get todoset from project
+  local project_data todoset_id
+  project_data=$(api_get "/projects/$project_id.json")
+  todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
+
+  if [[ -z "$todoset_id" ]]; then
+    warn "No todoset found in project"
+    return
+  fi
+
+  local todolists
+  todolists=$(api_get "/buckets/$project_id/todosets/$todoset_id/todolists.json")
+
+  local count
+  count=$(echo "$todolists" | jq 'length')
+
+  if [[ "$count" -eq 0 ]]; then
+    warn "No todolists found"
+    return
+  fi
+
+  echo
+  echo "Available todolists:"
+  echo
+  echo "$todolists" | jq -r 'to_entries[] | "\(.key + 1). \(.value.name) (#\(.value.id))"'
+  echo
+
+  read -rp "Select todolist (1-$count): " selection
+
+  if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt "$count" ]]; then
+    warn "Invalid selection, skipping todolist"
+    return
+  fi
+
+  local todolist_id todolist_name
+  todolist_id=$(echo "$todolists" | jq -r ".[$((selection - 1))].id")
+  todolist_name=$(echo "$todolists" | jq -r ".[$((selection - 1))].name")
+
+  set_local_config "todolist_id" "$todolist_id"
+  info "Set todolist_id = $todolist_id ($todolist_name)"
 }
 
 cmd_mcp() {

@@ -56,6 +56,7 @@ main() {
     card)       cmd_card "$@" ;;
     comment)    cmd_comment "$@" ;;
     assign)     cmd_assign "$@" ;;
+    unassign)   cmd_unassign "$@" ;;
 
     # Auth & config
     auth)       cmd_auth "$@" ;;
