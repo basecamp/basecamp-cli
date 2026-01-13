@@ -126,6 +126,34 @@ BCQ_BASE_URL=https://3.staging.basecampapi.com bcq auth login
 
 OAuth endpoints are discovered automatically via `.well-known/oauth-authorization-server` (RFC 8414).
 
+## Tab Completion
+
+```bash
+# Bash
+source /path/to/bcq/scripts/bcq-completion.bash
+
+# Or add to ~/.bashrc:
+echo 'source /path/to/bcq/scripts/bcq-completion.bash' >> ~/.bashrc
+```
+
+Provides completion for commands, subcommands, and flags.
+
+## Claude Code Integration
+
+bcq includes a Claude Code plugin with:
+
+- `/basecamp` - Primary workflow command
+- `/todo` - Quick todo operations
+- `basecamp-navigator` agent - Cross-project search
+- `context-linker` agent - Link code to Basecamp items
+- Git commit hook - Auto-detect todo references
+
+Install the plugin:
+```bash
+# From bcq directory
+claude plugins link .
+```
+
 ## Testing
 
 ```bash
