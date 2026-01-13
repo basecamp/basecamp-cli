@@ -76,6 +76,7 @@ main() {
     search)     cmd_search "$@" ;;
     show)       cmd_show "$@" ;;
     subscriptions) cmd_subscriptions "$@" ;;
+    timesheet)  cmd_timesheet "$@" ;;
     todolists)  cmd_todolists "$@" ;;
     todolistgroups) cmd_todolistgroups "$@" ;;
     todos)      cmd_todos "$@" ;;
