@@ -70,6 +70,7 @@ main() {
     me)         cmd_me "$@" ;;
     messages)   cmd_messages "$@" ;;
     messageboards) cmd_messageboards "$@" ;;
+    messagetypes) cmd_messagetypes "$@" ;;
     people)     cmd_people "$@" ;;
     projects)   cmd_projects "$@" ;;
     recordings) cmd_recordings "$@" ;;
