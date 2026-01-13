@@ -80,23 +80,37 @@ _self_update() {
       "Checkout a branch first: git checkout main"
   fi
 
+  # Check for upstream tracking branch
+  local upstream
+  upstream=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null || echo "")
+
+  if [[ -z "$upstream" ]]; then
+    die "No upstream configured for branch '$branch'" $EXIT_USAGE \
+      "Set upstream: git branch -u origin/$branch"
+  fi
+
+  if [[ "$upstream" != origin/* ]]; then
+    die "Upstream '$upstream' is not on origin" $EXIT_USAGE \
+      "Re-run installer or set upstream to origin: git branch -u origin/$branch"
+  fi
+
   # Check for local modifications
   if [[ "$force" != "true" ]] && ! git diff --quiet HEAD 2>/dev/null; then
     die "Local modifications detected" $EXIT_USAGE \
       "Commit or stash changes first, or use: bcq self-update --force"
   fi
 
-  echo "Updating bcq ($branch)..."
+  echo "Updating bcq ($branch from $upstream)..."
 
   local before after
   before=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
-  git fetch origin "$branch" --quiet 2>/dev/null || git fetch origin --quiet
+  git fetch origin --quiet
 
   # Try fast-forward first, fall back to reset if --force
-  if ! git merge --ff-only "origin/$branch" --quiet 2>/dev/null; then
+  if ! git merge --ff-only "$upstream" --quiet 2>/dev/null; then
     if [[ "$force" == "true" ]]; then
-      git reset --hard "origin/$branch" --quiet
+      git reset --hard "$upstream" --quiet
     else
       die "Cannot fast-forward" $EXIT_USAGE \
         "Local commits exist. Use: bcq self-update --force"
