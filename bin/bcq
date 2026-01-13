@@ -69,6 +69,7 @@ main() {
     files)      cmd_files "$@" ;;
     me)         cmd_me "$@" ;;
     messages)   cmd_messages "$@" ;;
+    messageboards) cmd_messageboards "$@" ;;
     people)     cmd_people "$@" ;;
     projects)   cmd_projects "$@" ;;
     recordings) cmd_recordings "$@" ;;
@@ -77,6 +78,7 @@ main() {
     show)       cmd_show "$@" ;;
     subscriptions) cmd_subscriptions "$@" ;;
     timesheet)  cmd_timesheet "$@" ;;
+    todosets)   cmd_todosets "$@" ;;
     todolists)  cmd_todolists "$@" ;;
     todolistgroups) cmd_todolistgroups "$@" ;;
     todos)      cmd_todos "$@" ;;
