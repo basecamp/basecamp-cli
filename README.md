@@ -5,11 +5,34 @@ Basecamp Query Tool — an agent-first interface for the Basecamp API.
 ## Install
 
 ```bash
-git clone https://github.com/basecamp/bcq.git
-export PATH="$PWD/bcq/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/install.sh | bash
 ```
 
-Requires: `bash 4+`, `curl`, `jq`
+This installs to `~/.local/share/bcq` and creates `~/.local/bin/bcq`. Run again to update.
+
+**Requirements:** `bash 4+`, `curl`, `jq`, `git`
+
+### macOS
+
+macOS ships with bash 3.2. Install modern bash first:
+
+```bash
+brew install bash jq
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/install.sh | bash
+```
+
+Or use Homebrew for everything:
+
+```bash
+brew tap basecamp/tap
+brew install bcq
+```
+
+### Updating
+
+**Installer:** Run the installer again, or `bcq self-update`
+
+**Homebrew:** `brew upgrade bcq`
 
 ## Quick Start
 
@@ -128,12 +151,17 @@ OAuth endpoints are discovered automatically via `.well-known/oauth-authorizatio
 
 ## Tab Completion
 
+If installed via Homebrew, completions are set up automatically.
+
+### Manual setup
+
 ```bash
 # Bash
-source /path/to/bcq/scripts/bcq-completion.bash
+source /path/to/bcq/completions/bcq.bash
 
-# Or add to ~/.bashrc:
-echo 'source /path/to/bcq/scripts/bcq-completion.bash' >> ~/.bashrc
+# Zsh (add to fpath)
+fpath=(/path/to/bcq/completions $fpath)
+autoload -Uz compinit && compinit
 ```
 
 Provides completion for commands, subcommands, and flags.
