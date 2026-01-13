@@ -6,16 +6,24 @@
 cmd_recordings() {
   local action="${1:-list}"
 
+  # Pass through to _recordings_list for flags or empty
   if [[ "$action" == -* ]] || [[ -z "$action" ]]; then
     _recordings_list "$@"
     return
   fi
 
-  shift || true
-
   case "$action" in
-    list) _recordings_list "$@" ;;
-    --help|-h) _help_recordings ;;
+    list)
+      shift || true
+      _recordings_list "$@"
+      ;;
+    --help|-h)
+      _help_recordings
+      ;;
+    # Type shorthands - pass through to _recordings_list
+    todos|todo|messages|message|documents|document|doc|comments|comment|cards|card|uploads|upload)
+      _recordings_list "$@"
+      ;;
     *)
       die "Unknown recordings action: $action" $EXIT_USAGE "Run: bcq recordings --help"
       ;;

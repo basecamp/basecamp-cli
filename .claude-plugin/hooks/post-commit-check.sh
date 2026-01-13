@@ -20,6 +20,12 @@ fi
 # Check if commit succeeded by looking for output patterns
 tool_output=$(echo "$input" | jq -r '.tool_output // empty' 2>/dev/null)
 
+# Verify commit actually succeeded - look for commit hash pattern or "create mode"
+if [[ ! "$tool_output" =~ \[.*[a-f0-9]{7,}\] ]] && [[ ! "$tool_output" =~ "create mode" ]]; then
+  # Commit likely failed, don't suggest linking
+  exit 0
+fi
+
 # Look for todo references in the commit message or branch name
 branch=$(git branch --show-current 2>/dev/null || true)
 last_commit_msg=$(git log -1 --format=%s 2>/dev/null || true)

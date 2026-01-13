@@ -139,10 +139,11 @@ _bcq_completions() {
   esac
 }
 
-# Register completion
-complete -F _bcq_completions bcq
-
-# Zsh compatibility
+# Zsh compatibility - must come before complete
 if [[ -n "$ZSH_VERSION" ]]; then
   autoload -U +X bashcompinit && bashcompinit
+  autoload -U +X compinit && compinit
 fi
+
+# Register completion
+complete -F _bcq_completions bcq
