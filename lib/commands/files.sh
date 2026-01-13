@@ -20,6 +20,7 @@ cmd_files() {
     list) _files_list "$@" ;;
     show) _files_show "$@" ;;
     update) _files_update "$@" ;;
+    upload) _uploads_create "$@" ;;
     uploads) _uploads_list "$@" ;;
     --help|-h) _help_files ;;
     *)
@@ -526,6 +527,111 @@ _files_show_md() {
   esac
 }
 
+_uploads_create() {
+  local file="" project="" vault_id="" description="" base_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --vault|--folder)
+        [[ -z "${2:-}" ]] && die "--vault requires a value" $EXIT_USAGE
+        vault_id="$2"
+        shift 2
+        ;;
+      --description|--desc|-d)
+        [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
+        description="$2"
+        shift 2
+        ;;
+      --name|-n)
+        [[ -z "${2:-}" ]] && die "--name requires a value" $EXIT_USAGE
+        base_name="$2"
+        shift 2
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        if [[ -z "$file" ]]; then
+          file="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$file" ]]; then
+    die "File path required" $EXIT_USAGE "Usage: bcq files upload <file> --in <project>"
+  fi
+
+  if [[ ! -f "$file" ]]; then
+    die "File not found: $file" $EXIT_NOT_FOUND
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  if [[ -z "$vault_id" ]]; then
+    vault_id=$(_get_vault_id "$project")
+  fi
+
+  if [[ -z "$vault_id" ]]; then
+    die "No Docs & Files found in project" $EXIT_NOT_FOUND
+  fi
+
+  # Get filename and content type
+  local filename content_type file_size
+  filename=$(basename "$file")
+  content_type=$(file --mime-type -b "$file" 2>/dev/null || echo "application/octet-stream")
+  file_size=$(wc -c < "$file" | tr -d ' ')
+
+  # Step 1: Upload attachment to get attachable_sgid
+  local attach_response attachable_sgid
+  attach_response=$(api_upload "/attachments.json?name=$(urlencode "$filename")" "$file" "$content_type")
+  attachable_sgid=$(echo "$attach_response" | jq -r '.attachable_sgid // empty')
+
+  if [[ -z "$attachable_sgid" ]]; then
+    die "Failed to upload attachment" $EXIT_API "No attachable_sgid returned"
+  fi
+
+  # Step 2: Create upload in vault
+  local payload
+  payload=$(jq -n --arg sgid "$attachable_sgid" '{attachable_sgid: $sgid}')
+
+  if [[ -n "$description" ]]; then
+    payload=$(echo "$payload" | jq --arg d "$description" '. + {description: $d}')
+  fi
+
+  if [[ -n "$base_name" ]]; then
+    payload=$(echo "$payload" | jq --arg n "$base_name" '. + {base_name: $n}')
+  fi
+
+  local response
+  response=$(api_post "/buckets/$project/vaults/$vault_id/uploads.json" "$payload")
+
+  local upload_id
+  upload_id=$(echo "$response" | jq -r '.id')
+  local summary="✓ Uploaded #$upload_id: $filename"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq files $upload_id --in $project" "View upload")" \
+    "$(breadcrumb "list" "bcq files uploads --in $project" "List uploads")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+
 _vaults_create() {
   local title="" project="" vault_id=""
 
@@ -770,7 +876,8 @@ Manage Docs & Files (vaults, uploads, documents).
     folders           List only folders (vaults)
     list              List all items in folder (default)
     show <id>         Show item details
-    update <id>       Update title/content
+    update <id>       Update document/vault/upload
+    upload <file>     Upload a file
     uploads           List only uploaded files
 
 ### Options
@@ -780,6 +887,8 @@ Manage Docs & Files (vaults, uploads, documents).
     --type <type>           Item type (vault, document, upload)
     --title, -n <title>     New title (for update)
     --content, -b <text>    Content/body (for create/update)
+    --description, -d       Description (for upload)
+    --name                  Base name without extension (for upload)
 
 ### Examples
 
@@ -796,7 +905,11 @@ Manage Docs & Files (vaults, uploads, documents).
     bcq files doc "Meeting Notes" --in 12345
     bcq files doc "Spec" --content "## Overview" --in 12345
 
-    # Update document
+    # Upload a file
+    bcq files upload report.pdf --in 12345
+    bcq files upload logo.png --description "New logo" --in 12345
+
+    # Update document/vault/upload
     bcq files update 11111 --title "New Title" --in 12345
     bcq files update 11111 --content "Updated content" --in 12345
 

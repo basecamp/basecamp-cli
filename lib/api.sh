@@ -179,6 +179,75 @@ api_delete() {
   _api_request DELETE "$url" "$token" "" "$@"
 }
 
+# Binary file upload (for attachments)
+api_upload() {
+  local path="$1"
+  local file="$2"
+  local content_type="${3:-application/octet-stream}"
+  shift 3 || shift 2 || shift
+
+  local token account_id
+  token=$(ensure_auth)
+  account_id=$(ensure_account_id)
+
+  local url="$BCQ_API_URL/$account_id$path"
+  local file_size
+  file_size=$(wc -c < "$file" | tr -d ' ')
+
+  debug "API UPLOAD $url ($content_type, $file_size bytes)"
+
+  local headers_file response http_code
+  headers_file=$(mktemp)
+  trap "rm -f '$headers_file'" RETURN
+
+  local output curl_exit
+  output=$(curl -s \
+    -X POST \
+    -H "Authorization: Bearer $token" \
+    -H "User-Agent: $BCQ_USER_AGENT" \
+    -H "Content-Type: $content_type" \
+    -H "Content-Length: $file_size" \
+    --data-binary "@$file" \
+    -D "$headers_file" \
+    -w '\n%{http_code}' \
+    "$url") || curl_exit=$?
+
+  if [[ -n "${curl_exit:-}" ]]; then
+    case "$curl_exit" in
+      6)  die "Could not resolve host" $EXIT_NETWORK ;;
+      7)  die "Connection refused" $EXIT_NETWORK ;;
+      28) die "Connection timed out" $EXIT_NETWORK ;;
+      *)  die "Network error (curl exit $curl_exit)" $EXIT_NETWORK ;;
+    esac
+  fi
+
+  http_code=$(echo "$output" | tail -n1)
+  response=$(echo "$output" | sed '$d')
+
+  debug "HTTP $http_code"
+
+  case "$http_code" in
+    200|201)
+      echo "$response"
+      return 0
+      ;;
+    401)
+      die "Authentication failed" $EXIT_AUTH "Run: bcq auth login"
+      ;;
+    403)
+      die "Permission denied" $EXIT_FORBIDDEN
+      ;;
+    404)
+      die "Not found" $EXIT_NOT_FOUND
+      ;;
+    *)
+      local error_msg
+      error_msg=$(echo "$response" | jq -r '.error // .message // "Upload failed"' 2>/dev/null || echo "Upload failed")
+      die "$error_msg (HTTP $http_code)" $EXIT_API
+      ;;
+  esac
+}
+
 _api_request() {
   local method="$1"
   local url="$2"

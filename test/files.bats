@@ -115,6 +115,27 @@ load test_helper
 }
 
 
+# Upload errors
+
+@test "files upload without file shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq files upload
+  assert_failure
+  assert_output_contains "File path required"
+}
+
+@test "files upload with missing file shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq files upload /nonexistent/file.txt
+  assert_failure
+  assert_output_contains "File not found"
+}
+
+
 # Help flag
 
 @test "files --help shows help" {
