@@ -15,9 +15,11 @@ cmd_campfire() {
   fi
 
   case "$action" in
+    delete) _campfire_line_delete "${@:2}" ;;
+    line|show) _campfire_line_show "${@:2}" ;;
     list) _campfires_list "${@:2}" ;;
-    post) _campfire_post "${@:2}" ;;
     messages) _campfire_messages "${@:2}" ;;
+    post) _campfire_post "${@:2}" ;;
     --help|-h) _help_campfire ;;
     *)
       die "Unknown campfire action: $action" $EXIT_USAGE "Run: bcq campfire --help"
@@ -31,8 +33,10 @@ _campfire_dispatch() {
   shift 2
 
   case "$action" in
-    post) _campfire_post --campfire "$campfire_id" "$@" ;;
+    delete) _campfire_line_delete --campfire "$campfire_id" "$@" ;;
+    line|show) _campfire_line_show --campfire "$campfire_id" "$@" ;;
     messages|"") _campfire_messages --campfire "$campfire_id" "$@" ;;
+    post) _campfire_post --campfire "$campfire_id" "$@" ;;
     *) die "Unknown campfire action: $action" $EXIT_USAGE ;;
   esac
 }
@@ -261,6 +265,126 @@ _campfire_post() {
   )
 
   output "$response" "$summary" "$bcs"
+}
+
+_campfire_line_show() {
+  local line_id="" campfire_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --campfire|-c)
+        [[ -z "${2:-}" ]] && die "--campfire requires a value" $EXIT_USAGE
+        campfire_id="$2"
+        shift 2
+        ;;
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$line_id" ]]; then
+          line_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$line_id" ]]; then
+    die "Line ID required" $EXIT_USAGE "Usage: bcq campfire line <id> --campfire <id> --in <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  if [[ -z "$campfire_id" ]]; then
+    local project_data
+    project_data=$(api_get "/projects/$project.json")
+    campfire_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "chat") | .id // empty')
+  fi
+
+  if [[ -z "$campfire_id" ]]; then
+    die "No campfire found" $EXIT_NOT_FOUND
+  fi
+
+  local response
+  response=$(api_get "/buckets/$project/chats/$campfire_id/lines/$line_id.json")
+
+  local creator
+  creator=$(echo "$response" | jq -r '.creator.name // "Unknown"')
+  local summary="Line #$line_id by $creator"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "delete" "bcq campfire delete $line_id --campfire $campfire_id --in $project" "Delete line")" \
+    "$(breadcrumb "messages" "bcq campfire $campfire_id messages --in $project" "Back to messages")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+_campfire_line_delete() {
+  local line_id="" campfire_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --campfire|-c)
+        [[ -z "${2:-}" ]] && die "--campfire requires a value" $EXIT_USAGE
+        campfire_id="$2"
+        shift 2
+        ;;
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$line_id" ]]; then
+          line_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$line_id" ]]; then
+    die "Line ID required" $EXIT_USAGE "Usage: bcq campfire delete <id> --campfire <id> --in <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  if [[ -z "$campfire_id" ]]; then
+    local project_data
+    project_data=$(api_get "/projects/$project.json")
+    campfire_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "chat") | .id // empty')
+  fi
+
+  if [[ -z "$campfire_id" ]]; then
+    die "No campfire found" $EXIT_NOT_FOUND
+  fi
+
+  api_delete "/buckets/$project/chats/$campfire_id/lines/$line_id.json" >/dev/null
+
+  local summary="Deleted line #$line_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "messages" "bcq campfire $campfire_id messages --in $project" "Back to messages")"
+  )
+
+  output '{}' "$summary" "$bcs"
 }
 
 _help_campfire() {
