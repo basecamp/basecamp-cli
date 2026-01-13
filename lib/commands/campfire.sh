@@ -42,10 +42,14 @@ _campfire_dispatch() {
 }
 
 _campfires_list() {
-  local project=""
+  local project="" all=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --all|-a)
+        all="true"
+        shift
+        ;;
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
@@ -57,12 +61,31 @@ _campfires_list() {
     esac
   done
 
+  # Account-wide campfire listing
+  if [[ "$all" == "true" ]]; then
+    local response
+    response=$(api_get "/chats.json")
+
+    local count
+    count=$(echo "$response" | jq 'length')
+    local summary="$count campfires"
+
+    local bcs
+    bcs=$(breadcrumbs \
+      "$(breadcrumb "messages" "bcq campfire <id> messages --in <project>" "View messages")" \
+      "$(breadcrumb "post" "bcq campfire <id> post \"message\" --in <project>" "Post message")"
+    )
+
+    output "$response" "$summary" "$bcs" "_campfires_list_md"
+    return
+  fi
+
   if [[ -z "$project" ]]; then
     project=$(get_project_id)
   fi
 
   if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
+    die "No project specified. Use --in <project> or --all for account-wide" $EXIT_USAGE
   fi
 
   # Get campfire from project dock
@@ -99,12 +122,22 @@ _campfires_list_md() {
   local summary="$2"
   local breadcrumbs="$3"
 
-  echo "## Campfires"
+  echo "## Campfires ($summary)"
   echo
 
-  echo "| # | Title | Lines |"
-  echo "|---|-------|-------|"
-  echo "$data" | jq -r '.[] | "| \(.id) | \(.title // "Campfire") | \(.lines_count // 0) |"'
+  # Check if any item has bucket info (account-wide listing)
+  local has_bucket
+  has_bucket=$(echo "$data" | jq -r '.[0].bucket.name // empty')
+
+  if [[ -n "$has_bucket" ]]; then
+    echo "| # | Title | Project | Lines |"
+    echo "|---|-------|---------|-------|"
+    echo "$data" | jq -r '.[] | "| \(.id) | \(.title // "Campfire") | \(.bucket.name // "-" | .[0:20]) | \(.lines_count // 0) |"'
+  else
+    echo "| # | Title | Lines |"
+    echo "|---|-------|-------|"
+    echo "$data" | jq -r '.[] | "| \(.id) | \(.title // "Campfire") | \(.lines_count // 0) |"'
+  fi
   echo
   md_breadcrumbs "$breadcrumbs"
 }
@@ -401,19 +434,23 @@ Interact with Campfire (real-time chat).
 
 ### Actions
 
-    list              List campfires in project
+    list              List campfires (in project or account-wide with --all)
     messages          View recent messages
     post "message"    Post a message
 
 ### Options
 
+    --all, -a               List all campfires across account
     --in, -p <project>      Project ID
     --campfire, -c <id>     Campfire ID
     --limit, -n <count>     Number of messages (default: 25)
 
 ### Examples
 
-    # List campfires
+    # List all campfires across account
+    bcq campfire list --all
+
+    # List campfire in project
     bcq campfire list --in 12345
 
     # View recent messages
