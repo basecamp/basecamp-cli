@@ -104,12 +104,15 @@ _bcq_completions() {
         COMPREPLY=($(compgen -W "$project_flags $global_flags" -- "$cur"))
       fi
       ;;
-    recordings|search)
+    recordings)
       if [[ $cword -eq 2 ]]; then
         COMPREPLY=($(compgen -W "todos messages documents comments cards uploads --type $project_flags" -- "$cur"))
       else
         COMPREPLY=($(compgen -W "--type $project_flags --status --sort --direction --limit $global_flags" -- "$cur"))
       fi
+      ;;
+    search)
+      COMPREPLY=($(compgen -W "--type --project --creator --limit $global_flags" -- "$cur"))
       ;;
     auth)
       if [[ $cword -eq 2 ]]; then

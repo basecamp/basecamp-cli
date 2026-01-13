@@ -163,10 +163,137 @@ _recordings_table() {
 }
 
 
-# Search is an alias for recordings with a note about API limitations
+# Real search using /search.json endpoint
 cmd_search() {
-  info "Note: Basecamp API doesn't have full-text search."
-  info "Using recordings filter instead..."
-  info ""
-  cmd_recordings "$@"
+  local query="" type="" project="" creator="" limit=""
+
+  # First positional arg is the query if not a flag
+  if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+    query="$1"
+    shift
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type|-t)
+        [[ -z "${2:-}" ]] && die "--type requires a value" $EXIT_USAGE
+        type="$2"
+        shift 2
+        ;;
+      --project|--in|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --creator|-c)
+        [[ -z "${2:-}" ]] && die "--creator requires a value" $EXIT_USAGE
+        creator="$2"
+        shift 2
+        ;;
+      --limit|-n)
+        [[ -z "${2:-}" ]] && die "--limit requires a value" $EXIT_USAGE
+        limit="$2"
+        shift 2
+        ;;
+      --help|-h)
+        _help_search
+        return
+        ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq search --help"
+        ;;
+      *)
+        # Remaining positional is query
+        if [[ -z "$query" ]]; then
+          query="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$query" ]]; then
+    die "Search query required" $EXIT_USAGE "Usage: bcq search <query> [--type <type>] [--project <id>]"
+  fi
+
+  # Build query string
+  local qs="q=$(urlencode "$query")"
+  [[ -n "$type" ]] && qs="$qs&type=$type"
+  [[ -n "$project" ]] && qs="$qs&bucket_id=$project"
+  [[ -n "$creator" ]] && qs="$qs&creator_id=$creator"
+
+  local response
+  response=$(api_get "/search.json?$qs")
+
+  # Apply client-side limit if specified
+  if [[ -n "$limit" ]]; then
+    response=$(echo "$response" | jq --argjson limit "$limit" '.[:$limit]')
+  fi
+
+  local format
+  format=$(get_format)
+
+  local count
+  count=$(echo "$response" | jq 'length')
+  local summary="$count results for \"$query\""
+
+  if [[ "$format" == "json" ]]; then
+    local bcs
+    bcs=$(breadcrumbs \
+      "$(breadcrumb "show" "bcq show <id> --project <bucket.id>" "Show result details")"
+    )
+    json_ok "$response" "$summary" "$bcs"
+  else
+    echo "## Search: $query ($count results)"
+    echo
+    _search_table "$response"
+  fi
+}
+
+_search_table() {
+  local data="$1"
+
+  local count
+  count=$(echo "$data" | jq 'length')
+
+  if [[ "$count" -eq 0 ]]; then
+    echo "*No results found*"
+    return
+  fi
+
+  echo "| # | Type | Title | Project |"
+  echo "|---|------|-------|---------|"
+  echo "$data" | jq -r '.[] | "| \(.id) | \(.type) | \(.title // .plain_text_content // "" | gsub("<[^>]*>"; "") | gsub("\n"; " ") | .[0:40]) | \(.bucket.name // "-" | .[0:20]) |"'
+}
+
+_help_search() {
+  cat <<'EOF'
+## bcq search
+
+Search across all Basecamp content.
+
+### Usage
+
+    bcq search <query> [options]
+
+### Options
+
+    --type, -t <type>     Filter by type: Todo, Message, Document, Comment,
+                          Kanban::Card, Schedule::Entry, Attachment, etc.
+    --project, -p <id>    Filter by project ID
+    --creator, -c <id>    Filter by creator person ID
+    --limit, -n <num>     Limit results
+
+### Examples
+
+    # Search for authentication-related items
+    bcq search "authentication"
+
+    # Search todos only
+    bcq search "bug fix" --type Todo
+
+    # Search in a specific project
+    bcq search "deploy" --project 12345
+
+EOF
 }

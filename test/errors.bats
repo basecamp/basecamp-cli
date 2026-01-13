@@ -191,6 +191,15 @@ load test_helper
   assert_output_contains "numeric person ID"
 }
 
+@test "search without query shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq search
+  assert_failure
+  assert_output_contains "Search query required"
+}
+
 # Search JSON cleanliness
 
 @test "search --json outputs clean JSON to stdout" {
