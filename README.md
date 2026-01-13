@@ -143,11 +143,11 @@ OAuth endpoints are discovered automatically via `.well-known/oauth-authorizatio
 ## Tab Completion
 
 ```bash
-# Bash
-source /path/to/bcq/completions/bcq.bash
+# Bash (add to ~/.bashrc)
+source ~/.local/share/bcq/completions/bcq.bash
 
-# Zsh (add to fpath)
-fpath=(/path/to/bcq/completions $fpath)
+# Zsh (add to ~/.zshrc)
+fpath=(~/.local/share/bcq/completions $fpath)
 autoload -Uz compinit && compinit
 ```
 
@@ -165,8 +165,7 @@ bcq includes a Claude Code plugin with:
 
 Install the plugin:
 ```bash
-# From bcq directory
-claude plugins link .
+claude plugins link ~/.local/share/bcq
 ```
 
 ## Testing
@@ -176,7 +175,7 @@ claude plugins link .
 bats test/*.bats      # Alternative: run bats directly
 ```
 
-Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `brew install bats-core`.
+Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `apt install bats` or `brew install bats-core`.
 
 ## License
 
