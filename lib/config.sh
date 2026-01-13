@@ -2,14 +2,17 @@
 # config.sh - Layered configuration system for bcq
 #
 # Config hierarchy (later overrides earlier):
-#   1. ~/.config/basecamp/config.json (global)
-#   2. .basecamp/config.json (local/per-directory)
-#   3. Environment variables
-#   4. Command-line flags
+#   1. /etc/basecamp/config.json (system-wide)
+#   2. ~/.config/basecamp/config.json (user/global)
+#   3. <git-root>/.basecamp/config.json (repo)
+#   4. <cwd>/.basecamp/config.json (local, walks up tree)
+#   5. Environment variables
+#   6. Command-line flags
 
 
 # Paths
 
+BCQ_SYSTEM_CONFIG_DIR="/etc/basecamp"
 BCQ_GLOBAL_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/basecamp"
 BCQ_LOCAL_CONFIG_DIR=".basecamp"
 BCQ_CONFIG_FILE="config.json"
@@ -35,15 +38,27 @@ _load_config_file() {
 load_config() {
   _BCQ_CONFIG=()
 
-  # Layer 1: Global config
+  # Layer 1: System-wide config
+  _load_config_file "$BCQ_SYSTEM_CONFIG_DIR/$BCQ_CONFIG_FILE"
+
+  # Layer 2: User/global config
   _load_config_file "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CONFIG_FILE"
 
-  # Layer 2: Local config (walk up directory tree)
+  # Layer 3: Git repo root config (if in a git repo)
+  local git_root
+  git_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  if [[ -n "$git_root" ]] && [[ -f "$git_root/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
+    _load_config_file "$git_root/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE"
+  fi
+
+  # Layer 4: Local config (walk up directory tree, skip git root if already loaded)
   local dir="$PWD"
   local local_configs=()
   while [[ "$dir" != "/" ]]; do
-    if [[ -f "$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
-      local_configs+=("$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE")
+    local config_path="$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE"
+    # Skip if this is the git root (already loaded above)
+    if [[ -f "$config_path" ]] && [[ "$dir" != "$git_root" ]]; then
+      local_configs+=("$config_path")
     fi
     dir="$(dirname "$dir")"
   done
@@ -53,12 +68,13 @@ load_config() {
     _load_config_file "${local_configs[$i]}"
   done
 
-  # Layer 3: Environment variables
+  # Layer 5: Environment variables
   [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && _BCQ_CONFIG["account_id"]="$BASECAMP_ACCOUNT_ID" || true
   [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && _BCQ_CONFIG["project_id"]="$BASECAMP_PROJECT_ID" || true
+  [[ -n "${BASECAMP_TODOLIST_ID:-}" ]] && _BCQ_CONFIG["todolist_id"]="$BASECAMP_TODOLIST_ID" || true
   [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && _BCQ_CONFIG["access_token"]="$BASECAMP_ACCESS_TOKEN" || true
 
-  # Layer 4: Command-line flags (already handled in global flag parsing)
+  # Layer 6: Command-line flags (already handled in global flag parsing)
   [[ -n "${BCQ_ACCOUNT:-}" ]] && _BCQ_CONFIG["account_id"]="$BCQ_ACCOUNT" || true
   [[ -n "${BCQ_PROJECT:-}" ]] && _BCQ_CONFIG["project_id"]="$BCQ_PROJECT" || true
 }
@@ -240,6 +256,18 @@ get_project_id() {
   get_config "project_id"
 }
 
+get_todolist_id() {
+  if [[ -n "${BASECAMP_TODOLIST_ID:-}" ]]; then
+    echo "$BASECAMP_TODOLIST_ID"
+    return
+  fi
+  get_config "todolist_id"
+}
+
+get_git_root() {
+  git rev-parse --show-toplevel 2>/dev/null || true
+}
+
 load_accounts() {
   local file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_ACCOUNTS_FILE"
   if [[ -f "$file" ]]; then
@@ -273,27 +301,48 @@ get_effective_config() {
 get_config_source() {
   local key="$1"
 
+  # Check flags first (highest priority)
   case "$key" in
     account_id) [[ -n "${BCQ_ACCOUNT:-}" ]] && echo "flag" && return ;;
     project_id) [[ -n "${BCQ_PROJECT:-}" ]] && echo "flag" && return ;;
   esac
 
+  # Check environment variables
   case "$key" in
     account_id) [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && echo "env" && return ;;
     project_id) [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && echo "env" && return ;;
+    todolist_id) [[ -n "${BASECAMP_TODOLIST_ID:-}" ]] && echo "env" && return ;;
     access_token) [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && echo "env" && return ;;
   esac
 
+  # Check local (cwd) config
   if [[ -f "$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
     local local_value
     local_value=$(jq -r --arg key "$key" '.[$key] // empty' "$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$local_value" ]] && echo "local" && return
+    [[ -n "$local_value" ]] && echo "local (.basecamp/)" && return
   fi
 
+  # Check git repo root config
+  local git_root
+  git_root=$(get_git_root)
+  if [[ -n "$git_root" ]] && [[ -f "$git_root/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
+    local repo_value
+    repo_value=$(jq -r --arg key "$key" '.[$key] // empty' "$git_root/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$repo_value" ]] && echo "repo ($git_root/.basecamp/)" && return
+  fi
+
+  # Check user/global config
   if [[ -f "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
     local global_value
     global_value=$(jq -r --arg key "$key" '.[$key] // empty' "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$global_value" ]] && echo "global" && return
+    [[ -n "$global_value" ]] && echo "user (~/.config/basecamp/)" && return
+  fi
+
+  # Check system-wide config
+  if [[ -f "$BCQ_SYSTEM_CONFIG_DIR/$BCQ_CONFIG_FILE" ]]; then
+    local system_value
+    system_value=$(jq -r --arg key "$key" '.[$key] // empty' "$BCQ_SYSTEM_CONFIG_DIR/$BCQ_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$system_value" ]] && echo "system (/etc/basecamp/)" && return
   fi
 
   echo "unset"

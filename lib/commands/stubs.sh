@@ -38,19 +38,50 @@ _config_show() {
   local config
   config=$(get_effective_config)
 
+  # Build config with sources
+  local config_with_sources='{}'
+  local keys=("account_id" "project_id" "todolist_id" "base_url" "api_url")
+  for key in "${keys[@]}"; do
+    local value source
+    value=$(get_config "$key")
+    if [[ -n "$value" ]]; then
+      source=$(get_config_source "$key")
+      config_with_sources=$(echo "$config_with_sources" | jq \
+        --arg key "$key" \
+        --arg value "$value" \
+        --arg source "$source" \
+        '.[$key] = {value: $value, source: $source}')
+    fi
+  done
+
   if [[ "$format" == "json" ]]; then
     local bcs
     bcs=$(breadcrumbs \
       "$(breadcrumb "set" "bcq config set <key> <value>" "Set config value")" \
       "$(breadcrumb "project" "bcq config project" "Select project")"
     )
-    json_ok "$config" "Effective configuration" "$bcs"
+    json_ok "$config_with_sources" "Effective configuration" "$bcs"
   else
     echo "## Configuration"
     echo
-    echo '```json'
-    echo "$config" | jq .
-    echo '```'
+    echo "| Key | Value | Source |"
+    echo "|-----|-------|--------|"
+    for key in "${keys[@]}"; do
+      local value source
+      value=$(get_config "$key")
+      if [[ -n "$value" ]]; then
+        source=$(get_config_source "$key")
+        # Mask tokens
+        [[ "$key" == *token* ]] && value="***"
+        echo "| $key | $value | $source |"
+      fi
+    done
+    echo
+    echo "**Config locations:**"
+    echo "- System: /etc/basecamp/config.json"
+    echo "- User: ~/.config/basecamp/config.json"
+    echo "- Repo: <git-root>/.basecamp/config.json"
+    echo "- Local: .basecamp/config.json"
   fi
 }
 
