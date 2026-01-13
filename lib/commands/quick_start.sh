@@ -177,6 +177,7 @@ GLOBAL FLAGS
   --verbose, -v     Debug output (shows curl commands)
   --project, -p     Override project context
   --account, -a     Override account context
+  --cache-dir       Override cache directory
 
 EXAMPLES
   bcq projects                    List all projects

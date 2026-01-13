@@ -34,7 +34,7 @@ _bcq_completions() {
   local config_actions="show init set unset project"
 
   # Global flags
-  local global_flags="--json --md --quiet --verbose --project --account --help"
+  local global_flags="--json --md --quiet --verbose --project --account --cache-dir --help"
 
   # Common flags
   local project_flags="--in --project -p"

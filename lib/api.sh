@@ -15,7 +15,14 @@ BCQ_BASE_DELAY="${BCQ_BASE_DELAY:-1}"
 # ETag Cache Helpers
 
 _cache_dir() {
-  echo "${BCQ_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/bcq}"
+  # Check layered config first (includes --cache-dir flag and env var)
+  local configured
+  configured=$(get_config "cache_dir" "")
+  if [[ -n "$configured" ]]; then
+    echo "$configured"
+  else
+    echo "${XDG_CACHE_HOME:-$HOME/.cache}/bcq"
+  fi
 }
 
 _cache_key() {

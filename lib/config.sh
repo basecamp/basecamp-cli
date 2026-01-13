@@ -77,6 +77,7 @@ load_config() {
   # Layer 6: Command-line flags (already handled in global flag parsing)
   [[ -n "${BCQ_ACCOUNT:-}" ]] && _BCQ_CONFIG["account_id"]="$BCQ_ACCOUNT" || true
   [[ -n "${BCQ_PROJECT:-}" ]] && _BCQ_CONFIG["project_id"]="$BCQ_PROJECT" || true
+  [[ -n "${BCQ_CACHE_DIR:-}" ]] && _BCQ_CONFIG["cache_dir"]="$BCQ_CACHE_DIR" || true
 }
 
 get_config() {

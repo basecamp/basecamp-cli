@@ -47,6 +47,9 @@ main() {
   parse_global_flags "$@"
   shift $GLOBAL_FLAGS_CONSUMED
 
+  # Reload config to pick up command-line flag overrides (e.g., --cache-dir)
+  load_config
+
   # No arguments → quick-start
   if [[ $# -eq 0 ]]; then
     cmd_quick_start

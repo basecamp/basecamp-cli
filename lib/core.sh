@@ -454,6 +454,14 @@ parse_global_flags() {
         (( GLOBAL_FLAGS_CONSUMED += 2 ))
         shift 2
         ;;
+      --cache-dir)
+        if [[ -z "${2:-}" ]]; then
+          die "--cache-dir requires a value" $EXIT_USAGE
+        fi
+        BCQ_CACHE_DIR="$2"
+        (( GLOBAL_FLAGS_CONSUMED += 2 ))
+        shift 2
+        ;;
       --)
         (( ++GLOBAL_FLAGS_CONSUMED ))
         break

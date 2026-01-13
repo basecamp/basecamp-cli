@@ -97,6 +97,14 @@ load test_helper
   assert_output_contains "--account requires a value"
 }
 
+@test "bcq --cache-dir without value shows error" {
+  create_credentials
+
+  run bcq --cache-dir
+  assert_failure
+  assert_output_contains "--cache-dir requires a value"
+}
+
 
 # Missing content errors
 

@@ -8,6 +8,7 @@ load test_helper
 
 @test "_cache_dir defaults to ~/.cache/bcq" {
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local result
@@ -18,6 +19,7 @@ load test_helper
 @test "_cache_dir respects XDG_CACHE_HOME" {
   export XDG_CACHE_HOME="$TEST_TEMP_DIR/xdg-cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local result
@@ -28,6 +30,7 @@ load test_helper
 @test "_cache_dir respects BCQ_CACHE_DIR override" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/custom-cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local result
@@ -35,8 +38,22 @@ load test_helper
   [[ "$result" == "$TEST_TEMP_DIR/custom-cache" ]]
 }
 
+@test "_cache_dir respects config file setting" {
+  mkdir -p "$TEST_HOME/.config/basecamp"
+  echo '{"cache_dir": "/custom/from/config"}' > "$TEST_HOME/.config/basecamp/config.json"
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+  load_config
+  source "$BCQ_ROOT/lib/api.sh"
+
+  local result
+  result=$(_cache_dir)
+  [[ "$result" == "/custom/from/config" ]]
+}
+
 @test "_cache_key generates consistent hash for same input" {
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local key1 key2
@@ -47,6 +64,7 @@ load test_helper
 
 @test "_cache_key generates different hash for different accounts" {
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local key1 key2
@@ -57,6 +75,7 @@ load test_helper
 
 @test "_cache_key generates different hash for different URLs" {
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local key1 key2
@@ -67,6 +86,7 @@ load test_helper
 
 @test "_cache_key generates different hash for different tokens" {
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local key1 key2
@@ -77,6 +97,7 @@ load test_helper
 
 @test "_cache_key generates different hash for different origins" {
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   export BCQ_API_URL="https://api.example.com"
@@ -93,6 +114,7 @@ load test_helper
 @test "_cache_set and _cache_get_etag round-trip" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local key="testkey123"
@@ -110,6 +132,7 @@ load test_helper
 @test "_cache_set and _cache_get_body round-trip" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local key="testkey456"
@@ -127,6 +150,7 @@ load test_helper
 @test "_cache_get_etag returns empty for missing key" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local result
@@ -137,6 +161,7 @@ load test_helper
 @test "_cache_get_body returns empty for missing key" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local result
@@ -147,6 +172,7 @@ load test_helper
 @test "cache files are created in correct location" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   _cache_set "mykey" '{"test": true}' '"etag123"' "HTTP/1.1 200 OK"
@@ -192,6 +218,7 @@ load test_helper
 @test "multiple cache entries stored correctly" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   _cache_set "key1" '{"a": 1}' '"etag1"' "HTTP/1.1 200 OK"
@@ -206,6 +233,7 @@ load test_helper
 @test "cache update overwrites existing entry" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   _cache_set "key1" '{"version": 1}' '"etag-v1"' "HTTP/1.1 200 OK"
@@ -218,6 +246,7 @@ load test_helper
 @test "cache stores and retrieves headers" {
   export BCQ_CACHE_DIR="$TEST_TEMP_DIR/cache"
   source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
   source "$BCQ_ROOT/lib/api.sh"
 
   local headers="HTTP/1.1 200 OK
