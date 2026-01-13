@@ -6,9 +6,9 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 14 | ~85 |
-| 🔶 Partial | 3 | ~15 |
-| ⬜ Not started | 17 | ~60 |
+| ✅ Implemented | 18 | ~110 |
+| 🔶 Partial | 2 | ~8 |
+| ⬜ Not started | 14 | ~45 |
 | ⏭️ Skip | 8 | ~20 |
 | **Total** | **42** | **~180** |
 
@@ -17,38 +17,38 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | Section | Endpoints | bcq Command | Status | Priority | Notes |
 |---------|-----------|-------------|--------|----------|-------|
 | **Core** |
-| projects | 9 | `projects` | 🔶 | high | list, show (create/update/delete pending) |
-| todos | 11 | `todos`, `todo`, `done` | ✅ | - | list, show, create, complete |
-| todolists | 8 | `todolists` | ✅ | - | list, show |
-| todosets | 3 | - | 🔶 | low | Container for todolists, rarely needed directly |
-| todolist_groups | 8 | - | ⬜ | medium | Grouping todolists |
+| projects | 9 | `projects` | ✅ | - | list, show, create, update, delete |
+| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | - | list, show, create, complete, uncomplete, position |
+| todolists | 8 | `todolists` | ✅ | - | list, show, create, update |
+| todosets | 3 | - | 🔶 | low | Container for todolists, accessed via project dock |
+| todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
 | **Communication** |
-| messages | 10 | `messages`, `message` | ✅ | - | list, show, create |
+| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin |
 | message_boards | 3 | - | 🔶 | low | Container, accessed via project dock |
 | message_types | 9 | - | ⬜ | low | Announcement categories |
-| campfires | 14 | `campfire` | ✅ | - | list, messages, post |
-| comments | 8 | `comment` | ✅ | - | add comment to any recording |
+| campfires | 14 | `campfire` | ✅ | - | list, messages, post, line show/delete |
+| comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | - | Accessed via project dock |
-| card_table_cards | 9 | `cards` | ✅ | - | list, show, create, move |
+| card_table_cards | 9 | `cards` | ✅ | - | list, show, create, update, move |
 | card_table_columns | 11 | `cards columns` | ✅ | - | list columns |
 | card_table_steps | 4 | - | ⬜ | medium | Workflow steps on cards |
 | **People** |
-| people | 12 | `people`, `me` | ✅ | - | list, show, pingable |
+| people | 12 | `people`, `me` | ✅ | - | list, show, pingable, add, remove |
 | **Search & Recordings** |
 | search | 2 | `search` | ✅ | - | Full-text search |
-| recordings | 4 | `recordings` | ✅ | - | Browse by type/status |
+| recordings | 4 | `recordings` | ✅ | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
-| uploads | 8 | `files`, `uploads` | ✅ | - | File list/show |
-| vaults | 8 | `files`, `vaults` | ✅ | - | Folder list/show/create |
-| documents | 8 | `files`, `docs` | ✅ | - | Document list/show |
+| uploads | 8 | `files`, `uploads` | ✅ | - | list, show |
+| vaults | 8 | `files`, `vaults` | ✅ | - | list, show, create |
+| documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update |
 | attachments | 1 | - | ⬜ | medium | Attachment metadata |
 | **Schedule** |
 | schedules | 4 | - | ⬜ | medium | Schedule container |
 | schedule_entries | 9 | - | ⬜ | medium | Calendar events |
-| events | 3 | - | 🔶 | low | Event occurrences |
+| events | 3 | - | ⬜ | low | Event occurrences |
 | **Webhooks** |
-| webhooks | 7 | `webhooks` | ✅ | - | Webhook CRUD |
+| webhooks | 7 | `webhooks` | ✅ | - | list, show, create, update, delete |
 | **Templates** |
 | templates | 15 | - | ⬜ | low | Project templates |
 | **Time Tracking** |
@@ -87,7 +87,7 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 1. **schedules** (4 endpoints) - Schedule container
 2. **schedule_entries** (9 endpoints) - Calendar events
 3. **timesheets** (9 endpoints) - Time entries
-4. **todolist_groups** (8 endpoints) - Grouping todolists
+4. **card_table_steps** (4 endpoints) - Workflow steps on cards
 
 ## Implementation Notes
 
@@ -102,8 +102,11 @@ Each resource typically supports:
 
 Plus action endpoints:
 - `POST /.../:id/completion` - Complete (todos)
+- `DELETE /.../:id/completion` - Uncomplete (todos)
 - `PUT /.../:id/position` - Reorder
 - `POST /.../:id/pin` - Pin to top
+- `DELETE /.../:id/pin` - Unpin
+- `PUT /.../:id/status/:status` - Change status (trash/archive/restore)
 
 ### bcq Command Patterns
 
@@ -113,5 +116,6 @@ bcq <resource> list               # List (explicit)
 bcq <resource> show <id>          # Show details
 bcq <resource> <id>               # Show (shorthand)
 bcq <resource> create "..."       # Create new
+bcq <resource> update <id>        # Update existing
 bcq <singular> "..."              # Create (shorthand)
 ```
