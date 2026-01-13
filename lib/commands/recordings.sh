@@ -165,6 +165,14 @@ _recordings_table() {
 
 # Real search using /search.json endpoint
 cmd_search() {
+  local action="${1:-}"
+
+  # Handle metadata subcommand
+  if [[ "$action" == "metadata" ]] || [[ "$action" == "types" ]]; then
+    shift || true
+    _search_metadata "$@"
+    return
+  fi
   local query="" type="" project="" creator="" limit=""
 
   # First positional arg is the query if not a flag
@@ -266,6 +274,25 @@ _search_table() {
   echo "$data" | jq -r '.[] | "| \(.id) | \(.type) | \(.title // .plain_text_content // "" | gsub("<[^>]*>"; "") | gsub("\n"; " ") | .[0:40]) | \(.bucket.name // "-" | .[0:20]) |"'
 }
 
+_search_metadata() {
+  local response
+  response=$(api_get "/searches/metadata.json")
+
+  local format
+  format=$(get_format)
+
+  local types file_types
+  types=$(echo "$response" | jq -r '[.recording_search_types[].key] | join(", ")')
+  file_types=$(echo "$response" | jq -r '[.file_search_types[].key] | join(", ")')
+
+  if [[ "$format" == "json" ]]; then
+    json_ok "$response" "Search metadata" ""
+  else
+    echo "**--type**: $types"
+    echo "**--file-type** (attachments): $file_types"
+  fi
+}
+
 _help_search() {
   cat <<'EOF'
 ## bcq search
@@ -275,11 +302,11 @@ Search across all Basecamp content.
 ### Usage
 
     bcq search <query> [options]
+    bcq search metadata          Show available types
 
 ### Options
 
-    --type, -t <type>     Filter by type: Todo, Message, Document, Comment,
-                          Kanban::Card, Schedule::Entry, Attachment, etc.
+    --type, -t <type>     Filter by recording type (run `bcq search metadata` for valid types)
     --project, -p <id>    Filter by project ID
     --creator, -c <id>    Filter by creator person ID
     --limit, -n <num>     Limit results
@@ -294,6 +321,9 @@ Search across all Basecamp content.
 
     # Search in a specific project
     bcq search "deploy" --project 12345
+
+    # Discover available types
+    bcq search metadata
 
 EOF
 }

@@ -112,7 +112,11 @@ _bcq_completions() {
       fi
       ;;
     search)
-      COMPREPLY=($(compgen -W "--type --project --creator --limit $global_flags" -- "$cur"))
+      if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "metadata types --type --project --creator --limit $global_flags" -- "$cur"))
+      else
+        COMPREPLY=($(compgen -W "--type --project --creator --limit $global_flags" -- "$cur"))
+      fi
       ;;
     auth)
       if [[ $cword -eq 2 ]]; then
