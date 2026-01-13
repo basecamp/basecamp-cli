@@ -162,27 +162,27 @@ Track implementation progress here. Check off items as completed.
 ## Future / Nice-to-Have
 
 ### More Basecamp Resources
-- [ ] Campfire support (`bcq campfire`, `bcq say`)
-- [ ] Card tables (`bcq cards`, `bcq card`)
+- [x] Campfire support (`bcq campfire`)
+- [x] Card tables (`bcq cards`, `bcq card`)
 - [ ] Schedules (`bcq schedule`, `bcq event`)
 - [ ] Documents (`bcq docs`, `bcq doc`)
-- [ ] Message board (`bcq messages`, `bcq message`)
+- [x] Message board (`bcq messages`, `bcq message`)
 - [ ] Webhooks (`bcq webhooks`)
 
 ### MCP Server (Built-in)
-- [ ] `bcq mcp serve` — Start MCP server on stdio
+- [x] `bcq mcp serve` — Start MCP server on stdio
 - [ ] `bcq mcp serve --port 8080` — Start on HTTP port
 - [ ] Auto-generate MCP tools from CLI commands
-- [ ] Share auth/config between CLI and MCP
+- [x] Share auth/config between CLI and MCP
 
 ### Agent-Specific Enhancements
 - [ ] **Claude Code**: Hooks for commit → todo linking
-- [ ] **Claude Code**: `/basecamp` skill with context awareness
+- [x] **Claude Code**: `/basecamp` skill with context awareness
 - [ ] **OpenCode/Codex**: Plugin/integration as they add support
 
 ### Infrastructure
-- [ ] Caching layer
-- [ ] Offline mode
+- [x] ETag HTTP caching
+- [ ] Cache TTL / eviction
 - [ ] Activity feed streaming (would benefit from MCP)
 
 ---

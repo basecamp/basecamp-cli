@@ -194,6 +194,33 @@ bcq cards <card_id>
 
 ---
 
+## Messages (Message Board)
+
+Message boards are for async discussions and announcements.
+
+### List Messages
+
+```bash
+bcq messages --in <project_id>
+bcq messages --in <project_id> --limit 20
+```
+
+### Show Message
+
+```bash
+bcq messages show <message_id>
+bcq messages <message_id>
+```
+
+### Create Message
+
+```bash
+bcq message "Subject" --in <project_id>
+bcq message "Subject" --in <project_id> --body "Full message content here"
+```
+
+---
+
 ## Campfire (Chat)
 
 Campfire is the real-time chat feature.

@@ -56,16 +56,17 @@ bcq campfire messages --in <project_id>
 
 ## Search Strategy
 
-Since Basecamp API doesn't have full-text search, use this approach:
-
-1. **Use recordings API for cross-project queries**
+1. **Use full-text search for content queries**
    ```bash
-   bcq recordings todos --json | jq '.data[] | select(.content | test("keyword"; "i"))'
+   bcq search "keyword"                    # Search all types
+   bcq search "keyword" --type Todo        # Search only todos
+   bcq search "keyword" --project <id>     # Limit to project
    ```
 
-2. **Filter client-side with jq**
+2. **Use recordings for browsing by type/status**
    ```bash
-   bcq todos --in <id> --json | jq '.data[] | select(.content | contains("auth"))'
+   bcq recordings todos --limit 20         # Recent todos
+   bcq recordings comments --project <id>  # Comments in project
    ```
 
 3. **Narrow by known context**
@@ -76,7 +77,7 @@ Since Basecamp API doesn't have full-text search, use this approach:
 
 | User Request | Approach |
 |--------------|----------|
-| "Find todos about auth" | `bcq recordings todos` + jq filter |
+| "Find todos about auth" | `bcq search "auth" --type Todo` |
 | "What's assigned to me?" | `bcq todos --assignee me` (per project) |
 | "Recent comments" | `bcq recordings comments --limit 20` |
 | "What projects exist?" | `bcq projects` |

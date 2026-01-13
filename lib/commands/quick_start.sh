@@ -151,6 +151,9 @@ COMMANDS
     todos           List todos
     todolists       List todolists
     messages        List messages
+    cards           List cards (kanban)
+    campfire        List campfires, view/post messages
+    recordings      Browse recordings by type
     search          Search across projects
     show            Show details of a resource
     people          List people
@@ -216,7 +219,7 @@ USAGE
 OPTIONS
   --in <project>    Filter by project (ID or name)
   --list <list>     Filter by todolist (ID or name)
-  --assignee <who>  Filter by assignee (me, ID, or @handle)
+  --assignee <who>  Filter by assignee (me or numeric ID)
   --status <s>      Filter by status (active, completed)
   --overdue         Show only overdue todos (past due, not completed)
   --json, -j        JSON output
@@ -333,9 +336,8 @@ EXAMPLES
   bcq recordings todos                     Recent todos across all projects
   bcq recordings messages --project 123    Messages in specific project
   bcq recordings comments --limit 20       Last 20 comments
-  bcq search todos --project 123           Alias for recordings
 
-NOTE: Basecamp API doesn't have full-text search. Use jq to filter results:
-  bcq recordings todos -q | jq '.[] | select(.content | test("bug"; "i"))'
+NOTE: For full-text search, use 'bcq search "query"' instead.
+Use recordings for browsing by type/status without a search term.
 EOF
 }

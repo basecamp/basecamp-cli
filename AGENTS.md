@@ -26,7 +26,7 @@ Key endpoints used by bcq:
 - `/people.json` - List people
 - `/my/profile.json` - Current user
 
-**Note:** There is no full-text search API. The Recordings API (`/projects/recordings.json`) supports filtering by type, project, and status, but not content search.
+**Search:** Use `bcq search "query"` for full-text search across projects. The Recordings API (`bcq recordings`) is for browsing by type/status without a search term.
 
 ## Testing
 

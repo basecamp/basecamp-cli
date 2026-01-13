@@ -28,7 +28,7 @@
 ```bash
 bcq projects | jq '.data[0]'           # Extract from envelope
 bcq projects -q | jq '.[0]'            # Quiet mode: raw data
-bcq todos --assignee me | bcq fmt      # Pipeline-friendly
+bcq todos --assignee me --json         # Pipeline-friendly JSON
 ```
 
 ---
@@ -267,7 +267,7 @@ bcq done 123 124 125                            # Complete multiple
 bcq reopen 123                                  # Reopen by ID
 bcq comment "LGTM" --on 123                     # Add comment by recording ID
 bcq assign 123 --to 456                         # Reassign by person ID
-bcq say "Hello!" --campfire 33333               # Send campfire message by ID
+bcq campfire post "Hello!" --campfire 33333     # Send campfire message by ID
 ```
 
 **Why ID-only for writes?**
@@ -289,7 +289,6 @@ bcq auth login                     # OAuth flow (browser)
 bcq auth login --no-browser        # OAuth flow (manual code entry)
 bcq auth logout                    # Clear credentials
 bcq auth status                    # Auth info
-bcq fmt                            # Format stdin (like jq's .)
 bcq version                        # Version info
 ```
 
