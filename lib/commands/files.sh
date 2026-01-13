@@ -13,12 +13,14 @@ cmd_files() {
   shift || true
 
   case "$action" in
-    list) _files_list "$@" ;;
-    folders|vaults) _vaults_list "$@" ;;
-    uploads) _uploads_list "$@" ;;
+    doc|document) _documents_create "$@" ;;
     docs|documents) _documents_list "$@" ;;
-    show) _files_show "$@" ;;
     folder|vault) _vaults_create "$@" ;;
+    folders|vaults) _vaults_list "$@" ;;
+    list) _files_list "$@" ;;
+    show) _files_show "$@" ;;
+    update) _files_update "$@" ;;
+    uploads) _uploads_list "$@" ;;
     --help|-h) _help_files ;;
     *)
       if [[ "$action" =~ ^[0-9]+$ ]]; then
@@ -580,6 +582,176 @@ _vaults_create() {
   output "$response" "$summary" ""
 }
 
+
+_documents_create() {
+  local title="" project="" vault_id="" content=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --vault|--folder)
+        [[ -z "${2:-}" ]] && die "--vault requires a value" $EXIT_USAGE
+        vault_id="$2"
+        shift 2
+        ;;
+      --content|--body|-b)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
+        content="$2"
+        shift 2
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        if [[ -z "$title" ]]; then
+          title="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$title" ]]; then
+    die "Document title required" $EXIT_USAGE "Usage: bcq files doc \"title\" --in <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  if [[ -z "$vault_id" ]]; then
+    vault_id=$(_get_vault_id "$project")
+  fi
+
+  if [[ -z "$vault_id" ]]; then
+    die "No Docs & Files found in project" $EXIT_NOT_FOUND
+  fi
+
+  local payload
+  payload=$(jq -n --arg title "$title" '{title: $title}')
+
+  if [[ -n "$content" ]]; then
+    payload=$(echo "$payload" | jq --arg c "$content" '. + {content: $c}')
+  fi
+
+  local response
+  response=$(api_post "/buckets/$project/vaults/$vault_id/documents.json" "$payload")
+
+  local doc_id
+  doc_id=$(echo "$response" | jq -r '.id')
+  local summary="✓ Created document #$doc_id: $title"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq files $doc_id --in $project" "View document")" \
+    "$(breadcrumb "list" "bcq files docs --in $project" "List documents")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+
+_files_update() {
+  local item_id="" project="" title="" content="" type=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --type|-t)
+        [[ -z "${2:-}" ]] && die "--type requires a value" $EXIT_USAGE
+        type="$2"
+        shift 2
+        ;;
+      --title|--name|-n)
+        [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
+        title="$2"
+        shift 2
+        ;;
+      --content|--body|-b)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
+        content="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$item_id" ]]; then
+          item_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$item_id" ]]; then
+    die "Item ID required" $EXIT_USAGE "Usage: bcq files update <id> --title \"new title\" --in <project>"
+  fi
+
+  if [[ -z "$title" ]] && [[ -z "$content" ]]; then
+    die "Title or content required" $EXIT_USAGE "Use --title and/or --content"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  # Auto-detect type if not specified
+  local endpoint=""
+  if [[ -n "$type" ]]; then
+    case "$type" in
+      vault|folder) endpoint="/buckets/$project/vaults/$item_id.json" ;;
+      document|doc) endpoint="/buckets/$project/documents/$item_id.json" ;;
+      upload|file) endpoint="/buckets/$project/uploads/$item_id.json" ;;
+      *) die "Invalid type: $type (use vault, document, or upload)" $EXIT_USAGE ;;
+    esac
+  else
+    # Try document first (most common update case)
+    if api_get "/buckets/$project/documents/$item_id.json" &>/dev/null; then
+      endpoint="/buckets/$project/documents/$item_id.json"
+      type="document"
+    elif api_get "/buckets/$project/vaults/$item_id.json" &>/dev/null; then
+      endpoint="/buckets/$project/vaults/$item_id.json"
+      type="vault"
+    elif api_get "/buckets/$project/uploads/$item_id.json" &>/dev/null; then
+      endpoint="/buckets/$project/uploads/$item_id.json"
+      type="upload"
+    else
+      die "Item $item_id not found" $EXIT_NOT_FOUND "Specify --type if needed"
+    fi
+  fi
+
+  local payload="{}"
+  [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')
+  [[ -n "$content" ]] && payload=$(echo "$payload" | jq --arg c "$content" '. + {content: $c}')
+
+  local response
+  response=$(api_put "$endpoint" "$payload")
+
+  local summary="Updated $type #$item_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq files $item_id --in $project" "View item")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+
 _help_files() {
   cat <<'EOF'
 ## bcq files
@@ -592,18 +764,22 @@ Manage Docs & Files (vaults, uploads, documents).
 
 ### Actions
 
-    list              List all items in folder (default)
-    folders           List only folders (vaults)
-    uploads           List only uploaded files
+    doc "title"       Create a new document
     docs              List only documents
-    show <id>         Show item details
     folder "name"     Create a new folder
+    folders           List only folders (vaults)
+    list              List all items in folder (default)
+    show <id>         Show item details
+    update <id>       Update title/content
+    uploads           List only uploaded files
 
 ### Options
 
-    --in, -p <project>    Project ID
-    --vault, --folder     Parent folder ID (default: root)
-    --type <type>         Item type for show (vault, upload, document)
+    --in, -p <project>      Project ID
+    --vault, --folder       Parent folder ID (default: root)
+    --type <type>           Item type (vault, document, upload)
+    --title, -n <title>     New title (for update)
+    --content, -b <text>    Content/body (for create/update)
 
 ### Examples
 
@@ -613,17 +789,22 @@ Manage Docs & Files (vaults, uploads, documents).
     # List specific folder
     bcq files --in 12345 --folder 67890
 
-    # List only files
-    bcq files uploads --in 12345
-
     # List only documents
     bcq files docs --in 12345
 
-    # Show file details
-    bcq files show 11111 --in 12345
+    # Create document
+    bcq files doc "Meeting Notes" --in 12345
+    bcq files doc "Spec" --content "## Overview" --in 12345
+
+    # Update document
+    bcq files update 11111 --title "New Title" --in 12345
+    bcq files update 11111 --content "Updated content" --in 12345
 
     # Create folder
     bcq files folder "Project Assets" --in 12345
+
+    # Show file details
+    bcq files show 11111 --in 12345
 
 EOF
 }
