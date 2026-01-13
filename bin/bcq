@@ -68,6 +68,7 @@ main() {
     docs)       cmd_docs "$@" ;;
     events)     cmd_events "$@" ;;
     files)      cmd_files "$@" ;;
+    forwards)   cmd_forwards "$@" ;;
     me)         cmd_me "$@" ;;
     messages)   cmd_messages "$@" ;;
     messageboards) cmd_messageboards "$@" ;;
