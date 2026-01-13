@@ -52,6 +52,7 @@ BCQ_API_URL="${BCQ_API_URL:-$(_derive_api_url "$BCQ_BASE_URL")}"
 
 parse_date() {
   local input="$1"
+  input=$(echo "$input" | tr '[:upper:]' '[:lower:]')
 
   case "$input" in
     today)
@@ -69,20 +70,85 @@ parse_date() {
     "next month"|nextmonth)
       date -v+1m +%Y-%m-%d 2>/dev/null || date -d "+1 month" +%Y-%m-%d
       ;;
+    "end of week"|eow)
+      # Friday of this week
+      _date_to_weekday 5
+      ;;
+    "end of month"|eom)
+      # Last day of current month
+      if date -v1d -v+1m -v-1d +%Y-%m-%d 2>/dev/null; then
+        :
+      else
+        date -d "$(date +%Y-%m-01) +1 month -1 day" +%Y-%m-%d
+      fi
+      ;;
+    monday|mon)    _date_to_weekday 1 ;;
+    tuesday|tue)   _date_to_weekday 2 ;;
+    wednesday|wed) _date_to_weekday 3 ;;
+    thursday|thu)  _date_to_weekday 4 ;;
+    friday|fri)    _date_to_weekday 5 ;;
+    saturday|sat)  _date_to_weekday 6 ;;
+    sunday|sun)    _date_to_weekday 0 ;;
+    "next monday"|"next mon")    _date_to_weekday 1 next ;;
+    "next tuesday"|"next tue")   _date_to_weekday 2 next ;;
+    "next wednesday"|"next wed") _date_to_weekday 3 next ;;
+    "next thursday"|"next thu")  _date_to_weekday 4 next ;;
+    "next friday"|"next fri")    _date_to_weekday 5 next ;;
+    "next saturday"|"next sat")  _date_to_weekday 6 next ;;
+    "next sunday"|"next sun")    _date_to_weekday 0 next ;;
     +[0-9]*)
       # +N days format (e.g., +3 for 3 days from now)
       local days="${input#+}"
       date -v+"${days}"d +%Y-%m-%d 2>/dev/null || date -d "+${days} days" +%Y-%m-%d
       ;;
+    "in "[0-9]*" day"*)
+      local days
+      days=$(echo "$input" | grep -oE '[0-9]+')
+      date -v+"${days}"d +%Y-%m-%d 2>/dev/null || date -d "+${days} days" +%Y-%m-%d
+      ;;
+    "in "[0-9]*" week"*)
+      local weeks
+      weeks=$(echo "$input" | grep -oE '[0-9]+')
+      local days=$((weeks * 7))
+      date -v+"${days}"d +%Y-%m-%d 2>/dev/null || date -d "+${days} days" +%Y-%m-%d
+      ;;
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
       # Already in YYYY-MM-DD format
-      echo "$input"
+      echo "$1"  # Use original input to preserve case
       ;;
     *)
       # Try to parse with date command, otherwise return as-is
-      date -j -f "%Y-%m-%d" "$input" +%Y-%m-%d 2>/dev/null || echo "$input"
+      date -j -f "%Y-%m-%d" "$1" +%Y-%m-%d 2>/dev/null || echo "$1"
       ;;
   esac
+}
+
+# Calculate date for next occurrence of weekday (0=Sun, 1=Mon, ..., 6=Sat)
+_date_to_weekday() {
+  local target_day="$1"
+  local force_next="${2:-}"
+
+  local current_day
+  current_day=$(date +%w)  # 0=Sun, 1=Mon, ..., 6=Sat
+
+  local days_ahead=$(( (target_day - current_day + 7) % 7 ))
+
+  # If same day and not forcing next week, use next occurrence
+  if [[ $days_ahead -eq 0 ]]; then
+    if [[ "$force_next" == "next" ]]; then
+      days_ahead=7
+    else
+      # If it's the target day, give next week's occurrence
+      days_ahead=7
+    fi
+  fi
+
+  # If "next" is specified and we'd get this week, add 7 days
+  if [[ "$force_next" == "next" ]] && [[ $days_ahead -lt 7 ]]; then
+    days_ahead=$((days_ahead + 7))
+  fi
+
+  date -v+"${days_ahead}"d +%Y-%m-%d 2>/dev/null || date -d "+${days_ahead} days" +%Y-%m-%d
 }
 
 
