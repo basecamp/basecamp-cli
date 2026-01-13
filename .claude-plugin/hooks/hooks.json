@@ -1,0 +1,17 @@
+{
+  "description": "bcq hooks for Basecamp integration",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-commit-check.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
