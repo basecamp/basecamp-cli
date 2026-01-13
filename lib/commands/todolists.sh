@@ -369,6 +369,9 @@ EOF
 
 
 # === Todolist Groups ===
+# Groups are sub-todolists within a parent todolist.
+# API: groups live under /todolists/:todolist_id/groups.json
+# Groups themselves are also todolists (type: "Todolist")
 
 cmd_todolistgroups() {
   local action="${1:-list}"
@@ -399,13 +402,18 @@ cmd_todolistgroups() {
 
 
 _todolistgroups_list() {
-  local project=""
+  local project="" todolist_id=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
+        shift 2
+        ;;
+      --list|-l)
+        [[ -z "${2:-}" ]] && die "--list requires a value" $EXIT_USAGE
+        todolist_id="$2"
         shift 2
         ;;
       --help|-h)
@@ -426,26 +434,26 @@ _todolistgroups_list() {
     die "No project specified. Use --in <project>" $EXIT_USAGE
   fi
 
-  # Get todoset from project dock
-  local project_data todoset_id
-  project_data=$(api_get "/projects/$project.json")
-  todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
-
-  if [[ -z "$todoset_id" ]]; then
-    die "No todoset found in project $project" $EXIT_NOT_FOUND
+  if [[ -z "$todolist_id" ]]; then
+    todolist_id=$(get_todolist_id)
   fi
 
+  if [[ -z "$todolist_id" ]]; then
+    die "No todolist specified. Use --list <todolist_id>" $EXIT_USAGE
+  fi
+
+  # GET /buckets/:project/todolists/:todolist_id/groups.json
   local response
-  response=$(api_get "/buckets/$project/todosets/$todoset_id/groups.json")
+  response=$(api_get "/buckets/$project/todolists/$todolist_id/groups.json")
 
   local count
   count=$(echo "$response" | jq 'length')
-  local summary="$count todolist groups"
+  local summary="$count groups in todolist #$todolist_id"
 
   local bcs
   bcs=$(breadcrumbs \
-    "$(breadcrumb "create" "bcq todolistgroups create \"name\" --in $project" "Create group")" \
-    "$(breadcrumb "todolists" "bcq todolists --in $project" "List todolists")"
+    "$(breadcrumb "create" "bcq todolistgroups create \"name\" --list $todolist_id --in $project" "Create group")" \
+    "$(breadcrumb "todolist" "bcq todolists $todolist_id --in $project" "View parent todolist")"
   )
 
   output "$response" "$summary" "$bcs" "_todolistgroups_list_md"
@@ -464,11 +472,11 @@ _todolistgroups_list_md() {
   count=$(echo "$data" | jq 'length')
 
   if [[ "$count" -eq 0 ]]; then
-    echo "*No todolist groups found*"
+    echo "*No groups found*"
   else
-    echo "| # | Name | Position |"
-    echo "|---|------|----------|"
-    echo "$data" | jq -r '.[] | "| \(.id) | \(.name) | \(.position // "-") |"'
+    echo "| # | Name | Todos | Position |"
+    echo "|---|------|-------|----------|"
+    echo "$data" | jq -r '.[] | "| \(.id) | \(.name // .title) | \(.completed_ratio // "-") | \(.position // "-") |"'
   fi
   echo
   md_breadcrumbs "$breadcrumbs"
@@ -506,22 +514,18 @@ _todolistgroups_show() {
     die "No project specified" $EXIT_USAGE "Use --in <project>"
   fi
 
-  # Get todoset from project dock
-  local project_data todoset_id
-  project_data=$(api_get "/projects/$project.json")
-  todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
-
+  # Groups are todolists: GET /buckets/:project/todolists/:group_id.json
   local response
-  response=$(api_get "/buckets/$project/todosets/$todoset_id/groups/$group_id.json")
+  response=$(api_get "/buckets/$project/todolists/$group_id.json")
 
   local name
-  name=$(echo "$response" | jq -r '.name')
+  name=$(echo "$response" | jq -r '.name // .title')
   local summary="Todolist group: $name"
 
   local bcs
   bcs=$(breadcrumbs \
     "$(breadcrumb "update" "bcq todolistgroups update $group_id --name \"new\" --in $project" "Update group")" \
-    "$(breadcrumb "list" "bcq todolistgroups --in $project" "List groups")"
+    "$(breadcrumb "todos" "bcq todos --list $group_id --in $project" "List todos in group")"
   )
 
   output "$response" "$summary" "$bcs"
@@ -529,13 +533,18 @@ _todolistgroups_show() {
 
 
 _todolistgroups_create() {
-  local name="" project=""
+  local name="" project="" todolist_id=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
+        shift 2
+        ;;
+      --list|-l)
+        [[ -z "${2:-}" ]] && die "--list requires a value" $EXIT_USAGE
+        todolist_id="$2"
         shift 2
         ;;
       -*)
@@ -551,7 +560,7 @@ _todolistgroups_create() {
   done
 
   if [[ -z "$name" ]]; then
-    die "Group name required" $EXIT_USAGE "Usage: bcq todolistgroups create \"name\" --in <project>"
+    die "Group name required" $EXIT_USAGE "Usage: bcq todolistgroups create \"name\" --list <todolist_id> --in <project>"
   fi
 
   if [[ -z "$project" ]]; then
@@ -562,28 +571,29 @@ _todolistgroups_create() {
     die "No project specified" $EXIT_USAGE "Use --in <project>"
   fi
 
-  # Get todoset from project dock
-  local project_data todoset_id
-  project_data=$(api_get "/projects/$project.json")
-  todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
+  if [[ -z "$todolist_id" ]]; then
+    todolist_id=$(get_todolist_id)
+  fi
 
-  if [[ -z "$todoset_id" ]]; then
-    die "No todoset found in project $project" $EXIT_NOT_FOUND
+  if [[ -z "$todolist_id" ]]; then
+    die "No todolist specified. Use --list <todolist_id>" $EXIT_USAGE
   fi
 
   local payload
   payload=$(jq -n --arg name "$name" '{name: $name}')
 
+  # POST /buckets/:project/todolists/:todolist_id/groups.json
   local response
-  response=$(api_post "/buckets/$project/todosets/$todoset_id/groups.json" "$payload")
+  response=$(api_post "/buckets/$project/todolists/$todolist_id/groups.json" "$payload")
 
   local group_id
   group_id=$(echo "$response" | jq -r '.id')
-  local summary="✓ Created todolist group #$group_id: $name"
+  local summary="✓ Created group #$group_id: $name"
 
   local bcs
   bcs=$(breadcrumbs \
-    "$(breadcrumb "list" "bcq todolistgroups --in $project" "List groups")"
+    "$(breadcrumb "list" "bcq todolistgroups --list $todolist_id --in $project" "List groups")" \
+    "$(breadcrumb "todos" "bcq todos --list $group_id --in $project" "Add todos to group")"
   )
 
   output "$response" "$summary" "$bcs"
@@ -630,18 +640,14 @@ _todolistgroups_update() {
     die "No project specified" $EXIT_USAGE "Use --in <project>"
   fi
 
-  # Get todoset from project dock
-  local project_data todoset_id
-  project_data=$(api_get "/projects/$project.json")
-  todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
-
   local payload
   payload=$(jq -n --arg name "$name" '{name: $name}')
 
+  # Groups are todolists: PUT /buckets/:project/todolists/:group_id.json
   local response
-  response=$(api_put "/buckets/$project/todosets/$todoset_id/groups/$group_id.json" "$payload")
+  response=$(api_put "/buckets/$project/todolists/$group_id.json" "$payload")
 
-  local summary="Updated todolist group #$group_id"
+  local summary="Updated group #$group_id"
 
   local bcs
   bcs=$(breadcrumbs \
@@ -692,22 +698,18 @@ _todolistgroups_position() {
     die "No project specified" $EXIT_USAGE "Use --in <project>"
   fi
 
-  # Get todoset from project dock
-  local project_data todoset_id
-  project_data=$(api_get "/projects/$project.json")
-  todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id // empty')
-
   local payload
   payload=$(jq -n --argjson pos "$position" '{position: $pos}')
 
+  # PUT /buckets/:project/todolists/groups/:group_id/position.json
   local response
-  response=$(api_put "/buckets/$project/todosets/$todoset_id/groups/$group_id/position.json" "$payload")
+  response=$(api_put "/buckets/$project/todolists/groups/$group_id/position.json" "$payload")
 
-  local summary="Moved todolist group #$group_id to position $position"
+  local summary="Moved group #$group_id to position $position"
 
   local bcs
   bcs=$(breadcrumbs \
-    "$(breadcrumb "list" "bcq todolistgroups --in $project" "List groups")"
+    "$(breadcrumb "show" "bcq todolistgroups $group_id --in $project" "View group")"
   )
 
   output "${response:-'{}'}" "$summary" "$bcs"
@@ -718,7 +720,10 @@ _help_todolistgroups() {
   cat <<'EOF'
 ## bcq todolistgroups
 
-Manage todolist groups (categories for organizing todolists).
+Manage todolist groups (sub-lists within a todolist).
+
+Groups are nested within a specific todolist and help organize todos
+into categories. Groups themselves function as todolists.
 
 ### Usage
 
@@ -726,31 +731,38 @@ Manage todolist groups (categories for organizing todolists).
 
 ### Actions
 
-    create "name"     Create a new group
-    list              List groups (default)
+    create "name"     Create a new group in a todolist
+    list              List groups in a todolist (default)
     position <id>     Reorder group position
     show <id>         Show group details
     update <id>       Update group name
 
 ### Options
 
-    --in, -p <project>    Project ID
-    --name, -n <name>     Group name (for update)
-    --to <position>       Target position (for reorder)
+    --in, -p <project>      Project ID
+    --list, -l <todolist>   Parent todolist ID (required for list/create)
+    --name, -n <name>       Group name (for update)
+    --to <position>         Target position (for reorder)
 
 ### Examples
 
-    # List todolist groups
-    bcq todolistgroups --in 12345
+    # List groups in a todolist
+    bcq todolistgroups --list 67890 --in 12345
 
     # Create a new group
-    bcq todolistgroups create "Sprint 42" --in 12345
+    bcq todolistgroups create "Phase 1" --list 67890 --in 12345
+
+    # Show group details
+    bcq todolistgroups show 11111 --in 12345
 
     # Update group name
-    bcq todolistgroups update 67890 --name "Sprint 43" --in 12345
+    bcq todolistgroups update 11111 --name "Phase 2" --in 12345
 
     # Move group to top
-    bcq todolistgroups reorder 67890 --to 1 --in 12345
+    bcq todolistgroups reorder 11111 --to 1 --in 12345
+
+    # Add todos to a group (groups are todolists)
+    bcq todo "Task" --list 11111 --in 12345
 
 EOF
 }
