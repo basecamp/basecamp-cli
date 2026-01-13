@@ -7,18 +7,12 @@ cmd_people() {
   shift || true
 
   case "$action" in
-    list|"")
-      _people_list "$@"
-      ;;
-    show|get)
-      _people_show "$@"
-      ;;
-    pingable)
-      _people_pingable "$@"
-      ;;
-    --help|-h)
-      _help_people
-      ;;
+    add) _people_add "$@" ;;
+    list|"") _people_list "$@" ;;
+    pingable) _people_pingable "$@" ;;
+    remove) _people_remove "$@" ;;
+    show|get) _people_show "$@" ;;
+    --help|-h) _help_people ;;
     *)
       # If it looks like an ID, show that person
       if [[ "$action" =~ ^[0-9]+$ ]]; then
@@ -49,7 +43,7 @@ _people_list() {
 
   local response
   if [[ -n "$project_id" ]]; then
-    response=$(api_get "/buckets/$project_id/people.json")
+    response=$(api_get "/projects/$project_id/people.json")
   else
     response=$(api_get "/people.json")
   fi
@@ -127,6 +121,105 @@ _people_pingable() {
     echo
     echo "$response" | jq -r '.[] | "- **\(.name)** #\(.id)"'
   fi
+}
+
+
+_people_add() {
+  local project_id="" person_ids=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project_id="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          person_ids+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$project_id" ]]; then
+    project_id=$(get_project_id)
+  fi
+
+  if [[ -z "$project_id" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  if [[ ${#person_ids[@]} -eq 0 ]]; then
+    die "Person ID(s) required" $EXIT_USAGE "Usage: bcq people add <id> [id...] --in <project>"
+  fi
+
+  # Build JSON array of IDs
+  local ids_json
+  ids_json=$(printf '%s\n' "${person_ids[@]}" | jq -R . | jq -s '{"grant": map(tonumber)}')
+
+  local response
+  response=$(api_put "/projects/$project_id/people/users.json" "$ids_json")
+
+  local count=${#person_ids[@]}
+  local summary="Added $count person(s) to project #$project_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "list" "bcq people --in $project_id" "List project members")"
+  )
+
+  output "${response:-'{}'}" "$summary" "$bcs"
+}
+
+_people_remove() {
+  local project_id="" person_ids=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project_id="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          person_ids+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$project_id" ]]; then
+    project_id=$(get_project_id)
+  fi
+
+  if [[ -z "$project_id" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  if [[ ${#person_ids[@]} -eq 0 ]]; then
+    die "Person ID(s) required" $EXIT_USAGE "Usage: bcq people remove <id> [id...] --in <project>"
+  fi
+
+  # Build JSON array of IDs to revoke
+  local ids_json
+  ids_json=$(printf '%s\n' "${person_ids[@]}" | jq -R . | jq -s '{"revoke": map(tonumber)}')
+
+  local response
+  response=$(api_put "/projects/$project_id/people/users.json" "$ids_json")
+
+  local count=${#person_ids[@]}
+  local summary="Removed $count person(s) from project #$project_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "list" "bcq people --in $project_id" "List project members")"
+  )
+
+  output "${response:-'{}'}" "$summary" "$bcs"
 }
 
 
