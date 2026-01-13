@@ -14,6 +14,12 @@ API_CALL_VAR_RE = re.compile(
     r"api_(get|post|put|patch|delete|upload)\s+\"?(\$[A-Za-z_][A-Za-z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_]*\})\"?"
 )
 ASSIGN_RE = re.compile(r"^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\"'])(.+?)\2")
+SKIP_SECTIONS = {
+    "chatbots.md",
+    "client_approvals.md",
+    "client_correspondences.md",
+    "client_replies.md",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -152,6 +158,9 @@ def main() -> int:
         return 1
 
     doc_sections = load_doc_endpoints(sections_dir)
+    skipped_sections = {name: endpoints for name, endpoints in doc_sections.items() if name in SKIP_SECTIONS}
+    if skipped_sections:
+        doc_sections = {name: endpoints for name, endpoints in doc_sections.items() if name not in SKIP_SECTIONS}
     bcq_endpoints = load_bcq_endpoints(bcq_root / "lib" / "commands")
 
     unique_docs = []
@@ -186,6 +195,9 @@ def main() -> int:
     total = len(unique_docs)
     pct = (matched / total * 100) if total else 0.0
     print(f"overall: {matched}/{total} ({pct:.1f}%)")
+    if skipped_sections:
+        skipped_endpoints = sum(len(endpoints) for endpoints in skipped_sections.values())
+        print(f"skipped sections: {len(skipped_sections)} ({skipped_endpoints} endpoints)")
 
     full = sorted([s for s, (m, t) in section_stats.items() if m == t])
     partial = sorted([s for s, (m, t) in section_stats.items() if 0 < m < t])

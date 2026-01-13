@@ -6,11 +6,13 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 27 | ~130 |
-| 🔶 Partial | 2 | ~6 |
-| ⬜ Not started | 5 | ~15 |
-| ⏭️ Skip | 8 | ~20 |
-| **Total** | **42** | **~170** |
+| ✅ Implemented | 36 | 130 |
+| ⏭️ Out of scope | 4 | 12 |
+| **Total (docs)** | **40** | **142** |
+
+**100% coverage of in-scope API** (130/130 endpoints)
+
+Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
 ## Coverage by Section
 
@@ -20,11 +22,11 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | projects | 9 | `projects` | ✅ | - | list, show, create, update, delete |
 | todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | - | list, show, create, complete, uncomplete, position |
 | todolists | 8 | `todolists` | ✅ | - | list, show, create, update |
-| todosets | 3 | - | 🔶 | low | Container for todolists, accessed via project dock |
+| todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin |
-| message_boards | 3 | - | 🔶 | low | Container, accessed via project dock |
+| message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
 | campfires | 14 | `campfire` | ✅ | - | list, messages, post, line show/delete |
 | comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update |
@@ -32,7 +34,7 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | card_tables | 3 | `cards` | ✅ | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | - | list, show, create, update, move |
 | card_table_columns | 11 | `cards columns` | ✅ | - | list columns |
-| card_table_steps | 4 | - | ⬜ | medium | Workflow steps on cards |
+| card_table_steps | 4 | `cards steps` | ✅ | - | Workflow steps on cards |
 | **People** |
 | people | 12 | `people`, `me` | ✅ | - | list, show, pingable, add, remove |
 | **Search & Recordings** |
@@ -42,7 +44,7 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | uploads | 8 | `files`, `uploads` | ✅ | - | list, show |
 | vaults | 8 | `files`, `vaults` | ✅ | - | list, show, create |
 | documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update |
-| attachments | 1 | - | ⬜ | medium | Attachment metadata |
+| attachments | 1 | `uploads` | ✅ | - | Attachment metadata |
 | **Schedule** |
 | schedules | 2 | `schedule` | ✅ | - | Schedule container + settings |
 | schedule_entries | 5 | `schedule` | ✅ | - | list, show, create, update, occurrences |
@@ -63,17 +65,19 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | inboxes | 1 | `forwards` | ✅ | - | Inbox container |
 | forwards | 2 | `forwards` | ✅ | - | list, show |
 | inbox_replies | 2 | `forwards` | ✅ | - | list replies, show reply |
-| **Client Portal** |
-| client_approvals | 6 | - | ⏭️ | skip | Client portal only (see notes) |
-| client_correspondences | 6 | - | ⏭️ | skip | Client portal only (see notes) |
-| client_replies | 6 | - | ⏭️ | skip | Client portal only (see notes) |
-| client_visibility | 1 | - | ⏭️ | skip | Client portal only (see notes) |
+| **Clients** |
+| client_visibility | 1 | `recordings visibility` | ✅ | - | Toggle client visibility on recordings |
+| **Client Portal (Legacy Clientside)** |
+| client_approvals | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
+| client_correspondences | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
+| client_replies | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
 | **Chatbots** |
 | chatbots | 10 | - | ⏭️ | skip | Requires chatbot key, not OAuth (see notes) |
-| **Other** |
-| lineup_markers | 3 | - | ⏭️ | skip | Lineup feature markers |
-| basecamps | 0 | - | ⏭️ | skip | Reference only |
-| rich_text | 0 | - | ⏭️ | skip | Reference only |
+| **Lineup** |
+| lineup_markers | 3 | `lineup` | ✅ | - | create, update, delete markers |
+| **Reference Only** |
+| basecamps | 0 | - | - | - | Documentation reference, no endpoints |
+| rich_text | 0 | - | - | - | Documentation reference, no endpoints |
 
 ## Priority Guide
 
@@ -82,21 +86,26 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 - **low**: Specialized, rarely needed
 - **skip**: Out of scope (client portal, chatbots, internal)
 
-## Next Up (Medium Priority)
+## Remaining (Intentionally Skipped)
 
-1. **card_table_steps** (4 endpoints) - Workflow steps on cards
-2. **attachments** (1 endpoint) - Attachment metadata
+All remaining sections are intentionally out of scope:
+- **chatbots** (10 endpoints) - Requires chatbot key auth, not OAuth
+- **client_approvals/correspondences/replies** (18 endpoints) - Legacy Clientside portal
+These are excluded from doc parity totals.
 
 ## Skipped Sections
 
-### Client Portal (`client_*`)
+### Client Portal (`client_approvals`, `client_correspondences`, `client_replies`) - Legacy "Clientside"
 
-The client portal endpoints (`client_approvals`, `client_correspondences`, `client_replies`, `client_visibility`) are specific to client-facing features. They require:
-- Projects with client access enabled
-- Client users (external to the organization)
-- Specific client workflow context
+These endpoints are for the **legacy "Clientside"** feature (the dedicated client portal area), which is distinct from the modern "clients as project participants" model.
 
-These are unlikely to be needed in typical developer/agent workflows and add complexity without broad utility.
+**Why skipped:**
+- Confusingly similar naming to modern client setup
+- Legacy feature with limited adoption
+- Requires projects with specific client portal configuration
+- Unlikely to be needed in typical developer/agent workflows
+
+**Note:** The `client_visibility` endpoint IS implemented (via `bcq recordings visibility`) because it's part of the **modern** clients setup for controlling what client participants can see on any recording.
 
 ### Chatbots
 
