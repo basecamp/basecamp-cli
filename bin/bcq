@@ -43,6 +43,32 @@ done
 
 
 _self_update() {
+  if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+    cat <<'EOF'
+bcq self-update - Update bcq to latest version
+
+USAGE
+  bcq self-update [--force]
+
+REQUIREMENTS
+  Only works for installer-based git installs:
+  - Must have .git directory (not tarball/Homebrew)
+  - Must be on a branch (not detached HEAD)
+  - Branch must track origin (e.g., origin/main)
+
+  Homebrew users: brew upgrade bcq
+
+OPTIONS
+  --force    Update even with local modifications or commits
+             (uses git reset --hard instead of merge --ff-only)
+
+EXAMPLES
+  bcq self-update           Update current branch from origin
+  bcq self-update --force   Force update, discarding local changes
+EOF
+    return 0
+  fi
+
   local force=false
   [[ "${1:-}" == "--force" ]] && force=true
 
