@@ -29,6 +29,10 @@ cmd_recordings() {
       shift || true
       _recordings_status "active" "$@"
       ;;
+    visibility|client-visibility)
+      shift || true
+      _recordings_visibility "$@"
+      ;;
     --help|-h)
       _help_recordings
       ;;
@@ -188,6 +192,74 @@ _recordings_status() {
   esac
 
   local summary="$status_msg recording #$recording_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq show $recording_id --in $project" "View recording")"
+  )
+
+  output "$response" "$summary" "$bcs"
+}
+
+
+# PUT /buckets/:id/recordings/:id/client_visibility.json
+_recordings_visibility() {
+  local recording_id="" project="" visible=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --visible|--show)
+        visible="true"
+        shift
+        ;;
+      --hidden|--hide)
+        visible="false"
+        shift
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$recording_id" ]]; then
+          recording_id="$1"
+        elif [[ "$1" == "true" ]] || [[ "$1" == "false" ]]; then
+          visible="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$recording_id" ]]; then
+    die "Recording ID required" $EXIT_USAGE "Usage: bcq recordings visibility <id> --visible|--hidden --in <project>"
+  fi
+
+  if [[ -z "$visible" ]]; then
+    die "Visibility required" $EXIT_USAGE "Use --visible or --hidden"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  local payload
+  payload=$(jq -n --argjson visible "$visible" '{visible_to_clients: $visible}')
+
+  local response
+  response=$(api_put "/buckets/$project/recordings/$recording_id/client_visibility.json" "$payload")
+
+  local summary
+  if [[ "$visible" == "true" ]]; then
+    summary="Recording #$recording_id now visible to clients"
+  else
+    summary="Recording #$recording_id now hidden from clients"
+  fi
 
   local bcs
   bcs=$(breadcrumbs \
