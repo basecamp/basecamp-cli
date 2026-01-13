@@ -165,6 +165,24 @@ create_accounts() {
 EOF
 }
 
+create_system_config() {
+  local content="${1:-{}}"
+  mkdir -p "$TEST_TEMP_DIR/etc/basecamp"
+  echo "$content" > "$TEST_TEMP_DIR/etc/basecamp/config.json"
+}
+
+create_repo_config() {
+  local content="${1:-{}}"
+  local git_root="${2:-$TEST_PROJECT}"
+  mkdir -p "$git_root/.basecamp"
+  echo "$content" > "$git_root/.basecamp/config.json"
+}
+
+init_git_repo() {
+  local dir="${1:-$TEST_PROJECT}"
+  git -C "$dir" init --quiet 2>/dev/null || true
+}
+
 
 # Mock helpers
 

@@ -219,3 +219,220 @@ load test_helper
   [[ "$BCQ_BASE_URL" == "http://3.basecamp.localhost:3001" ]]
   [[ "$BCQ_API_URL" == "http://3.basecampapi.localhost:3001" ]]
 }
+
+
+# Config Layering
+
+@test "loads system-wide config" {
+  create_system_config '{"account_id": "system-123"}'
+
+  source "$BCQ_ROOT/lib/core.sh"
+  BCQ_SYSTEM_CONFIG_DIR="$TEST_TEMP_DIR/etc/basecamp"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config "account_id")
+  [[ "$result" == "system-123" ]]
+}
+
+@test "user config overrides system config" {
+  create_system_config '{"account_id": "system-123"}'
+  create_global_config '{"account_id": "user-456"}'
+
+  source "$BCQ_ROOT/lib/core.sh"
+  BCQ_SYSTEM_CONFIG_DIR="$TEST_TEMP_DIR/etc/basecamp"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config "account_id")
+  [[ "$result" == "user-456" ]]
+}
+
+@test "repo config detected from git root" {
+  init_git_repo "$TEST_PROJECT"
+  mkdir -p "$TEST_PROJECT/subdir"
+  create_repo_config '{"project_id": "repo-789"}' "$TEST_PROJECT"
+
+  cd "$TEST_PROJECT/subdir"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config "project_id")
+  [[ "$result" == "repo-789" ]]
+}
+
+@test "repo config overrides user config" {
+  init_git_repo "$TEST_PROJECT"
+  create_global_config '{"project_id": "user-config"}'
+  create_repo_config '{"project_id": "repo-config"}' "$TEST_PROJECT"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config "project_id")
+  [[ "$result" == "repo-config" ]]
+}
+
+@test "local config overrides repo config" {
+  init_git_repo "$TEST_PROJECT"
+  mkdir -p "$TEST_PROJECT/subdir/.basecamp"
+  create_repo_config '{"project_id": "repo-config"}' "$TEST_PROJECT"
+  echo '{"project_id": "local-config"}' > "$TEST_PROJECT/subdir/.basecamp/config.json"
+
+  cd "$TEST_PROJECT/subdir"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config "project_id")
+  [[ "$result" == "local-config" ]]
+}
+
+@test "full config layering priority" {
+  # Set up all 6 layers
+  create_system_config '{"account_id": "system", "project_id": "system", "todolist_id": "system"}'
+  create_global_config '{"account_id": "user", "project_id": "user", "todolist_id": "user"}'
+  init_git_repo "$TEST_PROJECT"
+  create_repo_config '{"account_id": "repo", "project_id": "repo", "todolist_id": "repo"}' "$TEST_PROJECT"
+  mkdir -p "$TEST_PROJECT/subdir/.basecamp"
+  echo '{"project_id": "local", "todolist_id": "local"}' > "$TEST_PROJECT/subdir/.basecamp/config.json"
+  export BASECAMP_TODOLIST_ID="env"
+
+  cd "$TEST_PROJECT/subdir"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  BCQ_SYSTEM_CONFIG_DIR="$TEST_TEMP_DIR/etc/basecamp"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+
+  # account_id: local doesn't set, env doesn't set, so repo wins
+  result=$(get_config "account_id")
+  [[ "$result" == "repo" ]]
+
+  # project_id: local sets it
+  result=$(get_config "project_id")
+  [[ "$result" == "local" ]]
+
+  # todolist_id: env overrides all files
+  result=$(get_config "todolist_id")
+  [[ "$result" == "env" ]]
+}
+
+
+# Todolist ID getter
+
+@test "get_todolist_id from config" {
+  create_local_config '{"todolist_id": "77777"}'
+  unset BASECAMP_TODOLIST_ID
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_todolist_id)
+  [[ "$result" == "77777" ]]
+}
+
+@test "get_todolist_id from environment" {
+  create_local_config '{"todolist_id": "from-file"}'
+  export BASECAMP_TODOLIST_ID="from-env"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_todolist_id)
+  [[ "$result" == "from-env" ]]
+}
+
+
+# Config source tracking
+
+@test "get_config_source returns env for environment variable" {
+  export BASECAMP_ACCOUNT_ID="from-env"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "account_id")
+  [[ "$result" == "env" ]]
+}
+
+@test "get_config_source returns flag for BCQ_ACCOUNT" {
+  export BCQ_ACCOUNT="from-flag"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "account_id")
+  [[ "$result" == "flag" ]]
+}
+
+@test "get_config_source returns local for cwd config" {
+  create_local_config '{"project_id": "from-local"}'
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "project_id")
+  [[ "$result" == *"local"* ]]
+}
+
+@test "get_config_source returns user for global config" {
+  create_global_config '{"account_id": "from-user"}'
+  unset BASECAMP_ACCOUNT_ID
+  unset BCQ_ACCOUNT
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "account_id")
+  [[ "$result" == *"user"* ]]
+}
+
+@test "get_config_source returns system for system-wide config" {
+  create_system_config '{"account_id": "from-system"}'
+  unset BASECAMP_ACCOUNT_ID
+  unset BCQ_ACCOUNT
+
+  source "$BCQ_ROOT/lib/core.sh"
+  BCQ_SYSTEM_CONFIG_DIR="$TEST_TEMP_DIR/etc/basecamp"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "account_id")
+  [[ "$result" == *"system"* ]]
+}
+
+@test "get_config_source returns repo for git root config" {
+  init_git_repo "$TEST_PROJECT"
+  create_repo_config '{"project_id": "from-repo"}' "$TEST_PROJECT"
+  mkdir -p "$TEST_PROJECT/subdir"
+
+  cd "$TEST_PROJECT/subdir"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "project_id")
+  [[ "$result" == *"repo"* ]]
+}
+
+@test "get_config_source returns unset for missing key" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  load_config
+  result=$(get_config_source "nonexistent")
+  [[ "$result" == "unset" ]]
+}

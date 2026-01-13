@@ -12,7 +12,7 @@
 
 # Paths
 
-BCQ_SYSTEM_CONFIG_DIR="/etc/basecamp"
+BCQ_SYSTEM_CONFIG_DIR="${BCQ_SYSTEM_CONFIG_DIR:-/etc/basecamp}"
 BCQ_GLOBAL_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/basecamp"
 BCQ_LOCAL_CONFIG_DIR=".basecamp"
 BCQ_CONFIG_FILE="config.json"
