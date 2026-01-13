@@ -278,18 +278,24 @@ _search_metadata() {
   local response
   response=$(api_get "/searches/metadata.json")
 
+  # Handle empty response (204 No Content)
+  if [[ -z "$response" ]] || [[ "$response" == "null" ]]; then
+    die "Search metadata not available" $EXIT_NOT_FOUND \
+      "Common types: Todo, Message, Document, Comment, Kanban::Card"
+  fi
+
   local format
   format=$(get_format)
 
   local types file_types
-  types=$(echo "$response" | jq -r '[.recording_search_types[].key] | join(", ")')
-  file_types=$(echo "$response" | jq -r '[.file_search_types[].key] | join(", ")')
+  types=$(echo "$response" | jq -r '[.recording_search_types[].key] | join(", ") // empty')
+  file_types=$(echo "$response" | jq -r '[.file_search_types[].key] | join(", ") // empty')
 
   if [[ "$format" == "json" ]]; then
-    json_ok "$response" "Search metadata" ""
+    json_ok "$response" "Search metadata"
   else
-    echo "**--type**: $types"
-    echo "**--file-type** (attachments): $file_types"
+    echo "**--type**: ${types:-Todo, Message, Document, Comment, Kanban::Card}"
+    [[ -n "$file_types" ]] && echo "**--file-type** (attachments): $file_types"
   fi
 }
 

@@ -186,9 +186,15 @@ _api_request() {
       404)
         die "Not found" $EXIT_NOT_FOUND
         ;;
-      5*)
+      500)
+        # Internal server error - don't retry, it's an application bug
+        die "Server error (500)" $EXIT_API \
+          "The server encountered an internal error"
+        ;;
+      502|503|504)
+        # Gateway errors - transient, retry with backoff
         delay=$((BCQ_BASE_DELAY * 2 ** (attempt - 1)))
-        info "Server error ($http_code), retrying in ${delay}s..."
+        info "Gateway error ($http_code), retrying in ${delay}s..."
         sleep "$delay"
         ((attempt++))
         ;;
