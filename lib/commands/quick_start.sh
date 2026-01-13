@@ -176,6 +176,10 @@ COMMANDS
   MCP
     mcp serve       Start MCP server
 
+  Meta
+    version         Show version
+    self-update     Update (installer installs only)
+
 GLOBAL FLAGS
   --json, -j        Force JSON output
   --md, -m          Force Markdown output
@@ -325,12 +329,16 @@ EOF
 
 _help_recordings() {
   cat << 'EOF'
-bcq recordings - List recordings across projects
+bcq recordings - List and manage recordings across projects
 
 USAGE
   bcq recordings [type] [options]
+  bcq recordings trash <id> --in <project>         Trash a recording
+  bcq recordings archive <id> --in <project>       Archive a recording
+  bcq recordings restore <id> --in <project>       Restore a recording
+  bcq recordings visibility <id> --visible|--hidden --in <project>
 
-TYPES (required)
+TYPES (for listing)
   todos             Todo items
   messages          Message board posts
   documents         Documents
@@ -346,12 +354,18 @@ OPTIONS
   --direction       desc (default) or asc
   --limit, -n       Limit results
 
+CLIENT VISIBILITY (modern clients setup)
+  --visible         Make recording visible to clients
+  --hidden          Hide recording from clients
+
 EXAMPLES
   bcq recordings todos                     Recent todos across all projects
   bcq recordings messages --project 123    Messages in specific project
   bcq recordings comments --limit 20       Last 20 comments
+  bcq recordings visibility 456 --visible --in 123  Show to clients
+  bcq recordings visibility 456 --hidden --in 123   Hide from clients
 
-NOTE: For full-text search, use 'bcq search "query"' instead.
-Use recordings for browsing by type/status without a search term.
+NOTE: Client visibility controls what clients (project participants) can see.
+Not all recordings support visibility toggling - some inherit from parent.
 EOF
 }
