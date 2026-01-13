@@ -21,18 +21,9 @@ brew install bash jq
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/install.sh | bash
 ```
 
-Or use Homebrew for everything:
-
-```bash
-brew tap basecamp/tap
-brew install bcq
-```
-
 ### Updating
 
-**Installer:** Run the installer again, or `bcq self-update`
-
-**Homebrew:** `brew upgrade bcq`
+Run the installer again, or `bcq self-update`
 
 ## Quick Start
 
@@ -150,10 +141,6 @@ BCQ_BASE_URL=https://3.staging.basecampapi.com bcq auth login
 OAuth endpoints are discovered automatically via `.well-known/oauth-authorization-server` (RFC 8414).
 
 ## Tab Completion
-
-If installed via Homebrew, completions are set up automatically.
-
-### Manual setup
 
 ```bash
 # Bash

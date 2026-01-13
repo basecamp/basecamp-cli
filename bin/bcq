@@ -52,11 +52,9 @@ USAGE
 
 REQUIREMENTS
   Only works for installer-based git installs:
-  - Must have .git directory (not tarball/Homebrew)
+  - Must have .git directory (not tarball extract)
   - Must be on a branch (not detached HEAD)
   - Branch must track origin (e.g., origin/main)
-
-  Homebrew users: brew upgrade bcq
 
 OPTIONS
   --force    Update even with local modifications or commits
