@@ -69,9 +69,10 @@ _cards_list() {
     die "No card table found in project $project" $EXIT_NOT_FOUND
   fi
 
-  # Get columns (lists) in the card table
-  local columns_response
-  columns_response=$(api_get "/buckets/$project/card_tables/$card_table_id/columns.json")
+  # Get card table with embedded columns (lists)
+  local card_table_data columns_response
+  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+  columns_response=$(echo "$card_table_data" | jq '.lists // []')
 
   # Get cards from all columns or specific column
   local all_cards="[]"
@@ -82,13 +83,13 @@ _cards_list() {
     if [[ -z "$column_id" ]]; then
       die "Column '$column' not found" $EXIT_NOT_FOUND
     fi
-    all_cards=$(api_get "/buckets/$project/card_tables/columns/$column_id/cards.json" 2>/dev/null || echo '[]')
+    all_cards=$(api_get "/buckets/$project/card_tables/lists/$column_id/cards.json" 2>/dev/null || echo '[]')
   else
     # Get cards from all columns
     while IFS= read -r col_id; do
       [[ -z "$col_id" ]] && continue
       local cards
-      cards=$(api_get "/buckets/$project/card_tables/columns/$col_id/cards.json" 2>/dev/null || echo '[]')
+      cards=$(api_get "/buckets/$project/card_tables/lists/$col_id/cards.json" 2>/dev/null || echo '[]')
       all_cards=$(echo "$all_cards" "$cards" | jq -s '.[0] + .[1]')
     done < <(echo "$columns_response" | jq -r '.[].id')
   fi
@@ -236,19 +237,20 @@ _cards_create() {
     die "No card table found in project $project" $EXIT_NOT_FOUND
   fi
 
+  # Get card table with embedded columns (lists)
+  local card_table_data columns
+  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+  columns=$(echo "$card_table_data" | jq '.lists // []')
+
   local column_id
   if [[ -n "$column" ]]; then
     # Find column by name
-    local columns
-    columns=$(api_get "/buckets/$project/card_tables/$card_table_id/columns.json")
     column_id=$(echo "$columns" | jq -r --arg name "$column" '.[] | select(.title == $name) | .id // empty')
     if [[ -z "$column_id" ]]; then
       die "Column '$column' not found" $EXIT_NOT_FOUND
     fi
   else
-    # Use first column
-    local columns
-    columns=$(api_get "/buckets/$project/card_tables/$card_table_id/columns.json")
+    # Use first column (Inbox/Triage)
     column_id=$(echo "$columns" | jq -r '.[0].id // empty')
     if [[ -z "$column_id" ]]; then
       die "No columns found in card table" $EXIT_NOT_FOUND
@@ -259,7 +261,7 @@ _cards_create() {
   payload=$(jq -n --arg title "$title" '{title: $title}')
 
   local response
-  response=$(api_post "/buckets/$project/card_tables/columns/$column_id/cards.json" "$payload")
+  response=$(api_post "/buckets/$project/card_tables/lists/$column_id/cards.json" "$payload")
 
   local card_id
   card_id=$(echo "$response" | jq -r '.id')
@@ -320,22 +322,25 @@ _cards_move() {
   project_data=$(api_get "/projects/$project.json")
   card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
 
-  local columns column_id
-  columns=$(api_get "/buckets/$project/card_tables/$card_table_id/columns.json")
+  # Get card table with embedded columns (lists)
+  local card_table_data columns column_id
+  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+  columns=$(echo "$card_table_data" | jq '.lists // []')
   column_id=$(echo "$columns" | jq -r --arg name "$target_column" '.[] | select(.title == $name) | .id // empty')
 
   if [[ -z "$column_id" ]]; then
     die "Column '$target_column' not found" $EXIT_NOT_FOUND
   fi
 
-  # Move card to column
+  # Move card to column via moves endpoint
   local payload
   payload=$(jq -n --arg column_id "$column_id" '{column_id: ($column_id | tonumber)}')
 
-  local response
-  response=$(api_put "/buckets/$project/card_tables/cards/$card_id.json" "$payload")
+  # POST to /moves.json returns 204 No Content on success
+  api_post "/buckets/$project/card_tables/cards/$card_id/moves.json" "$payload" >/dev/null
 
   local summary="✓ Moved card #$card_id to '$target_column'"
+  local response='{}'
 
   local bcs
   bcs=$(breadcrumbs \
