@@ -166,6 +166,7 @@ COMMANDS
     comment         Add a comment
     done            Complete a todo
     message         Post a message
+    reopen          Reopen a completed todo
     todo            Create a todo
 
   Config
@@ -213,10 +214,18 @@ EOF
 
 _help_todos() {
   cat << 'EOF'
-bcq todos - List todos
+bcq todos - List and manage todos
 
 USAGE
-  bcq todos [options]
+  bcq todos [action] [options]
+
+ACTIONS
+  list              List todos (default)
+  show <id>         Show todo details
+  create "content"  Create a todo
+  complete <id>     Mark todo as done
+  uncomplete <id>   Reopen a completed todo
+  position <id>     Change todo position
 
 OPTIONS
   --in <project>    Filter by project (ID or name)
@@ -224,12 +233,15 @@ OPTIONS
   --assignee <who>  Filter by assignee (me or numeric ID)
   --status <s>      Filter by status (active, completed)
   --overdue         Show only overdue todos (past due, not completed)
+  --to <position>   Target position for reorder (1 = top)
   --json, -j        JSON output
 
 EXAMPLES
   bcq todos                        Your assigned todos
   bcq todos --in "Basecamp 4"      Todos in a project
   bcq todos --status completed     Completed todos
+  bcq reopen 123                   Reopen completed todo
+  bcq todos position 123 --to 1    Move todo to top
 EOF
 }
 
