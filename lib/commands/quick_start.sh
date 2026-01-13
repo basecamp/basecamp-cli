@@ -147,24 +147,26 @@ USAGE
 
 COMMANDS
   Query
-    projects        List projects
-    todos           List todos
-    todolists       List todolists
-    messages        List messages
-    cards           List cards (kanban)
     campfire        List campfires, view/post messages
+    cards           List cards (kanban)
+    files           List files, folders, documents
+    me              Show current user
+    messages        List messages
+    people          List people
+    projects        List projects
     recordings      Browse recordings by type
     search          Search across projects
     show            Show details of a resource
-    people          List people
-    me              Show current user
+    todolists       List todolists
+    todos           List todos
+    webhooks        Manage webhooks
 
   Actions
-    todo            Create a todo
+    assign          Assign a todo
+    comment         Add a comment
     done            Complete a todo
     message         Post a message
-    comment         Add a comment
-    assign          Assign a todo
+    todo            Create a todo
 
   Config
     auth            Authentication (login, logout, status)

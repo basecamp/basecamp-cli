@@ -6,9 +6,9 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 10 | ~60 |
-| 🔶 Partial | 4 | ~25 |
-| ⬜ Not started | 20 | ~75 |
+| ✅ Implemented | 14 | ~85 |
+| 🔶 Partial | 3 | ~15 |
+| ⬜ Not started | 17 | ~60 |
 | ⏭️ Skip | 8 | ~20 |
 | **Total** | **42** | **~180** |
 
@@ -39,16 +39,16 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | search | 2 | `search` | ✅ | - | Full-text search |
 | recordings | 4 | `recordings` | ✅ | - | Browse by type/status |
 | **Files & Documents** |
-| uploads | 8 | - | ⬜ | high | File uploads |
-| vaults | 8 | - | ⬜ | high | Folders (Docs & Files) |
-| documents | 8 | - | ⬜ | high | Rich text documents |
+| uploads | 8 | `files`, `uploads` | ✅ | - | File list/show |
+| vaults | 8 | `files`, `vaults` | ✅ | - | Folder list/show/create |
+| documents | 8 | `files`, `docs` | ✅ | - | Document list/show |
 | attachments | 1 | - | ⬜ | medium | Attachment metadata |
 | **Schedule** |
 | schedules | 4 | - | ⬜ | medium | Schedule container |
 | schedule_entries | 9 | - | ⬜ | medium | Calendar events |
 | events | 3 | - | 🔶 | low | Event occurrences |
 | **Webhooks** |
-| webhooks | 7 | - | ⬜ | high | Webhook CRUD |
+| webhooks | 7 | `webhooks` | ✅ | - | Webhook CRUD |
 | **Templates** |
 | templates | 15 | - | ⬜ | low | Project templates |
 | **Time Tracking** |
@@ -82,12 +82,12 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 - **low**: Specialized, rarely needed
 - **skip**: Out of scope (client portal, chatbots, internal)
 
-## Next Up (High Priority)
+## Next Up (Medium Priority)
 
-1. **webhooks** (7 endpoints) - CRUD for webhook subscriptions
-2. **uploads** (8 endpoints) - File upload/download
-3. **vaults** (8 endpoints) - Docs & Files folders
-4. **documents** (8 endpoints) - Rich text documents
+1. **schedules** (4 endpoints) - Schedule container
+2. **schedule_entries** (9 endpoints) - Calendar events
+3. **timesheets** (9 endpoints) - Time entries
+4. **todolist_groups** (8 endpoints) - Grouping todolists
 
 ## Implementation Notes
 

@@ -18,8 +18,8 @@ _bcq_completions() {
     cword=$COMP_CWORD
   }
 
-  # Top-level commands
-  local commands="projects todos todolists messages message todo done comment campfire cards card people recordings search show assign unassign me auth config help"
+  # Top-level commands (alphabetical)
+  local commands="assign auth campfire card cards comment config docs done files help me message messages mcp people projects recordings search show todo todolists todos unassign uploads vaults webhooks"
 
   # Subcommands by resource
   local projects_actions="list show"
@@ -30,6 +30,8 @@ _bcq_completions() {
   local cards_actions="list columns show create move"
   local people_actions="list show pingable"
   local recordings_actions="list todos messages documents comments cards uploads"
+  local files_actions="list folders vaults uploads docs documents show folder vault"
+  local webhooks_actions="list show create update delete"
   local auth_actions="login logout status"
   local config_actions="show init set unset project"
 
@@ -110,6 +112,20 @@ _bcq_completions() {
         COMPREPLY=($(compgen -W "todos messages documents comments cards uploads --type $project_flags" -- "$cur"))
       else
         COMPREPLY=($(compgen -W "--type $project_flags --status --sort --direction --limit $global_flags" -- "$cur"))
+      fi
+      ;;
+    files|vaults|uploads|docs)
+      if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$files_actions $project_flags" -- "$cur"))
+      else
+        COMPREPLY=($(compgen -W "$project_flags --vault --folder --type $global_flags" -- "$cur"))
+      fi
+      ;;
+    webhooks)
+      if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "$webhooks_actions $project_flags" -- "$cur"))
+      else
+        COMPREPLY=($(compgen -W "$project_flags --url --types --active --inactive $global_flags" -- "$cur"))
       fi
       ;;
     search)

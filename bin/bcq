@@ -72,6 +72,11 @@ main() {
     show)       cmd_show "$@" ;;
     people)     cmd_people "$@" ;;
     me)         cmd_me "$@" ;;
+    webhooks)   cmd_webhooks "$@" ;;
+    files)      cmd_files "$@" ;;
+    vaults)     cmd_vaults "$@" ;;
+    uploads)    cmd_uploads "$@" ;;
+    docs)       cmd_docs "$@" ;;
 
     # Action shortcuts
     todo)       cmd_todo_create "$@" ;;
