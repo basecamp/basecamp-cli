@@ -12,6 +12,84 @@ BCQ_MAX_RETRIES="${BCQ_MAX_RETRIES:-5}"
 BCQ_BASE_DELAY="${BCQ_BASE_DELAY:-1}"
 
 
+# ETag Cache Helpers
+
+_cache_dir() {
+  echo "${BCQ_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/bcq}"
+}
+
+_cache_key() {
+  local account_id="$1" url="$2" token="$3"
+  # Include origin (API URL), account, path, and token hash for isolation
+  # Token hash ensures different auth contexts don't share cache
+  local token_hash=""
+  if [[ -n "$token" ]]; then
+    if command -v shasum &>/dev/null; then
+      token_hash=$(echo -n "$token" | shasum -a 256 | cut -c1-16)
+    else
+      token_hash=$(echo -n "$token" | sha256sum | cut -c1-16)
+    fi
+  fi
+  local cache_input="${BCQ_API_URL:-}:${account_id}:${token_hash}:${url}"
+  # Use shasum (macOS) or sha256sum (Linux) for portability
+  if command -v shasum &>/dev/null; then
+    echo -n "$cache_input" | shasum -a 256 | cut -d' ' -f1
+  else
+    echo -n "$cache_input" | sha256sum | cut -d' ' -f1
+  fi
+}
+
+_cache_get_etag() {
+  local key="$1"
+  local etags_file="$(_cache_dir)/etags.json"
+  if [[ -f "$etags_file" ]]; then
+    jq -r --arg k "$key" '.[$k] // empty' "$etags_file" 2>/dev/null || true
+  fi
+}
+
+_cache_get_body() {
+  local key="$1"
+  local body_file="$(_cache_dir)/responses/${key}.body"
+  if [[ -f "$body_file" ]]; then
+    cat "$body_file"
+  fi
+}
+
+_cache_get_headers() {
+  local key="$1"
+  local headers_file="$(_cache_dir)/responses/${key}.headers"
+  if [[ -f "$headers_file" ]]; then
+    cat "$headers_file"
+  fi
+}
+
+_cache_set() {
+  local key="$1" body="$2" etag="$3" headers="$4"
+  local cache_dir="$(_cache_dir)"
+  local etags_file="$cache_dir/etags.json"
+  local body_file="$cache_dir/responses/${key}.body"
+  local headers_file="$cache_dir/responses/${key}.headers"
+
+  mkdir -p "$cache_dir/responses"
+
+  # Atomic write for body
+  echo "$body" > "${body_file}.tmp" && mv "${body_file}.tmp" "$body_file"
+
+  # Atomic write for headers (if provided)
+  if [[ -n "$headers" ]]; then
+    echo "$headers" > "${headers_file}.tmp" && mv "${headers_file}.tmp" "$headers_file"
+  fi
+
+  # Update etags.json (create if missing)
+  if [[ -f "$etags_file" ]]; then
+    jq --arg k "$key" --arg v "$etag" '.[$k] = $v' "$etags_file" > "${etags_file}.tmp" \
+      && mv "${etags_file}.tmp" "$etags_file"
+  else
+    jq -n --arg k "$key" --arg v "$etag" '{($k): $v}' > "$etags_file"
+  fi
+}
+
+
 # Authentication
 
 ensure_auth() {
@@ -108,6 +186,17 @@ _api_request() {
   headers_file=$(mktemp)
   trap "rm -f '$headers_file'" RETURN
 
+  # ETag cache setup (GET requests only)
+  local cache_key="" cached_etag=""
+  if [[ "$method" == "GET" ]] && [[ "${BCQ_CACHE_ENABLED:-true}" == "true" ]]; then
+    local account_id
+    account_id=$(get_account_id 2>/dev/null || echo "")
+    if [[ -n "$account_id" ]]; then
+      cache_key=$(_cache_key "$account_id" "$url" "$token")
+      cached_etag=$(_cache_get_etag "$cache_key")
+    fi
+  fi
+
   while (( attempt <= BCQ_MAX_RETRIES )); do
     debug "API $method $url (attempt $attempt)"
 
@@ -120,6 +209,12 @@ _api_request() {
       -D "$headers_file"
       -w '\n%{http_code}'
     )
+
+    # Add If-None-Match header for cached responses
+    if [[ -n "$cached_etag" ]]; then
+      curl_args+=(-H "If-None-Match: $cached_etag")
+      debug "Cache: If-None-Match $cached_etag"
+    fi
 
     if [[ -n "$body" ]]; then
       curl_args+=(-d "$body")
@@ -171,7 +266,28 @@ _api_request() {
     debug "HTTP $http_code"
 
     case "$http_code" in
+      304)
+        # Not Modified - return cached response
+        if [[ -n "$cache_key" ]]; then
+          debug "Cache hit: 304 Not Modified"
+          _cache_get_body "$cache_key"
+          return 0
+        fi
+        # Cache somehow missing, fall through to error
+        die "304 received but no cached response available" $EXIT_API
+        ;;
       200|201|204)
+        # Cache successful GET responses with ETag
+        if [[ "$method" == "GET" ]] && [[ -n "$cache_key" ]]; then
+          local etag
+          etag=$(grep -i '^ETag:' "$headers_file" | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r\n')
+          if [[ -n "$etag" ]]; then
+            local cached_headers
+            cached_headers=$(cat "$headers_file")
+            _cache_set "$cache_key" "$response" "$etag" "$cached_headers"
+            debug "Cache: stored with ETag $etag"
+          fi
+        fi
         echo "$response"
         return 0
         ;;
