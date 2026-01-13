@@ -60,27 +60,28 @@ main() {
   shift
 
   case "$command" in
-    # Core commands
-    projects)   cmd_projects "$@" ;;
-    todos)      cmd_todos "$@" ;;
-    todolists)  cmd_todolists "$@" ;;
-    todolistgroups) cmd_todolistgroups "$@" ;;
-    messages)   cmd_messages "$@" ;;
-    cards)      cmd_cards "$@" ;;
+    # Core commands (alphabetical)
     campfire)   cmd_campfire "$@" ;;
+    cards)      cmd_cards "$@" ;;
+    checkins)   cmd_checkins "$@" ;;
+    comments)   cmd_comments "$@" ;;
+    docs)       cmd_docs "$@" ;;
+    files)      cmd_files "$@" ;;
+    me)         cmd_me "$@" ;;
+    messages)   cmd_messages "$@" ;;
+    people)     cmd_people "$@" ;;
+    projects)   cmd_projects "$@" ;;
     recordings) cmd_recordings "$@" ;;
+    schedule)   cmd_schedule "$@" ;;
     search)     cmd_search "$@" ;;
     show)       cmd_show "$@" ;;
     subscriptions) cmd_subscriptions "$@" ;;
-    schedule)   cmd_schedule "$@" ;;
-    people)     cmd_people "$@" ;;
-    me)         cmd_me "$@" ;;
-    webhooks)   cmd_webhooks "$@" ;;
-    files)      cmd_files "$@" ;;
-    vaults)     cmd_vaults "$@" ;;
+    todolists)  cmd_todolists "$@" ;;
+    todolistgroups) cmd_todolistgroups "$@" ;;
+    todos)      cmd_todos "$@" ;;
     uploads)    cmd_uploads "$@" ;;
-    docs)       cmd_docs "$@" ;;
-    comments)   cmd_comments "$@" ;;
+    vaults)     cmd_vaults "$@" ;;
+    webhooks)   cmd_webhooks "$@" ;;
 
     # Action shortcuts
     todo)       cmd_todo_create "$@" ;;
