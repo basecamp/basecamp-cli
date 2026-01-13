@@ -24,6 +24,15 @@ load test_helper
   assert_output_contains "--schedule requires a value"
 }
 
+@test "schedule show --date without value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq schedule show 456 --date
+  assert_failure
+  assert_output_contains "--date requires a value"
+}
+
 
 # Missing context errors
 

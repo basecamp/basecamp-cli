@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # schedule.sh - Schedule and schedule entries management
-# Covers schedules.md (2 endpoints) and schedule_entries.md (4 endpoints)
+# Covers schedules.md (2 endpoints) and schedule_entries.md (5 endpoints)
 
 cmd_schedule() {
   local action="${1:-}"
@@ -241,14 +241,20 @@ _schedule_entries_md() {
 }
 
 # GET /buckets/:bucket/schedule_entries/:id.json
+# GET /buckets/:bucket/schedule_entries/:id/occurrences/:date.json (for recurring entries)
 _schedule_entry_show() {
-  local entry_id="" project=""
+  local entry_id="" project="" occurrence_date=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
+        shift 2
+        ;;
+      --date|--occurrence)
+        [[ -z "${2:-}" ]] && die "--date requires a value (YYYYMMDD)" $EXIT_USAGE
+        occurrence_date="$2"
         shift 2
         ;;
       *)
@@ -272,8 +278,14 @@ _schedule_entry_show() {
     die "No project specified" $EXIT_USAGE
   fi
 
-  local response
-  response=$(api_get "/buckets/$project/schedule_entries/$entry_id.json")
+  local response path
+  if [[ -n "$occurrence_date" ]]; then
+    # Access specific occurrence of recurring entry
+    path="/buckets/$project/schedule_entries/$entry_id/occurrences/$occurrence_date.json"
+  else
+    path="/buckets/$project/schedule_entries/$entry_id.json"
+  fi
+  response=$(api_get "$path")
 
   local summary starts_at ends_at
   summary=$(echo "$response" | jq -r '.summary // .title // "Entry"')
@@ -580,6 +592,7 @@ Manage project schedules and schedule entries.
     bcq schedule [options]                      Show project schedule
     bcq schedule entries [options]              List schedule entries
     bcq schedule show <entry_id> [options]      Show a schedule entry
+    bcq schedule show <entry_id> --date <YYYYMMDD>  Show recurring entry occurrence
     bcq schedule create <summary> [options]     Create a schedule entry
     bcq schedule update <entry_id> [options]    Update a schedule entry
     bcq schedule settings [options]             Update schedule settings
@@ -589,6 +602,7 @@ Manage project schedules and schedule entries.
     --in, -p <project>        Project ID
     --schedule, -s <id>       Schedule ID (auto-detected from dock)
     --status <status>         Filter entries: active, archived, trashed
+    --date <YYYYMMDD>         Access specific occurrence of recurring entry
 
 ### Entry Options (for create/update)
 
@@ -614,6 +628,9 @@ Manage project schedules and schedule entries.
 
     # View a specific entry
     bcq schedule show 456 --project 123
+
+    # View specific occurrence of recurring entry (by date)
+    bcq schedule show 456 --date 20240115 --project 123
 
     # Create a schedule entry
     bcq schedule create "Team Meeting" \
