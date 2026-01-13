@@ -45,7 +45,12 @@ load test_helper
   run bcq auth logout
   assert_success
 
-  [[ ! -f "$TEST_HOME/.config/basecamp/credentials.json" ]]
+  # With multi-origin support, file exists but entry for current base URL is removed
+  local base_url="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+  base_url="${base_url%/}"
+  local creds
+  creds=$(jq -r --arg url "$base_url" '.[$url] // empty' "$TEST_HOME/.config/basecamp/credentials.json")
+  [[ -z "$creds" ]]
 }
 
 @test "bcq auth logout handles missing credentials gracefully" {

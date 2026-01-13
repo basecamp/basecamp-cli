@@ -140,6 +140,9 @@ create_credentials() {
   local access_token="${1:-test-token}"
   local expires_at="${2:-$(($(date +%s) + 3600))}"
   local scope="${3:-}"
+  local base_url="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+  # Remove trailing slash for consistent keys
+  base_url="${base_url%/}"
 
   local scope_field=""
   if [[ -n "$scope" ]]; then
@@ -148,10 +151,12 @@ create_credentials() {
 
   cat > "$TEST_HOME/.config/basecamp/credentials.json" << EOF
 {
-  "access_token": "$access_token",
-  "refresh_token": "test-refresh-token",
-  $scope_field
-  "expires_at": $expires_at
+  "$base_url": {
+    "access_token": "$access_token",
+    "refresh_token": "test-refresh-token",
+    $scope_field
+    "expires_at": $expires_at
+  }
 }
 EOF
   chmod 600 "$TEST_HOME/.config/basecamp/credentials.json"

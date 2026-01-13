@@ -196,14 +196,11 @@ _auth_login() {
 }
 
 _auth_logout() {
-  local creds_file
-  creds_file=$(get_credentials_path)
-
-  if [[ -f "$creds_file" ]]; then
-    rm -f "$creds_file"
-    info "Logged out successfully"
+  if get_access_token &>/dev/null; then
+    clear_credentials
+    info "Logged out from $BCQ_BASE_URL"
   else
-    info "Not logged in"
+    info "Not logged in to $BCQ_BASE_URL"
   fi
 }
 

@@ -162,6 +162,18 @@ unset_config() {
 }
 
 
+# Multi-Origin Helpers
+#
+# Credentials are keyed by base URL to support multiple Basecamp instances
+# (production vs local development).
+
+_normalize_base_url() {
+  # Remove trailing slash for consistent keys
+  local url="${1:-$BCQ_BASE_URL}"
+  echo "${url%/}"
+}
+
+
 # Credentials
 
 get_credentials_path() {
@@ -171,11 +183,16 @@ get_credentials_path() {
 load_credentials() {
   local file
   file=$(get_credentials_path)
-  if [[ -f "$file" ]]; then
-    cat "$file"
-  else
+  local base_url
+  base_url=$(_normalize_base_url)
+
+  if [[ ! -f "$file" ]]; then
     echo '{}'
+    return
   fi
+
+  # Return credentials for current base URL
+  jq -r --arg url "$base_url" '.[$url] // {}' "$file"
 }
 
 save_credentials() {
@@ -183,7 +200,36 @@ save_credentials() {
   ensure_global_config_dir
   local file
   file=$(get_credentials_path)
-  echo "$json" > "$file"
+  local base_url
+  base_url=$(_normalize_base_url)
+
+  # Load existing multi-origin credentials
+  local existing='{}'
+  if [[ -f "$file" ]]; then
+    existing=$(cat "$file")
+  fi
+
+  # Update credentials for current base URL
+  local updated
+  updated=$(echo "$existing" | jq --arg url "$base_url" --argjson creds "$json" '.[$url] = $creds')
+  echo "$updated" > "$file"
+  chmod 600 "$file"
+}
+
+clear_credentials() {
+  local file
+  file=$(get_credentials_path)
+  local base_url
+  base_url=$(_normalize_base_url)
+
+  if [[ ! -f "$file" ]]; then
+    return
+  fi
+
+  # Remove credentials for current base URL only
+  local updated
+  updated=$(jq --arg url "$base_url" 'del(.[$url])' "$file")
+  echo "$updated" > "$file"
   chmod 600 "$file"
 }
 
