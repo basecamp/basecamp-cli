@@ -1,6 +1,6 @@
 # bcq
 
-Basecamp Query CLI — an agent-first command-line interface for the Basecamp API.
+Basecamp Query Tool — an agent-first interface for the Basecamp API.
 
 ## Install
 

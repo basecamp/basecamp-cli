@@ -128,6 +128,30 @@ _api_request() {
     curl_args+=("$@")
     curl_args+=("$url")
 
+    # Log curl command in verbose mode (with redacted token)
+    if [[ "$BCQ_VERBOSE" == "true" ]]; then
+      local curl_cmd="curl"
+      local prev_was_H=false
+      for arg in "${curl_args[@]}"; do
+        if [[ "$arg" == "-H" ]]; then
+          prev_was_H=true
+          continue
+        elif $prev_was_H; then
+          prev_was_H=false
+          if [[ "$arg" == "Authorization: Bearer"* ]]; then
+            curl_cmd+=" -H 'Authorization: Bearer [REDACTED]'"
+          else
+            curl_cmd+=" -H '$arg'"
+          fi
+        elif [[ "$arg" == *" "* ]]; then
+          curl_cmd+=" '$arg'"
+        else
+          curl_cmd+=" $arg"
+        fi
+      done
+      echo "[curl] $curl_cmd" >&2
+    fi
+
     local output curl_exit
     output=$(curl "${curl_args[@]}") || curl_exit=$?
 

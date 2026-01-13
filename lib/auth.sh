@@ -8,7 +8,7 @@
 BCQ_REDIRECT_PORT="${BCQ_REDIRECT_PORT:-8976}"
 BCQ_REDIRECT_URI="http://127.0.0.1:$BCQ_REDIRECT_PORT/callback"
 
-BCQ_CLIENT_NAME="bcq CLI"
+BCQ_CLIENT_NAME="bcq"
 BCQ_CLIENT_URI="https://github.com/basecamp/bcq"
 
 # Cached OAuth server metadata (populated by _ensure_oauth_config)

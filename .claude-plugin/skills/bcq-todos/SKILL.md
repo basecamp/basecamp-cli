@@ -14,7 +14,7 @@ triggers:
 
 # bcq Todo Operations
 
-Manage Basecamp todos via the `bcq` CLI.
+Manage Basecamp todos via `bcq`.
 
 ## List Todos
 

@@ -1,7 +1,7 @@
 ---
 name: bcq-reference
 description: |
-  Command reference for bcq (Basecamp CLI). Use when needing to interact with
+  Command reference for bcq (Basecamp Query Tool). Use when needing to interact with
   Basecamp: list projects, manage todos, cards, campfire chat, add comments.
   Covers all bcq commands with examples and output patterns.
 triggers:
@@ -19,7 +19,7 @@ triggers:
 
 # bcq Command Reference
 
-`bcq` is an agent-first CLI for the Basecamp API. All commands output structured JSON by default (for piping to jq) or human-readable markdown when run in a TTY.
+`bcq` is an agent-first tool for the Basecamp API. All commands output structured JSON by default (for piping to jq) or human-readable markdown when run in a TTY.
 
 ## Quick Start
 

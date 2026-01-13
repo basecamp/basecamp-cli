@@ -95,3 +95,19 @@ load test_helper
   assert_json_not_null ".auth"
   assert_json_not_null ".context"
 }
+
+
+# Verbose mode
+
+@test "verbose mode shows curl commands with redacted token" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # Run with verbose and capture stderr
+  run bash -c "bcq -v projects 2>&1 | grep '\[curl\]'"
+
+  # Should contain curl command with redacted token
+  assert_output_contains "[curl] curl"
+  assert_output_contains "[REDACTED]"
+  assert_output_not_contains "test-token"
+}

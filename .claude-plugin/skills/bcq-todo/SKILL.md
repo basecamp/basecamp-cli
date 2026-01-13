@@ -14,7 +14,7 @@ argument-hint: "<action> [content/id]"
 
 # /todo - Quick Todo Operations
 
-Fast todo management with bcq CLI.
+Fast todo management with bcq.
 
 ## Quick Patterns
 

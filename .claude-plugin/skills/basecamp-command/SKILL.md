@@ -2,7 +2,7 @@
 name: basecamp
 description: |
   Primary Basecamp workflow command. Create todos, check status, link code to tasks,
-  and coordinate with your team. Works with the bcq CLI.
+  and coordinate with your team. Works with bcq.
 triggers:
   - basecamp
   - /basecamp

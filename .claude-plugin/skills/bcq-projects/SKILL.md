@@ -14,7 +14,7 @@ triggers:
 
 # bcq Project Navigation
 
-Discover and explore Basecamp projects via the `bcq` CLI.
+Discover and explore Basecamp projects via `bcq`.
 
 ## List All Projects
 
