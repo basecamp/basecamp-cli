@@ -71,6 +71,7 @@ main() {
     recordings) cmd_recordings "$@" ;;
     search)     cmd_search "$@" ;;
     show)       cmd_show "$@" ;;
+    subscriptions) cmd_subscriptions "$@" ;;
     people)     cmd_people "$@" ;;
     me)         cmd_me "$@" ;;
     webhooks)   cmd_webhooks "$@" ;;
