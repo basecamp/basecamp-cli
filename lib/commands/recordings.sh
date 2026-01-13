@@ -17,6 +17,18 @@ cmd_recordings() {
       shift || true
       _recordings_list "$@"
       ;;
+    trash|trashed)
+      shift || true
+      _recordings_status "trashed" "$@"
+      ;;
+    archive|archived)
+      shift || true
+      _recordings_status "archived" "$@"
+      ;;
+    restore|active)
+      shift || true
+      _recordings_status "active" "$@"
+      ;;
     --help|-h)
       _help_recordings
       ;;
@@ -123,6 +135,61 @@ _recordings_list() {
     echo
     _recordings_table "$response" "$type"
   fi
+}
+
+
+_recordings_status() {
+  local new_status="$1"
+  shift || true
+  local recording_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$recording_id" ]]; then
+          recording_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$recording_id" ]]; then
+    die "Recording ID required" $EXIT_USAGE "Usage: bcq recordings $new_status <id> --in <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --in <project>"
+  fi
+
+  local response
+  response=$(api_put "/buckets/$project/recordings/$recording_id/status/$new_status.json" "{}")
+
+  local status_msg
+  case "$new_status" in
+    trashed) status_msg="Trashed" ;;
+    archived) status_msg="Archived" ;;
+    active) status_msg="Restored" ;;
+    *) status_msg="Changed to $new_status" ;;
+  esac
+
+  local summary="$status_msg recording #$recording_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq show $recording_id --in $project" "View recording")"
+  )
+
+  output "${response:-'{}'}" "$summary" "$bcs"
 }
 
 
