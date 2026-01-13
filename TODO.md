@@ -202,3 +202,8 @@ Track implementation progress here. Check off items as completed.
 - Best approach for mock server in tests? (Ruby WEBrick vs Python vs Node)
 - Should we support `bcq todos | bcq done` pipeline for bulk ops?
 - How to handle multi-account users in context?
+# Deferred Work
+
+## examples/ Workflow Documentation
+Add workflow examples once real usage patterns emerge and prove valuable.
+Capture what actually works rather than speculative patterns.
