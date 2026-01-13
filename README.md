@@ -179,4 +179,4 @@ Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `apt
 
 ## License
 
-MIT
+[MIT](LICENSE.md)
