@@ -34,10 +34,13 @@ cmd_cards() {
 
   case "$action" in
     columns) _cards_columns "$@" ;;
+    column) _cards_column "$@" ;;
     create) _cards_create "$@" ;;
     get|show) _cards_show "$@" ;;
     list) _cards_list "$@" ;;
     move) _cards_move "$@" ;;
+    steps) _cards_steps "$@" ;;
+    step) _cards_step "$@" ;;
     update) _cards_update "$@" ;;
     --help|-h) _help_cards ;;
     *)
@@ -218,6 +221,884 @@ _cards_columns_md() {
   echo "*Use column ID for stability (names can change)*"
   echo
   md_breadcrumbs "$breadcrumbs"
+}
+
+# Column management sub-command
+_cards_column() {
+  local action="${1:-}"
+
+  case "$action" in
+    show|get) shift; _cards_column_show "$@" ;;
+    create) shift; _cards_column_create "$@" ;;
+    update) shift; _cards_column_update "$@" ;;
+    move) shift; _cards_column_move "$@" ;;
+    watch) shift; _cards_column_watch "$@" ;;
+    unwatch) shift; _cards_column_unwatch "$@" ;;
+    on-hold) shift; _cards_column_on_hold "$@" ;;
+    no-on-hold) shift; _cards_column_no_on_hold "$@" ;;
+    color) shift; _cards_column_color "$@" ;;
+    *)
+      if [[ "$action" =~ ^[0-9]+$ ]]; then
+        _cards_column_show "$@"
+      else
+        die "Unknown column action: $action" $EXIT_USAGE "Actions: show, create, update, move, watch, unwatch, on-hold, no-on-hold, color"
+      fi
+      ;;
+  esac
+}
+
+# GET /buckets/:bucket/card_tables/columns/:id.json
+_cards_column_show() {
+  local column_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local response
+  response=$(api_get "/buckets/$project/card_tables/columns/$column_id.json")
+
+  local title cards_count
+  title=$(echo "$response" | jq -r '.title // "Column"')
+  cards_count=$(echo "$response" | jq -r '.cards_count // 0')
+  local summary="$title ($cards_count cards)"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "cards" "bcq cards --in $project --column $column_id" "List cards in column")" \
+    "$(breadcrumb "update" "bcq cards column update $column_id --project $project" "Update column")" \
+    "$(breadcrumb "columns" "bcq cards columns --in $project" "List all columns")"
+  )
+
+  output "$response" "$summary" "$bcs" "_cards_column_show_md"
+}
+
+_cards_column_show_md() {
+  local data="$1"
+  local summary="$2"
+  local breadcrumbs="$3"
+
+  local title description color cards_count
+  title=$(echo "$data" | jq -r '.title // "Column"')
+  description=$(echo "$data" | jq -r '.description // ""')
+  color=$(echo "$data" | jq -r '.color // "none"')
+  cards_count=$(echo "$data" | jq -r '.cards_count // 0')
+
+  echo "## Column: $title"
+  echo
+  echo "**Cards**: $cards_count"
+  echo "**Color**: $color"
+  if [[ -n "$description" ]] && [[ "$description" != "null" ]]; then
+    echo "**Description**: $description"
+  fi
+  echo
+  md_breadcrumbs "$breadcrumbs"
+}
+
+# POST /buckets/:bucket/card_tables/:card_table/columns.json
+_cards_column_create() {
+  local title="" description="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --description|-d)
+        [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
+        description="$2"
+        shift 2
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        if [[ -z "$title" ]]; then
+          title="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$title" ]]; then
+    die "Column title required" $EXIT_USAGE "Usage: bcq cards column create \"title\" --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  # Get card table ID from project dock
+  local project_data card_table_id
+  project_data=$(api_get "/projects/$project.json")
+  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
+
+  if [[ -z "$card_table_id" ]]; then
+    die "No card table found in project $project" $EXIT_NOT_FOUND
+  fi
+
+  local payload
+  payload=$(jq -n --arg title "$title" '{title: $title}')
+  [[ -n "$description" ]] && payload=$(echo "$payload" | jq --arg d "$description" '. + {description: $d}')
+
+  local response
+  response=$(api_post "/buckets/$project/card_tables/$card_table_id/columns.json" "$payload")
+
+  local column_id
+  column_id=$(echo "$response" | jq -r '.id')
+  local summary="✓ Created column #$column_id: $title"
+
+  output "$response" "$summary"
+}
+
+# PUT /buckets/:bucket/card_tables/columns/:id.json
+_cards_column_update() {
+  local column_id="" title="" description="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --title|-t)
+        [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
+        title="$2"
+        shift 2
+        ;;
+      --description|-d)
+        [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
+        description="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column update <id> --title \"new title\""
+  fi
+
+  if [[ -z "$title" ]] && [[ -z "$description" ]]; then
+    die "No update fields provided" $EXIT_USAGE "Use --title or --description"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload="{}"
+  [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')
+  [[ -n "$description" ]] && payload=$(echo "$payload" | jq --arg d "$description" '. + {description: $d}')
+
+  local response
+  response=$(api_put "/buckets/$project/card_tables/columns/$column_id.json" "$payload")
+
+  local summary="✓ Updated column #$column_id"
+
+  output "$response" "$summary"
+}
+
+# POST /buckets/:bucket/card_tables/:card_table/moves.json (for columns)
+_cards_column_move() {
+  local column_id="" position="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --position|--pos)
+        [[ -z "${2:-}" ]] && die "--position requires a value" $EXIT_USAGE
+        position="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column move <id> --position <n>"
+  fi
+
+  if [[ -z "$position" ]]; then
+    die "--position required" $EXIT_USAGE "Specify target position (1-indexed)"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  # Get card table ID
+  local project_data card_table_id
+  project_data=$(api_get "/projects/$project.json")
+  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
+
+  if [[ -z "$card_table_id" ]]; then
+    die "No card table found in project $project" $EXIT_NOT_FOUND
+  fi
+
+  local payload
+  payload=$(jq -n \
+    --argjson source "$column_id" \
+    --argjson target "$card_table_id" \
+    --argjson position "$position" \
+    '{source_id: $source, target_id: $target, position: $position}')
+
+  api_post "/buckets/$project/card_tables/$card_table_id/moves.json" "$payload" >/dev/null
+
+  local summary="✓ Moved column #$column_id to position $position"
+
+  output '{}' "$summary"
+}
+
+# POST /buckets/:bucket/card_tables/lists/:id/subscription.json
+_cards_column_watch() {
+  local column_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column watch <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  api_post "/buckets/$project/card_tables/lists/$column_id/subscription.json" '{}' >/dev/null
+
+  local summary="✓ Now watching column #$column_id"
+
+  output '{}' "$summary"
+}
+
+# DELETE /buckets/:bucket/card_tables/lists/:id/subscription.json
+_cards_column_unwatch() {
+  local column_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column unwatch <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  api_delete "/buckets/$project/card_tables/lists/$column_id/subscription.json" >/dev/null
+
+  local summary="✓ Stopped watching column #$column_id"
+
+  output '{}' "$summary"
+}
+
+# POST /buckets/:bucket/card_tables/columns/:id/on_hold.json
+_cards_column_on_hold() {
+  local column_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column on-hold <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local response
+  response=$(api_post "/buckets/$project/card_tables/columns/$column_id/on_hold.json" '{}')
+
+  local summary="✓ Enabled on-hold section for column #$column_id"
+
+  output "$response" "$summary"
+}
+
+# DELETE /buckets/:bucket/card_tables/columns/:id/on_hold.json
+_cards_column_no_on_hold() {
+  local column_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column no-on-hold <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local response
+  response=$(api_delete "/buckets/$project/card_tables/columns/$column_id/on_hold.json")
+
+  local summary="✓ Disabled on-hold section for column #$column_id"
+
+  output "$response" "$summary"
+}
+
+# PUT /buckets/:bucket/card_tables/columns/:id/color.json
+_cards_column_color() {
+  local column_id="" color="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --color|-c)
+        [[ -z "${2:-}" ]] && die "--color requires a value" $EXIT_USAGE
+        color="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$column_id" ]]; then
+          column_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$column_id" ]]; then
+    die "Column ID required" $EXIT_USAGE "Usage: bcq cards column color <id> --color <color>"
+  fi
+
+  if [[ -z "$color" ]]; then
+    die "--color required" $EXIT_USAGE "Colors: white, red, orange, yellow, green, blue, aqua, purple, gray, pink, brown"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload
+  payload=$(jq -n --arg c "$color" '{color: $c}')
+
+  local response
+  response=$(api_put "/buckets/$project/card_tables/columns/$column_id/color.json" "$payload")
+
+  local summary="✓ Set column #$column_id color to $color"
+
+  output "$response" "$summary"
+}
+
+# Step management sub-command
+_cards_step() {
+  local action="${1:-}"
+
+  case "$action" in
+    create) shift; _cards_step_create "$@" ;;
+    update) shift; _cards_step_update "$@" ;;
+    complete) shift; _cards_step_complete "$@" ;;
+    uncomplete) shift; _cards_step_uncomplete "$@" ;;
+    move) shift; _cards_step_move "$@" ;;
+    *)
+      die "Unknown step action: $action" $EXIT_USAGE "Actions: create, update, complete, uncomplete, move"
+      ;;
+  esac
+}
+
+# Steps are returned as part of card, so _cards_steps just shows card with step info
+_cards_steps() {
+  local card_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --card|-c)
+        [[ -z "${2:-}" ]] && die "--card requires a value" $EXIT_USAGE
+        card_id="$2"
+        shift 2
+        ;;
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$card_id" ]]; then
+          card_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$card_id" ]]; then
+    die "Card ID required" $EXIT_USAGE "Usage: bcq cards steps <card_id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local response
+  response=$(api_get "/buckets/$project/card_tables/cards/$card_id.json")
+
+  local steps
+  steps=$(echo "$response" | jq '.steps // []')
+  local count
+  count=$(echo "$steps" | jq 'length')
+  local summary="$count steps on card #$card_id"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "create" "bcq cards step create \"title\" --card $card_id --project $project" "Add step")" \
+    "$(breadcrumb "card" "bcq cards $card_id --project $project" "View card")"
+  )
+
+  output "$steps" "$summary" "$bcs" "_cards_steps_md"
+}
+
+_cards_steps_md() {
+  local data="$1"
+  local summary="$2"
+  local breadcrumbs="$3"
+
+  echo "## Card Steps ($summary)"
+  echo
+
+  local count
+  count=$(echo "$data" | jq 'length')
+
+  if [[ "$count" -eq 0 ]]; then
+    echo "*No steps*"
+  else
+    echo "| # | Step | Due | Assignees | Done |"
+    echo "|---|------|-----|-----------|------|"
+    echo "$data" | jq -r '.[] | "| \(.id) | \(.title // "-" | .[0:35]) | \(.due_on // "-") | \([.assignees[]?.name] | join(", ") | if . == "" then "-" else . end) | \(.completed // false) |"'
+  fi
+  echo
+  md_breadcrumbs "$breadcrumbs"
+}
+
+# POST /buckets/:bucket/card_tables/cards/:card/steps.json
+_cards_step_create() {
+  local title="" card_id="" due="" assignees="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --card|-c)
+        [[ -z "${2:-}" ]] && die "--card requires a value" $EXIT_USAGE
+        card_id="$2"
+        shift 2
+        ;;
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --due|-d)
+        [[ -z "${2:-}" ]] && die "--due requires a value" $EXIT_USAGE
+        due="$2"
+        shift 2
+        ;;
+      --assignees|-a)
+        [[ -z "${2:-}" ]] && die "--assignees requires a value" $EXIT_USAGE
+        assignees="$2"
+        shift 2
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        if [[ -z "$title" ]]; then
+          title="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$title" ]]; then
+    die "Step title required" $EXIT_USAGE "Usage: bcq cards step create \"title\" --card <card_id>"
+  fi
+
+  if [[ -z "$card_id" ]]; then
+    die "--card required" $EXIT_USAGE "Specify the card ID"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload
+  payload=$(jq -n --arg title "$title" '{title: $title}')
+
+  if [[ -n "$due" ]]; then
+    local due_date
+    due_date=$(parse_date "$due")
+    payload=$(echo "$payload" | jq --arg d "$due_date" '. + {due_on: $d}')
+  fi
+
+  [[ -n "$assignees" ]] && payload=$(echo "$payload" | jq --arg a "$assignees" '. + {assignees: $a}')
+
+  local response
+  response=$(api_post "/buckets/$project/card_tables/cards/$card_id/steps.json" "$payload")
+
+  local step_id
+  step_id=$(echo "$response" | jq -r '.id')
+  local summary="✓ Created step #$step_id: $title"
+
+  output "$response" "$summary"
+}
+
+# PUT /buckets/:bucket/card_tables/steps/:id.json
+_cards_step_update() {
+  local step_id="" title="" due="" assignees="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --title|-t)
+        [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
+        title="$2"
+        shift 2
+        ;;
+      --due|-d)
+        [[ -z "${2:-}" ]] && die "--due requires a value" $EXIT_USAGE
+        due="$2"
+        shift 2
+        ;;
+      --assignees|-a)
+        [[ -z "${2:-}" ]] && die "--assignees requires a value" $EXIT_USAGE
+        assignees="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$step_id" ]]; then
+          step_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$step_id" ]]; then
+    die "Step ID required" $EXIT_USAGE "Usage: bcq cards step update <id> --title \"new title\""
+  fi
+
+  if [[ -z "$title" ]] && [[ -z "$due" ]] && [[ -z "$assignees" ]]; then
+    die "No update fields provided" $EXIT_USAGE "Use --title, --due, or --assignees"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload="{}"
+  [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')
+
+  if [[ -n "$due" ]]; then
+    local due_date
+    due_date=$(parse_date "$due")
+    payload=$(echo "$payload" | jq --arg d "$due_date" '. + {due_on: $d}')
+  fi
+
+  [[ -n "$assignees" ]] && payload=$(echo "$payload" | jq --arg a "$assignees" '. + {assignees: $a}')
+
+  local response
+  response=$(api_put "/buckets/$project/card_tables/steps/$step_id.json" "$payload")
+
+  local summary="✓ Updated step #$step_id"
+
+  output "$response" "$summary"
+}
+
+# PUT /buckets/:bucket/card_tables/steps/:id/completions.json
+_cards_step_complete() {
+  local step_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$step_id" ]]; then
+          step_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$step_id" ]]; then
+    die "Step ID required" $EXIT_USAGE "Usage: bcq cards step complete <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload
+  payload='{"completion": "on"}'
+
+  local response
+  response=$(api_put "/buckets/$project/card_tables/steps/$step_id/completions.json" "$payload")
+
+  local summary="✓ Completed step #$step_id"
+
+  output "$response" "$summary"
+}
+
+# PUT /buckets/:bucket/card_tables/steps/:id/completions.json (uncomplete)
+_cards_step_uncomplete() {
+  local step_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$step_id" ]]; then
+          step_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$step_id" ]]; then
+    die "Step ID required" $EXIT_USAGE "Usage: bcq cards step uncomplete <id> --project <project>"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload
+  payload='{"completion": "off"}'
+
+  local response
+  response=$(api_put "/buckets/$project/card_tables/steps/$step_id/completions.json" "$payload")
+
+  local summary="✓ Uncompleted step #$step_id"
+
+  output "$response" "$summary"
+}
+
+# POST /buckets/:bucket/card_tables/cards/:card/positions.json
+_cards_step_move() {
+  local step_id="" card_id="" position="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --card|-c)
+        [[ -z "${2:-}" ]] && die "--card requires a value" $EXIT_USAGE
+        card_id="$2"
+        shift 2
+        ;;
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --position|--pos)
+        [[ -z "${2:-}" ]] && die "--position requires a value" $EXIT_USAGE
+        position="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$step_id" ]]; then
+          step_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$step_id" ]]; then
+    die "Step ID required" $EXIT_USAGE "Usage: bcq cards step move <step_id> --card <card_id> --position <n>"
+  fi
+
+  if [[ -z "$card_id" ]]; then
+    die "--card required" $EXIT_USAGE "Specify the card ID"
+  fi
+
+  if [[ -z "$position" ]]; then
+    die "--position required" $EXIT_USAGE "Specify target position (0-indexed)"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE
+  fi
+
+  local payload
+  payload=$(jq -n \
+    --argjson source "$step_id" \
+    --argjson position "$position" \
+    '{source_id: $source, position: $position}')
+
+  api_post "/buckets/$project/card_tables/cards/$card_id/positions.json" "$payload" >/dev/null
+
+  local summary="✓ Moved step #$step_id to position $position"
+
+  output '{}' "$summary"
 }
 
 _cards_show() {
@@ -568,7 +1449,7 @@ Manage cards in Card Tables (Kanban boards).
     bcq cards [action] [options]
     bcq card "title" [options]    # Shortcut for create
 
-### Actions
+### Card Actions
 
     columns           List columns with stable IDs
     create "title"    Create a new card
@@ -577,35 +1458,54 @@ Manage cards in Card Tables (Kanban boards).
     show <id>         Show card details
     update <id>       Update card attributes
 
+### Column Actions (bcq cards column <action>)
+
+    show <id>         Show column details
+    create "title"    Create a new column
+    update <id>       Update column title/description
+    move <id>         Reorder column position
+    watch <id>        Start watching column
+    unwatch <id>      Stop watching column
+    on-hold <id>      Enable on-hold section
+    no-on-hold <id>   Disable on-hold section
+    color <id>        Change column color
+
+### Step Actions (bcq cards step <action>)
+
+    create "title"    Create step on a card
+    update <id>       Update step
+    complete <id>     Mark step complete
+    uncomplete <id>   Mark step incomplete
+    move <id>         Reposition step
+
 ### Options
 
     --in, -p <project>      Project ID
     --column, -c <id|name>  Filter by or target column (ID preferred for stability)
-    --title, -t <text>      Card title (for update)
+    --card <id>             Card ID (for step operations)
+    --title, -t <text>      Title (for update)
     --content, -b <text>    Card description (for update)
     --due, -d <date>        Due date (for update)
     --assignee, -a <id>     Assignee ID or 'me' (for update)
+    --color <color>         Column color (white, red, orange, yellow, green, blue, aqua, purple, gray, pink, brown)
+    --position <n>          Position for move operations
 
 ### Examples
 
     # List all cards in project
     bcq cards --in 12345
 
-    # List cards in specific column
-    bcq cards --in 12345 --column "In Progress"
-
     # Create card
     bcq card "New feature" --in 12345
-    bcq card "Bug fix" --in 12345 --column "Inbox"
 
-    # Update card
-    bcq cards update 67890 --title "Updated title" --due tomorrow
+    # Column operations
+    bcq cards column create "In Progress" --in 12345
+    bcq cards column color 67890 --color blue --in 12345
 
-    # Move card
-    bcq cards move 67890 --to "Done"
-
-    # Show card details
-    bcq cards 67890
+    # Step operations
+    bcq cards steps 12345 --in 67890           # List steps on card
+    bcq cards step create "Do this" --card 12345 --in 67890
+    bcq cards step complete 111 --in 67890
 
 EOF
 }
