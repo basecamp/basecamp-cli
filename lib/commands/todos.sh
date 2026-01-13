@@ -18,6 +18,8 @@ cmd_todos() {
     get|show) _todos_show "$@" ;;
     create) cmd_todo_create "$@" ;;
     complete|done) cmd_todo_complete "$@" ;;
+    uncomplete|reopen) cmd_todo_uncomplete "$@" ;;
+    position|reorder|move) _todos_position "$@" ;;
     --help|-h) _help_todos ;;
     *)
       if [[ "$action" =~ ^[0-9]+$ ]]; then
@@ -400,4 +402,118 @@ cmd_todo_complete() {
   result=$(jq -n --argjson ids "$(printf '%s\n' "${completed[@]}" | jq -R . | jq -s .)" '{completed: $ids}')
 
   output "$result" "$summary" "$bcs"
+}
+
+
+cmd_todo_uncomplete() {
+  local todo_ids=()
+  local project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project|-p|--in)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          todo_ids+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ ${#todo_ids[@]} -eq 0 ]]; then
+    die "Todo ID(s) required" $EXIT_USAGE "Usage: bcq reopen <id> [id...]"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
+  fi
+
+  local reopened=()
+  for todo_id in "${todo_ids[@]}"; do
+    api_delete "/buckets/$project/todos/$todo_id/completion.json" &>/dev/null && {
+      reopened+=("$todo_id")
+    }
+  done
+
+  local count=${#reopened[@]}
+  local summary="↺ Reopened $count todo(s): ${reopened[*]}"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "list" "bcq todos --in $project" "List todos")" \
+    "$(breadcrumb "complete" "bcq done ${reopened[0]}" "Complete again")"
+  )
+
+  local result
+  result=$(jq -n --argjson ids "$(printf '%s\n' "${reopened[@]}" | jq -R . | jq -s .)" '{reopened: $ids}')
+
+  output "$result" "$summary" "$bcs"
+}
+
+
+_todos_position() {
+  local todo_id="" position=""
+  local project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project|-p|--in)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --position|--to)
+        [[ -z "${2:-}" ]] && die "--position requires a value" $EXIT_USAGE
+        position="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$todo_id" ]]; then
+          todo_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$todo_id" ]]; then
+    die "Todo ID required" $EXIT_USAGE "Usage: bcq todos position <id> --to <position>"
+  fi
+
+  if [[ -z "$position" ]]; then
+    die "Position required" $EXIT_USAGE "Use --to <position> (1 = top)"
+  fi
+
+  if [[ -z "$project" ]]; then
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
+  fi
+
+  local payload
+  payload=$(jq -n --argjson pos "$position" '{position: $pos}')
+
+  local response
+  response=$(api_put "/buckets/$project/todos/$todo_id/position.json" "$payload")
+
+  local summary="Moved todo #$todo_id to position $position"
+
+  local bcs
+  bcs=$(breadcrumbs \
+    "$(breadcrumb "show" "bcq todos $todo_id --in $project" "View todo")" \
+    "$(breadcrumb "list" "bcq todos --in $project" "List todos")"
+  )
+
+  output "${response:-'{}'}" "$summary" "$bcs"
 }
