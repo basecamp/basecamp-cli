@@ -17,7 +17,7 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | Section | Endpoints | bcq Command | Status | Priority | Notes |
 |---------|-----------|-------------|--------|----------|-------|
 | **Core** |
-| projects | 9 | `projects` | ✅ | - | list, show |
+| projects | 9 | `projects` | 🔶 | high | list, show (create/update/delete pending) |
 | todos | 11 | `todos`, `todo`, `done` | ✅ | - | list, show, create, complete |
 | todolists | 8 | `todolists` | ✅ | - | list, show |
 | todosets | 3 | - | 🔶 | low | Container for todolists, rarely needed directly |
