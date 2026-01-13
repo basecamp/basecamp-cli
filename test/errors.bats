@@ -208,6 +208,69 @@ load test_helper
   assert_output_contains "Search query required"
 }
 
+@test "reopen without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq reopen
+  assert_failure
+  assert_output_contains "Todo ID(s) required"
+}
+
+@test "todos position without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq todos position --to 1
+  assert_failure
+  assert_output_contains "Todo ID required"
+}
+
+@test "todos position without position shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq todos position 123
+  assert_failure
+  assert_output_contains "Position required"
+}
+
+@test "comments list without recording shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq comments
+  assert_failure
+  assert_output_contains "Recording ID required"
+}
+
+@test "comments show without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq comments show
+  assert_failure
+  assert_output_contains "Comment ID required"
+}
+
+@test "comments update without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq comments update "new content"
+  assert_failure
+  assert_output_contains "Comment ID required"
+}
+
+@test "comments update without content shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq comments update 123
+  assert_failure
+  assert_output_contains "Content required"
+}
+
 @test "messages without project shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'

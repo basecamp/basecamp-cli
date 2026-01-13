@@ -19,11 +19,11 @@ _bcq_completions() {
   }
 
   # Top-level commands (alphabetical)
-  local commands="assign auth campfire card cards comment config docs done files help me message messages mcp people projects recordings search show todo todolists todos unassign uploads vaults webhooks"
+  local commands="assign auth campfire card cards comment config docs done files help me message messages mcp people projects recordings reopen search show todo todolists todos unassign uploads vaults webhooks"
 
   # Subcommands by resource
   local projects_actions="list show"
-  local todos_actions="list show create complete"
+  local todos_actions="list show create complete uncomplete reopen position reorder"
   local todolists_actions="list show"
   local messages_actions="list show create post"
   local campfire_actions="list messages post"
