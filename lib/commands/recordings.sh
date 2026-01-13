@@ -174,6 +174,11 @@ _recordings_status() {
   local response
   response=$(api_put "/buckets/$project/recordings/$recording_id/status/$new_status.json" "{}")
 
+  # Handle 204 No Content (empty response)
+  if [[ -z "$response" ]]; then
+    response='{}'
+  fi
+
   local status_msg
   case "$new_status" in
     trashed) status_msg="Trashed" ;;
@@ -189,7 +194,7 @@ _recordings_status() {
     "$(breadcrumb "show" "bcq show $recording_id --in $project" "View recording")"
   )
 
-  output "${response:-'{}'}" "$summary" "$bcs"
+  output "$response" "$summary" "$bcs"
 }
 
 
