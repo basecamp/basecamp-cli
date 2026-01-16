@@ -1,0 +1,34 @@
+# Ephemeral run results (not committed)
+results/
+
+# Generated fixture data - contains account-specific IDs
+.fixtures.json
+
+# Local bcq config (contains credentials)
+.basecamp/
+
+# Cache directory
+.cache/
+
+# Local environment state (contains paths, run IDs)
+.bench-env
+
+# Debug scratch files
+debug/
+
+# Injection state
+.inject-state
+inject-curl
+.env
+
+# Development scratch files
+*.json
+!spec.yaml
+response.txt
+sweep_output.log
+typescript
+todoset_id_*.txt
+task12_summary.md
+
+# Keep reports/ JSON files
+!reports/*.json

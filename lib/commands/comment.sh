@@ -271,21 +271,36 @@ EOF
 }
 
 
-# Shortcut: bcq comment "text" --on <id> (create only)
+# Shortcut: bcq comment "text" --on <id> [id...] (create only, supports batch)
 cmd_comment() {
   local content=""
-  local recording_id=""
+  local recording_ids=()
   local project=""
+  local from_stdin=""
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --on|-r)
         [[ -z "${2:-}" ]] && die "--on requires a recording ID" $EXIT_USAGE
-        recording_id="$2"
+        # Support comma-separated IDs
+        IFS=',' read -ra ids <<< "$2"
+        recording_ids+=("${ids[@]}")
         shift 2
         ;;
-      --project|-p)
+      --ids)
+        # Read IDs from stdin or argument
+        if [[ "${2:-}" == "@-" ]] || [[ "${2:-}" == "-" ]]; then
+          from_stdin="true"
+          shift 2
+        else
+          [[ -z "${2:-}" ]] && die "--ids requires IDs or @- for stdin" $EXIT_USAGE
+          IFS=',' read -ra ids <<< "$2"
+          recording_ids+=("${ids[@]}")
+          shift 2
+        fi
+        ;;
+      --project|-p|--in)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
@@ -300,20 +315,35 @@ cmd_comment() {
       *)
         if [[ -z "$content" ]]; then
           content="$1"
+        elif [[ "$1" =~ ^[0-9]+$ ]]; then
+          recording_ids+=("$1")
         fi
         shift
         ;;
     esac
   done
 
-  if [[ -z "$content" ]]; then
-    die "Comment content required" $EXIT_USAGE \
-      "Usage: bcq comment \"content\" --on <recording_id>"
+  # Read IDs from stdin if requested
+  if [[ "$from_stdin" == "true" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      # Support one ID per line or comma-separated
+      IFS=',' read -ra ids <<< "$line"
+      for id in "${ids[@]}"; do
+        id=$(echo "$id" | tr -d '[:space:]')
+        [[ "$id" =~ ^[0-9]+$ ]] && recording_ids+=("$id")
+      done
+    done
   fi
 
-  if [[ -z "$recording_id" ]]; then
-    die "Recording ID required" $EXIT_USAGE \
-      "Usage: bcq comment \"content\" --on <recording_id>"
+  if [[ -z "$content" ]]; then
+    die "Comment content required" $EXIT_USAGE \
+      "Usage: bcq comment \"content\" --on <id> [id...]"
+  fi
+
+  if [[ ${#recording_ids[@]} -eq 0 ]]; then
+    die "Recording ID(s) required" $EXIT_USAGE \
+      "Usage: bcq comment \"content\" --on <id> [id...]"
   fi
 
   # Get project from context if not specified
@@ -330,47 +360,83 @@ cmd_comment() {
   local payload
   payload=$(jq -n --arg content "$content" '{content: $content}')
 
-  local response
-  response=$(api_post "/buckets/$project/recordings/$recording_id/comments.json" "$payload")
+  # Batch comment on all recording IDs
+  local commented=()
+  local comment_ids=()
+  local failed=()
+  for recording_id in "${recording_ids[@]}"; do
+    local response
+    # Capture stdout only; let stderr flow through for verbose output
+    if response=$(api_post "/buckets/$project/recordings/$recording_id/comments.json" "$payload"); then
+      commented+=("$recording_id")
+      comment_ids+=("$(echo "$response" | jq -r '.id')")
+    else
+      failed+=("$recording_id")
+    fi
+  done
 
-  local comment_id
-  comment_id=$(echo "$response" | jq -r '.id')
-  local summary="✓ Added comment #$comment_id to recording #$recording_id"
+  local count=${#commented[@]}
+  local fail_count=${#failed[@]}
+  local summary
+  if ((fail_count > 0)); then
+    summary="⚠ Added $count comment(s), $fail_count failed: ${failed[*]}"
+  else
+    summary="✓ Added $count comment(s) to: ${commented[*]}"
+  fi
 
   local bcs
   bcs=$(breadcrumbs \
-    "$(breadcrumb "view" "bcq show comment $comment_id --project $project" "View comment")" \
-    "$(breadcrumb "recording" "bcq show $recording_id --project $project" "View recording")"
+    "$(breadcrumb "list" "bcq todos --in $project" "List todos")"
   )
 
-  output "$response" "$summary" "$bcs"
+  local result
+  result=$(jq -n \
+    --argjson recordings "$(printf '%s\n' "${commented[@]}" | jq -R . | jq -s .)" \
+    --argjson comments "$(printf '%s\n' "${comment_ids[@]}" | jq -R . | jq -s .)" \
+    --argjson failed "$(printf '%s\n' "${failed[@]}" | jq -R . | jq -s .)" \
+    '{commented_recordings: $recordings, comment_ids: $comments, failed: $failed}')
+
+  output "$result" "$summary" "$bcs"
+
+  # Exit with error if any failed
+  ((fail_count > 0)) && return 1
+  return 0
 }
 
 _help_comment() {
   cat <<'EOF'
 ## bcq comment
 
-Add a comment to any Basecamp recording (todo, message, etc.)
+Add a comment to one or more Basecamp recordings (todos, messages, etc.)
 
 ### Usage
 
-    bcq comment "content" --on <recording_id> [--project <id>]
+    bcq comment "content" --on <id> [id...] [--project <id>]
+    bcq comment "content" --on id1,id2,id3 [--project <id>]
+    echo "123 456 789" | bcq comment "content" --ids @-
 
 ### Examples
 
-    # Comment on a todo
+    # Comment on a single todo
     bcq comment "Fixed in commit abc123" --on 12345
 
-    # With explicit project
-    bcq comment "Done!" --on 12345 --project 67890
+    # Comment on multiple todos at once (batch)
+    bcq comment "Processed in sweep" --on 111 222 333
+
+    # Comma-separated IDs
+    bcq comment "Done!" --on 111,222,333 --project 67890
+
+    # Read IDs from stdin (useful with jq)
+    bcq todos --overdue --json | jq -r '.data[].id' | bcq comment "Swept" --ids @-
 
     # Link a PR to a todo
     bcq comment "PR: https://github.com/org/repo/pull/42" --on 12345
 
 ### Options
 
-    --on, -r <id>       Recording ID to comment on (required)
-    --project, -p <id>  Project ID (uses config default if not set)
+    --on, -r <id...>     Recording ID(s) to comment on (required)
+    --ids <ids|@->       IDs as comma-separated list or @- for stdin
+    --project, -p <id>   Project ID (uses config default if not set)
 
 EOF
 }
