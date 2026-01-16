@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+# Curl shim for benchmarks
+# Intercepts all curl calls for logging and optional error injection
+#
+# This script should be prepended to PATH during benchmark runs:
+#   export PATH="$BENCH_DIR:$PATH"
+
+set -euo pipefail
+
+BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INJECT_STATE_FILE="$BENCH_DIR/.inject-state"
+LOGFILE="${BCQ_BENCH_LOGFILE:-$BENCH_DIR/results/requests.log}"
+LOOP_DETECT_FILE="$BENCH_DIR/.loop-detect"
+MAX_IDENTICAL_REQUESTS="${BCQ_BENCH_MAX_LOOPS:-5}"  # Abort after this many identical requests
+
+# Find real curl (skip this script and any other shims)
+find_real_curl() {
+  for candidate in /usr/bin/curl /opt/homebrew/bin/curl /usr/local/bin/curl; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  echo "curl"  # Hope PATH has it somewhere else
+}
+
+REAL_CURL="$(find_real_curl)"
+
+# Parse curl args to extract URL, method, and write-out format
+parse_args() {
+  url=""
+  method="GET"
+  has_dump_header=false
+  header_file=""
+  header_to_stdout=false
+  write_out_format=""
+  output_file=""  # -o option
+  local next_is=""
+
+  for arg in "$@"; do
+    if [[ -n "$next_is" ]]; then
+      case "$next_is" in
+        method) method="$arg" ;;
+        header_file)
+          header_file="$arg"
+          has_dump_header=true
+          # Handle -D - (headers to stdout)
+          if [[ "$header_file" == "-" ]]; then
+            header_to_stdout=true
+          fi
+          ;;
+        write_out) write_out_format="$arg" ;;
+        output) output_file="$arg" ;;
+      esac
+      next_is=""
+      continue
+    fi
+
+    case "$arg" in
+      -X|--request) next_is="method" ;;
+      -D) next_is="header_file" ;;
+      -w|--write-out) next_is="write_out" ;;
+      -o|--output) next_is="output" ;;
+      -d|--data|--data-raw|--data-binary)
+        [[ "$method" == "GET" ]] && method="POST"
+        ;;
+      http://*|https://*) url="$arg" ;;
+    esac
+  done
+}
+
+# Format write-out string with actual values
+# Supports: %{http_code}, %{time_total}, %{size_download}
+format_write_out() {
+  local format="$1"
+  local http_code="$2"
+
+  # Replace curl format variables with actual values
+  local result="$format"
+  result="${result//'%{http_code}'/$http_code}"
+  result="${result//'%{response_code}'/$http_code}"
+  result="${result//'%{time_total}'/0.001}"
+  result="${result//'%{size_download}'/0}"
+
+  # Handle escaped newlines
+  result="${result//\\n/$'\n'}"
+
+  echo -n "$result"
+}
+
+# Get current time in milliseconds
+now_ms() {
+  if [[ "$(uname)" == "Darwin" ]]; then
+    perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000'
+  else
+    echo $(($(date +%s%N) / 1000000))
+  fi
+}
+
+# Log a request
+log_request() {
+  local method="$1" url="$2" http_code="$3" duration_ms="$4" injected="${5:-false}"
+  mkdir -p "$(dirname "$LOGFILE")"
+  local redacted_url="${url/access_token=*/access_token=[REDACTED]}"
+  # Also redact Bearer tokens from URL (shouldn't be there, but safety)
+  redacted_url="${redacted_url/Bearer */Bearer [REDACTED]}"
+  echo "{\"ts\":$(now_ms),\"method\":\"$method\",\"url\":\"$redacted_url\",\"http_code\":\"$http_code\",\"duration_ms\":$duration_ms,\"injected\":$injected}" >> "$LOGFILE"
+}
+
+# Check if we should inject an error
+# State file format: error_code remaining at_request match_pattern
+# Returns: error code to inject, or empty if no injection
+# Takes URL as $1 to check against match_pattern
+check_injection() {
+  local url="${1:-}"
+
+  if [[ ! -f "$INJECT_STATE_FILE" ]]; then
+    return 1
+  fi
+
+  local error_code remaining at_request match_pattern
+  read -r error_code remaining at_request match_pattern < "$INJECT_STATE_FILE" 2>/dev/null || return 1
+
+  # Default values for missing fields
+  remaining="${remaining:-0}"
+  at_request="${at_request:-0}"
+  match_pattern="${match_pattern:--}"
+
+  # No more injections remaining
+  if [[ -z "$error_code" ]] || [[ "$remaining" -le 0 ]]; then
+    return 1
+  fi
+
+  # Check match conditions
+  local should_inject=false
+
+  # at_request targeting: inject on specific request number
+  if [[ "$at_request" != "0" ]] && [[ "$at_request" != "-" ]]; then
+    # Get current request count from counter file (same as inject-proxy.sh uses)
+    local counter_file="$BENCH_DIR/.inject-counter"
+    local request_num=0
+    if [[ -f "$counter_file" ]]; then
+      request_num=$(cat "$counter_file" 2>/dev/null || echo 0)
+    fi
+    request_num=$((request_num + 1))
+    echo "$request_num" > "$counter_file"
+
+    if [[ "$request_num" -eq "$at_request" ]]; then
+      should_inject=true
+    fi
+  # match targeting: inject when URL contains pattern
+  elif [[ "$match_pattern" != "-" ]] && [[ -n "$url" ]]; then
+    # Debug: show what we're matching
+    if [[ "${BCQ_INJECT_DEBUG:-}" == "true" ]]; then
+      echo "[inject-debug] Checking URL: $url against pattern: $match_pattern" >&2
+    fi
+    if [[ "$url" == *"$match_pattern"* ]]; then
+      should_inject=true
+      if [[ "${BCQ_INJECT_DEBUG:-}" == "true" ]]; then
+        echo "[inject-debug] MATCH! Will inject $error_code" >&2
+      fi
+    fi
+  # No targeting: inject immediately
+  else
+    should_inject=true
+  fi
+
+  if [[ "$should_inject" != "true" ]]; then
+    return 1
+  fi
+
+  # Decrement count and preserve all fields
+  echo "$error_code $((remaining - 1)) $at_request $match_pattern" > "$INJECT_STATE_FILE"
+  echo "$error_code"
+  return 0
+}
+
+# Loop detection: abort if same request seen too many times
+# Returns 0 (allow) or 1 (abort - loop detected)
+check_loop() {
+  local method="$1"
+  local url="$2"
+
+  # Skip loop detection if disabled
+  if [[ "${BCQ_BENCH_LOOP_DETECT:-true}" != "true" ]]; then
+    return 0
+  fi
+
+  # Only detect loops on Basecamp API calls, not LLM API calls
+  if [[ "$url" != *"basecampapi.com"* ]] && [[ "$url" != *"basecamp.localhost"* ]]; then
+    return 0
+  fi
+
+  # Create signature for this request (method + URL without query params for more aggressive detection)
+  local sig="$method|$url"
+
+  # Initialize file if needed
+  if [[ ! -f "$LOOP_DETECT_FILE" ]]; then
+    echo "" > "$LOOP_DETECT_FILE"
+  fi
+
+  # Read last signature and count
+  local last_sig count
+  read -r last_sig count < "$LOOP_DETECT_FILE" 2>/dev/null || { last_sig=""; count=0; }
+  count="${count:-0}"
+
+  if [[ "$sig" == "$last_sig" ]]; then
+    count=$((count + 1))
+  else
+    count=1
+  fi
+
+  # Save current state
+  echo "$sig $count" > "$LOOP_DETECT_FILE"
+
+  if [[ "$count" -ge "$MAX_IDENTICAL_REQUESTS" ]]; then
+    echo "[curl-shim] LOOP DETECTED: Same request $count times: $method $url" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Create a proper HTTP response for injection
+# This creates a temp file with headers and returns the body
+# IMPORTANT: Use echo -n to avoid trailing newline (curl -w handles newlines)
+inject_error_response() {
+  local error_code="$1"
+  local header_file="$2"
+
+  case "$error_code" in
+    401)
+      if [[ -n "$header_file" ]]; then
+        cat > "$header_file" << 'EOF'
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+WWW-Authenticate: Bearer realm="Basecamp"
+
+EOF
+      fi
+      # No trailing newline - matches real curl behavior
+      echo -n '{"error": "The access token is invalid"}'
+      ;;
+    429)
+      if [[ -n "$header_file" ]]; then
+        cat > "$header_file" << 'EOF'
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Retry-After: 2
+
+EOF
+      fi
+      # No trailing newline - matches real curl behavior
+      echo -n '{"error": "Rate limit exceeded"}'
+      ;;
+  esac
+}
+
+# Main execution
+main() {
+  parse_args "$@"
+
+  local start_ms
+  start_ms=$(now_ms)
+
+  # Loop detection: abort if agent is stuck in retry loop
+  if ! check_loop "$method" "$url"; then
+    log_request "$method" "$url" "LOOP" "0" "false"
+    echo '{"error": "Loop detected - same request repeated too many times"}' >&2
+    return 1
+  fi
+
+  # Check for error injection (pass URL for match targeting)
+  local inject_code
+  if inject_code=$(check_injection "$url"); then
+    # Create temp header file for injection
+    local temp_header=""
+    if [[ "$has_dump_header" == "true" ]] && [[ "$header_to_stdout" != "true" ]] && [[ -n "$header_file" ]]; then
+      temp_header="$header_file"
+    else
+      temp_header=$(mktemp)
+      trap "rm -f '$temp_header'" EXIT
+    fi
+
+    # Return injected response
+    local body
+    body=$(inject_error_response "$inject_code" "$temp_header")
+    local end_ms
+    end_ms=$(now_ms)
+
+    log_request "$method" "$url" "$inject_code" "$((end_ms - start_ms))" "true"
+
+    # If -D - was specified, output headers to stdout first
+    if [[ "$header_to_stdout" == "true" ]] && [[ -f "$temp_header" ]]; then
+      cat "$temp_header"
+    fi
+
+    # Output body - either to file (-o) or stdout
+    if [[ -n "$output_file" ]]; then
+      echo -n "$body" > "$output_file"
+    else
+      echo -n "$body"
+    fi
+
+    # Append write-out format if specified (bcq uses -w '\n%{http_code}')
+    # This always goes to stdout regardless of -o
+    if [[ -n "$write_out_format" ]]; then
+      format_write_out "$write_out_format" "$inject_code"
+    fi
+
+    # If -D was specified to a file (not stdout), copy headers
+    if [[ "$has_dump_header" == "true" ]] && [[ "$header_to_stdout" != "true" ]] && [[ "$temp_header" != "$header_file" ]]; then
+      cp "$temp_header" "$header_file"
+    fi
+
+    # Return success (0) so bcq processes the response, not a network error
+    # The HTTP status in headers tells bcq it's a 401/429
+    return 0
+  fi
+
+  # No injection - pass through to real curl with header capture
+  local our_header_file=""
+  local modified_args=()
+  local need_stdout_headers=false
+
+  # Build modified args, handling -D - specially
+  if [[ "$has_dump_header" != "true" ]]; then
+    # Caller didn't request headers, we still need them for logging
+    our_header_file=$(mktemp)
+    trap "rm -f '$our_header_file'" EXIT
+    modified_args=(-D "$our_header_file" "$@")
+  elif [[ "$header_to_stdout" == "true" ]]; then
+    # Caller wants -D - (headers to stdout)
+    # We capture to temp file, then output to stdout ourselves
+    our_header_file=$(mktemp)
+    trap "rm -f '$our_header_file'" EXIT
+    need_stdout_headers=true
+    # Rebuild args replacing -D - with -D tempfile
+    # Use length-based index for Bash 4.0/4.1 compatibility (negative indices require 4.2+)
+    for arg in "$@"; do
+      local last_idx=$((${#modified_args[@]} - 1))
+      if [[ "$arg" == "-" ]] && [[ $last_idx -ge 0 ]] && [[ "${modified_args[$last_idx]}" == "-D" ]]; then
+        modified_args+=("$our_header_file")
+      else
+        modified_args+=("$arg")
+      fi
+    done
+  else
+    our_header_file="$header_file"
+    modified_args=("$@")
+  fi
+
+  # Execute real curl
+  local output exit_code=0
+  output=$("$REAL_CURL" "${modified_args[@]}" 2>&1) || exit_code=$?
+
+  local end_ms
+  end_ms=$(now_ms)
+
+  # Extract HTTP status from headers
+  local http_code="000"
+  if [[ -f "$our_header_file" ]]; then
+    http_code=$(grep -oE '^HTTP/[0-9.]+ ([0-9]{3})' "$our_header_file" | tail -1 | grep -oE '[0-9]{3}$' || echo "000")
+  fi
+
+  log_request "$method" "$url" "$http_code" "$((end_ms - start_ms))" "false"
+
+  # If caller wanted headers to stdout, output them first
+  if [[ "$need_stdout_headers" == "true" ]] && [[ -f "$our_header_file" ]]; then
+    cat "$our_header_file"
+  fi
+
+  echo "$output"
+  return $exit_code
+}
+
+main "$@"
