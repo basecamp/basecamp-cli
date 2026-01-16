@@ -5,7 +5,6 @@ description: |
   Use this to answer "how do I..." or "what's the endpoint for..." questions.
 tools:
   - Bash
-  - Read
 ---
 
 # Basecamp 3 API Reference
@@ -26,41 +25,21 @@ Then read it to find endpoint links:
 cat "$README"
 ```
 
-## Documentation Structure
+## Find the Right Doc
 
-The README links to individual endpoint docs:
-
-| Resource | Doc file |
-|----------|----------|
-| Projects | `sections/projects.md` |
-| Todos | `sections/todos.md` |
-| Todolists | `sections/todolists.md` |
-| Todosets | `sections/todosets.md` |
-| Messages | `sections/messages.md` |
-| Message Boards | `sections/message_boards.md` |
-| Comments | `sections/comments.md` |
-| People | `sections/people.md` |
-| Campfires | `sections/campfires.md` |
-| Recordings | `sections/recordings.md` |
-
-To read a specific doc, derive its path from the README location:
+Don't assume section paths — they can change. Use ripgrep to locate the section:
 
 ```bash
 README="$(./scripts/api-docs.sh)"
+rg -n "todos" "$README"
+```
+
+Then open the linked section:
+
+```bash
 DOCS_DIR="$(dirname "$README")"
 cat "$DOCS_DIR/sections/todos.md"
 ```
-
-## Common Questions
-
-**"How do I complete a todo?"**
-→ Read `sections/todos.md`, look for completion endpoint
-
-**"What fields does a project have?"**
-→ Read `sections/projects.md`, look at response example
-
-**"How do I add a comment?"**
-→ Read `sections/comments.md`
 
 ## Base URL Pattern
 
