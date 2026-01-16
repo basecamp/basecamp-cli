@@ -14,11 +14,11 @@ for project_id in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
     
     # Get todoset
     todoset_id=$(curl -s "$BCQ_API_BASE/projects/$project_id.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null | jq -r '.dock[] | select(.name == "todoset") | .id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null | jq -r '.dock[] | select(.name == "todoset") | .id')
     
     # Get todolists
     todolists=$(curl -s "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset_id/todolists.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null | jq -r '.[].id' 2>/dev/null)
+        -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null | jq -r '.[].id' 2>/dev/null)
     
     # For each todolist, check pages
     while read -r todolist_id; do
@@ -27,7 +27,7 @@ for project_id in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
         page=1
         while [ $page -le 15 ]; do
             todos=$(curl -s "$BCQ_API_BASE/buckets/$project_id/todolists/$todolist_id/todos.json?page=$page" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null)
+                -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null)
             
             # Get count of todos on this page
             todo_count=$(echo "$todos" | jq 'length' 2>/dev/null || echo 0)
@@ -41,7 +41,7 @@ for project_id in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
                 
                 # Get comments for this todo
                 comments=$(curl -s "$BCQ_API_BASE/buckets/$project_id/recordings/$todo_id/comments.json" \
-                    -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null)
+                    -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null)
                 
                 # Check if our bench run is in any comment
                 if echo "$comments" | jq '.[] | .content' 2>/dev/null | grep -q "$BENCH_RUN"; then

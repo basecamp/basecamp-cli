@@ -298,7 +298,7 @@ _get_token_for_api() {
   local config_file="$config_dir/config.json"
 
   if [[ ! -f "$creds_file" ]]; then
-    echo "${BCQ_ACCESS_TOKEN:-}"
+    echo "${BASECAMP_TOKEN:-}"
     return
   fi
 
@@ -323,7 +323,7 @@ _get_api_base_for_raw() {
   fi
 
   if [[ -n "$api_url" ]]; then
-    echo "${api_url%/}/$BCQ_ACCOUNT_ID"
+    echo "${api_url%/}/$BASECAMP_ACCOUNT_ID"
     return
   fi
 
@@ -338,7 +338,7 @@ _get_api_base_for_raw() {
   # Convert basecamp to basecampapi
   local api_base
   api_base=$(echo "$base_url" | sed 's/basecamp\([^a-z]\)/basecampapi\1/; s/basecamp$/basecampapi/')
-  echo "$api_base/$BCQ_ACCOUNT_ID"
+  echo "$api_base/$BASECAMP_ACCOUNT_ID"
 }
 
 # Create seeded message

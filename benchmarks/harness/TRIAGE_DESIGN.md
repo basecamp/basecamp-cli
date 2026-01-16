@@ -71,8 +71,8 @@ preflight_check() {
   local errors=()
 
   # Environment
-  [[ -z "$BCQ_ACCESS_TOKEN" ]] && errors+=("BCQ_ACCESS_TOKEN not set")
-  [[ -z "$BCQ_ACCOUNT_ID" ]] && errors+=("BCQ_ACCOUNT_ID not set")
+  [[ -z "$BASECAMP_TOKEN" ]] && errors+=("BASECAMP_TOKEN not set")
+  [[ -z "$BASECAMP_ACCOUNT_ID" ]] && errors+=("BASECAMP_ACCOUNT_ID not set")
   [[ -z "$BCQ_BENCH_RUN_ID" ]] && errors+=("BCQ_BENCH_RUN_ID not set")
 
   # Model availability (quick API ping)

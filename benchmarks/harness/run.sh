@@ -114,8 +114,8 @@ preflight_check() {
   fi
 
   # Check required Basecamp environment
-  [[ -z "${BCQ_ACCESS_TOKEN:-}" ]] && errors+=("BCQ_ACCESS_TOKEN not set")
-  [[ -z "${BCQ_ACCOUNT_ID:-}" ]] && errors+=("BCQ_ACCOUNT_ID not set")
+  [[ -z "${BASECAMP_TOKEN:-}" ]] && errors+=("BASECAMP_TOKEN not set")
+  [[ -z "${BASECAMP_ACCOUNT_ID:-}" ]] && errors+=("BASECAMP_ACCOUNT_ID not set")
 
   # Run ID will be generated if not set, but fixture IDs are required
   [[ -z "${BCQ_BENCH_PROJECT_ID:-}" ]] && errors+=("BCQ_BENCH_PROJECT_ID not set - run seed.sh?")
@@ -245,7 +245,7 @@ You are a benchmark agent executing tasks against a Basecamp API.
 - Use /opt/homebrew/bin/bash for bash commands requiring bash 4+
 
 ## Available Environment Variables (after sourcing env.sh)
-- BCQ_ACCOUNT_ID: Basecamp account ID
+- BASECAMP_ACCOUNT_ID: Basecamp account ID
 - BCQ_BENCH_PROJECT_ID: Benchmark project 1
 - BCQ_BENCH_PROJECT_ID_2: Benchmark project 2
 

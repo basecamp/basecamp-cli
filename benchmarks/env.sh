@@ -82,20 +82,20 @@ _get_access_token() {
 }
 
 # Account ID - prefer env, fallback to config
-if [[ -z "${BCQ_ACCOUNT_ID:-}" ]]; then
-  export BCQ_ACCOUNT_ID="$(_get_account_id)"
+if [[ -z "${BASECAMP_ACCOUNT_ID:-}" ]]; then
+  export BASECAMP_ACCOUNT_ID="$(_get_account_id)"
 fi
 
 # Access token - prefer env, fallback to credentials
-if [[ -z "${BCQ_ACCESS_TOKEN:-}" ]]; then
-  export BCQ_ACCESS_TOKEN="$(_get_access_token)"
+if [[ -z "${BASECAMP_TOKEN:-}" ]]; then
+  export BASECAMP_TOKEN="$(_get_access_token)"
 fi
 
 # Validate required variables
 _validate_env() {
   local missing=()
-  [[ -z "${BCQ_ACCOUNT_ID:-}" ]] && missing+=("BCQ_ACCOUNT_ID")
-  [[ -z "${BCQ_ACCESS_TOKEN:-}" ]] && missing+=("BCQ_ACCESS_TOKEN")
+  [[ -z "${BASECAMP_ACCOUNT_ID:-}" ]] && missing+=("BASECAMP_ACCOUNT_ID")
+  [[ -z "${BASECAMP_TOKEN:-}" ]] && missing+=("BASECAMP_TOKEN")
 
   if (( ${#missing[@]} > 0 )); then
     echo "Error: Missing required environment variables: ${missing[*]}" >&2
@@ -145,7 +145,7 @@ _get_api_base() {
 }
 
 # API base URL (derived from config, works for both dev and prod)
-export BCQ_API_BASE="$(_get_api_base)/${BCQ_ACCOUNT_ID}"
+export BCQ_API_BASE="$(_get_api_base)/${BASECAMP_ACCOUNT_ID}"
 
 # User-Agent for raw API calls
 export BCQ_USER_AGENT="bcq-benchmark/1.0 (https://github.com/basecamp/bcq)"

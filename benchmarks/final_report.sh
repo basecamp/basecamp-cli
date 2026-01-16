@@ -17,13 +17,13 @@ count_processed_todos() {
     
     # Get todoset
     local todoset_id=$(curl -s -X GET "$BCQ_API_BASE/projects/$project_id.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq -r '.dock[] | select(.name == "todoset") | .id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" | jq -r '.dock[] | select(.name == "todoset") | .id')
     
     [ -z "$todoset_id" ] && { echo "$project_name: ERROR - no todoset found"; echo "0"; return 1; }
     
     # Get todolists
     local todolists=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset_id/todolists.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq -r '.[].id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" | jq -r '.[].id')
     
     # Scan all todos
     while read -r todolist_id; do
@@ -31,7 +31,7 @@ count_processed_todos() {
         
         for page in 1 2 3 4 5 6 7 8 9 10; do
             local todos=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/todolists/$todolist_id/todos.json?page=$page" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null)
+                -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null)
             
             # Check if we have any todos
             if [ -z "$(echo "$todos" | jq -r '.[] | .id' 2>/dev/null | head -1)" ]; then

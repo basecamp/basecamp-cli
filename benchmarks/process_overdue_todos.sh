@@ -27,13 +27,13 @@ api_request() {
     while true; do
         if [ -z "$data" ]; then
             response=$(curl -s -w "\n%{http_code}" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+                -H "Authorization: Bearer $BASECAMP_TOKEN" \
                 -H "Content-Type: application/json" \
                 "$BCQ_API_BASE$endpoint")
         else
             response=$(curl -s -w "\n%{http_code}" \
                 -X "$method" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+                -H "Authorization: Bearer $BASECAMP_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$data" \
                 "$BCQ_API_BASE$endpoint")

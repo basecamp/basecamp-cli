@@ -16,13 +16,13 @@ curl_with_retry() {
   while true; do
     if [ -z "$data" ]; then
       response=$(curl -s -w "\n%{http_code}" -X "$method" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+        -H "Authorization: Bearer $BASECAMP_TOKEN" \
         -H "Content-Type: application/json" \
         -H "User-Agent: BenchmarkAgent" \
         "$url")
     else
       response=$(curl -s -w "\n%{http_code}" -X "$method" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+        -H "Authorization: Bearer $BASECAMP_TOKEN" \
         -H "Content-Type: application/json" \
         -H "User-Agent: BenchmarkAgent" \
         -d "$data" \

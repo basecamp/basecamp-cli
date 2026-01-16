@@ -72,7 +72,7 @@ load_config() {
   [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && _BCQ_CONFIG["account_id"]="$BASECAMP_ACCOUNT_ID" || true
   [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && _BCQ_CONFIG["project_id"]="$BASECAMP_PROJECT_ID" || true
   [[ -n "${BASECAMP_TODOLIST_ID:-}" ]] && _BCQ_CONFIG["todolist_id"]="$BASECAMP_TODOLIST_ID" || true
-  [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && _BCQ_CONFIG["access_token"]="$BASECAMP_ACCESS_TOKEN" || true
+  [[ -n "${BASECAMP_TOKEN:-}" ]] && _BCQ_CONFIG["access_token"]="$BASECAMP_TOKEN" || true
 
   # Layer 6: Command-line flags (already handled in global flag parsing)
   [[ -n "${BCQ_ACCOUNT:-}" ]] && _BCQ_CONFIG["account_id"]="$BCQ_ACCOUNT" || true
@@ -234,8 +234,8 @@ clear_credentials() {
 }
 
 get_access_token() {
-  if [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
-    echo "$BASECAMP_ACCESS_TOKEN"
+  if [[ -n "${BASECAMP_TOKEN:-}" ]]; then
+    echo "$BASECAMP_TOKEN"
     return
   fi
 
@@ -359,7 +359,7 @@ get_config_source() {
     account_id) [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && echo "env" && return ;;
     project_id) [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && echo "env" && return ;;
     todolist_id) [[ -n "${BASECAMP_TODOLIST_ID:-}" ]] && echo "env" && return ;;
-    access_token) [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && echo "env" && return ;;
+    access_token) [[ -n "${BASECAMP_TOKEN:-}" ]] && echo "env" && return ;;
   esac
 
   # Check local (cwd) config

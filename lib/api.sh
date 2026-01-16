@@ -105,7 +105,7 @@ ensure_auth() {
     die "Not authenticated. Run: bcq auth login" $EXIT_AUTH
   }
 
-  if is_token_expired && [[ -z "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
+  if is_token_expired && [[ -z "${BASECAMP_TOKEN:-}" ]]; then
     debug "Token expired, refreshing..."
     if ! refresh_token; then
       die "Token expired and refresh failed. Run: bcq auth login" $EXIT_AUTH
@@ -376,7 +376,7 @@ _api_request() {
         ((attempt++))
         ;;
       401)
-        if [[ $attempt -eq 1 ]] && [[ -z "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
+        if [[ $attempt -eq 1 ]] && [[ -z "${BASECAMP_TOKEN:-}" ]]; then
           debug "401 received, attempting token refresh"
           if refresh_token; then
             token=$(get_access_token)
@@ -496,7 +496,7 @@ api_get_all() {
         if (( page_attempt > BCQ_MAX_RETRIES )); then
           die "Authentication failed after $BCQ_MAX_RETRIES attempts. Run: bcq auth login" $EXIT_AUTH
         fi
-        if [[ -z "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
+        if [[ -z "${BASECAMP_TOKEN:-}" ]]; then
           debug "401 received during pagination, attempting token refresh"
           if refresh_token; then
             token=$(ensure_auth)

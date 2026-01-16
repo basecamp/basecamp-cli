@@ -14,13 +14,13 @@ process_project() {
     
     # Get todoset ID
     local todoset_id=$(curl -s -X GET "$BCQ_API_BASE/projects/$project_id.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq -r '.dock[] | select(.name == "todoset") | .id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" | jq -r '.dock[] | select(.name == "todoset") | .id')
     
     [ -z "$todoset_id" ] && { echo "Error: No todoset found"; return; }
     
     # Get todolists
     local todolists=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset_id/todolists.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq -r '.[].id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" | jq -r '.[].id')
     
     # For each todolist, get all todos across all pages
     while read -r todolist_id; do
@@ -30,7 +30,7 @@ process_project() {
         while true; do
             # Get todos for this page
             local todos=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/todolists/$todolist_id/todos.json?page=$page" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+                -H "Authorization: Bearer $BASECAMP_TOKEN")
             
             # Check if empty
             [ -z "$(echo "$todos" | jq -r '.[] | .id' | head -1)" ] && break
@@ -48,13 +48,13 @@ process_project() {
                     # Post comment
                     local comment="Processed BenchChain $BCQ_BENCH_RUN_ID"
                     curl -s -X POST "$BCQ_API_BASE/buckets/$project_id/recordings/$todo_id/comments.json" \
-                        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+                        -H "Authorization: Bearer $BASECAMP_TOKEN" \
                         -H "Content-Type: application/json" \
                         -d "{\"content\":\"$comment\"}" > /dev/null
                     
                     # Mark complete
                     curl -s -X POST "$BCQ_API_BASE/buckets/$project_id/todos/$todo_id/completion.json" \
-                        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+                        -H "Authorization: Bearer $BASECAMP_TOKEN" \
                         -H "Content-Type: application/json" \
                         -d '{}' > /dev/null
                     

@@ -23,7 +23,7 @@ _get_fresh_token() {
 
   if [[ ! -f "$creds_file" ]]; then
     # Fall back to env var if no credentials file
-    echo "${BCQ_ACCESS_TOKEN:-}"
+    echo "${BASECAMP_TOKEN:-}"
     return
   fi
 
@@ -44,13 +44,13 @@ _get_fresh_token() {
     echo "$token"
   else
     # Fall back to env var
-    echo "${BCQ_ACCESS_TOKEN:-}"
+    echo "${BASECAMP_TOKEN:-}"
   fi
 }
 
 # Validate required env vars (account ID only - token read fresh each time)
-if [[ -z "${BCQ_ACCOUNT_ID:-}" ]]; then
-  echo "Error: BCQ_ACCOUNT_ID must be set" >&2
+if [[ -z "${BASECAMP_ACCOUNT_ID:-}" ]]; then
+  echo "Error: BASECAMP_ACCOUNT_ID must be set" >&2
   exit 1
 fi
 
@@ -89,7 +89,7 @@ _get_api_base() {
   _derive_api_url "$base_url"
 }
 
-BASE_URL="$(_get_api_base)/$BCQ_ACCOUNT_ID"
+BASE_URL="$(_get_api_base)/$BASECAMP_ACCOUNT_ID"
 
 # API request helper (uses real curl, not wrapper)
 # Reads fresh token on each call to handle post-refresh validation
@@ -997,8 +997,8 @@ Commands:
   check_overdue_chain            Task 12: Cross-project overdue sweep
 
 Environment:
-  BCQ_ACCOUNT_ID       Basecamp account ID
-  BCQ_ACCESS_TOKEN     Access token
+  BASECAMP_ACCOUNT_ID       Basecamp account ID
+  BASECAMP_TOKEN     Access token
   BCQ_BENCH_*          Fixture IDs from .fixtures.json
 EOF
       ;;

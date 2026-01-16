@@ -2,19 +2,19 @@
 
 # Get first project's todos to check
 project_data=$(curl -s "$BCQ_API_BASE/projects/$BCQ_BENCH_PROJECT_ID.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+  -H "Authorization: Bearer $BASECAMP_TOKEN")
 
 todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id')
 echo "Project 1 Todoset ID: $todoset_id"
 
 todolists=$(curl -s "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todosets/$todoset_id/todolists.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+  -H "Authorization: Bearer $BASECAMP_TOKEN")
 
 list_id=$(echo "$todolists" | jq -r '.[0].id')
 echo "First Todolist ID: $list_id"
 
 todos=$(curl -s "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todolists/$list_id/todos.json?page=1" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+  -H "Authorization: Bearer $BASECAMP_TOKEN")
 
 echo ""
 echo "Sample todos from page 1:"

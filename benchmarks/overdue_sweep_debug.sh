@@ -17,12 +17,12 @@ api_call() {
   while true; do
     if [ -n "$data" ]; then
       response=$(curl -s -w "\n%{http_code}" -X "$method" "$url" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+        -H "Authorization: Bearer $BASECAMP_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$data")
     else
       response=$(curl -s -w "\n%{http_code}" -X "$method" "$url" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+        -H "Authorization: Bearer $BASECAMP_TOKEN")
     fi
     
     http_code=$(echo "$response" | tail -n1)

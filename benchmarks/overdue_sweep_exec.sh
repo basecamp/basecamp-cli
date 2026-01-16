@@ -7,13 +7,13 @@ completed_count=0
 
 for project_id in "${projects[@]}"; do
   todolists=$(curl -s -H "Authorization: Bearer $BCQ_TOKEN" \
-    "https://3.basecampapi.com/$BCQ_ACCOUNT_ID/buckets/$project_id/todolists.json")
+    "https://3.basecampapi.com/$BASECAMP_ACCOUNT_ID/buckets/$project_id/todolists.json")
   
   todolist_ids=$(echo "$todolists" | jq -r '.[].id')
   
   for list_id in $todolist_ids; do
     todos=$(curl -s -H "Authorization: Bearer $BCQ_TOKEN" \
-      "https://3.basecampapi.com/$BCQ_ACCOUNT_ID/buckets/$project_id/todolists/$list_id.json" | \
+      "https://3.basecampapi.com/$BASECAMP_ACCOUNT_ID/buckets/$project_id/todolists/$list_id.json" | \
       jq -r '.todos[] | select(.completed == false and .due_on != null) | @json')
     
     while IFS= read -r todo; do
@@ -30,7 +30,7 @@ for project_id in "${projects[@]}"; do
         curl -s -X POST \
           -H "Authorization: Bearer $BCQ_TOKEN" \
           -H "Content-Type: application/json" \
-          "https://3.basecampapi.com/$BCQ_ACCOUNT_ID/buckets/$project_id/todos/$todo_id/completion.json" \
+          "https://3.basecampapi.com/$BASECAMP_ACCOUNT_ID/buckets/$project_id/todos/$todo_id/completion.json" \
           -d "{\"comment\": \"Overdue sweep: $BCQ_BENCH_RUN_ID\"}" > /dev/null
         ((completed_count++))
       fi

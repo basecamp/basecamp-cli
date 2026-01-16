@@ -226,7 +226,7 @@ prepare_overdue_todos() {
   for id in $overdue_ids; do
     local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-      -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+      -H "Authorization: Bearer $BASECAMP_TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"due_on\":\"$yesterday\"}" \
       "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todos/$id.json")
@@ -359,7 +359,7 @@ export PATH="$BENCH_DIR:\$PATH"
 export BCQ_CACHE_DIR="$BCQ_CACHE_DIR"
 export BCQ_CACHE_ENABLED="$BCQ_CACHE_ENABLED"
 export BCQ_BENCH_LOGFILE="$BCQ_BENCH_LOGFILE"
-export BCQ_ACCOUNT_ID="$BCQ_ACCOUNT_ID"
+export BASECAMP_ACCOUNT_ID="$BASECAMP_ACCOUNT_ID"
 export BCQ_API_BASE="$BCQ_API_BASE"
 export BCQ_BENCH_SEARCH_MARKER="$BCQ_BENCH_SEARCH_MARKER"
 export BCQ_BENCH_OUTPUT_FILE="$output_file"
@@ -373,9 +373,9 @@ ENVEOF
   if [[ "$CONDITION" == "raw" ]]; then
     cat >> "$env_file" << ENVEOF
 # Raw condition: provide token directly (no refresh available)
-export BCQ_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"
-export BASECAMP_ACCOUNT_ID="$BCQ_ACCOUNT_ID"
-export BASECAMP_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"
+export BASECAMP_TOKEN="$BASECAMP_TOKEN"
+export BASECAMP_ACCOUNT_ID="$BASECAMP_ACCOUNT_ID"
+export BASECAMP_ACCESS_TOKEN="$BASECAMP_TOKEN"
 ENVEOF
   else
     cat >> "$env_file" << ENVEOF

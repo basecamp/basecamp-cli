@@ -8,7 +8,7 @@ TODAY=${TODAY:-$(date +%Y-%m-%d)}
 export TODAY
 
 # Verify required variables
-if [[ -z "$BCQ_ACCESS_TOKEN" || -z "$BCQ_API_BASE" || -z "$BCQ_BENCH_PROJECT_ID" || -z "$BCQ_BENCH_PROJECT_ID_2" || -z "$BCQ_BENCH_RUN_ID" ]]; then
+if [[ -z "$BASECAMP_TOKEN" || -z "$BCQ_API_BASE" || -z "$BCQ_BENCH_PROJECT_ID" || -z "$BCQ_BENCH_PROJECT_ID_2" || -z "$BCQ_BENCH_RUN_ID" ]]; then
     echo "Error: Required environment variables not set"
     exit 1
 fi
@@ -23,9 +23,9 @@ api_call() {
     
     while [ $retry -lt $max_retries ]; do
         if [ "$method" = "GET" ]; then
-            response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" "$url")
+            response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $BASECAMP_TOKEN" "$url")
         else
-            response=$(curl -s -w "\n%{http_code}" -X "$method" -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" -H "Content-Type: application/json" -d "$data" "$url")
+            response=$(curl -s -w "\n%{http_code}" -X "$method" -H "Authorization: Bearer $BASECAMP_TOKEN" -H "Content-Type: application/json" -d "$data" "$url")
         fi
         
         http_code=$(echo "$response" | tail -n 1)

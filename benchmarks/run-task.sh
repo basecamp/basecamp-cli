@@ -37,7 +37,7 @@ export BCQ_BENCH_LOGFILE="$BENCH_DIR/results/requests.log"
 
 # Get token for raw condition
 TOKEN=$(jq -r '."http://3.basecamp.localhost:3001".access_token' ~/.config/basecamp/credentials.json 2>/dev/null || echo "")
-BASE="http://3.basecampapi.localhost:3001/$BCQ_ACCOUNT_ID"
+BASE="http://3.basecampapi.localhost:3001/$BASECAMP_ACCOUNT_ID"
 
 echo "=== Task $TASK ($CONDITION) ==="
 echo "Project 1: $BCQ_BENCH_PROJECT_ID"
