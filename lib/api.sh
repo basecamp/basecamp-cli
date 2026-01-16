@@ -446,6 +446,8 @@ api_get_all() {
   headers_file=$(mktemp)
   trap "rm -f '$headers_file'" RETURN
 
+  local page_attempt=0
+
   while (( page <= max_pages )); do
     debug "Fetching page $page: $url"
 
@@ -470,9 +472,43 @@ api_get_all() {
     http_code=$(echo "$output" | tail -n1)
     response=$(echo "$output" | sed '$d')
 
-    if [[ "$http_code" != "200" ]]; then
-      die "API request failed (HTTP $http_code)" $EXIT_API
-    fi
+    case "$http_code" in
+      200)
+        # Success - reset attempt counter for next page
+        page_attempt=0
+        ;;
+      429)
+        # Rate limited - wait and retry with cap
+        ((page_attempt++))
+        if (( page_attempt > BCQ_MAX_RETRIES )); then
+          die "Rate limited after $BCQ_MAX_RETRIES retries" $EXIT_API
+        fi
+        local retry_after
+        retry_after=$(grep -i "Retry-After:" "$headers_file" | awk '{print $2}' | tr -d '\r')
+        local delay=${retry_after:-2}
+        info "Rate limited, waiting ${delay}s (attempt $page_attempt/$BCQ_MAX_RETRIES)..."
+        sleep "$delay"
+        continue  # Retry same page
+        ;;
+      401)
+        # Auth failed - try to refresh token
+        ((page_attempt++))
+        if (( page_attempt > BCQ_MAX_RETRIES )); then
+          die "Authentication failed after $BCQ_MAX_RETRIES attempts. Run: bcq auth login" $EXIT_AUTH
+        fi
+        if [[ -z "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
+          debug "401 received during pagination, attempting token refresh"
+          if refresh_token; then
+            token=$(ensure_auth)
+            continue  # Retry same page with new token
+          fi
+        fi
+        die "Authentication failed (HTTP 401). Run: bcq auth login" $EXIT_AUTH
+        ;;
+      *)
+        die "API request failed (HTTP $http_code)" $EXIT_API
+        ;;
+    esac
 
     if [[ "$all_results" == "[]" ]]; then
       all_results="$response"

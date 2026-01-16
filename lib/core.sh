@@ -157,7 +157,17 @@ _date_to_weekday() {
 BCQ_FORMAT="${BCQ_FORMAT:-auto}"    # Output format: auto, json, md
 BCQ_QUIET="${BCQ_QUIET:-false}"     # Suppress non-essential output
 BCQ_VERBOSE="${BCQ_VERBOSE:-false}" # Debug output
+BCQ_AGENT="${BCQ_AGENT:-false}"     # Agent mode: json + quiet + minimal
+BCQ_IDS_ONLY="${BCQ_IDS_ONLY:-false}" # Output only IDs
+BCQ_COUNT="${BCQ_COUNT:-false}"     # Output only count
 GLOBAL_FLAGS_CONSUMED=0              # For shift in main
+
+# Apply agent mode defaults if set
+if [[ "${BCQ_AGENT_MODE:-}" == "1" ]] || [[ "${BCQ_AGENT_MODE:-}" == "true" ]]; then
+  BCQ_AGENT="true"
+  BCQ_FORMAT="json"
+  BCQ_QUIET="true"
+fi
 
 
 # Output Format Detection
@@ -330,6 +340,25 @@ output() {
   local context="${5:-{}}"
   local meta="${6:-{}}"
 
+  # --count mode: output just the count
+  if [[ "$BCQ_COUNT" == "true" ]]; then
+    echo "$data" | jq 'if type == "array" then length else 1 end'
+    return
+  fi
+
+  # --ids-only mode: output just the IDs
+  if [[ "$BCQ_IDS_ONLY" == "true" ]]; then
+    local format
+    format=$(get_format)
+    if [[ "$format" == "json" ]]; then
+      echo "$data" | jq 'if type == "array" then [.[].id] else [.id] end'
+    else
+      echo "$data" | jq -r 'if type == "array" then .[].id else .id end'
+    fi
+    return
+  fi
+
+  # --quiet/--data mode: just the raw data, no envelope
   if [[ "$BCQ_QUIET" == "true" ]]; then
     echo "$data"
     return
@@ -430,6 +459,26 @@ parse_global_flags() {
         ;;
       --quiet|-q|--data)
         BCQ_QUIET="true"
+        (( ++GLOBAL_FLAGS_CONSUMED ))
+        shift
+        ;;
+      --agent)
+        # Agent mode: JSON output, quiet (no breadcrumbs), minimal
+        BCQ_AGENT="true"
+        BCQ_FORMAT="json"
+        BCQ_QUIET="true"
+        (( ++GLOBAL_FLAGS_CONSUMED ))
+        shift
+        ;;
+      --ids-only)
+        # Output only IDs (one per line or JSON array)
+        BCQ_IDS_ONLY="true"
+        (( ++GLOBAL_FLAGS_CONSUMED ))
+        shift
+        ;;
+      --count)
+        # Output only count
+        BCQ_COUNT="true"
         (( ++GLOBAL_FLAGS_CONSUMED ))
         shift
         ;;
