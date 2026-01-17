@@ -1,181 +1,144 @@
 # bcq
 
-Basecamp Query Tool — an agent-first interface for the Basecamp API.
+Basecamp Query — an agent-first interface for the Basecamp API.
+
+## For Agents
+
+bcq provides skills that work with any AI agent capable of running shell commands.
+
+### Available Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `basecamp` | Workflow command for todos, projects, team coordination |
+| `basecamp-api-reference` | API endpoint lookup and documentation |
+
+### Using Skills
+
+**Any agent** can use bcq by:
+1. Installing bcq (see [Install](#install)) — this installs both CLI and skills
+2. Loading skills from `~/.local/share/bcq/.claude-plugin/skills/<skill>/SKILL.md`
+
+Skills are self-contained markdown files with instructions and allowed tools. They use standard `Bash` tool calls.
+
+**Example skill usage:**
+```
+User: "Show my Basecamp todos"
+Agent: [loads basecamp skill, runs `bcq todos`]
+```
+
+### Specialized Agents
+
+| Agent | Purpose |
+|-------|---------|
+| `basecamp-navigator` | Cross-project search and navigation |
+| `context-linker` | Link code changes to Basecamp items |
+
+Agent definitions are in `.claude-plugin/agents/`.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
 ```
 
-This installs to `~/.local/share/bcq` and creates `~/.local/bin/bcq`. Run again to update.
+Installs to `~/.local/share/bcq`, symlinks `~/.local/bin/bcq`. Run again to update.
 
 **Requirements:** `bash 4+`, `curl`, `jq`, `git`
 
-### macOS
+**macOS:** Install modern bash first: `brew install bash jq`
 
-macOS ships with bash 3.2. Install modern bash first:
-
-```bash
-brew install bash jq
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/install.sh | bash
-```
-
-### Updating
-
-Run the installer again, or `bcq self-update`
-
-## Quick Start
+### Authenticate
 
 ```bash
-# Authenticate (opens browser)
-bcq auth login
-
-# Request read-only access (least-privilege)
-bcq auth login --scope read
-
-# Headless mode (manual code entry)
-bcq auth login --no-browser
-
-# Check auth status
-bcq auth status
-
-# Orient yourself
-bcq
-
-# List projects
-bcq projects
-
-# List your todos
-bcq todos
-
-# Create a todo
-bcq todo "Fix the login bug" --project 12345
-
-# Complete a todo
-bcq done 67890
+bcq auth login          # Opens browser for OAuth
+bcq auth status         # Verify authentication
 ```
 
-## Output Contract
+## CLI Reference
 
-**Default**: JSON envelope when piped, markdown when TTY.
+The CLI is what agents use. Humans can use it directly too.
 
 ```bash
-# JSON envelope (piped or --json)
-bcq projects | jq '.data[0]'
-
-# Raw data only (--quiet or --data)
-bcq projects --quiet | jq '.[0]'
-
-# Force markdown
-bcq --md projects
+bcq                              # Orient: show context, recent activity
+bcq projects                     # List projects
+bcq todos                        # List your todos
+bcq todos --project 12345        # Todos in a project
+bcq todo "Fix the bug" --project 12345  # Create todo
+bcq done 67890                   # Complete todo
+bcq search "authentication"      # Search across projects
 ```
 
-### JSON Envelope Structure
+### Output Modes
+
+```bash
+bcq projects              # Markdown when TTY, JSON when piped
+bcq projects --json       # Force JSON envelope
+bcq projects --quiet      # Raw JSON data only (for jq)
+```
+
+### JSON Envelope
 
 ```json
 {
   "ok": true,
   "data": [...],
   "summary": "5 projects",
-  "breadcrumbs": [
-    {"action": "show", "cmd": "bcq show project <id>"}
-  ],
-  "context": {...},
-  "meta": {...}
+  "breadcrumbs": [{"action": "show", "cmd": "bcq show project <id>"}],
+  "context": {...}
 }
 ```
 
 ## Authentication
 
-bcq uses OAuth 2.1 with Dynamic Client Registration (DCR). On first login, it registers itself as an OAuth client and opens your browser for authorization.
-
-**Scope options:**
-- `full` (default): Read and write access to all resources
-- `read`: Read-only access — cannot create, update, or delete
+OAuth 2.1 with Dynamic Client Registration. First login opens browser for authorization.
 
 ```bash
-bcq auth login              # Full access (default)
+bcq auth login              # Full read/write access
 bcq auth login --scope read # Read-only access
-bcq auth status             # Shows current scope
-```
-
-When requesting `full` scope, you can downgrade to `read` on the Basecamp consent screen.
-
-If a read-only token attempts a write operation, bcq shows a clear error:
-```
-Error: Permission denied: read-only token cannot perform write operations
-Hint: Re-authenticate with full scope: bcq auth login --scope full
+bcq auth login --no-browser # Headless mode (manual code entry)
 ```
 
 ## Configuration
 
 ```
 ~/.config/basecamp/
-├── config.json        # Global defaults
-├── credentials.json   # OAuth tokens (0600)
-├── client.json        # DCR client registration
-└── accounts.json      # Discovered accounts
+├── credentials.json   # OAuth tokens
+├── client.json        # DCR registration
+└── config.json        # Preferences
 
 .basecamp/
 └── config.json        # Per-directory overrides
 ```
 
-Config hierarchy: global → local → environment → flags
+## Platform-Specific Packaging
 
-## Environment
+### Claude Code
 
-Point `bcq` at different Basecamp instances using `BCQ_BASE_URL`:
+For optimal Claude Code integration, install the plugin:
 
-```bash
-# Production (default)
-bcq projects
-
-# Local development
-BCQ_BASE_URL=http://3.basecamp.localhost:3001 bcq auth login
-
-# Staging/beta
-BCQ_BASE_URL=https://3.staging.basecampapi.com bcq auth login
-```
-
-OAuth endpoints are discovered automatically via `.well-known/oauth-authorization-server` (RFC 8414).
-
-## Tab Completion
-
-```bash
-# Bash (add to ~/.bashrc)
-source ~/.local/share/bcq/completions/bcq.bash
-
-# Zsh (add to ~/.zshrc)
-fpath=(~/.local/share/bcq/completions $fpath)
-autoload -Uz compinit && compinit
-```
-
-Provides completion for commands, subcommands, and flags.
-
-## Claude Code Integration
-
-bcq includes a Claude Code plugin with:
-
-- `/basecamp` - Workflow command for todos, projects, and team coordination
-- `basecamp-api-reference` - API documentation lookup
-- `basecamp-navigator` agent - Cross-project search
-- `context-linker` agent - Link code to Basecamp items
-- Session hooks - Load project context, detect todo references in commits
-
-Install the plugin:
 ```bash
 claude plugins install github:basecamp/bcq
 ```
 
-## Testing
+This adds:
+- `/basecamp` slash command
+- Automatic skill and agent loading
+- Session hooks for project context
+
+### Other Agents
+
+For Codex, OpenCode, Gemini, Copilot, etc.:
+1. Install bcq (see [Install](#install)) — includes CLI and skills
+2. Load skill content from `~/.local/share/bcq/.claude-plugin/skills/*/SKILL.md`
+3. Update with `bcq self-update` — updates both CLI and skills
+
+## Development
 
 ```bash
 ./test/run.sh         # Run all tests
-bats test/*.bats      # Alternative: run bats directly
+bats test/*.bats      # Run bats directly
 ```
-
-Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `apt install bats` or `brew install bats-core`.
 
 ## License
 
