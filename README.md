@@ -157,15 +157,15 @@ Provides completion for commands, subcommands, and flags.
 
 bcq includes a Claude Code plugin with:
 
-- `/basecamp` - Primary workflow command
-- `/todo` - Quick todo operations
+- `/basecamp` - Workflow command for todos, projects, and team coordination
+- `basecamp-api-reference` - API documentation lookup
 - `basecamp-navigator` agent - Cross-project search
 - `context-linker` agent - Link code to Basecamp items
-- Git commit hook - Auto-detect todo references
+- Session hooks - Load project context, detect todo references in commits
 
 Install the plugin:
 ```bash
-claude plugins link ~/.local/share/bcq
+claude plugins install github:basecamp/bcq
 ```
 
 ## Testing
