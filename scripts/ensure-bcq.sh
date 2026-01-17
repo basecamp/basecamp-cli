@@ -53,7 +53,7 @@ install_bcq() {
 
   # Symlink bcq to bin dir
   mkdir -p "$bin_dir"
-  ln -sf "$install_dir/scripts/bcq" "$bin_dir/bcq"
+  ln -sf "$install_dir/bin/bcq" "$bin_dir/bcq"
 
   echo "Installed bcq to $bin_dir/bcq"
   echo "Ensure $bin_dir is in your PATH"

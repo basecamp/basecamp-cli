@@ -19,10 +19,10 @@ Use the helper script to get the README path:
 README="$(./scripts/api-docs.sh)"
 ```
 
-Then read it to find endpoint links:
+Use ripgrep to find endpoint links:
 
 ```bash
-cat "$README"
+rg -n "todos|todolists|projects|messages|comments|people|campfires|recordings" "$README"
 ```
 
 ## Find the Right Doc
@@ -37,8 +37,8 @@ rg -n "todos" "$README"
 Then open the linked section:
 
 ```bash
-DOCS_DIR="$(dirname "$README")"
-cat "$DOCS_DIR/sections/todos.md"
+DOC_FILE="$(./scripts/api-docs.sh sections/todos.md)"
+cat "$DOC_FILE"
 ```
 
 ## Base URL Pattern

@@ -67,7 +67,11 @@ That README links to endpoint docs. Use `rg`/`sed` to open them as needed:
 - Projects, todos, todolists, messages, comments, people, etc.
 - Each endpoint doc shows request/response format
 
-Example: Open the README, find the todos link, then fetch that doc (same cache dir).
+Example: Open the README, find the todos link, then fetch that doc:
+```bash
+DOC_FILE="$(./scripts/api-docs.sh sections/todos.md)"
+cat "$DOC_FILE"
+```
 
 ## Authentication
 

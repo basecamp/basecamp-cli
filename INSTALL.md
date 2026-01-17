@@ -69,16 +69,22 @@ ln -sf "$PWD/bin/bcq" ~/.local/bin/bcq
 
 ### Updating
 
-If installed via git clone:
-```bash
-cd ~/.local/share/bcq  # or your install location
-git pull
-```
-
-Or use:
+**bcq CLI:**
 ```bash
 bcq self-update
 ```
+
+Or if installed via git clone:
+```bash
+cd ~/.local/share/bcq && git pull
+```
+
+**Claude Code plugin:**
+```bash
+claude plugin update basecamp
+```
+
+Note: The CLI and plugin update independently. Update both to stay current.
 
 ## Verification
 
