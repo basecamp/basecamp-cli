@@ -98,7 +98,7 @@ verify_install() {
 
 main() {
   echo ""
-  echo "bcq - Basecamp CLI Installer"
+  echo "bcq (Basecamp Query) - Installer"
   echo "============================"
   echo ""
 

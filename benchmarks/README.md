@@ -1,6 +1,6 @@
 # bcq vs Raw-API Benchmark
 
-Empirical comparison of `bcq` CLI vs raw curl+jq for Basecamp API interactions.
+Empirical comparison of `bcq` (Basecamp Query) vs raw curl+jq for Basecamp API interactions.
 
 ## Hypothesis
 
@@ -28,7 +28,7 @@ See `benchmarks/BENCHMARKING.md` for cohort, triage, and reporting policy.
 
 ## Dependencies
 
-- `bcq` - Basecamp CLI (this repo)
+- `bcq` - Basecamp Query (this repo)
 - `jq` - JSON processor
 - `yq` - YAML processor (for reading spec.yaml)
 - `curl` - HTTP client (standard on most systems)
