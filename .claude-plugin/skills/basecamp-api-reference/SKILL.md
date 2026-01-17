@@ -13,39 +13,79 @@ Answer questions about Basecamp API endpoints, shapes, and usage.
 
 ## Fetching Docs
 
-Use the helper script to get the README path:
+Fetch the API README (cached locally):
 
 ```bash
-README="$(./scripts/api-docs.sh)"
+DOCS_URL="https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md"
+CACHE_DIR="${HOME}/.cache/bcq/api-docs"
+README="$CACHE_DIR/README.md"
+
+mkdir -p "$CACHE_DIR"
+if [[ -f "$README" ]]; then
+  curl -fsSL -z "$README" -o "$README" "$DOCS_URL" 2>/dev/null || true
+else
+  curl -fsSL -o "$README" "$DOCS_URL"
+fi
 ```
 
-Use ripgrep to find endpoint links:
+## Find Endpoints
+
+Search the README for endpoint references:
 
 ```bash
-rg -n "todos|todolists|projects|messages|comments|people|campfires|recordings" "$README"
+grep -n "todos\|todolists\|projects\|messages\|comments\|people" "$README"
 ```
 
-## Find the Right Doc
-
-Don't assume section paths — they can change. Use ripgrep to locate the section:
+Or with ripgrep (if available):
 
 ```bash
-README="$(./scripts/api-docs.sh)"
-rg -n "todos" "$README"
+rg -n "todos|projects|messages" "$README"
 ```
 
-Then open the linked section:
+## Fetch Section Docs
+
+The README links to section files (e.g., `sections/todos.md`). Fetch them:
 
 ```bash
-DOC_FILE="$(./scripts/api-docs.sh sections/todos.md)"
-cat "$DOC_FILE"
+SECTION="sections/todos.md"
+BASE_URL="https://raw.githubusercontent.com/basecamp/bc3-api/master"
+SECTION_FILE="$CACHE_DIR/$SECTION"
+
+mkdir -p "$(dirname "$SECTION_FILE")"
+curl -fsSL -o "$SECTION_FILE" "$BASE_URL/$SECTION"
+cat "$SECTION_FILE"
 ```
+
+## Available Sections
+
+| Resource | Section File |
+|----------|-------------|
+| Projects | `sections/projects.md` |
+| Todos | `sections/todos.md` |
+| Todolists | `sections/todolists.md` |
+| Messages | `sections/messages.md` |
+| Comments | `sections/comments.md` |
+| People | `sections/people.md` |
+| Campfires | `sections/campfires.md` |
+| Recordings | `sections/recordings.md` |
 
 ## Base URL Pattern
 
-All endpoints use:
+All API endpoints use:
+
 ```
 https://3.basecampapi.com/{account_id}/...
 ```
 
-The `{account_id}` is the Basecamp account number.
+The `{account_id}` is the Basecamp account number (visible in Basecamp URLs).
+
+## Authentication
+
+All requests require:
+
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+Use `bcq auth status` to check current token, or `bcq auth login` to authenticate.
