@@ -6,7 +6,7 @@
 - JSON envelope with breadcrumbs for navigation
 - Pagination, backoff, and auth handled automatically
 
-## Agent Quickstart
+## Quick Start
 
 ### 1. Install bcq CLI
 
@@ -21,46 +21,89 @@ bcq auth login
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
 ```
 
-Skills install to `$BCQ_SKILLS_DIR` (default: `~/.local/share/bcq-skills`).
+Skills install to `$BCQ_DIR` (default: `~/.local/share/bcq`).
 
-**Custom location:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash -s -- --dir ~/my-skills
-```
+### 3. Connect Your Agent
 
-### 3. Point Your Agent at Skills
+Skills work with any agent that can execute shell commands. Platform-specific setup below.
 
-| Skill | Path | Purpose |
-|-------|------|---------|
-| `basecamp` | `$BCQ_SKILLS_DIR/skills/basecamp/SKILL.md` | Todos, projects, team coordination |
-| `basecamp-api-reference` | `$BCQ_SKILLS_DIR/skills/basecamp-api-reference/SKILL.md` | API endpoint lookup |
+---
 
-Skills use standard `Bash` tool calls — compatible with any agent (Claude, Codex, OpenCode, Gemini, Copilot, etc.).
+## Platform Setup
 
-### 4. Update Skills
-
-```bash
-# Re-run installer with --update
-./scripts/install-skills.sh --update --dir $BCQ_SKILLS_DIR
-
-# Or pull directly
-cd $BCQ_SKILLS_DIR && git pull
-```
-
-## Claude Code Plugin (Optional)
-
-For tighter Claude Code integration:
+### Claude Code
 
 ```bash
 claude plugins install github:basecamp/bcq
 ```
 
-This adds:
-- `/basecamp` slash command
-- Automatic skill and agent loading
-- Session hooks for project context
+This adds `/basecamp` slash command, hooks, and agents. Skills are bundled.
 
-The plugin uses the same skills — it's a convenience layer, not a separate product.
+### Codex (OpenAI)
+
+```bash
+./scripts/install-codex.sh
+```
+
+Or manually:
+1. Link skills: `ln -s ~/.local/share/bcq/skills ~/.codex/skills/bcq`
+2. Reference in `~/.codex/AGENTS.md`:
+   ```markdown
+   @~/.codex/skills/bcq/basecamp/SKILL.md
+   ```
+
+### OpenCode
+
+```bash
+./scripts/install-opencode.sh
+```
+
+Or manually:
+1. Link skills: `ln -s ~/.local/share/bcq/skills ~/.config/opencode/skill/bcq`
+2. Copy agent: `cp templates/opencode/basecamp.md ~/.config/opencode/agent/`
+
+### Gemini
+
+Copy the template and customize:
+```bash
+cp templates/gemini/GEMINI.md ~/GEMINI.md
+```
+
+The template includes skill references and common bcq commands.
+
+### GitHub Copilot
+
+Copy the template to your repo:
+```bash
+cp templates/copilot/copilot-instructions.md .github/
+```
+
+The template includes skill references and code-to-Basecamp linking patterns.
+
+### Any Other Agent
+
+Skills are plain Markdown with bash commands. Point your agent at:
+- `~/.local/share/bcq/skills/basecamp/SKILL.md` - Workflow commands
+- `~/.local/share/bcq/skills/basecamp-api-reference/SKILL.md` - API reference
+
+---
+
+## Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `basecamp` | Todos, projects, team coordination |
+| `basecamp-api-reference` | API endpoint lookup |
+
+Skills use standard `Bash` tool calls — compatible with any agent.
+
+## Update Skills
+
+```bash
+cd ~/.local/share/bcq && git pull
+```
+
+---
 
 ## Human CLI Usage
 
@@ -122,11 +165,10 @@ bcq auth login --no-browser # Headless mode
 
 | Component | Default Location | Override |
 |-----------|------------------|----------|
-| CLI | `~/.local/share/bcq` | `BCQ_INSTALL_DIR` |
+| Repository | `~/.local/share/bcq` | `BCQ_DIR` |
 | Binary | `~/.local/bin/bcq` | `BCQ_BIN_DIR` |
-| Skills | `~/.local/share/bcq-skills` | `BCQ_SKILLS_DIR` |
 
-For installer-based installs, `bcq self-update` updates the CLI. For skills, re-run `install-skills.sh --update`.
+Skills are at `~/.local/share/bcq/skills/`. Update with `cd ~/.local/share/bcq && git pull`.
 
 ## Development
 

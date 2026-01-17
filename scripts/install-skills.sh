@@ -7,12 +7,12 @@
 #   ./scripts/install-skills.sh --update           # Update existing installation
 #
 # Environment:
-#   BCQ_SKILLS_DIR   Target directory (default: ~/.local/share/bcq-skills)
+#   BCQ_DIR   Target directory (default: ~/.local/share/bcq)
 
 set -euo pipefail
 
 REPO_URL="https://github.com/basecamp/bcq"
-DEFAULT_DIR="${BCQ_SKILLS_DIR:-$HOME/.local/share/bcq-skills}"
+DEFAULT_DIR="${BCQ_DIR:-$HOME/.local/share/bcq}"
 
 info() { echo "==> $1"; }
 error() { echo "ERROR: $1" >&2; exit 1; }
@@ -24,12 +24,12 @@ Usage: install-skills.sh [OPTIONS]
 Install bcq skills for any AI agent.
 
 Options:
-  --dir DIR     Install skills to DIR (default: ~/.local/share/bcq-skills)
+  --dir DIR     Install to DIR (default: ~/.local/share/bcq)
   --update      Update existing installation
   --help        Show this help
 
 Environment:
-  BCQ_SKILLS_DIR   Default target directory
+  BCQ_DIR   Default target directory
 
 Examples:
   # Install to default location

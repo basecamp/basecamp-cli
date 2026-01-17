@@ -52,7 +52,7 @@ bcq auth status
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
 ```
 
-Installs to `$BCQ_SKILLS_DIR` (default: `~/.local/share/bcq-skills`).
+Installs to `$BCQ_DIR` (default: `~/.local/share/bcq`).
 
 **Custom location:**
 ```bash
@@ -61,19 +61,55 @@ curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-s
 
 **Verify:**
 ```bash
-ls $BCQ_SKILLS_DIR/skills/*/SKILL.md
+ls $BCQ_DIR/skills/*/SKILL.md
 ```
 
-## Step 4: Point Agent at Skills
+## Step 4: Connect Your Agent
 
-Skills are at:
+### Claude Code
+
+```bash
+claude plugins install github:basecamp/bcq
 ```
-$BCQ_SKILLS_DIR/skills/
+
+Done. Plugin bundles skills, hooks, and agents.
+
+### Codex (OpenAI)
+
+```bash
+./scripts/install-codex.sh
+```
+
+This links skills to `~/.codex/skills/bcq`.
+
+### OpenCode
+
+```bash
+./scripts/install-opencode.sh
+```
+
+This links skills and installs the Basecamp agent.
+
+### Gemini
+
+1. Copy template: `cp templates/gemini/GEMINI.md ~/GEMINI.md`
+2. Template includes skill references and common commands
+
+### GitHub Copilot
+
+1. Copy template: `cp templates/copilot/copilot-instructions.md .github/`
+2. Edit to include skill references
+
+### Any Other Agent
+
+Point your agent at these skill files:
+```
+~/.local/share/bcq/skills/
 ├── basecamp/SKILL.md           # Workflow skill
 └── basecamp-api-reference/SKILL.md  # API docs
 ```
 
-Load the SKILL.md content into your agent's instruction format. Skills use standard `Bash` tool calls.
+Skills use standard `Bash` tool calls.
 
 ## Updating
 
@@ -84,35 +120,7 @@ bcq self-update
 
 **Skills:**
 ```bash
-cd $BCQ_SKILLS_DIR && git pull
-# or re-run installer:
-./scripts/install-skills.sh --update --dir $BCQ_SKILLS_DIR
-```
-
-## Optional: Claude Code Plugin
-
-For tighter Claude Code integration:
-
-```bash
-claude plugins install github:basecamp/bcq
-```
-
-Adds `/basecamp` command and automatic context loading.
-
-## Optional: Human CLI Usage
-
-Test API access:
-```bash
-bcq projects
-```
-
-Common commands:
-```bash
-bcq todos                        # Your todos
-bcq todos --project PROJECT_ID   # Todos in project
-bcq todo "Task" --project ID     # Create todo
-bcq done TODO_ID                 # Complete todo
-bcq search "keyword"             # Search
+cd ~/.local/share/bcq && git pull
 ```
 
 ## Troubleshooting
@@ -142,9 +150,10 @@ brew install bash
 
 | Component | Default | Override |
 |-----------|---------|----------|
-| CLI | `~/.local/share/bcq` | `BCQ_INSTALL_DIR` |
+| Repository | `~/.local/share/bcq` | `BCQ_DIR` |
 | Binary | `~/.local/bin/bcq` | `BCQ_BIN_DIR` |
-| Skills | `~/.local/share/bcq-skills` | `BCQ_SKILLS_DIR` |
+
+Skills are at `~/.local/share/bcq/skills/`.
 
 ---
 
