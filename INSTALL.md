@@ -207,8 +207,19 @@ macOS ships with bash 3.2. Install bash 4+:
 
 ```bash
 brew install bash
-# Then run bcq with: /opt/homebrew/bin/bash ~/.local/bin/bcq
-# Or add alias: alias bcq='/opt/homebrew/bin/bash ~/.local/share/bcq/bin/bcq'
+```
+
+Ensure Homebrew's bash is found first (add to `~/.zshrc` or `~/.bash_profile`):
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"
+```
+
+Verify:
+
+```bash
+bash --version
+# Should show 5.x, not 3.2
 ```
 
 ## Uninstalling
