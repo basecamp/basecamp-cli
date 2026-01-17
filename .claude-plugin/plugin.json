@@ -1,19 +1,25 @@
 {
-  "name": "bcq",
+  "name": "basecamp",
   "version": "0.1.0",
-  "description": "Basecamp CLI for agent-first project management",
+  "description": "Basecamp integration for Claude Code. Create todos, track work, link code to projects.",
   "author": "37signals",
   "homepage": "https://github.com/basecamp/bcq",
+  "repository": "https://github.com/basecamp/bcq",
+  "license": "MIT",
   "skills": [
-    "skills/basecamp-command",
-    "skills/bcq-todo",
-    "skills/bcq-reference",
-    "skills/bcq-todos",
-    "skills/bcq-projects"
+    "skills/basecamp",
+    "skills/basecamp-api-reference"
   ],
   "agents": [
     "agents/basecamp-navigator.md",
     "agents/context-linker.md"
   ],
-  "hooks": "hooks/hooks.json"
+  "hooks": "hooks/hooks.json",
+  "dependencies": {
+    "bcq": {
+      "version": ">=0.1.0",
+      "install": "https://github.com/basecamp/bcq#installation",
+      "check": "scripts/ensure-bcq.sh --check"
+    }
+  }
 }

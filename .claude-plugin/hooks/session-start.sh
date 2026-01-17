@@ -6,13 +6,21 @@
 
 set -euo pipefail
 
-# Find bcq in the plugin's bin directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BCQ="${SCRIPT_DIR}/../../bin/bcq"
-
-# Check if bcq is available
-if [[ ! -x "$BCQ" ]]; then
-  exit 0
+# Find bcq - prefer PATH, fall back to plugin's bin directory
+if command -v bcq &>/dev/null; then
+  BCQ="bcq"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  BCQ="${SCRIPT_DIR}/../../bin/bcq"
+  if [[ ! -x "$BCQ" ]]; then
+    cat << 'EOF'
+<hook-output>
+Basecamp plugin: bcq CLI not found.
+Install: https://github.com/basecamp/bcq#installation
+</hook-output>
+EOF
+    exit 0
+  fi
 fi
 
 # Check if we have any Basecamp configuration
