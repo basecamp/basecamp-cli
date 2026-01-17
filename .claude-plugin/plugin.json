@@ -18,7 +18,7 @@
   "dependencies": {
     "bcq": {
       "version": ">=0.1.0",
-      "install": "https://github.com/basecamp/bcq#installation",
+      "install": "https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh",
       "check": "scripts/ensure-bcq.sh --check"
     }
   }

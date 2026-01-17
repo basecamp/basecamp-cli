@@ -34,7 +34,7 @@ Default to the public docs and cache locally. Use the local clone only if presen
 
 **Docs URL (override with `BCQ_API_DOCS_URL`):**
 ```
-https://raw.githubusercontent.com/basecamp/bc3-api/refs/heads/master/README.md
+https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md
 ```
 
 **Cache dir (override with `BCQ_API_DOCS_CACHE_DIR`):**
@@ -49,7 +49,7 @@ README="$(./scripts/api-docs.sh)"
 
 **If you need the manual steps:**
 ```bash
-DOCS_URL="${BCQ_API_DOCS_URL:-https://raw.githubusercontent.com/basecamp/bc3-api/refs/heads/master/README.md}"
+DOCS_URL="${BCQ_API_DOCS_URL:-https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md}"
 CACHE_DIR="${BCQ_API_DOCS_CACHE_DIR:-$HOME/.cache/bcq/api-docs}"
 mkdir -p "$CACHE_DIR"
 README="$CACHE_DIR/README.md"

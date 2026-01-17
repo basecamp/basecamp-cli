@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOCS_URL="${BCQ_API_DOCS_URL:-https://raw.githubusercontent.com/basecamp/bc3-api/refs/heads/master/README.md}"
+DOCS_URL="${BCQ_API_DOCS_URL:-https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md}"
 CACHE_DIR="${BCQ_API_DOCS_CACHE_DIR:-$HOME/.cache/bcq/api-docs}"
 README="$CACHE_DIR/README.md"
 LOCAL_ROOT="$HOME/Work/basecamp/bc3-api"
