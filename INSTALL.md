@@ -2,13 +2,13 @@
 
 ## Objective
 
-Enable AI agents to interact with Basecamp via bcq skills.
+Install bcq CLI and skills for your AI agent.
 
 ## Completion Criteria
 
 - [ ] `bcq --version` returns version number
 - [ ] `bcq auth status` shows authenticated
-- [ ] Skills available at `~/.local/share/bcq/.claude-plugin/skills/`
+- [ ] Skills directory exists with SKILL.md files
 
 ## Prerequisites
 
@@ -19,22 +19,20 @@ Enable AI agents to interact with Basecamp via bcq skills.
 | jq | `jq --version` | `brew install jq` or `apt install jq` |
 | git | `git --version` | `brew install git` or `apt install git` |
 
-## Installation
-
-### Step 1: Install bcq
+## Step 1: Install bcq CLI
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
 ```
 
-This installs to `~/.local/share/bcq` and symlinks `bcq` to `~/.local/bin/`.
+Installs to `$BCQ_INSTALL_DIR` (default: `~/.local/share/bcq`).
 
 **Verify:**
 ```bash
 bcq --version
 ```
 
-### Step 2: Authenticate
+## Step 2: Authenticate
 
 ```bash
 bcq auth login
@@ -48,68 +46,74 @@ bcq auth status
 # Expected: Authenticated as your@email.com
 ```
 
-### Step 3: Verify Skills
+## Step 3: Install Skills
 
-Skills are installed with bcq at:
-```
-~/.local/share/bcq/.claude-plugin/skills/
-├── basecamp/SKILL.md           # Main workflow skill
-└── basecamp-api-reference/SKILL.md  # API docs lookup
-```
-
-**Test API access:**
 ```bash
-bcq projects
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
 ```
 
-## Using Skills
+Installs to `$BCQ_SKILLS_DIR` (default: `~/.local/share/bcq-skills`).
 
-### Any Agent (Claude, Codex, OpenCode, etc.)
-
-Load skill content from the installed path:
-```
-~/.local/share/bcq/.claude-plugin/skills/<skill>/SKILL.md
-```
-
-Skills use standard `Bash` tool — compatible with any agent that can run shell commands.
-
-### Claude Code (Optional)
-
-For tighter integration, install the plugin:
+**Custom location:**
 ```bash
-claude plugins install github:basecamp/bcq
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash -s -- --dir ~/my-skills
 ```
 
-This adds `/basecamp` command and automatic context loading.
+**Verify:**
+```bash
+ls $BCQ_SKILLS_DIR/skills/*/SKILL.md
+```
+
+## Step 4: Point Agent at Skills
+
+Skills are at:
+```
+$BCQ_SKILLS_DIR/skills/
+├── basecamp/SKILL.md           # Workflow skill
+└── basecamp-api-reference/SKILL.md  # API docs
+```
+
+Load the SKILL.md content into your agent's instruction format. Skills use standard `Bash` tool calls.
 
 ## Updating
 
+**CLI:**
 ```bash
 bcq self-update
 ```
 
-Or re-run the installer. Skills update alongside the CLI.
-
-## Configuration
-
-### Per-Repo Config
-
-Link a repo to a Basecamp project:
-
+**Skills:**
 ```bash
-cd your-project
-bcq config init
-bcq config set project_id 12345
+cd $BCQ_SKILLS_DIR && git pull
+# or re-run installer:
+./scripts/install-skills.sh --update --dir $BCQ_SKILLS_DIR
 ```
 
-Now `bcq todos` works without `--project` flag.
+## Optional: Claude Code Plugin
 
-### Environment Variables
+For tighter Claude Code integration:
 
-| Variable | Purpose |
-|----------|---------|
-| `BASECAMP_TOKEN` | Access token (overrides stored auth) |
-| `BASECAMP_ACCOUNT_ID` | Default account ID |
+```bash
+claude plugins install github:basecamp/bcq
+```
+
+Adds `/basecamp` command and automatic context loading.
+
+## Optional: Human CLI Usage
+
+Test API access:
+```bash
+bcq projects
+```
+
+Common commands:
+```bash
+bcq todos                        # Your todos
+bcq todos --project PROJECT_ID   # Todos in project
+bcq todo "Task" --project ID     # Create todo
+bcq done TODO_ID                 # Complete todo
+bcq search "keyword"             # Search
+```
 
 ## Troubleshooting
 
@@ -120,33 +124,33 @@ Add to PATH:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Add to shell config to persist.
-
 ### "401 Unauthorized"
 
-Token expired. Re-authenticate:
+Token expired:
 ```bash
 bcq auth login
 ```
 
-### bash version too old (macOS)
+### bash too old (macOS)
 
-macOS ships with bash 3.2. Install bash 4+ via Homebrew:
+Install bash 4+:
 ```bash
 brew install bash
 ```
 
-## Common Commands
+## Install Paths
 
-```bash
-bcq projects                     # List projects
-bcq todos                        # Your todos
-bcq todos --project PROJECT_ID   # Todos in project
-bcq todo "Task" --project ID     # Create todo
-bcq done TODO_ID                 # Complete todo
-bcq search "keyword"             # Search across projects
-```
+| Component | Default | Override |
+|-----------|---------|----------|
+| CLI | `~/.local/share/bcq` | `BCQ_INSTALL_DIR` |
+| Binary | `~/.local/bin/bcq` | `BCQ_BIN_DIR` |
+| Skills | `~/.local/share/bcq-skills` | `BCQ_SKILLS_DIR` |
 
 ---
 
-**EXECUTE NOW**: Run `curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash`, then `bcq auth login`.
+**EXECUTE NOW:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
+bcq auth login
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
+```

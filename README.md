@@ -1,68 +1,75 @@
 # bcq
 
-Basecamp Query — an agent-first interface for the Basecamp API.
+**Basecamp automation for agents, skills, MCPs, and plugins.**
 
-## For Agents
+- Stable command grammar for agent workflows
+- JSON envelope with breadcrumbs for navigation
+- Pagination, backoff, and auth handled automatically
 
-bcq provides skills that work with any AI agent capable of running shell commands.
+## Agent Quickstart
 
-### Available Skills
-
-| Skill | Purpose |
-|-------|---------|
-| `basecamp` | Workflow command for todos, projects, team coordination |
-| `basecamp-api-reference` | API endpoint lookup and documentation |
-
-### Using Skills
-
-**Any agent** can use bcq by:
-1. Installing bcq (see [Install](#install)) — this installs both CLI and skills
-2. Loading skills from `~/.local/share/bcq/.claude-plugin/skills/<skill>/SKILL.md`
-
-Skills are self-contained markdown files with instructions and allowed tools. They use standard `Bash` tool calls.
-
-**Example skill usage:**
-```
-User: "Show my Basecamp todos"
-Agent: [loads basecamp skill, runs `bcq todos`]
-```
-
-### Specialized Agents
-
-| Agent | Purpose |
-|-------|---------|
-| `basecamp-navigator` | Cross-project search and navigation |
-| `context-linker` | Link code changes to Basecamp items |
-
-Agent definitions are in `.claude-plugin/agents/`.
-
-## Install
+### 1. Install bcq CLI
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
+bcq auth login
 ```
 
-Installs to `~/.local/share/bcq`, symlinks `~/.local/bin/bcq`. Run again to update.
-
-**Requirements:** `bash 4+`, `curl`, `jq`, `git`
-
-**macOS:** Install modern bash first: `brew install bash jq`
-
-### Authenticate
+### 2. Install Skills
 
 ```bash
-bcq auth login          # Opens browser for OAuth
-bcq auth status         # Verify authentication
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
 ```
 
-## CLI Reference
+Skills install to `$BCQ_SKILLS_DIR` (default: `~/.local/share/bcq-skills`).
+
+**Custom location:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash -s -- --dir ~/my-skills
+```
+
+### 3. Point Your Agent at Skills
+
+| Skill | Path | Purpose |
+|-------|------|---------|
+| `basecamp` | `$BCQ_SKILLS_DIR/skills/basecamp/SKILL.md` | Todos, projects, team coordination |
+| `basecamp-api-reference` | `$BCQ_SKILLS_DIR/skills/basecamp-api-reference/SKILL.md` | API endpoint lookup |
+
+Skills use standard `Bash` tool calls — compatible with any agent (Claude, Codex, OpenCode, Gemini, Copilot, etc.).
+
+### 4. Update Skills
+
+```bash
+# Re-run installer with --update
+./scripts/install-skills.sh --update --dir $BCQ_SKILLS_DIR
+
+# Or pull directly
+cd $BCQ_SKILLS_DIR && git pull
+```
+
+## Claude Code Plugin (Optional)
+
+For tighter Claude Code integration:
+
+```bash
+claude plugins install github:basecamp/bcq
+```
+
+This adds:
+- `/basecamp` slash command
+- Automatic skill and agent loading
+- Session hooks for project context
+
+The plugin uses the same skills — it's a convenience layer, not a separate product.
+
+## Human CLI Usage
 
 The CLI is what agents use. Humans can use it directly too.
 
 ```bash
-bcq                              # Orient: show context, recent activity
+bcq                              # Orient: context, recent activity
 bcq projects                     # List projects
-bcq todos                        # List your todos
+bcq todos                        # Your assigned todos
 bcq todos --project 12345        # Todos in a project
 bcq todo "Fix the bug" --project 12345  # Create todo
 bcq done 67890                   # Complete todo
@@ -74,7 +81,7 @@ bcq search "authentication"      # Search across projects
 ```bash
 bcq projects              # Markdown when TTY, JSON when piped
 bcq projects --json       # Force JSON envelope
-bcq projects --quiet      # Raw JSON data only (for jq)
+bcq projects --quiet      # Raw JSON data only
 ```
 
 ### JSON Envelope
@@ -91,12 +98,12 @@ bcq projects --quiet      # Raw JSON data only (for jq)
 
 ## Authentication
 
-OAuth 2.1 with Dynamic Client Registration. First login opens browser for authorization.
+OAuth 2.1 with Dynamic Client Registration. First login opens browser.
 
 ```bash
 bcq auth login              # Full read/write access
 bcq auth login --scope read # Read-only access
-bcq auth login --no-browser # Headless mode (manual code entry)
+bcq auth login --no-browser # Headless mode
 ```
 
 ## Configuration
@@ -108,30 +115,18 @@ bcq auth login --no-browser # Headless mode (manual code entry)
 └── config.json        # Preferences
 
 .basecamp/
-└── config.json        # Per-directory overrides
+└── config.json        # Per-repo overrides
 ```
 
-## Platform-Specific Packaging
+## Install Paths
 
-### Claude Code
+| Component | Default Location | Override |
+|-----------|------------------|----------|
+| CLI | `~/.local/share/bcq` | `BCQ_INSTALL_DIR` |
+| Binary | `~/.local/bin/bcq` | `BCQ_BIN_DIR` |
+| Skills | `~/.local/share/bcq-skills` | `BCQ_SKILLS_DIR` |
 
-For optimal Claude Code integration, install the plugin:
-
-```bash
-claude plugins install github:basecamp/bcq
-```
-
-This adds:
-- `/basecamp` slash command
-- Automatic skill and agent loading
-- Session hooks for project context
-
-### Other Agents
-
-For Codex, OpenCode, Gemini, Copilot, etc.:
-1. Install bcq (see [Install](#install)) — includes CLI and skills
-2. Load skill content from `~/.local/share/bcq/.claude-plugin/skills/*/SKILL.md`
-3. Update with `bcq self-update` — updates both CLI and skills
+For installer-based installs, `bcq self-update` updates the CLI. For skills, re-run `install-skills.sh --update`.
 
 ## Development
 
