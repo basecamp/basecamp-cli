@@ -21,11 +21,11 @@ curl -s https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md
 
 ```bash
 # Environment provides:
-# - BCQ_ACCESS_TOKEN: Bearer token
+# - BASECAMP_TOKEN: Bearer token
 # - BCQ_API_BASE: Full base URL including account ID
 
 # All requests require:
-# Authorization: Bearer $BCQ_ACCESS_TOKEN
+# Authorization: Bearer $BASECAMP_TOKEN
 # Content-Type: application/json
 # User-Agent: YourApp (you@example.com)
 ```

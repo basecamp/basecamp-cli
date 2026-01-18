@@ -15,11 +15,11 @@ Includes endpoint examples and domain patterns.
 
 ```bash
 # Environment provides:
-# - BCQ_ACCESS_TOKEN: Bearer token
+# - BASECAMP_TOKEN: Bearer token
 # - BCQ_API_BASE: Full base URL including account ID
 
 # All requests require:
-# Authorization: Bearer $BCQ_ACCESS_TOKEN
+# Authorization: Bearer $BASECAMP_TOKEN
 # Content-Type: application/json
 # User-Agent: YourApp (you@example.com)
 ```
@@ -31,11 +31,11 @@ Includes endpoint examples and domain patterns.
 ```bash
 # List all projects
 curl -s "$BCQ_API_BASE/projects.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 
 # Get project details
 curl -s "$BCQ_API_BASE/projects/{project_id}.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 ```
 
 ### Todos
@@ -43,17 +43,17 @@ curl -s "$BCQ_API_BASE/projects/{project_id}.json" \
 ```bash
 # List todos in a todolist
 curl -s "$BCQ_API_BASE/buckets/{project_id}/todolists/{todolist_id}/todos.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 
 # Create a todo
 curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/todolists/{todolist_id}/todos.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+  -H "Authorization: Bearer $BASECAMP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"content": "Todo text", "assignee_ids": [123]}' | jq
 
 # Complete a todo
 curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/todos/{todo_id}/completion.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN"
+  -H "Authorization: Bearer $BASECAMP_TOKEN"
 ```
 
 ### Todolists
@@ -61,11 +61,11 @@ curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/todos/{todo_id}/completion.j
 ```bash
 # List todolists in a project's todoset
 curl -s "$BCQ_API_BASE/buckets/{project_id}/todosets/{todoset_id}/todolists.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 
 # Create a todolist
 curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/todosets/{todoset_id}/todolists.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+  -H "Authorization: Bearer $BASECAMP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name": "List name"}' | jq
 ```
@@ -75,7 +75,7 @@ curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/todosets/{todoset_id}/todoli
 ```bash
 # List messages
 curl -s "$BCQ_API_BASE/buckets/{project_id}/message_boards/{board_id}/messages.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 ```
 
 ### Comments
@@ -83,7 +83,7 @@ curl -s "$BCQ_API_BASE/buckets/{project_id}/message_boards/{board_id}/messages.j
 ```bash
 # Add comment to any recording
 curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/recordings/{recording_id}/comments.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+  -H "Authorization: Bearer $BASECAMP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"content": "Comment text"}' | jq
 ```
@@ -93,11 +93,11 @@ curl -s -X POST "$BCQ_API_BASE/buckets/{project_id}/recordings/{recording_id}/co
 ```bash
 # List all people
 curl -s "$BCQ_API_BASE/people.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 
 # Get person by ID
 curl -s "$BCQ_API_BASE/people/{person_id}.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 ```
 
 ### Search
@@ -105,7 +105,7 @@ curl -s "$BCQ_API_BASE/people/{person_id}.json" \
 ```bash
 # Search across projects
 curl -s "$BCQ_API_BASE/projects/search.json?query=term" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq
+  -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 ```
 
 ## Pagination
