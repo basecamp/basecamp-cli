@@ -1,1 +1,1 @@
-../bcq-basecamp/SKILL.md
+../../../skills/basecamp/SKILL.md

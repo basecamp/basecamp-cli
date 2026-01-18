@@ -21,7 +21,7 @@ run_task() {
   echo "[matrix] Task $task_id, Condition: $condition, Run: $run_num"
 
   # Setup condition
-  ./harness.sh --task "$task_id" --condition "$condition" --setup-only 2>/dev/null || true
+  ./harness.sh --task "$task_id" --strategy "$condition" --setup-only 2>/dev/null || true
 
   local start_ms=$(date +%s%3N)
   local success=false

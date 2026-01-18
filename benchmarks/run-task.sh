@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Non-interactive task runner for benchmark automation
-# Usage: ./run-task.sh --task 12 --condition bcq-default
+# Usage: ./run-task.sh --task 12 --strategy bcq-default
 
 set -euo pipefail
 
@@ -14,13 +14,13 @@ MATCH=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task|-t) TASK="$2"; shift 2 ;;
-    --condition|-c) CONDITION="$2"; shift 2 ;;
+    --strategy|-c) CONDITION="$2"; shift 2 ;;
     --match|-m) MATCH="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 
-[[ -z "$TASK" ]] && { echo "Usage: $0 --task <id> --condition <cond>"; exit 1; }
+[[ -z "$TASK" ]] && { echo "Usage: $0 --task <id> --strategy <cond>"; exit 1; }
 
 # Clean state
 rm -f .inject-state .inject-counter results/requests.log

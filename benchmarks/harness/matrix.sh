@@ -11,7 +11,7 @@ fi
 # Usage:
 #   ./harness/matrix.sh --task 12
 #   ./harness/matrix.sh --task 12 --models "claude-sonnet,gpt-4o"
-#   ./harness/matrix.sh --task 12 --conditions "bcq"
+#   ./harness/matrix.sh --task 12 --strategys "bcq"
 #   ./harness/matrix.sh --task 12 --runs 5   # 5 runs per cell for statistics
 
 set -euo pipefail
@@ -92,7 +92,7 @@ while [[ $# -gt 0 ]]; do
       MODELS="$2"
       shift 2
       ;;
-    --conditions|-c)
+    --strategys|-c)
       CONDITIONS="$2"
       shift 2
       ;;
@@ -119,7 +119,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -z "$TASK" ]] && { echo "Usage: $0 --task <id> [--models m1,m2] [--conditions c1,c2] [--runs N]" >&2; exit 1; }
+[[ -z "$TASK" ]] && { echo "Usage: $0 --task <id> [--models m1,m2] [--strategys c1,c2] [--runs N]" >&2; exit 1; }
 
 # === Matrix Execution ===
 IFS=',' read -ra MODEL_LIST <<< "$MODELS"
@@ -175,7 +175,7 @@ for model in "${MODEL_LIST[@]}"; do
         fi
 
         # Run benchmark
-        result_file=$("$HARNESS_DIR/run.sh" --task "$TASK" --condition "$condition" --model "$model" 2>&1 | \
+        result_file=$("$HARNESS_DIR/run.sh" --task "$TASK" --strategy "$condition" --model "$model" 2>&1 | \
           tee /dev/stderr | \
           grep -o '"run_id":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
 
