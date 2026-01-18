@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-AUTH_HEADER="Authorization: Bearer ${BCQ_ACCESS_TOKEN}"
+AUTH_HEADER="Authorization: Bearer ${BASECAMP_TOKEN}"
 USER_AGENT_HEADER="User-Agent: ${BCQ_USER_AGENT}"
 CONTENT_TYPE_HEADER="Content-Type: application/json"
 

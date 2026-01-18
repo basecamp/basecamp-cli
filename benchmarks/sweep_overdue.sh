@@ -11,7 +11,7 @@ TOTAL_OVERDUE=0
 TOTAL_PROCESSED=0
 
 echo "=== Overdue Sweep Across Benchmark Projects ==="
-echo "Access Token: ${BCQ_ACCESS_TOKEN:0:20}..."
+echo "Access Token: ${BASECAMP_TOKEN:0:20}..."
 echo "API Base: $BCQ_API_BASE"
 echo "Project 1: $BCQ_BENCH_PROJECT_ID"
 echo "Project 2: $BCQ_BENCH_PROJECT_ID_2"
@@ -30,12 +30,12 @@ function make_request() {
   while true; do
     if [ -z "$data" ]; then
       response=$(curl -s -w "\n%{http_code}" -X "$method" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+        -H "Authorization: Bearer $BASECAMP_TOKEN" \
         -H "Content-Type: application/json" \
         "$url")
     else
       response=$(curl -s -w "\n%{http_code}" -X "$method" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+        -H "Authorization: Bearer $BASECAMP_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$data" \
         "$url")

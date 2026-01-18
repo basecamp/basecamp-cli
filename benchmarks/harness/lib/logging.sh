@@ -95,8 +95,8 @@ redact_secrets() {
   text=$(echo "$text" | sed -E 's/(Bearer\s+)[A-Za-z0-9_\-\.]+/\1[REDACTED]/gi')
   # Redact Authorization headers
   text=$(echo "$text" | sed -E 's/(Authorization:\s*)[^\s"'\'']+/\1[REDACTED]/gi')
-  # Redact BCQ_ACCESS_TOKEN values
-  text=$(echo "$text" | sed -E 's/(BCQ_ACCESS_TOKEN=)[^\s"'\'']+/\1[REDACTED]/gi')
+  # Redact BASECAMP_TOKEN values
+  text=$(echo "$text" | sed -E 's/(BASECAMP_TOKEN=)[^\s"'\'']+/\1[REDACTED]/gi')
   # Redact common API key patterns
   text=$(echo "$text" | sed -E 's/(sk-ant-)[A-Za-z0-9_\-]+/\1[REDACTED]/gi')
   text=$(echo "$text" | sed -E 's/(sk-)[A-Za-z0-9_\-]{20,}/\1[REDACTED]/gi')

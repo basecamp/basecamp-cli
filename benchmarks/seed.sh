@@ -298,7 +298,7 @@ _get_token_for_api() {
   local config_file="$config_dir/config.json"
 
   if [[ ! -f "$creds_file" ]]; then
-    echo "${BCQ_ACCESS_TOKEN:-}"
+    echo "${BASECAMP_TOKEN:-}"
     return
   fi
 

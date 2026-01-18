@@ -252,7 +252,7 @@ prepare_overdue_todos() {
   for id in $overdue_ids; do
     local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-      -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+      -H "Authorization: Bearer $BASECAMP_TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"due_on\":\"$yesterday\"}" \
       "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todos/$id.json")
@@ -397,15 +397,14 @@ export BCQ_BENCH_RUN_ID="$BCQ_BENCH_RUN_ID"
 export BCQ_BENCH_RUN_START="$BCQ_BENCH_RUN_START"
 ENVEOF
 
-  # IMPORTANT: Only export BASECAMP_ACCESS_TOKEN for raw-* strategies
+  # IMPORTANT: Only export token for raw-* strategies
   # bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set
   if ! strategy_uses_bcq; then
     cat >> "$env_file" << ENVEOF
 # Raw strategy: provide token directly (no refresh available)
-export BCQ_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"
+export BASECAMP_TOKEN="$BASECAMP_TOKEN"
 export BASECAMP_ACCOUNT_ID="$BCQ_ACCOUNT_ID"
-export BASECAMP_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"
-export BASECAMP_TOKEN="$BCQ_ACCESS_TOKEN"
+export BASECAMP_ACCESS_TOKEN="$BASECAMP_TOKEN"
 ENVEOF
   else
     cat >> "$env_file" << ENVEOF

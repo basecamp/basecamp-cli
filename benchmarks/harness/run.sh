@@ -114,7 +114,7 @@ preflight_check() {
   fi
 
   # Check required Basecamp environment
-  [[ -z "${BCQ_ACCESS_TOKEN:-}" ]] && errors+=("BCQ_ACCESS_TOKEN not set")
+  [[ -z "${BASECAMP_TOKEN:-}" ]] && errors+=("BASECAMP_TOKEN not set")
   [[ -z "${BCQ_ACCOUNT_ID:-}" ]] && errors+=("BCQ_ACCOUNT_ID not set")
 
   # Run ID will be generated if not set, but fixture IDs are required

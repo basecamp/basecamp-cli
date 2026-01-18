@@ -23,7 +23,7 @@ _get_fresh_token() {
 
   if [[ ! -f "$creds_file" ]]; then
     # Fall back to env var if no credentials file
-    echo "${BCQ_ACCESS_TOKEN:-}"
+    echo "${BASECAMP_TOKEN:-}"
     return
   fi
 
@@ -44,7 +44,7 @@ _get_fresh_token() {
     echo "$token"
   else
     # Fall back to env var
-    echo "${BCQ_ACCESS_TOKEN:-}"
+    echo "${BASECAMP_TOKEN:-}"
   fi
 }
 
@@ -998,7 +998,7 @@ Commands:
 
 Environment:
   BCQ_ACCOUNT_ID       Basecamp account ID
-  BCQ_ACCESS_TOKEN     Access token
+  BASECAMP_TOKEN     Access token
   BCQ_BENCH_*          Fixture IDs from .fixtures.json
 EOF
       ;;

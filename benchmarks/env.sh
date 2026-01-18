@@ -87,15 +87,15 @@ if [[ -z "${BCQ_ACCOUNT_ID:-}" ]]; then
 fi
 
 # Access token - prefer env, fallback to credentials
-if [[ -z "${BCQ_ACCESS_TOKEN:-}" ]]; then
-  export BCQ_ACCESS_TOKEN="$(_get_access_token)"
+if [[ -z "${BASECAMP_TOKEN:-}" ]]; then
+  export BASECAMP_TOKEN="$(_get_access_token)"
 fi
 
 # Validate required variables
 _validate_env() {
   local missing=()
   [[ -z "${BCQ_ACCOUNT_ID:-}" ]] && missing+=("BCQ_ACCOUNT_ID")
-  [[ -z "${BCQ_ACCESS_TOKEN:-}" ]] && missing+=("BCQ_ACCESS_TOKEN")
+  [[ -z "${BASECAMP_TOKEN:-}" ]] && missing+=("BASECAMP_TOKEN")
 
   if (( ${#missing[@]} > 0 )); then
     echo "Error: Missing required environment variables: ${missing[*]}" >&2
