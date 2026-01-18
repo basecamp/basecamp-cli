@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Benchmark harness - sets up environment and records metrics
+# Skill-bench harness - sets up environment and records metrics
+#
+# Compares 5 conditions from conditions.json:
+#   bcq-full, bcq-generated, bcq-only, raw-docs, raw-guided
 #
 # EXECUTION MODEL:
 #   This harness does NOT automatically invoke Claude Code. It:
@@ -9,15 +12,15 @@
 #   4. After completion, validates results and records metrics
 #
 #   Example workflow:
-#     ./harness.sh --task 01 --condition bcq-default
+#     ./harness.sh --task 01 --condition bcq-full
 #     # Harness prints prompt file path
-#     # You invoke Claude Code: claude /path/to/task.md --skill bcq-basecamp
+#     # You invoke Claude Code: claude /path/to/task.md --skill bcq-full
 #     # Run validation: ./validate.sh check_all_todos 75
 #
 # Usage:
-#   ./harness.sh --task 01 --condition bcq-default
-#   ./harness.sh --task all --condition raw --model haiku
-#   ./harness.sh --task 07 --condition bcq-nocache --inject 429
+#   ./harness.sh --task 01 --condition bcq-full
+#   ./harness.sh --task all --condition raw-docs --model haiku
+#   ./harness.sh --task 07 --condition bcq-generated --inject 429
 #
 # Results are written to results/<run_id>-<condition>-<task>.json
 
@@ -28,13 +31,16 @@ source "$BENCH_DIR/env.sh"
 
 # Defaults
 TASK=""
-CONDITION="bcq-default"
+CONDITION="bcq-full"
 MODEL="${BCQ_BENCH_MODEL:-sonnet}"
 INJECT_ERROR=""
 INJECT_COUNT=1
 DRY_RUN=false
 TRIAL=1
 AUTO_RESET=true  # Reset state before each task (prevents false positives)
+
+# Load conditions from conditions.json
+CONDITIONS_FILE="$BENCH_DIR/conditions.json"
 
 log() { echo "[harness] $*" >&2; }
 die() { echo "[harness] ERROR: $*" >&2; exit 1; }
@@ -69,19 +75,28 @@ parse_args() {
   done
 
   [[ -z "$TASK" ]] && die "Task required. Use --task <id|all>"
-  [[ ! "$CONDITION" =~ ^(raw|bcq-nocache|bcq-default)$ ]] && die "Invalid condition: $CONDITION"
+
+  # Validate condition against conditions.json
+  if ! jq -e --arg c "$CONDITION" '.conditions | has($c)' "$CONDITIONS_FILE" >/dev/null 2>&1; then
+    local valid_conditions
+    valid_conditions=$(jq -r '.conditions | keys | join(", ")' "$CONDITIONS_FILE")
+    die "Invalid condition: $CONDITION. Valid: $valid_conditions"
+  fi
   :  # Explicit no-op to ensure proper return
 }
 
 show_help() {
+  local conditions_list
+  conditions_list=$(jq -r '.conditions | to_entries | map("  \(.key): \(.value.description)") | join("\n")' "$CONDITIONS_FILE" 2>/dev/null || echo "  (error reading conditions.json)")
+
   cat << EOF
-Benchmark Harness - Run bcq vs raw-API tasks
+Benchmark Harness - Run skill-bench tasks
 
 Usage: $0 [options]
 
 Options:
   --task, -t <id|all>       Task ID (01-10) or 'all'
-  --condition, -c <cond>    raw, bcq-nocache, or bcq-default (default: bcq-default)
+  --condition, -c <cond>    Condition name (default: bcq-full)
   --model, -m <model>       Model identifier for metadata (default: sonnet)
   --inject, -i <code>       Inject error (401 or 429) before task
   --inject-count <n>        Number of errors to inject (default: 1)
@@ -91,10 +106,13 @@ Options:
   --no-reset                Skip state reset (use for debugging only)
   --help, -h                Show this help
 
+Conditions (from conditions.json):
+$conditions_list
+
 Examples:
-  $0 --task 01 --condition bcq-default
-  $0 --task all --condition raw --model haiku
-  $0 --task 07 --condition bcq-default --inject 429
+  $0 --task 01 --condition bcq-full
+  $0 --task all --condition raw-docs --model haiku
+  $0 --task 07 --condition bcq-generated --inject 429
 EOF
 }
 
@@ -108,6 +126,20 @@ generate_run_id() {
   export BCQ_BENCH_RUN_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   echo "$run_id"
+}
+
+# Get condition config from conditions.json
+get_condition_config() {
+  local condition="$1"
+  local field="$2"
+  jq -r --arg c "$condition" ".conditions[\$c].$field // \"\"" "$CONDITIONS_FILE"
+}
+
+# Check if condition uses bcq (vs raw curl)
+condition_uses_bcq() {
+  local tools
+  tools=$(get_condition_config "$CONDITION" "tools")
+  echo "$tools" | jq -e 'index("bcq") != null' >/dev/null 2>&1
 }
 
 # Setup condition-specific environment
@@ -124,28 +156,22 @@ setup_condition() {
   # The shim intercepts all curl calls and logs them
   export PATH="$BENCH_DIR:$PATH"
 
-  case "$CONDITION" in
-    raw)
-      # Raw uses curl directly, no bcq
-      export BCQ_BENCH_USE_BCQ=false
-      export BCQ_CACHE_ENABLED=false
-      ;;
-    bcq-nocache|bcq-default)
-      # CRITICAL: Unset BASECAMP_ACCESS_TOKEN for bcq conditions
-      # bcq skips token refresh when this is set, which would poison Task 08 results
-      if [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
-        log "WARNING: BASECAMP_ACCESS_TOKEN is set; unsetting to allow bcq token refresh"
-      fi
-      unset BASECAMP_ACCESS_TOKEN
+  if condition_uses_bcq; then
+    # bcq-based conditions (bcq-full, bcq-generated, bcq-only)
+    # CRITICAL: Unset BASECAMP_ACCESS_TOKEN for bcq conditions
+    # bcq skips token refresh when this is set, which would poison Task 08 results
+    if [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
+      log "WARNING: BASECAMP_ACCESS_TOKEN is set; unsetting to allow bcq token refresh"
+    fi
+    unset BASECAMP_ACCESS_TOKEN
 
-      export BCQ_BENCH_USE_BCQ=true
-      if [[ "$CONDITION" == "bcq-default" ]]; then
-        export BCQ_CACHE_ENABLED=true
-      else
-        export BCQ_CACHE_ENABLED=false
-      fi
-      ;;
-  esac
+    export BCQ_BENCH_USE_BCQ=true
+    export BCQ_CACHE_ENABLED=true  # Real-world product behavior
+  else
+    # raw-based conditions (raw-docs, raw-guided)
+    export BCQ_BENCH_USE_BCQ=false
+    export BCQ_CACHE_ENABLED=false
+  fi
 }
 
 # Setup error injection
@@ -178,16 +204,16 @@ get_task_injection() {
   TASK_INJECT_AT_REQUEST=$(yq -r ".tasks[] | select(.id == \"$task_id\") | .inject.at_request // 0" "$BENCH_DIR/spec.yaml")
 }
 
-# Get skill for condition
+# Get skill path for condition (from conditions.json)
+get_skill_path() {
+  get_condition_config "$CONDITION" "skill"
+}
+
+# Get skill name (basename of skill path for display)
 get_skill() {
-  case "$CONDITION" in
-    raw)
-      echo "raw-api-basecamp"
-      ;;
-    bcq-nocache|bcq-default)
-      echo "bcq-basecamp"
-      ;;
-  esac
+  local skill_path
+  skill_path=$(get_skill_path)
+  basename "$(dirname "$skill_path")"
 }
 
 # Per-task setup hooks
@@ -252,14 +278,17 @@ prepare_overdue_todos() {
 # NOTE: This measures file sizes, not the exact prompt sent to the model.
 # Claude Code may add system context that isn't captured here.
 calc_prompt_size() {
-  local skill="$1"
-  local prompt_file="$2"
+  local prompt_file="$1"
 
-  local skill_file="$BCQ_ROOT/.claude-plugin/skills/$skill/SKILL.md"
+  # Get skill path from conditions.json (relative to repo root)
+  local skill_path
+  skill_path=$(get_skill_path)
+  local skill_file="$BCQ_ROOT/$skill_path"
   local task_file="$BENCH_DIR/$prompt_file"
 
   local skill_bytes=0 task_bytes=0 total_bytes=0
 
+  # Follow symlinks to get actual file size
   if [[ -f "$skill_file" ]]; then
     skill_bytes=$(wc -c < "$skill_file" | tr -d ' ')
   fi
@@ -326,7 +355,7 @@ run_task() {
 
   # Calculate prompt size for this task
   local prompt_size_json
-  prompt_size_json=$(calc_prompt_size "$skill" "$prompt_file")
+  prompt_size_json=$(calc_prompt_size "$prompt_file")
   local total_prompt_bytes
   total_prompt_bytes=$(echo "$prompt_size_json" | jq '.total_bytes')
 
@@ -368,9 +397,9 @@ export BCQ_BENCH_RUN_ID="$BCQ_BENCH_RUN_ID"
 export BCQ_BENCH_RUN_START="$BCQ_BENCH_RUN_START"
 ENVEOF
 
-  # IMPORTANT: Only export BASECAMP_ACCESS_TOKEN for 'raw' condition
+  # IMPORTANT: Only export BASECAMP_ACCESS_TOKEN for raw-* conditions
   # bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set
-  if [[ "$CONDITION" == "raw" ]]; then
+  if ! condition_uses_bcq; then
     cat >> "$env_file" << ENVEOF
 # Raw condition: provide token directly (no refresh available)
 export BCQ_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"

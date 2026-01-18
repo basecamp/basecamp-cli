@@ -1,1 +1,1 @@
-../../../.claude-plugin/skills/bcq-basecamp/SKILL.md
+../bcq-basecamp/SKILL.md

@@ -14,7 +14,7 @@ export BCQ_ROOT="${BCQ_ROOT:-$(dirname "$BENCH_DIR")}"
 [[ ":$PATH:" != *":$BCQ_ROOT/bin:"* ]] && export PATH="$BCQ_ROOT/bin:$PATH"
 
 # Cache control - set by harness.sh per condition
-# BCQ_CACHE_ENABLED: true (bcq-default) or false (bcq-nocache, raw)
+# BCQ_CACHE_ENABLED: true (bcq-*) or false (raw-*)
 export BCQ_CACHE_DIR="${BCQ_CACHE_DIR:-$BENCH_DIR/.cache}"
 
 # Request logging
