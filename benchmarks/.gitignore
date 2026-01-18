@@ -32,3 +32,6 @@ task12_summary.md
 
 # Keep reports/ JSON files
 !reports/*.json
+
+# Keep conditions.json (condition→skill mapping)
+!conditions.json

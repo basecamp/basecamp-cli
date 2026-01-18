@@ -1,0 +1,43 @@
+{
+  "conditions": {
+    "A": {
+      "name": "bcq-full",
+      "skill": "benchmarks/skills/bcq-full/SKILL.md",
+      "tools": ["bcq"],
+      "description": "Full hand-authored skill (control)"
+    },
+    "B": {
+      "name": "bcq-generated",
+      "skill": "benchmarks/skills/bcq-generated/SKILL.md",
+      "tools": ["bcq"],
+      "description": "CLI-generated skill from invariants"
+    },
+    "C": {
+      "name": "bcq-only",
+      "skill": "benchmarks/skills/bcq-only/SKILL.md",
+      "tools": ["bcq"],
+      "description": "Minimal 'use bcq --help' prompt"
+    },
+    "D1": {
+      "name": "raw-docs",
+      "skill": "benchmarks/skills/raw-docs/SKILL.md",
+      "tools": ["curl", "jq"],
+      "description": "Raw API with docs link only"
+    },
+    "D2": {
+      "name": "raw-guided",
+      "skill": "benchmarks/skills/raw-guided/SKILL.md",
+      "tools": ["curl", "jq"],
+      "description": "Raw API with docs + guidance patterns"
+    }
+  },
+  "aliases": {
+    "bcq-full": "A",
+    "bcq-generated": "B",
+    "bcq-only": "C",
+    "raw-docs": "D1",
+    "raw-guided": "D2",
+    "raw": "D1",
+    "api-only": "D1"
+  }
+}

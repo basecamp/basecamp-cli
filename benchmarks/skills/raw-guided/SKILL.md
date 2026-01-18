@@ -1,14 +1,15 @@
 ---
-name: basecamp-raw
+name: raw-guided
 version: "0.1.0"
-description: Basecamp API via curl (no CLI wrapper)
+description: Basecamp API via curl with endpoint guidance
 tools:
   - Bash
 ---
 
-# Basecamp API (Raw)
+# Basecamp API (Raw + Guidance)
 
 Direct Basecamp 4 API access via curl + jq. No CLI wrapper.
+Includes endpoint examples and domain patterns.
 
 ## Authentication
 

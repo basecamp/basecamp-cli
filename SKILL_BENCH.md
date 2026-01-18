@@ -4,9 +4,10 @@ Empirical test to determine the optimal skill strategy for bcq.
 
 ## Questions
 
-1. **Does bcq help?** — Compare bcq-based conditions (A/B/C) vs raw API (D)
+1. **Does bcq help?** — Compare bcq-based conditions (A/B/C) vs raw API (D1/D2)
 2. **Full vs generated skill?** — Compare hand-authored (A) vs CLI-generated (B)
 3. **Skill vs no skill?** — Compare skill-based (A/B) vs `bcq --help` only (C)
+4. **Does guidance help raw API?** — Compare docs-only (D1) vs guided (D2)
 
 ## Hypothesis
 
@@ -23,7 +24,8 @@ If generated skill matches full skill, we switch to generated (less maintenance,
 | **A** | `bcq-full` | bcq | Full hand-authored skill (control) |
 | **B** | `bcq-generated` | bcq | Minimal CLI-generated skill |
 | **C** | `bcq-only` | bcq | "use `bcq --help`" prompt only |
-| **D** | `api-only` | curl | Raw API skill with endpoint docs |
+| **D1** | `raw-docs` | curl | Raw API with docs link only |
+| **D2** | `raw-guided` | curl | Raw API with endpoint examples |
 
 ### Condition A: bcq + full skill (control)
 
@@ -62,20 +64,55 @@ Agent receives:
 
 Tests whether `bcq --help` alone is self-sufficient.
 
-### Condition D: raw API skill
+### Condition D1: raw API (docs only)
 
 Agent receives:
-- `benchmarks/skills/api-only/SKILL.md` with API endpoint documentation
+- `benchmarks/skills/raw-docs/SKILL.md` — link to API docs only
 - curl + jq tools
 - No bcq CLI
 
-The raw skill provides:
+The minimal raw skill provides:
+- Authentication pattern
+- Base URL
+- Link to fetch API documentation
+
+Baseline to measure bcq's value-add over pure docs.
+
+### Condition D2: raw API (guided)
+
+Agent receives:
+- `benchmarks/skills/raw-guided/SKILL.md` — full endpoint examples
+- curl + jq tools
+- No bcq CLI
+
+The guided raw skill provides:
 - Authentication pattern
 - Endpoint URLs and curl examples
 - Response structure documentation
 - Pagination and rate limiting notes
 
-Baseline to measure bcq's value-add over raw API.
+Tests whether endpoint guidance (without bcq) is sufficient.
+
+## Condition Map
+
+Single source of truth for condition → skill mapping:
+
+```json
+// benchmarks/conditions.json
+{
+  "conditions": {
+    "A":  { "skill": "bcq-full",      "tools": ["bcq"] },
+    "B":  { "skill": "bcq-generated", "tools": ["bcq"] },
+    "C":  { "skill": "bcq-only",      "tools": ["bcq"] },
+    "D1": { "skill": "raw-docs",      "tools": ["curl", "jq"] },
+    "D2": { "skill": "raw-guided",    "tools": ["curl", "jq"] }
+  },
+  "aliases": {
+    "bcq-full": "A", "bcq-generated": "B", "bcq-only": "C",
+    "raw-docs": "D1", "raw-guided": "D2", "raw": "D1"
+  }
+}
+```
 
 ## Tasks
 
@@ -101,9 +138,11 @@ Reuse tasks from `benchmarks/spec.yaml` (the existing bcq vs raw benchmark):
 | 06: Create list + todos | todoset vs todolist | A/B vs C/D (invariants) |
 | 09: Bulk complete overdue | Workflow patterns | A vs B (full skill features) |
 | 07: Recover from 429 | Error handling | A/B/C vs D (bcq vs raw) |
+| 01: Pagination | Following Link headers | D1 vs D2 (guidance value) |
 
 If B matches A on task 09, the full skill's workflow patterns don't add value.
 If B outperforms C on task 06, the generated skill's invariants help.
+If D2 outperforms D1, endpoint guidance matters for raw API.
 
 ## Metrics
 
@@ -118,11 +157,16 @@ If B outperforms C on task 06, the generated skill's invariants help.
 ## Execution
 
 ```bash
-# Run all four conditions
-./benchmarks/harness.sh --condition bcq-full       # A: full skill (control)
-./benchmarks/harness.sh --condition bcq-generated  # B: generated skill
-./benchmarks/harness.sh --condition bcq-only       # C: bcq --help only
-./benchmarks/harness.sh --condition api-only       # D: raw API
+# Run all five conditions
+./benchmarks/harness.sh --condition A   # bcq-full (control)
+./benchmarks/harness.sh --condition B   # bcq-generated
+./benchmarks/harness.sh --condition C   # bcq-only
+./benchmarks/harness.sh --condition D1  # raw-docs
+./benchmarks/harness.sh --condition D2  # raw-guided
+
+# Or use aliases
+./benchmarks/harness.sh --condition bcq-full
+./benchmarks/harness.sh --condition raw-docs
 
 # Compare results
 jq -s 'group_by(.condition) | map({
@@ -135,12 +179,12 @@ jq -s 'group_by(.condition) | map({
 
 ## Decision Criteria
 
-### Question 1: Does bcq help? (A/B/C vs D)
+### Question 1: Does bcq help? (A/B/C vs D1/D2)
 
 | Outcome | Decision |
 |---------|----------|
-| A/B/C >> D | bcq adds value, keep CLI |
-| A/B/C ≈ D | bcq not worth it, raw API is fine |
+| A/B/C >> D1/D2 | bcq adds value, keep CLI |
+| A/B/C ≈ D1/D2 | bcq not worth it, raw API is fine |
 
 ### Question 2: Full vs generated skill? (A vs B)
 
@@ -157,10 +201,17 @@ jq -s 'group_by(.condition) | map({
 | A or B >> C | Skill adds value |
 | A or B ≈ C | `bcq --help` is sufficient, no skill needed |
 
+### Question 4: Does guidance help raw API? (D1 vs D2)
+
+| Outcome | Decision |
+|---------|----------|
+| D2 >> D1 | Endpoint examples matter |
+| D2 ≈ D1 | Docs link is sufficient |
+
 ### Decision matrix
 
-| A vs B | Best(A,B) vs C | Best(A,B,C) vs D | Action |
-|--------|----------------|------------------|--------|
+| A vs B | Best(A,B) vs C | Best(A,B,C) vs Best(D1,D2) | Action |
+|--------|----------------|----------------------------|--------|
 | A >> B | A >> C | A >> D | Ship full skill |
 | A ≈ B | B >> C | B >> D | Ship generated skill |
 | A ≈ B | B ≈ C | C >> D | Ship bcq, no skill |
@@ -181,10 +232,12 @@ bcq skill > ~/.config/basecamp/skills/basecamp/SKILL.md
 | File | Purpose |
 |------|---------|
 | `lib/agent_invariants.json` | Source of truth for domain invariants |
+| `benchmarks/conditions.json` | Condition → skill mapping |
 | `benchmarks/skills/bcq-full/SKILL.md` | Condition A: full hand-authored skill |
 | `benchmarks/skills/bcq-generated/SKILL.md` | Condition B: CLI-generated skill |
 | `benchmarks/skills/bcq-only/SKILL.md` | Condition C: minimal "use --help" |
-| `benchmarks/skills/api-only/SKILL.md` | Condition D: raw API |
+| `benchmarks/skills/raw-docs/SKILL.md` | Condition D1: docs link only |
+| `benchmarks/skills/raw-guided/SKILL.md` | Condition D2: endpoint examples |
 | `bcq help` | Human-readable agent help |
 | `bcq skill` | Skill generator (produces B) |
 | `bcq help --json` | Machine-readable for tooling |
