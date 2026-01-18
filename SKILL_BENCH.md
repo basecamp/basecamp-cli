@@ -12,11 +12,11 @@ If the skill doesn't measurably improve outcomes, we rely solely on `bcq --help`
 
 ## Conditions
 
-| Condition | Setup | What agent sees |
-|-----------|-------|-----------------|
-| **A** | bcq + generated skill | `skills/basecamp/SKILL.md` loaded, plus `bcq --help` |
-| **B** | bcq only | Prompt says "use `bcq --help`", no skill file |
-| **C** | raw curl + docs | No bcq, API docs only (baseline from prior benchmark) |
+| Condition | Skill | CLI | What agent sees |
+|-----------|-------|-----|-----------------|
+| **A** | `basecamp` | bcq | Generated skill with invariants + bcq CLI |
+| **B** | none | bcq | "use `bcq --help`" prompt only |
+| **C** | `basecamp-raw` | curl | Raw API skill with endpoint docs |
 
 ### Condition A: bcq + minimal skill
 
@@ -33,20 +33,26 @@ The skill provides:
 ### Condition B: bcq only
 
 Agent receives:
-- System prompt: "Use the `bcq` CLI for Basecamp operations. Run `bcq --help` for available commands."
+- `benchmarks/skills/bcq-only/SKILL.md` — minimal "use bcq --help" prompt
 - Access to `bcq` CLI
-- No skill file, no domain invariants
+- No domain invariants
 
 This tests whether `bcq --help` is self-sufficient.
 
-### Condition C: raw curl + docs (baseline)
+### Condition C: raw API skill
 
 Agent receives:
-- Basecamp API documentation
+- `benchmarks/skills/basecamp-raw/SKILL.md` with API endpoint documentation
 - curl + jq tools
-- No bcq
+- No bcq CLI
 
-Already benchmarked separately. Included for reference.
+The raw skill provides:
+- Authentication pattern
+- Endpoint URLs and curl examples
+- Response structure documentation
+- Pagination and rate limiting notes
+
+This is the baseline to measure bcq's value-add.
 
 ## Tasks
 
@@ -84,25 +90,45 @@ If Condition A outperforms B on task 06, the invariants have value.
 ## Execution
 
 ```bash
-# Run A vs B comparison
-./benchmarks/harness.sh --condition skill   # Condition A
-./benchmarks/harness.sh --condition bcq     # Condition B
+# Run all three conditions
+./benchmarks/harness.sh --condition skill     # Condition A: bcq + skill
+./benchmarks/harness.sh --condition bcq       # Condition B: bcq only
+./benchmarks/harness.sh --condition raw       # Condition C: raw API skill
 
 # Compare results
 jq -s 'group_by(.condition) | map({
   condition: .[0].condition,
   success_rate: ([.[] | select(.success)] | length) / length,
-  avg_errors: ([.[] | .metrics.error_count] | add / length)
+  avg_errors: ([.[] | .metrics.error_count] | add / length),
+  avg_time_ms: ([.[] | .metrics.time_ms] | add / length)
 })' benchmarks/results/*.json
 ```
 
 ## Decision Criteria
 
+### Primary question: Does bcq help?
+
 | Outcome | Decision |
 |---------|----------|
-| A > B by ≥10% success rate | Keep skill, invariants have value |
-| A ≈ B (within 5%) | Drop skill, rely on `bcq --help` |
+| A or B >> C | bcq adds value, keep CLI |
+| A or B ≈ C | bcq not worth it, raw API is fine |
+
+### Secondary question: Does the skill add value beyond bcq --help?
+
+| Outcome | Decision |
+|---------|----------|
+| A > B by ≥10% success rate | Keep skill, invariants help |
+| A ≈ B (within 5%) | Drop skill, `bcq --help` is sufficient |
 | A < B | Skill is harmful, drop it |
+
+### Decision matrix
+
+| A vs B | A/B vs C | Action |
+|--------|----------|--------|
+| A >> B | A >> C | Ship bcq + skill |
+| A ≈ B | A ≈ B >> C | Ship bcq, drop skill |
+| A ≈ B | A ≈ B ≈ C | Raw API sufficient, bcq optional |
+| A < B | — | Skill harmful, investigate |
 
 If skill is kept, add to installer:
 ```bash
@@ -116,6 +142,8 @@ bcq help --agent --format=skill > ~/.config/basecamp/skills/basecamp/SKILL.md
 |------|---------|
 | `lib/agent_invariants.json` | Source of truth for domain invariants |
 | `skills/basecamp/SKILL.md` | Generated skill (checked in as bootstrap) |
+| `benchmarks/skills/bcq-only/SKILL.md` | Minimal "use bcq --help" (benchmark only) |
+| `benchmarks/skills/basecamp-raw/SKILL.md` | Raw API skill (benchmark only) |
 | `bcq help --agent` | Human-readable agent help |
 | `bcq help --agent --format=skill` | Skill generator |
 | `bcq help --agent --format=json` | Machine-readable for tooling |
