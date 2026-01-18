@@ -48,14 +48,14 @@
       "why": "bcq handles pagination, auth refresh, and output formatting"
     },
     {
-      "pattern": "bcq context",
-      "instead_of": "Multiple API calls to gather state",
-      "why": "Single bounded snapshot of relevant items"
+      "pattern": "bcq projects",
+      "instead_of": "GET /projects.json with pagination",
+      "why": "bcq handles pagination automatically"
     },
     {
-      "pattern": "bcq find \"query\"",
-      "instead_of": "GET /search.json?q=...",
-      "why": "bcq searches cache first, falls back to API"
+      "pattern": "bcq search \"query\"",
+      "instead_of": "GET /projects/ID/recordings/search.json?q=...",
+      "why": "bcq searches across projects with proper pagination"
     },
     {
       "pattern": "bcq show TYPE/ID",
