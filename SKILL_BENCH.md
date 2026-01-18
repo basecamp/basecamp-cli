@@ -122,7 +122,7 @@ If B outperforms C on task 06, the generated skill's invariants help.
 ./benchmarks/harness.sh --condition bcq-full       # A: full skill (control)
 ./benchmarks/harness.sh --condition bcq-generated  # B: generated skill
 ./benchmarks/harness.sh --condition bcq-only       # C: bcq --help only
-./benchmarks/harness.sh --condition raw            # D: raw API
+./benchmarks/harness.sh --condition api-only       # D: raw API
 
 # Compare results
 jq -s 'group_by(.condition) | map({
@@ -187,7 +187,7 @@ bcq skill > ~/.config/basecamp/skills/basecamp/SKILL.md
 | `benchmarks/skills/api-only/SKILL.md` | Condition D: raw API |
 | `bcq help` | Human-readable agent help |
 | `bcq skill` | Skill generator (produces B) |
-| `bcq help --format=json` | Machine-readable for tooling |
+| `bcq help --json` | Machine-readable for tooling |
 
 ## Promotion Strategy
 
