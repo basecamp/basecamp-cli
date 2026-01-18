@@ -1,5 +1,5 @@
 {
-  "conditions": {
+  "strategies": {
     "bcq-full": {
       "skill": "benchmarks/skills/bcq-full/SKILL.md",
       "tools": ["bcq"],

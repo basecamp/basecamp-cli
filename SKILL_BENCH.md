@@ -4,7 +4,7 @@ Empirical test to determine the optimal skill strategy for bcq.
 
 ## Questions
 
-1. **Does bcq help?** — Compare bcq conditions vs raw API conditions
+1. **Does bcq help?** — Compare bcq strategies vs raw API strategies
 2. **Full vs generated skill?** — Compare `bcq-full` vs `bcq-generated`
 3. **Skill vs no skill?** — Compare skill-based vs `bcq-only`
 4. **Does guidance help raw API?** — Compare `raw-docs` vs `raw-guided`
@@ -17,9 +17,9 @@ A minimal, CLI-generated skill may be sufficient if:
 
 If generated skill matches full skill, we switch to generated (less maintenance, no drift).
 
-## Conditions
+## Strategies
 
-| Condition | Tools | What agent sees |
+| Strategy | Tools | What agent sees |
 |-----------|-------|-----------------|
 | `bcq-full` | bcq | Full hand-authored skill (control) |
 | `bcq-generated` | bcq | Minimal CLI-generated skill |
@@ -92,13 +92,13 @@ The guided raw skill provides:
 
 Tests whether endpoint guidance (without bcq) is sufficient.
 
-## Condition Map
+## Strategy Map
 
-Single source of truth: `benchmarks/conditions.json`
+Single source of truth: `benchmarks/strategies.json`
 
 ```json
 {
-  "conditions": {
+  "strategies": {
     "bcq-full":      { "tools": ["bcq"], ... },
     "bcq-generated": { "tools": ["bcq"], ... },
     "bcq-only":      { "tools": ["bcq"], ... },
@@ -147,16 +147,16 @@ Reuse tasks from `benchmarks/spec.yaml`:
 ## Execution
 
 ```bash
-# Run all conditions
-./benchmarks/harness.sh --condition bcq-full
-./benchmarks/harness.sh --condition bcq-generated
-./benchmarks/harness.sh --condition bcq-only
-./benchmarks/harness.sh --condition raw-docs
-./benchmarks/harness.sh --condition raw-guided
+# Run all strategies
+./benchmarks/harness.sh --strategy bcq-full
+./benchmarks/harness.sh --strategy bcq-generated
+./benchmarks/harness.sh --strategy bcq-only
+./benchmarks/harness.sh --strategy raw-docs
+./benchmarks/harness.sh --strategy raw-guided
 
 # Compare results
-jq -s 'group_by(.condition) | map({
-  condition: .[0].condition,
+jq -s 'group_by(.strategy) | map({
+  strategy: .[0].strategy,
   success_rate: ([.[] | select(.success)] | length) / length,
   avg_errors: ([.[] | .metrics.error_count] | add / length),
   avg_time_ms: ([.[] | .metrics.time_ms] | add / length)
@@ -207,7 +207,7 @@ jq -s 'group_by(.condition) | map({
 | File | Purpose |
 |------|---------|
 | `lib/agent_invariants.json` | Source of truth for domain invariants |
-| `benchmarks/conditions.json` | Condition → skill mapping |
+| `benchmarks/strategies.json` | Strategy → skill mapping |
 | `benchmarks/skills/bcq-full/SKILL.md` | Symlink to production skill |
 | `benchmarks/skills/bcq-generated/SKILL.md` | CLI-generated skill |
 | `benchmarks/skills/bcq-only/SKILL.md` | Minimal "use --help" |
