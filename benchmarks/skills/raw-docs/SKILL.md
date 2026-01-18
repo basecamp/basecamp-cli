@@ -8,7 +8,7 @@ tools:
 
 # Basecamp API (Raw)
 
-Direct Basecamp 4 API access via curl + jq. No CLI wrapper.
+Direct Basecamp API access via curl + jq. No CLI wrapper.
 
 ## Documentation
 
@@ -20,19 +20,14 @@ curl -s https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md
 ## Authentication
 
 ```bash
-export BASECAMP_ACCESS_TOKEN="your_token"
-export BASECAMP_ACCOUNT_ID="your_account_id"
+# Environment provides:
+# - BCQ_ACCESS_TOKEN: Bearer token
+# - BCQ_API_BASE: Full base URL including account ID
 
 # All requests require:
-# Authorization: Bearer $BASECAMP_ACCESS_TOKEN
+# Authorization: Bearer $BCQ_ACCESS_TOKEN
 # Content-Type: application/json
 # User-Agent: YourApp (you@example.com)
-```
-
-## Base URL
-
-```
-https://3.basecampapi.com/{account_id}/
 ```
 
 Consult the API documentation for endpoints, request formats, and response structures.
