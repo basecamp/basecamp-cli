@@ -5,7 +5,7 @@ source env.sh
 # Export environment values for this session
 TODAY="${TODAY}"
 BASE="${BCQ_API_BASE}"
-AUTH_HEADER="Authorization: Bearer ${BCQ_ACCESS_TOKEN}"
+AUTH_HEADER="Authorization: Bearer ${BASECAMP_TOKEN}"
 CONTENT_HEADER="Content-Type: application/json"
 PROJECTS=("${BCQ_BENCH_PROJECT_ID}" "${BCQ_BENCH_PROJECT_ID_2}")
 

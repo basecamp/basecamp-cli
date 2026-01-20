@@ -217,6 +217,9 @@ main() {
     # MCP server
     mcp)        cmd_mcp "$@" ;;
 
+    # Skill generation
+    skill)      cmd_skill "$@" ;;
+
     # Meta
     version|--version|-V)
       echo "bcq $BCQ_VERSION"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Curl wrapper that logs all requests for metrics
-# Used by BOTH bcq and raw-api conditions for fair request counting
+# Used by BOTH bcq and api strategies for fair request counting
 #
 # To use: prepend to PATH so this gets called instead of real curl
 # export PATH="$BENCH_DIR:$PATH"

@@ -1,0 +1,80 @@
+{
+  "invariants": [
+    {
+      "id": "bucket-is-project",
+      "title": "bucket = project",
+      "description": "In URLs and API responses, `bucket_id` is always the project ID. Basecamp URLs follow `/buckets/{project_id}/...` pattern."
+    },
+    {
+      "id": "todoset-vs-todolist",
+      "title": "todoset vs todolist",
+      "description": "Each project has exactly ONE todoset (the container). Todolists live inside the todoset. To create a todolist, you need the todoset_id, not the project_id."
+    },
+    {
+      "id": "dock-capabilities",
+      "title": "dock defines capabilities",
+      "description": "Project capabilities are listed in the `dock[]` array. Check dock before assuming a feature exists (message_board, todoset, vault, schedule, etc.)."
+    },
+    {
+      "id": "recording-generic",
+      "title": "recording is generic",
+      "description": "A 'recording' is any content item: todo, message, document, comment, upload, etc. The recordings endpoint queries across types."
+    },
+    {
+      "id": "person-vs-people",
+      "title": "person vs people",
+      "description": "Singular endpoints use `/people/{id}.json`, plural use `/people.json`. The resource is 'person' not 'user'."
+    },
+    {
+      "id": "completed-vs-status",
+      "title": "completed flag, not status field",
+      "description": "Todos use a boolean `completed` field, not a status string. Filter with `?status=active` or `?status=completed`."
+    },
+    {
+      "id": "assignees-array",
+      "title": "assignees is always an array",
+      "description": "Todo assignees is an array of person objects, even for single assignment. Use `assignee_ids: [id]` when creating/updating."
+    },
+    {
+      "id": "parent-hierarchy",
+      "title": "parent field for hierarchy",
+      "description": "Items have a `parent` object showing their container. Todo's parent is a todolist. Message's parent is a message_board."
+    }
+  ],
+  "preferred_patterns": [
+    {
+      "pattern": "bcq todos list --project ID",
+      "instead_of": "Raw curl to /buckets/ID/todolists/X/todos.json",
+      "why": "bcq handles pagination, auth refresh, and output formatting"
+    },
+    {
+      "pattern": "bcq projects",
+      "instead_of": "GET /projects.json with pagination",
+      "why": "bcq handles pagination automatically"
+    },
+    {
+      "pattern": "bcq search \"query\"",
+      "instead_of": "GET /projects/ID/recordings/search.json?q=...",
+      "why": "bcq searches across projects with proper pagination"
+    },
+    {
+      "pattern": "bcq show TYPE/ID",
+      "instead_of": "Constructing recording URLs manually",
+      "why": "bcq resolves the correct endpoint for any recording type"
+    }
+  ],
+  "anti_patterns": [
+    {
+      "pattern": "Calling Basecamp API directly via curl",
+      "why": "Bypasses auth refresh, rate limiting, and pagination handling"
+    },
+    {
+      "pattern": "Assuming project has a feature without checking dock",
+      "why": "Not all projects have all tools enabled"
+    },
+    {
+      "pattern": "Using todoset_id where todolist_id is expected",
+      "why": "Common confusion; todoset is the container, todolist is the actual list"
+    }
+  ]
+}

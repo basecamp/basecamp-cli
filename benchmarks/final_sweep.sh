@@ -16,11 +16,11 @@ for project_id in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
     
     # Get todoset
     todoset=$(curl -s "$BCQ_API_BASE/projects/$project_id.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null | jq -r '.dock[] | select(.name == "todoset") | .id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null | jq -r '.dock[] | select(.name == "todoset") | .id')
     
     # Get todolists
     lists=$(curl -s "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset/todolists.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null | jq -r '.[].id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null | jq -r '.[].id')
     
     while read -r list_id; do
         [ -z "$list_id" ] && continue
@@ -28,7 +28,7 @@ for project_id in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
         page=1
         while [ $page -le 10 ]; do
             todos=$(curl -s "$BCQ_API_BASE/buckets/$project_id/todolists/$list_id/todos.json?page=$page" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" 2>/dev/null)
+                -H "Authorization: Bearer $BASECAMP_TOKEN" 2>/dev/null)
             
             if [ -z "$(echo "$todos" | jq -r '.[] | .id' 2>/dev/null | head -1)" ]; then
                 break
@@ -45,13 +45,13 @@ for project_id in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
                     
                     # Comment
                     curl -s -X POST "$BCQ_API_BASE/buckets/$project_id/recordings/$id/comments.json" \
-                        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+                        -H "Authorization: Bearer $BASECAMP_TOKEN" \
                         -H "Content-Type: application/json" \
                         -d "{\"content\":\"Processed BenchChain $BCQ_BENCH_RUN_ID\"}" > /dev/null 2>&1
                     
                     # Complete
                     curl -s -X POST "$BCQ_API_BASE/buckets/$project_id/todos/$id/completion.json" \
-                        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+                        -H "Authorization: Bearer $BASECAMP_TOKEN" \
                         -H "Content-Type: application/json" \
                         -d '{}' > /dev/null 2>&1
                     

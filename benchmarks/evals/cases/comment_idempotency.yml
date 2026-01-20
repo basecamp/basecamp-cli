@@ -1,0 +1,153 @@
+# Comment Idempotency: Must check before posting
+# Tests invariant #7: "Idempotent comments"
+
+name: comment_idempotency
+description: |
+  Todo already has the marker comment from a previous run.
+  Agent MUST check existing comments before posting.
+  FAIL if agent posts duplicate marker.
+
+fixtures:
+  - method: GET
+    path: "/projects.json"
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  - method: GET
+    path: "/projects.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  - method: GET
+    path: "/projects.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  - method: GET
+    path: "/projects/1.json"
+    response:
+      status: 200
+      body:
+        id: 1
+        name: "Test Project"
+        dock:
+          - name: todoset
+            id: 10
+            enabled: true
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  # No page param = page 1 behavior (agent may not specify ?page=1)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  # Page 1 (explicit)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  # Page 2 (empty = end)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  # TRAP: Comment already exists with marker
+  - method: GET
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 200
+      body:
+        - id: 8888
+          content: "Processed BenchChain previous-run-id"
+          created_at: "2025-01-01T00:00:00Z"
+
+  # POST comment (should NOT be called)
+  - method: POST
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 201
+      body:
+        id: 9001
+        content: "Processed BenchChain test-run-id"
+
+  # POST completion
+  - method: POST
+    path: "/buckets/1/todos/1003/completion.json"
+    response:
+      status: 200
+      body:
+        id: 1003
+        completed: true
+
+assertions:
+  required_sequence:
+    # Must check existing comments before posting
+    - method: GET
+      path: "/buckets/1/recordings/1003/comments.json"
+      expect_status: 200
+
+  end_state:
+    # Must complete the todo
+    - method: POST
+      path: "/buckets/1/todos/1003/completion.json"
+      count: 1
+
+  forbidden:
+    # MUST NOT post any comment (marker already exists)
+    - method: POST
+      path: "/buckets/1/recordings/1003/comments.json"
+
+  max_calls: 12
+
+notes:
+  - "Checked existing comments before posting"
+  - "Did NOT post duplicate marker comment"
+  - "Still completed the todo"

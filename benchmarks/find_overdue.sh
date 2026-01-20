@@ -5,12 +5,12 @@ echo "Today: $TODAY"
 echo ""
 
 project_data=$(curl -s "$BCQ_API_BASE/projects/$BCQ_BENCH_PROJECT_ID.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+  -H "Authorization: Bearer $BASECAMP_TOKEN")
 
 todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id')
 
 todolists=$(curl -s "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todosets/$todoset_id/todolists.json" \
-  -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+  -H "Authorization: Bearer $BASECAMP_TOKEN")
 
 list_id=$(echo "$todolists" | jq -r '.[0].id')
 
@@ -20,7 +20,7 @@ found_any=false
 
 while true; do
   todos=$(curl -s "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todolists/$list_id/todos.json?page=$page" \
-    -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+    -H "Authorization: Bearer $BASECAMP_TOKEN")
   
   if [[ "$todos" == "[]" || -z "$todos" ]]; then
     break

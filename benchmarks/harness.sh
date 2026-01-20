@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Benchmark harness - sets up environment and records metrics
+# Skill-bench harness - sets up environment and records metrics
+#
+# Compares 5 strategies from strategies.json:
+#   bcq-full, bcq-generated, bcq-only, api-docs-only, api-docs-with-curl-examples
 #
 # EXECUTION MODEL:
 #   This harness does NOT automatically invoke Claude Code. It:
@@ -9,17 +12,17 @@
 #   4. After completion, validates results and records metrics
 #
 #   Example workflow:
-#     ./harness.sh --task 01 --condition bcq-default
+#     ./harness.sh --task 01 --strategy bcq-full
 #     # Harness prints prompt file path
-#     # You invoke Claude Code: claude /path/to/task.md --skill bcq-basecamp
+#     # You invoke Claude Code: claude /path/to/task.md --skill bcq-full
 #     # Run validation: ./validate.sh check_all_todos 75
 #
 # Usage:
-#   ./harness.sh --task 01 --condition bcq-default
-#   ./harness.sh --task all --condition raw --model haiku
-#   ./harness.sh --task 07 --condition bcq-nocache --inject 429
+#   ./harness.sh --task 01 --strategy bcq-full
+#   ./harness.sh --task all --strategy api-docs-only --model haiku
+#   ./harness.sh --task 07 --strategy bcq-generated --inject 429
 #
-# Results are written to results/<run_id>-<condition>-<task>.json
+# Results are written to results/<run_id>-<strategy>-<task>.json
 
 set -euo pipefail
 
@@ -28,13 +31,16 @@ source "$BENCH_DIR/env.sh"
 
 # Defaults
 TASK=""
-CONDITION="bcq-default"
+STRATEGY="bcq-full"
 MODEL="${BCQ_BENCH_MODEL:-sonnet}"
 INJECT_ERROR=""
 INJECT_COUNT=1
 DRY_RUN=false
 TRIAL=1
 AUTO_RESET=true  # Reset state before each task (prevents false positives)
+
+# Load strategies from strategies.json
+STRATEGIES_FILE="$BENCH_DIR/strategies.json"
 
 log() { echo "[harness] $*" >&2; }
 die() { echo "[harness] ERROR: $*" >&2; exit 1; }
@@ -45,8 +51,8 @@ parse_args() {
     case "$1" in
       --task|-t)
         TASK="$2"; shift 2 ;;
-      --condition|-c)
-        CONDITION="$2"; shift 2 ;;
+      --strategy|-s)
+        STRATEGY="$2"; shift 2 ;;
       --model|-m)
         MODEL="$2"; shift 2 ;;
       --inject|-i)
@@ -69,19 +75,28 @@ parse_args() {
   done
 
   [[ -z "$TASK" ]] && die "Task required. Use --task <id|all>"
-  [[ ! "$CONDITION" =~ ^(raw|bcq-nocache|bcq-default)$ ]] && die "Invalid condition: $CONDITION"
+
+  # Validate strategy against strategies.json
+  if ! jq -e --arg c "$STRATEGY" '.strategies | has($c)' "$STRATEGIES_FILE" >/dev/null 2>&1; then
+    local valid_strategies
+    valid_strategies=$(jq -r '.strategies | keys | join(", ")' "$STRATEGIES_FILE")
+    die "Invalid strategy: $STRATEGY. Valid: $valid_strategies"
+  fi
   :  # Explicit no-op to ensure proper return
 }
 
 show_help() {
+  local strategies_list
+  strategies_list=$(jq -r '.strategies | to_entries | map("  \(.key): \(.value.description)") | join("\n")' "$STRATEGIES_FILE" 2>/dev/null || echo "  (error reading strategies.json)")
+
   cat << EOF
-Benchmark Harness - Run bcq vs raw-API tasks
+Benchmark Harness - Run skill-bench tasks
 
 Usage: $0 [options]
 
 Options:
   --task, -t <id|all>       Task ID (01-10) or 'all'
-  --condition, -c <cond>    raw, bcq-nocache, or bcq-default (default: bcq-default)
+  --strategy, -s <strategy>    Strategy name (default: bcq-full)
   --model, -m <model>       Model identifier for metadata (default: sonnet)
   --inject, -i <code>       Inject error (401 or 429) before task
   --inject-count <n>        Number of errors to inject (default: 1)
@@ -91,10 +106,13 @@ Options:
   --no-reset                Skip state reset (use for debugging only)
   --help, -h                Show this help
 
+Strategies (from strategies.json):
+$strategies_list
+
 Examples:
-  $0 --task 01 --condition bcq-default
-  $0 --task all --condition raw --model haiku
-  $0 --task 07 --condition bcq-default --inject 429
+  $0 --task 01 --strategy bcq-full
+  $0 --task all --strategy api-docs-only --model haiku
+  $0 --task 07 --strategy bcq-generated --inject 429
 EOF
 }
 
@@ -110,9 +128,23 @@ generate_run_id() {
   echo "$run_id"
 }
 
-# Setup condition-specific environment
-setup_condition() {
-  log "Setting up condition: $CONDITION"
+# Get strategy config from strategies.json
+get_strategy_config() {
+  local strategy="$1"
+  local field="$2"
+  jq -r --arg c "$strategy" ".strategies[\$c].$field // \"\"" "$STRATEGIES_FILE"
+}
+
+# Check if strategy uses bcq (vs raw curl)
+strategy_uses_bcq() {
+  local tools
+  tools=$(get_strategy_config "$STRATEGY" "tools")
+  echo "$tools" | jq -e 'index("bcq") != null' >/dev/null 2>&1
+}
+
+# Setup strategy-specific environment
+setup_strategy() {
+  log "Setting up strategy: $STRATEGY"
 
   # Clear cache
   rm -rf "$BCQ_CACHE_DIR"
@@ -124,28 +156,22 @@ setup_condition() {
   # The shim intercepts all curl calls and logs them
   export PATH="$BENCH_DIR:$PATH"
 
-  case "$CONDITION" in
-    raw)
-      # Raw uses curl directly, no bcq
-      export BCQ_BENCH_USE_BCQ=false
-      export BCQ_CACHE_ENABLED=false
-      ;;
-    bcq-nocache|bcq-default)
-      # CRITICAL: Unset BASECAMP_ACCESS_TOKEN for bcq conditions
-      # bcq skips token refresh when this is set, which would poison Task 08 results
-      if [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
-        log "WARNING: BASECAMP_ACCESS_TOKEN is set; unsetting to allow bcq token refresh"
-      fi
-      unset BASECAMP_ACCESS_TOKEN
+  if strategy_uses_bcq; then
+    # bcq-based strategies (bcq-full, bcq-generated, bcq-only)
+    # CRITICAL: Unset BASECAMP_ACCESS_TOKEN for bcq strategies
+    # bcq skips token refresh when this is set, which would poison Task 08 results
+    if [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
+      log "WARNING: BASECAMP_ACCESS_TOKEN is set; unsetting to allow bcq token refresh"
+    fi
+    unset BASECAMP_ACCESS_TOKEN
 
-      export BCQ_BENCH_USE_BCQ=true
-      if [[ "$CONDITION" == "bcq-default" ]]; then
-        export BCQ_CACHE_ENABLED=true
-      else
-        export BCQ_CACHE_ENABLED=false
-      fi
-      ;;
-  esac
+    export BCQ_BENCH_USE_BCQ=true
+    export BCQ_CACHE_ENABLED=true  # Real-world product behavior
+  else
+    # api-based strategies (api-docs-only, api-docs-with-curl-examples)
+    export BCQ_BENCH_USE_BCQ=false
+    export BCQ_CACHE_ENABLED=false
+  fi
 }
 
 # Setup error injection
@@ -153,7 +179,7 @@ setup_injection() {
   if [[ -n "$INJECT_ERROR" ]]; then
     log "Setting up error injection: $INJECT_ERROR x $INJECT_COUNT"
     "$BENCH_DIR/inject-proxy.sh" setup "$INJECT_ERROR" "$INJECT_COUNT"
-    # curl shim is already on PATH from setup_condition
+    # curl shim is already on PATH from setup_strategy
   else
     "$BENCH_DIR/inject-proxy.sh" clear >/dev/null 2>&1 || true
   fi
@@ -178,20 +204,31 @@ get_task_injection() {
   TASK_INJECT_AT_REQUEST=$(yq -r ".tasks[] | select(.id == \"$task_id\") | .inject.at_request // 0" "$BENCH_DIR/spec.yaml")
 }
 
-# Get skill for condition
-get_skill() {
-  case "$CONDITION" in
-    raw)
-      echo "raw-api-basecamp"
-      ;;
-    bcq-nocache|bcq-default)
-      echo "bcq-basecamp"
-      ;;
-  esac
+# Check if strategy uses a skill (vs prompt)
+strategy_uses_skill() {
+  local skill_path
+  skill_path=$(get_strategy_config "$STRATEGY" "skill")
+  [[ -n "$skill_path" ]]
+}
+
+# Get instruction path for strategy (skill or prompt, from strategies.json)
+get_instruction_path() {
+  local skill_path prompt_path
+  skill_path=$(get_strategy_config "$STRATEGY" "skill")
+  if [[ -n "$skill_path" ]]; then
+    echo "$skill_path"
+  else
+    get_strategy_config "$STRATEGY" "prompt"
+  fi
+}
+
+# Get strategy display name
+get_strategy_name() {
+  echo "$STRATEGY"
 }
 
 # Per-task setup hooks
-# Called before each task to ensure task-specific preconditions
+# Called before each task to ensure task-specific pre-conditions
 setup_task() {
   local task_id="$1"
 
@@ -226,7 +263,7 @@ prepare_overdue_todos() {
   for id in $overdue_ids; do
     local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-      -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+      -H "Authorization: Bearer $BASECAMP_TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"due_on\":\"$yesterday\"}" \
       "$BCQ_API_BASE/buckets/$BCQ_BENCH_PROJECT_ID/todos/$id.json")
@@ -247,34 +284,36 @@ prepare_overdue_todos() {
   log "  Updated $(echo "$overdue_ids" | wc -w | tr -d ' ') overdue todos"
 }
 
-# Calculate prompt size (skill file + task prompt file)
+# Calculate prompt size (strategy instruction + task prompt file)
 # Returns JSON object with byte counts
 # NOTE: This measures file sizes, not the exact prompt sent to the model.
-# Claude Code may add system context that isn't captured here.
+# Claude Code may add system context and @-referenced files that aren't captured here.
 calc_prompt_size() {
-  local skill="$1"
-  local prompt_file="$2"
+  local task_prompt_file="$1"
 
-  local skill_file="$BCQ_ROOT/.claude-plugin/skills/$skill/SKILL.md"
-  local task_file="$BENCH_DIR/$prompt_file"
+  # Get strategy instruction path (skill or prompt) from strategies.json
+  local instruction_path
+  instruction_path=$(get_instruction_path)
+  local instruction_file="$BCQ_ROOT/$instruction_path"
+  local task_file="$BENCH_DIR/$task_prompt_file"
 
-  local skill_bytes=0 task_bytes=0 total_bytes=0
+  local instruction_bytes=0 task_bytes=0 total_bytes=0
 
-  if [[ -f "$skill_file" ]]; then
-    skill_bytes=$(wc -c < "$skill_file" | tr -d ' ')
+  if [[ -f "$instruction_file" ]]; then
+    instruction_bytes=$(wc -c < "$instruction_file" | tr -d ' ')
   fi
 
   if [[ -f "$task_file" ]]; then
     task_bytes=$(wc -c < "$task_file" | tr -d ' ')
   fi
 
-  total_bytes=$((skill_bytes + task_bytes))
+  total_bytes=$((instruction_bytes + task_bytes))
 
   jq -n \
-    --argjson skill "$skill_bytes" \
+    --argjson instruction "$instruction_bytes" \
     --argjson task "$task_bytes" \
     --argjson total "$total_bytes" \
-    '{skill_bytes: $skill, task_bytes: $task, total_bytes: $total}'
+    '{instruction_bytes: $instruction, task_bytes: $task, total_bytes: $total}'
 }
 
 # Run a single task
@@ -283,7 +322,7 @@ run_task() {
   local run_id="$2"
 
   # Set per-task log file to avoid cross-contamination when running --task all
-  export BCQ_BENCH_LOGFILE="$BENCH_DIR/results/${run_id}-${CONDITION}-${task_id}-requests.jsonl"
+  export BCQ_BENCH_LOGFILE="$BENCH_DIR/results/${run_id}-${STRATEGY}-${task_id}-requests.jsonl"
   mkdir -p "$(dirname "$BCQ_BENCH_LOGFILE")"
   rm -f "$BCQ_BENCH_LOGFILE"  # Clear per-task log
 
@@ -293,8 +332,8 @@ run_task() {
   prompt_file=$(get_task_info "$task_id" "prompt_file")
   local timeout
   timeout=$(get_task_info "$task_id" "timeout_seconds")
-  local skill
-  skill=$(get_skill)
+  local strategy_name
+  strategy_name=$(get_strategy_name)
 
   # Check for task-specific injection from spec.yaml
   # CLI --inject overrides spec.yaml if provided
@@ -324,18 +363,28 @@ run_task() {
     export BCQ_BENCH_INJECTION_EXPECTED=""
   fi
 
+  # Get instruction path for this strategy
+  local instruction_path
+  instruction_path=$(get_instruction_path)
+  local instruction_type
+  if strategy_uses_skill; then
+    instruction_type="skill"
+  else
+    instruction_type="prompt"
+  fi
+
   # Calculate prompt size for this task
   local prompt_size_json
-  prompt_size_json=$(calc_prompt_size "$skill" "$prompt_file")
+  prompt_size_json=$(calc_prompt_size "$prompt_file")
   local total_prompt_bytes
   total_prompt_bytes=$(echo "$prompt_size_json" | jq '.total_bytes')
 
   log "Running task $task_id: $task_name"
-  log "  Condition: $CONDITION, Skill: $skill, Model: $MODEL"
+  log "  Strategy: $STRATEGY ($instruction_type), Model: $MODEL"
   log "  Prompt size: $total_prompt_bytes bytes"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    log "  [DRY RUN] Would execute: $BENCH_DIR/$prompt_file with skill $skill"
+    log "  [DRY RUN] Would execute: $BENCH_DIR/$prompt_file with $instruction_type $instruction_path"
     return 0
   fi
 
@@ -343,10 +392,10 @@ run_task() {
   setup_task "$task_id"
 
   # Create result structure
-  local result_file="$BENCH_DIR/results/${run_id}-${CONDITION}-${task_id}.json"
+  local result_file="$BENCH_DIR/results/${run_id}-${STRATEGY}-${task_id}.json"
 
   # Create output file for task results (used by Task 11 validation)
-  local output_file="$BENCH_DIR/results/${run_id}-${CONDITION}-${task_id}-output.txt"
+  local output_file="$BENCH_DIR/results/${run_id}-${STRATEGY}-${task_id}-output.txt"
   mkdir -p "$(dirname "$output_file")"
   # Export for validation to access
   export BCQ_BENCH_OUTPUT_FILE="$output_file"
@@ -368,18 +417,17 @@ export BCQ_BENCH_RUN_ID="$BCQ_BENCH_RUN_ID"
 export BCQ_BENCH_RUN_START="$BCQ_BENCH_RUN_START"
 ENVEOF
 
-  # IMPORTANT: Only export BASECAMP_ACCESS_TOKEN for 'raw' condition
+  # IMPORTANT: Only export token for api-* strategies
   # bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set
-  if [[ "$CONDITION" == "raw" ]]; then
+  if ! strategy_uses_bcq; then
     cat >> "$env_file" << ENVEOF
-# Raw condition: provide token directly (no refresh available)
-export BCQ_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"
+# API strategy: provide token directly (no refresh available)
+export BASECAMP_TOKEN="$BASECAMP_TOKEN"
 export BASECAMP_ACCOUNT_ID="$BCQ_ACCOUNT_ID"
-export BASECAMP_ACCESS_TOKEN="$BCQ_ACCESS_TOKEN"
 ENVEOF
   else
     cat >> "$env_file" << ENVEOF
-# bcq condition: let bcq read from credentials and handle refresh
+# bcq strategy: let bcq read from credentials and handle refresh
 # CRITICAL: Unset BASECAMP_ACCESS_TOKEN to enable bcq token refresh
 # (prevents stale token from raw runs poisoning Task 08)
 unset BASECAMP_ACCESS_TOKEN
@@ -392,12 +440,19 @@ ENVEOF
   log "  ║  READY FOR MANUAL EXECUTION                                      ║"
   log "  ╠══════════════════════════════════════════════════════════════════╣"
   log "  ║  Task:  $task_id - $task_name"
-  log "  ║  Skill: $skill"
-  log "  ║  Prompt: $BENCH_DIR/$prompt_file"
+  log "  ║  Strategy: $strategy_name ($instruction_type)"
+  log "  ║  Instruction: $instruction_path"
+  log "  ║  Task prompt: $BENCH_DIR/$prompt_file"
   log "  ╠══════════════════════════════════════════════════════════════════╣"
-  log "  ║  In another terminal, run:                                       ║"
-  log "  ║    source $env_file"
-  log "  ║    # Then execute your agent with the prompt file                ║"
+  log "  ║  Setup: source $env_file"
+  log "  ╠══════════════════════════════════════════════════════════════════╣"
+  if strategy_uses_skill; then
+  log "  ║  Invoke Claude with skill: $instruction_path"
+  log "  ║  Then paste task from: $BENCH_DIR/$prompt_file"
+  else
+  log "  ║  Prepend prompt: $BCQ_ROOT/$instruction_path"
+  log "  ║  Then paste task from: $BENCH_DIR/$prompt_file"
+  fi
   log "  ╠══════════════════════════════════════════════════════════════════╣"
   log "  ║  Press ENTER when task is complete to run validation...          ║"
   log "  ╚══════════════════════════════════════════════════════════════════╝"
@@ -428,7 +483,7 @@ ENVEOF
   "run_id": "$run_id",
   "task_id": "$task_id",
   "task_name": "$task_name",
-  "condition": "$CONDITION",
+  "strategy": "$STRATEGY",
   "model": "$MODEL",
   "trial": $TRIAL,
   "success": null,
@@ -450,7 +505,8 @@ ENVEOF
     "passed": null
   },
   "prompt_file": "$prompt_file",
-  "skill": "$skill",
+  "instruction_path": "$instruction_path",
+  "instruction_type": "$instruction_type",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "log_file": "results/$(basename "$BCQ_BENCH_LOGFILE")"
 }
@@ -474,7 +530,7 @@ run_validation() {
   local task_id="$1"
   local run_id="$2"
 
-  local result_file="$BENCH_DIR/results/${run_id}-${CONDITION}-${task_id}.json"
+  local result_file="$BENCH_DIR/results/${run_id}-${STRATEGY}-${task_id}.json"
   if [[ ! -f "$result_file" ]]; then
     log "No result file for task $task_id, skipping validation"
     return 1
@@ -536,10 +592,10 @@ main() {
   log "Benchmark run: $run_id"
   log "Run ID: $BCQ_BENCH_RUN_ID"
   log "Run Start: $BCQ_BENCH_RUN_START"
-  log "Condition: $CONDITION, Model: $MODEL"
+  log "Strategy: $STRATEGY, Model: $MODEL"
   log "Auto-reset: $AUTO_RESET"
 
-  setup_condition
+  setup_strategy
 
   if [[ "$TASK" == "all" ]]; then
     for task_id in $(list_tasks); do
@@ -555,7 +611,7 @@ main() {
         export BCQ_BENCH_RUN_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         log "Run Start (post-reset): $BCQ_BENCH_RUN_START"
       fi
-      setup_condition
+      setup_strategy
       # Injection is now setup per-task in run_task() from spec.yaml
       run_task "$task_id" "$run_id"
       if [[ "$DRY_RUN" != "true" ]]; then
@@ -589,7 +645,7 @@ main() {
   # Summary
   if [[ "$TASK" == "all" ]]; then
     log "Results:"
-    for f in "$BENCH_DIR/results/${run_id}-${CONDITION}-"*.json; do
+    for f in "$BENCH_DIR/results/${run_id}-${STRATEGY}-"*.json; do
       [[ -f "$f" ]] || continue
       local tid success
       tid=$(jq -r '.task_id' "$f")

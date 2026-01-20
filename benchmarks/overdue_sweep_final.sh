@@ -1,149 +1,175 @@
-#!/opt/homebrew/bin/bash
+#!/bin/bash
 
-# Load environment first
+set -e
 source env.sh
 
-# Set TODAY if not already set
-TODAY=${TODAY:-$(date +%Y-%m-%d)}
-export TODAY
-
-# Verify required variables
-if [[ -z "$BCQ_ACCESS_TOKEN" || -z "$BCQ_API_BASE" || -z "$BCQ_BENCH_PROJECT_ID" || -z "$BCQ_BENCH_PROJECT_ID_2" || -z "$BCQ_BENCH_RUN_ID" ]]; then
-    echo "Error: Required environment variables not set"
-    exit 1
-fi
-
-# Helper function for API calls with retry on 429
+# Helper function to handle 429 retries
 api_call() {
-    local method="$1"
-    local url="$2"
-    local data="${3:-}"
+    local method=$1
+    local endpoint=$2
+    local data=$3
     local max_retries=5
-    local retry=0
-    
-    while [ $retry -lt $max_retries ]; do
-        if [ "$method" = "GET" ]; then
-            response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" "$url")
+    local retry_count=0
+
+    while [ $retry_count -lt $max_retries ]; do
+        if [ -z "$data" ]; then
+            response=$(curl -s -w "\n%{http_code}" -X "$method" "$endpoint" \
+                -H "Authorization: Bearer $BASECAMP_TOKEN" \
+                -H "Content-Type: application/json" \
+                -H "User-Agent: BenchmarkTask (benchmark@test.com)")
         else
-            response=$(curl -s -w "\n%{http_code}" -X "$method" -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" -H "Content-Type: application/json" -d "$data" "$url")
+            response=$(curl -s -w "\n%{http_code}" -X "$method" "$endpoint" \
+                -H "Authorization: Bearer $BASECAMP_TOKEN" \
+                -H "Content-Type: application/json" \
+                -H "User-Agent: BenchmarkTask (benchmark@test.com)" \
+                -d "$data")
         fi
-        
-        http_code=$(echo "$response" | tail -n 1)
+
+        http_code=$(echo "$response" | tail -n1)
         body=$(echo "$response" | sed '$d')
-        
+
         if [ "$http_code" = "429" ]; then
-            echo "  Rate limited (429), sleeping 2s..." >&2
-            ((retry++))
+            echo "Rate limited, sleeping 2 seconds..." >&2
             sleep 2
+            retry_count=$((retry_count + 1))
             continue
         fi
-        
-        if [[ "$http_code" =~ ^2 ]]; then
-            echo "$body"
-            return 0
-        else
-            echo "Error: HTTP $http_code for $url" >&2
-            echo "$body" >&2
-            return 1
-        fi
+
+        echo "$body"
+        return 0
     done
-    
-    echo "Error: Max retries exceeded for $url" >&2
+
+    echo "Max retries exceeded for $endpoint" >&2
     return 1
 }
 
-# Process a single project
-process_project() {
-    local project_id="$1"
-    local project_name="$2"
-    local overdue_count=0
-    
-    echo "Processing project $project_name (ID: $project_id)..." >&2
-    
-    # Get project and extract todoset ID
-    project_data=$(api_call GET "$BCQ_API_BASE/projects/$project_id.json")
-    todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id')
-    
-    if [ -z "$todoset_id" ] || [ "$todoset_id" = "null" ]; then
-        echo "  No todoset found in project $project_name" >&2
-        echo "0"
-        return 0
-    fi
-    
-    echo "  Found todoset: $todoset_id" >&2
-    
-    # Get all todolists
-    todolists=$(api_call GET "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset_id/todolists.json")
-    todolist_ids=$(echo "$todolists" | jq -r '.[].id')
-    
-    if [ -z "$todolist_ids" ]; then
-        echo "  No todolists found" >&2
-        echo "0"
-        return 0
-    fi
-    
-    # Process each todolist
-    for list_id in $todolist_ids; do
-        echo "  Processing todolist: $list_id" >&2
-        page=1
+# Helper function to paginate through todos
+get_all_todos() {
+    local project_id=$1
+    local todolist_id=$2
+    local page=1
+    local all_todos=""
+
+    while true; do
+        echo "Fetching page $page of todos for todolist $todolist_id..." >&2
+        response=$(api_call GET "$BCQ_API_BASE/buckets/$project_id/todolists/$todolist_id/todos.json?page=$page" "")
         
-        while true; do
-            todos=$(api_call GET "$BCQ_API_BASE/buckets/$project_id/todolists/$list_id/todos.json?page=$page")
-            
-            # Check if page is empty
-            todo_count=$(echo "$todos" | jq '. | length')
-            if [ "$todo_count" = "0" ]; then
-                echo "    Page $page: empty, stopping pagination" >&2
-                break
-            fi
-            echo "    Page $page: $todo_count todos" >&2
-            
-            # Filter overdue todos
-            overdue_todos=$(echo "$todos" | jq -r --arg today "$TODAY" '
-                .[] | 
-                select(.title | startswith("Benchmark Overdue Todo")) |
-                select(.completed == false) |
-                select(.due_on != null and .due_on < $today) |
-                .id
-            ')
-            
-            # Process each overdue todo
-            for todo_id in $overdue_todos; do
-                echo "    Found overdue todo: $todo_id" >&2
-                
-                # Add comment
-                comment_data=$(jq -n --arg run_id "$BCQ_BENCH_RUN_ID" '{content: "Processed BenchChain \($run_id)"}')
-                api_call POST "$BCQ_API_BASE/buckets/$project_id/recordings/$todo_id/comments.json" "$comment_data" > /dev/null
-                echo "      Added comment" >&2
-                
-                # Complete todo
-                api_call POST "$BCQ_API_BASE/buckets/$project_id/todos/$todo_id/completion.json" "{}" > /dev/null
-                echo "      Completed todo" >&2
-                
-                ((overdue_count++))
-            done
-            
-            ((page++))
-        done
+        todos=$(echo "$response" | jq -c '.[]' 2>/dev/null || echo "")
+        
+        if [ -z "$todos" ]; then
+            break
+        fi
+
+        if [ -z "$all_todos" ]; then
+            all_todos="$todos"
+        else
+            all_todos=$(echo -e "$all_todos\n$todos")
+        fi
+
+        page=$((page + 1))
     done
-    
-    echo "  Project $project_name: Processed $overdue_count overdue todos" >&2
-    echo "$overdue_count"
+
+    echo "$all_todos"
 }
 
-# Main execution
-echo "=== Starting Overdue Sweep ==="
-echo "Today's date: $TODAY"
-echo "Run ID: $BCQ_BENCH_RUN_ID"
-echo ""
+# Process both projects in a single pass
+process_all_projects() {
+    local project1=$BCQ_BENCH_PROJECT_ID
+    local project2=$BCQ_BENCH_PROJECT_ID_2
+    local count=0
 
-count1=$(process_project "$BCQ_BENCH_PROJECT_ID" "Project 1")
-echo ""
-count2=$(process_project "$BCQ_BENCH_PROJECT_ID_2" "Project 2")
+    for project_id in "$project1" "$project2"; do
+        echo "======================================== " >&2
+        echo "Processing Project: $project_id" >&2
+        echo "======================================== " >&2
 
-total=$((count1 + count2))
-echo ""
-echo "=== Sweep Complete ==="
-echo "Project 1: $count1 overdue todos processed"
-echo "Project 2: $count2 overdue todos processed"
-echo "Total: $total overdue todos processed"
+        # Get project details to extract todoset ID
+        echo "Fetching project details..." >&2
+        project_data=$(api_call GET "$BCQ_API_BASE/projects/$project_id.json" "")
+        todoset_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "todoset") | .id')
+
+        if [ -z "$todoset_id" ]; then
+            echo "No todoset found for project $project_id" >&2
+            continue
+        fi
+
+        echo "Found todoset ID: $todoset_id" >&2
+
+        # Get all todolists in the todoset
+        echo "Fetching todolists..." >&2
+        todolists=$(api_call GET "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset_id/todolists.json" "")
+        
+        # Process each todolist
+        while IFS= read -r todolist; do
+            if [ -z "$todolist" ]; then
+                continue
+            fi
+
+            todolist_id=$(echo "$todolist" | jq -r '.id')
+            todolist_name=$(echo "$todolist" | jq -r '.name')
+            
+            echo "Processing todolist: $todolist_name (ID: $todolist_id)" >&2
+
+            # Get all todos for this todolist (with pagination)
+            todos=$(get_all_todos "$project_id" "$todolist_id")
+
+            # Filter overdue todos that match criteria and process each
+            while IFS= read -r todo; do
+                if [ -z "$todo" ]; then
+                    continue
+                fi
+
+                # Extract fields
+                title=$(echo "$todo" | jq -r '.title // ""')
+                completed=$(echo "$todo" | jq -r '.completed')
+                due_on=$(echo "$todo" | jq -r '.due_on // ""')
+                todo_id=$(echo "$todo" | jq -r '.id')
+                
+                # Check all conditions for matching
+                if [[ ! "$title" =~ ^Benchmark\ Overdue\ Todo ]]; then
+                    continue
+                fi
+                
+                if [ "$completed" != "false" ]; then
+                    continue
+                fi
+                
+                # Check if due_on exists and is before TODAY using string comparison
+                if [ -z "$due_on" ]; then
+                    continue
+                fi
+                
+                if [[ "$due_on" -ge "$TODAY" ]]; then
+                    continue
+                fi
+
+                # This is an overdue todo that matches criteria
+                echo "Found overdue todo: $title (ID: $todo_id, Due: $due_on)" >&2
+
+                # Add comment with run ID (expanded variable in double quotes)
+                comment_content="Processed BenchChain $BCQ_BENCH_RUN_ID"
+                echo "Adding comment: $comment_content" >&2
+                comment_data=$(jq -n --arg content "$comment_content" '{content: $content}')
+                api_call POST "$BCQ_API_BASE/buckets/$project_id/recordings/$todo_id/comments.json" "$comment_data" > /dev/null 2>&1
+
+                # Mark as completed
+                echo "Marking todo as completed..." >&2
+                api_call POST "$BCQ_API_BASE/buckets/$project_id/todos/$todo_id/completion.json" "" > /dev/null 2>&1
+
+                count=$((count + 1))
+            done < <(echo "$todos" | jq -c '.')
+        done < <(echo "$todolists" | jq -c '.[]')
+    done
+
+    echo "" >&2
+    echo "========================================" >&2
+    echo "SWEEP COMPLETE" >&2
+    echo "========================================" >&2
+    echo "Total todos processed: $count" >&2
+    echo "Total comments added: $count" >&2
+    echo "Total todos completed: $count" >&2
+    echo "========================================" >&2
+}
+
+process_all_projects
+

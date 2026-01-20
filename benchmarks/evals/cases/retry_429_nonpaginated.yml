@@ -1,0 +1,161 @@
+# 429 Retry (Non-Paginated): Tests MODEL's 429 recovery behavior
+# NOTE: This tests MODEL behavior, not infrastructure.
+# The 429 occurs on a single-resource GET, so the model must handle it.
+
+name: retry_429_nonpaginated
+description: |
+  Tests that the model correctly handles 429 on a non-paginated endpoint.
+  First request to GET /projects/1.json returns 429 with Retry-After header.
+  Model MUST recognize the error, wait, and retry the same request.
+  FAIL if agent gives up or doesn't retry.
+
+fixtures:
+  - method: GET
+    path: "/projects.json"
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  - method: GET
+    path: "/projects.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  - method: GET
+    path: "/projects.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  # Project detail - success response (used after retry)
+  - method: GET
+    path: "/projects/1.json"
+    response:
+      status: 200
+      body:
+        id: 1
+        name: "Test Project"
+        dock:
+          - name: todoset
+            id: 10
+            enabled: true
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  - method: GET
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 200
+      body: []
+
+  - method: POST
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 201
+      body:
+        id: 9001
+        content: "BenchChain - processed by agent"
+
+  - method: POST
+    path: "/buckets/1/todos/1003/completion.json"
+    response:
+      status: 200
+      body:
+        id: 1003
+        completed: true
+
+# ERROR INJECTION: 429 on first call to project detail (non-paginated)
+inject:
+  - method: GET
+    path: "/projects/1.json"
+    on_call: 1
+    response:
+      status: 429
+      headers:
+        Retry-After: "2"
+      body:
+        error: "Rate limit exceeded"
+
+assertions:
+  required_sequence:
+    # First attempt to project detail (will get 429)
+    - method: GET
+      path: "/projects/1.json"
+      occurrence: 1
+      expect_status: 429
+
+    # MUST retry after waiting
+    - method: GET
+      path: "/projects/1.json"
+      occurrence: 2
+      expect_status: 200
+
+  end_state:
+    # Must complete the overdue todo (proves recovery worked)
+    - method: POST
+      path: "/buckets/1/todos/1003/completion.json"
+      count: 1
+
+  max_calls: 18
+
+notes:
+  - "Model received 429 on non-paginated endpoint"
+  - "Model retried after waiting"
+  - "Completed overdue todo (proves retry succeeded)"

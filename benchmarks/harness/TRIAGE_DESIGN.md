@@ -71,7 +71,7 @@ preflight_check() {
   local errors=()
 
   # Environment
-  [[ -z "$BCQ_ACCESS_TOKEN" ]] && errors+=("BCQ_ACCESS_TOKEN not set")
+  [[ -z "$BASECAMP_TOKEN" ]] && errors+=("BASECAMP_TOKEN not set")
   [[ -z "$BCQ_ACCOUNT_ID" ]] && errors+=("BCQ_ACCOUNT_ID not set")
   [[ -z "$BCQ_BENCH_RUN_ID" ]] && errors+=("BCQ_BENCH_RUN_ID not set")
 
@@ -220,9 +220,9 @@ triage_run() {
 
 ```json
 {
-  "run_id": "20260115-190436-12-bcq-gpt-5-mini",
+  "run_id": "20260115-190436-12-bcq-full-gpt-5-mini",
   "task": "12",
-  "condition": "bcq",
+  "strategy": "bcq-full",
   "model": "gpt-5-mini",
   "success": false,
   "run_status": "valid",           // NEW: valid | invalid

@@ -200,8 +200,10 @@ execute_bash_tool() {
   [[ ! -x "$bash_cmd" ]] && bash_cmd="bash"
 
   # Execute with timeout (if available)
+  # Use TOOL_TIMEOUT from run.sh, default to 60s if not set
+  local timeout_secs="${TOOL_TIMEOUT:-60}"
   if [[ -n "$TIMEOUT_CMD" ]]; then
-    "$TIMEOUT_CMD" 60 "$bash_cmd" -c "$command" 2>&1 || return $?
+    "$TIMEOUT_CMD" "$timeout_secs" "$bash_cmd" -c "$command" 2>&1 || return $?
   else
     "$bash_cmd" -c "$command" 2>&1 || return $?
   fi

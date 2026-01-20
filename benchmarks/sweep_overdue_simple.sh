@@ -17,14 +17,14 @@ process_todo() {
     
     # Comment
     curl -s -X POST \
-      -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+      -H "Authorization: Bearer $BASECAMP_TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"content\":\"Processed BenchChain $BCQ_BENCH_RUN_ID\"}" \
       "$BCQ_API_BASE/buckets/$proj/recordings/$todo_id/comments.json" > /dev/null
     
     # Complete
     curl -s -X POST \
-      -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" \
+      -H "Authorization: Bearer $BASECAMP_TOKEN" \
       "$BCQ_API_BASE/buckets/$proj/todos/$todo_id/completion.json" > /dev/null
     
     echo "  Completed!"
@@ -38,12 +38,12 @@ for proj in "${projects[@]}"; do
     echo "[Project $proj] Starting..."
     
     # Get todoset
-    project_json=$(curl -s -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" "$BCQ_API_BASE/projects/$proj.json")
+    project_json=$(curl -s -H "Authorization: Bearer $BASECAMP_TOKEN" "$BCQ_API_BASE/projects/$proj.json")
     todoset=$(echo "$project_json" | jq -r '.dock[] | select(.name=="todoset") | .id')
     echo "[Project $proj] Todoset: $todoset"
     
     # Get todolists
-    lists_json=$(curl -s -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" "$BCQ_API_BASE/buckets/$proj/todosets/$todoset/todolists.json")
+    lists_json=$(curl -s -H "Authorization: Bearer $BASECAMP_TOKEN" "$BCQ_API_BASE/buckets/$proj/todosets/$todoset/todolists.json")
     lists=$(echo "$lists_json" | jq -r '.[] | .id')
     
     for list in $lists; do
@@ -51,7 +51,7 @@ for proj in "${projects[@]}"; do
         
         page=1
         while true; do
-            todos=$(curl -s -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" "$BCQ_API_BASE/buckets/$proj/todolists/$list/todos.json?page=$page")
+            todos=$(curl -s -H "Authorization: Bearer $BASECAMP_TOKEN" "$BCQ_API_BASE/buckets/$proj/todolists/$list/todos.json?page=$page")
             count=$(echo "$todos" | jq 'length')
             [ "$count" -eq 0 ] && break
             

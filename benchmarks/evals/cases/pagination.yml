@@ -1,0 +1,210 @@
+# Pagination: Must traverse all pages until empty
+# Tests invariant #6: "Always paginate until empty"
+
+name: pagination_full_traversal
+description: |
+  Complete the overdue todo sweep task for project 1:
+  1. Find all overdue todos (due_on < today, not completed)
+  2. For each overdue todo: check comments, post marker "BenchChain", complete it
+
+  The todolist has 3 pages. Only page 2 has an overdue todo.
+  FAIL if agent stops at page 1 (common error).
+
+fixtures:
+  # Projects list - no page param
+  - method: GET
+    path: "/projects.json"
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  # Projects page 1
+  - method: GET
+    path: "/projects.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  # Projects page 2 (empty)
+  - method: GET
+    path: "/projects.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  - method: GET
+    path: "/projects/1.json"
+    response:
+      status: 200
+      body:
+        id: 1
+        name: "Test Project"
+        dock:
+          - name: todoset
+            id: 10
+            enabled: true
+
+  # Todolists - no page param
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+          todos_url: "/buckets/1/todolists/100/todos.json"
+
+  # Todolists page 1
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+          todos_url: "/buckets/1/todolists/100/todos.json"
+
+  # Todolists page 2 (empty)
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  # No page param = page 1 behavior
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    response:
+      status: 200
+      body:
+        - id: 1001
+          content: "Benchmark Seed Todo 1"
+          due_on: null
+          completed: false
+        - id: 1002
+          content: "Benchmark Seed Todo 2"
+          due_on: null
+          completed: false
+
+  # Page 1 (explicit)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1001
+          content: "Benchmark Seed Todo 1"
+          due_on: null
+          completed: false
+        - id: 1002
+          content: "Benchmark Seed Todo 2"
+          due_on: null
+          completed: false
+
+  # Page 2 (contains overdue)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  # Page 3 (empty = end)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "3"}
+    response:
+      status: 200
+      body: []
+
+  # Comments endpoint (empty - no existing comments)
+  - method: GET
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 200
+      body: []
+
+  # POST comment
+  - method: POST
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 201
+      body:
+        id: 9001
+        content: "Processed BenchChain test-run-id"
+
+  # POST completion
+  - method: POST
+    path: "/buckets/1/todos/1003/completion.json"
+    response:
+      status: 200
+      body:
+        id: 1003
+        completed: true
+
+assertions:
+  required_sequence:
+    # Must fetch single project to get dock (list response lacks dock)
+    - method: GET
+      path: "/projects/1.json"
+      expect_status: 200
+
+    # Must get todolists from todoset
+    - method: GET
+      path: "/buckets/1/todosets/10/todolists.json"
+      expect_status: 200
+
+    # CRITICAL: Must fetch page 2 and page 3 (empty signals end)
+    # Page 1 can be fetched with or without ?page=1 param
+    - method: GET
+      path: "/buckets/1/todolists/100/todos.json"
+      query: {page: "2"}
+      expect_status: 200
+
+    - method: GET
+      path: "/buckets/1/todolists/100/todos.json"
+      query: {page: "3"}
+      expect_status: 200
+
+  end_state:
+    # Must complete the overdue todo (only one exists)
+    - method: POST
+      path: "/buckets/1/todos/1003/completion.json"
+      count: 1
+
+    # Must comment on the todo at least once
+    - method: POST
+      path: "/buckets/1/recordings/1003/comments.json"
+      min_count: 1
+
+  forbidden:
+    # Should not complete non-overdue todos
+    - method: POST
+      path: "/buckets/1/todos/1001/completion.json"
+
+    - method: POST
+      path: "/buckets/1/todos/1002/completion.json"
+
+    # Invalid URL pattern - todos under todosets/todolists (common model error)
+    - method: GET
+      path: "/buckets/1/todosets/10/todolists/100/todos.json"
+
+  max_calls: 15
+
+notes:
+  - "Fetched all 3 pages (including empty page 3)"
+  - "Completed exactly 1 overdue todo (id 1003)"
+  - "Did not complete non-overdue todos"
