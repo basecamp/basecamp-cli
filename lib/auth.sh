@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# auth.sh - OAuth 2.1 authentication with Dynamic Client Registration
-# Uses .well-known/oauth-authorization-server discovery (RFC 8414)
+# auth.sh - OAuth authentication with support for multiple providers
+#
+# Supports two OAuth providers:
+# 1. Basecamp OAuth 2.1 (BC3) - Uses DCR, PKCE, .well-known discovery
+# 2. Launchpad OAuth 2 - Pre-registered clients, no PKCE
+#
+# Strategy: Try BC3 OAuth 2.1 discovery first, fall back to Launchpad if unavailable
 
 
 # OAuth Configuration
@@ -11,36 +16,62 @@ BCQ_REDIRECT_URI="http://127.0.0.1:$BCQ_REDIRECT_PORT/callback"
 BCQ_CLIENT_NAME="bcq"
 BCQ_CLIENT_URI="https://github.com/basecamp/bcq"
 
+# Configurable client credentials for Launchpad OAuth (no DCR support)
+# Register at https://integrate.37signals.com to get client_id/client_secret
+BCQ_CLIENT_ID="${BCQ_CLIENT_ID:-}"
+BCQ_CLIENT_SECRET="${BCQ_CLIENT_SECRET:-}"
+
+# Launchpad OAuth 2 endpoints (configurable for dev/staging/production)
+# Production: https://launchpad.37signals.com
+# Staging:    https://launchpad-staging.37signals.com
+# Dev:        http://launchpad.localhost:3011
+BCQ_LAUNCHPAD_URL="${BCQ_LAUNCHPAD_URL:-https://launchpad.37signals.com}"
+BCQ_LAUNCHPAD_AUTH_URL="${BCQ_LAUNCHPAD_AUTH_URL:-$BCQ_LAUNCHPAD_URL/authorization/new}"
+BCQ_LAUNCHPAD_TOKEN_URL="${BCQ_LAUNCHPAD_TOKEN_URL:-$BCQ_LAUNCHPAD_URL/authorization/token}"
+
 # Cached OAuth server metadata (populated by _ensure_oauth_config)
 declare -g _BCQ_OAUTH_CONFIG=""
+declare -g _BCQ_OAUTH_TYPE=""  # "bc3" or "launchpad"
 
 
-# OAuth Discovery (RFC 8414)
+# OAuth Discovery
 
 _discover_oauth_config() {
-  # Fetch OAuth 2.1 server metadata from .well-known endpoint
+  # Try BC3 OAuth 2.1 discovery first (RFC 8414)
   local discovery_url="$BCQ_BASE_URL/.well-known/oauth-authorization-server"
 
-  debug "Discovering OAuth config from: $discovery_url"
+  debug "Attempting BC3 OAuth 2.1 discovery from: $discovery_url"
 
   local response
-  response=$(curl -s -f "$discovery_url") || {
-    die "Failed to discover OAuth configuration from $discovery_url" $EXIT_AUTH \
-      "Ensure BCQ_BASE_URL points to a valid Basecamp instance"
-  }
+  if response=$(curl -s -f "$discovery_url" 2>/dev/null); then
+    # Validate required fields
+    local authorization_endpoint token_endpoint
+    authorization_endpoint=$(echo "$response" | jq -r '.authorization_endpoint // empty')
+    token_endpoint=$(echo "$response" | jq -r '.token_endpoint // empty')
 
-  # Validate required fields
-  local authorization_endpoint token_endpoint
-  authorization_endpoint=$(echo "$response" | jq -r '.authorization_endpoint // empty')
-  token_endpoint=$(echo "$response" | jq -r '.token_endpoint // empty')
-
-  if [[ -z "$authorization_endpoint" ]] || [[ -z "$token_endpoint" ]]; then
-    debug "Discovery response: $response"
-    die "Invalid OAuth discovery response - missing required endpoints" $EXIT_AUTH
+    if [[ -n "$authorization_endpoint" ]] && [[ -n "$token_endpoint" ]]; then
+      _BCQ_OAUTH_CONFIG="$response"
+      _BCQ_OAUTH_TYPE="bc3"
+      debug "BC3 OAuth 2.1 config discovered successfully"
+      return 0
+    fi
   fi
 
-  _BCQ_OAUTH_CONFIG="$response"
-  debug "OAuth config discovered successfully"
+  # Fall back to Launchpad OAuth 2
+  debug "BC3 OAuth 2.1 discovery failed, using Launchpad OAuth 2"
+  _BCQ_OAUTH_TYPE="launchpad"
+
+  # Synthesize a config object for Launchpad
+  _BCQ_OAUTH_CONFIG=$(jq -n \
+    --arg auth "$BCQ_LAUNCHPAD_AUTH_URL" \
+    --arg token "$BCQ_LAUNCHPAD_TOKEN_URL" \
+    '{
+      authorization_endpoint: $auth,
+      token_endpoint: $token,
+      grant_types_supported: ["authorization_code", "refresh_token"]
+    }')
+
+  debug "Launchpad OAuth 2 config configured"
 }
 
 _ensure_oauth_config() {
@@ -54,6 +85,11 @@ _get_oauth_endpoint() {
   local key="$1"
   _ensure_oauth_config
   echo "$_BCQ_OAUTH_CONFIG" | jq -r ".$key // empty"
+}
+
+_get_oauth_type() {
+  _ensure_oauth_config
+  echo "$_BCQ_OAUTH_TYPE"
 }
 
 # Convenience accessors for OAuth endpoints
@@ -122,38 +158,66 @@ _auth_login() {
     return 0
   fi
 
-  # Pre-fetch OAuth config (avoids repeated discovery in subshells)
+  # Pre-fetch OAuth config (discovers provider type: bc3 or launchpad)
   _ensure_oauth_config
 
-  # Get or register client
-  local client_id client_secret
-  if ! _load_client; then
-    info "Registering OAuth client..."
-    _register_client || die "Failed to register OAuth client" $EXIT_AUTH
-  fi
-  _load_client
+  local oauth_type
+  oauth_type=$(_get_oauth_type)
+  debug "Using OAuth type: $oauth_type"
 
-  # Generate PKCE challenge
-  local code_verifier code_challenge
-  code_verifier=$(_generate_code_verifier)
-  code_challenge=$(_generate_code_challenge "$code_verifier")
-  debug "Generated code_verifier: $code_verifier"
-  debug "Generated code_challenge: $code_challenge"
+  # Warn about scope limitations for Launchpad
+  if [[ "$oauth_type" == "launchpad" ]] && [[ "$scope" == "read" ]]; then
+    warn "Launchpad OAuth does not support read-only scope; granting full access"
+    scope="full"
+  fi
+
+  # Get or register client based on OAuth type
+  local client_id client_secret
+  if [[ "$oauth_type" == "bc3" ]]; then
+    # BC3: Use Dynamic Client Registration
+    if ! _load_client; then
+      info "Registering OAuth client..."
+      _register_client || die "Failed to register OAuth client" $EXIT_AUTH
+    fi
+    _load_client
+  else
+    # Launchpad: Use pre-configured client credentials
+    _load_launchpad_client || die "Launchpad OAuth requires client credentials" $EXIT_AUTH \
+      "Set BCQ_CLIENT_ID and BCQ_CLIENT_SECRET environment variables" \
+      "Register at https://integrate.37signals.com"
+  fi
 
   # Generate state for CSRF protection
   local state
   state=$(_generate_state)
 
-  # Build authorization URL (using discovered endpoint)
+  # Build authorization URL based on OAuth type
   local auth_endpoint auth_url
   auth_endpoint=$(_authorization_endpoint)
-  auth_url="$auth_endpoint?response_type=code"
-  auth_url+="&client_id=$client_id"
-  auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
-  auth_url+="&code_challenge=$code_challenge"
-  auth_url+="&code_challenge_method=S256"
-  auth_url+="&scope=$scope"  # Default: full (read+write), use --scope read for read-only
-  auth_url+="&state=$state"
+
+  if [[ "$oauth_type" == "bc3" ]]; then
+    # BC3 OAuth 2.1 with PKCE
+    local code_verifier code_challenge
+    code_verifier=$(_generate_code_verifier)
+    code_challenge=$(_generate_code_challenge "$code_verifier")
+    debug "Generated code_verifier: $code_verifier"
+    debug "Generated code_challenge: $code_challenge"
+
+    auth_url="$auth_endpoint?response_type=code"
+    auth_url+="&client_id=$client_id"
+    auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
+    auth_url+="&code_challenge=$code_challenge"
+    auth_url+="&code_challenge_method=S256"
+    auth_url+="&scope=$scope"
+    auth_url+="&state=$state"
+  else
+    # Launchpad OAuth 2 (no PKCE)
+    local code_verifier=""  # Not used for Launchpad
+    auth_url="$auth_endpoint?type=web_server"
+    auth_url+="&client_id=$client_id"
+    auth_url+="&redirect_uri=$(urlencode "$BCQ_REDIRECT_URI")"
+    auth_url+="&state=$state"
+  fi
 
   local auth_code
 
@@ -181,7 +245,7 @@ _auth_login() {
 
   # Exchange code for tokens
   info "Exchanging authorization code..."
-  _exchange_code "$auth_code" "$code_verifier" "$client_id" "$client_secret" || \
+  _exchange_code "$auth_code" "$code_verifier" "$client_id" "$client_secret" "$oauth_type" || \
     die "Token exchange failed" $EXIT_AUTH
 
   # Discover accounts
@@ -215,6 +279,7 @@ _auth_status() {
   local expires_at=""
   local token_status="none"
   local scope=""
+  local oauth_type=""
 
   if get_access_token &>/dev/null; then
     auth_status="authenticated"
@@ -224,6 +289,7 @@ _auth_status() {
     creds=$(load_credentials)
     expires_at=$(echo "$creds" | jq -r '.expires_at // 0')
     scope=$(echo "$creds" | jq -r '.scope // empty')
+    oauth_type=$(echo "$creds" | jq -r '.oauth_type // empty')
 
     if is_token_expired; then
       token_status="expired"
@@ -247,10 +313,12 @@ _auth_status() {
       --arg account_name "$account_name" \
       --arg expires_at "$expires_at" \
       --arg scope "$scope" \
+      --arg oauth_type "$oauth_type" \
       '{
         status: $status,
         token: $token_status,
         scope: (if $scope != "" then $scope else null end),
+        oauth_provider: (if $oauth_type != "" then $oauth_type else null end),
         account: {
           id: (if $account_id != "" then ($account_id | tonumber) else null end),
           name: (if $account_name != "" then $account_name else null end)
@@ -263,6 +331,13 @@ _auth_status() {
     if [[ "$auth_status" == "authenticated" ]]; then
       echo "Status: ✓ Authenticated"
       [[ -n "$account_name" ]] && echo "Account: $account_name (#$account_id)" || true
+      if [[ -n "$oauth_type" ]]; then
+        if [[ "$oauth_type" == "launchpad" ]]; then
+          echo "Provider: Launchpad OAuth 2"
+        else
+          echo "Provider: Basecamp OAuth 2.1"
+        fi
+      fi
       if [[ -n "$scope" ]]; then
         if [[ "$scope" == "read" ]]; then
           echo "Scope: $scope (read-only)"
@@ -350,6 +425,7 @@ _register_client() {
 }
 
 _load_client() {
+  # Load BC3 DCR client credentials from file
   local client_file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
   if [[ ! -f "$client_file" ]]; then
     return 1
@@ -360,6 +436,33 @@ _load_client() {
 
   # Only client_id is required (public clients may not have secret)
   [[ -n "$client_id" ]]
+}
+
+_load_launchpad_client() {
+  # Load Launchpad client credentials from environment or config
+  # Launchpad requires pre-registered clients (no DCR)
+
+  # Priority: env vars > config file
+  if [[ -n "$BCQ_CLIENT_ID" ]] && [[ -n "$BCQ_CLIENT_SECRET" ]]; then
+    client_id="$BCQ_CLIENT_ID"
+    client_secret="$BCQ_CLIENT_SECRET"
+    debug "Loaded Launchpad credentials from environment"
+    return 0
+  fi
+
+  # Try config file
+  local config_client_id config_client_secret
+  config_client_id=$(get_config "oauth_client_id" "")
+  config_client_secret=$(get_config "oauth_client_secret" "")
+
+  if [[ -n "$config_client_id" ]] && [[ -n "$config_client_secret" ]]; then
+    client_id="$config_client_id"
+    client_secret="$config_client_secret"
+    debug "Loaded Launchpad credentials from config"
+    return 0
+  fi
+
+  return 1
 }
 
 _generate_code_verifier() {
@@ -501,32 +604,48 @@ _exchange_code() {
   local code_verifier="$2"
   local client_id="$3"
   local client_secret="$4"
+  local oauth_type="${5:-bc3}"
 
   local token_endpoint
   token_endpoint=$(_token_endpoint)
 
-  debug "Exchanging code at: $token_endpoint"
-  debug "Code verifier: $code_verifier"
-  debug "Code verifier length: ${#code_verifier}"
-
-  # Build curl args - only include client_secret for confidential clients
-  local curl_args=(
-    -s -X POST
-    -H "Content-Type: application/x-www-form-urlencoded"
-    --data-urlencode "grant_type=authorization_code"
-    --data-urlencode "code=$code"
-    --data-urlencode "redirect_uri=$BCQ_REDIRECT_URI"
-    --data-urlencode "client_id=$client_id"
-    --data-urlencode "code_verifier=$code_verifier"
-  )
-
-  # Only include client_secret for confidential clients (non-empty secret)
-  if [[ -n "$client_secret" ]]; then
-    curl_args+=(--data-urlencode "client_secret=$client_secret")
-  fi
+  debug "Exchanging code at: $token_endpoint (oauth_type=$oauth_type)"
 
   local response
-  response=$(curl "${curl_args[@]}" "$token_endpoint")
+
+  if [[ "$oauth_type" == "bc3" ]]; then
+    # BC3 OAuth 2.1 token exchange with PKCE
+    debug "Code verifier: $code_verifier"
+    debug "Code verifier length: ${#code_verifier}"
+
+    # Build curl args - only include client_secret for confidential clients
+    local curl_args=(
+      -s -X POST
+      -H "Content-Type: application/x-www-form-urlencoded"
+      --data-urlencode "grant_type=authorization_code"
+      --data-urlencode "code=$code"
+      --data-urlencode "redirect_uri=$BCQ_REDIRECT_URI"
+      --data-urlencode "client_id=$client_id"
+      --data-urlencode "code_verifier=$code_verifier"
+    )
+
+    # Only include client_secret for confidential clients (non-empty secret)
+    if [[ -n "$client_secret" ]]; then
+      curl_args+=(--data-urlencode "client_secret=$client_secret")
+    fi
+
+    response=$(curl "${curl_args[@]}" "$token_endpoint")
+  else
+    # Launchpad OAuth 2 token exchange (no PKCE, different params)
+    response=$(curl -s -X POST \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --data-urlencode "type=web_server" \
+      --data-urlencode "code=$code" \
+      --data-urlencode "redirect_uri=$BCQ_REDIRECT_URI" \
+      --data-urlencode "client_id=$client_id" \
+      --data-urlencode "client_secret=$client_secret" \
+      "$token_endpoint")
+  fi
 
   local access_token refresh_token expires_in scope
   access_token=$(echo "$response" | jq -r '.access_token // empty')
@@ -542,13 +661,24 @@ _exchange_code() {
   local expires_at
   expires_at=$(($(date +%s) + expires_in))
 
+  # Store oauth_type and token_endpoint in credentials for proper refresh handling
+  # Storing token_endpoint ensures refresh works even if discovery fails later
   local creds
   creds=$(jq -n \
     --arg access_token "$access_token" \
     --arg refresh_token "$refresh_token" \
     --argjson expires_at "$expires_at" \
     --arg scope "$scope" \
-    '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at, scope: $scope}')
+    --arg oauth_type "$oauth_type" \
+    --arg token_endpoint "$token_endpoint" \
+    '{
+      access_token: $access_token,
+      refresh_token: $refresh_token,
+      expires_at: $expires_at,
+      scope: $scope,
+      oauth_type: $oauth_type,
+      token_endpoint: $token_endpoint
+    }')
 
   save_credentials "$creds"
 }
