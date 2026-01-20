@@ -32,8 +32,8 @@ strategies_reference:
   bcq-full: "Full hand-authored skill (control)"
   bcq-generated: "CLI-generated skill from invariants"
   bcq-only: "Minimal 'use bcq --help' prompt"
-  api-docs: "Raw API with docs link only"
-  api-guided: "Raw API with endpoint examples"
+  api-docs-only: "Raw API with docs link only"
+  api-docs-with-curl-examples: "Raw API with endpoint examples"
 
 tasks:
   - id: "01"

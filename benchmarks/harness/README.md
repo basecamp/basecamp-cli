@@ -13,7 +13,7 @@ export OPENAI_API_KEY="sk-..."
 ./harness/run.sh --task 12 --strategy bcq-full --model claude-sonnet
 
 # Run full matrix
-./harness/matrix.sh --task 12 --models "claude-sonnet,gpt-4o" --strategies "bcq-full,api-guided"
+./harness/matrix.sh --task 12 --models "claude-sonnet,gpt-4o" --strategies "bcq-full,api-docs-with-curl-examples"
 ```
 
 ## Supported Models

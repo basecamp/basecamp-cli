@@ -2,7 +2,7 @@
 # Skill-bench harness - sets up environment and records metrics
 #
 # Compares 5 strategies from strategies.json:
-#   bcq-full, bcq-generated, bcq-only, api-docs, api-guided
+#   bcq-full, bcq-generated, bcq-only, api-docs-only, api-docs-with-curl-examples
 #
 # EXECUTION MODEL:
 #   This harness does NOT automatically invoke Claude Code. It:
@@ -19,7 +19,7 @@
 #
 # Usage:
 #   ./harness.sh --task 01 --strategy bcq-full
-#   ./harness.sh --task all --strategy api-docs --model haiku
+#   ./harness.sh --task all --strategy api-docs-only --model haiku
 #   ./harness.sh --task 07 --strategy bcq-generated --inject 429
 #
 # Results are written to results/<run_id>-<strategy>-<task>.json
@@ -111,7 +111,7 @@ $strategies_list
 
 Examples:
   $0 --task 01 --strategy bcq-full
-  $0 --task all --strategy api-docs --model haiku
+  $0 --task all --strategy api-docs-only --model haiku
   $0 --task 07 --strategy bcq-generated --inject 429
 EOF
 }
@@ -168,7 +168,7 @@ setup_strategy() {
     export BCQ_BENCH_USE_BCQ=true
     export BCQ_CACHE_ENABLED=true  # Real-world product behavior
   else
-    # api-based strategies (api-docs, api-guided)
+    # api-based strategies (api-docs-only, api-docs-with-curl-examples)
     export BCQ_BENCH_USE_BCQ=false
     export BCQ_CACHE_ENABLED=false
   fi

@@ -9,7 +9,7 @@ Eval harness for testing AI agent behavior against Basecamp API workflows.
 export OPENAI_API_KEY="sk-..."
 
 # Run single case
-ruby harness/agent_runner.rb pagination api-with-guide -m gpt-4o
+ruby harness/agent_runner.rb pagination api-docs-with-agent-invariants -m gpt-4o
 
 # Run all cases (positional args: model, iterations, prompt)
 ./run_all.sh gpt-4o 10
@@ -29,7 +29,7 @@ Example aggregation:
 ```bash
 passes=0; fails=0; skips=0
 for case in cases/*.yml; do
-  ruby harness/agent_runner.rb "$case" api-with-guide -m gpt-4o
+  ruby harness/agent_runner.rb "$case" api-docs-with-agent-invariants -m gpt-4o
   case $? in
     0) ((passes++)) ;;
     1) ((fails++)) ;;

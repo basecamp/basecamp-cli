@@ -6,7 +6,7 @@ set -euo pipefail
 
 MODEL="${1:-gpt-4o-mini}"
 ITERATIONS="${2:-1}"
-PROMPT="${3:-api-with-guide}"
+PROMPT="${3:-api-docs-with-agent-invariants}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CASES_DIR="$SCRIPT_DIR/cases"

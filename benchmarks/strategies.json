@@ -20,18 +20,18 @@
       "tools": ["bcq"],
       "description": "Ultra-minimal skill (~15 tokens)"
     },
-    "api-docs": {
-      "prompt": "benchmarks/prompts/api-docs.md",
+    "api-docs-only": {
+      "prompt": "benchmarks/prompts/api-docs-only.md",
       "tools": ["curl", "jq"],
       "description": "Raw API with docs link only"
     },
-    "api-guided": {
-      "prompt": "benchmarks/prompts/api-guided.md",
+    "api-docs-with-curl-examples": {
+      "prompt": "benchmarks/prompts/api-docs-with-curl-examples.md",
       "tools": ["curl", "jq"],
       "description": "Raw API with endpoint examples"
     },
-    "api-with-guide": {
-      "prompt": "benchmarks/prompts/api-with-guide.md",
+    "api-docs-with-agent-invariants": {
+      "prompt": "benchmarks/prompts/api-docs-with-agent-invariants.md",
       "tools": ["curl", "jq"],
       "description": "Raw API with agent-optimized invariants guide"
     }

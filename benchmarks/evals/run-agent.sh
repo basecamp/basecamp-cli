@@ -11,7 +11,7 @@ if [[ -f "../.env" ]]; then
 fi
 
 case_name="${1:-}"
-prompt_name="${2:-api-with-guide}"
+prompt_name="${2:-api-docs-with-agent-invariants}"
 shift 2 || true
 
 if [[ -z "$case_name" ]]; then

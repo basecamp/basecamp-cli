@@ -12,7 +12,7 @@ fi
 #
 # Usage:
 #   ./harness/run.sh --task 12 --strategy bcq --model claude-sonnet
-#   ./harness/run.sh --task 12 --strategy api-guided --model gpt-4o
+#   ./harness/run.sh --task 12 --strategy api-docs-with-curl-examples --model gpt-4o
 #   ./harness/run.sh --task 12 --strategy bcq --model claude-haiku --thinking
 #
 # Supported models:
@@ -41,7 +41,7 @@ get_strategy_list() {
   if [[ -f "$STRATEGIES_FILE" ]]; then
     jq -r '.strategies | keys[]' "$STRATEGIES_FILE" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//'
   else
-    echo "bcq-full,api-guided"  # fallback
+    echo "bcq-full,api-docs-with-curl-examples"  # fallback
   fi
 }
 
@@ -94,7 +94,7 @@ Options:
 
 Examples:
   $(basename "$0") --task 12 --strategy bcq-full --model claude-sonnet
-  $(basename "$0") --task 12 --strategy api-guided --model gpt-4o
+  $(basename "$0") --task 12 --strategy api-docs-with-curl-examples --model gpt-4o
   $(basename "$0") --task 12 --strategy bcq-only --model claude-haiku --dry-run
 EOF
   exit 1

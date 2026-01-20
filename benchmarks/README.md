@@ -21,8 +21,8 @@ Strategies are defined in `strategies.json`. Each strategy specifies either a sk
 | `bcq-full` | skill | Full hand-authored skill (control) |
 | `bcq-generated` | skill | CLI-generated skill from invariants |
 | `bcq-only` | prompt | Minimal "use bcq --help" prompt |
-| `api-docs` | prompt | Raw API with docs link only |
-| `api-guided` | prompt | Raw API with endpoint examples |
+| `api-docs-only` | prompt | Raw API with docs link only |
+| `api-docs-with-curl-examples` | prompt | Raw API with endpoint examples |
 
 See `SKILL_BENCH.md` for detailed comparison methodology.
 
@@ -110,8 +110,8 @@ benchmarks/
 │   └── bcq-generated/  # CLI-generated skill
 ├── prompts/            # Prompt files for prompt-based strategies
 │   ├── bcq-only.md
-│   ├── api-docs.md
-│   └── api-guided.md
+│   ├── api-docs-only.md
+│   └── api-docs-with-curl-examples.md
 ├── tasks/              # Task prompts
 │   └── *.md
 ├── results/            # Output (gitignored)
@@ -152,8 +152,8 @@ The `prompt_size` field measures bytes of the skill/prompt file + task prompt fi
 Track model performance by adding `--model`:
 
 ```bash
-./harness.sh --task 01 --strategy api-guided --model haiku
-./harness.sh --task 01 --strategy api-guided --model sonnet
+./harness.sh --task 01 --strategy api-docs-with-curl-examples --model haiku
+./harness.sh --task 01 --strategy api-docs-with-curl-examples --model sonnet
 ./harness.sh --task 01 --strategy bcq-full --model haiku
 ```
 

@@ -63,4 +63,4 @@ source benchmarks/.env   # Loads ANTHROPIC_API_KEY, OPENAI_API_KEY from 1Passwor
 ./benchmarks/harness/report.sh benchmarks/results/             # Generate report
 ```
 
-**Strategies:** See `benchmarks/strategies.json` for available strategies (bcq-full, bcq-minimal, api-with-guide, etc.)
+**Strategies:** See `benchmarks/strategies.json` for available strategies (bcq-full, bcq-minimal, api-docs-with-agent-invariants, etc.)

@@ -52,7 +52,7 @@ echo "[matrix] Starting benchmark matrix..."
 echo "[matrix] Results: $RESULTS_FILE"
 
 for task in "${TASKS[@]}"; do
-  for strategy in bcq-full api-guided; do
+  for strategy in bcq-full api-docs-with-curl-examples; do
     run_task "$task" "$strategy" 1
   done
 done

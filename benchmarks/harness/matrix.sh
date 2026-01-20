@@ -80,7 +80,7 @@ STRATEGIES_FILE="$BENCH_DIR/strategies.json"
 if [[ -f "$STRATEGIES_FILE" ]]; then
   STRATEGIES=$(jq -r '.strategies | keys[]' "$STRATEGIES_FILE" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
 else
-  STRATEGIES="bcq-full,api-guided"  # fallback
+  STRATEGIES="bcq-full,api-docs-with-curl-examples"  # fallback
 fi
 RUNS=1
 DELAY=2

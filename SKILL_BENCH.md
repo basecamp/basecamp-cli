@@ -7,7 +7,7 @@ Empirical test to determine the optimal skill strategy for bcq.
 1. **Does bcq help?** — Compare bcq strategies vs raw API strategies
 2. **Full vs generated skill?** — Compare `bcq-full` vs `bcq-generated`
 3. **Skill vs no skill?** — Compare skill-based vs `bcq-only`
-4. **Does guidance help raw API?** — Compare `api-docs` vs `api-guided`
+4. **Does guidance help raw API?** — Compare `api-docs-only` vs `api-docs-with-curl-examples`
 
 ## Hypothesis
 
@@ -24,8 +24,8 @@ If generated skill matches full skill, we switch to generated (less maintenance,
 | `bcq-full` | bcq | skill | Full hand-authored skill (control) |
 | `bcq-generated` | bcq | skill | Minimal CLI-generated skill |
 | `bcq-only` | bcq | prompt | "use `bcq --help`" prompt only |
-| `api-docs` | curl | prompt | Raw API with docs link only |
-| `api-guided` | curl | prompt | Raw API with endpoint examples |
+| `api-docs-only` | curl | prompt | Raw API with docs link only |
+| `api-docs-with-curl-examples` | curl | prompt | Raw API with endpoint examples |
 
 ### bcq-full (control)
 
@@ -64,10 +64,10 @@ Agent receives:
 
 Tests whether `bcq --help` alone is self-sufficient.
 
-### api-docs
+### api-docs-only
 
 Agent receives:
-- `benchmarks/prompts/api-docs.md` — link to API docs only
+- `benchmarks/prompts/api-docs-only.md` — link to API docs only
 - curl + jq tools
 - No bcq CLI
 
@@ -77,10 +77,10 @@ The minimal raw prompt provides:
 
 Baseline to measure bcq's value-add over pure docs.
 
-### api-guided
+### api-docs-with-curl-examples
 
 Agent receives:
-- `benchmarks/prompts/api-guided.md` — full endpoint examples
+- `benchmarks/prompts/api-docs-with-curl-examples.md` — full endpoint examples
 - curl + jq tools
 - No bcq CLI
 
@@ -102,15 +102,15 @@ Single source of truth: `benchmarks/strategies.json`
     "bcq-full":      { "skill": "skills/basecamp/SKILL.md", "tools": ["bcq"] },
     "bcq-generated": { "skill": "benchmarks/skills/bcq-generated/SKILL.md", "tools": ["bcq"] },
     "bcq-only":      { "prompt": "benchmarks/prompts/bcq-only.md", "tools": ["bcq"] },
-    "api-docs":      { "prompt": "benchmarks/prompts/api-docs.md", "tools": ["curl", "jq"] },
-    "api-guided":    { "prompt": "benchmarks/prompts/api-guided.md", "tools": ["curl", "jq"] }
+    "api-docs-only":      { "prompt": "benchmarks/prompts/api-docs-only.md", "tools": ["curl", "jq"] },
+    "api-docs-with-curl-examples":    { "prompt": "benchmarks/prompts/api-docs-with-curl-examples.md", "tools": ["curl", "jq"] }
   }
 }
 ```
 
 Strategies use either:
 - **skill**: Points to a SKILL.md file loaded by Claude Code's skill system (bcq-full, bcq-generated)
-- **prompt**: Points to a prompt file prepended to the task (bcq-only, api-docs, api-guided)
+- **prompt**: Points to a prompt file prepended to the task (bcq-only, api-docs-only, api-docs-with-curl-examples)
 
 ## Tasks
 
@@ -136,7 +136,7 @@ Reuse tasks from `benchmarks/spec.yaml`:
 | 06: Create list + todos | todoset vs todolist | bcq-full/generated vs bcq-only/api-* |
 | 09: Bulk complete overdue | Workflow patterns | bcq-full vs bcq-generated |
 | 07: Recover from 429 | Error handling | bcq-* vs api-* |
-| 01: Pagination | Following Link headers | api-docs vs api-guided |
+| 01: Pagination | Following Link headers | api-docs-only vs api-docs-with-curl-examples |
 
 ## Metrics
 
@@ -155,8 +155,8 @@ Reuse tasks from `benchmarks/spec.yaml`:
 ./benchmarks/harness.sh --task all --strategy bcq-full
 ./benchmarks/harness.sh --task all --strategy bcq-generated
 ./benchmarks/harness.sh --task all --strategy bcq-only
-./benchmarks/harness.sh --task all --strategy api-docs
-./benchmarks/harness.sh --task all --strategy api-guided
+./benchmarks/harness.sh --task all --strategy api-docs-only
+./benchmarks/harness.sh --task all --strategy api-docs-with-curl-examples
 
 # Compare results
 jq -s 'group_by(.strategy) | map({
@@ -194,8 +194,8 @@ jq -s 'group_by(.strategy) | map({
 
 | Outcome | Decision |
 |---------|----------|
-| api-guided >> api-docs | Endpoint examples matter |
-| api-guided ≈ api-docs | Docs link is sufficient |
+| api-docs-with-curl-examples >> api-docs-only | Endpoint examples matter |
+| api-docs-with-curl-examples ≈ api-docs-only | Docs link is sufficient |
 
 ### Decision matrix
 
@@ -215,8 +215,8 @@ jq -s 'group_by(.strategy) | map({
 | `skills/basecamp/SKILL.md` | Production skill (bcq-full) |
 | `benchmarks/skills/bcq-generated/SKILL.md` | CLI-generated skill |
 | `benchmarks/prompts/bcq-only.md` | Minimal "use --help" |
-| `benchmarks/prompts/api-docs.md` | Docs link only |
-| `benchmarks/prompts/api-guided.md` | Endpoint examples |
+| `benchmarks/prompts/api-docs-only.md` | Docs link only |
+| `benchmarks/prompts/api-docs-with-curl-examples.md` | Endpoint examples |
 | `bcq help` | Agent-optimized help |
 | `bcq skill` | Skill generator |
 
@@ -242,8 +242,8 @@ Rationale: The skill adds maintenance burden without measurable reliability lift
 | bcq-full | 100% |
 | bcq-generated | 100% |
 | bcq-only | 100% |
-| api-docs | 55% |
-| api-guided | 45% |
+| api-docs-only | 55% |
+| api-docs-with-curl-examples | 45% |
 
 **Decision for Task 12:** bcq-only matches bcq-full (100% = 100%). No skill needed for overdue sweep workflows.
 
