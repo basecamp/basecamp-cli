@@ -84,6 +84,64 @@ load test_helper
   has_config "account_id"
 }
 
+@test "has_config returns false for empty value" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "empty_key" ""
+  ! has_config "empty_key"
+}
+
+
+# Config round-trip (Bash 3.2 storage)
+
+@test "config set/get round-trip preserves value" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "test_key" "test_value"
+  result=$(__cfg_get "test_key")
+  [[ "$result" == "test_value" ]]
+}
+
+@test "config unset removes key" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "temp_key" "temp_value"
+  __cfg_unset "temp_key"
+  result=$(__cfg_get "temp_key" "default")
+  [[ "$result" == "default" ]]
+}
+
+@test "config handles values starting with -n" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "flag_key" "-n some value"
+  result=$(__cfg_get "flag_key")
+  [[ "$result" == "-n some value" ]]
+}
+
+@test "config handles values starting with -e" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "escape_key" "-e test\nvalue"
+  result=$(__cfg_get "escape_key")
+  [[ "$result" == "-e test\nvalue" ]]
+}
+
+@test "config set overwrites existing key" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "overwrite_key" "first"
+  __cfg_set "overwrite_key" "second"
+  result=$(__cfg_get "overwrite_key")
+  [[ "$result" == "second" ]]
+}
+
 
 # Credentials
 
