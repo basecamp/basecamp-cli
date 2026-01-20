@@ -203,9 +203,10 @@ load test_helper
   [[ "$client_secret" == "config-client-secret" ]]
 }
 
-@test "_load_launchpad_client fails when no credentials" {
+@test "_load_launchpad_client fails when no credentials for custom hosts" {
   unset BCQ_CLIENT_ID BCQ_CLIENT_SECRET
   create_global_config '{}'
+  export BCQ_LAUNCHPAD_URL="http://launchpad.localhost:3011"
 
   source "$BCQ_ROOT/lib/core.sh"
   source "$BCQ_ROOT/lib/config.sh"
@@ -213,6 +214,34 @@ load test_helper
 
   run _load_launchpad_client
   assert_failure
+}
+
+@test "_load_launchpad_client uses built-in defaults for production" {
+  unset BCQ_CLIENT_ID BCQ_CLIENT_SECRET
+  create_global_config '{}'
+  export BCQ_LAUNCHPAD_URL="https://launchpad.37signals.com"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+  source "$BCQ_ROOT/lib/auth.sh"
+
+  _load_launchpad_client
+  [[ "$client_id" == "5fdd0da8e485ae6f80f4ce0a4938640bb22f1348" ]]
+  [[ "$client_secret" == "a3dc33d78258e828efd6768ac2cd67f32ec1910a" ]]
+}
+
+@test "_load_launchpad_client uses built-in defaults with trailing slash" {
+  unset BCQ_CLIENT_ID BCQ_CLIENT_SECRET
+  create_global_config '{}'
+  export BCQ_LAUNCHPAD_URL="https://launchpad.37signals.com/"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+  source "$BCQ_ROOT/lib/auth.sh"
+
+  _load_launchpad_client
+  [[ "$client_id" == "5fdd0da8e485ae6f80f4ce0a4938640bb22f1348" ]]
+  [[ "$client_secret" == "a3dc33d78258e828efd6768ac2cd67f32ec1910a" ]]
 }
 
 @test "_get_oauth_type defaults to launchpad when discovery fails" {
