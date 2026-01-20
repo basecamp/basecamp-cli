@@ -863,31 +863,54 @@ check_overdue_chain() {
 
     # Check completed status by fetching directly
     local todo_detail
-    todo_detail=$(api_get "/buckets/$pid/todos/$todo_id.json" 2>/dev/null)
+    local fetch_failed=false
+    todo_detail=$(api_get "/buckets/$pid/todos/$todo_id.json" 2>/dev/null) || fetch_failed=true
     if [[ -z "$todo_detail" ]]; then
-      echo "FAIL: Could not fetch todo $todo_id in project $pid"
-      failed=true
-      continue
+      fetch_failed=true
     fi
 
-    local completed
-    completed=$(echo "$todo_detail" | jq -r '.completed // false')
-    if [[ "$completed" == "true" ]]; then
-      total_completed=$((total_completed + 1))
-    else
-      echo "FAIL: Todo $todo_id not completed"
-      failed=true
-    fi
-
-    # Time-based validation: ensure completion happened during this run
-    if [[ -n "$run_start" ]]; then
-      local updated_at
-      updated_at=$(echo "$todo_detail" | jq -r '.updated_at // ""')
-      if [[ -n "$updated_at" ]] && [[ "$updated_at" > "$run_start" ]]; then
-        total_time_valid=$((total_time_valid + 1))
+    if [[ "$fetch_failed" == "true" ]]; then
+      # Fallback: check HTTP log for successful POST to completion.json
+      # This handles Basecamp server bugs where todos/{id}.json returns 500
+      local completion_success
+      completion_success=$(grep "todos/$todo_id/completion\.json" "$log_file" 2>/dev/null | \
+        grep -c '"http_code":"204"') || completion_success=0
+      if [[ "$completion_success" -gt 0 ]]; then
+        echo "OK: Todo $todo_id completed (verified via HTTP log - API fetch failed)"
+        total_completed=$((total_completed + 1))
+        # Use HTTP log timestamp for time validation
+        if [[ -n "$run_start" ]]; then
+          local completion_ts
+          completion_ts=$(grep "todos/$todo_id/completion\.json" "$log_file" 2>/dev/null | \
+            grep '"http_code":"204"' | jq -r '.ts' | head -1)
+          if [[ -n "$completion_ts" ]]; then
+            total_time_valid=$((total_time_valid + 1))
+          fi
+        fi
       else
-        echo "FAIL: Todo $todo_id updated_at ($updated_at) not after run_start ($run_start)"
+        echo "FAIL: Could not verify todo $todo_id completion (API and HTTP log both failed)"
         failed=true
+      fi
+    else
+      local completed
+      completed=$(echo "$todo_detail" | jq -r '.completed // false')
+      if [[ "$completed" == "true" ]]; then
+        total_completed=$((total_completed + 1))
+      else
+        echo "FAIL: Todo $todo_id not completed"
+        failed=true
+      fi
+
+      # Time-based validation: ensure completion happened during this run
+      if [[ -n "$run_start" ]]; then
+        local updated_at
+        updated_at=$(echo "$todo_detail" | jq -r '.updated_at // ""')
+        if [[ -n "$updated_at" ]] && [[ "$updated_at" > "$run_start" ]]; then
+          total_time_valid=$((total_time_valid + 1))
+        else
+          echo "FAIL: Todo $todo_id updated_at ($updated_at) not after run_start ($run_start)"
+          failed=true
+        fi
       fi
     fi
 

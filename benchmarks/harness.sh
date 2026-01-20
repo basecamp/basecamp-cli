@@ -2,7 +2,7 @@
 # Skill-bench harness - sets up environment and records metrics
 #
 # Compares 5 strategies from strategies.json:
-#   bcq-full, bcq-generated, bcq-only, raw-docs, raw-guided
+#   bcq-full, bcq-generated, bcq-only, api-docs, api-guided
 #
 # EXECUTION MODEL:
 #   This harness does NOT automatically invoke Claude Code. It:
@@ -19,7 +19,7 @@
 #
 # Usage:
 #   ./harness.sh --task 01 --strategy bcq-full
-#   ./harness.sh --task all --strategy raw-docs --model haiku
+#   ./harness.sh --task all --strategy api-docs --model haiku
 #   ./harness.sh --task 07 --strategy bcq-generated --inject 429
 #
 # Results are written to results/<run_id>-<strategy>-<task>.json
@@ -111,7 +111,7 @@ $strategies_list
 
 Examples:
   $0 --task 01 --strategy bcq-full
-  $0 --task all --strategy raw-docs --model haiku
+  $0 --task all --strategy api-docs --model haiku
   $0 --task 07 --strategy bcq-generated --inject 429
 EOF
 }
@@ -168,7 +168,7 @@ setup_strategy() {
     export BCQ_BENCH_USE_BCQ=true
     export BCQ_CACHE_ENABLED=true  # Real-world product behavior
   else
-    # raw-based strategies (raw-docs, raw-guided)
+    # api-based strategies (api-docs, api-guided)
     export BCQ_BENCH_USE_BCQ=false
     export BCQ_CACHE_ENABLED=false
   fi
@@ -204,16 +204,27 @@ get_task_injection() {
   TASK_INJECT_AT_REQUEST=$(yq -r ".tasks[] | select(.id == \"$task_id\") | .inject.at_request // 0" "$BENCH_DIR/spec.yaml")
 }
 
-# Get skill path for strategy (from strategies.json)
-get_skill_path() {
-  get_strategy_config "$STRATEGY" "skill"
+# Check if strategy uses a skill (vs prompt)
+strategy_uses_skill() {
+  local skill_path
+  skill_path=$(get_strategy_config "$STRATEGY" "skill")
+  [[ -n "$skill_path" ]]
 }
 
-# Get skill name (basename of skill path for display)
-get_skill() {
-  local skill_path
-  skill_path=$(get_skill_path)
-  basename "$(dirname "$skill_path")"
+# Get instruction path for strategy (skill or prompt, from strategies.json)
+get_instruction_path() {
+  local skill_path prompt_path
+  skill_path=$(get_strategy_config "$STRATEGY" "skill")
+  if [[ -n "$skill_path" ]]; then
+    echo "$skill_path"
+  else
+    get_strategy_config "$STRATEGY" "prompt"
+  fi
+}
+
+# Get strategy display name
+get_strategy_name() {
+  echo "$STRATEGY"
 }
 
 # Per-task setup hooks
@@ -273,37 +284,36 @@ prepare_overdue_todos() {
   log "  Updated $(echo "$overdue_ids" | wc -w | tr -d ' ') overdue todos"
 }
 
-# Calculate prompt size (skill file + task prompt file)
+# Calculate prompt size (strategy instruction + task prompt file)
 # Returns JSON object with byte counts
 # NOTE: This measures file sizes, not the exact prompt sent to the model.
-# Claude Code may add system context that isn't captured here.
+# Claude Code may add system context and @-referenced files that aren't captured here.
 calc_prompt_size() {
-  local prompt_file="$1"
+  local task_prompt_file="$1"
 
-  # Get skill path from strategies.json (relative to repo root)
-  local skill_path
-  skill_path=$(get_skill_path)
-  local skill_file="$BCQ_ROOT/$skill_path"
-  local task_file="$BENCH_DIR/$prompt_file"
+  # Get strategy instruction path (skill or prompt) from strategies.json
+  local instruction_path
+  instruction_path=$(get_instruction_path)
+  local instruction_file="$BCQ_ROOT/$instruction_path"
+  local task_file="$BENCH_DIR/$task_prompt_file"
 
-  local skill_bytes=0 task_bytes=0 total_bytes=0
+  local instruction_bytes=0 task_bytes=0 total_bytes=0
 
-  # Follow symlinks to get actual file size
-  if [[ -f "$skill_file" ]]; then
-    skill_bytes=$(wc -c < "$skill_file" | tr -d ' ')
+  if [[ -f "$instruction_file" ]]; then
+    instruction_bytes=$(wc -c < "$instruction_file" | tr -d ' ')
   fi
 
   if [[ -f "$task_file" ]]; then
     task_bytes=$(wc -c < "$task_file" | tr -d ' ')
   fi
 
-  total_bytes=$((skill_bytes + task_bytes))
+  total_bytes=$((instruction_bytes + task_bytes))
 
   jq -n \
-    --argjson skill "$skill_bytes" \
+    --argjson instruction "$instruction_bytes" \
     --argjson task "$task_bytes" \
     --argjson total "$total_bytes" \
-    '{skill_bytes: $skill, task_bytes: $task, total_bytes: $total}'
+    '{instruction_bytes: $instruction, task_bytes: $task, total_bytes: $total}'
 }
 
 # Run a single task
@@ -322,8 +332,8 @@ run_task() {
   prompt_file=$(get_task_info "$task_id" "prompt_file")
   local timeout
   timeout=$(get_task_info "$task_id" "timeout_seconds")
-  local skill
-  skill=$(get_skill)
+  local strategy_name
+  strategy_name=$(get_strategy_name)
 
   # Check for task-specific injection from spec.yaml
   # CLI --inject overrides spec.yaml if provided
@@ -353,6 +363,16 @@ run_task() {
     export BCQ_BENCH_INJECTION_EXPECTED=""
   fi
 
+  # Get instruction path for this strategy
+  local instruction_path
+  instruction_path=$(get_instruction_path)
+  local instruction_type
+  if strategy_uses_skill; then
+    instruction_type="skill"
+  else
+    instruction_type="prompt"
+  fi
+
   # Calculate prompt size for this task
   local prompt_size_json
   prompt_size_json=$(calc_prompt_size "$prompt_file")
@@ -360,11 +380,11 @@ run_task() {
   total_prompt_bytes=$(echo "$prompt_size_json" | jq '.total_bytes')
 
   log "Running task $task_id: $task_name"
-  log "  Strategy: $STRATEGY, Skill: $skill, Model: $MODEL"
+  log "  Strategy: $STRATEGY ($instruction_type), Model: $MODEL"
   log "  Prompt size: $total_prompt_bytes bytes"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    log "  [DRY RUN] Would execute: $BENCH_DIR/$prompt_file with skill $skill"
+    log "  [DRY RUN] Would execute: $BENCH_DIR/$prompt_file with $instruction_type $instruction_path"
     return 0
   fi
 
@@ -397,14 +417,13 @@ export BCQ_BENCH_RUN_ID="$BCQ_BENCH_RUN_ID"
 export BCQ_BENCH_RUN_START="$BCQ_BENCH_RUN_START"
 ENVEOF
 
-  # IMPORTANT: Only export token for raw-* strategies
+  # IMPORTANT: Only export token for api-* strategies
   # bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set
   if ! strategy_uses_bcq; then
     cat >> "$env_file" << ENVEOF
-# Raw strategy: provide token directly (no refresh available)
+# API strategy: provide token directly (no refresh available)
 export BASECAMP_TOKEN="$BASECAMP_TOKEN"
 export BASECAMP_ACCOUNT_ID="$BCQ_ACCOUNT_ID"
-export BASECAMP_ACCESS_TOKEN="$BASECAMP_TOKEN"
 ENVEOF
   else
     cat >> "$env_file" << ENVEOF
@@ -421,12 +440,19 @@ ENVEOF
   log "  ║  READY FOR MANUAL EXECUTION                                      ║"
   log "  ╠══════════════════════════════════════════════════════════════════╣"
   log "  ║  Task:  $task_id - $task_name"
-  log "  ║  Skill: $skill"
-  log "  ║  Prompt: $BENCH_DIR/$prompt_file"
+  log "  ║  Strategy: $strategy_name ($instruction_type)"
+  log "  ║  Instruction: $instruction_path"
+  log "  ║  Task prompt: $BENCH_DIR/$prompt_file"
   log "  ╠══════════════════════════════════════════════════════════════════╣"
-  log "  ║  In another terminal, run:                                       ║"
-  log "  ║    source $env_file"
-  log "  ║    # Then execute your agent with the prompt file                ║"
+  log "  ║  Setup: source $env_file"
+  log "  ╠══════════════════════════════════════════════════════════════════╣"
+  if strategy_uses_skill; then
+  log "  ║  Invoke Claude with skill: $instruction_path"
+  log "  ║  Then paste task from: $BENCH_DIR/$prompt_file"
+  else
+  log "  ║  Prepend prompt: $BCQ_ROOT/$instruction_path"
+  log "  ║  Then paste task from: $BENCH_DIR/$prompt_file"
+  fi
   log "  ╠══════════════════════════════════════════════════════════════════╣"
   log "  ║  Press ENTER when task is complete to run validation...          ║"
   log "  ╚══════════════════════════════════════════════════════════════════╝"
@@ -479,7 +505,8 @@ ENVEOF
     "passed": null
   },
   "prompt_file": "$prompt_file",
-  "skill": "$skill",
+  "instruction_path": "$instruction_path",
+  "instruction_type": "$instruction_type",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "log_file": "results/$(basename "$BCQ_BENCH_LOGFILE")"
 }

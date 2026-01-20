@@ -11,9 +11,9 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 #
 # Usage:
-#   ./harness/run.sh --task 12 --condition bcq --model claude-sonnet
-#   ./harness/run.sh --task 12 --condition raw --model gpt-4o
-#   ./harness/run.sh --task 12 --condition bcq --model claude-haiku --thinking
+#   ./harness/run.sh --task 12 --strategy bcq --model claude-sonnet
+#   ./harness/run.sh --task 12 --strategy api-guided --model gpt-4o
+#   ./harness/run.sh --task 12 --strategy bcq --model claude-haiku --thinking
 #
 # Supported models:
 #   Anthropic: claude-sonnet, claude-haiku, claude-opus
@@ -33,30 +33,69 @@ BENCH_DIR="$(dirname "$HARNESS_DIR")"
 source "$HARNESS_DIR/lib/logging.sh"
 source "$HARNESS_DIR/lib/core.sh"
 
+# === Strategy Registry ===
+STRATEGIES_FILE="$BENCH_DIR/strategies.json"
+
+# Get list of all strategy names from strategies.json
+get_strategy_list() {
+  if [[ -f "$STRATEGIES_FILE" ]]; then
+    jq -r '.strategies | keys[]' "$STRATEGIES_FILE" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//'
+  else
+    echo "bcq-full,api-guided"  # fallback
+  fi
+}
+
+# Get strategy config (prompt or skill path) from strategies.json
+get_strategy_config() {
+  local strategy="$1"
+  local field="$2"  # "prompt" or "skill"
+  if [[ -f "$STRATEGIES_FILE" ]]; then
+    jq -r --arg s "$strategy" --arg f "$field" '.strategies[$s][$f] // empty' "$STRATEGIES_FILE" 2>/dev/null
+  fi
+}
+
+# Validate strategy exists in registry
+validate_strategy() {
+  local strategy="$1"
+  if [[ -f "$STRATEGIES_FILE" ]]; then
+    jq -e --arg s "$strategy" '.strategies[$s]' "$STRATEGIES_FILE" >/dev/null 2>&1
+  else
+    return 0  # Allow anything if no registry
+  fi
+}
+
 # === Configuration ===
 TASK=""
-CONDITION=""
+STRATEGY=""
 MODEL=""
 MAX_TURNS=50
 TIMEOUT=300
+DRY_RUN=false
+
+# Track resolved prompt path for metrics
+RESOLVED_PROMPT_PATH=""
 
 # === Argument Parsing ===
 usage() {
+  local strategies
+  strategies=$(get_strategy_list)
   cat <<EOF
 Usage: $(basename "$0") [options]
 
 Options:
   --task, -t <id>        Task ID (e.g., 12)
-  --condition, -c <name> Condition: bcq or raw
+  --strategy, -s <name>  Strategy: ${strategies}
   --model, -m <name>     Model: claude-sonnet, claude-haiku, gpt-4o, etc.
   --max-turns <n>        Maximum agent turns (default: 50)
   --timeout <seconds>    Execution timeout (default: 300)
   --thinking             Enable extended thinking (opus only)
+  --dry-run              Validate config and resolve prompts without running agent
   --help, -h             Show this help
 
 Examples:
-  $(basename "$0") --task 12 --condition bcq --model claude-sonnet
-  $(basename "$0") --task 12 --condition raw --model gpt-4o
+  $(basename "$0") --task 12 --strategy bcq-full --model claude-sonnet
+  $(basename "$0") --task 12 --strategy api-guided --model gpt-4o
+  $(basename "$0") --task 12 --strategy bcq-only --model claude-haiku --dry-run
 EOF
   exit 1
 }
@@ -68,8 +107,8 @@ parse_args() {
         TASK="$2"
         shift 2
         ;;
-      --condition|-c)
-        CONDITION="$2"
+      --strategy|-s)
+        STRATEGY="$2"
         shift 2
         ;;
       --model|-m)
@@ -88,6 +127,10 @@ parse_args() {
         export ANTHROPIC_THINKING=true
         shift
         ;;
+      --dry-run)
+        DRY_RUN=true
+        shift
+        ;;
       --help|-h)
         usage
         ;;
@@ -99,7 +142,7 @@ parse_args() {
   done
 
   if [[ -z "$TASK" ]]; then log_error "Missing required: --task"; usage; fi
-  if [[ -z "$CONDITION" ]]; then log_error "Missing required: --condition"; usage; fi
+  if [[ -z "$STRATEGY" ]]; then log_error "Missing required: --strategy"; usage; fi
   if [[ -z "$MODEL" ]]; then log_error "Missing required: --model"; usage; fi
 }
 
@@ -130,15 +173,17 @@ preflight_check() {
       ;;
   esac
 
-  # Check model API key availability
-  case "$MODEL" in
-    claude-*|anthropic/*)
-      [[ -z "${ANTHROPIC_API_KEY:-}" ]] && errors+=("ANTHROPIC_API_KEY not set (required for $MODEL)")
-      ;;
-    gpt-*|openai/*|o1*|o3*)
-      [[ -z "${OPENAI_API_KEY:-}" ]] && errors+=("OPENAI_API_KEY not set (required for $MODEL)")
-      ;;
-  esac
+  # Check model API key availability (skip in dry-run mode)
+  if [[ "$DRY_RUN" != "true" ]]; then
+    case "$MODEL" in
+      claude-*|anthropic/*)
+        [[ -z "${ANTHROPIC_API_KEY:-}" ]] && errors+=("ANTHROPIC_API_KEY not set (required for $MODEL)")
+        ;;
+      gpt-*|openai/*|o1*|o3*)
+        [[ -z "${OPENAI_API_KEY:-}" ]] && errors+=("OPENAI_API_KEY not set (required for $MODEL)")
+        ;;
+    esac
+  fi
 
   # Check task file exists
   local task_file="$BENCH_DIR/tasks/${TASK}-"*.md
@@ -191,49 +236,90 @@ load_model_adapter() {
 }
 
 # === Task Loading ===
+# Resolves and loads the prompt for a task+strategy combination.
+# Combines: task-specific instructions + strategy documentation
+# Sets RESOLVED_PROMPT_PATH global for metrics tracking.
+# Fails fast if required files don't exist.
 load_task() {
   local task_id="$1"
-  local condition="$2"
+  local strategy="$2"
 
   local task_dir="$BENCH_DIR/tasks/$task_id"
+  local task_prompt="" strategy_docs=""
 
-  # Check for task.yaml or fall back to markdown prompts
-  if [[ -f "$task_dir/task.yaml" ]]; then
-    local task_def
-    task_def=$(yq -o=json '.' "$task_dir/task.yaml")
+  # === Step 1: Load task-specific instructions ===
+  # Determine which task prompt variant to use based on strategy type
+  local task_prompt_file=""
+  if [[ "$strategy" == bcq* ]]; then
+    task_prompt_file="$task_dir/prompt-bcq.md"
+  elif [[ "$strategy" == api* ]]; then
+    task_prompt_file="$task_dir/prompt-raw.md"
+  fi
 
-    # Get prompt file for condition
-    local prompt_file
-    prompt_file=$(echo "$task_def" | jq -r --arg c "$condition" \
-      '.conditions[] | select(.id == $c) | .prompt_file // empty')
+  # Try strategy-specific prompt first, then type-based, then generic
+  if [[ -f "$task_dir/prompt-${strategy}.md" ]]; then
+    task_prompt_file="$task_dir/prompt-${strategy}.md"
+  fi
 
-    if [[ -n "$prompt_file" ]] && [[ -f "$task_dir/$prompt_file" ]]; then
-      cat "$task_dir/$prompt_file"
-      return
+  if [[ -n "$task_prompt_file" ]] && [[ -f "$task_prompt_file" ]]; then
+    task_prompt=$(cat "$task_prompt_file")
+    RESOLVED_PROMPT_PATH="tasks/$task_id/$(basename "$task_prompt_file")"
+  else
+    # Fall back to task.yaml or generic task file
+    local task_file
+    task_file=$(compgen -G "$BENCH_DIR/tasks/${task_id}-"*.md | head -1)
+    if [[ -n "$task_file" ]] && [[ -f "$task_file" ]]; then
+      task_prompt=$(cat "$task_file")
+      RESOLVED_PROMPT_PATH="tasks/$(basename "$task_file")"
     fi
   fi
 
-  # Fall back to direct markdown files
-  local prompt_file="$task_dir/prompt-${condition}.md"
-  if [[ -f "$prompt_file" ]]; then
-    cat "$prompt_file"
-    return
+  if [[ -z "$task_prompt" ]]; then
+    log_error "No task instructions found for task=$task_id strategy=$strategy"
+    log_error "  Checked: prompt-${strategy}.md, prompt-bcq.md, prompt-raw.md, ${task_id}-*.md"
+    exit 1
   fi
 
-  # Fall back to task markdown file
-  local task_file="$BENCH_DIR/tasks/${task_id}-"*.md
-  if compgen -G "$task_file" > /dev/null; then
-    cat $task_file
-    return
+  # === Step 2: Load strategy documentation (optional context) ===
+  local strategy_prompt strategy_skill
+  strategy_prompt=$(get_strategy_config "$strategy" "prompt")
+  strategy_skill=$(get_strategy_config "$strategy" "skill")
+
+  if [[ -n "$strategy_prompt" ]]; then
+    local prompt_path="$BENCH_DIR/../$strategy_prompt"
+    if [[ -f "$prompt_path" ]]; then
+      strategy_docs=$(cat "$prompt_path")
+    else
+      log_error "Strategy '$strategy' specifies prompt '$strategy_prompt' but file not found: $prompt_path"
+      exit 1
+    fi
+  elif [[ -n "$strategy_skill" ]]; then
+    local skill_path="$BENCH_DIR/../$strategy_skill"
+    if [[ -f "$skill_path" ]]; then
+      strategy_docs=$(cat "$skill_path")
+    else
+      log_error "Strategy '$strategy' specifies skill '$strategy_skill' but file not found: $skill_path"
+      exit 1
+    fi
   fi
 
-  log_error "No prompt found for task=$task_id condition=$condition"
-  exit 1
+  # === Step 3: Combine task instructions + strategy docs ===
+  if [[ -n "$strategy_docs" ]]; then
+    echo "$task_prompt"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Reference: Strategy Documentation"
+    echo ""
+    echo "$strategy_docs"
+  else
+    echo "$task_prompt"
+  fi
 }
 
 # === System Prompt ===
 build_system_prompt() {
-  local condition="$1"
+  local strategy="$1"
 
   cat <<EOF
 You are a benchmark agent executing tasks against a Basecamp API.
@@ -253,8 +339,8 @@ You are a benchmark agent executing tasks against a Basecamp API.
 Execute the task described in the user message. Be efficient with API calls.
 Report what you did and the results when complete.
 
-## Condition: $condition
-$(if [[ "$condition" == "bcq" ]]; then
+## Strategy: $strategy
+$(if [[ "$strategy" == bcq* ]]; then
   echo "Use the bcq CLI tool for all operations."
 else
   echo "Use raw curl commands only. No bcq CLI."
@@ -340,8 +426,48 @@ main() {
     exit 1
   fi
 
+  # Load task prompt early to validate prompt resolution
+  # This must happen before dry-run exit so we catch missing prompts
+  log_info "Loading task: $TASK ($STRATEGY)"
+  local task_prompt
+  task_prompt=$(load_task "$TASK" "$STRATEGY")
+
+  # Build system prompt
+  local system_prompt
+  system_prompt=$(build_system_prompt "$STRATEGY")
+
+  # Compute prompt hash for cohort integrity tracking
+  local prompt_hash
+  prompt_hash=$(echo -n "${system_prompt}${task_prompt}" | shasum -a 256 | cut -d' ' -f1 | cut -c1-12)
+
+  # Dry-run mode: validate and exit without running agent
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "=== Dry Run: Configuration Valid ==="
+    echo "Task:          $TASK"
+    echo "Strategy:      $STRATEGY"
+    echo "Model:         $MODEL"
+    echo "Prompt path:   $RESOLVED_PROMPT_PATH"
+    echo "Prompt hash:   $prompt_hash"
+    echo "Prompt length: $(echo "$task_prompt" | wc -c | tr -d ' ') bytes"
+    echo ""
+    echo "System prompt preview:"
+    echo "$system_prompt" | head -10
+    echo "..."
+    echo ""
+    echo "Task prompt preview:"
+    echo "$task_prompt" | head -10
+    echo "..."
+    exit 0
+  fi
+
   # Initialize logging
-  init_logging "$TASK" "$CONDITION" "$MODEL" "$BENCH_DIR/results"
+  init_logging "$TASK" "$STRATEGY" "$MODEL" "$BENCH_DIR/results"
+
+  # Export resolved prompt path for metrics
+  export BCQ_BENCH_PROMPT_PATH="$RESOLVED_PROMPT_PATH"
+  export BCQ_BENCH_PROMPT_HASH="$prompt_hash"
+  log_debug "Prompt path: $RESOLVED_PROMPT_PATH"
+  log_debug "Prompt hash: $prompt_hash"
 
   # Load model adapter
   load_model_adapter "$MODEL"
@@ -352,24 +478,24 @@ main() {
   source "$BENCH_DIR/env.sh"
   export PATH="/opt/homebrew/bin:$BENCH_DIR/../bin:$BENCH_DIR:$PATH"
 
-  # Set TOOL_FILTER based on condition to enforce bcq vs raw
+  # Set TOOL_FILTER based on strategy to enforce bcq vs api
   # Filter is a regex matched against the command - blocks if NO match
   # Common plumbing commands allowed in both: source, cd, date, sleep, echo, printf, test ([), true, false
   local PLUMBING='^(source |cd |\. |date|sleep|echo|printf|cat |head |tail |wc |test |\[|true|false|mkdir |rm |export )'
 
-  case "$CONDITION" in
+  case "$STRATEGY" in
     bcq*)
       # Allow bcq CLI + plumbing - block curl to API
       export TOOL_FILTER="$PLUMBING|bcq |/opt/homebrew/bin/bash|bash "
       log_info "Tool filter: bcq + plumbing (no raw curl)"
       ;;
-    raw*)
+    api*)
       # Allow curl/jq + plumbing - block bcq
       export TOOL_FILTER="$PLUMBING|curl |jq |grep |sed |awk |sort |uniq |cut |tr "
       log_info "Tool filter: curl/jq + plumbing (no bcq)"
       ;;
     *)
-      log_warn "Unknown condition '$CONDITION', no tool filter applied"
+      log_warn "Unknown strategy '$STRATEGY', no tool filter applied"
       export TOOL_FILTER=""
       ;;
   esac
@@ -383,28 +509,28 @@ main() {
   # Set up error injection from spec.yaml if task has injection config
   setup_injection "$TASK"
 
-  # Load task prompt
-  log_info "Loading task: $TASK ($CONDITION)"
-  local task_prompt
-  task_prompt=$(load_task "$TASK" "$CONDITION")
-
-  # Build system prompt
-  local system_prompt
-  system_prompt=$(build_system_prompt "$CONDITION")
-
-  # Compute prompt hash for cohort integrity tracking
-  local prompt_hash
-  prompt_hash=$(echo -n "${system_prompt}${task_prompt}" | shasum -a 256 | cut -d' ' -f1 | cut -c1-12)
-  export BCQ_BENCH_PROMPT_HASH="$prompt_hash"
-  log_debug "Prompt hash: $prompt_hash"
-
   # Export max turns for triage consistency
   export BCQ_BENCH_MAX_TURNS="$MAX_TURNS"
 
-  # Run agent
+  # Run agent (capture errors separately)
   log_info "Starting agent..."
-  local agent_output
-  agent_output=$(run_agent "$system_prompt" "$task_prompt" "$MAX_TURNS")
+  local agent_output agent_errors
+  agent_errors=""
+  {
+    agent_output=$(run_agent "$system_prompt" "$task_prompt" "$MAX_TURNS" 2>&1)
+  } || {
+    agent_errors="Agent exited with non-zero status"
+  }
+
+  # Capture any error patterns from agent output
+  if echo "$agent_output" | grep -qiE "error|failed|exception|traceback"; then
+    agent_errors="${agent_errors}$(echo "$agent_output" | grep -iE "error|failed|exception|traceback" | head -20)"
+  fi
+
+  # Write errors.txt if any errors captured
+  if [[ -n "$agent_errors" ]]; then
+    printf "%s\n" "$agent_errors" > "$LOG_DIR/errors.txt"
+  fi
 
   # Load metrics from subshell (run_agent saves them to a temp file)
   load_metrics

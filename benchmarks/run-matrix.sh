@@ -15,19 +15,19 @@ echo '[]' > "$RESULTS_FILE"
 
 run_task() {
   local task_id="$1"
-  local condition="$2"
+  local strategy="$2"
   local run_num="$3"
 
-  echo "[matrix] Task $task_id, Condition: $condition, Run: $run_num"
+  echo "[matrix] Task $task_id, Strategy: $strategy, Run: $run_num"
 
-  # Setup condition
-  ./harness.sh --task "$task_id" --strategy "$condition" --setup-only 2>/dev/null || true
+  # Setup strategy
+  ./harness.sh --task "$task_id" --strategy "$strategy" --setup-only 2>/dev/null || true
 
   local start_ms=$(date +%s%3N)
   local success=false
   local error_msg=""
 
-  # Execute task based on condition
+  # Execute task based on strategy
   # (This is where agent execution happens - for now just validate existing state)
 
   local end_ms=$(date +%s%3N)
@@ -36,11 +36,11 @@ run_task() {
   # Record result
   local result=$(jq -n \
     --arg task "$task_id" \
-    --arg cond "$condition" \
+    --arg strat "$strategy" \
     --argjson run "$run_num" \
     --argjson duration "$duration" \
     --argjson success "$success" \
-    '{task: $task, condition: $cond, run: $run, duration_ms: $duration, success: $success}')
+    '{task: $task, strategy: $strat, run: $run, duration_ms: $duration, success: $success}')
 
   jq ". + [$result]" "$RESULTS_FILE" > "$RESULTS_FILE.tmp" && mv "$RESULTS_FILE.tmp" "$RESULTS_FILE"
 
@@ -52,8 +52,8 @@ echo "[matrix] Starting benchmark matrix..."
 echo "[matrix] Results: $RESULTS_FILE"
 
 for task in "${TASKS[@]}"; do
-  for condition in bcq-default raw; do
-    run_task "$task" "$condition" 1
+  for strategy in bcq-full api-guided; do
+    run_task "$task" "$strategy" 1
   done
 done
 
