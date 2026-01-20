@@ -661,7 +661,8 @@ _exchange_code() {
   local expires_at
   expires_at=$(($(date +%s) + expires_in))
 
-  # Store oauth_type in credentials for proper refresh handling
+  # Store oauth_type and token_endpoint in credentials for proper refresh handling
+  # Storing token_endpoint ensures refresh works even if discovery fails later
   local creds
   creds=$(jq -n \
     --arg access_token "$access_token" \
@@ -669,12 +670,14 @@ _exchange_code() {
     --argjson expires_at "$expires_at" \
     --arg scope "$scope" \
     --arg oauth_type "$oauth_type" \
+    --arg token_endpoint "$token_endpoint" \
     '{
       access_token: $access_token,
       refresh_token: $refresh_token,
       expires_at: $expires_at,
       scope: $scope,
-      oauth_type: $oauth_type
+      oauth_type: $oauth_type,
+      token_endpoint: $token_endpoint
     }')
 
   save_credentials "$creds"

@@ -141,6 +141,7 @@ create_credentials() {
   local expires_at="${2:-$(($(date +%s) + 3600))}"
   local scope="${3:-}"
   local oauth_type="${4:-}"
+  local token_endpoint="${5:-}"
   local base_url="${BCQ_BASE_URL:-https://3.basecampapi.com}"
   # Remove trailing slash for consistent keys
   base_url="${base_url%/}"
@@ -155,6 +156,11 @@ create_credentials() {
     oauth_type_field="\"oauth_type\": \"$oauth_type\","
   fi
 
+  local token_endpoint_field=""
+  if [[ -n "$token_endpoint" ]]; then
+    token_endpoint_field="\"token_endpoint\": \"$token_endpoint\","
+  fi
+
   cat > "$TEST_HOME/.config/basecamp/credentials.json" << EOF
 {
   "$base_url": {
@@ -162,6 +168,7 @@ create_credentials() {
     "refresh_token": "test-refresh-token",
     $scope_field
     $oauth_type_field
+    $token_endpoint_field
     "expires_at": $expires_at
   }
 }

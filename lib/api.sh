@@ -538,10 +538,11 @@ refresh_token() {
   local creds
   creds=$(load_credentials)
 
-  local refresh_tok oauth_type scope
+  local refresh_tok oauth_type scope stored_token_endpoint
   refresh_tok=$(echo "$creds" | jq -r '.refresh_token // empty')
   oauth_type=$(echo "$creds" | jq -r '.oauth_type // "bc3"')
   scope=$(echo "$creds" | jq -r '.scope // empty')
+  stored_token_endpoint=$(echo "$creds" | jq -r '.token_endpoint // empty')
 
   if [[ -z "$refresh_tok" ]]; then
     debug "No refresh token available"
@@ -579,11 +580,15 @@ refresh_token() {
 
   local token_endpoint response curl_exit
 
-  # Select token endpoint based on stored oauth_type, not discovery
-  # This ensures refresh works even if discovery results change
-  if [[ "$oauth_type" == "launchpad" ]]; then
+  # Use stored token endpoint if available (preferred - avoids discovery dependency)
+  # Fall back to discovery/defaults for legacy credentials without stored endpoint
+  if [[ -n "$stored_token_endpoint" ]]; then
+    token_endpoint="$stored_token_endpoint"
+    debug "Using stored token endpoint: $token_endpoint"
+  elif [[ "$oauth_type" == "launchpad" ]]; then
     token_endpoint="$BCQ_LAUNCHPAD_TOKEN_URL"
   else
+    # Legacy BC3 credentials without stored endpoint - must use discovery
     token_endpoint=$(_token_endpoint)
   fi
 
@@ -632,7 +637,7 @@ refresh_token() {
   local expires_at
   expires_at=$(($(date +%s) + expires_in))
 
-  # Preserve oauth_type and scope in refreshed credentials
+  # Preserve oauth_type, scope, and token_endpoint in refreshed credentials
   local new_creds
   new_creds=$(jq -n \
     --arg access_token "$new_access_token" \
@@ -640,12 +645,14 @@ refresh_token() {
     --argjson expires_at "$expires_at" \
     --arg scope "$scope" \
     --arg oauth_type "$oauth_type" \
+    --arg token_endpoint "$token_endpoint" \
     '{
       access_token: $access_token,
       refresh_token: $refresh_token,
       expires_at: $expires_at,
       scope: $scope,
-      oauth_type: $oauth_type
+      oauth_type: $oauth_type,
+      token_endpoint: $token_endpoint
     }')
 
   save_credentials "$new_creds"

@@ -262,7 +262,31 @@ MOCK_CURL
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
-@test "refresh_token uses Launchpad endpoint for launchpad oauth_type" {
+@test "refresh_token uses stored token_endpoint" {
+  # Create credentials with stored token_endpoint (new behavior)
+  create_credentials "test-token" "$(($(date +%s) - 100))" "full" "launchpad" "https://stored.endpoint/token"
+  export BCQ_CLIENT_ID="test-client-id"
+  export BCQ_CLIENT_SECRET="test-client-secret"
+  # Set a different Launchpad URL to verify stored endpoint takes precedence
+  export BCQ_LAUNCHPAD_TOKEN_URL="https://launchpad.test/authorization/token"
+
+  setup_refresh_mock_curl
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+  source "$BCQ_ROOT/lib/api.sh"
+  source "$BCQ_ROOT/lib/auth.sh"
+
+  refresh_token
+
+  # Verify the stored token endpoint was used, not the env var
+  local url
+  url=$(cat "$BATS_TEST_TMPDIR/curl_urls")
+  [[ "$url" == "https://stored.endpoint/token" ]]
+}
+
+@test "refresh_token falls back to BCQ_LAUNCHPAD_TOKEN_URL for legacy credentials" {
+  # Create credentials WITHOUT stored token_endpoint (legacy behavior)
   create_credentials "test-token" "$(($(date +%s) - 100))" "full" "launchpad"
   export BCQ_CLIENT_ID="test-client-id"
   export BCQ_CLIENT_SECRET="test-client-secret"
@@ -277,7 +301,7 @@ MOCK_CURL
 
   refresh_token
 
-  # Verify the Launchpad token URL was used
+  # Verify the fallback Launchpad token URL was used
   local url
   url=$(cat "$BATS_TEST_TMPDIR/curl_urls")
   [[ "$url" == "https://launchpad.test/authorization/token" ]]
