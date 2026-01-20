@@ -463,16 +463,42 @@ SUBCOMMANDS
   login             Authenticate via OAuth
   logout            Clear stored credentials
   status            Show authentication status
+  refresh           Force token refresh
 
 OPTIONS (for login)
   --scope <scope>   Request 'full' (read+write) or 'read' (read-only) access
                     Default: full. Use 'read' for least-privilege access.
+                    Note: Launchpad OAuth always grants full access (see below).
   --no-browser      Manual authorization code entry (headless mode)
+
+OAUTH PROVIDERS
+  bcq supports two OAuth providers:
+
+  1. Basecamp OAuth 2.1 (BC3) - Auto-discovered via .well-known endpoint
+     - Uses Dynamic Client Registration (DCR)
+     - Uses PKCE for security
+     - Supports --scope read for least-privilege access
+     - No configuration required
+
+  2. Launchpad OAuth 2 - Fallback when BC3 OAuth is unavailable
+     - Requires pre-registered client credentials
+     - Register at https://integrate.37signals.com
+     - Set credentials via environment variables or config
+     - Always grants full access (--scope read is ignored with a warning)
+
+ENVIRONMENT VARIABLES
+  BCQ_CLIENT_ID       Launchpad OAuth client ID
+  BCQ_CLIENT_SECRET   Launchpad OAuth client secret
+
+  Alternatively, set in config:
+    bcq config set --global oauth_client_id <id>
+    bcq config set --global oauth_client_secret <secret>
 
 EXAMPLES
   bcq auth login                   Full access (default)
   bcq auth login --scope read      Read-only access
   bcq auth status
+  BCQ_CLIENT_ID=xxx BCQ_CLIENT_SECRET=yyy bcq auth login
 EOF
 }
 

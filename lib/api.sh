@@ -538,37 +538,86 @@ refresh_token() {
   local creds
   creds=$(load_credentials)
 
-  local refresh_token
-  refresh_token=$(echo "$creds" | jq -r '.refresh_token // empty')
+  local refresh_tok oauth_type scope stored_token_endpoint
+  refresh_tok=$(echo "$creds" | jq -r '.refresh_token // empty')
+  oauth_type=$(echo "$creds" | jq -r '.oauth_type // "bc3"')
+  scope=$(echo "$creds" | jq -r '.scope // empty')
+  stored_token_endpoint=$(echo "$creds" | jq -r '.token_endpoint // empty')
 
-  if [[ -z "$refresh_token" ]]; then
+  if [[ -z "$refresh_tok" ]]; then
     debug "No refresh token available"
     return 1
   fi
 
-  local client_file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
-  if [[ ! -f "$client_file" ]]; then
-    debug "No client credentials found"
-    return 1
-  fi
+  debug "Refreshing token (oauth_type=$oauth_type)..."
 
   local client_id client_secret
-  client_id=$(jq -r '.client_id' "$client_file")
-  client_secret=$(jq -r '.client_secret' "$client_file")
+  if [[ "$oauth_type" == "launchpad" ]]; then
+    # Launchpad: Load client credentials from env/config
+    if [[ -n "$BCQ_CLIENT_ID" ]] && [[ -n "$BCQ_CLIENT_SECRET" ]]; then
+      client_id="$BCQ_CLIENT_ID"
+      client_secret="$BCQ_CLIENT_SECRET"
+    else
+      client_id=$(get_config "oauth_client_id" "")
+      client_secret=$(get_config "oauth_client_secret" "")
+    fi
 
-  debug "Refreshing token..."
+    if [[ -z "$client_id" ]] || [[ -z "$client_secret" ]]; then
+      debug "No Launchpad client credentials found"
+      return 1
+    fi
+  else
+    # BC3: Load client credentials from file
+    local client_file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CLIENT_FILE"
+    if [[ ! -f "$client_file" ]]; then
+      debug "No client credentials found"
+      return 1
+    fi
 
-  local token_endpoint
-  token_endpoint=$(_token_endpoint)
+    client_id=$(jq -r '.client_id' "$client_file")
+    client_secret=$(jq -r '.client_secret // ""' "$client_file")
+  fi
 
-  local response curl_exit
-  response=$(curl -s -X POST \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "grant_type=refresh_token" \
-    -d "refresh_token=$refresh_token" \
-    -d "client_id=$client_id" \
-    -d "client_secret=$client_secret" \
-    "$token_endpoint") || curl_exit=$?
+  local token_endpoint response curl_exit
+
+  # Use stored token endpoint if available (preferred - avoids discovery dependency)
+  # Fall back to discovery/defaults for legacy credentials without stored endpoint
+  if [[ -n "$stored_token_endpoint" ]]; then
+    token_endpoint="$stored_token_endpoint"
+    debug "Using stored token endpoint: $token_endpoint"
+  elif [[ "$oauth_type" == "launchpad" ]]; then
+    token_endpoint="$BCQ_LAUNCHPAD_TOKEN_URL"
+  else
+    # Legacy BC3 credentials without stored endpoint - must use discovery
+    token_endpoint=$(_token_endpoint)
+  fi
+
+  if [[ "$oauth_type" == "launchpad" ]]; then
+    # Launchpad OAuth 2 refresh (uses type=refresh, not grant_type)
+    response=$(curl -s -X POST \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --data-urlencode "type=refresh" \
+      --data-urlencode "refresh_token=$refresh_tok" \
+      --data-urlencode "client_id=$client_id" \
+      --data-urlencode "client_secret=$client_secret" \
+      "$token_endpoint") || curl_exit=$?
+  else
+    # BC3 OAuth 2.1 refresh (standard RFC 6749)
+    local curl_args=(
+      -s -X POST
+      -H "Content-Type: application/x-www-form-urlencoded"
+      --data-urlencode "grant_type=refresh_token"
+      --data-urlencode "refresh_token=$refresh_tok"
+      --data-urlencode "client_id=$client_id"
+    )
+
+    # Only include client_secret for confidential clients
+    if [[ -n "$client_secret" ]]; then
+      curl_args+=(--data-urlencode "client_secret=$client_secret")
+    fi
+
+    response=$(curl "${curl_args[@]}" "$token_endpoint") || curl_exit=$?
+  fi
 
   if [[ -n "${curl_exit:-}" ]]; then
     debug "Token refresh network error (curl exit $curl_exit)"
@@ -588,12 +637,23 @@ refresh_token() {
   local expires_at
   expires_at=$(($(date +%s) + expires_in))
 
+  # Preserve oauth_type, scope, and token_endpoint in refreshed credentials
   local new_creds
   new_creds=$(jq -n \
     --arg access_token "$new_access_token" \
-    --arg refresh_token "${new_refresh_token:-$refresh_token}" \
+    --arg refresh_token "${new_refresh_token:-$refresh_tok}" \
     --argjson expires_at "$expires_at" \
-    '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at}')
+    --arg scope "$scope" \
+    --arg oauth_type "$oauth_type" \
+    --arg token_endpoint "$token_endpoint" \
+    '{
+      access_token: $access_token,
+      refresh_token: $refresh_token,
+      expires_at: $expires_at,
+      scope: $scope,
+      oauth_type: $oauth_type,
+      token_endpoint: $token_endpoint
+    }')
 
   save_credentials "$new_creds"
   debug "Token refreshed successfully"
