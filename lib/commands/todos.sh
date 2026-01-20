@@ -574,8 +574,10 @@ _todos_sweep() {
   fi
 
   # Extract IDs
-  local todo_ids
-  mapfile -t todo_ids < <(echo "$todos_json" | jq -r '.[].id')
+  local todo_ids=()
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && todo_ids+=("$id")
+  done < <(echo "$todos_json" | jq -r '.[].id')
 
   if [[ "$dry_run" == "true" ]]; then
     local result

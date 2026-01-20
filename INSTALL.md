@@ -14,7 +14,7 @@ Install bcq CLI and skills for your AI agent.
 
 | Requirement | Check Command | Install |
 |-------------|---------------|---------|
-| bash 4.0+ | `bash --version` | macOS: `brew install bash` |
+| bash 3.2+ | `bash --version` | Pre-installed on macOS/Linux |
 | curl | `curl --version` | Usually pre-installed |
 | jq | `jq --version` | `brew install jq` or `apt install jq` |
 | git | `git --version` | `brew install git` or `apt install git` |
@@ -138,26 +138,6 @@ export PATH="$HOME/.local/bin:$PATH"
 Token expired:
 ```bash
 bcq auth login
-```
-
-### bash too old (macOS)
-
-Install bash 4+:
-```bash
-brew install bash
-```
-
-Ensure Homebrew's bash is found first (add to `~/.zshrc` or `~/.bash_profile`):
-
-```bash
-export PATH="/opt/homebrew/bin:$PATH"
-```
-
-Verify:
-
-```bash
-bash --version
-# Should show 5.x, not 3.2
 ```
 
 ## Install Paths
