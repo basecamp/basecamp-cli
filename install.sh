@@ -115,19 +115,19 @@ install_bcq() {
   info "Creating bcq command in $BIN_DIR..."
 
   # Find bash 4+
-  local bash_path="/usr/bin/env bash"
+  local bash_cmd="/usr/bin/env bash"
   if [[ "$(uname)" == "Darwin" ]]; then
     if [[ -x /opt/homebrew/bin/bash ]]; then
-      bash_path="/opt/homebrew/bin/bash"
+      bash_cmd="/opt/homebrew/bin/bash"
     elif [[ -x /usr/local/bin/bash ]]; then
-      bash_path="/usr/local/bin/bash"
+      bash_cmd="/usr/local/bin/bash"
     fi
   fi
 
   cat > "$BIN_DIR/bcq" <<EOF
-#!$bash_path
+#!$bash_cmd
 export BCQ_ROOT="$INSTALL_DIR"
-exec "$bash_path" "\$BCQ_ROOT/bin/bcq" "\$@"
+exec $bash_cmd "\$BCQ_ROOT/bin/bcq" "\$@"
 EOF
 
   chmod +x "$BIN_DIR/bcq"
