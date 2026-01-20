@@ -16,8 +16,9 @@ BCQ_REDIRECT_URI="http://127.0.0.1:$BCQ_REDIRECT_PORT/callback"
 BCQ_CLIENT_NAME="bcq"
 BCQ_CLIENT_URI="https://github.com/basecamp/bcq"
 
-# Configurable client credentials for Launchpad OAuth (no DCR support)
-# Register at https://integrate.37signals.com to get client_id/client_secret
+# Configurable client credentials for custom Launchpad OAuth instances
+# Built-in defaults are used for production/staging 37signals hosts
+# For dev instances, register at your local integrate service
 BCQ_CLIENT_ID="${BCQ_CLIENT_ID:-}"
 BCQ_CLIENT_SECRET="${BCQ_CLIENT_SECRET:-}"
 
@@ -442,7 +443,9 @@ _load_launchpad_client() {
   # Load Launchpad client credentials from environment or config
   # Launchpad requires pre-registered clients (no DCR)
 
-  # Priority: env vars > config file
+  # Priority: env vars > config file > built-in defaults
+
+  # 1. Environment variables (highest priority for overrides)
   if [[ -n "$BCQ_CLIENT_ID" ]] && [[ -n "$BCQ_CLIENT_SECRET" ]]; then
     client_id="$BCQ_CLIENT_ID"
     client_secret="$BCQ_CLIENT_SECRET"
@@ -450,7 +453,7 @@ _load_launchpad_client() {
     return 0
   fi
 
-  # Try config file
+  # 2. Config file
   local config_client_id config_client_secret
   config_client_id=$(get_config "oauth_client_id" "")
   config_client_secret=$(get_config "oauth_client_secret" "")
@@ -459,6 +462,14 @@ _load_launchpad_client() {
     client_id="$config_client_id"
     client_secret="$config_client_secret"
     debug "Loaded Launchpad credentials from config"
+    return 0
+  fi
+
+  # 3. Built-in defaults for production Launchpad
+  if [[ "$BCQ_LAUNCHPAD_URL" == "https://launchpad.37signals.com"* ]]; then
+    client_id="5fdd0da8e485ae6f80f4ce0a4938640bb22f1348"
+    client_secret="a3dc33d78258e828efd6768ac2cd67f32ec1910a"
+    debug "Using built-in Launchpad credentials"
     return 0
   fi
 
