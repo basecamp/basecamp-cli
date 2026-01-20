@@ -1,0 +1,168 @@
+# 422 Recovery: Agent must recover from validation error
+# Tests error recovery for 422 Unprocessable Entity
+
+name: recover_422
+description: |
+  First POST to comments returns 422 with error hint.
+  Agent MUST read the error, understand the fix, and retry.
+  FAIL if agent gives up after 422.
+
+fixtures:
+  - method: GET
+    path: "/projects.json"
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  - method: GET
+    path: "/projects.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1
+          name: "Test Project"
+
+  - method: GET
+    path: "/projects.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  - method: GET
+    path: "/projects/1.json"
+    response:
+      status: 200
+      body:
+        id: 1
+        name: "Test Project"
+        dock:
+          - name: todoset
+            id: 10
+            enabled: true
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 100
+          name: "Main List"
+
+  - method: GET
+    path: "/buckets/1/todosets/10/todolists.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  # No page param = page 1 behavior
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  # Page 1 (explicit)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "1"}
+    response:
+      status: 200
+      body:
+        - id: 1003
+          content: "Benchmark Overdue Todo 1"
+          due_on: "2020-01-01"
+          completed: false
+
+  # Page 2 (empty = end)
+  - method: GET
+    path: "/buckets/1/todolists/100/todos.json"
+    query: {page: "2"}
+    response:
+      status: 200
+      body: []
+
+  # Comments (empty)
+  - method: GET
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 200
+      body: []
+
+  # POST comment -> 201 (injection overrides first call with 422)
+  - method: POST
+    path: "/buckets/1/recordings/1003/comments.json"
+    response:
+      status: 201
+      body:
+        id: 9001
+        content: "BenchChain - processed by agent"
+
+  # POST completion
+  - method: POST
+    path: "/buckets/1/todos/1003/completion.json"
+    response:
+      status: 200
+      body:
+        id: 1003
+        completed: true
+
+# ERROR INJECTION: First POST to comments without matching body returns 422
+inject:
+  - method: POST
+    path: "/buckets/1/recordings/1003/comments.json"
+    on_call: 1
+    response:
+      status: 422
+      body:
+        error: "content is required"
+        hint: "POST body must include {\"content\": \"your message\"}"
+
+assertions:
+  required_sequence:
+    # First POST attempt (will get 422)
+    - method: POST
+      path: "/buckets/1/recordings/1003/comments.json"
+      occurrence: 1
+      expect_status: 422
+
+    # MUST retry with proper body
+    - method: POST
+      path: "/buckets/1/recordings/1003/comments.json"
+      occurrence: 2
+      expect_status: 201
+
+  end_state:
+    # Must complete the todo (proves recovery worked)
+    - method: POST
+      path: "/buckets/1/todos/1003/completion.json"
+      count: 1
+
+    # Must have successfully posted comment
+    - method: POST
+      path: "/buckets/1/recordings/1003/comments.json"
+      count: 2  # First 422, second 201
+
+  max_calls: 12
+
+notes:
+  - "Received 422 on first POST attempt (missing body)"
+  - "Retried with proper JSON body"
+  - "Completed the overdue todo"
