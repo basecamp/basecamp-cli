@@ -91,14 +91,14 @@ print_table() {
   fi
 }
 
-echo "## Summary (grouped by task/condition/model)"
+echo "## Summary (grouped by task/strategy/model)"
 jq -s "
-  map($JQ_FILTER) |
-  sort_by(.task, .condition, .model) |
-  group_by(.task + \"|\" + .condition + \"|\" + .model) |
+  map($JQ_FILTER | . + {strategy: (.strategy // .condition)}) |
+  sort_by(.task, .strategy, .model) |
+  group_by(.task + \"|\" + .strategy + \"|\" + .model) |
   map({
     task: .[0].task,
-    condition: .[0].condition,
+    strategy: .[0].strategy,
     model: .[0].model,
     runs: length,
     pass_rate: (map(select(.success==true)) | length) / length,
@@ -110,11 +110,11 @@ jq -s "
     avg_turns: (map(.metrics.turns) | add / length)
   }) |
   ([
-    \"task\",\"condition\",\"model\",\"runs\",\"pass_rate\",
+    \"task\",\"strategy\",\"model\",\"runs\",\"pass_rate\",
     \"avg_http\",\"avg_429\",\"avg_tokens\",\"avg_prompt_bytes\",\"avg_duration_ms\",\"avg_turns\"
   ] | @tsv),
   (map([
-    .task, .condition, .model, .runs,
+    .task, .strategy, .model, .runs,
     (.pass_rate*100 | tostring + \"%\"),
     (.avg_http|tostring), (.avg_429|tostring),
     (.avg_tokens|tostring), (.avg_prompt_bytes|tostring),
@@ -125,14 +125,14 @@ jq -s "
 echo ""
 echo "## Per-run details"
 jq -s "
-  map($JQ_FILTER) |
-  sort_by(.task, .condition, .model, .run_id) |
+  map($JQ_FILTER | . + {strategy: (.strategy // .condition)}) |
+  sort_by(.task, .strategy, .model, .run_id) |
   ([
-    \"run_id\",\"task\",\"condition\",\"model\",\"success\",
+    \"run_id\",\"task\",\"strategy\",\"model\",\"success\",
     \"http_requests\",\"http_429s\",\"tokens_total\",\"prompt_bytes\",\"duration_ms\",\"turns\"
   ] | @tsv),
   (map([
-    .run_id, .task, .condition, .model, (.success|tostring),
+    .run_id, .task, .strategy, .model, (.success|tostring),
     (.metrics.http.requests|tostring),
     (.metrics.http.rate_limited|tostring),
     (.metrics.tokens.total // 0 | tostring),
@@ -146,7 +146,7 @@ echo ""
 echo "## Per-run methodology checks (from validation output)"
 {
   printf "%s\n" \
-    "run_id	task	condition	model	injection_expected	pagination_ok	recovered_429	run_marker_ok	time_valid	validation_reason"
+    "run_id	task	strategy	model	injection_expected	pagination_ok	recovered_429	run_marker_ok	time_valid	validation_reason"
 
   for metrics_file in "${files[@]}"; do
     run_dir=$(dirname "$metrics_file")
@@ -154,7 +154,7 @@ echo "## Per-run methodology checks (from validation output)"
 
     run_id=$(jq -r '.run_id' "$metrics_file")
     task=$(jq -r '.task' "$metrics_file")
-    condition=$(jq -r '.condition' "$metrics_file")
+    strategy=$(jq -r '.strategy // .condition' "$metrics_file")
     model=$(jq -r '.model' "$metrics_file")
 
     injection_expected="n/a"
@@ -199,7 +199,7 @@ echo "## Per-run methodology checks (from validation output)"
     fi
 
     printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-      "$run_id" "$task" "$condition" "$model" "$injection_expected" "$pagination_ok" "$recovered_429" "$run_marker_ok" "$time_valid" "$validation_reason"
+      "$run_id" "$task" "$strategy" "$model" "$injection_expected" "$pagination_ok" "$recovered_429" "$run_marker_ok" "$time_valid" "$validation_reason"
   done
 } | print_table
 
@@ -207,7 +207,7 @@ echo ""
 echo "## Per-run model outcome (metrics + validation)"
 {
   printf "%s\n" \
-    "run_id	task	condition	model	success	request_count	prompt_bytes	duration_ms	validation_reason"
+    "run_id	task	strategy	model	success	request_count	prompt_bytes	duration_ms	validation_reason"
 
   for metrics_file in "${files[@]}"; do
     run_dir=$(dirname "$metrics_file")
@@ -215,7 +215,7 @@ echo "## Per-run model outcome (metrics + validation)"
 
     run_id=$(jq -r '.run_id' "$metrics_file")
     task=$(jq -r '.task' "$metrics_file")
-    condition=$(jq -r '.condition' "$metrics_file")
+    strategy=$(jq -r '.strategy // .condition' "$metrics_file")
     model=$(jq -r '.model' "$metrics_file")
     success=$(jq -r '.success' "$metrics_file")
     request_count=$(jq -r '.metrics.http.requests' "$metrics_file")
@@ -228,7 +228,7 @@ echo "## Per-run model outcome (metrics + validation)"
     fi
 
     printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-      "$run_id" "$task" "$condition" "$model" "$success" "$request_count" "$prompt_bytes" "$duration_ms" "$validation_reason"
+      "$run_id" "$task" "$strategy" "$model" "$success" "$request_count" "$prompt_bytes" "$duration_ms" "$validation_reason"
   done
 } | print_table
 
@@ -236,7 +236,7 @@ echo ""
 echo "## Cost Analysis (per run)"
 {
   printf "%s\n" \
-    "run_id	condition	model	success	input_tokens	output_tokens	cache_read	cache_write	cost_usd"
+    "run_id	strategy	model	success	input_tokens	output_tokens	cache_read	cache_write	cost_usd"
 
   for metrics_file in "${files[@]}"; do
     # Apply task filter if set
@@ -246,7 +246,7 @@ echo "## Cost Analysis (per run)"
     fi
 
     run_id=$(jq -r '.run_id' "$metrics_file")
-    condition=$(jq -r '.condition' "$metrics_file")
+    strategy=$(jq -r '.strategy // .condition' "$metrics_file")
     model=$(jq -r '.model' "$metrics_file")
     success=$(jq -r '.success' "$metrics_file")
     input_tokens=$(jq -r '.metrics.tokens.input // 0' "$metrics_file")
@@ -258,17 +258,17 @@ echo "## Cost Analysis (per run)"
     cost=$(calc_cost "$model" "$input_tokens" "$output_tokens" "$cache_read" "$cache_write")
 
     printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t$%s\n" \
-      "$run_id" "$condition" "$model" "$success" "$input_tokens" "$output_tokens" "$cache_read" "$cache_write" "$cost"
+      "$run_id" "$strategy" "$model" "$success" "$input_tokens" "$output_tokens" "$cache_read" "$cache_write" "$cost"
   done
 } | print_table
 
 echo ""
-echo "## Cost per Success (by condition/model)"
+echo "## Cost per Success (by strategy/model)"
 {
   printf "%s\n" \
-    "condition	model	runs	successes	total_cost	cost_per_run	cost_per_success"
+    "strategy	model	runs	successes	total_cost	cost_per_run	cost_per_success"
 
-  # Aggregate by condition and model
+  # Aggregate by strategy and model
   declare -A runs_by_key=()
   declare -A successes_by_key=()
   declare -A cost_by_key=()
@@ -280,7 +280,7 @@ echo "## Cost per Success (by condition/model)"
       [[ "$task" != "$TASK_FILTER" ]] && continue
     fi
 
-    condition=$(jq -r '.condition' "$metrics_file")
+    strategy=$(jq -r '.strategy // .condition' "$metrics_file")
     model=$(jq -r '.model' "$metrics_file")
     success=$(jq -r '.success' "$metrics_file")
     input_tokens=$(jq -r '.metrics.tokens.input // 0' "$metrics_file")
@@ -289,7 +289,7 @@ echo "## Cost per Success (by condition/model)"
     cache_write=$(jq -r '.metrics.tokens.cache_write // 0' "$metrics_file")
 
     cost=$(calc_cost "$model" "$input_tokens" "$output_tokens" "$cache_read" "$cache_write")
-    key="${condition}|${model}"
+    key="${strategy}|${model}"
 
     runs_by_key[$key]=$((${runs_by_key[$key]:-0} + 1))
     [[ "$success" == "true" ]] && successes_by_key[$key]=$((${successes_by_key[$key]:-0} + 1))
@@ -298,7 +298,7 @@ echo "## Cost per Success (by condition/model)"
 
   # Output aggregated results
   for key in "${!runs_by_key[@]}"; do
-    IFS='|' read -r condition model <<< "$key"
+    IFS='|' read -r strategy model <<< "$key"
     runs=${runs_by_key[$key]}
     successes=${successes_by_key[$key]:-0}
     total_cost=${cost_by_key[$key]}
@@ -312,21 +312,21 @@ echo "## Cost per Success (by condition/model)"
     fi
 
     printf "%s\t%s\t%s\t%s\t$%s\t$%s\t$%s\n" \
-      "$condition" "$model" "$runs" "$successes" \
+      "$strategy" "$model" "$runs" "$successes" \
       "$(printf "%.4f" "$total_cost")" "$cost_per_run" "$cost_per_success"
   done | sort
 } | print_table
 
 echo ""
-echo "## Condition Summary (cost efficiency)"
+echo "## Strategy Summary (cost efficiency)"
 {
   printf "%s\n" \
-    "condition	total_runs	total_successes	pass_rate	total_cost	avg_cost_per_run	avg_cost_per_success"
+    "strategy	total_runs	total_successes	pass_rate	total_cost	avg_cost_per_run	avg_cost_per_success"
 
-  # Aggregate by condition only
-  declare -A cond_runs=()
-  declare -A cond_successes=()
-  declare -A cond_cost=()
+  # Aggregate by strategy only
+  declare -A strat_runs=()
+  declare -A strat_successes=()
+  declare -A strat_cost=()
 
   for metrics_file in "${files[@]}"; do
     # Apply task filter if set
@@ -335,7 +335,7 @@ echo "## Condition Summary (cost efficiency)"
       [[ "$task" != "$TASK_FILTER" ]] && continue
     fi
 
-    condition=$(jq -r '.condition' "$metrics_file")
+    strategy=$(jq -r '.strategy // .condition' "$metrics_file")
     model=$(jq -r '.model' "$metrics_file")
     success=$(jq -r '.success' "$metrics_file")
     input_tokens=$(jq -r '.metrics.tokens.input // 0' "$metrics_file")
@@ -345,16 +345,16 @@ echo "## Condition Summary (cost efficiency)"
 
     cost=$(calc_cost "$model" "$input_tokens" "$output_tokens" "$cache_read" "$cache_write")
 
-    cond_runs[$condition]=$((${cond_runs[$condition]:-0} + 1))
-    [[ "$success" == "true" ]] && cond_successes[$condition]=$((${cond_successes[$condition]:-0} + 1))
-    cond_cost[$condition]=$(awk "BEGIN {print ${cond_cost[$condition]:-0} + $cost}")
+    strat_runs[$strategy]=$((${strat_runs[$strategy]:-0} + 1))
+    [[ "$success" == "true" ]] && strat_successes[$strategy]=$((${strat_successes[$strategy]:-0} + 1))
+    strat_cost[$strategy]=$(awk "BEGIN {print ${strat_cost[$strategy]:-0} + $cost}")
   done
 
-  # Output condition summaries
-  for condition in "${!cond_runs[@]}"; do
-    runs=${cond_runs[$condition]}
-    successes=${cond_successes[$condition]:-0}
-    total_cost=${cond_cost[$condition]}
+  # Output strategy summaries
+  for strategy in "${!strat_runs[@]}"; do
+    runs=${strat_runs[$strategy]}
+    successes=${strat_successes[$strategy]:-0}
+    total_cost=${strat_cost[$strategy]}
 
     pass_rate=$(awk "BEGIN {printf \"%.0f\", ($successes / $runs) * 100}")
     cost_per_run=$(awk "BEGIN {printf \"%.6f\", $total_cost / $runs}")
@@ -366,7 +366,7 @@ echo "## Condition Summary (cost efficiency)"
     fi
 
     printf "%s\t%s\t%s\t%s%%\t$%s\t$%s\t$%s\n" \
-      "$condition" "$runs" "$successes" "$pass_rate" \
+      "$strategy" "$runs" "$successes" "$pass_rate" \
       "$(printf "%.4f" "$total_cost")" "$cost_per_run" "$cost_per_success"
   done | sort
 } | print_table

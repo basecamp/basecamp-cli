@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a 1-page analysis template using models/conditions from a report
+# Generate a 1-page analysis template using models/strategies from a report
 #
 # Usage:
 #   ./harness/analysis-template.sh [report.md] [task_id]
@@ -57,7 +57,7 @@ if [[ -z "$REPORT" ]]; then
 fi
 
 declare -a MODELS=()
-declare -a CONDITIONS=()
+declare -a STRATEGIES=()
 
 add_unique() {
   local value="$1"
@@ -72,18 +72,18 @@ parse_report_matrix() {
   local report="$1"
   local in_table="false"
   while IFS= read -r line; do
-    if [[ "$line" =~ ^\| ]] && [[ "$line" == *"Model"* ]] && [[ "$line" == *"Condition"* ]]; then
+    if [[ "$line" =~ ^\| ]] && [[ "$line" == *"Model"* ]] && [[ "$line" == *"Strategy"* ]]; then
       in_table="true"
       continue
     fi
     if [[ "$in_table" == "true" ]]; then
       [[ "$line" =~ ^\|[[:space:]]*- ]] && continue
       [[ ! "$line" =~ ^\| ]] && break
-      local model condition
+      local model strategy
       model=$(echo "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')
-      condition=$(echo "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')
+      strategy=$(echo "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')
       [[ -n "$model" ]] && add_unique "$model" MODELS
-      [[ -n "$condition" ]] && add_unique "$condition" CONDITIONS
+      [[ -n "$strategy" ]] && add_unique "$strategy" STRATEGIES
     fi
   done < "$report"
 }
@@ -92,7 +92,7 @@ parse_report_summary() {
   local report="$1"
   local in_table="false"
   while IFS= read -r line; do
-    if [[ "$line" == "## Summary (grouped by task/condition/model)"* ]]; then
+    if [[ "$line" == "## Summary (grouped by task/strategy/model)"* ]]; then
       in_table="true"
       continue
     fi
@@ -102,15 +102,15 @@ parse_report_summary() {
       if [[ "$line" == task* ]] || [[ "$line" =~ ^-+$ ]]; then
         continue
       fi
-      local task condition model
+      local task strategy model
       task=$(echo "$line" | awk '{print $1}')
-      condition=$(echo "$line" | awk '{print $2}')
+      strategy=$(echo "$line" | awk '{print $2}')
       model=$(echo "$line" | awk '{print $3}')
       if [[ -n "$model" ]] && [[ "$model" != "model" ]]; then
         add_unique "$model" MODELS
       fi
-      if [[ -n "$condition" ]] && [[ "$condition" != "condition" ]]; then
-        add_unique "$condition" CONDITIONS
+      if [[ -n "$strategy" ]] && [[ "$strategy" != "strategy" ]]; then
+        add_unique "$strategy" STRATEGIES
       fi
       if [[ -z "$TASK_ID" ]] && [[ -n "$task" ]] && [[ "$task" != "task" ]]; then
         TASK_ID="$task"
@@ -147,10 +147,10 @@ parse_metrics() {
     jq_filter="select(.task == \"$TASK_ID\")"
   fi
 
-  while IFS=$'\t' read -r model condition; do
+  while IFS=$'\t' read -r model strategy; do
     [[ -n "$model" ]] && add_unique "$model" MODELS
-    [[ -n "$condition" ]] && add_unique "$condition" CONDITIONS
-  done < <(jq -r "$jq_filter | [.model, .condition] | @tsv" "${files[@]}" 2>/dev/null || true)
+    [[ -n "$strategy" ]] && add_unique "$strategy" STRATEGIES
+  done < <(jq -r "$jq_filter | [.model, (.strategy // .condition)] | @tsv" "${files[@]}" 2>/dev/null || true)
 
   if [[ -z "$TASK_ID" ]]; then
     TASK_ID=$(jq -r '.task' "${files[0]}" 2>/dev/null || true)
@@ -163,7 +163,7 @@ if [[ "$FROM_METRICS" != "true" ]] && [[ -n "$REPORT" ]]; then
   parse_report_summary "$REPORT"
 fi
 
-if [[ ${#MODELS[@]} -eq 0 ]] || [[ ${#CONDITIONS[@]} -eq 0 ]] || [[ "$FROM_METRICS" == "true" ]]; then
+if [[ ${#MODELS[@]} -eq 0 ]] || [[ ${#STRATEGIES[@]} -eq 0 ]] || [[ "$FROM_METRICS" == "true" ]]; then
   parse_metrics
 fi
 
@@ -171,31 +171,29 @@ if [[ -z "$TASK_ID" ]]; then
   TASK_ID="<task>"
 fi
 
-# Order conditions with bcq/raw first if present
-declare -a ORDERED_CONDITIONS=()
-for preferred in bcq raw; do
-  for cond in "${CONDITIONS[@]}"; do
-    if [[ "$cond" == "$preferred" ]]; then
-      add_unique "$cond" ORDERED_CONDITIONS
-    fi
-  done
+# Order strategies with bcq* first if present
+declare -a ORDERED_STRATEGIES=()
+for strat in "${STRATEGIES[@]}"; do
+  if [[ "$strat" == bcq* ]]; then
+    add_unique "$strat" ORDERED_STRATEGIES
+  fi
 done
-for cond in "${CONDITIONS[@]}"; do
-  add_unique "$cond" ORDERED_CONDITIONS
+for strat in "${STRATEGIES[@]}"; do
+  add_unique "$strat" ORDERED_STRATEGIES
 done
 
 if [[ ${#MODELS[@]} -eq 0 ]]; then
   MODELS=("<models>")
 fi
-if [[ ${#ORDERED_CONDITIONS[@]} -eq 0 ]]; then
-  ORDERED_CONDITIONS=("<conditions>")
+if [[ ${#ORDERED_STRATEGIES[@]} -eq 0 ]]; then
+  ORDERED_STRATEGIES=("<strategies>")
 fi
 
 # Estimate runs per cell from metrics if available
 RUNS_PER_CELL="<n>"
 if command -v jq >/dev/null 2>&1; then
   if ls "$RESULTS_DIR"/*/metrics.json >/dev/null 2>&1; then
-    counts=$(jq -r "select(.task == \"$TASK_ID\") | [.model, .condition] | @tsv" \
+    counts=$(jq -r "select(.task == \"$TASK_ID\") | [.model, (.strategy // .condition)] | @tsv" \
       "$RESULTS_DIR"/*/metrics.json 2>/dev/null | sort | uniq -c || true)
     if [[ -n "$counts" ]]; then
       RUNS_PER_CELL=$(echo "$counts" | awk '{if($1>max) max=$1} END {print max}')
@@ -204,16 +202,16 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 models_csv=$(IFS=', '; echo "${MODELS[*]}")
-conds_csv=$(IFS=', '; echo "${ORDERED_CONDITIONS[*]}")
+strats_csv=$(IFS=', '; echo "${ORDERED_STRATEGIES[*]}")
 
 cat <<EOF
 # bcq vs Raw API — Benchmark Analysis (Task ${TASK_ID})
 
-Date: $(date +%Y-%m-%d)  
-Task: ${TASK_ID}  
-Runs: ${RUNS_PER_CELL} per cell  
-Conditions: ${conds_csv}  
-Models: ${models_csv}  
+Date: $(date +%Y-%m-%d)
+Task: ${TASK_ID}
+Runs: ${RUNS_PER_CELL} per cell
+Strategies: ${strats_csv}
+Models: ${models_csv}
 Substitutions (if any): <note substitutions>
 
 ## Executive Summary (3–4 sentences)
@@ -233,13 +231,13 @@ Substitutions (if any): <note substitutions>
 **Outcome:** ✅ / ⚠️ / ❌
 
 ## Results Matrix
-| Model | Condition | Pass Rate | Avg Input Tokens | Avg Cost/Run | Cost per Success |
+| Model | Strategy | Pass Rate | Avg Input Tokens | Avg Cost/Run | Cost per Success |
 |------|-----------|-----------|------------------|--------------|------------------|
 EOF
 
 for model in "${MODELS[@]}"; do
-  for cond in "${ORDERED_CONDITIONS[@]}"; do
-    printf "| %s | %s |  |  |  |  |\n" "$model" "$cond"
+  for strat in "${ORDERED_STRATEGIES[@]}"; do
+    printf "| %s | %s |  |  |  |  |\n" "$model" "$strat"
   done
 done
 

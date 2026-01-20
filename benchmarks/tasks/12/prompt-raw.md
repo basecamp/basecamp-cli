@@ -13,7 +13,7 @@ by writing a single script that handles pagination and both projects in one pass
 and process both projects.
 
 After sourcing env.sh, these variables are available:
-- `BCQ_ACCESS_TOKEN` - Bearer token for Authorization header
+- `BASECAMP_TOKEN` - Bearer token for Authorization header
 - `BCQ_API_BASE` - Full API base URL with account (e.g., http://3.basecampapi.localhost:3001/181900405)
 - `BCQ_BENCH_PROJECT_ID` - Project 1 ID
 - `BCQ_BENCH_PROJECT_ID_2` - Project 2 ID

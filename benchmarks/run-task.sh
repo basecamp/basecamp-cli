@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Non-interactive task runner for benchmark automation
-# Usage: ./run-task.sh --task 12 --condition bcq-default
+# Usage: ./run-task.sh --task 12 --strategy bcq-default
 
 set -euo pipefail
 
@@ -8,19 +8,19 @@ BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$BENCH_DIR"
 
 TASK=""
-CONDITION="bcq-default"
+STRATEGY="bcq-default"
 MATCH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task|-t) TASK="$2"; shift 2 ;;
-    --condition|-c) CONDITION="$2"; shift 2 ;;
+    --strategy|-c) STRATEGY="$2"; shift 2 ;;
     --match|-m) MATCH="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 
-[[ -z "$TASK" ]] && { echo "Usage: $0 --task <id> --condition <cond>"; exit 1; }
+[[ -z "$TASK" ]] && { echo "Usage: $0 --task <id> --strategy <cond>"; exit 1; }
 
 # Clean state
 rm -f .inject-state .inject-counter results/requests.log
@@ -35,11 +35,11 @@ source env.sh
 export PATH="/opt/homebrew/bin:$BENCH_DIR:$PATH"
 export BCQ_BENCH_LOGFILE="$BENCH_DIR/results/requests.log"
 
-# Get token for raw condition
+# Get token for api-* strategies
 TOKEN=$(jq -r '."http://3.basecamp.localhost:3001".access_token' ~/.config/basecamp/credentials.json 2>/dev/null || echo "")
 BASE="http://3.basecampapi.localhost:3001/$BCQ_ACCOUNT_ID"
 
-echo "=== Task $TASK ($CONDITION) ==="
+echo "=== Task $TASK ($STRATEGY) ==="
 echo "Project 1: $BCQ_BENCH_PROJECT_ID"
 echo "Project 2: $BCQ_BENCH_PROJECT_ID_2"
 
@@ -55,7 +55,7 @@ if [[ "$TASK" == "12" ]]; then
   echo "Run ID: $RUN_ID"
   echo "Marker: $MARKER"
 
-  if [[ "$CONDITION" == "bcq-default" ]] || [[ "$CONDITION" == "bcq-nocache" ]]; then
+  if [[ "$STRATEGY" == "bcq-default" ]] || [[ "$STRATEGY" == "bcq-nocache" ]]; then
     # BCQ execution
     for PID in "$BCQ_BENCH_PROJECT_ID" "$BCQ_BENCH_PROJECT_ID_2"; do
       echo "--- Project $PID (bcq) ---"

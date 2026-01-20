@@ -146,6 +146,19 @@ Install bash 4+:
 brew install bash
 ```
 
+Ensure Homebrew's bash is found first (add to `~/.zshrc` or `~/.bash_profile`):
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"
+```
+
+Verify:
+
+```bash
+bash --version
+# Should show 5.x, not 3.2
+```
+
 ## Install Paths
 
 | Component | Default | Override |

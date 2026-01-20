@@ -20,13 +20,13 @@ count_processed() {
     
     # Get todoset
     local todoset_id=$(curl -s -X GET "$BCQ_API_BASE/projects/$project_id.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq -r '.dock[] | select(.name == "todoset") | .id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" | jq -r '.dock[] | select(.name == "todoset") | .id')
     
     [ -z "$todoset_id" ] && return 0
     
     # Get todolists
     local todolists=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/todosets/$todoset_id/todolists.json" \
-        -H "Authorization: Bearer $BCQ_ACCESS_TOKEN" | jq -r '.[].id')
+        -H "Authorization: Bearer $BASECAMP_TOKEN" | jq -r '.[].id')
     
     # Check all todos for completed ones with matching bench run in comments
     while read -r todolist_id; do
@@ -34,7 +34,7 @@ count_processed() {
         
         for page in {1..30}; do
             todos=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/todolists/$todolist_id/todos.json?page=$page" \
-                -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+                -H "Authorization: Bearer $BASECAMP_TOKEN")
             
             # Get completed overdue benchmark todos
             local todo_ids=$(echo "$todos" | jq -r '.[] | select(.title | startswith("Benchmark Overdue Todo")) | select(.completed == true) | .id')
@@ -48,7 +48,7 @@ count_processed() {
                 
                 # Check if this todo has a comment with our bench run ID
                 local comments=$(curl -s -X GET "$BCQ_API_BASE/buckets/$project_id/recordings/$todo_id/comments.json" \
-                    -H "Authorization: Bearer $BCQ_ACCESS_TOKEN")
+                    -H "Authorization: Bearer $BASECAMP_TOKEN")
                 
                 if echo "$comments" | jq . 2>/dev/null | grep -q "$BENCH_RUN"; then
                     ((count++))

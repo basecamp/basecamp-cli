@@ -2,7 +2,7 @@
 
 set -e
 
-AUTH="Authorization: Bearer ${BCQ_ACCESS_TOKEN}"
+AUTH="Authorization: Bearer ${BASECAMP_TOKEN}"
 AGENT="User-Agent: ${BCQ_USER_AGENT}"
 CONTENT="Content-Type: application/json"
 

@@ -13,8 +13,8 @@ export BCQ_ROOT="${BCQ_ROOT:-$(dirname "$BENCH_DIR")}"
 # Add bcq to PATH if not already there
 [[ ":$PATH:" != *":$BCQ_ROOT/bin:"* ]] && export PATH="$BCQ_ROOT/bin:$PATH"
 
-# Cache control - set by harness.sh per condition
-# BCQ_CACHE_ENABLED: true (bcq-default) or false (bcq-nocache, raw)
+# Cache control - set by harness.sh per strategy
+# BCQ_CACHE_ENABLED: true (bcq-*) or false (api-*)
 export BCQ_CACHE_DIR="${BCQ_CACHE_DIR:-$BENCH_DIR/.cache}"
 
 # Request logging
@@ -87,15 +87,15 @@ if [[ -z "${BCQ_ACCOUNT_ID:-}" ]]; then
 fi
 
 # Access token - prefer env, fallback to credentials
-if [[ -z "${BCQ_ACCESS_TOKEN:-}" ]]; then
-  export BCQ_ACCESS_TOKEN="$(_get_access_token)"
+if [[ -z "${BASECAMP_TOKEN:-}" ]]; then
+  export BASECAMP_TOKEN="$(_get_access_token)"
 fi
 
 # Validate required variables
 _validate_env() {
   local missing=()
   [[ -z "${BCQ_ACCOUNT_ID:-}" ]] && missing+=("BCQ_ACCOUNT_ID")
-  [[ -z "${BCQ_ACCESS_TOKEN:-}" ]] && missing+=("BCQ_ACCESS_TOKEN")
+  [[ -z "${BASECAMP_TOKEN:-}" ]] && missing+=("BASECAMP_TOKEN")
 
   if (( ${#missing[@]} > 0 )); then
     echo "Error: Missing required environment variables: ${missing[*]}" >&2
@@ -166,4 +166,4 @@ BCQ_BENCH_SEARCH_MARKER=$(yq -r '.fixtures.search_marker' "$BENCH_DIR/spec.yaml"
 
 # IMPORTANT: Do NOT export BASECAMP_ACCESS_TOKEN here!
 # bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set.
-# harness.sh exports it ONLY for the 'raw' condition.
+# harness.sh exports it ONLY for the 'api-*' strategies.

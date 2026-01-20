@@ -26,13 +26,13 @@ RUN_START=""  # ISO 8601 timestamp for time-based validation
 
 init_logging() {
   local task="$1"
-  local condition="$2"
+  local strategy="$2"
   local model="$3"
   local results_dir="$4"
 
   # Generate run ID
   local model_safe="${model//[:\/]/-}"
-  RUN_ID="$(date +%Y%m%d-%H%M%S)-${task}-${condition}-${model_safe}"
+  RUN_ID="$(date +%Y%m%d-%H%M%S)-${task}-${strategy}-${model_safe}"
 
   # Create log directory
   LOG_DIR="$results_dir/$RUN_ID"
@@ -95,8 +95,8 @@ redact_secrets() {
   text=$(echo "$text" | sed -E 's/(Bearer\s+)[A-Za-z0-9_\-\.]+/\1[REDACTED]/gi')
   # Redact Authorization headers
   text=$(echo "$text" | sed -E 's/(Authorization:\s*)[^\s"'\'']+/\1[REDACTED]/gi')
-  # Redact BCQ_ACCESS_TOKEN values
-  text=$(echo "$text" | sed -E 's/(BCQ_ACCESS_TOKEN=)[^\s"'\'']+/\1[REDACTED]/gi')
+  # Redact BASECAMP_TOKEN values
+  text=$(echo "$text" | sed -E 's/(BASECAMP_TOKEN=)[^\s"'\'']+/\1[REDACTED]/gi')
   # Redact common API key patterns
   text=$(echo "$text" | sed -E 's/(sk-ant-)[A-Za-z0-9_\-]+/\1[REDACTED]/gi')
   text=$(echo "$text" | sed -E 's/(sk-)[A-Za-z0-9_\-]{20,}/\1[REDACTED]/gi')
@@ -166,7 +166,7 @@ finalize_results() {
     --arg run_id "$RUN_ID" \
     --arg run_start "$RUN_START" \
     --arg task "$TASK" \
-    --arg condition "$CONDITION" \
+    --arg strategy "$STRATEGY" \
     --arg model "$MODEL" \
     --argjson success "$success" \
     --argjson duration_ms "$duration_ms" \
@@ -184,6 +184,7 @@ finalize_results() {
     --argjson prompt_system_bytes "${METRICS[prompt_system_bytes]}" \
     --argjson prompt_task_bytes "${METRICS[prompt_task_bytes]}" \
     --arg prompt_hash "${BCQ_BENCH_PROMPT_HASH:-}" \
+    --arg prompt_path "${BCQ_BENCH_PROMPT_PATH:-}" \
     --arg run_start_ts "$RUN_START" \
     --arg injection_expected "${BCQ_BENCH_INJECTION_EXPECTED:-}" \
     --arg inject_match "${BCQ_INJECT_MATCH:-}" \
@@ -192,10 +193,11 @@ finalize_results() {
     '{
       run_id: $run_id,
       task: $task,
-      condition: $condition,
+      strategy: $strategy,
       model: $model,
       success: $success,
       prompt_hash: $prompt_hash,
+      prompt_path: $prompt_path,
       contract_version: $contract_version,
       prompt_regime: $prompt_regime,
       run_start: $run_start_ts,
