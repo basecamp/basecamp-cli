@@ -22,15 +22,72 @@ BCQ_ACCOUNTS_FILE="accounts.json"
 
 
 # Config Loading
+#
+# Uses indexed array with "key=value" strings for Bash 3.2 compatibility
+# (macOS ships with Bash 3.2, associative arrays require Bash 4+)
 
-declare -A _BCQ_CONFIG
+_BCQ_CONFIG=()
+
+# Internal helpers for config key-value storage
+# Named with __cfg prefix to avoid conflicts with command functions
+__cfg_set() {
+  local key="$1" value="$2"
+  __cfg_unset "$key"
+  _BCQ_CONFIG+=("$key=$value")
+}
+
+__cfg_get() {
+  local key="$1" default="${2:-}"
+  local entry value
+  for entry in "${_BCQ_CONFIG[@]+"${_BCQ_CONFIG[@]}"}"; do
+    if [[ "${entry%%=*}" == "$key" ]]; then
+      value="${entry#*=}"
+      # Return default for empty values (matches old :- expansion behavior)
+      if [[ -n "$value" ]]; then
+        printf '%s\n' "$value"
+      else
+        printf '%s\n' "$default"
+      fi
+      return
+    fi
+  done
+  printf '%s\n' "$default"
+}
+
+__cfg_has() {
+  local key="$1" entry value
+  for entry in "${_BCQ_CONFIG[@]+"${_BCQ_CONFIG[@]}"}"; do
+    if [[ "${entry%%=*}" == "$key" ]]; then
+      value="${entry#*=}"
+      [[ -n "$value" ]] && return 0
+      return 1
+    fi
+  done
+  return 1
+}
+
+__cfg_unset() {
+  local key="$1"
+  local new_config=() entry
+  for entry in "${_BCQ_CONFIG[@]+"${_BCQ_CONFIG[@]}"}"; do
+    [[ "${entry%%=*}" != "$key" ]] && new_config+=("$entry")
+  done
+  _BCQ_CONFIG=("${new_config[@]+"${new_config[@]}"}")
+}
+
+__cfg_keys() {
+  local entry
+  for entry in "${_BCQ_CONFIG[@]+"${_BCQ_CONFIG[@]}"}"; do
+    echo "${entry%%=*}"
+  done
+}
 
 _load_config_file() {
   local file="$1"
   if [[ -f "$file" ]]; then
     debug "Loading config from $file"
     while IFS='=' read -r key value; do
-      _BCQ_CONFIG["$key"]="$value"
+      __cfg_set "$key" "$value"
     done < <(jq -r 'to_entries | .[] | "\(.key)=\(.value)"' "$file" 2>/dev/null || true)
   fi
 }
@@ -69,26 +126,26 @@ load_config() {
   done
 
   # Layer 5: Environment variables
-  [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && _BCQ_CONFIG["account_id"]="$BASECAMP_ACCOUNT_ID" || true
-  [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && _BCQ_CONFIG["project_id"]="$BASECAMP_PROJECT_ID" || true
-  [[ -n "${BASECAMP_TODOLIST_ID:-}" ]] && _BCQ_CONFIG["todolist_id"]="$BASECAMP_TODOLIST_ID" || true
-  [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && _BCQ_CONFIG["access_token"]="$BASECAMP_ACCESS_TOKEN" || true
+  [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && __cfg_set "account_id" "$BASECAMP_ACCOUNT_ID" || true
+  [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && __cfg_set "project_id" "$BASECAMP_PROJECT_ID" || true
+  [[ -n "${BASECAMP_TODOLIST_ID:-}" ]] && __cfg_set "todolist_id" "$BASECAMP_TODOLIST_ID" || true
+  [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]] && __cfg_set "access_token" "$BASECAMP_ACCESS_TOKEN" || true
 
   # Layer 6: Command-line flags (already handled in global flag parsing)
-  [[ -n "${BCQ_ACCOUNT:-}" ]] && _BCQ_CONFIG["account_id"]="$BCQ_ACCOUNT" || true
-  [[ -n "${BCQ_PROJECT:-}" ]] && _BCQ_CONFIG["project_id"]="$BCQ_PROJECT" || true
-  [[ -n "${BCQ_CACHE_DIR:-}" ]] && _BCQ_CONFIG["cache_dir"]="$BCQ_CACHE_DIR" || true
+  [[ -n "${BCQ_ACCOUNT:-}" ]] && __cfg_set "account_id" "$BCQ_ACCOUNT" || true
+  [[ -n "${BCQ_PROJECT:-}" ]] && __cfg_set "project_id" "$BCQ_PROJECT" || true
+  [[ -n "${BCQ_CACHE_DIR:-}" ]] && __cfg_set "cache_dir" "$BCQ_CACHE_DIR" || true
 }
 
 get_config() {
   local key="$1"
   local default="${2:-}"
-  echo "${_BCQ_CONFIG[$key]:-$default}"
+  __cfg_get "$key" "$default"
 }
 
 has_config() {
   local key="$1"
-  [[ -n "${_BCQ_CONFIG[$key]:-}" ]]
+  __cfg_has "$key"
 }
 
 
@@ -118,7 +175,7 @@ set_global_config() {
     jq -n --arg key "$key" --arg value "$value" '{($key): $value}' > "$file"
   fi
 
-  _BCQ_CONFIG["$key"]="$value"
+  __cfg_set "$key" "$value"
 }
 
 set_local_config() {
@@ -137,7 +194,7 @@ set_local_config() {
     jq -n --arg key "$key" --arg value "$value" '{($key): $value}' > "$file"
   fi
 
-  _BCQ_CONFIG["$key"]="$value"
+  __cfg_set "$key" "$value"
 }
 
 unset_config() {
@@ -158,7 +215,7 @@ unset_config() {
     mv "$tmp" "$file"
   fi
 
-  unset "_BCQ_CONFIG[$key]"
+  __cfg_unset "$key"
 }
 
 
@@ -334,14 +391,16 @@ save_accounts() {
 # Config Display
 
 get_effective_config() {
-  local result='{}'
-  for key in "${!_BCQ_CONFIG[@]}"; do
+  local result='{}' key value
+  while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    value=$(__cfg_get "$key")
     if [[ "$key" == "access_token" ]] || [[ "$key" == "refresh_token" ]]; then
       result=$(echo "$result" | jq --arg key "$key" '.[$key] = "***"')
     else
-      result=$(echo "$result" | jq --arg key "$key" --arg value "${_BCQ_CONFIG[$key]}" '.[$key] = $value')
+      result=$(echo "$result" | jq --arg key "$key" --arg value "$value" '.[$key] = $value')
     fi
-  done
+  done < <(__cfg_keys)
   echo "$result"
 }
 

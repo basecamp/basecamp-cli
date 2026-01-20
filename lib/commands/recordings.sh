@@ -126,7 +126,9 @@ _recordings_list() {
 
   local count
   count=$(echo "$response" | jq 'length')
-  local summary="$count ${type,,}s"
+  local type_lower
+  type_lower=$(echo "$type" | tr '[:upper:]' '[:lower:]')
+  local summary="$count ${type_lower}s"
 
   if [[ "$format" == "json" ]]; then
     local bcs

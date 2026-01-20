@@ -69,7 +69,12 @@ load test_helper
   save_credentials '{"access_token": "test", "refresh_token": "test", "expires_at": 9999999999}'
 
   local perms
-  perms=$(stat -f "%Lp" "$TEST_HOME/.config/basecamp/credentials.json" 2>/dev/null || stat -c "%a" "$TEST_HOME/.config/basecamp/credentials.json" 2>/dev/null)
+  # macOS uses -f for format, Linux uses -c
+  if stat -f "%Lp" / >/dev/null 2>&1; then
+    perms=$(stat -f "%Lp" "$TEST_HOME/.config/basecamp/credentials.json")
+  else
+    perms=$(stat -c "%a" "$TEST_HOME/.config/basecamp/credentials.json")
+  fi
 
   [[ "$perms" == "600" ]]
 }

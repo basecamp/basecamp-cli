@@ -31,8 +31,8 @@ BCQ_LAUNCHPAD_AUTH_URL="${BCQ_LAUNCHPAD_AUTH_URL:-$BCQ_LAUNCHPAD_URL/authorizati
 BCQ_LAUNCHPAD_TOKEN_URL="${BCQ_LAUNCHPAD_TOKEN_URL:-$BCQ_LAUNCHPAD_URL/authorization/token}"
 
 # Cached OAuth server metadata (populated by _ensure_oauth_config)
-declare -g _BCQ_OAUTH_CONFIG=""
-declare -g _BCQ_OAUTH_TYPE=""  # "bc3" or "launchpad"
+_BCQ_OAUTH_CONFIG=""
+_BCQ_OAUTH_TYPE=""  # "bc3" or "launchpad"
 
 
 # OAuth Discovery

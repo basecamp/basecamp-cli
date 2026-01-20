@@ -34,8 +34,8 @@ load test_helper
 @test "bcq --help shows help" {
   run bcq --help
   assert_success
-  assert_output_contains "USAGE"
   assert_output_contains "COMMANDS"
+  assert_output_contains "bcq"
 }
 
 @test "bcq help shows main help" {

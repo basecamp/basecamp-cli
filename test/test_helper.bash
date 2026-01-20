@@ -29,6 +29,7 @@ setup() {
   unset BASECAMP_PROJECT_ID
   unset BCQ_ACCOUNT
   unset BCQ_PROJECT
+  unset XDG_CONFIG_HOME  # Ensure tests use $HOME/.config
 
   cd "$TEST_PROJECT"
 }
