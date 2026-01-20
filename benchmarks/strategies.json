@@ -1,7 +1,7 @@
 {
   "strategies": {
     "bcq-full": {
-      "skill": "benchmarks/skills/bcq-full/SKILL.md",
+      "skill": "skills/basecamp/SKILL.md",
       "tools": ["bcq"],
       "description": "Full hand-authored skill (control)"
     },
@@ -11,19 +11,29 @@
       "description": "CLI-generated skill from invariants"
     },
     "bcq-only": {
-      "skill": "benchmarks/skills/bcq-only/SKILL.md",
+      "prompt": "benchmarks/prompts/bcq-only.md",
       "tools": ["bcq"],
       "description": "Minimal 'use bcq --help' prompt"
     },
-    "raw-docs": {
-      "skill": "benchmarks/skills/raw-docs/SKILL.md",
+    "bcq-minimal": {
+      "skill": "benchmarks/skills/bcq-minimal/SKILL.md",
+      "tools": ["bcq"],
+      "description": "Ultra-minimal skill (~15 tokens)"
+    },
+    "api-docs": {
+      "prompt": "benchmarks/prompts/api-docs.md",
       "tools": ["curl", "jq"],
       "description": "Raw API with docs link only"
     },
-    "raw-guided": {
-      "skill": "benchmarks/skills/raw-guided/SKILL.md",
+    "api-guided": {
+      "prompt": "benchmarks/prompts/api-guided.md",
       "tools": ["curl", "jq"],
       "description": "Raw API with endpoint examples"
+    },
+    "api-with-guide": {
+      "prompt": "benchmarks/prompts/api-with-guide.md",
+      "tools": ["curl", "jq"],
+      "description": "Raw API with agent-optimized invariants guide"
     }
   }
 }

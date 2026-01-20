@@ -1,12 +1,4 @@
----
-name: raw-guided
-version: "0.1.0"
-description: Basecamp API via curl with endpoint guidance
-tools:
-  - Bash
----
-
-# Basecamp API (Raw + Guidance)
+# Basecamp API (Guided)
 
 Direct Basecamp API access via curl + jq. No CLI wrapper.
 Includes endpoint examples and domain patterns.
@@ -103,8 +95,8 @@ curl -s "$BCQ_API_BASE/people/{person_id}.json" \
 ### Search
 
 ```bash
-# Search across projects
-curl -s "$BCQ_API_BASE/projects/search.json?query=term" \
+# Search across all projects
+curl -s "$BCQ_API_BASE/search.json?q=term" \
   -H "Authorization: Bearer $BASECAMP_TOKEN" | jq
 ```
 

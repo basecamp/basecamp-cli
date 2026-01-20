@@ -1,12 +1,4 @@
----
-name: raw-docs
-version: "0.1.0"
-description: Basecamp API via curl (docs reference only)
-tools:
-  - Bash
----
-
-# Basecamp API (Raw)
+# Basecamp API
 
 Direct Basecamp API access via curl + jq. No CLI wrapper.
 
