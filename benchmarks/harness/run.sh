@@ -421,6 +421,9 @@ run_validation() {
 main() {
   parse_args "$@"
 
+  # Export timeout for use by execute_bash_tool in core.sh
+  export TOOL_TIMEOUT="$TIMEOUT"
+
   # Preflight checks - fail fast before creating log dirs or spending API tokens
   if ! preflight_check; then
     exit 1
