@@ -69,7 +69,8 @@ ls $BCQ_DIR/skills/*/SKILL.md
 ### Claude Code
 
 ```bash
-claude plugins install github:basecamp/bcq
+claude plugin marketplace add basecamp/bcq
+claude plugin install basecamp
 ```
 
 Done. Plugin bundles skills, hooks, and agents.

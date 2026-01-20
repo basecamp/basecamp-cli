@@ -2,24 +2,11 @@
   "name": "basecamp",
   "version": "0.1.0",
   "description": "Basecamp integration for Claude Code. Create todos, track work, link code to projects.",
-  "author": "37signals",
+  "author": {
+    "name": "37signals",
+    "email": "support@37signals.com"
+  },
   "homepage": "https://github.com/basecamp/bcq",
   "repository": "https://github.com/basecamp/bcq",
-  "license": "MIT",
-  "skills": [
-    "skills/basecamp",
-    "skills/basecamp-api-reference"
-  ],
-  "agents": [
-    "agents/basecamp-navigator.md",
-    "agents/context-linker.md"
-  ],
-  "hooks": "hooks/hooks.json",
-  "dependencies": {
-    "bcq": {
-      "version": ">=0.1.0",
-      "install": "https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh",
-      "check": "scripts/ensure-bcq.sh --check"
-    }
-  }
+  "license": "MIT"
 }

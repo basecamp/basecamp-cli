@@ -34,7 +34,8 @@ Skills work with any agent that can execute shell commands. Platform-specific se
 ### Claude Code
 
 ```bash
-claude plugins install github:basecamp/bcq
+claude plugin marketplace add basecamp/bcq
+claude plugin install basecamp
 ```
 
 This adds `/basecamp` slash command, hooks, and agents. Skills are bundled.

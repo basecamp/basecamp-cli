@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "bcq",
+  "metadata": {
+    "description": "Basecamp CLI and Claude Code integration",
+    "version": "0.1.0"
+  },
+  "owner": {
+    "name": "37signals",
+    "email": "support@37signals.com"
+  },
+  "plugins": [
+    {
+      "name": "basecamp",
+      "description": "Basecamp integration for Claude Code. Create todos, track work, link code to projects.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
