@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test-bash32:
@@ -41,7 +42,11 @@ jobs:
           bash --version | grep -q "version 5\." || (echo "Expected Bash 5.x" && exit 1)
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y bats jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          # Install bats-core from source (apt/npm packages are outdated)
+          git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
 
       - name: Run tests
         run: ./test/run.sh
