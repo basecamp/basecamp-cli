@@ -218,7 +218,9 @@ main() {
     mcp)        cmd_mcp "$@" ;;
 
     # Meta
-    version)    echo "bcq $BCQ_VERSION" ;;
+    version|--version|-V)
+      echo "bcq $BCQ_VERSION"
+      ;;
     self-update|update)
       _self_update "$@"
       ;;
