@@ -1,0 +1,52 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-bash32:
+    name: Test (Bash 3.2)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Bash 3.2
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash --version | grep -q "version 3\." || (echo "Expected Bash 3.x" && exit 1)
+
+      - name: Install dependencies
+        run: brew install bats-core jq
+
+      - name: Run tests with Bash 3.2
+        run: /bin/bash ./test/run.sh
+
+      - name: Smoke test
+        run: |
+          /bin/bash bin/bcq --version
+          /bin/bash bin/bcq --help | head -5
+
+  test-bash5:
+    name: Test (Bash 5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Bash 5
+        run: |
+          bash --version | head -1
+          bash --version | grep -q "version 5\." || (echo "Expected Bash 5.x" && exit 1)
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Run tests
+        run: ./test/run.sh
+
+      - name: Smoke test
+        run: |
+          bin/bcq --version
+          bin/bcq --help | head -5
