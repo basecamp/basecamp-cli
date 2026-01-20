@@ -46,3 +46,21 @@ BCQ_BASE_URL=http://3.basecamp.localhost:3001 bcq auth login
 ```
 
 OAuth endpoints are discovered via `.well-known/oauth-authorization-server`.
+
+## Benchmarks
+
+**Credentials:** Before running benchmarks, source the env file:
+```bash
+source benchmarks/.env   # Loads ANTHROPIC_API_KEY, OPENAI_API_KEY from 1Password
+```
+
+**Run benchmarks:**
+```bash
+./benchmarks/reset.sh                                          # Reset fixtures
+./benchmarks/harness/run.sh --strategy <name> --task 12 --model claude-sonnet
+./benchmarks/harness/matrix.sh                                 # Full matrix run
+./benchmarks/harness/triage.sh --update benchmarks/results/    # Classify results
+./benchmarks/harness/report.sh benchmarks/results/             # Generate report
+```
+
+**Strategies:** See `benchmarks/strategies.json` for available strategies (bcq-full, bcq-minimal, api-with-guide, etc.)

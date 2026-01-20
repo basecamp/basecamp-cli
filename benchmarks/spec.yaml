@@ -26,21 +26,14 @@ fixtures:
     <p>---</p>
     <p>Meeting rescheduled to 3pm. Please confirm attendance.</p>
 
-conditions:
-  - name: raw
-    description: "curl + jq only, no bcq"
-    cache_enabled: false
-    skill: raw-api-basecamp
-
-  - name: bcq-nocache
-    description: "bcq without caching (apples-to-apples)"
-    cache_enabled: false
-    skill: bcq-basecamp
-
-  - name: bcq-default
-    description: "bcq with caching (real-world product)"
-    cache_enabled: true
-    skill: bcq-basecamp
+# Strategies are now defined in strategies.json
+# This section is for reference only
+strategies_reference:
+  bcq-full: "Full hand-authored skill (control)"
+  bcq-generated: "CLI-generated skill from invariants"
+  bcq-only: "Minimal 'use bcq --help' prompt"
+  api-docs: "Raw API with docs link only"
+  api-guided: "Raw API with endpoint examples"
 
 tasks:
   - id: "01"

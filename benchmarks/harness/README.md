@@ -10,10 +10,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."
 
 # Run single benchmark
-./harness/run.sh --task 12 --condition bcq --model claude-sonnet
+./harness/run.sh --task 12 --strategy bcq-full --model claude-sonnet
 
 # Run full matrix
-./harness/matrix.sh --task 12 --models "claude-sonnet,gpt-4o" --conditions "bcq,raw"
+./harness/matrix.sh --task 12 --models "claude-sonnet,gpt-4o" --strategies "bcq-full,api-guided"
 ```
 
 ## Supported Models

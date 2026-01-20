@@ -1,6 +1,6 @@
-# bcq vs Raw-API Benchmark
+# bcq Skill Benchmark
 
-Empirical comparison of `bcq` (Basecamp Query) vs raw curl+jq for Basecamp API interactions.
+Empirical comparison of skill strategies for Basecamp API interactions with AI agents.
 
 ## Hypothesis
 
@@ -12,19 +12,19 @@ bcq provides value over raw API access through:
 
 These benefits may be especially pronounced with cheaper/simpler models.
 
-## Instruction Regime
+## Strategies
 
-We tested two instruction regimes:
+Strategies are defined in `strategies.json`. Each strategy specifies either a skill or prompt:
 
-1. **Soft anchor (baseline)**: Communicates efficient paths ("~1-2 bash calls") but allows iteration. Includes a correctness guard ("you must still enumerate todolists, paginate all pages, handle 429s"). This is the fairest cross-model comparison.
+| Strategy | Type | Description |
+|----------|------|-------------|
+| `bcq-full` | skill | Full hand-authored skill (control) |
+| `bcq-generated` | skill | CLI-generated skill from invariants |
+| `bcq-only` | prompt | Minimal "use bcq --help" prompt |
+| `api-docs` | prompt | Raw API with docs link only |
+| `api-guided` | prompt | Raw API with endpoint examples |
 
-2. **Hard contract (optimization)**: Strict execution limits (≤2 tool calls, no verification loops). Reduces tokens and cost dramatically for compliant models but depresses success rates for iterative models (e.g., Claude).
-
-> **Baseline results use the soft-anchor regime; hard-contract runs are reported separately as an optimization experiment.**
-
-Results from hard-contract runs should not be compared directly to baseline—they measure a different capability (single-shot script generation vs. iterative task completion).
-
-See `benchmarks/BENCHMARKING.md` for cohort, triage, and reporting policy.
+See `SKILL_BENCH.md` for detailed comparison methodology.
 
 ## Dependencies
 
@@ -48,12 +48,11 @@ bcq auth status
 ./seed.sh
 
 # 3. Setup environment for a task
-./harness.sh --task 01 --condition bcq-default
-# This prints the prompt file and skill to use
+./harness.sh --task 01 --strategy bcq-full
+# This prints the skill/prompt file and task to use
 
 # 4. Execute manually with Claude Code
-# Read the task prompt and use the appropriate skill
-# Example: claude /path/to/task.md --skill bcq-basecamp
+# Read the task prompt and use the appropriate skill/prompt
 
 # 5. Validate results
 ./validate.sh check_all_todos 75
@@ -67,7 +66,7 @@ bcq auth status
 The harness does NOT automatically invoke Claude Code. Instead:
 
 1. **Setup**: `./harness.sh` sets up environment (cache, logging, error injection)
-2. **Execute**: You manually invoke Claude Code with the task prompt and skill
+2. **Execute**: You manually invoke Claude Code with the task prompt and skill/prompt
 3. **Validate**: Run `./validate.sh` to check success
 4. **Reset**: Run `./reset.sh` before the next task
 
@@ -75,14 +74,6 @@ This manual approach allows you to:
 - Use any agent (Claude Code, OpenCode, Codex, etc.)
 - Observe agent behavior during execution
 - Control timing and interruptions
-
-## Conditions
-
-| Condition | Description |
-|-----------|-------------|
-| `raw` | curl + jq only, no bcq |
-| `bcq-nocache` | bcq with caching disabled |
-| `bcq-default` | bcq with caching enabled |
 
 ## Tasks
 
@@ -106,6 +97,7 @@ This manual approach allows you to:
 benchmarks/
 ├── README.md           # This file
 ├── spec.yaml           # Task definitions (canonical source of truth)
+├── strategies.json     # Strategy → skill/prompt mapping
 ├── env.sh              # Environment setup
 ├── seed.sh             # Create test fixtures
 ├── reset.sh            # Clean up state
@@ -113,23 +105,29 @@ benchmarks/
 ├── validate.sh         # Neutral validation (curl+jq, not bcq)
 ├── curl                # Curl shim for request logging + error injection
 ├── inject-proxy.sh     # Error injection state management
+├── skills/             # Skill files for skill-based strategies
+│   ├── bcq-full/       # Symlink to production skill
+│   └── bcq-generated/  # CLI-generated skill
+├── prompts/            # Prompt files for prompt-based strategies
+│   ├── bcq-only.md
+│   ├── api-docs.md
+│   └── api-guided.md
 ├── tasks/              # Task prompts
 │   └── *.md
 ├── results/            # Output (gitignored)
 │   └── *.json
-├── reports/            # Canonical benchmark reports (committed)
 └── .fixtures.json      # Seeded IDs (gitignored)
 ```
 
 ## Metrics
 
-Results are written to `results/<run_id>-<condition>-<task>.json`:
+Results are written to `results/<run_id>-<strategy>-<task>.json`:
 
 ```json
 {
   "run_id": "20250113-120000-1",
   "task_id": "01",
-  "condition": "bcq-default",
+  "strategy": "bcq-full",
   "model": "sonnet",
   "success": true,
   "metrics": {
@@ -138,7 +136,7 @@ Results are written to `results/<run_id>-<condition>-<task>.json`:
     "error_count": 0
   },
   "prompt_size": {
-    "skill_bytes": 5000,
+    "instruction_bytes": 5000,
     "task_bytes": 800,
     "total_bytes": 5800
   }
@@ -147,16 +145,16 @@ Results are written to `results/<run_id>-<condition>-<task>.json`:
 
 ### Prompt Size Metric
 
-The `prompt_size` field measures bytes of the skill file + task prompt file. This is a **proxy** for actual prompt size—Claude Code may add system context, conversation history, or tool schemas that aren't captured here. Use this for relative comparisons between conditions (e.g., raw vs bcq), not absolute prompt costs.
+The `prompt_size` field measures bytes of the skill/prompt file + task prompt file. This is a **proxy** for actual prompt size—Claude Code may add system context, conversation history, or tool schemas that aren't captured here. Use this for relative comparisons between strategies.
 
 ## Model Comparison
 
 Track model performance by adding `--model`:
 
 ```bash
-./harness.sh --task 01 --condition raw --model haiku
-./harness.sh --task 01 --condition raw --model sonnet
-./harness.sh --task 01 --condition bcq-default --model haiku
+./harness.sh --task 01 --strategy api-guided --model haiku
+./harness.sh --task 01 --strategy api-guided --model sonnet
+./harness.sh --task 01 --strategy bcq-full --model haiku
 ```
 
 This tests the hypothesis that bcq lets cheaper models succeed where raw-API needs expensive reasoning models.
@@ -164,8 +162,8 @@ This tests the hypothesis that bcq lets cheaper models succeed where raw-API nee
 ## Aggregate Results
 
 ```bash
-jq -s 'group_by(.condition) | map({
-  condition: .[0].condition,
+jq -s 'group_by(.strategy) | map({
+  strategy: .[0].strategy,
   success_rate: (map(select(.success)) | length) / length,
   avg_time_ms: (map(.metrics.time_ms) | add / length),
   total_errors: (map(.metrics.error_count) | add)
@@ -178,20 +176,20 @@ jq -s 'group_by(.condition) | map({
 
 ```bash
 # Task 07: 429 rate limit - tests retry/backoff
-./harness.sh --task 07 --condition bcq-default
+./harness.sh --task 07 --strategy bcq-full
 
 # Task 08: 401 invalid token - tests fail-fast UX
-./harness.sh --task 08 --condition bcq-default
+./harness.sh --task 08 --strategy bcq-full
 
 # --task all applies correct injection per task
-./harness.sh --task all --condition bcq-default
+./harness.sh --task all --strategy bcq-full
 ```
 
 **Manual override**: CLI flags override spec.yaml:
 
 ```bash
 # Force 429 injection on any task
-./harness.sh --task 01 --condition bcq-default --inject 429 --inject-count 2
+./harness.sh --task 01 --strategy bcq-full --inject 429 --inject-count 2
 ```
 
 **How it works**: The `curl` shim intercepts all curl calls, checks `.inject-state`, and returns fake HTTP responses with proper -w output formatting.
