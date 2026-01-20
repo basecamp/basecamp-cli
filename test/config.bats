@@ -92,6 +92,15 @@ load test_helper
   ! has_config "empty_key"
 }
 
+@test "get_config returns default for empty value" {
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+
+  __cfg_set "empty_key" ""
+  result=$(__cfg_get "empty_key" "fallback")
+  [[ "$result" == "fallback" ]]
+}
+
 
 # Config round-trip (Bash 3.2 storage)
 

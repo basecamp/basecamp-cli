@@ -38,10 +38,16 @@ __cfg_set() {
 
 __cfg_get() {
   local key="$1" default="${2:-}"
-  local entry
+  local entry value
   for entry in "${_BCQ_CONFIG[@]+"${_BCQ_CONFIG[@]}"}"; do
     if [[ "${entry%%=*}" == "$key" ]]; then
-      printf '%s\n' "${entry#*=}"
+      value="${entry#*=}"
+      # Return default for empty values (matches old :- expansion behavior)
+      if [[ -n "$value" ]]; then
+        printf '%s\n' "$value"
+      else
+        printf '%s\n' "$default"
+      fi
       return
     fi
   done
