@@ -374,17 +374,39 @@ get_git_root() {
 
 load_accounts() {
   local file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_ACCOUNTS_FILE"
-  if [[ -f "$file" ]]; then
-    cat "$file"
-  else
+  local base_url
+  base_url=$(_normalize_base_url)
+
+  if [[ ! -f "$file" ]]; then
     echo '[]'
+    return
   fi
+
+  # Return accounts for current base URL
+  jq -r --arg url "$base_url" '.[$url] // []' "$file"
 }
 
 save_accounts() {
   local json="$1"
   ensure_global_config_dir
-  echo "$json" > "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_ACCOUNTS_FILE"
+  local file="$BCQ_GLOBAL_CONFIG_DIR/$BCQ_ACCOUNTS_FILE"
+  local base_url
+  base_url=$(_normalize_base_url)
+
+  # Load existing multi-origin accounts
+  local existing='{}'
+  if [[ -f "$file" ]]; then
+    existing=$(cat "$file")
+    # Handle legacy array format (migrate to object)
+    if echo "$existing" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      existing='{}'
+    fi
+  fi
+
+  # Update accounts for current base URL
+  local updated
+  updated=$(echo "$existing" | jq --arg url "$base_url" --argjson accts "$json" '.[$url] = $accts')
+  echo "$updated" > "$file"
 }
 
 

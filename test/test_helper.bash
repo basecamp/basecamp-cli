@@ -178,10 +178,13 @@ EOF
 }
 
 create_accounts() {
-  cat > "$TEST_HOME/.config/basecamp/accounts.json" << 'EOF'
-[
-  {"id": 99999, "name": "Test Account", "href": "https://3.basecampapi.com/99999"}
-]
+  local base_url="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+  cat > "$TEST_HOME/.config/basecamp/accounts.json" << EOF
+{
+  "$base_url": [
+    {"id": 99999, "name": "Test Account", "href": "https://3.basecampapi.com/99999"}
+  ]
+}
 EOF
 }
 
