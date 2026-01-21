@@ -698,11 +698,26 @@ _discover_accounts() {
   local token
   token=$(get_access_token) || return 1
 
-  # Authorization self-introspection - returns token info including accessible accounts
-  # Uses API host since DCR clients are untrusted and only allowed on API endpoints
-  local authorization_endpoint="$BCQ_API_URL/authorization.json"
+  # Determine introspection endpoint based on OAuth provider used during auth
+  # Read from stored credentials, not from discovery (which reflects current server state)
+  local oauth_type authorization_endpoint creds
+  creds=$(load_credentials)
+  oauth_type=$(echo "$creds" | jq -r '.oauth_type // empty')
 
-  debug "Fetching authorization from: $authorization_endpoint"
+  # Fall back to discovery if not stored (legacy credentials)
+  if [[ -z "$oauth_type" ]]; then
+    oauth_type=$(_get_oauth_type)
+  fi
+
+  if [[ "$oauth_type" == "launchpad" ]]; then
+    # Launchpad tokens introspect via Launchpad
+    authorization_endpoint="$BCQ_LAUNCHPAD_URL/authorization.json"
+  else
+    # BC3 tokens introspect via Basecamp API
+    authorization_endpoint="$BCQ_API_URL/authorization.json"
+  fi
+
+  debug "Fetching authorization from: $authorization_endpoint (oauth_type=$oauth_type)"
 
   local response http_code
   response=$(curl -s -w '\n%{http_code}' \
@@ -720,8 +735,14 @@ _discover_accounts() {
   fi
 
   local accounts
-  # Extract accounts from authorization response; queenbee_id is used in URLs
-  accounts=$(echo "$response" | jq '[.accounts[] | {id: .queenbee_id, name: .name, href: .href}]')
+  # Extract accounts from authorization response
+  # Launchpad returns .id directly, BC3 returns .queenbee_id
+  if [[ "$oauth_type" == "launchpad" ]]; then
+    # Filter to bc3 accounts only (Launchpad also knows about HEY, etc.)
+    accounts=$(echo "$response" | jq '[.accounts[] | select(.product == "bc3") | {id: .id, name: .name, href: .href}]')
+  else
+    accounts=$(echo "$response" | jq '[.accounts[] | {id: .queenbee_id, name: .name, href: .href}]')
+  fi
 
   if [[ "$accounts" != "[]" ]] && [[ "$accounts" != "null" ]]; then
     save_accounts "$accounts"
