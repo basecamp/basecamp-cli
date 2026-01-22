@@ -20,7 +20,7 @@ jobs:
           /bin/bash --version | grep -q "version 3\." || (echo "Expected Bash 3.x" && exit 1)
 
       - name: Install dependencies
-        run: brew install bats-core jq
+        run: brew install bats-core jq rush-parallel
 
       - name: Run tests with Bash 3.2
         run: /bin/bash ./test/run.sh
@@ -43,7 +43,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y jq
+          sudo apt-get update && sudo apt-get install -y jq parallel
           # Install bats-core from source (apt/npm packages are outdated)
           git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
           sudo /tmp/bats-core/install.sh /usr/local

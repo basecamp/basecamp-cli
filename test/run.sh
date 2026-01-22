@@ -10,4 +10,14 @@ if ! command -v bats &>/dev/null; then
   exit 1
 fi
 
-exec bats "$@" *.bats
+# Auto-detect CPU cores for parallel execution
+jobs=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+
+# Use rush (macOS) or parallel (Linux) for parallelization
+if command -v rush &>/dev/null; then
+  exec bats --parallel-binary-name rush -j "$jobs" "$@" *.bats
+elif command -v parallel &>/dev/null && parallel --version 2>&1 | grep -q "GNU"; then
+  exec bats -j "$jobs" "$@" *.bats
+else
+  exec bats "$@" *.bats
+fi
