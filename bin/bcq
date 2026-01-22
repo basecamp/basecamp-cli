@@ -17,6 +17,7 @@ source "$BCQ_ROOT/lib/config.sh"
 source "$BCQ_ROOT/lib/api.sh"
 source "$BCQ_ROOT/lib/auth.sh"
 source "$BCQ_ROOT/lib/help.sh"
+source "$BCQ_ROOT/lib/names.sh"
 
 # Load command handlers
 for cmd_file in "$BCQ_ROOT/lib/commands"/*.sh; do
