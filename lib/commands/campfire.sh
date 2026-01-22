@@ -80,13 +80,8 @@ _campfires_list() {
     return
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project> or --all for account-wide" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}" "Use --in <project>, --all, or set in .basecamp/config.json")
 
   # Get campfire from project dock
   local project_data campfire_id campfire_data
@@ -168,13 +163,8 @@ _campfire_messages() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get campfire ID from project if not specified
   if [[ -z "$campfire_id" ]]; then
@@ -261,13 +251,8 @@ _campfire_post() {
       "Usage: bcq campfire post \"message\" [--in project]"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get campfire ID from project if not specified
   if [[ -z "$campfire_id" ]]; then
@@ -328,13 +313,8 @@ _campfire_line_show() {
     die "Line ID required" $EXIT_USAGE "Usage: bcq campfire line <id> --campfire <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$campfire_id" ]]; then
     local project_data
@@ -390,13 +370,8 @@ _campfire_line_delete() {
     die "Line ID required" $EXIT_USAGE "Usage: bcq campfire delete <id> --campfire <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$campfire_id" ]]; then
     local project_data

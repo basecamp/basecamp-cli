@@ -50,13 +50,8 @@ _events_list() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq events <recording_id> --project <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/recordings/$recording_id/events.json")

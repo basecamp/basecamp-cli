@@ -89,13 +89,8 @@ _files_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get root vault if not specified
   if [[ -z "$vault_id" ]]; then
@@ -221,13 +216,8 @@ _vaults_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$vault_id" ]]; then
     vault_id=$(_get_vault_id "$project")
@@ -286,13 +276,8 @@ _uploads_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$vault_id" ]]; then
     vault_id=$(_get_vault_id "$project")
@@ -351,13 +336,8 @@ _documents_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$vault_id" ]]; then
     vault_id=$(_get_vault_id "$project")
@@ -418,13 +398,8 @@ _files_show() {
     die "Item ID required" $EXIT_USAGE
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Try to detect type if not specified
   local response
@@ -572,13 +547,8 @@ _uploads_create() {
     die "File not found: $file" $EXIT_NOT_FOUND
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$vault_id" ]]; then
     vault_id=$(_get_vault_id "$project")
@@ -663,13 +633,8 @@ _vaults_create() {
     die "Folder name required" $EXIT_USAGE "Usage: bcq files folder \"name\" --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$vault_id" ]]; then
     vault_id=$(_get_vault_id "$project")
@@ -725,13 +690,8 @@ _documents_create() {
     die "Document title required" $EXIT_USAGE "Usage: bcq files doc \"title\" --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$vault_id" ]]; then
     vault_id=$(_get_vault_id "$project")
@@ -807,13 +767,8 @@ _files_update() {
     die "Title or content required" $EXIT_USAGE "Use --title and/or --content"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Auto-detect type if not specified
   local endpoint=""

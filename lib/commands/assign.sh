@@ -40,13 +40,8 @@ cmd_assign() {
     die "Assignee required" $EXIT_USAGE "Usage: bcq assign <todo_id> --to <person>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Resolve assignee to ID
   local assignee_id
@@ -127,13 +122,8 @@ cmd_unassign() {
     die "Assignee required" $EXIT_USAGE "Usage: bcq unassign <todo_id> --from <person>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Resolve assignee to ID
   local assignee_id

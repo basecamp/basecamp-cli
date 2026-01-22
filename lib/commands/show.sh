@@ -48,13 +48,8 @@ cmd_show() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq show [type] <id> [--project <id>]"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Determine endpoint based on type
   local endpoint
