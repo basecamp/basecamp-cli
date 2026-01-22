@@ -193,7 +193,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123, "todolist_id": 456}'
 
-  run bcq todo "test" --assignee "john@example.com"
+  run bcq todo --content "test" --assignee "john@example.com"
   assert_failure
   assert_output_contains "Invalid assignee"
   assert_output_contains "numeric person ID"

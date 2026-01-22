@@ -654,11 +654,34 @@ _vaults_create() {
 }
 
 
+_help_doc_create() {
+  cat << 'EOF'
+bcq files doc - Create a new document
+
+USAGE
+  bcq files doc --title "title" [options]
+
+OPTIONS
+  --title, -n <text>        Document title (required)
+  --in, --project, -p <id>  Project ID or name
+  --vault, --folder <id>    Parent folder ID (default: root)
+  --content, --body, -b     Document body content
+
+EXAMPLES
+  bcq files doc --title "Meeting Notes" --in 123
+  bcq files doc --title "Spec" --content "## Overview" --in "My Project"
+EOF
+}
+
 _documents_create() {
   local title="" project="" vault_id="" content=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_doc_create
+        return
+        ;;
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
@@ -674,20 +697,22 @@ _documents_create() {
         content="$2"
         shift 2
         ;;
+      --title|-n)
+        [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
+        title="$2"
+        shift 2
+        ;;
       -*)
-        shift
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq files doc --help"
         ;;
       *)
-        if [[ -z "$title" ]]; then
-          title="$1"
-        fi
-        shift
+        die "Unexpected argument: $1" $EXIT_USAGE "Run: bcq files doc --help"
         ;;
     esac
   done
 
   if [[ -z "$title" ]]; then
-    die "Document title required" $EXIT_USAGE "Usage: bcq files doc \"title\" --in <project>"
+    die "Document title required" $EXIT_USAGE "Usage: bcq files doc --title \"title\" --in <project>"
   fi
 
   # Resolve project (supports names, IDs, and config fallback)
@@ -857,8 +882,8 @@ Manage Docs & Files (vaults, uploads, documents).
     bcq files docs --in 12345
 
     # Create document
-    bcq files doc "Meeting Notes" --in 12345
-    bcq files doc "Spec" --content "## Overview" --in 12345
+    bcq files doc --title "Meeting Notes" --in 12345
+    bcq files doc --title "Spec" --content "## Overview" --in 12345
 
     # Upload a file
     bcq files upload report.pdf --in 12345

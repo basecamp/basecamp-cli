@@ -251,7 +251,9 @@ load test_helper
 
 @test "_get_oauth_type defaults to launchpad when discovery fails" {
   # Use a fake base URL that doesn't exist
+  # Also set local Launchpad URL to avoid localhost protection check
   export BCQ_BASE_URL="http://127.0.0.1:19999"
+  export BCQ_LAUNCHPAD_URL="http://launchpad.localhost:3011"
 
   source "$BCQ_ROOT/lib/core.sh"
   source "$BCQ_ROOT/lib/config.sh"
@@ -261,6 +263,22 @@ load test_helper
   oauth_type=$(_get_oauth_type)
 
   [[ "$oauth_type" == "launchpad" ]]
+}
+
+@test "localhost with production Launchpad fails with helpful error" {
+  # When using localhost base URL with production Launchpad, should error
+  export BCQ_BASE_URL="http://127.0.0.1:19999"
+  export BCQ_LAUNCHPAD_URL="https://launchpad.37signals.com"
+
+  source "$BCQ_ROOT/lib/core.sh"
+  source "$BCQ_ROOT/lib/config.sh"
+  source "$BCQ_ROOT/lib/auth.sh"
+
+  run _get_oauth_type
+
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"Local dev OAuth requires configuration"* ]]
+  [[ "$output" == *"BCQ_LAUNCHPAD_URL"* ]]
 }
 
 

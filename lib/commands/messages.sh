@@ -166,32 +166,44 @@ _messages_show_md() {
 }
 
 _messages_create() {
-  local subject="${1:-}"
-  shift || true
-
-  local project="" content=""
+  local subject="" project="" content="" draft=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_message_create
+        return
+        ;;
+      --subject|-s)
+        [[ -z "${2:-}" ]] && die "--subject requires a value" $EXIT_USAGE
+        subject="$2"
+        shift 2
+        ;;
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --content|--body|-b)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
         content="$2"
         shift 2
         ;;
-      *)
-        if [[ -z "$subject" ]]; then
-          subject="$1"
-        fi
+      --draft)
+        draft=true
         shift
+        ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq message --help"
+        ;;
+      *)
+        die "Unexpected argument: $1" $EXIT_USAGE "Run: bcq message --help"
         ;;
     esac
   done
 
   if [[ -z "$subject" ]]; then
-    die "Message subject required" $EXIT_USAGE "Usage: bcq message \"subject\" --in <project>"
+    die "Message subject required" $EXIT_USAGE "Usage: bcq message --subject \"subject\" --in <project>"
   fi
 
   # Resolve project (supports names, IDs, and config fallback)
@@ -206,13 +218,21 @@ _messages_create() {
     die "No message board found in project $project" $EXIT_NOT_FOUND
   fi
 
-  # Build payload
+  # Build payload - messages controller has wrap_parameters, so subject/content
+  # are auto-wrapped, but status must be top-level
   local payload
   payload=$(jq -n --arg subject "$subject" '{subject: $subject}')
 
   if [[ -n "$content" ]]; then
     payload=$(echo "$payload" | jq --arg content "$content" '. + {content: $content}')
   fi
+
+  # Default to active (published) status unless --draft is specified
+  local status="active"
+  if [[ "$draft" == true ]]; then
+    status="drafted"
+  fi
+  payload=$(echo "$payload" | jq --arg s "$status" '. + {status: $s}')
 
   local response
   response=$(api_post "/buckets/$project/message_boards/$message_board_id/messages.json" "$payload")
@@ -365,6 +385,24 @@ _messages_unpin() {
   output '{}' "$summary" "$bcs"
 }
 
+
+_help_message_create() {
+  cat << 'EOF'
+bcq message - Post a message to a project's message board
+
+USAGE
+  bcq message --subject "subject" [options]
+
+OPTIONS
+  --subject, -s <text>       Message subject/title (required)
+  --content, --body, -b      Message body content
+  --in, --project, -p <id>   Project ID or name
+
+EXAMPLES
+  bcq message --subject "Weekly Update" --in 123
+  bcq message -s "Meeting Notes" --content "Here are the notes..." --in "My Project"
+EOF
+}
 
 # Shortcut for creating messages
 cmd_message() {

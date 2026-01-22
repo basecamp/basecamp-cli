@@ -442,6 +442,104 @@ die() {
 
 # Global Flag Parsing
 
+# Global flags can appear anywhere in the command line:
+#   bcq --json projects
+#   bcq projects --json
+#   bcq todos --json --in 123
+# This function extracts global flags and returns remaining args via BCQ_REMAINING_ARGS
+
+BCQ_REMAINING_ARGS=()
+
+extract_global_flags() {
+  BCQ_REMAINING_ARGS=()
+  local skip_next=false
+  local past_separator=false
+
+  while [[ $# -gt 0 ]]; do
+    # After --, everything is passed through
+    if [[ "$past_separator" == "true" ]]; then
+      BCQ_REMAINING_ARGS+=("$1")
+      shift
+      continue
+    fi
+
+    # Handle skipping value for previous flag
+    if [[ "$skip_next" == "true" ]]; then
+      skip_next=false
+      shift
+      continue
+    fi
+
+    case "$1" in
+      --json|-j)
+        BCQ_FORMAT="json"
+        shift
+        ;;
+      --md|-m|--markdown)
+        BCQ_FORMAT="md"
+        shift
+        ;;
+      --quiet|-q|--data)
+        BCQ_QUIET="true"
+        shift
+        ;;
+      --agent)
+        BCQ_AGENT="true"
+        BCQ_FORMAT="json"
+        BCQ_QUIET="true"
+        shift
+        ;;
+      --ids-only)
+        BCQ_IDS_ONLY="true"
+        shift
+        ;;
+      --count)
+        BCQ_COUNT="true"
+        shift
+        ;;
+      --verbose|-v)
+        BCQ_VERBOSE="true"
+        shift
+        ;;
+      --project|-p)
+        if [[ -z "${2:-}" ]]; then
+          die "--project requires a value" $EXIT_USAGE
+        fi
+        BCQ_PROJECT="$2"
+        skip_next=true
+        shift
+        ;;
+      --account|-a)
+        if [[ -z "${2:-}" ]]; then
+          die "--account requires a value" $EXIT_USAGE
+        fi
+        BCQ_ACCOUNT="$2"
+        skip_next=true
+        shift
+        ;;
+      --cache-dir)
+        if [[ -z "${2:-}" ]]; then
+          die "--cache-dir requires a value" $EXIT_USAGE
+        fi
+        BCQ_CACHE_DIR="$2"
+        skip_next=true
+        shift
+        ;;
+      --)
+        past_separator=true
+        BCQ_REMAINING_ARGS+=("$1")
+        shift
+        ;;
+      *)
+        # Not a global flag, keep it
+        BCQ_REMAINING_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+# Legacy function for backward compatibility
 parse_global_flags() {
   GLOBAL_FLAGS_CONSUMED=0
 

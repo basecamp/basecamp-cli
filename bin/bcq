@@ -135,9 +135,11 @@ EOF
 }
 
 main() {
-  # Parse global flags first
-  parse_global_flags "$@"
-  shift $GLOBAL_FLAGS_CONSUMED
+  # Extract global flags from anywhere in the argument list
+  # This allows: bcq projects --json, bcq --json projects, bcq todos --json --in 123
+  extract_global_flags "$@"
+  # Use ${arr[@]+"${arr[@]}"} pattern for Bash 3.2 compatibility with empty arrays
+  set -- ${BCQ_REMAINING_ARGS[@]+"${BCQ_REMAINING_ARGS[@]}"}
 
   # Reload config to pick up command-line flag overrides (e.g., --cache-dir)
   load_config
