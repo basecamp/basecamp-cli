@@ -405,7 +405,10 @@ format_resolve_error() {
   if [[ -n "$RESOLVE_ERROR" ]]; then
     echo "$RESOLVE_ERROR"
   else
-    echo "${type^} not found: $input"
+    # Capitalize first letter (Bash 3.2 compatible)
+    local capitalized
+    capitalized="$(echo "${type:0:1}" | tr '[:lower:]' '[:upper:]')${type:1}"
+    echo "$capitalized not found: $input"
   fi
 }
 
