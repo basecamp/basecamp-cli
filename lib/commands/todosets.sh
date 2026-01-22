@@ -6,7 +6,7 @@ cmd_todosets() {
   local action="${1:-}"
 
   case "$action" in
-    show|get) shift; _todoset_show "$@" ;;
+    show) shift; _todoset_show "$@" ;;
     --help|-h) _help_todosets ;;
     "")
       _todoset_show "$@"
@@ -144,7 +144,8 @@ View todoset container for a project.
 ### Notes
 
 A todoset is the container that holds all todolists in a project. Each project
-has exactly one todoset in its dock.
+has exactly one todoset in its dock. Use `bcq todolists` to manage the actual
+lists; use `bcq todosets` only when you need the container's ID.
 
 EOF
 }

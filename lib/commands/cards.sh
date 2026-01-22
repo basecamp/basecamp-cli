@@ -36,7 +36,7 @@ cmd_cards() {
     columns) _cards_columns "$@" ;;
     column) _cards_column "$@" ;;
     create) _cards_create "$@" ;;
-    get|show) _cards_show "$@" ;;
+    show) _cards_show "$@" ;;
     list) _cards_list "$@" ;;
     move) _cards_move "$@" ;;
     steps) _cards_steps "$@" ;;
@@ -228,7 +228,7 @@ _cards_column() {
   local action="${1:-}"
 
   case "$action" in
-    show|get) shift; _cards_column_show "$@" ;;
+    show) shift; _cards_column_show "$@" ;;
     create) shift; _cards_column_create "$@" ;;
     update) shift; _cards_column_update "$@" ;;
     move) shift; _cards_column_move "$@" ;;

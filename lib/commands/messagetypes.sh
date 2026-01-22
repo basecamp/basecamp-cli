@@ -7,11 +7,11 @@ cmd_messagetypes() {
   local action="${1:-}"
 
   case "$action" in
-    list|ls) shift; _messagetypes_list "$@" ;;
-    show|get) shift; _messagetype_show "$@" ;;
-    create|new) shift; _messagetype_create "$@" ;;
+    list) shift; _messagetypes_list "$@" ;;
+    show) shift; _messagetype_show "$@" ;;
+    create) shift; _messagetype_create "$@" ;;
     update) shift; _messagetype_update "$@" ;;
-    delete|rm) shift; _messagetype_delete "$@" ;;
+    delete) shift; _messagetype_delete "$@" ;;
     --help|-h) _help_messagetypes ;;
     "")
       _messagetypes_list "$@"

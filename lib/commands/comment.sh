@@ -14,7 +14,7 @@ cmd_comments() {
 
   case "$action" in
     list) _comments_list "$@" ;;
-    get|show) _comments_show "$@" ;;
+    show) _comments_show "$@" ;;
     update) _comments_update "$@" ;;
     --help|-h) _help_comments ;;
     *)
