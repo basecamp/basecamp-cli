@@ -217,7 +217,7 @@ jq -s 'group_by(.strategy) | map({
 | `benchmarks/prompts/bcq-only.md` | Minimal "use --help" |
 | `benchmarks/prompts/api-docs-only.md` | Docs link only |
 | `benchmarks/prompts/api-docs-with-curl-examples.md` | Endpoint examples |
-| `bcq help` | Agent-optimized help |
+| `bcq help` | Full categorized help |
 | `bcq skill` | Skill generator |
 
 ## Promotion Strategy

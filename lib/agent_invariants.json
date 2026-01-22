@@ -1,4 +1,6 @@
 {
+  "version": "1.0.0",
+  "description": "Basecamp API domain invariants. Canonical source for agent skills.",
   "invariants": [
     {
       "id": "bucket-is-project",
@@ -43,22 +45,22 @@
   ],
   "preferred_patterns": [
     {
-      "pattern": "bcq todos list --project ID",
+      "pattern": "bcq todos --project ID --json",
       "instead_of": "Raw curl to /buckets/ID/todolists/X/todos.json",
       "why": "bcq handles pagination, auth refresh, and output formatting"
     },
     {
-      "pattern": "bcq projects",
+      "pattern": "bcq projects --json",
       "instead_of": "GET /projects.json with pagination",
       "why": "bcq handles pagination automatically"
     },
     {
-      "pattern": "bcq search \"query\"",
+      "pattern": "bcq search \"query\" --json",
       "instead_of": "GET /projects/ID/recordings/search.json?q=...",
       "why": "bcq searches across projects with proper pagination"
     },
     {
-      "pattern": "bcq show TYPE/ID",
+      "pattern": "bcq show TYPE/ID --json",
       "instead_of": "Constructing recording URLs manually",
       "why": "bcq resolves the correct endpoint for any recording type"
     }
@@ -75,6 +77,18 @@
     {
       "pattern": "Using todoset_id where todolist_id is expected",
       "why": "Common confusion; todoset is the container, todolist is the actual list"
+    },
+    {
+      "pattern": "Relying on implicit JSON output detection",
+      "why": "Output format depends on TTY detection. Always pass --json for predictable structured output."
     }
-  ]
+  ],
+  "agent_guidance": {
+    "always_pass_json_flag": true,
+    "json_flag": "--json",
+    "pagination_handled": true,
+    "rate_limiting_handled": true,
+    "auth_refresh_handled": true,
+    "note": "bcq handles pagination, rate limiting, and auth refresh automatically. Agents should always pass --json for predictable output."
+  }
 }
