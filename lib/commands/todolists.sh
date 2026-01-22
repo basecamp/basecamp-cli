@@ -49,13 +49,8 @@ _todolists_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get todoset from project dock
   local project_data todoset_id
@@ -135,13 +130,8 @@ _todolists_show() {
     die "Todolist ID required" $EXIT_USAGE "Usage: bcq todolists show <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/todolists/$todolist_id.json")
@@ -220,13 +210,8 @@ _todolists_create() {
     die "Todolist name required" $EXIT_USAGE "Usage: bcq todolists create \"name\" --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get todoset from project dock
   local project_data todoset_id
@@ -298,13 +283,8 @@ _todolists_update() {
     die "Name or description required" $EXIT_USAGE "Use --name and/or --description"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload="{}"
   [[ -n "$name" ]] && payload=$(echo "$payload" | jq --arg n "$name" '. + {name: $n}')
@@ -430,21 +410,11 @@ _todolistgroups_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
-
-  if [[ -z "$todolist_id" ]]; then
-    todolist_id=$(get_todolist_id)
-  fi
-
-  if [[ -z "$todolist_id" ]]; then
-    die "No todolist specified. Use --list <todolist_id>" $EXIT_USAGE
-  fi
+  # Resolve todolist (supports names, IDs, and config fallback)
+  todolist_id=$(require_todolist_id "${todolist_id:-}" "$project")
 
   # GET /buckets/:project/todolists/:todolist_id/groups.json
   local response
@@ -510,13 +480,8 @@ _todolistgroups_show() {
     die "Group ID required" $EXIT_USAGE "Usage: bcq todolistgroups show <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Groups are todolists: GET /buckets/:project/todolists/:group_id.json
   local response
@@ -567,21 +532,11 @@ _todolistgroups_create() {
     die "Group name required" $EXIT_USAGE "Usage: bcq todolistgroups create \"name\" --list <todolist_id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
-
-  if [[ -z "$todolist_id" ]]; then
-    todolist_id=$(get_todolist_id)
-  fi
-
-  if [[ -z "$todolist_id" ]]; then
-    die "No todolist specified. Use --list <todolist_id>" $EXIT_USAGE
-  fi
+  # Resolve todolist (supports names, IDs, and config fallback)
+  todolist_id=$(require_todolist_id "${todolist_id:-}" "$project")
 
   local payload
   payload=$(jq -n --arg name "$name" '{name: $name}')
@@ -636,13 +591,8 @@ _todolistgroups_update() {
     die "Name required" $EXIT_USAGE "Use --name \"new name\""
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --arg name "$name" '{name: $name}')
@@ -694,13 +644,8 @@ _todolistgroups_position() {
     die "Position required" $EXIT_USAGE "Use --to <position> (1 = top)"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --argjson pos "$position" '{position: $pos}')
