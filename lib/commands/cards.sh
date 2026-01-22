@@ -121,7 +121,7 @@ _cards_list() {
 
   local bcs
   bcs=$(breadcrumbs \
-    "$(breadcrumb "create" "bcq card \"title\" --in $project" "Create card")" \
+    "$(breadcrumb "create" "bcq card --title \"title\" --in $project" "Create card")" \
     "$(breadcrumb "show" "bcq cards <id>" "Show card details")" \
     "$(breadcrumb "columns" "bcq cards columns --in $project" "List columns with IDs")"
   )
@@ -191,7 +191,7 @@ _cards_columns() {
   local bcs
   bcs=$(breadcrumbs \
     "$(breadcrumb "cards" "bcq cards --in $project --column <id>" "List cards in column")" \
-    "$(breadcrumb "create" "bcq card \"title\" --in $project --column <id>" "Create card in column")"
+    "$(breadcrumb "create" "bcq card --title \"title\" --in $project --column <id>" "Create card in column")"
   )
 
   output "$columns" "$summary" "$bcs" "_cards_columns_md"
@@ -1079,6 +1079,15 @@ _cards_create() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_card_create
+        return
+        ;;
+      --title|-t)
+        [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
+        title="$2"
+        shift 2
+        ;;
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
@@ -1090,19 +1099,16 @@ _cards_create() {
         shift 2
         ;;
       -*)
-        shift
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq card --help"
         ;;
       *)
-        if [[ -z "$title" ]]; then
-          title="$1"
-        fi
-        shift
+        die "Unexpected argument: $1" $EXIT_USAGE "Run: bcq card --help"
         ;;
     esac
   done
 
   if [[ -z "$title" ]]; then
-    die "Card title required" $EXIT_USAGE "Usage: bcq card create \"title\" --in <project>"
+    die "Card title required" $EXIT_USAGE "Usage: bcq card --title \"title\" --in <project>"
   fi
 
   # Resolve project (supports names, IDs, and config fallback)
@@ -1309,6 +1315,24 @@ _cards_update() {
   output "$response" "$summary" "$bcs"
 }
 
+_help_card_create() {
+  cat << 'EOF'
+bcq card - Create a new card
+
+USAGE
+  bcq card --title "title" [options]
+
+OPTIONS
+  --title, -t <text>        Card title (required)
+  --in, --project, -p <id>  Project ID or name
+  --column, -c <id|name>    Column ID or name (defaults to first column)
+
+EXAMPLES
+  bcq card --title "New feature" --in 123
+  bcq card -t "Bug fix" --column "In Progress" --in "My Project"
+EOF
+}
+
 # Shortcut for creating cards
 cmd_card() {
   local action="${1:-}"
@@ -1346,7 +1370,7 @@ Manage cards in Card Tables (Kanban boards).
 ### Usage
 
     bcq cards [action] [options]
-    bcq card "title" [options]    # Shortcut for create
+    bcq card --title "title" [options]    # Shortcut for create
 
 ### Card Actions
 
@@ -1395,7 +1419,7 @@ Manage cards in Card Tables (Kanban boards).
     bcq cards --in 12345
 
     # Create card
-    bcq card "New feature" --in 12345
+    bcq card --title "New feature" --in 12345
 
     # Column operations
     bcq cards column create "In Progress" --in 12345

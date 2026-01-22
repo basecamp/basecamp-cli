@@ -58,6 +58,22 @@ _discover_oauth_config() {
     fi
   fi
 
+  # Check for local dev misconfiguration before falling back to Launchpad
+  # If BCQ_BASE_URL is localhost but BCQ_LAUNCHPAD_URL is production, warn the user
+  local is_localhost=false
+  if [[ "$BCQ_BASE_URL" == *"localhost"* ]] || [[ "$BCQ_BASE_URL" == *"127.0.0.1"* ]]; then
+    is_localhost=true
+  fi
+
+  if [[ "$is_localhost" == "true" ]] && [[ "$BCQ_LAUNCHPAD_URL" == "https://launchpad.37signals.com"* ]]; then
+    die "Local dev OAuth requires configuration" $EXIT_AUTH \
+      "BC3 OAuth discovery failed at: $discovery_url
+Options:
+1. Expose .well-known/oauth-authorization-server on local BC3
+2. Set BCQ_LAUNCHPAD_URL to local Launchpad:
+   export BCQ_LAUNCHPAD_URL=http://launchpad.localhost:3011"
+  fi
+
   # Fall back to Launchpad OAuth 2
   debug "BC3 OAuth 2.1 discovery failed, using Launchpad OAuth 2"
   _BCQ_OAUTH_TYPE="launchpad"
@@ -764,10 +780,13 @@ _select_account() {
     return
   fi
 
+  local account_id account_name account_href
+  local selected_index=0
+
   if [[ "$count" -eq 1 ]]; then
-    local account_id account_name
     account_id=$(echo "$accounts" | jq -r '.[0].id')
     account_name=$(echo "$accounts" | jq -r '.[0].name')
+    account_href=$(echo "$accounts" | jq -r '.[0].href // empty')
     set_global_config "account_id" "$account_id"
     info "Selected account: $account_name (#$account_id)"
   elif [[ "$count" -gt 1 ]]; then
@@ -781,15 +800,16 @@ _select_account() {
     read -rp "Select account (1-$count): " choice
 
     if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
-      local account_id account_name
-      account_id=$(echo "$accounts" | jq -r ".[$((choice - 1))].id")
-      account_name=$(echo "$accounts" | jq -r ".[$((choice - 1))].name")
+      selected_index=$((choice - 1))
+      account_id=$(echo "$accounts" | jq -r ".[$selected_index].id")
+      account_name=$(echo "$accounts" | jq -r ".[$selected_index].name")
+      account_href=$(echo "$accounts" | jq -r ".[$selected_index].href // empty")
       set_global_config "account_id" "$account_id"
       info "Selected account: $account_name (#$account_id)"
     else
       warn "Invalid choice, using first account"
-      local account_id
       account_id=$(echo "$accounts" | jq -r '.[0].id')
+      account_href=$(echo "$accounts" | jq -r '.[0].href // empty')
       set_global_config "account_id" "$account_id"
     fi
   fi
@@ -797,8 +817,21 @@ _select_account() {
   # Save the API URLs so bcq knows which server to talk to
   # This ensures tokens obtained from dev servers talk to dev servers
   set_global_config "base_url" "$BCQ_BASE_URL"
-  set_global_config "api_url" "$BCQ_API_URL"
-  debug "Saved API URLs: base=$BCQ_BASE_URL api=$BCQ_API_URL"
+
+  # Use account's href as API URL if available (respects what Basecamp tells us)
+  # The href from authorization.json is the canonical API endpoint for that account
+  if [[ -n "$account_href" ]] && [[ "$account_href" != "null" ]]; then
+    # Extract base URL from href (remove trailing account ID path)
+    # e.g., "https://3.basecampapi.com/12345" -> "https://3.basecampapi.com"
+    local api_base
+    api_base=$(echo "$account_href" | sed 's|/[0-9]*$||')
+    set_global_config "api_url" "$api_base"
+    debug "Saved API URL from account href: $api_base"
+  else
+    set_global_config "api_url" "$BCQ_API_URL"
+    debug "Saved API URL from environment: $BCQ_API_URL"
+  fi
+  debug "Saved base URL: $BCQ_BASE_URL"
 }
 
 

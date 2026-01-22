@@ -247,40 +247,50 @@ _todos_show_md() {
 
 
 cmd_todo_create() {
-  local content="${1:-}"
-  shift || true
-
-  local project="" todolist="" assignee="" due=""
+  local content="" project="" todolist="" assignee="" due=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_todo_create
+        return
+        ;;
+      --content|-c)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
+        content="$2"
+        shift 2
+        ;;
       --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
         ;;
       --list|--todolist|-l)
+        [[ -z "${2:-}" ]] && die "--list requires a value" $EXIT_USAGE
         todolist="$2"
         shift 2
         ;;
       --assignee|--to|-a)
+        [[ -z "${2:-}" ]] && die "--assignee requires a value" $EXIT_USAGE
         assignee="$2"
         shift 2
         ;;
       --due|-d)
+        [[ -z "${2:-}" ]] && die "--due requires a value" $EXIT_USAGE
         due="$2"
         shift 2
         ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq todo --help"
+        ;;
       *)
-        if [[ -z "$content" ]]; then
-          content="$1"
-        fi
-        shift
+        die "Unexpected argument: $1" $EXIT_USAGE "Run: bcq todo --help"
         ;;
     esac
   done
 
   if [[ -z "$content" ]]; then
-    die "Todo content required" $EXIT_USAGE "Usage: bcq todo \"content\" [options]"
+    die "Todo content required" $EXIT_USAGE "Usage: bcq todo --content \"content\" [options]"
   fi
 
   # Resolve project (supports names, IDs, and config fallback)
@@ -347,6 +357,27 @@ cmd_todo_create() {
   )
 
   output "$response" "$summary" "$bcs"
+}
+
+_help_todo_create() {
+  cat << 'EOF'
+bcq todo - Create a new todo
+
+USAGE
+  bcq todo --content "content" [options]
+
+OPTIONS
+  --content, -c <text>       Todo content (required)
+  --in, --project, -p <id>   Project ID or name
+  --list, --todolist, -l     Todolist ID or name
+  --assignee, --to, -a       Assignee ID or "me"
+  --due, -d <date>           Due date (YYYY-MM-DD, "today", "tomorrow", etc.)
+
+EXAMPLES
+  bcq todo --content "Fix the bug" --in 123
+  bcq todo -c "Review PR" --list "Development" --due tomorrow
+  bcq todo --content "Ship it" --assignee me --in "My Project"
+EOF
 }
 
 

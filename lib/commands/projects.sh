@@ -79,7 +79,25 @@ _projects_list_md() {
 }
 
 _projects_show() {
-  local project_id="$1"
+  local project_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h)
+        _help_projects_show
+        return
+        ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq projects show --help"
+        ;;
+      *)
+        if [[ -z "$project_id" ]]; then
+          project_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
 
   if [[ -z "$project_id" ]]; then
     die "Project ID required" $EXIT_USAGE "Usage: bcq projects show <id>"
@@ -131,28 +149,36 @@ _projects_show_md() {
 }
 
 _projects_create() {
-  local name="${1:-}"
-  shift || true
+  local name=""
   local description=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_projects_create
+        return
+        ;;
+      --name|-n)
+        [[ -z "${2:-}" ]] && die "--name requires a value" $EXIT_USAGE
+        name="$2"
+        shift 2
+        ;;
       --description|--desc|-d)
         [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
         description="$2"
         shift 2
         ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq projects create --help"
+        ;;
       *)
-        if [[ -z "$name" ]]; then
-          name="$1"
-        fi
-        shift
+        die "Unexpected argument: $1" $EXIT_USAGE "Run: bcq projects create --help"
         ;;
     esac
   done
 
   if [[ -z "$name" ]]; then
-    die "Project name required" $EXIT_USAGE "Usage: bcq projects create \"name\" [--description \"desc\"]"
+    die "Project name required" $EXIT_USAGE "Usage: bcq projects create --name \"name\""
   fi
 
   local payload
@@ -183,6 +209,10 @@ _projects_update() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_projects_update
+        return
+        ;;
       --name|-n)
         [[ -z "${2:-}" ]] && die "--name requires a value" $EXIT_USAGE
         name="$2"
@@ -192,6 +222,9 @@ _projects_update() {
         [[ -z "${2:-}" ]] && die "--description requires a value" $EXIT_USAGE
         description="$2"
         shift 2
+        ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq projects update --help"
         ;;
       *)
         if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$project_id" ]]; then
@@ -232,6 +265,13 @@ _projects_delete() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        _help_projects_delete
+        return
+        ;;
+      -*)
+        die "Unknown option: $1" $EXIT_USAGE "Run: bcq projects delete --help"
+        ;;
       *)
         if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$project_id" ]]; then
           project_id="$1"
