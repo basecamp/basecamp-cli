@@ -46,7 +46,7 @@ BCQ_COMMANDS=(
   "messagetypes:communication:Manage message categories:list,show,create,update,delete"
   "forwards:communication:Manage email forwards (inbox):list,show,inbox,replies,reply"
   "subscriptions:communication:Manage notification subscriptions:show,subscribe,unsubscribe,add,remove"
-  "comments:communication:Manage comments:list,show,create,update"
+  "comments:communication:Manage comments:list,show,update"
 
   # Search & browse
   "search:search:Search across projects:"

@@ -41,9 +41,12 @@ extract_from_content() {
 
   is_excluded "$filename" && return 0
 
+  # Pattern: * `METHOD /path` - store in variable for bash version compatibility
+  local endpoint_pattern='^[*] `([A-Z]+) ([^`]+)`'
+
   # Use process substitution to avoid subshell (pipeline would lose output)
   while IFS= read -r line; do
-    if [[ "$line" =~ ^\*\ \`([A-Z]+)\ ([^\`]+)\` ]]; then
+    if [[ "$line" =~ $endpoint_pattern ]]; then
       local method="${BASH_REMATCH[1]}"
       local path="${BASH_REMATCH[2]}"
 

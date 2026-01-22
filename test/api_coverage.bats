@@ -2,31 +2,49 @@
 # api_coverage.bats - API coverage verification tests
 #
 # These tests verify that bcq implements all documented Basecamp API endpoints.
-# They are skipped if bc3-api is not available locally.
+# By default, fetches from GitHub. Set BC3_API_DIR for local clone.
+# Tests skip gracefully if GitHub API is rate-limited.
+
+# Require bats 1.5.0+ for --separate-stderr support
+bats_require_minimum_version 1.5.0
 
 setup() {
   export BCQ_ROOT="${BATS_TEST_DIRNAME}/.."
   export PATH="$BCQ_ROOT/bin:$PATH"
 
-  # Check for bc3-api
-  BC3_API_DIR="${BC3_API_DIR:-$HOME/Work/basecamp/bc3-api}"
-  if [[ ! -d "$BC3_API_DIR/sections" ]]; then
-    skip "bc3-api not found at $BC3_API_DIR"
+  # Use local bc3-api clone if available, otherwise GitHub fetch (default)
+  if [[ -n "${BC3_API_DIR:-}" ]] && [[ -d "$BC3_API_DIR/sections" ]]; then
+    export BC3_API_DIR
+  else
+    unset BC3_API_DIR  # Let scripts use GitHub fetch
   fi
-  export BC3_API_DIR
+}
+
+# Helper: check if docs can be fetched with sufficient data
+# Returns false if rate-limited (partial data) or network error
+docs_available() {
+  local output count
+  output=$("$BCQ_ROOT/test/api_coverage/extract_docs.sh" 2>/dev/null) || return 1
+  count=$(echo "$output" | jq -r 'length' 2>/dev/null) || return 1
+  # Need at least 50 endpoints to consider docs "available"
+  # (full bc3-api has ~130 endpoints, partial fetch indicates rate limiting)
+  [[ "$count" -gt 50 ]]
 }
 
 @test "extract_docs.sh produces valid JSON" {
-  run "$BCQ_ROOT/test/api_coverage/extract_docs.sh"
-  [ "$status" -eq 0 ]
+  # Use --separate-stderr to prevent stderr from corrupting JSON output
+  run --separate-stderr "$BCQ_ROOT/test/api_coverage/extract_docs.sh"
+  if [ "$status" -ne 0 ]; then
+    skip "GitHub API unavailable (rate limited or network error)"
+  fi
 
-  # Validate JSON
+  # Validate JSON (output contains only stdout now)
   echo "$output" | jq . > /dev/null
   [ "$?" -eq 0 ]
 }
 
 @test "extract_impl.sh produces valid JSON" {
-  run "$BCQ_ROOT/test/api_coverage/extract_impl.sh"
+  run --separate-stderr "$BCQ_ROOT/test/api_coverage/extract_impl.sh"
   [ "$status" -eq 0 ]
 
   # Validate JSON
@@ -35,12 +53,21 @@ setup() {
 }
 
 @test "compare.sh runs without error" {
+  if ! docs_available; then
+    skip "GitHub API unavailable (rate limited or network error)"
+  fi
+
   run "$BCQ_ROOT/test/api_coverage/compare.sh"
   [ "$status" -eq 0 ]
 }
 
 @test "compare.sh --json produces valid JSON" {
-  run "$BCQ_ROOT/test/api_coverage/compare.sh" --json
+  if ! docs_available; then
+    skip "GitHub API unavailable (rate limited or network error)"
+  fi
+
+  # Use --separate-stderr to prevent stderr from corrupting JSON output
+  run --separate-stderr "$BCQ_ROOT/test/api_coverage/compare.sh" --json
   [ "$status" -eq 0 ]
 
   # Validate JSON
@@ -49,7 +76,11 @@ setup() {
 }
 
 @test "coverage is at least 85%" {
-  run "$BCQ_ROOT/test/api_coverage/compare.sh" --json
+  if ! docs_available; then
+    skip "GitHub API unavailable (rate limited or network error)"
+  fi
+
+  run --separate-stderr "$BCQ_ROOT/test/api_coverage/compare.sh" --json
   [ "$status" -eq 0 ]
 
   coverage=$(echo "$output" | jq -r '.coverage_percentage')
@@ -57,7 +88,11 @@ setup() {
 }
 
 @test "documented endpoints count is reasonable (>100)" {
-  run "$BCQ_ROOT/test/api_coverage/compare.sh" --json
+  if ! docs_available; then
+    skip "GitHub API unavailable (rate limited or network error)"
+  fi
+
+  run --separate-stderr "$BCQ_ROOT/test/api_coverage/compare.sh" --json
   [ "$status" -eq 0 ]
 
   count=$(echo "$output" | jq -r '.documented_endpoints')
@@ -69,6 +104,10 @@ setup() {
 }
 
 @test "excluded sections are not in documented endpoints" {
+  if ! docs_available; then
+    skip "GitHub API unavailable (rate limited or network error)"
+  fi
+
   # Read exclusions
   while IFS= read -r line; do
     [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue

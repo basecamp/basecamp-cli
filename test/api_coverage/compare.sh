@@ -29,16 +29,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Check if bc3-api is available
-BC3_API_DIR="${BC3_API_DIR:-$HOME/Work/basecamp/bc3-api}"
-if [[ ! -d "$BC3_API_DIR/sections" ]]; then
-  if [[ "$JSON_OUTPUT" == "true" ]]; then
-    echo '{"error": "bc3-api not found", "skip": true}'
-  else
-    echo "Warning: bc3-api not found at $BC3_API_DIR" >&2
-    echo "Skipping API coverage check" >&2
-  fi
-  exit 0
+# Use local bc3-api if available, otherwise extract_docs.sh fetches from GitHub
+if [[ -n "${BC3_API_DIR:-}" ]] && [[ -d "$BC3_API_DIR/sections" ]]; then
+  export BC3_API_DIR
+else
+  unset BC3_API_DIR  # Let extract_docs.sh use GitHub fetch
 fi
 
 # Extract endpoints
