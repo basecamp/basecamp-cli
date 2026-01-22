@@ -289,3 +289,48 @@ setup() {
   result=$(format_resolve_error "project" "test-input")
   [[ "$result" == "Project not found: test-input" ]]
 }
+
+
+# ============================================================================
+# Integration Helper Tests
+# ============================================================================
+
+@test "require_project_id resolves name to ID" {
+  _names_set_cache "projects" '[
+    {"id": 111, "name": "Project Alpha"},
+    {"id": 222, "name": "Project Beta"}
+  ]'
+
+  result=$(require_project_id "Project Alpha")
+  [[ "$result" == "111" ]]
+}
+
+@test "require_project_id passes through numeric ID" {
+  result=$(require_project_id "12345")
+  [[ "$result" == "12345" ]]
+}
+
+@test "require_project_id uses config when no argument" {
+  export BCQ_PROJECT="99999"
+
+  result=$(require_project_id "")
+  [[ "$result" == "99999" ]]
+}
+
+@test "require_person_id resolves name to ID" {
+  _names_set_cache "people" '[
+    {"id": 111, "name": "Alice Smith", "email_address": "alice@example.com"}
+  ]'
+
+  result=$(require_person_id "Alice Smith")
+  [[ "$result" == "111" ]]
+}
+
+@test "require_person_id resolves email to ID" {
+  _names_set_cache "people" '[
+    {"id": 222, "name": "Bob Jones", "email_address": "bob@example.com"}
+  ]'
+
+  result=$(require_person_id "bob@example.com")
+  [[ "$result" == "222" ]]
+}

@@ -408,3 +408,76 @@ format_resolve_error() {
     echo "${type^} not found: $input"
   fi
 }
+
+
+# ============================================================================
+# Integration Helpers
+# ============================================================================
+
+# Require a project ID (from argument or config), resolving names if needed
+# Args: $1 - optional project (name/ID from flag, or empty to use config)
+# Returns: resolved numeric project ID
+# Dies: if project not specified and not in config, or if resolution fails
+require_project_id() {
+  local input="${1:-}"
+  local project
+
+  # Use input if provided, otherwise get from config
+  if [[ -n "$input" ]]; then
+    project="$input"
+  else
+    project=$(get_project_id)
+  fi
+
+  if [[ -z "$project" ]]; then
+    die "No project specified. Use --in <project> or set in .basecamp/config.json" $EXIT_USAGE
+  fi
+
+  # Resolve name to ID (resolve_project_id handles numeric IDs efficiently)
+  local resolved
+  resolved=$(resolve_project_id "$project") || die "$(format_resolve_error project "$project")" $EXIT_NOT_FOUND
+  echo "$resolved"
+}
+
+# Require a person ID (from argument), resolving names if needed
+# Args: $1 - person name, email, or ID
+# Returns: resolved numeric person ID
+# Dies: if resolution fails
+require_person_id() {
+  local input="$1"
+
+  if [[ -z "$input" ]]; then
+    die "Person identifier required" $EXIT_USAGE
+  fi
+
+  local resolved
+  resolved=$(resolve_person_id "$input") || die "$(format_resolve_error person "$input")" $EXIT_NOT_FOUND
+  echo "$resolved"
+}
+
+# Require a todolist ID (from argument or config), resolving names if needed
+# Args: $1 - optional todolist (name/ID from flag, or empty to use config)
+#       $2 - project ID (required for resolution)
+# Returns: resolved numeric todolist ID
+# Dies: if not specified/found, or if resolution fails
+require_todolist_id() {
+  local input="${1:-}"
+  local project_id="$2"
+  local todolist
+
+  # Use input if provided, otherwise get from config
+  if [[ -n "$input" ]]; then
+    todolist="$input"
+  else
+    todolist=$(get_todolist_id)
+  fi
+
+  if [[ -z "$todolist" ]]; then
+    die "No todolist specified. Use --list <todolist> or set todolist_id in config" $EXIT_USAGE
+  fi
+
+  # Resolve name to ID
+  local resolved
+  resolved=$(resolve_todolist_id "$todolist" "$project_id") || die "$(format_resolve_error todolist "$todolist")" $EXIT_NOT_FOUND
+  echo "$resolved"
+}
