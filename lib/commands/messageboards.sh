@@ -62,13 +62,8 @@ _messageboard_show() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project <id> or set default"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$messageboard_id" ]]; then
     messageboard_id=$(_get_messageboard_id "$project")

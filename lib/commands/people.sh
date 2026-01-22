@@ -143,13 +143,8 @@ _people_add() {
     esac
   done
 
-  if [[ -z "$project_id" ]]; then
-    project_id=$(get_project_id)
-  fi
-
-  if [[ -z "$project_id" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project_id=$(require_project_id "${project_id:-}")
 
   if [[ ${#person_ids[@]} -eq 0 ]]; then
     die "Person ID(s) required" $EXIT_USAGE "Usage: bcq people add <id> [id...] --in <project>"
@@ -192,13 +187,8 @@ _people_remove() {
     esac
   done
 
-  if [[ -z "$project_id" ]]; then
-    project_id=$(get_project_id)
-  fi
-
-  if [[ -z "$project_id" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project_id=$(require_project_id "${project_id:-}")
 
   if [[ ${#person_ids[@]} -eq 0 ]]; then
     die "Person ID(s) required" $EXIT_USAGE "Usage: bcq people remove <id> [id...] --in <project>"

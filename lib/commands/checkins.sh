@@ -60,13 +60,8 @@ _checkins_show() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project <id> or set default"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$questionnaire_id" ]]; then
     questionnaire_id=$(_get_questionnaire_id "$project")
@@ -124,13 +119,8 @@ _checkins_questions() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$questionnaire_id" ]]; then
     questionnaire_id=$(_get_questionnaire_id "$project")
@@ -198,13 +188,8 @@ _checkins_question_show() {
     die "Question ID required" $EXIT_USAGE "Usage: bcq checkins question <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/questions/$question_id.json")
@@ -269,13 +254,8 @@ _checkins_answers() {
     die "Question ID required" $EXIT_USAGE "Usage: bcq checkins answers <question_id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/questions/$question_id/answers.json")
@@ -339,13 +319,8 @@ _checkins_answer_show() {
     die "Answer ID required" $EXIT_USAGE "Usage: bcq checkins answer <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/question_answers/$answer_id.json")

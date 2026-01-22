@@ -44,13 +44,8 @@ _subscriptions_show() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq subscriptions <recording_id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/recordings/$recording_id/subscription.json")
@@ -114,13 +109,8 @@ _subscriptions_subscribe() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq subscriptions subscribe <recording_id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_post "/buckets/$project/recordings/$recording_id/subscription.json" "{}")
@@ -159,13 +149,8 @@ _subscriptions_unsubscribe() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq subscriptions unsubscribe <recording_id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_delete "/buckets/$project/recordings/$recording_id/subscription.json" >/dev/null 2>&1 || true
 
@@ -216,13 +201,8 @@ _subscriptions_update() {
     die "Person ID(s) required" $EXIT_USAGE "Provide comma-separated person IDs"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Convert comma-separated IDs to JSON array
   local ids_array

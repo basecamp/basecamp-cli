@@ -59,13 +59,8 @@ _comments_list() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq comments --on <recording_id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/recordings/$recording_id/comments.json")
@@ -127,13 +122,8 @@ _comments_show() {
     die "Comment ID required" $EXIT_USAGE "Usage: bcq comments show <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/comments/$comment_id.json")
@@ -206,13 +196,8 @@ _comments_update() {
     die "Content required" $EXIT_USAGE "Usage: bcq comments update <id> \"content\" --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --arg content "$content" '{content: $content}')
@@ -346,15 +331,8 @@ cmd_comment() {
       "Usage: bcq comment \"content\" --on <id> [id...]"
   fi
 
-  # Get project from context if not specified
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE \
-      "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Build payload
   local payload

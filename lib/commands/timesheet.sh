@@ -139,13 +139,8 @@ _timesheet_project() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "Project ID required" $EXIT_USAGE "Usage: bcq timesheet project <id>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/projects/$project/timesheet.json")
@@ -210,13 +205,8 @@ _timesheet_recording() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq timesheet recording <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project <id> or set default"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/projects/$project/recordings/$recording_id/timesheet.json")

@@ -61,13 +61,8 @@ _schedule_show() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project <id> or set default"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$schedule_id" ]]; then
     schedule_id=$(_get_schedule_id "$project")
@@ -137,13 +132,8 @@ _schedule_update() {
     die "--include-due required (true or false)" $EXIT_USAGE
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$schedule_id" ]]; then
     schedule_id=$(_get_schedule_id "$project")
@@ -190,13 +180,8 @@ _schedule_entries() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$schedule_id" ]]; then
     schedule_id=$(_get_schedule_id "$project")
@@ -270,13 +255,8 @@ _schedule_entry_show() {
     die "Entry ID required" $EXIT_USAGE "Usage: bcq schedule show <entry_id> --project <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response path
   if [[ -n "$occurrence_date" ]]; then
@@ -410,13 +390,8 @@ _schedule_entry_create() {
     die "--ends-at required (ISO 8601 datetime)" $EXIT_USAGE
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$schedule_id" ]]; then
     schedule_id=$(_get_schedule_id "$project")
@@ -523,13 +498,8 @@ _schedule_entry_update() {
     die "Entry ID required" $EXIT_USAGE "Usage: bcq schedule update <entry_id> [options]"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Build payload with provided fields only
   local payload="{}"
