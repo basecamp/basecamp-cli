@@ -224,19 +224,19 @@ _people_remove() {
 
 
 # Resolve assignee to person ID
-# Accepts: "me" or numeric ID
+# Accepts: "me", name, email, or numeric ID
 # Returns: numeric ID or empty string on error
+# Note: Uses names.sh resolve_person_id for name/email resolution
 resolve_assignee() {
   local assignee="$1"
 
-  if [[ "$assignee" == "me" ]]; then
-    local profile
-    profile=$(api_get "/my/profile.json")
-    echo "$profile" | jq -r '.id'
-  elif [[ "$assignee" =~ ^[0-9]+$ ]]; then
-    echo "$assignee"
+  # Use resolve_person_id which handles "me", names, emails, and numeric IDs
+  local resolved
+  resolved=$(resolve_person_id "$assignee" 2>/dev/null)
+  if [[ -n "$resolved" ]]; then
+    echo "$resolved"
   else
-    # Invalid format - return empty to signal error
+    # Return empty to signal error (caller handles error message)
     echo ""
   fi
 }

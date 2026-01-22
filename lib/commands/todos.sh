@@ -75,18 +75,15 @@ _todos_list() {
     esac
   done
 
-  # Use project from context if not specified
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project> or set in .basecamp/config.json" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Build path based on context
   local path
   if [[ -n "$todolist" ]]; then
+    # Resolve todolist name to ID if needed
+    todolist=$(resolve_todolist_id "$todolist" "$project") || \
+      die "$(format_resolve_error todolist "$todolist")" $EXIT_NOT_FOUND
     path="/buckets/$project/todolists/$todolist/todos.json"
   else
     # Get todoset ID from project dock
@@ -189,15 +186,14 @@ _todos_list_md() {
 
 _todos_show() {
   local todo_id="$1"
-  local project="${2:-$(get_project_id)}"
+  local project="${2:-}"
 
   if [[ -z "$todo_id" ]]; then
     die "Todo ID required" $EXIT_USAGE "Usage: bcq todos show <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/todos/$todo_id.json")
@@ -287,18 +283,20 @@ cmd_todo_create() {
     die "Todo content required" $EXIT_USAGE "Usage: bcq todo \"content\" [options]"
   fi
 
-  # Get project from context if not specified
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project> or set in .basecamp/config.json" $EXIT_USAGE
-  fi
-
-  # Get todolist from context if not specified
-  if [[ -z "$todolist" ]]; then
+  # Resolve todolist (supports names, IDs, and config fallback)
+  if [[ -n "$todolist" ]]; then
+    todolist=$(resolve_todolist_id "$todolist" "$project") || \
+      die "$(format_resolve_error todolist "$todolist")" $EXIT_NOT_FOUND
+  else
     todolist=$(get_config "todolist_id")
+    if [[ -n "$todolist" ]]; then
+      # Resolve config value in case it's a name
+      todolist=$(resolve_todolist_id "$todolist" "$project") || \
+        die "$(format_resolve_error todolist "$todolist")" $EXIT_NOT_FOUND
+    fi
   fi
 
   if [[ -z "$todolist" ]]; then
@@ -312,7 +310,7 @@ cmd_todo_create() {
   fi
 
   if [[ -z "$todolist" ]]; then
-    die "No todolist found. Use --list <id>" $EXIT_USAGE
+    die "No todolist found. Use --list <todolist>" $EXIT_USAGE
   fi
 
   # Build payload
@@ -375,13 +373,8 @@ cmd_todo_complete() {
     die "Todo ID(s) required" $EXIT_USAGE "Usage: bcq done <id> [id...] --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project> or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local completed=()
   local failed=()
@@ -445,13 +438,8 @@ cmd_todo_uncomplete() {
     die "Todo ID(s) required" $EXIT_USAGE "Usage: bcq reopen <id> [id...]"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local reopened=()
   local failed=()
@@ -547,13 +535,8 @@ _todos_sweep() {
       "Use --comment and/or --complete"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Build list args
   local list_args=(--in "$project")
@@ -673,9 +656,8 @@ _todos_list_json() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get todoset ID from project dock
   local project_data todoset
@@ -806,13 +788,8 @@ _todos_position() {
     die "Position required" $EXIT_USAGE "Use --to <position> (1 = top)"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --argjson pos "$position" '{position: $pos}')
