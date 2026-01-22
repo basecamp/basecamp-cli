@@ -51,14 +51,8 @@ _messages_list() {
     esac
   done
 
-  # Use project from context if not specified
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project> or set in .basecamp/config.json" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get message board ID from project dock
   local project_data message_board_id
@@ -128,13 +122,8 @@ _messages_show() {
     die "Message ID required" $EXIT_USAGE "Usage: bcq messages show <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/messages/$message_id.json")
@@ -205,13 +194,8 @@ _messages_create() {
     die "Message subject required" $EXIT_USAGE "Usage: bcq message \"subject\" --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get message board ID from project dock
   local project_data message_board_id
@@ -283,13 +267,8 @@ _messages_update() {
     die "Subject or content required" $EXIT_USAGE "Use --subject and/or --content"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload="{}"
   [[ -n "$subject" ]] && payload=$(echo "$payload" | jq --arg s "$subject" '. + {subject: $s}')
@@ -331,13 +310,8 @@ _messages_pin() {
     die "Message ID required" $EXIT_USAGE "Usage: bcq messages pin <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_post "/buckets/$project/recordings/$message_id/pin.json" "{}" >/dev/null
 
@@ -375,13 +349,8 @@ _messages_unpin() {
     die "Message ID required" $EXIT_USAGE "Usage: bcq messages unpin <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_delete "/buckets/$project/recordings/$message_id/pin.json" >/dev/null
 

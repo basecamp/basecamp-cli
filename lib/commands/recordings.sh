@@ -169,13 +169,8 @@ _recordings_status() {
     die "Recording ID required" $EXIT_USAGE "Usage: bcq recordings $new_status <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_put "/buckets/$project/recordings/$recording_id/status/$new_status.json" "{}")
@@ -242,13 +237,8 @@ _recordings_visibility() {
     die "Visibility required" $EXIT_USAGE "Use --visible or --hidden"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --argjson visible "$visible" '{visible_to_clients: $visible}')

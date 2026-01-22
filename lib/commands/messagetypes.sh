@@ -46,13 +46,8 @@ _messagetypes_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/categories.json")
@@ -116,13 +111,8 @@ _messagetype_show() {
     die "Message type ID required" $EXIT_USAGE "Usage: bcq messagetypes show <id> --project <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/categories/$type_id.json")
@@ -209,13 +199,8 @@ _messagetype_create() {
     die "--icon required" $EXIT_USAGE "Usage: bcq messagetypes create \"Name\" --icon \"emoji\""
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --arg name "$name" --arg icon "$icon" '{name: $name, icon: $icon}')
@@ -270,13 +255,8 @@ _messagetype_update() {
     die "Message type ID required" $EXIT_USAGE "Usage: bcq messagetypes update <id> [options]"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload="{}"
 
@@ -329,13 +309,8 @@ _messagetype_delete() {
     die "Message type ID required" $EXIT_USAGE "Usage: bcq messagetypes delete <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_delete "/buckets/$project/categories/$type_id.json"
 

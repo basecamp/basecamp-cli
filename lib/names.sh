@@ -419,10 +419,12 @@ format_resolve_error() {
 
 # Require a project ID (from argument or config), resolving names if needed
 # Args: $1 - optional project (name/ID from flag, or empty to use config)
+#       $2 - optional custom hint for error message (default: "Use --in <project> or set in .basecamp/config.json")
 # Returns: resolved numeric project ID
 # Dies: if project not specified and not in config, or if resolution fails
 require_project_id() {
   local input="${1:-}"
+  local hint="${2:-Use --in <project> or set in .basecamp/config.json}"
   local project
 
   # Use input if provided, otherwise get from config
@@ -433,7 +435,7 @@ require_project_id() {
   fi
 
   if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project> or set in .basecamp/config.json" $EXIT_USAGE
+    die "No project specified. $hint" $EXIT_USAGE
   fi
 
   # Resolve name to ID (resolve_project_id handles numeric IDs efficiently)

@@ -72,7 +72,7 @@ load test_helper
 
   run bcq timesheet project
   assert_failure
-  assert_output_contains "Project ID required"
+  assert_output_contains "No project specified"
 }
 
 @test "timesheet recording without id shows error" {

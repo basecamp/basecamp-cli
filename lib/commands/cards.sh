@@ -78,13 +78,8 @@ _cards_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get card table from project dock
   local project_data card_table_id
@@ -172,13 +167,8 @@ _cards_columns() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get card table from project dock
   local project_data card_table_id
@@ -271,13 +261,8 @@ _cards_column_show() {
     die "Column ID required" $EXIT_USAGE "Usage: bcq cards column <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/card_tables/columns/$column_id.json")
@@ -351,13 +336,8 @@ _cards_column_create() {
     die "Column title required" $EXIT_USAGE "Usage: bcq cards column create \"title\" --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get card table ID from project dock
   local project_data card_table_id
@@ -420,13 +400,8 @@ _cards_column_update() {
     die "No update fields provided" $EXIT_USAGE "Use --title or --description"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload="{}"
   [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')
@@ -473,13 +448,8 @@ _cards_column_move() {
     die "--position required" $EXIT_USAGE "Specify target position (1-indexed)"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get card table ID
   local project_data card_table_id
@@ -528,13 +498,8 @@ _cards_column_watch() {
     die "Column ID required" $EXIT_USAGE "Usage: bcq cards column watch <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_post "/buckets/$project/card_tables/lists/$column_id/subscription.json" '{}' >/dev/null
 
@@ -567,13 +532,8 @@ _cards_column_unwatch() {
     die "Column ID required" $EXIT_USAGE "Usage: bcq cards column unwatch <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_delete "/buckets/$project/card_tables/lists/$column_id/subscription.json" >/dev/null
 
@@ -606,13 +566,8 @@ _cards_column_on_hold() {
     die "Column ID required" $EXIT_USAGE "Usage: bcq cards column on-hold <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_post "/buckets/$project/card_tables/columns/$column_id/on_hold.json" '{}')
@@ -646,13 +601,8 @@ _cards_column_no_on_hold() {
     die "Column ID required" $EXIT_USAGE "Usage: bcq cards column no-on-hold <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_delete "/buckets/$project/card_tables/columns/$column_id/on_hold.json")
@@ -695,13 +645,8 @@ _cards_column_color() {
     die "--color required" $EXIT_USAGE "Colors: white, red, orange, yellow, green, blue, aqua, purple, gray, pink, brown"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --arg c "$color" '{color: $c}')
@@ -759,13 +704,8 @@ _cards_steps() {
     die "Card ID required" $EXIT_USAGE "Usage: bcq cards steps <card_id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/card_tables/cards/$card_id.json")
@@ -853,13 +793,8 @@ _cards_step_create() {
     die "--card required" $EXIT_USAGE "Specify the card ID"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n --arg title "$title" '{title: $title}')
@@ -925,13 +860,8 @@ _cards_step_update() {
     die "No update fields provided" $EXIT_USAGE "Use --title, --due, or --assignees"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload="{}"
   [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')
@@ -976,13 +906,8 @@ _cards_step_complete() {
     die "Step ID required" $EXIT_USAGE "Usage: bcq cards step complete <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload='{"completion": "on"}'
@@ -1019,13 +944,8 @@ _cards_step_uncomplete() {
     die "Step ID required" $EXIT_USAGE "Usage: bcq cards step uncomplete <id> --project <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload='{"completion": "off"}'
@@ -1080,13 +1000,8 @@ _cards_step_move() {
     die "--position required" $EXIT_USAGE "Specify target position (0-indexed)"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   payload=$(jq -n \
@@ -1103,15 +1018,14 @@ _cards_step_move() {
 
 _cards_show() {
   local card_id="$1"
-  local project="${2:-$(get_project_id)}"
+  local project="${2:-}"
 
   if [[ -z "$card_id" ]]; then
     die "Card ID required" $EXIT_USAGE "Usage: bcq cards show <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/card_tables/cards/$card_id.json")
@@ -1191,13 +1105,8 @@ _cards_create() {
     die "Card title required" $EXIT_USAGE "Usage: bcq card create \"title\" --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get card table and first column if not specified
   local project_data card_table_id
@@ -1280,13 +1189,8 @@ _cards_move() {
     die "Target column required" $EXIT_USAGE "Usage: bcq cards move <id> --to \"Column\""
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get card table and find target column
   local project_data card_table_id
@@ -1369,13 +1273,8 @@ _cards_update() {
     die "At least one field required" $EXIT_USAGE "Use --title, --content, --due, or --assignee"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project or set in .basecamp/config.json"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload="{}"
   [[ -n "$title" ]] && payload=$(echo "$payload" | jq --arg t "$title" '. + {title: $t}')

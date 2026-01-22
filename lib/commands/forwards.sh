@@ -50,13 +50,8 @@ _forwards_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get inbox ID from project dock if not provided
   if [[ -z "$inbox_id" ]]; then
@@ -128,13 +123,8 @@ _forward_show() {
     die "Forward ID required" $EXIT_USAGE "Usage: bcq forwards show <id> --project <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/inbox_forwards/$forward_id.json")
@@ -210,13 +200,8 @@ _inbox_show() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Get inbox ID from project dock if not provided
   if [[ -z "$inbox_id" ]]; then
@@ -287,13 +272,8 @@ _forward_replies_list() {
     die "Forward ID required" $EXIT_USAGE "Usage: bcq forwards replies <forward_id> --project <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/inbox_forwards/$forward_id/replies.json")
@@ -365,13 +345,8 @@ _forward_reply_show() {
     die "Reply ID required" $EXIT_USAGE "Usage: bcq forwards reply <forward_id> <reply_id> --project <id>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/inbox_forwards/$forward_id/replies/$reply_id.json")

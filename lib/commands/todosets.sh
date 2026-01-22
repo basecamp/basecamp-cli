@@ -62,13 +62,8 @@ _todoset_show() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --project <id> or set default"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   if [[ -z "$todoset_id" ]]; then
     todoset_id=$(_get_todoset_id "$project")

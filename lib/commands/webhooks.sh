@@ -48,13 +48,8 @@ _webhooks_list() {
     esac
   done
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified. Use --in <project>" $EXIT_USAGE
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/webhooks.json")
@@ -115,13 +110,8 @@ _webhooks_show() {
     die "Webhook ID required" $EXIT_USAGE "Usage: bcq webhooks show <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local response
   response=$(api_get "/buckets/$project/webhooks/$webhook_id.json")
@@ -202,13 +192,8 @@ _webhooks_create() {
     die "Webhook URL required" $EXIT_USAGE "Usage: bcq webhooks create --url <https://...> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   local payload
   if [[ -n "$types" ]]; then
@@ -277,13 +262,8 @@ _webhooks_update() {
     die "Webhook ID required" $EXIT_USAGE "Usage: bcq webhooks update <id> --url <url> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   # Build payload with only specified fields
   local payload="{}"
@@ -332,13 +312,8 @@ _webhooks_delete() {
     die "Webhook ID required" $EXIT_USAGE "Usage: bcq webhooks delete <id> --in <project>"
   fi
 
-  if [[ -z "$project" ]]; then
-    project=$(get_project_id)
-  fi
-
-  if [[ -z "$project" ]]; then
-    die "No project specified" $EXIT_USAGE "Use --in <project>"
-  fi
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
 
   api_delete "/buckets/$project/webhooks/$webhook_id.json" >/dev/null
 
