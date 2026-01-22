@@ -666,15 +666,17 @@ OPTIONS
   --in, --project, -p <id>  Project ID or name
   --vault, --folder <id>    Parent folder ID (default: root)
   --content, --body, -b     Document body content
+  --draft                   Create as draft (default: published)
 
 EXAMPLES
   bcq files doc --title "Meeting Notes" --in 123
   bcq files doc --title "Spec" --content "## Overview" --in "My Project"
+  bcq files doc --title "WIP Notes" --draft --in 123
 EOF
 }
 
 _documents_create() {
-  local title="" project="" vault_id="" content=""
+  local title="" project="" vault_id="" content="" draft=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -701,6 +703,10 @@ _documents_create() {
         [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
         title="$2"
         shift 2
+        ;;
+      --draft)
+        draft=true
+        shift
         ;;
       -*)
         die "Unknown option: $1" $EXIT_USAGE "Run: bcq files doc --help"
@@ -732,6 +738,13 @@ _documents_create() {
   if [[ -n "$content" ]]; then
     payload=$(echo "$payload" | jq --arg c "$content" '. + {content: $c}')
   fi
+
+  # Default to active (published) status unless --draft is specified
+  local status="active"
+  if [[ "$draft" == true ]]; then
+    status="drafted"
+  fi
+  payload=$(echo "$payload" | jq --arg s "$status" '. + {status: $s}')
 
   local response
   response=$(api_post "/buckets/$project/vaults/$vault_id/documents.json" "$payload")
@@ -865,8 +878,9 @@ Manage Docs & Files (vaults, uploads, documents).
     --in, -p <project>      Project ID
     --vault, --folder       Parent folder ID (default: root)
     --type <type>           Item type (vault, document, upload)
-    --title, -n <title>     New title (for update)
+    --title, -n <title>     Document/folder title (required for doc)
     --content, -b <text>    Content/body (for create/update)
+    --draft                 Create document as draft (default: published)
     --description, -d       Description (for upload)
     --name                  Base name without extension (for upload)
 
@@ -881,9 +895,10 @@ Manage Docs & Files (vaults, uploads, documents).
     # List only documents
     bcq files docs --in 12345
 
-    # Create document
+    # Create document (published by default)
     bcq files doc --title "Meeting Notes" --in 12345
     bcq files doc --title "Spec" --content "## Overview" --in 12345
+    bcq files doc --title "WIP Notes" --draft --in 12345
 
     # Upload a file
     bcq files upload report.pdf --in 12345
