@@ -9,8 +9,8 @@ cmd_forwards() {
   local action="${1:-}"
 
   case "$action" in
-    list|ls|"") shift || true; _forwards_list "$@" ;;
-    show|get) shift; _forward_show "$@" ;;
+    list|"") shift || true; _forwards_list "$@" ;;
+    show) shift; _forward_show "$@" ;;
     inbox) shift; _inbox_show "$@" ;;
     replies) shift; _forward_replies_list "$@" ;;
     reply) shift; _forward_reply_show "$@" ;;

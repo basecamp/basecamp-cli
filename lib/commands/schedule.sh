@@ -6,9 +6,9 @@ cmd_schedule() {
   local action="${1:-}"
 
   case "$action" in
-    entries|list) shift; _schedule_entries "$@" ;;
-    show|get) shift; _schedule_entry_show "$@" ;;
-    create|add) shift; _schedule_entry_create "$@" ;;
+    entries) shift; _schedule_entries "$@" ;;
+    show) shift; _schedule_entry_show "$@" ;;
+    create) shift; _schedule_entry_create "$@" ;;
     update) shift; _schedule_entry_update "$@" ;;
     settings) shift; _schedule_update "$@" ;;
     --help|-h) _help_schedule ;;

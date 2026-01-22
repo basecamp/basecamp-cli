@@ -15,8 +15,8 @@ cmd_messages() {
 
   case "$action" in
     list) _messages_list "$@" ;;
-    get|show) _messages_show "$@" ;;
-    create|post) _messages_create "$@" ;;
+    show) _messages_show "$@" ;;
+    create) _messages_create "$@" ;;
     pin) _messages_pin "$@" ;;
     unpin) _messages_unpin "$@" ;;
     update) _messages_update "$@" ;;

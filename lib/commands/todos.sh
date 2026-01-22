@@ -15,11 +15,11 @@ cmd_todos() {
 
   case "$action" in
     list) _todos_list "$@" ;;
-    get|show) _todos_show "$@" ;;
+    show) _todos_show "$@" ;;
     create) cmd_todo_create "$@" ;;
-    complete|done) cmd_todo_complete "$@" ;;
-    uncomplete|reopen) cmd_todo_uncomplete "$@" ;;
-    position|reorder|move) _todos_position "$@" ;;
+    complete) cmd_todo_complete "$@" ;;
+    uncomplete) cmd_todo_uncomplete "$@" ;;
+    position) _todos_position "$@" ;;
     sweep) _todos_sweep "$@" ;;
     --help|-h) _help_todos ;;
     *)

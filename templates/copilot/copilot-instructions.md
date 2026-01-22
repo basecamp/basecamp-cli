@@ -2,13 +2,15 @@
 
 You have access to `bcq` CLI for Basecamp project management.
 
+**Always pass `--json` for structured output.**
+
 ## Quick Reference
 
 ```bash
-# Read
-bcq projects                      # List projects
-bcq todos --in <project_id>       # List todos
-bcq search "query"                # Search
+# Read (always use --json)
+bcq projects --json                      # List projects
+bcq todos --in <project_id> --json       # List todos
+bcq search "query" --json                # Search
 
 # Write
 bcq todo "Task" --in <project_id> # Create todo

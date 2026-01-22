@@ -9,9 +9,9 @@ cmd_lineup() {
   local action="${1:-}"
 
   case "$action" in
-    create|add) shift; _lineup_marker_create "$@" ;;
+    create) shift; _lineup_marker_create "$@" ;;
     update) shift; _lineup_marker_update "$@" ;;
-    delete|remove|rm) shift; _lineup_marker_delete "$@" ;;
+    delete) shift; _lineup_marker_delete "$@" ;;
     --help|-h) _help_lineup ;;
     "")
       die "Action required" $EXIT_USAGE "Run: bcq lineup --help"

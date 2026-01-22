@@ -16,6 +16,7 @@ source "$BCQ_ROOT/lib/core.sh"
 source "$BCQ_ROOT/lib/config.sh"
 source "$BCQ_ROOT/lib/api.sh"
 source "$BCQ_ROOT/lib/auth.sh"
+source "$BCQ_ROOT/lib/help.sh"
 
 # Load command handlers
 for cmd_file in "$BCQ_ROOT/lib/commands"/*.sh; do
@@ -194,6 +195,9 @@ main() {
     # Auth & config
     auth)       cmd_auth "$@" ;;
     config)     cmd_config "$@" ;;
+
+    # Discovery
+    commands)   cmd_commands "$@" ;;
 
     # MCP server
     mcp)        cmd_mcp "$@" ;;

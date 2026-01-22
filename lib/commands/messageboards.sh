@@ -6,7 +6,7 @@ cmd_messageboards() {
   local action="${1:-}"
 
   case "$action" in
-    show|get) shift; _messageboard_show "$@" ;;
+    show) shift; _messageboard_show "$@" ;;
     --help|-h) _help_messageboards ;;
     "")
       _messageboard_show "$@"

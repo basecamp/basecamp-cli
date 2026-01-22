@@ -6,12 +6,12 @@ cmd_templates() {
   local action="${1:-}"
 
   case "$action" in
-    list|ls) shift; _templates_list "$@" ;;
-    show|get) shift; _template_show "$@" ;;
-    create|new) shift; _template_create "$@" ;;
+    list) shift; _templates_list "$@" ;;
+    show) shift; _template_show "$@" ;;
+    create) shift; _template_create "$@" ;;
     update) shift; _template_update "$@" ;;
-    delete|trash) shift; _template_delete "$@" ;;
-    construct|build) shift; _template_construct "$@" ;;
+    delete) shift; _template_delete "$@" ;;
+    construct) shift; _template_construct "$@" ;;
     construction) shift; _template_construction_status "$@" ;;
     --help|-h) _help_templates ;;
     "")

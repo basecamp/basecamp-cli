@@ -13,10 +13,10 @@ cmd_webhooks() {
 
   case "$action" in
     list) _webhooks_list "$@" ;;
-    get|show) _webhooks_show "$@" ;;
+    show) _webhooks_show "$@" ;;
     create) _webhooks_create "$@" ;;
     update) _webhooks_update "$@" ;;
-    delete|destroy) _webhooks_delete "$@" ;;
+    delete) _webhooks_delete "$@" ;;
     --help|-h) _help_webhooks ;;
     *)
       if [[ "$action" =~ ^[0-9]+$ ]]; then

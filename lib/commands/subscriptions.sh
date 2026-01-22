@@ -5,7 +5,7 @@ cmd_subscriptions() {
   local action="${1:-}"
 
   case "$action" in
-    show|get|"") shift || true; _subscriptions_show "$@" ;;
+    show|"") shift || true; _subscriptions_show "$@" ;;
     subscribe) shift; _subscriptions_subscribe "$@" ;;
     unsubscribe) shift; _subscriptions_unsubscribe "$@" ;;
     add) shift; _subscriptions_update "add" "$@" ;;

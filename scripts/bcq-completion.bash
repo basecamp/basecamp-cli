@@ -19,13 +19,13 @@ _bcq_completions() {
   }
 
   # Top-level commands (alphabetical)
-  local commands="assign auth campfire card cards comment config docs done files help me message messages mcp people projects recordings reopen search show todo todolists todos unassign uploads vaults webhooks"
+  local commands="assign auth campfire card cards checkins comments commands config docs done events files forwards help lineup me message messageboards messages messagetypes mcp people projects recordings reopen schedule search show skill subscriptions templates timesheet todo todolists todolistgroups todos todosets unassign uploads vaults version webhooks"
 
   # Subcommands by resource
   local projects_actions="list show"
-  local todos_actions="list show create complete uncomplete reopen position reorder"
+  local todos_actions="list show create complete uncomplete position"
   local todolists_actions="list show"
-  local messages_actions="list show create post"
+  local messages_actions="list show create"
   local campfire_actions="list messages post"
   local cards_actions="list columns show create move"
   local people_actions="list show pingable"
@@ -134,6 +134,19 @@ _bcq_completions() {
       else
         COMPREPLY=($(compgen -W "--type --project --creator --limit $global_flags" -- "$cur"))
       fi
+      ;;
+    schedule)
+      if [[ $cword -eq 2 ]]; then
+        COMPREPLY=($(compgen -W "entries show create update settings $project_flags" -- "$cur"))
+      else
+        COMPREPLY=($(compgen -W "$project_flags --starts-at --ends-at --all-day --summary $global_flags" -- "$cur"))
+      fi
+      ;;
+    commands)
+      COMPREPLY=($(compgen -W "--category $global_flags" -- "$cur"))
+      ;;
+    skill|version|help|reopen)
+      COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
       ;;
     auth)
       if [[ $cword -eq 2 ]]; then
