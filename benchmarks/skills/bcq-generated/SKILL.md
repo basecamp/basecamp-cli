@@ -1,7 +1,14 @@
 # Basecamp via bcq (Generated)
 
-Use the `bcq` CLI for all Basecamp operations. Run `bcq --help` for commands,
-`bcq <command> --help` for details.
+Use `bcq` for all Basecamp operations. **Always pass `--json` for structured output.**
+
+## Critical: Explicit JSON Output
+
+Always pass `--json` flag. Do NOT rely on implicit output detection:
+```bash
+bcq todos --project ID --json     # Correct: explicit JSON
+bcq todos --project ID            # Avoid: format depends on TTY
+```
 
 ## Domain Invariants
 
@@ -19,10 +26,10 @@ These trip up models — internalize them:
 ## Preferred Patterns
 
 ```bash
-bcq todos list --project ID
-bcq projects
-bcq search "query"
-bcq show TYPE/ID
+bcq todos --project ID --json
+bcq projects --json
+bcq search "query" --json
+bcq show TYPE/ID --json
 ```
 
 ## Anti-Patterns
@@ -30,19 +37,20 @@ bcq show TYPE/ID
 - **Calling Basecamp API directly via curl**: Bypasses auth refresh, rate limiting, and pagination handling
 - **Assuming project has a feature without checking dock**: Not all projects have all tools enabled
 - **Using todoset_id where todolist_id is expected**: Common confusion; todoset is the container, todolist is the actual list
+- **Relying on implicit JSON output detection**: Output format depends on TTY detection. Always pass --json for predictable structured output.
 
 ## Commands Reference
 
-Run `bcq --help` for full command list. Key commands:
+Run `bcq --help --json` for full command list. Key commands:
 
 | Command | Description |
 |---------|-------------|
-| `bcq projects` | List projects |
-| `bcq todos` | List todos |
-| `bcq todo "content"` | Create a todo |
-| `bcq done <id>` | Complete a todo |
-| `bcq comment "text" <id>` | Add a comment |
-| `bcq search "query"` | Search across projects |
-| `bcq show TYPE/ID` | Show any recording |
+| `bcq projects --json` | List projects |
+| `bcq todos --project ID --json` | List todos in project |
+| `bcq todo "content" --project ID` | Create a todo |
+| `bcq done <id> --project ID` | Complete a todo |
+| `bcq comment "text" --on <id>` | Add a comment |
+| `bcq search "query" --json` | Search across projects |
+| `bcq show TYPE/ID --json` | Show any recording |
 
 Never call the Basecamp API directly when bcq can do it.

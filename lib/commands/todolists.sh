@@ -15,7 +15,7 @@ cmd_todolists() {
   case "$action" in
     create) _todolists_create "$@" ;;
     list) _todolists_list "$@" ;;
-    show|get) _todolists_show "$@" ;;
+    show) _todolists_show "$@" ;;
     update) _todolists_update "$@" ;;
     --help|-h) _help_todolists ;;
     *)
@@ -330,6 +330,10 @@ _help_todolists() {
 
 Manage todolists in a project.
 
+NOTE: A "todoset" is the container; "todolists" are the actual lists inside it.
+Each project has one todoset containing multiple todolists. Use `bcq todosets`
+to see the container, use `bcq todolists` to manage the lists.
+
 ### Usage
 
     bcq todolists [action] [options]
@@ -386,8 +390,8 @@ cmd_todolistgroups() {
   case "$action" in
     create) _todolistgroups_create "$@" ;;
     list) _todolistgroups_list "$@" ;;
-    position|reorder) _todolistgroups_position "$@" ;;
-    show|get) _todolistgroups_show "$@" ;;
+    position) _todolistgroups_position "$@" ;;
+    show) _todolistgroups_show "$@" ;;
     update) _todolistgroups_update "$@" ;;
     --help|-h) _help_todolistgroups ;;
     *)
@@ -683,7 +687,7 @@ _todolistgroups_position() {
   done
 
   if [[ -z "$group_id" ]]; then
-    die "Group ID required" $EXIT_USAGE "Usage: bcq todolistgroups reorder <id> --to <position>"
+    die "Group ID required" $EXIT_USAGE "Usage: bcq todolistgroups position <id> --to <position>"
   fi
 
   if [[ -z "$position" ]]; then
@@ -759,7 +763,7 @@ into categories. Groups themselves function as todolists.
     bcq todolistgroups update 11111 --name "Phase 2" --in 12345
 
     # Move group to top
-    bcq todolistgroups reorder 11111 --to 1 --in 12345
+    bcq todolistgroups position 11111 --to 1 --in 12345
 
     # Add todos to a group (groups are todolists)
     bcq todo "Task" --list 11111 --in 12345

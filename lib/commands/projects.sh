@@ -8,9 +8,9 @@ cmd_projects() {
 
   case "$action" in
     create) _projects_create "$@" ;;
-    delete|destroy|trash) _projects_delete "$@" ;;
+    delete) _projects_delete "$@" ;;
     list) _projects_list "$@" ;;
-    get|show) _projects_show "$@" ;;
+    show) _projects_show "$@" ;;
     update) _projects_update "$@" ;;
     --help|-h) _help_projects ;;
     *)

@@ -123,32 +123,37 @@ _quick_start_md() {
 
 
 cmd_help() {
-  local command=""
+  local topic=""
+  local json_output=false
+  local format
+  format=$(get_format)
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help|-h) _help_help; return ;;
-      --json) _help_json; return ;;
+      --json) json_output=true; shift ;;
       --*) shift ;;  # Skip unknown flags
-      *) command="$1"; shift ;;
+      *) topic="$1"; shift ;;
     esac
   done
 
-  # Command-specific help
-  if [[ -n "$command" ]]; then
-    case "$command" in
-      projects) _help_projects ;;
-      todos) _help_todos ;;
-      auth) _help_auth ;;
-      config) _help_config ;;
-      *) _help_default ;;
-    esac
+  # Help topic (exit-codes, json-output)
+  # Pass json flag to topic handler for topic-specific JSON output
+  if [[ -n "$topic" ]]; then
+    _help_topic "$topic" "$json_output"
     return
   fi
 
-  # Default: agent-optimized compact help
-  _help_default
+  # JSON output only when explicitly requested (not auto-detected)
+  # Help is fundamentally human-facing; --json must be explicit
+  if [[ "$json_output" == "true" ]]; then
+    _help_full_json
+    return
+  fi
+
+  # Default: comprehensive categorized help
+  _help_full
 }
 
 # Emit SKILL.md — separate command, not a help format
@@ -176,16 +181,21 @@ _help_help() {
 bcq help - Show help information
 
 USAGE
-  bcq help [command]
+  bcq help [topic]
   bcq help --json
 
+TOPICS
+  exit-codes    Exit code reference
+  json-output   JSON output format documentation
+
 OPTIONS
-  --json    Machine-readable JSON output
+  --json        Machine-readable JSON output
 
 EXAMPLES
-  bcq help           Agent-optimized help (default)
-  bcq help todos     Command-specific help
-  bcq skill          Generate SKILL.md (separate command)
+  bcq help              Full categorized help
+  bcq help exit-codes   Exit code reference
+  bcq help --json       JSON output for programmatic use
+  bcq skill             Generate SKILL.md (separate command)
 EOF
 }
 
@@ -241,8 +251,15 @@ tools:
 
 # Basecamp via bcq
 
-Use the \`bcq\` CLI for all Basecamp operations. Run \`bcq --help\` for commands,
-\`bcq <command> --help\` for details.
+Use \`bcq\` for all Basecamp operations. **Always pass \`--json\` for structured output.**
+
+## Critical: Explicit JSON Output
+
+Always pass \`--json\` flag. Do NOT rely on implicit output detection:
+\`\`\`bash
+bcq todos --project ID --json     # Correct: explicit JSON
+bcq todos --project ID            # Avoid: format depends on TTY
+\`\`\`
 
 ## Domain Invariants
 
@@ -285,13 +302,13 @@ Run `bcq --help` for full command list. Key commands:
 
 | Command | Description |
 |---------|-------------|
-| `bcq projects` | List projects |
-| `bcq todos` | List todos |
-| `bcq todo "content"` | Create a todo |
-| `bcq done <id>` | Complete a todo |
-| `bcq comment "text" <id>` | Add a comment |
-| `bcq search "query"` | Search across projects |
-| `bcq show TYPE/ID` | Show any recording |
+| `bcq projects --json` | List projects |
+| `bcq todos --project ID --json` | List todos in project |
+| `bcq todo "content" --project ID` | Create a todo |
+| `bcq done <id> --project ID` | Complete a todo |
+| `bcq comment "text" --on <id>` | Add a comment |
+| `bcq search "query" --json` | Search across projects |
+| `bcq show TYPE/ID --json` | Show any recording |
 
 Never call the Basecamp API directly when bcq can do it.
 EOF
@@ -449,6 +466,11 @@ EXAMPLES
   bcq todos --status completed     Completed todos
   bcq reopen 123                   Reopen completed todo
   bcq todos position 123 --to 1    Move todo to top
+
+NOTES
+  Todos use a boolean 'completed' field, not a status string. Filter by status
+  using --status active or --status completed. When assigning, use assignee_ids
+  as an array (even for single assignment).
 EOF
 }
 

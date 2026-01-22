@@ -1,2 +1,2 @@
-Use `bcq` for all Basecamp operations. Run `bcq --help` for commands.
-Do not call Basecamp API directly if bcq can do it.
+Use `bcq` for all Basecamp operations. Always pass `--json` for structured output.
+Run `bcq --help` for commands. Do not call Basecamp API directly.

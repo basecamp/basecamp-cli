@@ -11,7 +11,7 @@ cmd_people() {
     list|"") _people_list "$@" ;;
     pingable) _people_pingable "$@" ;;
     remove) _people_remove "$@" ;;
-    show|get) _people_show "$@" ;;
+    show) _people_show "$@" ;;
     --help|-h) _help_people ;;
     *)
       # If it looks like an ID, show that person
