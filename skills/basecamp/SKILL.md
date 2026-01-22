@@ -18,6 +18,8 @@ argument-hint: "[action] [args...]"
 
 Interact with Basecamp: create todos, check project status, link code to tasks.
 
+**Always pass `--json` for structured output.**
+
 ## Context
 
 Check current project context:
@@ -35,11 +37,11 @@ git branch --show-current 2>/dev/null || echo "Not a git repo"
 ### List & Navigate
 
 ```bash
-bcq projects                      # List all projects
-bcq todos --in <project_id>       # List todos in project
-bcq todos --assignee me           # My todos (requires project)
-bcq people                        # List people
-bcq people --project <id>         # People on a project
+bcq projects --json                      # List all projects
+bcq todos --in <project_id> --json       # List todos in project
+bcq todos --assignee me --json           # My todos (requires project)
+bcq people --json                        # List people
+bcq people --project <id> --json         # People on a project
 ```
 
 ### Create & Modify
@@ -55,7 +57,7 @@ bcq comment "Text" --on <todo_id>                 # Add comment
 ### Cards & Campfire
 
 ```bash
-bcq cards --in <project_id>                       # List cards
+bcq cards --in <project_id> --json                # List cards
 bcq card "Title" --in <project_id>                # Create card
 bcq cards move <card_id> --to "Done"              # Move card
 bcq campfire post "Message" --in <project_id>    # Post to campfire
@@ -105,8 +107,8 @@ bcq config set project_id <project_id>
 bcq config set todolist_id <todolist_id>  # Optional default
 
 # Now commands use defaults
-bcq todos         # No --in needed
-bcq todo "Task"   # Creates in default project/list
+bcq todos --json         # No --in needed
+bcq todo "Task"          # Creates in default project/list
 ```
 
 ## Smart Defaults
@@ -117,11 +119,10 @@ bcq todo "Task"   # Creates in default project/list
 
 ## Output
 
-Default: Markdown in TTY, JSON when piped.
+Always pass `--json` for predictable structured output:
 
 ```bash
-bcq todos --in 123              # Markdown table
-bcq todos --in 123 --json       # JSON envelope
+bcq todos --in 123 --json       # JSON envelope (recommended)
 bcq todos --in 123 -q           # Raw JSON (no envelope)
 ```
 
@@ -131,3 +132,8 @@ If you see "Permission denied: read-only token":
 ```bash
 bcq auth login --scope full    # Re-auth with write access
 ```
+
+## Learn More
+
+For API domain model (buckets, recordings, dock, etc.):
+https://github.com/basecamp/bc3-api#key-concepts

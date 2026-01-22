@@ -2,6 +2,8 @@
 
 You have access to `bcq` CLI for Basecamp project management.
 
+**Always pass `--json` for structured output.**
+
 ## Skills
 
 Load these skill files for detailed command reference:
@@ -13,10 +15,10 @@ Load these skill files for detailed command reference:
 
 ### Read Operations
 ```bash
-bcq projects                      # List all projects
-bcq todos --in <project_id>       # List todos in project
-bcq todos --assignee me           # My assigned todos
-bcq search "query"                # Search across projects
+bcq projects --json                      # List all projects
+bcq todos --in <project_id> --json       # List todos in project
+bcq todos --assignee me --json           # My assigned todos
+bcq search "query" --json                # Search across projects
 ```
 
 ### Write Operations
@@ -26,11 +28,12 @@ bcq done <todo_id>                          # Complete todo
 bcq comment "Text" --on <recording_id>      # Add comment
 ```
 
-## Output Modes
+## Output
+
+Always pass `--json` for predictable structured output:
 
 ```bash
-bcq todos --in 123        # Markdown (human-readable)
-bcq todos --in 123 --json # JSON envelope with breadcrumbs
+bcq todos --in 123 --json # JSON envelope (recommended)
 bcq todos --in 123 -q     # Raw JSON data only
 ```
 
