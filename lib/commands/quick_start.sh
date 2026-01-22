@@ -421,18 +421,104 @@ EOF
 
 _help_projects() {
   cat << 'EOF'
-bcq projects - List projects
+bcq projects - Manage projects
 
 USAGE
-  bcq projects [options]
+  bcq projects [action] [options]
+
+ACTIONS
+  list              List projects (default)
+  show <id>         Show project details
+  create            Create a new project (requires --name)
+  update <id>       Update project name/description
+  delete <id>       Trash a project
 
 OPTIONS
   --json, -j        JSON output
   --status <s>      Filter by status (active, archived, trashed)
 
 EXAMPLES
-  bcq projects
-  bcq projects --json | jq '.[0]'
+  bcq projects                                  List all projects
+  bcq projects --json | jq '.[0]'               Get first project as JSON
+  bcq projects show 12345                       Show project details
+  bcq projects create --name "New Project"      Create project
+  bcq projects update 123 --name "Renamed"      Rename project
+  bcq projects delete 123                       Trash project
+
+Run 'bcq projects <action> --help' for action-specific help.
+EOF
+}
+
+_help_projects_create() {
+  cat << 'EOF'
+bcq projects create - Create a new project
+
+USAGE
+  bcq projects create --name "name" [options]
+
+OPTIONS
+  --name, -n <name>                  Project name (required)
+  --description, --desc, -d <text>   Project description
+
+EXAMPLES
+  bcq projects create --name "My Project"
+  bcq projects create --name "My Project" --description "A great project"
+  bcq projects create -n "My Project" -d "Short desc"
+EOF
+}
+
+_help_projects_show() {
+  cat << 'EOF'
+bcq projects show - Show project details
+
+USAGE
+  bcq projects show <id>
+
+ARGUMENTS
+  <id>              Project ID
+
+EXAMPLES
+  bcq projects show 12345
+  bcq projects show 12345 --json
+EOF
+}
+
+_help_projects_update() {
+  cat << 'EOF'
+bcq projects update - Update a project
+
+USAGE
+  bcq projects update <id> [options]
+
+ARGUMENTS
+  <id>              Project ID
+
+OPTIONS
+  --name, -n <name>                  New project name
+  --description, --desc, -d <text>   New project description
+
+EXAMPLES
+  bcq projects update 123 --name "New Name"
+  bcq projects update 123 --description "Updated description"
+  bcq projects update 123 -n "Name" -d "Desc"
+EOF
+}
+
+_help_projects_delete() {
+  cat << 'EOF'
+bcq projects delete - Trash a project
+
+USAGE
+  bcq projects delete <id>
+
+ARGUMENTS
+  <id>              Project ID
+
+NOTE
+  This moves the project to trash, it does not permanently delete it.
+
+EXAMPLES
+  bcq projects delete 12345
 EOF
 }
 
