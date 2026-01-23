@@ -183,6 +183,7 @@ main() {
     todolistgroups) cmd_todolistgroups "$@" ;;
     todos)      cmd_todos "$@" ;;
     uploads)    cmd_uploads "$@" ;;
+    url)        cmd_url "$@" ;;
     vaults)     cmd_vaults "$@" ;;
     webhooks)   cmd_webhooks "$@" ;;
 
