@@ -251,7 +251,9 @@ _api_delete() {
   path=$(_api_parse_path "$path")
 
   local response
-  response=$(api_delete "$path" 2>/dev/null || echo '{}')
+  response=$(api_delete "$path" 2>/dev/null) || true
+  # Handle 204 No Content (empty response)
+  [[ -z "$response" ]] && response='{}'
 
   output "$response" "✓ DELETE $path"
 }
