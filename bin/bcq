@@ -155,6 +155,7 @@ main() {
 
   case "$command" in
     # Core commands (alphabetical)
+    api)        cmd_api "$@" ;;
     campfire)   cmd_campfire "$@" ;;
     cards)      cmd_cards "$@" ;;
     checkins)   cmd_checkins "$@" ;;
