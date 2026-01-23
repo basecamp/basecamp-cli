@@ -1075,7 +1075,7 @@ _cards_show_md() {
 }
 
 _cards_create() {
-  local title="" project="" column=""
+  local title="" content="" project="" column=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1086,6 +1086,11 @@ _cards_create() {
       --title|-t)
         [[ -z "${2:-}" ]] && die "--title requires a value" $EXIT_USAGE
         title="$2"
+        shift 2
+        ;;
+      --content|--body|-b)
+        [[ -z "${2:-}" ]] && die "--content requires a value" $EXIT_USAGE
+        content="$2"
         shift 2
         ;;
       --in|--project|-p)
@@ -1145,6 +1150,7 @@ _cards_create() {
 
   local payload
   payload=$(jq -n --arg title "$title" '{title: $title}')
+  [[ -n "$content" ]] && payload=$(echo "$payload" | jq --arg c "$content" '. + {content: $c}')
 
   local response
   response=$(api_post "/buckets/$project/card_tables/lists/$column_id/cards.json" "$payload")
@@ -1324,12 +1330,14 @@ USAGE
 
 OPTIONS
   --title, -t <text>        Card title (required)
+  --content, -b <text>      Card body/description (HTML supported)
   --in, --project, -p <id>  Project ID or name
   --column, -c <id|name>    Column ID or name (defaults to first column)
 
 EXAMPLES
   bcq card --title "New feature" --in 123
-  bcq card -t "Bug fix" --column "In Progress" --in "My Project"
+  bcq card -t "Bug fix" --content "Details about the bug" --in "My Project"
+  bcq card -t "Task" -b "<strong>Priority:</strong> High" --column "In Progress" --in 123
 EOF
 }
 
@@ -1418,8 +1426,8 @@ Manage cards in Card Tables (Kanban boards).
     # List all cards in project
     bcq cards --in 12345
 
-    # Create card
-    bcq card --title "New feature" --in 12345
+    # Create card with body content
+    bcq card --title "New feature" --content "Details here" --in 12345
 
     # Column operations
     bcq cards column create "In Progress" --in 12345
