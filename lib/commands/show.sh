@@ -69,6 +69,9 @@ cmd_show() {
     card|cards)
       endpoint="/buckets/$project/card_tables/cards/$id.json"
       ;;
+    card-table|card_table|cardtable)
+      endpoint="/buckets/$project/card_tables/$id.json"
+      ;;
     document|documents)
       endpoint="/buckets/$project/documents/$id.json"
       ;;
@@ -77,7 +80,7 @@ cmd_show() {
       endpoint="/buckets/$project/recordings/$id.json"
       ;;
     *)
-      die "Unknown type: $type" $EXIT_USAGE "Supported: todo, todolist, message, comment, card, document"
+      die "Unknown type: $type" $EXIT_USAGE "Supported: todo, todolist, message, comment, card, card-table, document"
       ;;
   esac
 
@@ -146,7 +149,7 @@ Show details of any Basecamp recording by ID.
 
 ### Types
 
-    todo, todolist, message, comment, card, document
+    todo, todolist, message, comment, card, card-table, document
 
 If no type specified, uses generic recording lookup.
 
