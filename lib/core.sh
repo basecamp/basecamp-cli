@@ -657,7 +657,25 @@ require_command() {
   fi
 }
 
+# URL encode a string (RFC 3986)
+# Handles UTF-8 by encoding each byte of multi-byte characters
 urlencode() {
   local string="$1"
-  python3 -c "import urllib.parse; print(urllib.parse.quote('''$string''', safe=''))"
+  local strlen=${#string}
+  local encoded=""
+  local pos c
+
+  for (( pos=0 ; pos<strlen ; pos++ )); do
+    c=${string:$pos:1}
+    case "$c" in
+      [-_.~a-zA-Z0-9]) encoded+="$c" ;;
+      *)
+        # Convert character to UTF-8 bytes and percent-encode each byte
+        local bytes
+        bytes=$(printf '%s' "$c" | od -An -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g')
+        encoded+="$bytes"
+        ;;
+    esac
+  done
+  echo "$encoded"
 }
