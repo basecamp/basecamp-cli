@@ -177,6 +177,7 @@ main() {
     subscriptions) cmd_subscriptions "$@" ;;
     templates)  cmd_templates "$@" ;;
     timesheet)  cmd_timesheet "$@" ;;
+    tools)      cmd_tools "$@" ;;
     todosets)   cmd_todosets "$@" ;;
     todolists)  cmd_todolists "$@" ;;
     todolistgroups) cmd_todolistgroups "$@" ;;
