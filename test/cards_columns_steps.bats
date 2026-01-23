@@ -1,7 +1,48 @@
 #!/usr/bin/env bats
-# cards_columns_steps.bats - Test column and step command error handling
+# cards_columns_steps.bats - Test card, column, and step command error handling
 
 load test_helper
+
+
+# Card create tests
+
+@test "card --help shows help with --content option" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq card --help
+  assert_success
+  assert_output_contains "bcq card"
+  assert_output_contains "--content"
+  assert_output_contains "--title"
+}
+
+@test "card --content without value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq card --title "Test" --content
+  assert_failure
+  assert_output_contains "--content requires a value"
+}
+
+@test "card with unknown option shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq card --title "Test" --foo
+  assert_failure
+  assert_output_contains "Unknown option: --foo"
+}
+
+@test "card without title shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq card --content "Body only"
+  assert_failure
+  assert_output_contains "Card title required"
+}
 
 
 # Column show errors
