@@ -70,10 +70,17 @@ _url_parse() {
   # Parse path components
   # Expected formats:
   #   /{account}/buckets/{bucket}/{type}/{id}
+  #   /{account}/buckets/{bucket}/card_tables/cards/{id}  (nested card path)
   #   /{account}/projects/{project}
   #   /{account}/buckets/{bucket}/{type}  (list view)
 
-  if [[ "$path_only" =~ ^/([0-9]+)/buckets/([0-9]+)/([^/]+)/([0-9]+) ]]; then
+  if [[ "$path_only" =~ ^/([0-9]+)/buckets/([0-9]+)/card_tables/cards/([0-9]+) ]]; then
+    # Card URL: /{account}/buckets/{bucket}/card_tables/cards/{id}
+    account_id="${BASH_REMATCH[1]}"
+    bucket_id="${BASH_REMATCH[2]}"
+    recording_type="cards"
+    recording_id="${BASH_REMATCH[3]}"
+  elif [[ "$path_only" =~ ^/([0-9]+)/buckets/([0-9]+)/([^/]+)/([0-9]+) ]]; then
     # Full recording URL: /{account}/buckets/{bucket}/{type}/{id}
     account_id="${BASH_REMATCH[1]}"
     bucket_id="${BASH_REMATCH[2]}"
