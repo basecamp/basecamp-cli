@@ -25,8 +25,15 @@ Interact with Basecamp: create todos, check project status, link code to tasks.
 
 ## URL Parsing
 
-When given a Basecamp URL, parse it to understand what's being referenced:
+Parse a Basecamp URL to extract its components:
 
+```bash
+bcq url parse "https://3.basecamp.com/2914079/buckets/41746046/messages/9478142982#__recording_9488783598" --json
+```
+
+Returns: `account_id`, `bucket_id`, `type`, `recording_id`, `comment_id` (from fragment).
+
+**URL Structure:**
 ```
 https://3.basecamp.com/{account_id}/buckets/{project_id}/{type}/{id}#__recording_{comment_id}
 ```
@@ -36,18 +43,25 @@ https://3.basecamp.com/{account_id}/buckets/{project_id}/{type}/{id}#__recording
 - `/buckets/27/messages/123#__recording_456` → Comment 456 on message 123
 - `/buckets/27/card_tables/cards/789` → Card 789 in project 27
 - `/buckets/27/todos/101` → Todo 101 in project 27
-- `/buckets/27/todolists/202` → Todolist 202 in project 27
 
 **Fetch with bcq:**
 ```bash
-# Show any recording by ID (works for messages, todos, cards, comments, etc.)
+# Show any recording by ID
 bcq show <type> <id> --project <project_id> --json
 
-# Example: fetch a card
-bcq show card 9486682178 --project 27 --json
+# Example: fetch a message
+bcq show message 9478142982 --project 41746046 --json
+```
 
-# Example: fetch a comment (comments are also recordings)
-bcq show comment 9500689518 --project 27 --json
+**Replying to Comments:**
+
+Comments are flat on the parent recording (no nested replies). To reply:
+```bash
+# Parse the URL to get IDs
+bcq url parse "https://3.basecamp.com/.../messages/123#__recording_456" --json
+
+# Comment on the parent recording (message 123), not the comment
+bcq comment --content "Your reply" --on 123 --project <project_id>
 ```
 
 ## Context
@@ -89,7 +103,7 @@ bcq comment --content "Text" --on <recording_id> --project <id>  # Add comment
 ```bash
 bcq cards --in <project_id> --json                       # List cards
 bcq card --title "Title" --in <project_id>               # Create card
-bcq cards move <card_id> --to "Done" --in <project_id>   # Move card
+bcq cards move <card_id> --to "Done" --project <project_id>  # Move card
 bcq campfire post --content "Message" --in <project_id>  # Post to campfire
 ```
 
@@ -184,7 +198,6 @@ bcq auth login --scope full    # Re-auth with write access
 All shortcut commands require explicit flags:
 - `bcq todo --content "text"` (not `bcq todo "text"`)
 - `bcq card --title "title"` (not `bcq card "title"`)
-- `bcq project --name "name"` (not `bcq project "name"`)
 
 ## Learn More
 
