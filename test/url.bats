@@ -85,6 +85,18 @@ load test_helper
   assert_json_value ".data.type_singular" "campfire"
 }
 
+@test "bcq url parse parses card URL with nested path" {
+  run bcq url parse "https://3.basecamp.com/2914079/buckets/27/card_tables/cards/9486682178#__recording_9500689518" --json
+  assert_success
+  is_valid_json
+  assert_json_value ".data.account_id" "2914079"
+  assert_json_value ".data.bucket_id" "27"
+  assert_json_value ".data.type" "cards"
+  assert_json_value ".data.type_singular" "card"
+  assert_json_value ".data.recording_id" "9486682178"
+  assert_json_value ".data.comment_id" "9500689518"
+}
+
 
 # Project URLs
 
