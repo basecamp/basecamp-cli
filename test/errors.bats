@@ -187,6 +187,34 @@ load test_helper
   assert_output_not_contains "Unknown option"
 }
 
+@test "show --help lists card-table type" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq show --help
+  assert_success
+  assert_output_contains "card-table"
+}
+
+@test "show unknown type error mentions card-table" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq show foobar 456
+  assert_failure
+  assert_output_contains "Unknown type: foobar"
+  assert_output_contains "card-table"
+}
+
+@test "show card-table parses type correctly" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # Will fail on API call (no project), but should parse card-table type correctly
+  run bcq show card-table 456 --project 123
+  assert_output_not_contains "Unknown type"
+}
+
 # Assignee validation
 
 @test "invalid assignee format shows clear error" {
