@@ -128,12 +128,12 @@ assert_json_not_null() {
 # Fixtures
 
 create_global_config() {
-  local content="${1:-{}}"
+  local content="${1:-"{}"}"
   echo "$content" > "$TEST_HOME/.config/basecamp/config.json"
 }
 
 create_local_config() {
-  local content="${1:-{}}"
+  local content="${1:-"{}"}"
   echo "$content" > "$TEST_PROJECT/.basecamp/config.json"
 }
 
@@ -189,13 +189,13 @@ EOF
 }
 
 create_system_config() {
-  local content="${1:-{}}"
+  local content="${1:-"{}"}"
   mkdir -p "$TEST_TEMP_DIR/etc/basecamp"
   echo "$content" > "$TEST_TEMP_DIR/etc/basecamp/config.json"
 }
 
 create_repo_config() {
-  local content="${1:-{}}"
+  local content="${1:-"{}"}"
   local git_root="${2:-$TEST_PROJECT}"
   mkdir -p "$git_root/.basecamp"
   echo "$content" > "$git_root/.basecamp/config.json"
