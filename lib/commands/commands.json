@@ -1,0 +1,296 @@
+{
+  "categories": [
+    {"id": "core", "label": "Core Commands"},
+    {"id": "shortcut", "label": "Shortcut Commands"},
+    {"id": "files", "label": "Files & Docs"},
+    {"id": "scheduling", "label": "Scheduling & Time"},
+    {"id": "organization", "label": "Organization"},
+    {"id": "communication", "label": "Communication"},
+    {"id": "search", "label": "Search & Browse"},
+    {"id": "auth", "label": "Auth & Config"},
+    {"id": "additional", "label": "Additional Commands"}
+  ],
+  "commands": [
+    {
+      "name": "projects",
+      "category": "core",
+      "description": "Manage projects",
+      "actions": ["list", "show", "create", "update", "delete"]
+    },
+    {
+      "name": "todos",
+      "category": "core",
+      "description": "Manage to-dos",
+      "actions": ["list", "show", "create", "complete", "uncomplete", "position"]
+    },
+    {
+      "name": "todolists",
+      "category": "core",
+      "description": "Manage to-do lists",
+      "actions": ["list", "show", "create", "update"]
+    },
+    {
+      "name": "todosets",
+      "category": "core",
+      "description": "View to-do set containers",
+      "actions": ["show"]
+    },
+    {
+      "name": "todolistgroups",
+      "category": "core",
+      "description": "Manage to-do list groups",
+      "actions": ["list", "show", "create", "update", "position"]
+    },
+    {
+      "name": "messages",
+      "category": "core",
+      "description": "Manage messages",
+      "actions": ["list", "show", "create", "update", "pin", "unpin"]
+    },
+    {
+      "name": "campfire",
+      "category": "core",
+      "description": "Chat in Campfire rooms",
+      "actions": ["list", "messages", "post", "line", "delete"]
+    },
+    {
+      "name": "cards",
+      "category": "core",
+      "description": "Manage Kanban cards",
+      "actions": ["list", "show", "create", "update", "move", "columns", "steps"]
+    },
+    {
+      "name": "todo",
+      "category": "shortcut",
+      "description": "Create a to-do",
+      "actions": [],
+      "alias_for": "todos create"
+    },
+    {
+      "name": "done",
+      "category": "shortcut",
+      "description": "Complete a to-do",
+      "actions": [],
+      "alias_for": "todos complete"
+    },
+    {
+      "name": "reopen",
+      "category": "shortcut",
+      "description": "Uncomplete a to-do",
+      "actions": [],
+      "alias_for": "todos uncomplete"
+    },
+    {
+      "name": "message",
+      "category": "shortcut",
+      "description": "Post a message",
+      "actions": [],
+      "alias_for": "messages create"
+    },
+    {
+      "name": "card",
+      "category": "shortcut",
+      "description": "Create a card",
+      "actions": [],
+      "alias_for": "cards create"
+    },
+    {
+      "name": "comment",
+      "category": "shortcut",
+      "description": "Add a comment",
+      "actions": []
+    },
+    {
+      "name": "assign",
+      "category": "shortcut",
+      "description": "Assign a recording",
+      "actions": []
+    },
+    {
+      "name": "unassign",
+      "category": "shortcut",
+      "description": "Remove assignment",
+      "actions": []
+    },
+    {
+      "name": "files",
+      "category": "files",
+      "description": "Manage files, documents, and folders",
+      "actions": ["list", "show", "create", "update"]
+    },
+    {
+      "name": "uploads",
+      "category": "files",
+      "description": "List and manage uploads",
+      "actions": ["list", "show"]
+    },
+    {
+      "name": "vaults",
+      "category": "files",
+      "description": "Manage folders (vaults)",
+      "actions": ["list", "show", "create"]
+    },
+    {
+      "name": "docs",
+      "category": "files",
+      "description": "Manage documents",
+      "actions": ["list", "show", "create", "update"]
+    },
+    {
+      "name": "schedule",
+      "category": "scheduling",
+      "description": "Manage schedule entries",
+      "actions": ["show", "entries", "create", "update"]
+    },
+    {
+      "name": "timesheet",
+      "category": "scheduling",
+      "description": "View time tracking reports",
+      "actions": ["report", "project", "recording"]
+    },
+    {
+      "name": "checkins",
+      "category": "scheduling",
+      "description": "View automatic check-ins",
+      "actions": ["questions", "question", "answers", "answer"]
+    },
+    {
+      "name": "people",
+      "category": "organization",
+      "description": "Manage people and access",
+      "actions": ["list", "show", "pingable", "add", "remove"]
+    },
+    {
+      "name": "templates",
+      "category": "organization",
+      "description": "Manage project templates",
+      "actions": ["list", "show", "create", "update", "delete", "construct"]
+    },
+    {
+      "name": "webhooks",
+      "category": "organization",
+      "description": "Manage webhooks",
+      "actions": ["list", "show", "create", "update", "delete"]
+    },
+    {
+      "name": "lineup",
+      "category": "organization",
+      "description": "Manage lineup markers",
+      "actions": ["create", "update", "delete"]
+    },
+    {
+      "name": "messageboards",
+      "category": "communication",
+      "description": "View message boards",
+      "actions": ["show"]
+    },
+    {
+      "name": "messagetypes",
+      "category": "communication",
+      "description": "Manage message categories",
+      "actions": ["list", "show", "create", "update", "delete"]
+    },
+    {
+      "name": "forwards",
+      "category": "communication",
+      "description": "Manage email forwards (inbox)",
+      "actions": ["list", "show", "inbox", "replies", "reply"]
+    },
+    {
+      "name": "subscriptions",
+      "category": "communication",
+      "description": "Manage notification subscriptions",
+      "actions": ["show", "subscribe", "unsubscribe", "add", "remove"]
+    },
+    {
+      "name": "comments",
+      "category": "communication",
+      "description": "Manage comments",
+      "actions": ["list", "show", "update"]
+    },
+    {
+      "name": "search",
+      "category": "search",
+      "description": "Search across projects",
+      "actions": []
+    },
+    {
+      "name": "recordings",
+      "category": "search",
+      "description": "Browse recordings by type/status",
+      "actions": ["list", "trash", "archive", "restore", "visibility"]
+    },
+    {
+      "name": "show",
+      "category": "search",
+      "description": "Show any recording by ID",
+      "actions": []
+    },
+    {
+      "name": "events",
+      "category": "search",
+      "description": "View recording change history",
+      "actions": []
+    },
+    {
+      "name": "auth",
+      "category": "auth",
+      "description": "Authenticate with Basecamp",
+      "actions": ["login", "logout", "status", "refresh"]
+    },
+    {
+      "name": "config",
+      "category": "auth",
+      "description": "Manage configuration",
+      "actions": ["show", "init", "set", "unset", "project"]
+    },
+    {
+      "name": "me",
+      "category": "auth",
+      "description": "Show current user profile",
+      "actions": []
+    },
+    {
+      "name": "commands",
+      "category": "additional",
+      "description": "List all commands",
+      "actions": []
+    },
+    {
+      "name": "mcp",
+      "category": "additional",
+      "description": "MCP server integration",
+      "actions": ["server"]
+    },
+    {
+      "name": "skill",
+      "category": "additional",
+      "description": "Generate SKILL.md",
+      "actions": []
+    },
+    {
+      "name": "api",
+      "category": "additional",
+      "description": "Raw API access",
+      "actions": []
+    },
+    {
+      "name": "help",
+      "category": "additional",
+      "description": "Show help",
+      "actions": []
+    },
+    {
+      "name": "version",
+      "category": "additional",
+      "description": "Show version",
+      "actions": []
+    },
+    {
+      "name": "self-update",
+      "category": "additional",
+      "description": "Update bcq",
+      "actions": []
+    }
+  ]
+}

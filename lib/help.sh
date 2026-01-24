@@ -1,72 +1,30 @@
 #!/usr/bin/env bash
 # help.sh - Comprehensive help system
 
-# Command metadata for programmatic discovery
-# Format: "command:category:description:actions"
-BCQ_COMMANDS=(
-  # Core commands
-  "projects:core:Manage projects:list,show,create,update,delete"
-  "todos:core:Manage to-dos:list,show,create,complete,uncomplete,position"
-  "todolists:core:Manage to-do lists:list,show,create,update"
-  "todosets:core:View to-do set containers:show"
-  "todolistgroups:core:Manage to-do list groups:list,show,create,update,position"
-  "messages:core:Manage messages:list,show,create,update,pin,unpin"
-  "campfire:core:Chat in Campfire rooms:list,messages,post,line,delete"
-  "cards:core:Manage Kanban cards:list,show,create,update,move,columns,steps"
+# Command metadata is now stored in lib/commands/commands.json
+# This provides a single source of truth for command discovery
 
-  # Shortcuts
-  "todo:shortcut:Create a to-do:todos create"
-  "done:shortcut:Complete a to-do:todos complete"
-  "reopen:shortcut:Uncomplete a to-do:todos uncomplete"
-  "message:shortcut:Post a message:messages create"
-  "card:shortcut:Create a card:cards create"
-  "comment:shortcut:Add a comment:"
-  "assign:shortcut:Assign a recording:"
-  "unassign:shortcut:Remove assignment:"
+# Path to commands metadata (relative to script directory)
+_BCQ_COMMANDS_JSON=""
 
-  # Files & docs
-  "files:files:Manage files, documents, and folders:list,show,create,update"
-  "uploads:files:List and manage uploads:list,show"
-  "vaults:files:Manage folders (vaults):list,show,create"
-  "docs:files:Manage documents:list,show,create,update"
+_get_commands_json_path() {
+  if [[ -z "$_BCQ_COMMANDS_JSON" ]]; then
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    _BCQ_COMMANDS_JSON="$script_dir/commands/commands.json"
+  fi
+  echo "$_BCQ_COMMANDS_JSON"
+}
 
-  # Scheduling & time
-  "schedule:scheduling:Manage schedule entries:show,entries,create,update"
-  "timesheet:scheduling:View time tracking reports:report,project,recording"
-  "checkins:scheduling:View automatic check-ins:questions,question,answers,answer"
-
-  # Organization
-  "people:organization:Manage people and access:list,show,pingable,add,remove"
-  "templates:organization:Manage project templates:list,show,create,update,delete,construct"
-  "webhooks:organization:Manage webhooks:list,show,create,update,delete"
-  "lineup:organization:Manage lineup markers:create,update,delete"
-
-  # Communication
-  "messageboards:communication:View message boards:show"
-  "messagetypes:communication:Manage message categories:list,show,create,update,delete"
-  "forwards:communication:Manage email forwards (inbox):list,show,inbox,replies,reply"
-  "subscriptions:communication:Manage notification subscriptions:show,subscribe,unsubscribe,add,remove"
-  "comments:communication:Manage comments:list,show,update"
-
-  # Search & browse
-  "search:search:Search across projects:"
-  "recordings:search:Browse recordings by type/status:list,trash,archive,restore,visibility"
-  "show:search:Show any recording by ID:"
-  "events:search:View recording change history:"
-
-  # Auth & config
-  "auth:auth:Authenticate with Basecamp:login,logout,status,refresh"
-  "config:auth:Manage configuration:show,init,set,unset,project"
-  "me:auth:Show current user profile:"
-
-  # Additional/meta
-  "commands:additional:List all commands:"
-  "mcp:additional:MCP server integration:server"
-  "skill:additional:Generate SKILL.md:"
-  "help:additional:Show help:"
-  "version:additional:Show version:"
-  "self-update:additional:Update bcq:"
-)
+_load_commands_metadata() {
+  local json_file
+  json_file=$(_get_commands_json_path)
+  if [[ -f "$json_file" ]]; then
+    cat "$json_file"
+  else
+    echo '{"categories": [], "commands": []}'
+  fi
+}
 
 # Help topics
 BCQ_HELP_TOPICS=(
@@ -162,38 +120,11 @@ EOF
 
 # JSON output for programmatic discovery
 _help_full_json() {
-  local commands_json="[]"
-  local categories_json='["core","shortcut","files","scheduling","organization","communication","search","auth","additional"]'
+  local metadata
+  metadata=$(_load_commands_metadata)
 
-  # Build commands array
-  for entry in "${BCQ_COMMANDS[@]}"; do
-    IFS=':' read -r name category description actions <<< "$entry"
-    local actions_json="[]"
-    if [[ -n "$actions" ]]; then
-      # Convert comma-separated to JSON array
-      actions_json=$(echo "$actions" | tr ',' '\n' | jq -R . | jq -s .)
-    fi
-
-    local cmd_obj
-    cmd_obj=$(jq -n \
-      --arg name "$name" \
-      --arg category "$category" \
-      --arg description "$description" \
-      --argjson actions "$actions_json" \
-      '{name: $name, category: $category, description: $description, actions: $actions}')
-
-    commands_json=$(echo "$commands_json" | jq --argjson cmd "$cmd_obj" '. + [$cmd]')
-  done
-
-  jq -n \
-    --arg version "$BCQ_VERSION" \
-    --argjson commands "$commands_json" \
-    --argjson categories "$categories_json" \
-    '{
-      version: $version,
-      commands: $commands,
-      categories: $categories
-    }'
+  # Return structured data from JSON file with version added
+  echo "$metadata" | jq --arg version "$BCQ_VERSION" '. + {version: $version}'
 }
 
 # Help topic: exit codes
@@ -351,36 +282,31 @@ cmd_commands() {
 }
 
 _commands_list_md() {
+  local metadata
+  metadata=$(_load_commands_metadata)
+
   echo "# bcq Commands"
   echo
 
-  local current_category=""
-  local category_names=(
-    "core:Core Commands"
-    "shortcut:Shortcut Commands"
-    "files:Files & Docs"
-    "scheduling:Scheduling & Time"
-    "organization:Organization"
-    "communication:Communication"
-    "search:Search & Browse"
-    "auth:Auth & Config"
-    "additional:Additional Commands"
-  )
+  # Iterate over categories from JSON
+  local categories
+  categories=$(echo "$metadata" | jq -r '.categories[] | "\(.id):\(.label)"')
 
-  for cat_entry in "${category_names[@]}"; do
-    IFS=':' read -r cat_key cat_name <<< "$cat_entry"
+  while IFS=: read -r cat_id cat_label; do
+    [[ -z "$cat_id" ]] && continue
 
-    echo "## $cat_name"
+    echo "## $cat_label"
     echo
 
-    for entry in "${BCQ_COMMANDS[@]}"; do
-      IFS=':' read -r name category description actions <<< "$entry"
-      if [[ "$category" == "$cat_key" ]]; then
-        printf "  %-14s %s\n" "$name" "$description"
-      fi
-    done
+    # Get commands for this category and format with printf for proper padding
+    echo "$metadata" | jq -r --arg cat "$cat_id" \
+      '.commands[] | select(.category == $cat) | "\(.name)\t\(.description)"' | \
+      while IFS=$'\t' read -r name desc; do
+        printf "  %-14s %s\n" "$name" "$desc"
+      done
+
     echo
-  done
+  done <<< "$categories"
 }
 
 _help_commands_cmd() {
