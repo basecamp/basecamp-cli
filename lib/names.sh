@@ -8,6 +8,13 @@
 # Cache directory (session-scoped temp files)
 _BCQ_NAMES_CACHE_DIR="${TMPDIR:-/tmp}/bcq-names-$$"
 
+# Clean up cache on shell exit to prevent disk leak
+# The trap is only set if not already set (allows nested sourcing)
+if [[ -z "${_BCQ_NAMES_TRAP_SET:-}" ]]; then
+  _BCQ_NAMES_TRAP_SET=1
+  trap '_names_clear_cache 2>/dev/null' EXIT
+fi
+
 # Global error message for resolution failures
 # Initialized here so it's always declared (resolver functions run in subshells
 # via command substitution, so their assignments don't reach the parent shell)
