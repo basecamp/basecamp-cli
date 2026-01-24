@@ -410,7 +410,182 @@ save_accounts() {
 }
 
 
-# Config Display
+# ============================================================================
+# JSON-First Config API (New)
+#
+# These functions provide a cleaner API with explicit source tracking.
+# The merged config and sources are stored as JSON for type safety.
+# ============================================================================
+
+BCQ_CONFIG_JSON='{}'
+BCQ_CONFIG_SOURCES_JSON='{}'
+
+# Helper: Read and validate a JSON config file
+# Returns valid JSON or '{}' if file is missing/invalid
+_read_json_config() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    local content
+    content=$(cat "$file" 2>/dev/null) || { echo '{}'; return; }
+    # Validate JSON, fall back to {} if malformed
+    if echo "$content" | jq -e . >/dev/null 2>&1; then
+      echo "$content"
+    else
+      debug "Warning: invalid JSON in $file, skipping"
+      echo '{}'
+    fi
+  else
+    echo '{}'
+  fi
+}
+
+# Load all config layers and merge into BCQ_CONFIG_JSON
+# Also builds BCQ_CONFIG_SOURCES_JSON with source tracking
+config_load() {
+  local system_json='{}'
+  local global_json='{}'
+  local repo_json='{}'
+  local local_json='{}'
+  local env_json='{}'
+  local flag_json='{}'
+
+  # Layer 1: System-wide config (lowest priority)
+  system_json=$(_read_json_config "$BCQ_SYSTEM_CONFIG_DIR/$BCQ_CONFIG_FILE")
+
+  # Layer 2: User/global config
+  global_json=$(_read_json_config "$BCQ_GLOBAL_CONFIG_DIR/$BCQ_CONFIG_FILE")
+
+  # Layer 3: Git repo root config
+  local git_root
+  git_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  if [[ -n "$git_root" ]]; then
+    repo_json=$(_read_json_config "$git_root/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE")
+  fi
+
+  # Layer 4: Local configs (walk up cwd tree, excluding git root)
+  # Collect all local configs then merge from root to cwd (closer overrides)
+  local dir="$PWD"
+  local local_configs=()
+  while [[ "$dir" != "/" ]]; do
+    local config_path="$dir/$BCQ_LOCAL_CONFIG_DIR/$BCQ_CONFIG_FILE"
+    if [[ -f "$config_path" ]] && [[ "$dir" != "$git_root" ]]; then
+      local_configs+=("$config_path")
+    fi
+    dir="$(dirname "$dir")"
+  done
+
+  # Merge local configs from root to cwd (reverse order, so closer overrides)
+  local_json='{}'
+  for ((i=${#local_configs[@]}-1; i>=0; i--)); do
+    local layer_json
+    layer_json=$(_read_json_config "${local_configs[$i]}")
+    local_json=$(printf '%s\n%s' "$local_json" "$layer_json" | jq -s '.[0] * .[1]')
+  done
+
+  # Layer 5: Environment variables
+  env_json=$(jq -n \
+    --arg account_id "${BASECAMP_ACCOUNT_ID:-}" \
+    --arg project_id "${BASECAMP_PROJECT_ID:-}" \
+    --arg todolist_id "${BASECAMP_TODOLIST_ID:-}" \
+    --arg access_token "${BASECAMP_ACCESS_TOKEN:-}" \
+    '{} |
+      if $account_id != "" then .account_id = $account_id else . end |
+      if $project_id != "" then .project_id = $project_id else . end |
+      if $todolist_id != "" then .todolist_id = $todolist_id else . end |
+      if $access_token != "" then .access_token = $access_token else . end')
+
+  # Layer 6: Command-line flags (highest priority)
+  flag_json=$(jq -n \
+    --arg account_id "${BCQ_ACCOUNT:-}" \
+    --arg project_id "${BCQ_PROJECT:-}" \
+    --arg cache_dir "${BCQ_CACHE_DIR:-}" \
+    '{} |
+      if $account_id != "" then .account_id = $account_id else . end |
+      if $project_id != "" then .project_id = $project_id else . end |
+      if $cache_dir != "" then .cache_dir = $cache_dir else . end')
+
+  # Merge layers (later overrides earlier)
+  # Use printf with newlines so jq -s can parse multiple JSON objects correctly
+  BCQ_CONFIG_JSON=$(printf '%s\n' "$system_json" "$global_json" "$repo_json" "$local_json" "$env_json" "$flag_json" | \
+    jq -s 'reduce .[] as $item ({}; . * $item)')
+
+  # Build sources map by walking layers from highest to lowest priority
+  # First key to set a value wins (since we go high to low)
+  BCQ_CONFIG_SOURCES_JSON=$(jq -n \
+    --argjson flag "$flag_json" \
+    --argjson env "$env_json" \
+    --argjson local "$local_json" \
+    --argjson repo "$repo_json" \
+    --argjson global "$global_json" \
+    --argjson system "$system_json" \
+    '
+    def add_sources(obj; source):
+      reduce (obj | keys[]) as $k (.; if has($k) | not then .[$k] = source else . end);
+
+    {} |
+    add_sources($flag; "flag") |
+    add_sources($env; "env") |
+    add_sources($local; "local") |
+    add_sources($repo; "repo") |
+    add_sources($global; "global") |
+    add_sources($system; "system")
+    ')
+}
+
+# Get a config value from the merged JSON config
+# Args: $1 - key, $2 - default (optional)
+# Returns: value or default
+config_get_json() {
+  local key="$1"
+  local default="${2:-}"
+  local value
+  value=$(echo "$BCQ_CONFIG_JSON" | jq -r --arg k "$key" '.[$k] // empty')
+  if [[ -n "$value" ]]; then
+    echo "$value"
+  else
+    echo "$default"
+  fi
+}
+
+# Check if a config key exists and has a non-null value
+# Args: $1 - key
+# Returns: 0 if exists, 1 if not
+config_has_json() {
+  local key="$1"
+  local value
+  value=$(echo "$BCQ_CONFIG_JSON" | jq -r --arg k "$key" '.[$k] // empty')
+  [[ -n "$value" ]]
+}
+
+# Get the source of a config value
+# Args: $1 - key
+# Returns: source name (flag, env, local, repo, global, system, unset)
+config_source_json() {
+  local key="$1"
+  local source
+  source=$(echo "$BCQ_CONFIG_SOURCES_JSON" | jq -r --arg k "$key" '.[$k] // "unset"')
+  echo "$source"
+}
+
+# Get all config with sources (for display)
+# Returns: JSON object with {key: {value: ..., source: ...}, ...}
+config_show_all() {
+  jq -n \
+    --argjson config "$BCQ_CONFIG_JSON" \
+    --argjson sources "$BCQ_CONFIG_SOURCES_JSON" \
+    '
+    $config | to_entries | map({
+      key: .key,
+      value: {
+        value: (if .key == "access_token" or .key == "refresh_token" then "***" else .value end),
+        source: ($sources[.key] // "unset")
+      }
+    }) | from_entries
+    '
+}
+
+
+# Config Display (Legacy)
 
 get_effective_config() {
   local result='{}' key value
@@ -480,3 +655,4 @@ get_config_source() {
 # Initialize
 
 load_config
+config_load
