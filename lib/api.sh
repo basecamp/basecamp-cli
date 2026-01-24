@@ -10,6 +10,7 @@
 BCQ_USER_AGENT="bcq/$BCQ_VERSION (https://github.com/basecamp/bcq)"
 BCQ_MAX_RETRIES="${BCQ_MAX_RETRIES:-5}"
 BCQ_BASE_DELAY="${BCQ_BASE_DELAY:-1}"
+BCQ_CACHE_TTL="${BCQ_CACHE_TTL:-86400}"  # 24 hours default
 
 
 # ETag Cache Helpers
@@ -50,8 +51,28 @@ _cache_get_etag() {
   local key="$1"
   local etags_file="$(_cache_dir)/etags.json"
   if [[ -f "$etags_file" ]]; then
-    jq -r --arg k "$key" '.[$k] // empty' "$etags_file" 2>/dev/null || true
+    jq -r --arg k "$key" '.[$k].etag // .[$k] // empty' "$etags_file" 2>/dev/null || true
   fi
+}
+
+_cache_get_timestamp() {
+  local key="$1"
+  local etags_file="$(_cache_dir)/etags.json"
+  if [[ -f "$etags_file" ]]; then
+    jq -r --arg k "$key" '.[$k].timestamp // 0' "$etags_file" 2>/dev/null || echo "0"
+  else
+    echo "0"
+  fi
+}
+
+_cache_is_expired() {
+  local key="$1"
+  local ttl="${2:-$BCQ_CACHE_TTL}"
+  local timestamp
+  timestamp=$(_cache_get_timestamp "$key")
+  local now
+  now=$(date +%s)
+  (( now - timestamp > ttl ))
 }
 
 _cache_get_body() {
@@ -76,6 +97,8 @@ _cache_set() {
   local etags_file="$cache_dir/etags.json"
   local body_file="$cache_dir/responses/${key}.body"
   local headers_file="$cache_dir/responses/${key}.headers"
+  local timestamp
+  timestamp=$(date +%s)
 
   mkdir -p "$cache_dir/responses"
 
@@ -87,12 +110,15 @@ _cache_set() {
     echo "$headers" > "${headers_file}.tmp" && mv "${headers_file}.tmp" "$headers_file"
   fi
 
-  # Update etags.json (create if missing)
+  # Update etags.json with etag and timestamp (create if missing)
+  # Format: {key: {etag: "...", timestamp: 123456}}
   if [[ -f "$etags_file" ]]; then
-    jq --arg k "$key" --arg v "$etag" '.[$k] = $v' "$etags_file" > "${etags_file}.tmp" \
+    jq --arg k "$key" --arg v "$etag" --argjson ts "$timestamp" \
+      '.[$k] = {etag: $v, timestamp: $ts}' "$etags_file" > "${etags_file}.tmp" \
       && mv "${etags_file}.tmp" "$etags_file"
   else
-    jq -n --arg k "$key" --arg v "$etag" '{($k): $v}' > "$etags_file"
+    jq -n --arg k "$key" --arg v "$etag" --argjson ts "$timestamp" \
+      '{($k): {etag: $v, timestamp: $ts}}' > "$etags_file"
   fi
 }
 
@@ -269,7 +295,12 @@ _api_request() {
     account_id=$(get_account_id 2>/dev/null || echo "")
     if [[ -n "$account_id" ]]; then
       cache_key=$(_cache_key "$account_id" "$url" "$token")
-      cached_etag=$(_cache_get_etag "$cache_key")
+      # Only use cached ETag if cache hasn't expired
+      if ! _cache_is_expired "$cache_key"; then
+        cached_etag=$(_cache_get_etag "$cache_key")
+      else
+        debug "Cache: entry expired, forcing fresh request"
+      fi
     fi
   fi
 
@@ -465,12 +496,15 @@ api_get_all() {
         6)  die "Could not resolve host" $EXIT_NETWORK ;;
         7)  die "Connection refused" $EXIT_NETWORK ;;
         28) die "Connection timed out" $EXIT_NETWORK ;;
+        35) die "SSL/TLS handshake failed" $EXIT_NETWORK ;;
         *)  die "Network error (curl exit $curl_exit)" $EXIT_NETWORK ;;
       esac
     fi
 
     http_code=$(echo "$output" | tail -n1)
     response=$(echo "$output" | sed '$d')
+
+    debug "HTTP $http_code (page $page)"
 
     case "$http_code" in
       200)
@@ -505,8 +539,32 @@ api_get_all() {
         fi
         die "Authentication failed (HTTP 401). Run: bcq auth login" $EXIT_AUTH
         ;;
+      403)
+        die "Permission denied" $EXIT_FORBIDDEN \
+          "You don't have access to this resource"
+        ;;
+      404)
+        die "Not found" $EXIT_NOT_FOUND
+        ;;
+      500)
+        die "Server error (500)" $EXIT_API \
+          "The server encountered an internal error"
+        ;;
+      502|503|504)
+        # Gateway errors - transient, retry with backoff
+        ((page_attempt++))
+        if (( page_attempt > BCQ_MAX_RETRIES )); then
+          die "Gateway error after $BCQ_MAX_RETRIES retries" $EXIT_API
+        fi
+        local delay=$((BCQ_BASE_DELAY * 2 ** (page_attempt - 1)))
+        info "Gateway error ($http_code), retrying in ${delay}s..."
+        sleep "$delay"
+        continue  # Retry same page
+        ;;
       *)
-        die "API request failed (HTTP $http_code)" $EXIT_API
+        local error_msg
+        error_msg=$(echo "$response" | jq -r '.error // .message // "Unknown error"' 2>/dev/null || echo "Request failed")
+        die "$error_msg (HTTP $http_code)" $EXIT_API
         ;;
     esac
 
