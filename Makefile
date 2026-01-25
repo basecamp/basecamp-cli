@@ -131,6 +131,38 @@ check: fmt-check vet test
 run: build
 	$(BUILD_DIR)/$(BINARY)
 
+# --- Security targets ---
+
+# Run all security checks
+.PHONY: security
+security: lint vuln secrets
+
+# Run vulnerability scanner
+.PHONY: vuln
+vuln:
+	@echo "Running govulncheck..."
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+# Run secret scanner
+.PHONY: secrets
+secrets:
+	@command -v gitleaks >/dev/null || (echo "Install gitleaks: brew install gitleaks" && exit 1)
+	gitleaks detect --source . --verbose
+
+# Run fuzz tests (30s each by default)
+.PHONY: fuzz
+fuzz:
+	@echo "Running dateparse fuzz test..."
+	go test -fuzz=FuzzParseFrom -fuzztime=30s ./internal/dateparse/
+	@echo "Running URL parsing fuzz test..."
+	go test -fuzz=FuzzURLPathParsing -fuzztime=30s ./internal/commands/
+
+# Run quick fuzz tests (10s each, for CI)
+.PHONY: fuzz-quick
+fuzz-quick:
+	go test -fuzz=FuzzParseFrom -fuzztime=10s ./internal/dateparse/
+	go test -fuzz=FuzzURLPathParsing -fuzztime=10s ./internal/commands/
+
 # Show help
 .PHONY: help
 help:
@@ -155,4 +187,12 @@ help:
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  check          Run all checks (fmt-check, vet, test)"
 	@echo "  run            Build and run"
+	@echo ""
+	@echo "Security:"
+	@echo "  security       Run all security checks (lint, vuln, secrets)"
+	@echo "  vuln           Run govulncheck for dependency vulnerabilities"
+	@echo "  secrets        Run gitleaks for secret detection"
+	@echo "  fuzz           Run fuzz tests (30s each)"
+	@echo "  fuzz-quick     Run quick fuzz tests (10s each, for CI)"
+	@echo ""
 	@echo "  help           Show this help"
