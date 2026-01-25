@@ -105,13 +105,18 @@ jobs:
       - name: Build binary
         run: go build -o bin/bcq ./cmd/bcq
 
-      - name: Install BATS
-        run: |
-          git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
-          sudo /tmp/bats-core/install.sh /usr/local
+      - name: Cache BATS
+        id: cache-bats
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/libexec/bats-core
+          key: bats-1.11.0
 
-      - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install BATS
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
 
       - name: Run BATS integration tests
         run: bats e2e/
