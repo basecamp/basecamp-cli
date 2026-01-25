@@ -1,0 +1,38 @@
+# golangci-lint v2 configuration
+version: "2"
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/basecamp/bcq
+
+linters:
+  # Disable errcheck - too many false positives for CLI tools
+  disable:
+    - errcheck
+  enable:
+    - misspell
+    - bodyclose
+    - noctx
+
+  settings:
+    misspell:
+      locale: US
+
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files have relaxed rules
+      - path: _test\.go
+        linters:
+          - gosec
+          - bodyclose

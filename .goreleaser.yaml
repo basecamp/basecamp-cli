@@ -1,0 +1,110 @@
+# GoReleaser configuration for bcq
+# Docs: https://goreleaser.com
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: bcq
+    main: ./cmd/bcq
+    binary: bcq
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+      - freebsd
+      - openbsd
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/basecamp/bcq/internal/version.Version={{.Version}}
+      - -X github.com/basecamp/bcq/internal/version.Commit={{.Commit}}
+      - -X github.com/basecamp/bcq/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: basecamp
+    name: bcq
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  header: |
+    ## bcq v{{.Version}}
+
+    CLI for Basecamp. See the [README](https://github.com/basecamp/bcq) for installation and usage.
+
+brews:
+  - name: bcq
+    repository:
+      owner: basecamp
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    folder: Formula
+    homepage: "https://github.com/basecamp/bcq"
+    description: "Command-line interface for Basecamp"
+    license: "MIT"
+    skip_upload: auto
+    test: |
+      system "#{bin}/bcq", "--version"
+    install: |
+      bin.install "bcq"
+
+# Windows package manager (shares homebrew-tap repo)
+# Users install with:
+#   scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+#   scoop install bcq
+scoops:
+  - name: bcq
+    repository:
+      owner: basecamp
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    folder: bucket
+    homepage: "https://github.com/basecamp/bcq"
+    description: "Command-line interface for Basecamp"
+    license: MIT
+    skip_upload: auto
