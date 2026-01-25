@@ -11,6 +11,8 @@ BCQ_USER_AGENT="bcq/$BCQ_VERSION (https://github.com/basecamp/bcq)"
 BCQ_MAX_RETRIES="${BCQ_MAX_RETRIES:-5}"
 BCQ_BASE_DELAY="${BCQ_BASE_DELAY:-1}"
 BCQ_CACHE_TTL="${BCQ_CACHE_TTL:-86400}"  # 24 hours default
+BCQ_CONNECT_TIMEOUT="${BCQ_CONNECT_TIMEOUT:-10}"  # Connection timeout in seconds
+BCQ_REQUEST_TIMEOUT="${BCQ_REQUEST_TIMEOUT:-30}"  # Total request timeout in seconds
 
 
 # ETag Cache Helpers
@@ -120,6 +122,46 @@ _cache_set() {
     jq -n --arg k "$key" --arg v "$etag" --argjson ts "$timestamp" \
       '{($k): {etag: $v, timestamp: $ts}}' > "$etags_file"
   fi
+}
+
+# Prune expired cache entries (call periodically to prevent unbounded growth)
+_cache_prune() {
+  local cache_dir etags_file
+  cache_dir=$(_cache_dir)
+  etags_file="$cache_dir/etags.json"
+
+  [[ -f "$etags_file" ]] || return 0
+
+  local now ttl
+  now=$(date +%s)
+  ttl="${BCQ_CACHE_TTL:-86400}"
+
+  # Remove expired entries from etags.json
+  local valid_keys
+  valid_keys=$(jq -r --argjson now "$now" --argjson ttl "$ttl" \
+    'to_entries | map(select(.value.timestamp > ($now - $ttl))) | from_entries' \
+    "$etags_file" 2>/dev/null) || return 0
+
+  echo "$valid_keys" > "${etags_file}.tmp" && mv "${etags_file}.tmp" "$etags_file"
+
+  # Get list of valid cache keys
+  local valid_key_list
+  valid_key_list=$(echo "$valid_keys" | jq -r 'keys[]' 2>/dev/null)
+
+  # Remove orphaned response files (bodies are in responses/ subdir)
+  local responses_dir="$cache_dir/responses"
+  [[ -d "$responses_dir" ]] || return 0
+
+  local file key
+  for file in "$responses_dir"/*; do
+    [[ -f "$file" ]] || continue
+    # Extract key from filename (remove .body or .headers suffix)
+    key=$(basename "$file" | sed 's/\.\(body\|headers\)$//')
+    if ! echo "$valid_key_list" | grep -qx "$key"; then
+      rm -f "$file"
+      debug "Cache: pruned orphaned file $(basename "$file")"
+    fi
+  done
 }
 
 
@@ -310,6 +352,8 @@ _api_request() {
     local curl_args=(
       -s
       -X "$method"
+      --connect-timeout "$BCQ_CONNECT_TIMEOUT"
+      --max-time "$BCQ_REQUEST_TIMEOUT"
       -H "Authorization: Bearer $token"
       -H "User-Agent: $BCQ_USER_AGENT"
       -H "Content-Type: application/json"
@@ -484,6 +528,8 @@ api_get_all() {
 
     local output http_code response curl_exit
     output=$(curl -s \
+      --connect-timeout "$BCQ_CONNECT_TIMEOUT" \
+      --max-time "$BCQ_REQUEST_TIMEOUT" \
       -H "Authorization: Bearer $token" \
       -H "User-Agent: $BCQ_USER_AGENT" \
       -H "Content-Type: application/json" \
@@ -731,3 +777,7 @@ project_path() {
 
   echo "/buckets/$project_id$resource"
 }
+
+
+# Prune cache on startup (fast no-op if nothing to prune)
+_cache_prune 2>/dev/null &

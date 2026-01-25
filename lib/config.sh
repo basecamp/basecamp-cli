@@ -532,10 +532,18 @@ config_load() {
     ')
 }
 
+# Ensure config_load has been called (lazy initialization)
+_ensure_config_loaded() {
+  if [[ "$BCQ_CONFIG_JSON" == '{}' ]]; then
+    config_load
+  fi
+}
+
 # Get a config value from the merged JSON config
 # Args: $1 - key, $2 - default (optional)
 # Returns: value or default
 config_get_json() {
+  _ensure_config_loaded
   local key="$1"
   local default="${2:-}"
   local value
@@ -551,6 +559,7 @@ config_get_json() {
 # Args: $1 - key
 # Returns: 0 if exists, 1 if not
 config_has_json() {
+  _ensure_config_loaded
   local key="$1"
   local value
   value=$(echo "$BCQ_CONFIG_JSON" | jq -r --arg k "$key" '.[$k] // empty')
@@ -561,6 +570,7 @@ config_has_json() {
 # Args: $1 - key
 # Returns: source name (flag, env, local, repo, global, system, unset)
 config_source_json() {
+  _ensure_config_loaded
   local key="$1"
   local source
   source=$(echo "$BCQ_CONFIG_SOURCES_JSON" | jq -r --arg k "$key" '.[$k] // "unset"')
@@ -570,6 +580,7 @@ config_source_json() {
 # Get all config with sources (for display)
 # Returns: JSON object with {key: {value: ..., source: ...}, ...}
 config_show_all() {
+  _ensure_config_loaded
   jq -n \
     --argjson config "$BCQ_CONFIG_JSON" \
     --argjson sources "$BCQ_CONFIG_SOURCES_JSON" \
@@ -655,4 +666,4 @@ get_config_source() {
 # Initialize
 
 load_config
-config_load
+# Note: config_load() is called lazily by config_get_json() etc.
