@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -54,8 +54,8 @@ func newTodosetShowCmd(project, todosetID *string) *cobra.Command {
 
 func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
+	if app == nil {
+		return fmt.Errorf("app not initialized")
 	}
 
 	// Resolve project
@@ -84,18 +84,20 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/todosets/%s.json", resolvedProjectID, resolvedTodosetID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	// Parse IDs as int64
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
+	}
+	tsID, err := strconv.ParseInt(resolvedTodosetID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid todoset ID")
 	}
 
-	var todoset struct {
-		TodolistsCount int    `json:"todolists_count"`
-		CompletedRatio string `json:"completed_ratio"`
-	}
-	if err := json.Unmarshal(resp.Data, &todoset); err != nil {
-		return fmt.Errorf("failed to parse todoset: %w", err)
+	// Use SDK to get todoset
+	todoset, err := app.SDK.Todosets().Get(cmd.Context(), bucketID, tsID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	completedRatio := todoset.CompletedRatio
@@ -103,7 +105,7 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		completedRatio = "0.0"
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(todoset,
 		output.WithSummary(fmt.Sprintf("%d todolists (%s%% complete)", todoset.TodolistsCount, completedRatio)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

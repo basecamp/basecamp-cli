@@ -10,6 +10,12 @@ github.com/aymanbagabas/go-udiff v0.3.1 h1:LV+qyBQ2pqe0u42ZsUEtPiCaUoqgA9gYRDs3v
 github.com/aymanbagabas/go-udiff v0.3.1/go.mod h1:G0fsKmG+P6ylD0r6N/KgQD/nWzgfnl8ZBcNLgcbrw8E=
 github.com/basecamp/basecamp-sdk/go v0.0.0-20260125214045-6e4b87b848d1 h1:jdRBjeaQsJu4dip1MGiw2fWZs102B2FClBjCiFWVV3c=
 github.com/basecamp/basecamp-sdk/go v0.0.0-20260125214045-6e4b87b848d1/go.mod h1:1cMqk0Hyih/Oe/VJC1JXvPHI4FKBXI0RmgTxbG41ohQ=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260125220406-dc68d8f9d1e8 h1:TC18WBOfoVQlEk/B1JyF3cxEbKQkV2eSemq1wFEsLuM=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260125220406-dc68d8f9d1e8/go.mod h1:1cMqk0Hyih/Oe/VJC1JXvPHI4FKBXI0RmgTxbG41ohQ=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260125220622-7946f145a06a h1:5mG8ssm+bIvHQom5Hg83CWVJCr60fpC0ORqt1ytXtac=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260125220622-7946f145a06a/go.mod h1:1cMqk0Hyih/Oe/VJC1JXvPHI4FKBXI0RmgTxbG41ohQ=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260125221103-add603d07a0c h1:ekwMbVKagQBdDHYdDCuAaqGqeqAo1Zhrky3en3oIoPA=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260125221103-add603d07a0c/go.mod h1:1cMqk0Hyih/Oe/VJC1JXvPHI4FKBXI0RmgTxbG41ohQ=
 github.com/catppuccin/go v0.3.0 h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=
 github.com/catppuccin/go v0.3.0/go.mod h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=
 github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7 h1:JFgG/xnwFfbezlUnFMJy0nusZvytYysV4SCS2cYbvws=
