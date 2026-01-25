@@ -1,0 +1,28 @@
+# Gitleaks configuration for bcq
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "bcq gitleaks config"
+
+# Allowlist specific false positives
+[allowlist]
+  description = "Known safe patterns"
+
+  # OAuth client secrets are public by design (they're embedded in CLI binaries)
+  # See: https://www.oauth.com/oauth2-servers/mobile-and-native-apps/
+  regexTarget = "match"
+  regexes = [
+    # Public OAuth client secrets for native apps (not actual secrets)
+    '''launchpadClientSecret\s*=\s*"[a-f0-9]+"''',
+    '''bc3ClientSecret\s*=\s*"[a-f0-9]+"''',
+
+    # Domain names (not secrets)
+    '''launchpad\.37signals\.com''',
+    '''basecampapi\.(com|localhost)''',
+  ]
+
+  # Test files with fake/example tokens
+  paths = [
+    '''_test\.go$''',
+    '''benchmarks/.*''',
+    '''skills-benchmarking/.*''',
+  ]
