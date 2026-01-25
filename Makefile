@@ -70,10 +70,10 @@ build-bsd:
 test:
 	BCQ_NO_KEYRING=1 $(GOTEST) -v ./...
 
-# Run BATS tests against Go binary
-.PHONY: test-bats
-test-bats: build
-	BCQ_NO_KEYRING=1 BCQ_BIN=./bin/bcq bats test/
+# Run end-to-end tests against Go binary
+.PHONY: test-e2e
+test-e2e: build
+	BCQ_NO_KEYRING=1 BCQ_BIN=./bin/bcq bats e2e/
 
 # Run tests with coverage
 .PHONY: test-coverage
@@ -143,7 +143,7 @@ help:
 	@echo "  build-windows  Build for Windows (arm64 + amd64)"
 	@echo "  build-bsd      Build for FreeBSD + OpenBSD (arm64 + amd64)"
 	@echo "  test           Run Go unit tests"
-	@echo "  test-bats      Run BATS tests against Go binary"
+	@echo "  test-e2e       Run end-to-end tests against Go binary"
 	@echo "  test-coverage  Run tests with coverage report"
 	@echo "  vet            Run go vet"
 	@echo "  fmt            Format code"
