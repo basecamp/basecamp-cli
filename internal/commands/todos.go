@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/dateparse"
 	"github.com/basecamp/bcq/internal/output"
@@ -161,17 +163,16 @@ func NewTodoCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			todolist = resolvedTodolist
 
-			// Build request body
-			body := map[string]any{
-				"content": content,
+			// Build SDK request
+			req := &basecamp.CreateTodoRequest{
+				Content: content,
 			}
 			if due != "" {
 				// Parse natural language date
 				parsedDue := dateparse.Parse(due)
 				if parsedDue != "" {
-					body["due_on"] = parsedDue
+					req.DueOn = parsedDue
 				}
 			}
 			if assignee != "" {
@@ -181,28 +182,24 @@ func NewTodoCmd() *cobra.Command {
 					return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
 				}
 				assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
-				body["assignee_ids"] = []int64{assigneeIDInt}
+				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/todolists/%s/todos.json", project, todolist)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			projectID, err := strconv.ParseInt(project, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			var todo struct {
-				ID int64 `json:"id"`
-			}
-			if err := resp.UnmarshalData(&todo); err != nil {
-				return fmt.Errorf("failed to parse todo: %w", err)
+			todo, err := app.SDK.Todos().Create(cmd.Context(), projectID, todolistID, req)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			var result json.RawMessage
-			if err := resp.UnmarshalData(&result); err != nil {
-				return fmt.Errorf("failed to parse todo: %w", err)
-			}
-
-			return app.Output.OK(result,
+			return app.Output.OK(todo,
 				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -312,41 +309,32 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	if err != nil {
 		return err
 	}
-	todolist = resolvedTodolist
 
-	path := fmt.Sprintf("/buckets/%s/todolists/%s/todos.json", project, todolist)
-
-	todos, err := app.API.GetAll(cmd.Context(), path)
+	projectID, err := strconv.ParseInt(project, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
+	}
+	todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid todolist ID")
 	}
 
-	var result []Todo
-	for _, raw := range todos {
-		var todo Todo
-		if err := json.Unmarshal(raw, &todo); err != nil {
-			continue
-		}
-
-		// Filter by status if specified
-		if status != "" {
-			if status == "completed" && !todo.Completed {
-				continue
-			}
-			if status == "pending" && todo.Completed {
-				continue
-			}
-		}
-
-		result = append(result, todo)
+	opts := &basecamp.TodoListOptions{}
+	if status != "" {
+		opts.Status = status
 	}
 
-	return app.Output.OK(result,
-		output.WithSummary(fmt.Sprintf("%d todos", len(result))),
+	todos, err := app.SDK.Todos().List(cmd.Context(), projectID, todolistID, opts)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.Output.OK(todos,
+		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq todos create --content <text> --in %s --list %s", project, todolist),
+				Cmd:         fmt.Sprintf("bcq todos create --content <text> --in %s --list %s", project, resolvedTodolist),
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
@@ -509,10 +497,6 @@ func newTodosShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
-
 			// Use project from flag or config
 			if project == "" {
 				project = app.Flags.Project
@@ -529,31 +513,32 @@ func newTodosShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project = resolvedProject
 
-			todoID := args[0]
-			path := fmt.Sprintf("/buckets/%s/todos/%s.json", project, todoID)
-
-			resp, err := app.API.Get(cmd.Context(), path)
+			projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var todo json.RawMessage
-			if err := resp.UnmarshalData(&todo); err != nil {
-				return fmt.Errorf("failed to parse todo: %w", err)
+			todoID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todo ID")
+			}
+
+			todo, err := app.SDK.Todos().Get(cmd.Context(), projectID, todoID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(todo,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("bcq done %s", todoID),
+						Cmd:         fmt.Sprintf("bcq done %d", todoID),
 						Description: "Complete this todo",
 					},
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("bcq comment --on %s --content <text>", todoID),
+						Cmd:         fmt.Sprintf("bcq comment --on %d --content <text>", todoID),
 						Description: "Add comment",
 					},
 				),
@@ -644,17 +629,16 @@ func newTodosCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			todolist = resolvedTodolist
 
-			// Build request body
-			body := map[string]any{
-				"content": content,
+			// Build SDK request
+			req := &basecamp.CreateTodoRequest{
+				Content: content,
 			}
 			if due != "" {
 				// Parse natural language date
 				parsedDue := dateparse.Parse(due)
 				if parsedDue != "" {
-					body["due_on"] = parsedDue
+					req.DueOn = parsedDue
 				}
 			}
 			if assignee != "" {
@@ -664,28 +648,24 @@ func newTodosCreateCmd() *cobra.Command {
 					return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
 				}
 				assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
-				body["assignee_ids"] = []int64{assigneeIDInt}
+				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/todolists/%s/todos.json", project, todolist)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			projectID, err := strconv.ParseInt(project, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			var todo struct {
-				ID int64 `json:"id"`
-			}
-			if err := resp.UnmarshalData(&todo); err != nil {
-				return fmt.Errorf("failed to parse todo: %w", err)
+			todo, err := app.SDK.Todos().Create(cmd.Context(), projectID, todolistID, req)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			var result json.RawMessage
-			if err := resp.UnmarshalData(&result); err != nil {
-				return fmt.Errorf("failed to parse todo: %w", err)
-			}
-
-			return app.Output.OK(result,
+			return app.Output.OK(todo,
 				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -815,10 +795,6 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
-
 	// Use project from flag or config
 	if project == "" {
 		project = app.Flags.Project
@@ -835,18 +811,26 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	if err != nil {
 		return err
 	}
-	project = resolvedProject
+
+	projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
 
 	var completed []string
 	var failed []string
 
-	for _, todoID := range todoIDs {
-		path := fmt.Sprintf("/buckets/%s/todos/%s/completion.json", project, todoID)
-		_, err := app.API.Post(cmd.Context(), path, nil)
+	for _, todoIDStr := range todoIDs {
+		todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 		if err != nil {
-			failed = append(failed, todoID)
+			failed = append(failed, todoIDStr)
+			continue
+		}
+		err = app.SDK.Todos().Complete(cmd.Context(), projectID, todoID)
+		if err != nil {
+			failed = append(failed, todoIDStr)
 		} else {
-			completed = append(completed, todoID)
+			completed = append(completed, todoIDStr)
 		}
 	}
 
@@ -865,7 +849,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq todos --in %s", project),
+				Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProject),
 				Description: "List remaining todos",
 			},
 			output.Breadcrumb{
@@ -1212,10 +1196,6 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
-
 	// Use project from flag or config
 	if project == "" {
 		project = app.Flags.Project
@@ -1232,18 +1212,26 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	if err != nil {
 		return err
 	}
-	project = resolvedProject
+
+	projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
 
 	var reopened []string
 	var failed []string
 
-	for _, todoID := range todoIDs {
-		path := fmt.Sprintf("/buckets/%s/todos/%s/completion.json", project, todoID)
-		_, err := app.API.Delete(cmd.Context(), path)
+	for _, todoIDStr := range todoIDs {
+		todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 		if err != nil {
-			failed = append(failed, todoID)
+			failed = append(failed, todoIDStr)
+			continue
+		}
+		err = app.SDK.Todos().Uncomplete(cmd.Context(), projectID, todoID)
+		if err != nil {
+			failed = append(failed, todoIDStr)
 		} else {
-			reopened = append(reopened, todoID)
+			reopened = append(reopened, todoIDStr)
 		}
 	}
 
@@ -1262,7 +1250,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq todos --in %s", project),
+				Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProject),
 				Description: "List todos",
 			},
 			output.Breadcrumb{
@@ -1290,12 +1278,6 @@ func newTodosPositionCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
-
-			todoID := args[0]
-
 			if position == 0 {
 				return output.ErrUsage("--to is required (1 = top)")
 			}
@@ -1316,27 +1298,33 @@ func newTodosPositionCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project = resolvedProject
 
-			body := map[string]int{"position": position}
-
-			path := fmt.Sprintf("/buckets/%s/todos/%s/position.json", project, todoID)
-			_, err = app.API.Put(cmd.Context(), path, body)
+			projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			todoID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todo ID")
+			}
+
+			err = app.SDK.Todos().Reposition(cmd.Context(), projectID, todoID, position)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"repositioned": true, "position": position},
-				output.WithSummary(fmt.Sprintf("Moved todo #%s to position %d", todoID, position)),
+				output.WithSummary(fmt.Sprintf("Moved todo #%d to position %d", todoID, position)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq todos show %s --in %s", todoID, project),
+						Cmd:         fmt.Sprintf("bcq todos show %d --in %s", todoID, resolvedProject),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq todos --in %s", project),
+						Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProject),
 						Description: "List todos",
 					},
 				),
