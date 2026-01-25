@@ -36,7 +36,8 @@ type GlobalFlags struct {
 	// Output format flags
 	JSON    bool
 	Quiet   bool
-	MD      bool
+	MD      bool   // Literal Markdown syntax output
+	Styled  bool   // Force ANSI styled output (even when piped)
 	IDsOnly bool
 	Count   bool
 	Agent   bool
@@ -116,7 +117,14 @@ func (a *App) ApplyFlags() {
 			Format: output.FormatJSON,
 			Writer: os.Stdout,
 		})
+	} else if a.Flags.Styled {
+		// Force ANSI styled output (even when piped)
+		a.Output = output.New(output.Options{
+			Format: output.FormatStyled,
+			Writer: os.Stdout,
+		})
 	} else if a.Flags.MD {
+		// Literal Markdown syntax (portable, pipeable to glow/bat)
 		a.Output = output.New(output.Options{
 			Format: output.FormatMarkdown,
 			Writer: os.Stdout,
