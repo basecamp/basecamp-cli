@@ -83,31 +83,36 @@ _cards_list() {
 
   local all_cards="[]"
 
-  # Discover card table from project dock
-  local project_data card_table_id
-  project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
-
-  local card_table_data columns_response
-  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
-  columns_response=$(echo "$card_table_data" | jq '.lists // []')
-
-  if [[ -n "$column" ]]; then
-    # Get cards from specific column (by ID or name)
-    local column_id
-    column_id=$(_resolve_column "$columns_response" "$column")
-    if [[ -z "$column_id" ]]; then
-      die "Column '$column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
-    fi
-    all_cards=$(api_get "/buckets/$project/card_tables/lists/$column_id/cards.json" 2>/dev/null || echo '[]')
+  if [[ -n "$column" ]] && [[ "$column" =~ ^[0-9]+$ ]]; then
+    # Numeric column ID provided - use directly (skip card table discovery)
+    all_cards=$(api_get "/buckets/$project/card_tables/lists/$column/cards.json" 2>/dev/null || echo '[]')
   else
-    # Get cards from all columns
-    while IFS= read -r col_id; do
-      [[ -z "$col_id" ]] && continue
-      local cards
-      cards=$(api_get "/buckets/$project/card_tables/lists/$col_id/cards.json" 2>/dev/null || echo '[]')
-      all_cards=$(echo "$all_cards" "$cards" | jq -s '.[0] + .[1]')
-    done < <(echo "$columns_response" | jq -r '.[].id')
+    # Need discovery: either no column (list all) or column is a name
+    local project_data card_table_id
+    project_data=$(api_get "/projects/$project.json")
+    card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
+
+    local card_table_data columns_response
+    card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+    columns_response=$(echo "$card_table_data" | jq '.lists // []')
+
+    if [[ -n "$column" ]]; then
+      # Get cards from specific column by name
+      local column_id
+      column_id=$(_resolve_column "$columns_response" "$column")
+      if [[ -z "$column_id" ]]; then
+        die "Column '$column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
+      fi
+      all_cards=$(api_get "/buckets/$project/card_tables/lists/$column_id/cards.json" 2>/dev/null || echo '[]')
+    else
+      # Get cards from all columns
+      while IFS= read -r col_id; do
+        [[ -z "$col_id" ]] && continue
+        local cards
+        cards=$(api_get "/buckets/$project/card_tables/lists/$col_id/cards.json" 2>/dev/null || echo '[]')
+        all_cards=$(echo "$all_cards" "$cards" | jq -s '.[0] + .[1]')
+      done < <(echo "$columns_response" | jq -r '.[].id')
+    fi
   fi
 
   local count
@@ -1129,26 +1134,33 @@ _cards_create() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Discover card table from project dock
-  local project_data card_table_id
-  project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
+  local column_id
 
-  local card_table_data columns column_id
-  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
-  columns=$(echo "$card_table_data" | jq '.lists // []')
-
-  if [[ -n "$column" ]]; then
-    # Find column by ID or name
-    column_id=$(_resolve_column "$columns" "$column")
-    if [[ -z "$column_id" ]]; then
-      die "Column '$column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
-    fi
+  if [[ -n "$column" ]] && [[ "$column" =~ ^[0-9]+$ ]]; then
+    # Numeric column ID provided - use directly (skip card table discovery)
+    column_id="$column"
   else
-    # Use first column (Inbox/Triage)
-    column_id=$(echo "$columns" | jq -r '.[0].id // empty')
-    if [[ -z "$column_id" ]]; then
-      die "No columns found in card table" $EXIT_NOT_FOUND
+    # Need discovery: either no column (use first) or column is a name
+    local project_data card_table_id
+    project_data=$(api_get "/projects/$project.json")
+    card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
+
+    local card_table_data columns
+    card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+    columns=$(echo "$card_table_data" | jq '.lists // []')
+
+    if [[ -n "$column" ]]; then
+      # Find column by name
+      column_id=$(_resolve_column "$columns" "$column")
+      if [[ -z "$column_id" ]]; then
+        die "Column '$column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
+      fi
+    else
+      # Use first column (Inbox/Triage)
+      column_id=$(echo "$columns" | jq -r '.[0].id // empty')
+      if [[ -z "$column_id" ]]; then
+        die "No columns found in card table" $EXIT_NOT_FOUND
+      fi
     fi
   fi
 

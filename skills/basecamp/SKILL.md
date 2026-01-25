@@ -118,9 +118,11 @@ bcq campfire post --content "Message" --in <project_id>  # Post to campfire
 bcq url parse "https://3.basecamp.com/.../card_tables/columns/456" --json
 # Returns breadcrumbs with exact command to use
 
-# Create card in that column
+# Create card in that column (numeric column ID skips card table discovery)
 bcq card --title "Title" --in <project_id> --column <column_id> --json
 ```
+
+**Multi-card-table projects:** When a project has multiple card tables, use the numeric column ID from the URL. This bypasses card table discovery and works directly.
 
 ## Common Workflows
 
