@@ -150,7 +150,7 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 			var data struct {
 				PayloadURL string `json:"payload_url"`
 			}
-			json.Unmarshal(resp.Data, &data)
+			_ = json.Unmarshal(resp.Data, &data) // Best-effort
 
 			summary := fmt.Sprintf("Webhook #%s: %s", webhookID, data.PayloadURL)
 
@@ -241,7 +241,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 			var webhook struct {
 				ID int64 `json:"id"`
 			}
-			json.Unmarshal(resp.Data, &webhook)
+			_ = json.Unmarshal(resp.Data, &webhook) // Best-effort
 
 			return app.Output.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Created webhook #%d", webhook.ID)),
@@ -263,7 +263,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 
 	cmd.Flags().StringVar(&url, "url", "", "Webhook payload URL (must be HTTPS)")
 	cmd.Flags().StringVar(&types, "types", "", "Comma-separated event types (default: all)")
-	cmd.MarkFlagRequired("url")
+	_ = cmd.MarkFlagRequired("url")
 
 	return cmd
 }

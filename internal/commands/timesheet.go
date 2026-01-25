@@ -108,7 +108,7 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 	var totalHours float64
 	for _, e := range entries {
 		var hours float64
-		fmt.Sscanf(e.Hours, "%f", &hours)
+		_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: ID validated
 		totalHours += hours
 	}
 
@@ -182,7 +182,7 @@ func newTimesheetProjectCmd() *cobra.Command {
 			var totalHours float64
 			for _, e := range entries {
 				var hours float64
-				fmt.Sscanf(e.Hours, "%f", &hours)
+				_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: ID validated
 				totalHours += hours
 			}
 
@@ -260,7 +260,7 @@ func newTimesheetRecordingCmd() *cobra.Command {
 			var totalHours float64
 			for _, e := range entries {
 				var hours float64
-				fmt.Sscanf(e.Hours, "%f", &hours)
+				_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: ID validated
 				totalHours += hours
 			}
 

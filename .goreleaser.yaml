@@ -44,6 +44,26 @@ checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
 
+# Generate SBOM for supply chain transparency
+sboms:
+  - artifacts: archive
+    documents:
+      - sbom
+
+# Sign checksums with cosign (keyless via Sigstore)
+# Requires: permissions.id-token: write in workflow for OIDC
+signs:
+  - cmd: cosign
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--output-certificate=${certificate}'
+      - '--output-signature=${signature}'
+      - '${artifact}'
+      - '--yes'
+    artifacts: checksum
+    output: true
+
 changelog:
   sort: asc
   use: github

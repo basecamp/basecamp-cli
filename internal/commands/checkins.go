@@ -87,7 +87,7 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		Name           string `json:"name"`
 		QuestionsCount int    `json:"questions_count"`
 	}
-	json.Unmarshal(resp.Data, &data)
+	_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary display
 
 	name := data.Name
 	if name == "" {
@@ -239,7 +239,7 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionID string) err
 		Title        string `json:"title"`
 		AnswersCount int    `json:"answers_count"`
 	}
-	json.Unmarshal(resp.Data, &data)
+	_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary display
 
 	summary := fmt.Sprintf("%s (%d answers)", data.Title, data.AnswersCount)
 
@@ -352,7 +352,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				ID    int64  `json:"id"`
 				Title string `json:"title"`
 			}
-			json.Unmarshal(resp.Data, &question)
+			_ = json.Unmarshal(resp.Data, &question) // Best-effort for summary
 
 			return app.Output.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Created question #%d: %s", question.ID, question.Title)),
@@ -377,7 +377,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 	cmd.Flags().StringVarP(&frequency, "frequency", "f", "", "Schedule frequency (default: every_day)")
 	cmd.Flags().StringVar(&timeOfDay, "time", "", "Time to ask (default: 5:00pm)")
 	cmd.Flags().StringVarP(&days, "days", "d", "", "Days to ask, comma-separated (default: 1,2,3,4,5)")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -462,7 +462,7 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 			var data struct {
 				Title string `json:"title"`
 			}
-			json.Unmarshal(resp.Data, &data)
+			_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary
 
 			return app.Output.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Updated question #%s: %s", questionID, data.Title)),
@@ -616,7 +616,7 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerID string) error {
 			ID int64 `json:"id"`
 		} `json:"parent"`
 	}
-	json.Unmarshal(resp.Data, &data)
+	_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary
 
 	author := data.Creator.Name
 	if author == "" {
@@ -713,7 +713,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 					Name string `json:"name"`
 				} `json:"creator"`
 			}
-			json.Unmarshal(resp.Data, &data)
+			_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary
 
 			author := data.Creator.Name
 			if author == "" {
@@ -741,7 +741,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVar(&questionID, "question", "", "Question ID to answer (required)")
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Answer content (required)")
 	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22)")
-	cmd.MarkFlagRequired("content")
+	_ = cmd.MarkFlagRequired("content")
 
 	return cmd
 }
@@ -805,7 +805,7 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 					ID int64 `json:"id"`
 				} `json:"parent"`
 			}
-			json.Unmarshal(resp.Data, &data)
+			_ = json.Unmarshal(resp.Data, &data) // Best-effort for breadcrumbs
 
 			questionID := strconv.FormatInt(data.Parent.ID, 10)
 
@@ -828,7 +828,7 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "New answer content (required)")
-	cmd.MarkFlagRequired("content")
+	_ = cmd.MarkFlagRequired("content")
 
 	return cmd
 }

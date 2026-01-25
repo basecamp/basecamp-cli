@@ -126,12 +126,12 @@ func newConfigInitCmd() *cobra.Command {
 			}
 
 			// Create directory
-			if err := os.MkdirAll(configDir, 0755); err != nil {
+			if err := os.MkdirAll(configDir, 0750); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
 			// Create empty config file
-			if err := os.WriteFile(configFile, []byte("{}\n"), 0644); err != nil {
+			if err := os.WriteFile(configFile, []byte("{}\n"), 0600); err != nil {
 				return fmt.Errorf("failed to create config file: %w", err)
 			}
 
@@ -197,14 +197,14 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 
 			// Ensure directory exists
 			configDir := filepath.Dir(configPath)
-			if err := os.MkdirAll(configDir, 0755); err != nil {
+			if err := os.MkdirAll(configDir, 0750); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
 			// Load existing config or create new
 			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil {
-				json.Unmarshal(data, &configData)
+			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
+				_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
 			}
 
 			// Set value
@@ -226,7 +226,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
 
-			if err := os.WriteFile(configPath, append(data, '\n'), 0644); err != nil {
+			if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
@@ -292,8 +292,8 @@ func newConfigUnsetCmd() *cobra.Command {
 
 			// Load existing config
 			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil {
-				json.Unmarshal(data, &configData)
+			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
+				_ = json.Unmarshal(data, &configData) // Ignore error - treat as empty
 			} else {
 				return app.Output.OK(map[string]any{
 					"key":    key,
@@ -318,7 +318,7 @@ func newConfigUnsetCmd() *cobra.Command {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
 
-			if err := os.WriteFile(configPath, append(data, '\n'), 0644); err != nil {
+			if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
@@ -394,14 +394,14 @@ func newConfigProjectCmd() *cobra.Command {
 			configPath := filepath.Join(".basecamp", "config.json")
 
 			// Ensure directory exists
-			if err := os.MkdirAll(".basecamp", 0755); err != nil {
+			if err := os.MkdirAll(".basecamp", 0750); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
 			// Load or create config
 			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil {
-				json.Unmarshal(data, &configData)
+			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
+				_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
 			}
 
 			// Set project_id
@@ -413,7 +413,7 @@ func newConfigProjectCmd() *cobra.Command {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
 
-			if err := os.WriteFile(configPath, append(data, '\n'), 0644); err != nil {
+			if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 

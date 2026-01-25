@@ -435,7 +435,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	cmd.Flags().StringVarP(&content, "content", "b", "", "Card body/description")
 	cmd.Flags().StringVar(&content, "body", "", "Card body/description (alias for --content)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -619,7 +619,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 
 			// Move card to column
 			var columnIDInt int64
-			fmt.Sscanf(columnID, "%d", &columnIDInt)
+			_, _ = fmt.Sscanf(columnID, "%d", &columnIDInt) //nolint:gosec // G104: ID validated by ResolveColumn
 
 			body := map[string]int64{
 				"column_id": columnIDInt,
@@ -659,7 +659,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name (required)")
-	cmd.MarkFlagRequired("to")
+	_ = cmd.MarkFlagRequired("to")
 
 	return cmd
 }
@@ -884,7 +884,7 @@ func NewCardCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
 	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("title")
 
 	cmd.AddCommand(
 		newCardsUpdateCmd(&project),
@@ -1062,7 +1062,7 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Column title (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Column description")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -1641,8 +1641,8 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVarP(&cardID, "card", "c", "", "Card ID (required)")
 	cmd.Flags().StringVarP(&dueOn, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&assignees, "assignees", "", "Assignees (IDs or names, comma-separated)")
-	cmd.MarkFlagRequired("title")
-	cmd.MarkFlagRequired("card")
+	_ = cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("card")
 
 	return cmd
 }

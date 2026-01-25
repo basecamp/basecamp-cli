@@ -258,7 +258,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Group name (required)")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -322,7 +322,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name (required)")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -380,7 +380,7 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
-	cmd.MarkFlagRequired("position")
+	_ = cmd.MarkFlagRequired("position")
 
 	return cmd
 }

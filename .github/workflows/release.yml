@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write  # Required for keyless cosign signing via OIDC
 
 jobs:
   test:
@@ -49,6 +50,9 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: homebrew-tap
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6

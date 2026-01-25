@@ -271,7 +271,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Todolist name (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }

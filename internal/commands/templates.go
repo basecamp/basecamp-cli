@@ -367,7 +367,7 @@ which can be polled via 'templates construction' until the status is "completed"
 	cmd.Flags().StringVar(&projectName, "name", "", "Project name (required)")
 	cmd.Flags().StringVar(&projectDesc, "description", "", "Project description")
 	cmd.Flags().StringVar(&projectDesc, "desc", "", "Project description (alias)")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
