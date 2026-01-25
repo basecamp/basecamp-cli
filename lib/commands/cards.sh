@@ -1017,11 +1017,33 @@ _cards_step_move() {
 }
 
 _cards_show() {
-  local card_id="$1"
-  local project="${2:-}"
+  local card_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      --help|-h)
+        echo "Usage: bcq cards show <id> --project <project_id>"
+        return
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$card_id" ]]; then
+          card_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
 
   if [[ -z "$card_id" ]]; then
-    die "Card ID required" $EXIT_USAGE "Usage: bcq cards show <id>"
+    die "Card ID required" $EXIT_USAGE "Usage: bcq cards show <id> --project <project_id>"
   fi
 
   # Resolve project (supports names, IDs, and config fallback)
