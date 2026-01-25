@@ -4,15 +4,21 @@
 
 ```
 bcq/
-├── bin/bcq              # Main CLI entrypoint
-├── lib/
-│   ├── core.sh          # Output formatting, date parsing, utilities
-│   ├── config.sh        # Config file management, credentials
-│   ├── api.sh           # HTTP helpers, rate limiting, auth
-│   ├── auth.sh          # OAuth 2.1 + DCR authentication
-│   └── commands/        # Command implementations
-├── test/                # bats tests
-└── .claude-plugin/      # Claude Code integration
+├── cmd/bcq/          # Main entrypoint
+├── internal/
+│   ├── api/          # Basecamp API client
+│   ├── appctx/       # Application context
+│   ├── auth/         # OAuth authentication
+│   ├── cli/          # CLI framework
+│   ├── commands/     # Command implementations
+│   ├── config/       # Configuration management
+│   ├── dateparse/    # Date parsing
+│   ├── names/        # Name resolution
+│   ├── output/       # Output formatting
+│   ├── tui/          # Terminal UI
+│   └── version/      # Version info
+├── test/             # BATS integration tests
+└── .claude-plugin/   # Claude Code integration
 ```
 
 ## Basecamp API Reference
@@ -31,12 +37,13 @@ Key endpoints used by bcq:
 ## Testing
 
 ```bash
-./test/run.sh         # Run all tests
-bats test/*.bats      # Alternative: run bats directly
-bats test/auth.bats   # Run auth tests only
+make build            # Build binary to ./bin/bcq
+make test             # Run Go unit tests
+make test-bats        # Run BATS integration tests
+make check            # All checks (fmt-check, vet, test)
 ```
 
-Tests use [bats-core](https://github.com/bats-core/bats-core). Install with `brew install bats-core`.
+Requirements: Go 1.24+, [bats-core](https://github.com/bats-core/bats-core) for integration tests.
 
 ## OAuth Development
 
