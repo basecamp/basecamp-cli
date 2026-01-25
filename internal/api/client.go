@@ -237,10 +237,19 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 }
 
 func (c *Client) doRequestURL(ctx context.Context, method, url string, body any) (*Response, error) {
-	// Only retry GET requests to prevent duplicate mutations.
-	// POST/PUT/DELETE are not idempotent and retrying could create duplicate data.
+	// Non-GET requests: don't retry on 429/5xx (could duplicate data), but DO retry
+	// once after a successful 401 token refresh so users don't have to rerun commands.
 	if method != "GET" {
-		return c.singleRequest(ctx, method, url, body, 1)
+		resp, err := c.singleRequest(ctx, method, url, body, 1)
+		if err == nil {
+			return resp, nil
+		}
+		// Only retry if this was a 401 that triggered successful token refresh
+		if apiErr, ok := err.(*output.Error); ok && apiErr.Retryable && apiErr.Code == output.CodeAuth {
+			c.log("[bcq] Token refreshed, retrying %s request", method)
+			return c.singleRequest(ctx, method, url, body, 2)
+		}
+		return nil, err
 	}
 
 	var attempt int
