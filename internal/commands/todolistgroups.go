@@ -1,10 +1,12 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
@@ -56,8 +58,8 @@ func newTodolistgroupsListCmd(project, todolist *string) *cobra.Command {
 
 func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
+	if app == nil {
+		return fmt.Errorf("app not initialized")
 	}
 
 	// Resolve project
@@ -92,18 +94,23 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/todolists/%s/groups.json", resolvedProjectID, resolvedTodolistID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	// Parse IDs as int64
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
+	}
+	todolistID, err := strconv.ParseInt(resolvedTodolistID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid todolist ID")
 	}
 
-	var groups []any
-	if err := json.Unmarshal(resp.Data, &groups); err != nil {
-		return fmt.Errorf("failed to parse groups: %w", err)
+	// Get groups via SDK
+	groups, err := app.SDK.TodolistGroups().List(cmd.Context(), bucketID, todolistID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(groups,
 		output.WithSummary(fmt.Sprintf("%d groups in todolist #%s", len(groups), todolist)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -127,11 +134,11 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
-			groupID := args[0]
+			groupIDStr := args[0]
 
 			// Resolve project
 			projectID := *project
@@ -150,25 +157,28 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/todolist_groups/%s.json", resolvedProjectID, groupID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid group ID")
 			}
 
-			var group struct {
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(resp.Data, &group); err != nil {
-				return fmt.Errorf("failed to parse group: %w", err)
+			// Get group via SDK
+			group, err := app.SDK.TodolistGroups().Get(cmd.Context(), bucketID, groupID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(group,
 				output.WithSummary(group.Name),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq todolistgroups update %s --name \"New Name\" --in %s", groupID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq todolistgroups update %s --name \"New Name\" --in %s", groupIDStr, resolvedProjectID),
 						Description: "Rename group",
 					},
 				),
@@ -186,8 +196,8 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 		Long:  "Create a new group in a todolist.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
 			if name == "" {
@@ -207,14 +217,14 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 			}
 
 			// Resolve todolist - fall back to config
-			todolistID := *todolist
-			if todolistID == "" {
-				todolistID = app.Flags.Todolist
+			todolistIDStr := *todolist
+			if todolistIDStr == "" {
+				todolistIDStr = app.Flags.Todolist
 			}
-			if todolistID == "" {
-				todolistID = app.Config.TodolistID
+			if todolistIDStr == "" {
+				todolistIDStr = app.Config.TodolistID
 			}
-			if todolistID == "" {
+			if todolistIDStr == "" {
 				return output.ErrUsage("--list is required")
 			}
 
@@ -223,28 +233,33 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				return err
 			}
 
-			resolvedTodolistID, _, err := app.Names.ResolveTodolist(cmd.Context(), todolistID, resolvedProjectID)
+			resolvedTodolistID, _, err := app.Names.ResolveTodolist(cmd.Context(), todolistIDStr, resolvedProjectID)
 			if err != nil {
 				return err
 			}
 
-			body := map[string]string{"name": name}
-
-			path := fmt.Sprintf("/buckets/%s/todolists/%s/groups.json", resolvedProjectID, resolvedTodolistID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			todolistID, err := strconv.ParseInt(resolvedTodolistID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			var group struct {
-				ID   int64  `json:"id"`
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(resp.Data, &group); err != nil {
-				return fmt.Errorf("failed to parse group: %w", err)
+			// Build SDK request
+			req := &basecamp.CreateTodolistGroupRequest{
+				Name: name,
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			// Create group via SDK
+			group, err := app.SDK.TodolistGroups().Create(cmd.Context(), bucketID, todolistID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(group,
 				output.WithSummary(fmt.Sprintf("Created group: %s", group.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -273,11 +288,11 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
-			groupID := args[0]
+			groupIDStr := args[0]
 
 			if name == "" {
 				return output.ErrUsage("--name is required")
@@ -300,22 +315,28 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{"name": name}
-
-			path := fmt.Sprintf("/buckets/%s/todolist_groups/%s.json", resolvedProjectID, groupID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid group ID")
 			}
 
-			var group struct {
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(resp.Data, &group); err != nil {
-				return fmt.Errorf("failed to parse group: %w", err)
+			// Build SDK request
+			req := &basecamp.UpdateTodolistGroupRequest{
+				Name: name,
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			// Update group via SDK
+			group, err := app.SDK.TodolistGroups().Update(cmd.Context(), bucketID, groupID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(group,
 				output.WithSummary(fmt.Sprintf("Renamed to: %s", group.Name)),
 			)
 		},
@@ -337,11 +358,11 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
-			groupID := args[0]
+			groupIDStr := args[0]
 
 			if position == 0 {
 				return output.ErrUsage("--position is required (1-based)")
@@ -364,12 +385,20 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]int{"position": position}
-
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/position.json", resolvedProjectID, groupID)
-			_, err = app.API.Put(cmd.Context(), path, body)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid group ID")
+			}
+
+			// Reposition group via SDK
+			err = app.SDK.TodolistGroups().Reposition(cmd.Context(), bucketID, groupID, position)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"repositioned": true, "position": position},

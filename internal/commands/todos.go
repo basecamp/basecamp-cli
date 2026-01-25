@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -14,22 +13,6 @@ import (
 	"github.com/basecamp/bcq/internal/dateparse"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Todo represents a Basecamp todo item.
-type Todo struct {
-	ID          int64    `json:"id"`
-	Content     string   `json:"content"`
-	Description string   `json:"description"`
-	DueOn       string   `json:"due_on"`
-	Completed   bool     `json:"completed"`
-	Assignees   []Person `json:"assignees"`
-}
-
-// Person represents a person assignee.
-type Person struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-}
 
 // todosListFlags holds the flags for the todos list command.
 type todosListFlags struct {
@@ -348,79 +331,49 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 
 func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status string, overdue bool) error {
 	// Resolve assignee name to ID if provided
-	var assigneeID string
+	var assigneeID int64
 	if assignee != "" {
 		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
 		if err != nil {
 			return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
 		}
-		assigneeID = resolvedID
+		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
-	// Get project to find todoset
-	projectPath := fmt.Sprintf("/projects/%s.json", project)
-	resp, err := app.API.Get(cmd.Context(), projectPath)
+	// Parse project ID
+	bucketID, err := strconv.ParseInt(project, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
+	// Get todoset ID from project dock
+	todosetIDStr, err := getTodosetID(cmd, app, project)
 	if err != nil {
 		return err
 	}
-
-	var projectData struct {
-		Dock []struct {
-			Name string `json:"name"`
-			ID   int64  `json:"id"`
-		} `json:"dock"`
-	}
-	if err := resp.UnmarshalData(&projectData); err != nil {
-		return fmt.Errorf("failed to parse project: %w", err)
-	}
-
-	// Find todoset
-	var todosetID int64
-	for _, dock := range projectData.Dock {
-		if dock.Name == "todoset" {
-			todosetID = dock.ID
-			break
-		}
-	}
-
-	if todosetID == 0 {
-		return output.ErrNotFoundHint("todoset", project, "Project may not have todos enabled")
-	}
-
-	// Get todolists
-	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", project, todosetID)
-	todolistsRaw, err := app.API.GetAll(cmd.Context(), todolistsPath)
+	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid todoset ID")
+	}
+
+	// Get todolists via SDK
+	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	// Aggregate todos from all todolists
-	var allTodos []Todo
-	for _, tlRaw := range todolistsRaw {
-		var tl struct {
-			ID int64 `json:"id"`
-		}
-		if err := json.Unmarshal(tlRaw, &tl); err != nil {
-			continue
-		}
-
-		todosPath := fmt.Sprintf("/buckets/%s/todolists/%d/todos.json", project, tl.ID)
-		todosRaw, err := app.API.GetAll(cmd.Context(), todosPath)
+	var allTodos []basecamp.Todo
+	for _, tl := range todolists {
+		todos, err := app.SDK.Todos().List(cmd.Context(), bucketID, tl.ID, nil)
 		if err != nil {
 			continue // Skip failed todolists
 		}
-
-		for _, raw := range todosRaw {
-			var todo Todo
-			if err := json.Unmarshal(raw, &todo); err != nil {
-				continue
-			}
-			allTodos = append(allTodos, todo)
-		}
+		allTodos = append(allTodos, todos...)
 	}
 
 	// Apply filters
-	var result []Todo
+	var result []basecamp.Todo
 	for _, todo := range allTodos {
 		// Filter by status
 		if status != "" {
@@ -433,10 +386,10 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		}
 
 		// Filter by assignee (using resolved ID)
-		if assigneeID != "" {
+		if assigneeID != 0 {
 			found := false
 			for _, a := range todo.Assignees {
-				if fmt.Sprintf("%d", a.ID) == assigneeID {
+				if a.ID == assigneeID {
 					found = true
 					break
 				}
@@ -700,48 +653,26 @@ func newTodosCreateCmd() *cobra.Command {
 }
 
 func getFirstTodolistID(cmd *cobra.Command, app *appctx.App, project string) (int64, error) {
-	// Get project to find todoset
-	projectPath := fmt.Sprintf("/projects/%s.json", project)
-	resp, err := app.API.Get(cmd.Context(), projectPath)
+	// Parse project ID
+	bucketID, err := strconv.ParseInt(project, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Invalid project ID")
+	}
+
+	// Get todoset ID from project dock
+	todosetIDStr, err := getTodosetID(cmd, app, project)
 	if err != nil {
 		return 0, err
 	}
-
-	var projectData struct {
-		Dock []struct {
-			Name string `json:"name"`
-			ID   int64  `json:"id"`
-		} `json:"dock"`
-	}
-	if err := resp.UnmarshalData(&projectData); err != nil {
-		return 0, fmt.Errorf("failed to parse project: %w", err)
-	}
-
-	// Find todoset
-	var todosetID int64
-	for _, dock := range projectData.Dock {
-		if dock.Name == "todoset" {
-			todosetID = dock.ID
-			break
-		}
-	}
-
-	if todosetID == 0 {
-		return 0, output.ErrNotFound("todoset", project)
-	}
-
-	// Get first todolist
-	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", project, todosetID)
-	tlResp, err := app.API.Get(cmd.Context(), todolistsPath)
+	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
 	if err != nil {
-		return 0, err
+		return 0, output.ErrUsage("Invalid todoset ID")
 	}
 
-	var todolists []struct {
-		ID int64 `json:"id"`
-	}
-	if err := tlResp.UnmarshalData(&todolists); err != nil {
-		return 0, fmt.Errorf("failed to parse todolists: %w", err)
+	// Get first todolist via SDK
+	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	if err != nil {
+		return 0, convertSDKError(err)
 	}
 
 	if len(todolists) == 0 {
@@ -1058,81 +989,51 @@ Examples:
 }
 
 // getTodosForSweep gets todos matching the sweep filters.
-func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee string, overdue bool) ([]Todo, error) {
+func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee string, overdue bool) ([]basecamp.Todo, error) {
 	// Resolve assignee name to ID if provided
-	var assigneeID string
+	var assigneeID int64
 	if assignee != "" {
 		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
 		}
-		assigneeID = resolvedID
+		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
-	// Get project to find todoset
-	projectPath := fmt.Sprintf("/projects/%s.json", project)
-	resp, err := app.API.Get(cmd.Context(), projectPath)
+	// Parse project ID
+	bucketID, err := strconv.ParseInt(project, 10, 64)
+	if err != nil {
+		return nil, output.ErrUsage("Invalid project ID")
+	}
+
+	// Get todoset ID from project dock
+	todosetIDStr, err := getTodosetID(cmd, app, project)
 	if err != nil {
 		return nil, err
 	}
-
-	var projectData struct {
-		Dock []struct {
-			Name string `json:"name"`
-			ID   int64  `json:"id"`
-		} `json:"dock"`
-	}
-	if err := resp.UnmarshalData(&projectData); err != nil {
-		return nil, fmt.Errorf("failed to parse project: %w", err)
-	}
-
-	// Find todoset
-	var todosetID int64
-	for _, dock := range projectData.Dock {
-		if dock.Name == "todoset" {
-			todosetID = dock.ID
-			break
-		}
-	}
-
-	if todosetID == 0 {
-		return nil, output.ErrNotFoundHint("todoset", project, "Project may not have todos enabled")
-	}
-
-	// Get todolists
-	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", project, todosetID)
-	todolistsRaw, err := app.API.GetAll(cmd.Context(), todolistsPath)
+	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, output.ErrUsage("Invalid todoset ID")
+	}
+
+	// Get todolists via SDK
+	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	if err != nil {
+		return nil, convertSDKError(err)
 	}
 
 	// Aggregate todos from all todolists
-	var allTodos []Todo
-	for _, tlRaw := range todolistsRaw {
-		var tl struct {
-			ID int64 `json:"id"`
-		}
-		if err := json.Unmarshal(tlRaw, &tl); err != nil {
-			continue
-		}
-
-		todosPath := fmt.Sprintf("/buckets/%s/todolists/%d/todos.json", project, tl.ID)
-		todosRaw, err := app.API.GetAll(cmd.Context(), todosPath)
+	var allTodos []basecamp.Todo
+	for _, tl := range todolists {
+		todos, err := app.SDK.Todos().List(cmd.Context(), bucketID, tl.ID, nil)
 		if err != nil {
-			continue
+			continue // Skip failed todolists
 		}
-
-		for _, raw := range todosRaw {
-			var todo Todo
-			if err := json.Unmarshal(raw, &todo); err != nil {
-				continue
-			}
-			allTodos = append(allTodos, todo)
-		}
+		allTodos = append(allTodos, todos...)
 	}
 
 	// Apply filters
-	var result []Todo
+	var result []basecamp.Todo
 	for _, todo := range allTodos {
 		// Skip completed todos
 		if todo.Completed {
@@ -1140,10 +1041,10 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 		}
 
 		// Filter by assignee
-		if assigneeID != "" {
+		if assigneeID != 0 {
 			found := false
 			for _, a := range todo.Assignees {
-				if fmt.Sprintf("%d", a.ID) == assigneeID {
+				if a.ID == assigneeID {
 					found = true
 					break
 				}

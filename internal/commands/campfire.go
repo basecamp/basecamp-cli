@@ -6,16 +6,18 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
 
 // CampfireLine represents a line (message) in a Campfire chat.
 type CampfireLine struct {
-	ID        int64  `json:"id"`
-	Content   string `json:"content"`
-	Creator   Person `json:"creator"`
-	CreatedAt string `json:"created_at"`
+	ID        int64           `json:"id"`
+	Content   string          `json:"content"`
+	Creator   basecamp.Person `json:"creator"`
+	CreatedAt string          `json:"created_at"`
 }
 
 // NewCampfireCmd creates the campfire command for real-time chat.
