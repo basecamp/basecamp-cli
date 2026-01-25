@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/api"
 	"github.com/basecamp/bcq/internal/auth"
 	"github.com/basecamp/bcq/internal/config"
@@ -24,6 +26,7 @@ type App struct {
 	Config *config.Config
 	Auth   *auth.Manager
 	API    *api.Client
+	SDK    *basecamp.Client
 	Names  *names.Resolver
 	Output *output.Writer
 
@@ -53,6 +56,15 @@ type GlobalFlags struct {
 	CacheDir string
 }
 
+// authAdapter wraps auth.Manager to implement basecamp.TokenProvider.
+type authAdapter struct {
+	mgr *auth.Manager
+}
+
+func (a *authAdapter) AccessToken(ctx context.Context) (string, error) {
+	return a.mgr.AccessToken(ctx)
+}
+
 // NewApp creates a new App with the given configuration.
 func NewApp(cfg *config.Config) *App {
 	// Use a timeout to prevent auth operations from hanging forever on network issues.
@@ -64,6 +76,17 @@ func NewApp(cfg *config.Config) *App {
 	authMgr := auth.NewManager(cfg, httpClient)
 	apiClient := api.NewClient(cfg, authMgr)
 	nameResolver := names.NewResolver(apiClient, authMgr)
+
+	// Create SDK client with auth adapter
+	sdkCfg := &basecamp.Config{
+		BaseURL:      cfg.BaseURL,
+		AccountID:    cfg.AccountID,
+		ProjectID:    cfg.ProjectID,
+		TodolistID:   cfg.TodolistID,
+		CacheDir:     cfg.CacheDir,
+		CacheEnabled: cfg.CacheEnabled,
+	}
+	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr})
 
 	// Determine output format from config (default to auto)
 	format := output.FormatAuto
@@ -80,6 +103,7 @@ func NewApp(cfg *config.Config) *App {
 		Config: cfg,
 		Auth:   authMgr,
 		API:    apiClient,
+		SDK:    sdkClient,
 		Names:  nameResolver,
 		Output: output.New(output.Options{
 			Format: format,
@@ -134,6 +158,7 @@ func (a *App) ApplyFlags() {
 	// Apply verbose mode
 	if a.Flags.Verbose {
 		a.API.SetVerbose(true)
+		a.SDK.SetVerbose(true)
 	}
 }
 
