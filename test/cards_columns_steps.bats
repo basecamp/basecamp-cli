@@ -339,6 +339,18 @@ load test_helper
 }
 
 
+# Step delete errors
+
+@test "cards step delete without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq cards step delete
+  assert_failure
+  assert_output_contains "Step ID required"
+}
+
+
 # Step unknown action
 
 @test "cards step unknown action shows error" {
