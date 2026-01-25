@@ -42,6 +42,7 @@ https://3.basecamp.com/{account_id}/buckets/{project_id}/{type}/{id}#__recording
 - `/buckets/27/messages/123` → Message 123 in project 27
 - `/buckets/27/messages/123#__recording_456` → Comment 456 on message 123
 - `/buckets/27/card_tables/cards/789` → Card 789 in project 27
+- `/buckets/27/card_tables/columns/456` → Column 456 in project 27 (for creating cards)
 - `/buckets/27/todos/101` → Todo 101 in project 27
 
 **Fetch with bcq:**
@@ -101,10 +102,24 @@ bcq comment --content "Text" --on <recording_id> --project <id>  # Add comment
 ### Cards & Campfire
 
 ```bash
-bcq cards --in <project_id> --json                       # List cards
-bcq card --title "Title" --in <project_id>               # Create card
+bcq cards --in <project_id> --json                       # List all cards
+bcq cards columns --in <project_id> --json               # List columns with IDs
+bcq cards --in <project_id> --column <column_id> --json  # List cards in column
+bcq card --title "Title" --in <project_id>               # Create card (first column)
+bcq card --title "Title" --in <project_id> --column <id> # Create card in column
+bcq card --title "Title" --content "<p>Body</p>" --in <project_id>  # With HTML body
 bcq cards move <card_id> --to "Done" --project <project_id>  # Move card
 bcq campfire post --content "Message" --in <project_id>  # Post to campfire
+```
+
+**Creating cards from a column URL:**
+```bash
+# Parse the URL to get project and column IDs
+bcq url parse "https://3.basecamp.com/.../card_tables/columns/456" --json
+# Returns breadcrumbs with exact command to use
+
+# Create card in that column
+bcq card --title "Title" --in <project_id> --column <column_id> --json
 ```
 
 ## Common Workflows
@@ -198,6 +213,17 @@ bcq auth login --scope full    # Re-auth with write access
 All shortcut commands require explicit flags:
 - `bcq todo --content "text"` (not `bcq todo "text"`)
 - `bcq card --title "title"` (not `bcq card "title"`)
+
+**Network error (curl exit 3) - URL malformed:**
+This usually means special characters in content broke the URL. Try:
+```bash
+# Test with simple content first
+bcq card --title "Test" --in <project_id> --json
+
+# Avoid special characters in --content; use plain text or escaped HTML
+# Bad:  --content "<p>Line1\nLine2</p>"
+# Good: --content "<p>Line1</p><p>Line2</p>"
+```
 
 ## Learn More
 
