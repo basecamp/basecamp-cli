@@ -80,6 +80,12 @@ _url_parse() {
     bucket_id="${BASH_REMATCH[2]}"
     recording_type="cards"
     recording_id="${BASH_REMATCH[3]}"
+  elif [[ "$path_only" =~ ^/([0-9]+)/buckets/([0-9]+)/card_tables/columns/([0-9]+) ]]; then
+    # Column URL: /{account}/buckets/{bucket}/card_tables/columns/{id}
+    account_id="${BASH_REMATCH[1]}"
+    bucket_id="${BASH_REMATCH[2]}"
+    recording_type="columns"
+    recording_id="${BASH_REMATCH[3]}"
   elif [[ "$path_only" =~ ^/([0-9]+)/buckets/([0-9]+)/([^/]+)/([0-9]+) ]]; then
     # Full recording URL: /{account}/buckets/{bucket}/{type}/{id}
     account_id="${BASH_REMATCH[1]}"
@@ -123,6 +129,7 @@ _url_parse() {
     comments) type_singular="comment" ;;
     uploads) type_singular="upload" ;;
     cards) type_singular="card" ;;
+    columns) type_singular="column" ;;
     chats|campfires) type_singular="campfire" ;;
     schedules) type_singular="schedule" ;;
     schedule_entries) type_singular="schedule_entry" ;;
@@ -179,16 +186,24 @@ _url_parse() {
   local bcs="[]"
 
   if [[ -n "$recording_id" ]] && [[ -n "$bucket_id" ]]; then
-    bcs=$(breadcrumbs \
-      "$(breadcrumb "show" "bcq show $type_singular $recording_id --in $bucket_id" "View the $type_singular")" \
-      "$(breadcrumb "comment" "bcq comment \"text\" --on $recording_id --in $bucket_id" "Add a comment")" \
-      "$(breadcrumb "comments" "bcq comments --on $recording_id --in $bucket_id" "List comments")")
+    if [[ "$type_singular" == "column" ]]; then
+      # Column URL - show card operations for this column
+      bcs=$(breadcrumbs \
+        "$(breadcrumb "cards" "bcq cards --in $bucket_id --column $recording_id" "List cards in column")" \
+        "$(breadcrumb "create" "bcq card --title \"Title\" --in $bucket_id --column $recording_id" "Create card in column")" \
+        "$(breadcrumb "columns" "bcq cards columns --in $bucket_id" "List all columns")")
+    else
+      bcs=$(breadcrumbs \
+        "$(breadcrumb "show" "bcq show $type_singular $recording_id --project $bucket_id" "View the $type_singular")" \
+        "$(breadcrumb "comment" "bcq comment \"text\" --on $recording_id --project $bucket_id" "Add a comment")" \
+        "$(breadcrumb "comments" "bcq comments --on $recording_id --project $bucket_id" "List comments")")
 
-    if [[ -n "$comment_id" ]]; then
-      # Append comment breadcrumb to existing
-      local comment_bc
-      comment_bc=$(breadcrumb "show-comment" "bcq comments show $comment_id --in $bucket_id" "View the comment")
-      bcs=$(echo "$bcs" | jq --argjson bc "$comment_bc" '. + [$bc]')
+      if [[ -n "$comment_id" ]]; then
+        # Append comment breadcrumb to existing
+        local comment_bc
+        comment_bc=$(breadcrumb "show-comment" "bcq comments show $comment_id --project $bucket_id" "View the comment")
+        bcs=$(echo "$bcs" | jq --argjson bc "$comment_bc" '. + [$bc]')
+      fi
     fi
   fi
 
