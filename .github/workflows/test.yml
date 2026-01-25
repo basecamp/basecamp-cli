@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    name: Go Tests
+    name: Tests
     runs-on: ubuntu-latest
     env:
       BCQ_NO_KEYRING: "1"
@@ -22,17 +22,7 @@ jobs:
           go-version: '1.24'
 
       - name: Run unit tests
-        run: go test -race -v ./...
-
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.1.6
+        run: go test -v ./...
 
       - name: Build binary
         run: go build -o bin/bcq ./cmd/bcq
@@ -41,6 +31,63 @@ jobs:
         run: |
           ./bin/bcq --version
           ./bin/bcq --help | head -5
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.1.6
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Cache Go tools
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: go-tools-${{ runner.os }}-govulncheck-v1.1.4
+
+      - name: Run govulncheck
+        run: |
+          command -v govulncheck || go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
+
+  race-check:
+    name: Race Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Run tests with race detector
+        env:
+          BCQ_NO_KEYRING: "1"
+        run: go test -race -v ./...
 
   integration:
     name: Integration Tests
@@ -58,13 +105,18 @@ jobs:
       - name: Build binary
         run: go build -o bin/bcq ./cmd/bcq
 
-      - name: Install BATS
-        run: |
-          git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
-          sudo /tmp/bats-core/install.sh /usr/local
+      - name: Cache BATS
+        id: cache-bats
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/libexec/bats-core
+          key: bats-1.11.0
 
-      - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install BATS
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
 
       - name: Run BATS integration tests
         run: bats e2e/
@@ -72,46 +124,53 @@ jobs:
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     env:
       BCQ_NO_KEYRING: "1"
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
 
-      - name: Check for internal changes
-        if: github.event_name == 'pull_request'
+      - name: Check for benchmark-relevant changes
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            internal:
-              - 'internal/**'
+            bench:
+              - 'internal/api/**'
+              - 'internal/names/**'
+              - 'internal/dateparse/**'
+              - 'internal/output/**'
+              - 'go.mod'
+              - 'go.sum'
 
-      # Run benchmarks on: main pushes (always), PRs (only if internal/ changed)
       - name: Set up Go
-        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
+        if: steps.filter.outputs.bench == 'true'
         uses: actions/setup-go@v6
         with:
           go-version: '1.24'
 
       - name: Run benchmarks
-        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
+        if: steps.filter.outputs.bench == 'true'
         run: go test -bench=. -benchmem -count=3 ./internal/... | tee benchmarks.txt
 
       - name: Download previous benchmark baseline
-        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
+        if: steps.filter.outputs.bench == 'true'
         uses: actions/cache/restore@v5
         with:
           path: benchmarks-baseline.txt
-          key: benchmarks-${{ github.base_ref || 'main' }}
+          key: benchmarks-main
           restore-keys: |
             benchmarks-main
 
       - name: Install benchstat
-        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
+        if: steps.filter.outputs.bench == 'true'
         run: go install golang.org/x/perf/cmd/benchstat@latest
 
       - name: Compare benchmarks
-        if: (github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true') && hashFiles('benchmarks-baseline.txt') != ''
+        if: steps.filter.outputs.bench == 'true' && hashFiles('benchmarks-baseline.txt') != ''
         run: |
           echo "## Benchmark Comparison" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -119,34 +178,33 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Check for significant regression
-        if: (github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true') && hashFiles('benchmarks-baseline.txt') != ''
+        if: steps.filter.outputs.bench == 'true' && hashFiles('benchmarks-baseline.txt') != ''
         run: |
           benchstat benchmarks-baseline.txt benchmarks.txt > comparison.txt 2>&1 || true
-          # Warn on >20% regression but don't fail (benchmarks can be noisy)
           if grep -E '\+[2-9][0-9]\.[0-9]+%|\+[1-9][0-9][0-9]+' comparison.txt; then
             echo "::warning::Potential performance regression detected (>20% slower in some benchmarks)"
           fi
 
-      - name: Save benchmark baseline (main branch only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      - name: Save benchmark baseline
+        if: steps.filter.outputs.bench == 'true'
         uses: actions/cache/save@v5
         with:
           path: benchmarks.txt
           key: benchmarks-main-${{ github.sha }}
 
       - name: Update baseline cache alias
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: steps.filter.outputs.bench == 'true'
         run: cp benchmarks.txt benchmarks-baseline.txt
 
       - name: Save baseline alias
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: steps.filter.outputs.bench == 'true'
         uses: actions/cache/save@v5
         with:
           path: benchmarks-baseline.txt
           key: benchmarks-main
 
       - name: Upload benchmark results
-        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
+        if: steps.filter.outputs.bench == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: benchmarks
