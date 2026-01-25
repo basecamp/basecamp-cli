@@ -1,23 +1,16 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Todolist represents a Basecamp todolist.
-type Todolist struct {
-	ID                  int64  `json:"id"`
-	Name                string `json:"name"`
-	Description         string `json:"description,omitempty"`
-	TodosRemainingCount int    `json:"todos_remaining_count"`
-	CompletedRatio      string `json:"completed_ratio"`
-}
 
 // NewTodolistsCmd creates the todolists command group.
 func NewTodolistsCmd() *cobra.Command {
@@ -63,8 +56,8 @@ func newTodolistsListCmd(project *string) *cobra.Command {
 
 func runTodolistsList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
+	if app == nil {
+		return fmt.Errorf("app not initialized")
 	}
 
 	// Resolve project
@@ -85,21 +78,25 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 	}
 
 	// Get todoset from project dock
-	todosetID, err := getTodosetID(cmd, app, resolvedProjectID)
+	todosetIDStr, err := getTodosetID(cmd, app, resolvedProjectID)
 	if err != nil {
 		return err
 	}
 
-	// Get todolists
-	path := fmt.Sprintf("/buckets/%s/todosets/%s/todolists.json", resolvedProjectID, todosetID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	// Parse IDs as int64
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
+	}
+	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid todoset ID")
 	}
 
-	var todolists []Todolist
-	if err := resp.UnmarshalData(&todolists); err != nil {
-		return fmt.Errorf("failed to parse todolists: %w", err)
+	// Get todolists via SDK
+	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(todolists,
@@ -127,11 +124,11 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
-			todolistID := args[0]
+			todolistIDStr := args[0]
 
 			// Resolve project
 			projectID := *project
@@ -150,33 +147,33 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/todolists/%s.json", resolvedProjectID, todolistID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			var todolist map[string]any
-			if err := json.Unmarshal(resp.Data, &todolist); err != nil {
-				return err
+			// Get todolist via SDK
+			todolist, err := app.SDK.Todolists().Get(cmd.Context(), bucketID, todolistID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			name := ""
-			if n, ok := todolist["name"].(string); ok {
-				name = n
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Todolist: %s", name)),
+			return app.Output.OK(todolist,
+				output.WithSummary(fmt.Sprintf("Todolist: %s", todolist.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         fmt.Sprintf("bcq todos --list %s --in %s", todolistID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq todos --list %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "List todos",
 					},
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("bcq todos create --content <text> --list %s --in %s", todolistID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "Create todo",
 					},
 				),
@@ -196,8 +193,8 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 		Long:  "Create a new todolist in a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
 			if name == "" {
@@ -222,46 +219,46 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 			}
 
 			// Get todoset from project dock
-			todosetID, err := getTodosetID(cmd, app, resolvedProjectID)
+			todosetIDStr, err := getTodosetID(cmd, app, resolvedProjectID)
 			if err != nil {
 				return err
 			}
 
-			// Build request body
-			body := map[string]string{
-				"name": name,
-			}
-			if description != "" {
-				body["description"] = description
-			}
-
-			path := fmt.Sprintf("/buckets/%s/todosets/%s/todolists.json", resolvedProjectID, todosetID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todoset ID")
 			}
 
-			var todolist map[string]any
-			if err := json.Unmarshal(resp.Data, &todolist); err != nil {
-				return err
+			// Build SDK request
+			req := &basecamp.CreateTodolistRequest{
+				Name:        name,
+				Description: description,
 			}
 
-			todolistID := ""
-			if id, ok := todolist["id"].(float64); ok {
-				todolistID = fmt.Sprintf("%.0f", id)
+			// Create todolist via SDK
+			todolist, err := app.SDK.Todolists().Create(cmd.Context(), bucketID, todosetID, req)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Created todolist #%s: %s", todolistID, name)),
+			todolistIDStr := fmt.Sprintf("%d", todolist.ID)
+
+			return app.Output.OK(todolist,
+				output.WithSummary(fmt.Sprintf("Created todolist #%s: %s", todolistIDStr, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolistID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "View todolist",
 					},
 					output.Breadcrumb{
 						Action:      "add_todo",
-						Cmd:         fmt.Sprintf("bcq todos create --content <text> --list %s --in %s", todolistID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "Add todo",
 					},
 				),
@@ -287,11 +284,11 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			if app == nil {
+				return fmt.Errorf("app not initialized")
 			}
 
-			todolistID := args[0]
+			todolistIDStr := args[0]
 
 			if name == "" && description == "" {
 				return output.ErrUsage("at least one of --name or --description is required")
@@ -314,27 +311,34 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Build request body
-			body := make(map[string]string)
-			if name != "" {
-				body["name"] = name
-			}
-			if description != "" {
-				body["description"] = description
-			}
-
-			path := fmt.Sprintf("/buckets/%s/todolists/%s.json", resolvedProjectID, todolistID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			// Parse IDs as int64
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated todolist #%s", todolistID)),
+			// Build SDK request
+			req := &basecamp.UpdateTodolistRequest{
+				Name:        name,
+				Description: description,
+			}
+
+			// Update todolist via SDK
+			todolist, err := app.SDK.Todolists().Update(cmd.Context(), bucketID, todolistID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(todolist,
+				output.WithSummary(fmt.Sprintf("Updated todolist #%s", todolistIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolistID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "View todolist",
 					},
 				),

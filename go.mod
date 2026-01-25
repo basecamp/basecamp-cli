@@ -3,7 +3,7 @@ module github.com/basecamp/bcq
 go 1.24.0
 
 require (
-	github.com/basecamp/basecamp-sdk/go v0.0.0-20260125214045-6e4b87b848d1
+	github.com/basecamp/basecamp-sdk/go v0.0.0-20260125221103-add603d07a0c
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v0.8.0
