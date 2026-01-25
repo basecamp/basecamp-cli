@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/basecamp/basecamp-sdk/pkg/basecamp"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/api"
 	"github.com/basecamp/bcq/internal/auth"
