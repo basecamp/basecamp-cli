@@ -681,6 +681,59 @@ urlencode() {
 }
 
 
+# Get a dock tool ID from project data, handling multiples
+# Usage: require_dock_tool "$project_data" "kanban_board" "$project_id" [--id <id>]
+#
+# When project has multiple tools of this type:
+#   - If --id is provided, use that specific ID
+#   - Otherwise, error with list of available tools
+#
+# Outputs: tool ID on success
+# Exits: with error message on failure
+require_dock_tool() {
+  local project_data="$1"
+  local dock_name="$2"
+  local project_id="$3"
+  local explicit_id=""
+
+  shift 3
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --id)
+        explicit_id="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  # If ID provided directly, use it
+  if [[ -n "$explicit_id" ]]; then
+    echo "$explicit_id"
+    return 0
+  fi
+
+  # Discover from dock
+  local tool_ids tool_count
+  tool_ids=$(echo "$project_data" | jq -r ".dock[] | select(.name == \"$dock_name\") | .id")
+  tool_count=$(echo "$tool_ids" | grep -c . 2>/dev/null || echo 0)
+
+  if [[ "$tool_count" -eq 0 ]]; then
+    die "No $dock_name found in project $project_id" $EXIT_NOT_FOUND
+  fi
+
+  if [[ "$tool_count" -gt 1 ]]; then
+    local tools_info
+    tools_info=$(echo "$project_data" | jq -r ".dock[] | select(.name == \"$dock_name\") | \"  - \(.title) (ID: \(.id))\"")
+    die "Project has $tool_count ${dock_name}s. Specify ID directly:" $EXIT_USAGE "$tools_info"
+  fi
+
+  echo "$tool_ids" | head -1
+}
+
+
 # Verify required dependencies on startup
 _check_dependencies() {
   require_command curl "Install curl: https://curl.se/"

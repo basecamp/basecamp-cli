@@ -81,24 +81,19 @@ _cards_list() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Get card table from project dock
+  local all_cards="[]"
+
+  # Discover card table from project dock
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
 
-  if [[ -z "$card_table_id" ]]; then
-    die "No card table found in project $project" $EXIT_NOT_FOUND
-  fi
-
-  # Get card table with embedded columns (lists)
   local card_table_data columns_response
   card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
   columns_response=$(echo "$card_table_data" | jq '.lists // []')
 
-  # Get cards from all columns or specific column
-  local all_cards="[]"
   if [[ -n "$column" ]]; then
-    # Get cards from specific column (accepts ID or name)
+    # Get cards from specific column (by ID or name)
     local column_id
     column_id=$(_resolve_column "$columns_response" "$column")
     if [[ -z "$column_id" ]]; then
@@ -152,13 +147,18 @@ _cards_list_md() {
 }
 
 _cards_columns() {
-  local project=""
+  local project="" card_table=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
+        shift 2
+        ;;
+      --card-table)
+        [[ -z "${2:-}" ]] && die "--card-table requires a value" $EXIT_USAGE
+        card_table="$2"
         shift 2
         ;;
       *)
@@ -170,14 +170,10 @@ _cards_columns() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Get card table from project dock
+  # Get project data and resolve card table
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
-
-  if [[ -z "$card_table_id" ]]; then
-    die "No card table found in project $project" $EXIT_NOT_FOUND
-  fi
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project" --id "$card_table")
 
   # Get card table with embedded columns (lists)
   local card_table_data columns
@@ -339,14 +335,10 @@ _cards_column_create() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Get card table ID from project dock
+  # Discover card table from project dock
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
-
-  if [[ -z "$card_table_id" ]]; then
-    die "No card table found in project $project" $EXIT_NOT_FOUND
-  fi
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
 
   local payload
   payload=$(jq -n --arg title "$title" '{title: $title}')
@@ -451,14 +443,10 @@ _cards_column_move() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Get card table ID
+  # Discover card table from project dock
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
-
-  if [[ -z "$card_table_id" ]]; then
-    die "No card table found in project $project" $EXIT_NOT_FOUND
-  fi
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
 
   local payload
   payload=$(jq -n \
@@ -1141,21 +1129,15 @@ _cards_create() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Get card table and first column if not specified
+  # Discover card table from project dock
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
 
-  if [[ -z "$card_table_id" ]]; then
-    die "No card table found in project $project" $EXIT_NOT_FOUND
-  fi
-
-  # Get card table with embedded columns (lists)
-  local card_table_data columns
+  local card_table_data columns column_id
   card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
   columns=$(echo "$card_table_data" | jq '.lists // []')
 
-  local column_id
   if [[ -n "$column" ]]; then
     # Find column by ID or name
     column_id=$(_resolve_column "$columns" "$column")
@@ -1226,10 +1208,10 @@ _cards_move() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Get card table and find target column
+  # Discover card table from project dock
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(echo "$project_data" | jq -r '.dock[] | select(.name == "kanban_board") | .id // empty')
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
 
   # Get card table with embedded columns (lists)
   local card_table_data columns column_id
