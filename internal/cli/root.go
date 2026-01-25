@@ -63,8 +63,9 @@ func NewRootCmd() *cobra.Command {
 	// Output format flags
 	cmd.PersistentFlags().BoolVarP(&flags.JSON, "json", "j", false, "Output as JSON")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "Output data only, no envelope")
-	cmd.PersistentFlags().BoolVarP(&flags.MD, "md", "m", false, "Output as Markdown")
-	cmd.PersistentFlags().BoolVar(&flags.MD, "markdown", false, "Output as Markdown")
+	cmd.PersistentFlags().BoolVarP(&flags.MD, "md", "m", false, "Output as Markdown (portable)")
+	cmd.PersistentFlags().BoolVar(&flags.MD, "markdown", false, "Output as Markdown (portable)")
+	cmd.PersistentFlags().BoolVar(&flags.Styled, "styled", false, "Force styled output (ANSI colors)")
 	cmd.PersistentFlags().BoolVar(&flags.IDsOnly, "ids-only", false, "Output only IDs")
 	cmd.PersistentFlags().BoolVar(&flags.Count, "count", false, "Output only count")
 	cmd.PersistentFlags().BoolVar(&flags.Agent, "agent", false, "Agent mode (JSON + quiet)")
@@ -145,11 +146,12 @@ func Execute() {
 
 		// Determine output format from flags (read from command's persistent flags)
 		pf := cmd.PersistentFlags()
-		format := output.FormatAuto // Default to auto (TTY → MD, non-TTY → JSON)
+		format := output.FormatAuto // Default to auto (TTY → styled, non-TTY → JSON)
 		agent, _ := pf.GetBool("agent")
 		quiet, _ := pf.GetBool("quiet")
 		idsOnly, _ := pf.GetBool("ids-only")
 		count, _ := pf.GetBool("count")
+		styled, _ := pf.GetBool("styled")
 		md, _ := pf.GetBool("md")
 		jsonFlag, _ := pf.GetBool("json")
 
@@ -159,6 +161,8 @@ func Execute() {
 			format = output.FormatIDs
 		} else if count {
 			format = output.FormatCount
+		} else if styled {
+			format = output.FormatStyled
 		} else if md {
 			format = output.FormatMarkdown
 		} else if jsonFlag {

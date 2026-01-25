@@ -36,9 +36,10 @@ type ErrorResponse struct {
 type Format int
 
 const (
-	FormatAuto Format = iota // Auto-detect: TTY → Markdown, non-TTY → JSON
+	FormatAuto Format = iota // Auto-detect: TTY → Styled, non-TTY → JSON
 	FormatJSON
-	FormatMarkdown
+	FormatMarkdown // Literal Markdown syntax (portable, pipeable)
+	FormatStyled   // ANSI styled output (forced, even when piped)
 	FormatQuiet
 	FormatIDs
 	FormatCount
@@ -96,10 +97,10 @@ func (w *Writer) Err(err error) error {
 func (w *Writer) write(v any) error {
 	format := w.opts.Format
 
-	// Auto-detect format: TTY → Markdown, non-TTY → JSON
+	// Auto-detect format: TTY → Styled, non-TTY → JSON
 	if format == FormatAuto {
 		if isTTY(w.opts.Writer) {
-			format = FormatMarkdown
+			format = FormatStyled
 		} else {
 			format = FormatJSON
 		}
@@ -117,7 +118,9 @@ func (w *Writer) write(v any) error {
 	case FormatCount:
 		return w.writeCount(v)
 	case FormatMarkdown:
-		return w.writeMarkdown(v)
+		return w.writeLiteralMarkdown(v)
+	case FormatStyled:
+		return w.writeStyled(v)
 	default:
 		return w.writeJSON(v)
 	}
@@ -240,9 +243,30 @@ func normalizeUnmarshaled(v any) any {
 	}
 }
 
-func (w *Writer) writeMarkdown(v any) error {
-	// For now, fall back to JSON. Markdown rendering can be enhanced later.
-	return w.writeJSON(v)
+// writeStyled outputs ANSI styled terminal output.
+func (w *Writer) writeStyled(v any) error {
+	r := NewRenderer(w.opts.Writer, true) // Force styled
+	switch resp := v.(type) {
+	case *Response:
+		return r.RenderResponse(w.opts.Writer, resp)
+	case *ErrorResponse:
+		return r.RenderError(w.opts.Writer, resp)
+	default:
+		return w.writeJSON(v)
+	}
+}
+
+// writeLiteralMarkdown outputs literal Markdown syntax (portable, pipeable).
+func (w *Writer) writeLiteralMarkdown(v any) error {
+	r := NewMarkdownRenderer(w.opts.Writer)
+	switch resp := v.(type) {
+	case *Response:
+		return r.RenderResponse(w.opts.Writer, resp)
+	case *ErrorResponse:
+		return r.RenderError(w.opts.Writer, resp)
+	default:
+		return w.writeJSON(v)
+	}
 }
 
 // ResponseOption modifies a Response.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -776,6 +777,258 @@ func TestNormalizeDataWithNil(t *testing.T) {
 }
 
 // =============================================================================
+// formatCell Tests
+// =============================================================================
+
+func TestFormatCellWithScalarArray(t *testing.T) {
+	// Test string arrays (e.g., tags)
+	tags := []any{"frontend", "bug", "urgent"}
+	result := formatCell(tags)
+	if result != "frontend, bug, urgent" {
+		t.Errorf("formatCell(string array) = %q, want %q", result, "frontend, bug, urgent")
+	}
+
+	// Test number arrays
+	numbers := []any{float64(1), float64(2), float64(3)}
+	result = formatCell(numbers)
+	if result != "1, 2, 3" {
+		t.Errorf("formatCell(number array) = %q, want %q", result, "1, 2, 3")
+	}
+
+	// Test mixed arrays
+	mixed := []any{"a", float64(1), "b"}
+	result = formatCell(mixed)
+	if result != "a, 1, b" {
+		t.Errorf("formatCell(mixed array) = %q, want %q", result, "a, 1, b")
+	}
+
+	// Test empty array
+	empty := []any{}
+	result = formatCell(empty)
+	if result != "" {
+		t.Errorf("formatCell(empty array) = %q, want %q", result, "")
+	}
+}
+
+func TestFormatCellWithMapArray(t *testing.T) {
+	// Test maps with name key (assignees)
+	assignees := []any{
+		map[string]any{"id": float64(1), "name": "Alice"},
+		map[string]any{"id": float64(2), "name": "Bob"},
+	}
+	result := formatCell(assignees)
+	if result != "Alice, Bob" {
+		t.Errorf("formatCell(assignees) = %q, want %q", result, "Alice, Bob")
+	}
+
+	// Test maps with title key (no name)
+	items := []any{
+		map[string]any{"id": float64(1), "title": "Task A"},
+		map[string]any{"id": float64(2), "title": "Task B"},
+	}
+	result = formatCell(items)
+	if result != "Task A, Task B" {
+		t.Errorf("formatCell(items with title) = %q, want %q", result, "Task A, Task B")
+	}
+
+	// Test maps with only id (fallback)
+	attachments := []any{
+		map[string]any{"id": float64(100)},
+		map[string]any{"id": float64(200)},
+	}
+	result = formatCell(attachments)
+	if result != "100, 200" {
+		t.Errorf("formatCell(attachments) = %q, want %q", result, "100, 200")
+	}
+}
+
+// =============================================================================
+// Markdown Format Tests
+// =============================================================================
+
+func TestWriterMarkdownFormatError(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	err := w.Err(ErrNotFound("project", "123"))
+	if err != nil {
+		t.Fatalf("Err() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should NOT be JSON
+	if strings.Contains(output, `"ok":`) {
+		t.Errorf("Markdown error output should not contain JSON, got: %s", output)
+	}
+	// Should contain styled error message
+	if !strings.Contains(output, "Error:") {
+		t.Errorf("Markdown error output should contain 'Error:', got: %s", output)
+	}
+	if !strings.Contains(output, "project not found") {
+		t.Errorf("Markdown error output should contain error message, got: %s", output)
+	}
+}
+
+func TestWriterMarkdownFormatList(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := []map[string]any{
+		{"id": 1, "name": "Project A", "status": "active"},
+		{"id": 2, "name": "Project B", "status": "archived"},
+	}
+	err := w.OK(data, WithSummary("2 projects"))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should NOT be JSON
+	if strings.Contains(output, `"ok":`) {
+		t.Errorf("Markdown list output should not contain JSON, got: %s", output)
+	}
+	// Should contain summary
+	if !strings.Contains(output, "2 projects") {
+		t.Errorf("Markdown output should contain summary, got: %s", output)
+	}
+	// Should contain data
+	if !strings.Contains(output, "Project A") {
+		t.Errorf("Markdown output should contain data, got: %s", output)
+	}
+}
+
+func TestWriterMarkdownFormatObject(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":        123,
+		"name":      "Test Todo",
+		"completed": false,
+	}
+	err := w.OK(data)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should NOT be JSON
+	if strings.Contains(output, `"ok":`) {
+		t.Errorf("Markdown object output should not contain JSON, got: %s", output)
+	}
+	// Should contain key-value pairs
+	if !strings.Contains(output, "id") || !strings.Contains(output, "123") {
+		t.Errorf("Markdown output should contain id: 123, got: %s", output)
+	}
+	if !strings.Contains(output, "completed") || !strings.Contains(output, "no") {
+		t.Errorf("Markdown output should contain completed: no, got: %s", output)
+	}
+}
+
+func TestWriterMarkdownFormatBreadcrumbs(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := map[string]any{"id": 1}
+	err := w.OK(data, WithBreadcrumbs(
+		Breadcrumb{Action: "show", Cmd: "bcq show 1", Description: "View details"},
+	))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should contain breadcrumb (literal Markdown uses "### Next" heading)
+	if !strings.Contains(output, "Next") {
+		t.Errorf("Markdown output should contain 'Next', got: %s", output)
+	}
+	if !strings.Contains(output, "bcq show 1") {
+		t.Errorf("Markdown output should contain breadcrumb command, got: %s", output)
+	}
+}
+
+func TestWriterMarkdownNoANSIWhenNotTTY(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf, // bytes.Buffer is not a TTY
+	})
+
+	err := w.Err(ErrNotFound("project", "123"))
+	if err != nil {
+		t.Fatalf("Err() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should NOT contain ANSI escape codes when not a TTY
+	if strings.Contains(output, "\x1b[") {
+		t.Errorf("Markdown output should not contain ANSI codes when not TTY, got: %q", output)
+	}
+	// Should still contain the error message
+	if !strings.Contains(output, "Error:") {
+		t.Errorf("Markdown output should contain 'Error:', got: %s", output)
+	}
+}
+
+func TestWriterStyledEmitsANSI(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf, // bytes.Buffer is not a TTY, but FormatStyled forces ANSI
+	})
+
+	err := w.Err(ErrNotFound("project", "123"))
+	if err != nil {
+		t.Fatalf("Err() failed: %v", err)
+	}
+
+	output := buf.String()
+	// SHOULD contain ANSI escape codes when FormatStyled is used
+	if !strings.Contains(output, "\x1b[") {
+		t.Errorf("Styled output should contain ANSI codes, got: %q", output)
+	}
+	// Should still contain the error message
+	if !strings.Contains(output, "Error:") {
+		t.Errorf("Styled output should contain 'Error:', got: %s", output)
+	}
+}
+
+func TestWriterMarkdownOutputsLiteralMarkdown(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	err := w.Err(ErrNotFound("project", "123"))
+	if err != nil {
+		t.Fatalf("Err() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should NOT contain ANSI escape codes
+	if strings.Contains(output, "\x1b[") {
+		t.Errorf("Markdown output should NOT contain ANSI codes, got: %q", output)
+	}
+	// Should contain Markdown syntax
+	if !strings.Contains(output, "**Error:**") {
+		t.Errorf("Markdown output should contain '**Error:**', got: %s", output)
+	}
+}
+
+// =============================================================================
 // Format Constants Tests
 // =============================================================================
 
@@ -785,6 +1038,7 @@ func TestFormatConstants(t *testing.T) {
 		FormatAuto:     "auto",
 		FormatJSON:     "json",
 		FormatMarkdown: "markdown",
+		FormatStyled:   "styled",
 		FormatQuiet:    "quiet",
 		FormatIDs:      "ids",
 		FormatCount:    "count",
