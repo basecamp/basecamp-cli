@@ -157,5 +157,15 @@ func (c *Cache) Invalidate(key string) error {
 		return err
 	}
 
-	return os.WriteFile(etagsFile, data, 0600)
+	// Write atomically using temp file + rename (same pattern as Set)
+	tmpEtags := etagsFile + ".tmp"
+	if err := os.WriteFile(tmpEtags, data, 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpEtags, etagsFile); err != nil {
+		_ = os.Remove(tmpEtags) // Best-effort cleanup
+		return err
+	}
+
+	return nil
 }

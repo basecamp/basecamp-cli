@@ -80,8 +80,10 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		return "", output.ErrAuth("Not authenticated")
 	}
 
-	// Check if token is expired (with 5 minute buffer)
-	if time.Now().Unix() >= creds.ExpiresAt-300 {
+	// Check if token is expired (with 5 minute buffer).
+	// ExpiresAt==0 means non-expiring token (e.g., from BASECAMP_TOKEN env var),
+	// so only refresh if ExpiresAt > 0 and is within the expiry window.
+	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
 		if err := m.refreshLocked(ctx, origin, creds); err != nil {
 			return "", err
 		}
@@ -187,10 +189,40 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 type LoginOptions struct {
 	Scope     string
 	NoBrowser bool // If true, don't auto-open browser, just print URL
+
+	// CallbackAddr is the address for the local OAuth callback server.
+	// Default: "127.0.0.1:8976"
+	CallbackAddr string
+
+	// BrowserLauncher opens the authorization URL in a browser.
+	// If nil, uses the default system browser launcher.
+	BrowserLauncher func(url string) error
+
+	// Logger receives status messages during the login flow.
+	// If nil, messages are suppressed for headless/SDK use.
+	Logger func(msg string)
+}
+
+// defaults fills in default values for LoginOptions.
+func (o *LoginOptions) defaults() {
+	if o.CallbackAddr == "" {
+		o.CallbackAddr = "127.0.0.1:8976"
+	}
+	if o.BrowserLauncher == nil && !o.NoBrowser {
+		o.BrowserLauncher = openBrowser
+	}
+}
+
+// log outputs a message if a logger is configured.
+func (o *LoginOptions) log(msg string) {
+	if o.Logger != nil {
+		o.Logger(msg)
+	}
 }
 
 // Login initiates the OAuth login flow.
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
+	opts.defaults()
 	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
 
 	// Discover OAuth config
@@ -200,7 +232,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	}
 
 	// Load or register client credentials
-	clientCreds, err := m.loadClientCredentials(ctx, oauthCfg, oauthType)
+	clientCreds, err := m.loadClientCredentials(ctx, oauthCfg, oauthType, &opts)
 	if err != nil {
 		return err
 	}
@@ -216,19 +248,19 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	state := generateState()
 
 	// Build authorization URL
-	authURL, err := m.buildAuthURL(oauthCfg, oauthType, opts.Scope, state, codeChallenge, clientCreds.ClientID)
+	authURL, err := m.buildAuthURL(oauthCfg, oauthType, opts.Scope, state, codeChallenge, clientCreds.ClientID, &opts)
 	if err != nil {
 		return err
 	}
 
 	// Start local callback server
-	code, err := m.waitForCallback(ctx, state, authURL, opts.NoBrowser)
+	code, err := m.waitForCallback(ctx, state, authURL, &opts)
 	if err != nil {
 		return err
 	}
 
 	// Exchange code for tokens
-	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds)
+	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds, &opts)
 	if err != nil {
 		return err
 	}
@@ -270,7 +302,7 @@ func (m *Manager) discoverOAuth(ctx context.Context) (*OAuthConfig, string, erro
 	}, "launchpad", nil
 }
 
-func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *OAuthConfig, oauthType string) (*ClientCredentials, error) {
+func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *OAuthConfig, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
 	if oauthType == "bc3" {
 		// BC3: Try to load from stored file, otherwise register via DCR
 		creds, err := m.loadBC3Client()
@@ -282,7 +314,7 @@ func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *OAuthConf
 		if oauthCfg.RegistrationEndpoint == "" {
 			return nil, output.ErrAuth("OAuth server does not support Dynamic Client Registration")
 		}
-		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint)
+		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, opts)
 	}
 
 	// Launchpad: Check environment variables, then use built-in defaults
@@ -323,11 +355,12 @@ func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 	return &creds, nil
 }
 
-func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string) (*ClientCredentials, error) {
+func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
+	redirectURI := "http://" + opts.CallbackAddr + "/callback"
 	regReq := map[string]interface{}{
 		"client_name":                "bcq",
 		"client_uri":                 "https://github.com/basecamp/bcq",
-		"redirect_uris":              []string{"http://127.0.0.1:8976/callback"},
+		"redirect_uris":              []string{redirectURI},
 		"grant_types":                []string{"authorization_code"},
 		"response_types":             []string{"code"},
 		"token_endpoint_auth_method": "none",
@@ -395,16 +428,18 @@ func (m *Manager) saveBC3Client(creds *ClientCredentials) error {
 	return os.WriteFile(clientFile, data, 0600)
 }
 
-func (m *Manager) buildAuthURL(cfg *OAuthConfig, oauthType, scope, state, codeChallenge, clientID string) (string, error) {
+func (m *Manager) buildAuthURL(cfg *OAuthConfig, oauthType, scope, state, codeChallenge, clientID string, opts *LoginOptions) (string, error) {
 	u, err := url.Parse(cfg.AuthorizationEndpoint)
 	if err != nil {
 		return "", err
 	}
 
+	redirectURI := "http://" + opts.CallbackAddr + "/callback"
+
 	q := u.Query()
 	q.Set("response_type", "code")
 	q.Set("client_id", clientID)
-	q.Set("redirect_uri", "http://127.0.0.1:8976/callback")
+	q.Set("redirect_uri", redirectURI)
 	q.Set("state", state)
 
 	if oauthType == "bc3" {
@@ -421,10 +456,10 @@ func (m *Manager) buildAuthURL(cfg *OAuthConfig, oauthType, scope, state, codeCh
 	return u.String(), nil
 }
 
-func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL string, noBrowser bool) (string, error) {
+func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL string, opts *LoginOptions) (string, error) {
 	// Start listener
 	lc := net.ListenConfig{}
-	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:8976")
+	listener, err := lc.Listen(ctx, "tcp", opts.CallbackAddr)
 	if err != nil {
 		return "", fmt.Errorf("failed to start callback server: %w", err)
 	}
@@ -460,16 +495,16 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	go server.Serve(listener)
 
 	// Try to open browser automatically unless --no-browser was specified
-	if !noBrowser {
-		if err := openBrowser(authURL); err != nil {
+	if opts.BrowserLauncher != nil {
+		if err := opts.BrowserLauncher(authURL); err != nil {
 			// Fall back to printing URL if browser open fails
-			fmt.Printf("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL)
+			opts.log("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
 		} else {
-			fmt.Println("\nOpening browser for authentication...")
-			fmt.Printf("If the browser doesn't open, visit: %s\n\nWaiting for authentication...\n", authURL)
+			opts.log("\nOpening browser for authentication...")
+			opts.log("If the browser doesn't open, visit: " + authURL + "\n\nWaiting for authentication...")
 		}
 	} else {
-		fmt.Printf("\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL)
+		opts.log("\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
 	}
 
 	// Wait for callback or timeout
@@ -485,11 +520,12 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	}
 }
 
-func (m *Manager) exchangeCode(ctx context.Context, cfg *OAuthConfig, oauthType, code, codeVerifier string, clientCreds *ClientCredentials) (*Credentials, error) {
+func (m *Manager) exchangeCode(ctx context.Context, cfg *OAuthConfig, oauthType, code, codeVerifier string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
+	redirectURI := "http://" + opts.CallbackAddr + "/callback"
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
 	data.Set("code", code)
-	data.Set("redirect_uri", "http://127.0.0.1:8976/callback")
+	data.Set("redirect_uri", redirectURI)
 	data.Set("client_id", clientCreds.ClientID)
 
 	switch oauthType {
