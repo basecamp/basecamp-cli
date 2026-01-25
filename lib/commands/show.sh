@@ -9,7 +9,7 @@ cmd_show() {
   # Parse all arguments in single pass
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --project|-p)
+      --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
         shift 2
@@ -155,8 +155,8 @@ If no type specified, uses generic recording lookup.
 
 ### Options
 
-    --project, -p <id>    Project ID
-    --type, -t <type>     Recording type
+    --in, --project, -p <id>   Project ID
+    --type, -t <type>          Recording type
 
 ### Examples
 
