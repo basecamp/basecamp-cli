@@ -7,10 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/basecamp/bcq/internal/tui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/x/term"
+
+	"github.com/basecamp/bcq/internal/tui"
 )
 
 // Renderer handles styled terminal output.
@@ -579,7 +580,7 @@ func (r *MarkdownRenderer) renderData(b *strings.Builder, data any) {
 		b.WriteString("*No data*\n")
 
 	default:
-		b.WriteString(fmt.Sprintf("%v\n", data))
+		fmt.Fprintf(b, "%v\n", data)
 	}
 }
 

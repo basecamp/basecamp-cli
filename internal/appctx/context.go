@@ -36,8 +36,8 @@ type GlobalFlags struct {
 	// Output format flags
 	JSON    bool
 	Quiet   bool
-	MD      bool   // Literal Markdown syntax output
-	Styled  bool   // Force ANSI styled output (even when piped)
+	MD      bool // Literal Markdown syntax output
+	Styled  bool // Force ANSI styled output (even when piped)
 	IDsOnly bool
 	Count   bool
 	Agent   bool
