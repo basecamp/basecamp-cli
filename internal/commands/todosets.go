@@ -1,0 +1,121 @@
+package commands
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/bcq/internal/output"
+)
+
+// NewTodosetsCmd creates the todosets command for viewing todoset containers.
+func NewTodosetsCmd() *cobra.Command {
+	var project string
+	var todosetID string
+
+	cmd := &cobra.Command{
+		Use:   "todosets",
+		Short: "View todoset container",
+		Long: `View todoset container for a project.
+
+A todoset is the container that holds all todolists in a project.
+Each project has exactly one todoset in its dock.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTodosetShow(cmd, project, todosetID)
+		},
+	}
+
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.Flags().StringVarP(&todosetID, "todoset", "t", "", "Todoset ID (auto-detected from project)")
+
+	cmd.AddCommand(newTodosetShowCmd(&project, &todosetID))
+
+	return cmd
+}
+
+func newTodosetShowCmd(project, todosetID *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "show [id]",
+		Short: "Show todoset details",
+		Long:  "Display detailed information about a todoset.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := *todosetID
+			if len(args) > 0 {
+				id = args[0]
+			}
+			return runTodosetShow(cmd, *project, id)
+		},
+	}
+}
+
+func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
+	app := appctx.FromContext(cmd.Context())
+	if err := app.API.RequireAccount(); err != nil {
+		return err
+	}
+
+	// Resolve project
+	projectID := project
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		return output.ErrUsage("--project is required")
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	// Get todoset ID - use provided ID or fetch from project dock
+	resolvedTodosetID := todosetID
+	if resolvedTodosetID == "" {
+		resolvedTodosetID, err = getTodosetID(cmd, app, resolvedProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	path := fmt.Sprintf("/buckets/%s/todosets/%s.json", resolvedProjectID, resolvedTodosetID)
+	resp, err := app.API.Get(cmd.Context(), path)
+	if err != nil {
+		return err
+	}
+
+	var todoset struct {
+		TodolistsCount int    `json:"todolists_count"`
+		CompletedRatio string `json:"completed_ratio"`
+	}
+	if err := json.Unmarshal(resp.Data, &todoset); err != nil {
+		return fmt.Errorf("failed to parse todoset: %w", err)
+	}
+
+	completedRatio := todoset.CompletedRatio
+	if completedRatio == "" {
+		completedRatio = "0.0"
+	}
+
+	return app.Output.OK(json.RawMessage(resp.Data),
+		output.WithSummary(fmt.Sprintf("%d todolists (%s%% complete)", todoset.TodolistsCount, completedRatio)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "todolists",
+				Cmd:         fmt.Sprintf("bcq todolists --in %s", resolvedProjectID),
+				Description: "List all todolists",
+			},
+			output.Breadcrumb{
+				Action:      "project",
+				Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+				Description: "View project details",
+			},
+		),
+	)
+}
