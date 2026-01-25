@@ -672,8 +672,9 @@ _cards_step() {
     complete) shift; _cards_step_complete "$@" ;;
     uncomplete) shift; _cards_step_uncomplete "$@" ;;
     move) shift; _cards_step_move "$@" ;;
+    delete) shift; _cards_step_delete "$@" ;;
     *)
-      die "Unknown step action: $action" $EXIT_USAGE "Actions: create, update, complete, uncomplete, move"
+      die "Unknown step action: $action" $EXIT_USAGE "Actions: create, update, complete, uncomplete, move, delete"
       ;;
   esac
 }
@@ -1015,6 +1016,40 @@ _cards_step_move() {
   api_post "/buckets/$project/card_tables/cards/$card_id/positions.json" "$payload" >/dev/null
 
   local summary="✓ Moved step #$step_id to position $position"
+
+  output '{}' "$summary"
+}
+
+# DELETE /buckets/:bucket/card_tables/steps/:id.json
+_cards_step_delete() {
+  local step_id="" project=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --in|--project|-p)
+        [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
+        project="$2"
+        shift 2
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]] && [[ -z "$step_id" ]]; then
+          step_id="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$step_id" ]]; then
+    die "Step ID required" $EXIT_USAGE "Usage: bcq cards step delete <id> --project <project>"
+  fi
+
+  # Resolve project (supports names, IDs, and config fallback)
+  project=$(require_project_id "${project:-}")
+
+  api_delete "/buckets/$project/card_tables/steps/$step_id.json" >/dev/null
+
+  local summary="✓ Deleted step #$step_id"
 
   output '{}' "$summary"
 }
@@ -1441,6 +1476,7 @@ Manage cards in Card Tables (Kanban boards).
     complete <id>     Mark step complete
     uncomplete <id>   Mark step incomplete
     move <id>         Reposition step
+    delete <id>       Delete a step
 
 ### Options
 
