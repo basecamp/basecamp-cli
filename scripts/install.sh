@@ -5,56 +5,99 @@
 #   curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
 #
 # Options (via environment):
-#   BCQ_INSTALL_DIR   Where to clone bcq (default: ~/.local/share/bcq)
-#   BCQ_BIN_DIR       Where to symlink binary (default: ~/.local/bin)
+#   BCQ_BIN_DIR       Where to install binary (default: ~/.local/bin)
+#   BCQ_VERSION       Specific version to install (default: latest)
 
 set -euo pipefail
 
-REPO_URL="https://github.com/basecamp/bcq"
-INSTALL_DIR="${BCQ_INSTALL_DIR:-$HOME/.local/share/bcq}"
+REPO="basecamp/bcq"
 BIN_DIR="${BCQ_BIN_DIR:-$HOME/.local/bin}"
+VERSION="${BCQ_VERSION:-}"
 
 info() { echo "==> $1"; }
 error() { echo "ERROR: $1" >&2; exit 1; }
 
-# Check prerequisites
-check_prereqs() {
-  local missing=()
-  command -v git &>/dev/null || missing+=("git")
-  command -v curl &>/dev/null || missing+=("curl")
-  command -v jq &>/dev/null || missing+=("jq")
-  command -v bash &>/dev/null || missing+=("bash")
+detect_platform() {
+  local os arch
 
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    error "Missing required tools: ${missing[*]}"
-  fi
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  case "$os" in
+    darwin) os="darwin" ;;
+    linux) os="linux" ;;
+    freebsd) os="freebsd" ;;
+    openbsd) os="openbsd" ;;
+    mingw*|msys*|cygwin*) os="windows" ;;
+    *) error "Unsupported OS: $os" ;;
+  esac
 
-  # Check bash version (need 4.0+ for associative arrays)
-  local bash_version
-  bash_version=$(bash --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  local major="${bash_version%%.*}"
-  if [[ "$major" -lt 4 ]]; then
-    error "bash 4.0+ required (found $bash_version)"
-  fi
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) error "Unsupported architecture: $arch" ;;
+  esac
+
+  echo "${os}_${arch}"
 }
 
-install_bcq() {
-  info "Installing bcq to $INSTALL_DIR"
+get_latest_version() {
+  local version
+  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+  if [[ -z "$version" ]]; then
+    error "Could not determine latest version. Check your network connection."
+  fi
+  echo "$version"
+}
 
-  if [[ -d "$INSTALL_DIR" ]]; then
-    info "Updating existing installation..."
-    (cd "$INSTALL_DIR" && git pull --ff-only)
+download_binary() {
+  local version="$1"
+  local platform="$2"
+  local url archive_name ext
+
+  # Determine archive extension
+  if [[ "$platform" == windows_* ]]; then
+    ext="zip"
   else
-    info "Cloning bcq..."
-    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    ext="tar.gz"
   fi
 
-  # Create bin directory and symlink
-  mkdir -p "$BIN_DIR"
-  ln -sf "$INSTALL_DIR/bin/bcq" "$BIN_DIR/bcq"
-  chmod +x "$INSTALL_DIR/bin/bcq"
+  archive_name="bcq_${version}_${platform}.${ext}"
+  url="https://github.com/${REPO}/releases/download/v${version}/${archive_name}"
 
-  info "Installed bcq to $BIN_DIR/bcq"
+  info "Downloading bcq v${version} for ${platform}..."
+
+  local tmp_dir
+  tmp_dir=$(mktemp -d)
+  trap 'rm -rf "$tmp_dir"' EXIT
+
+  if ! curl -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
+    error "Failed to download from $url"
+  fi
+
+  # Extract binary
+  info "Extracting..."
+  cd "$tmp_dir"
+  if [[ "$ext" == "zip" ]]; then
+    unzip -q "$archive_name"
+  else
+    tar -xzf "$archive_name"
+  fi
+
+  # Find and install binary
+  local binary_name="bcq"
+  if [[ "$platform" == windows_* ]]; then
+    binary_name="bcq.exe"
+  fi
+
+  if [[ ! -f "$binary_name" ]]; then
+    error "Binary not found in archive"
+  fi
+
+  mkdir -p "$BIN_DIR"
+  mv "$binary_name" "$BIN_DIR/"
+  chmod +x "$BIN_DIR/$binary_name"
+
+  info "Installed bcq to $BIN_DIR/$binary_name"
 }
 
 setup_path() {
@@ -66,7 +109,7 @@ setup_path() {
   info "Adding $BIN_DIR to PATH"
 
   local shell_rc=""
-  case "$SHELL" in
+  case "${SHELL:-}" in
     */zsh)  shell_rc="$HOME/.zshrc" ;;
     */bash) shell_rc="$HOME/.bashrc" ;;
     *)      shell_rc="$HOME/.profile" ;;
@@ -86,7 +129,6 @@ setup_path() {
 }
 
 verify_install() {
-  # Try with full path first
   if "$BIN_DIR/bcq" --version &>/dev/null; then
     info "Installation verified!"
     "$BIN_DIR/bcq" --version
@@ -99,11 +141,24 @@ verify_install() {
 main() {
   echo ""
   echo "bcq (Basecamp Query) - Installer"
-  echo "============================"
+  echo "================================="
   echo ""
 
-  check_prereqs
-  install_bcq
+  # Check for curl
+  if ! command -v curl &>/dev/null; then
+    error "curl is required but not installed"
+  fi
+
+  local platform version
+  platform=$(detect_platform)
+
+  if [[ -n "$VERSION" ]]; then
+    version="$VERSION"
+  else
+    version=$(get_latest_version)
+  fi
+
+  download_binary "$version" "$platform"
   setup_path
   verify_install
 
@@ -112,9 +167,6 @@ main() {
   echo "  1. Reload your shell: source ~/.bashrc (or ~/.zshrc)"
   echo "  2. Authenticate: bcq auth login"
   echo "  3. Test: bcq projects"
-  echo ""
-  echo "For Claude Code integration:"
-  echo "  claude plugins install github:basecamp/bcq"
   echo ""
 }
 
