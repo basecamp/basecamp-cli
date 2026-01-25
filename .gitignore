@@ -1,6 +1,10 @@
 # Local config
 .basecamp/
 
+# Go workspace (for local SDK development)
+go.work
+go.work.sum
+
 # Built binaries
 bin/bcq
 bin/bcq-*

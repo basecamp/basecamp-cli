@@ -18,6 +18,21 @@ make test-bats   # Integration tests (requires bats-core)
 make check       # fmt-check, vet, test
 ```
 
+## SDK Development
+
+When developing against a local copy of [basecamp-sdk](https://github.com/basecamp/basecamp-sdk), use Go workspaces instead of `replace` directives in go.mod:
+
+```bash
+# Set up workspace (one-time)
+go work init .
+go work use ../basecamp-sdk/go
+
+# Now bcq will use your local SDK automatically
+go build ./...
+```
+
+The `go.work` file is gitignored - your local setup won't affect the repo.
+
 ## Requirements
 
 - Go 1.25+
