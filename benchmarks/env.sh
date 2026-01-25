@@ -164,6 +164,6 @@ export BCQ_BENCH_PROMPT_REGIME="${BCQ_BENCH_PROMPT_REGIME:-baseline_soft_anchor_
 export BCQ_BENCH_SEARCH_MARKER
 BCQ_BENCH_SEARCH_MARKER=$(yq -r '.fixtures.search_marker' "$BENCH_DIR/spec.yaml" 2>/dev/null || echo "bcqbench2025")
 
-# IMPORTANT: Do NOT export BASECAMP_ACCESS_TOKEN here!
-# bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set.
+# IMPORTANT: Do NOT export BASECAMP_TOKEN here!
+# bcq skips token refresh when BASECAMP_TOKEN is set.
 # harness.sh exports it ONLY for the 'api-*' strategies.

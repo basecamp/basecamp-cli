@@ -156,7 +156,7 @@ load test_helper
 
 @test "loads credentials from file" {
   create_credentials "my-test-token" "$(($(date +%s) + 3600))"
-  unset BASECAMP_ACCESS_TOKEN
+  unset BASECAMP_TOKEN
 
   source "$BCQ_ROOT/lib/core.sh"
   source "$BCQ_ROOT/lib/config.sh"
@@ -167,7 +167,7 @@ load test_helper
 
 @test "environment token overrides file" {
   create_credentials "file-token"
-  export BASECAMP_ACCESS_TOKEN="env-token"
+  export BASECAMP_TOKEN="env-token"
 
   source "$BCQ_ROOT/lib/core.sh"
   source "$BCQ_ROOT/lib/config.sh"

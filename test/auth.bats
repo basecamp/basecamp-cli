@@ -7,7 +7,7 @@ load test_helper
 # Auth status
 
 @test "bcq auth status shows unauthenticated when no credentials" {
-  unset BASECAMP_ACCESS_TOKEN
+  unset BASECAMP_TOKEN
 
   run bcq --md auth status
   assert_success
@@ -15,7 +15,7 @@ load test_helper
 }
 
 @test "bcq auth status --json returns JSON" {
-  unset BASECAMP_ACCESS_TOKEN
+  unset BASECAMP_TOKEN
 
   run bcq auth status --json
   assert_success
@@ -29,7 +29,7 @@ load test_helper
   create_global_config '{"account_id": "99999"}'
 
   # Use env token since we can't easily test file-based auth in this context
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq --md auth status
   assert_success
@@ -87,7 +87,7 @@ load test_helper
   create_accounts
   create_global_config '{"account_id": "99999"}'
 
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq --md auth status
   assert_success
@@ -99,7 +99,7 @@ load test_helper
   create_accounts
   create_global_config '{"account_id": "99999"}'
 
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq --md auth status
   assert_success
@@ -111,7 +111,7 @@ load test_helper
   create_accounts
   create_global_config '{"account_id": "99999"}'
 
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq auth status --json
   assert_success
@@ -150,7 +150,7 @@ load test_helper
   create_accounts
   create_global_config '{"account_id": "99999"}'
 
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq --md auth status
   assert_success
@@ -162,7 +162,7 @@ load test_helper
   create_accounts
   create_global_config '{"account_id": "99999"}'
 
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq --md auth status
   assert_success
@@ -174,7 +174,7 @@ load test_helper
   create_accounts
   create_global_config '{"account_id": "99999"}'
 
-  export BASECAMP_ACCESS_TOKEN="test-token"
+  export BASECAMP_TOKEN="test-token"
 
   run bcq auth status --json
   assert_success
