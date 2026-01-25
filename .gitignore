@@ -12,3 +12,16 @@ dist/
 # Test coverage
 coverage.out
 coverage.html
+
+# Profiling artifacts
+profiles/
+*.pprof
+*.test
+
+# Benchmark comparison files
+benchmarks-current.txt
+# Keep baseline for tracking
+# benchmarks-baseline.txt
+
+# PGO profile (generated, can optionally be committed for reproducible builds)
+# default.pgo

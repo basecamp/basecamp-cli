@@ -26,6 +26,15 @@ VERSION_PKG := github.com/basecamp/bcq/internal/version
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)
 BUILD_FLAGS := -ldflags "$(LDFLAGS)"
 
+# PGO (Profile-Guided Optimization)
+PGO_PROFILE := default.pgo
+HAS_PGO := $(shell test -f $(PGO_PROFILE) && echo 1 || echo 0)
+ifeq ($(HAS_PGO),1)
+    PGO_FLAGS := -pgo=$(PGO_PROFILE)
+else
+    PGO_FLAGS :=
+endif
+
 # Default target
 .PHONY: all
 all: check
@@ -34,6 +43,18 @@ all: check
 .PHONY: build
 build:
 	$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/bcq
+
+# Build with PGO optimization (requires default.pgo)
+.PHONY: build-pgo
+build-pgo:
+	@if [ ! -f $(PGO_PROFILE) ]; then \
+		echo "Warning: $(PGO_PROFILE) not found. Run 'make collect-profile' first."; \
+		echo "Building without PGO..."; \
+		$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/bcq; \
+	else \
+		echo "Building with PGO optimization..."; \
+		$(GOBUILD) $(BUILD_FLAGS) $(PGO_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/bcq; \
+	fi
 
 # Build for all platforms
 .PHONY: build-all
@@ -81,6 +102,80 @@ test-coverage:
 	$(GOTEST) -v -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
+# ============================================================================
+# Benchmarking & Performance
+# ============================================================================
+
+# Run all benchmarks
+.PHONY: bench
+bench:
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/...
+
+# Run benchmarks with CPU profiling (profiles first package only due to Go limitation)
+.PHONY: bench-cpu
+bench-cpu:
+	@mkdir -p profiles
+	@echo "Profiling internal/names (primary hot path)..."
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
+	@echo "CPU profile saved to profiles/cpu.pprof"
+	@echo "View with: go tool pprof -http=:8080 profiles/cpu.pprof"
+	@echo ""
+	@echo "Note: For full multi-package profiling, use 'make collect-profile'"
+
+# Run benchmarks with memory profiling (profiles first package only due to Go limitation)
+.PHONY: bench-mem
+bench-mem:
+	@mkdir -p profiles
+	@echo "Profiling internal/names (primary hot path)..."
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
+	@echo "Memory profile saved to profiles/mem.pprof"
+	@echo "View with: go tool pprof -http=:8080 profiles/mem.pprof"
+	@echo ""
+	@echo "Note: For full multi-package profiling, use 'make collect-profile'"
+
+# Save current benchmarks as baseline for comparison
+.PHONY: bench-save
+bench-save:
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-baseline.txt
+	@echo "Baseline saved to benchmarks-baseline.txt"
+
+# Compare current benchmarks against baseline
+.PHONY: bench-compare
+bench-compare:
+	@if [ ! -f benchmarks-baseline.txt ]; then \
+		echo "No baseline found. Run 'make bench-save' first."; \
+		exit 1; \
+	fi
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-current.txt
+	@command -v benchstat >/dev/null 2>&1 || go install golang.org/x/perf/cmd/benchstat@latest
+	benchstat benchmarks-baseline.txt benchmarks-current.txt
+
+# Check benchmarks against performance targets (CI gate)
+.PHONY: bench-gate
+bench-gate:
+	@if [ ! -f perf-targets.yaml ]; then \
+		echo "Error: perf-targets.yaml not found"; \
+		exit 1; \
+	fi
+	@command -v yq >/dev/null 2>&1 || (echo "Error: yq is required. Install with: brew install yq" && exit 1)
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/... | ./scripts/check-perf-targets.sh
+
+# ============================================================================
+# Profile-Guided Optimization (PGO)
+# ============================================================================
+
+# Collect PGO profile from benchmarks
+.PHONY: collect-profile
+collect-profile:
+	./scripts/collect-profile.sh
+
+# Clean PGO and profiling artifacts
+.PHONY: clean-pgo
+clean-pgo:
+	rm -f $(PGO_PROFILE)
+	rm -rf profiles/
+	rm -f benchmarks-*.txt
+
 # Run go vet
 .PHONY: vet
 vet:
@@ -116,6 +211,10 @@ verify:
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
+
+# Clean all (including PGO artifacts)
+.PHONY: clean-all
+clean-all: clean clean-pgo
 
 # Install to GOPATH/bin
 .PHONY: install
@@ -168,22 +267,44 @@ fuzz-quick:
 help:
 	@echo "bcq Makefile targets:"
 	@echo ""
+	@echo "Build:"
 	@echo "  build          Build the binary"
+	@echo "  build-pgo      Build with PGO optimization (requires profile)"
 	@echo "  build-all      Build for all platforms"
 	@echo "  build-darwin   Build for macOS (arm64 + amd64)"
 	@echo "  build-linux    Build for Linux (arm64 + amd64)"
 	@echo "  build-windows  Build for Windows (arm64 + amd64)"
 	@echo "  build-bsd      Build for FreeBSD + OpenBSD (arm64 + amd64)"
+	@echo ""
+	@echo "Test:"
 	@echo "  test           Run Go unit tests"
 	@echo "  test-e2e       Run end-to-end tests against Go binary"
 	@echo "  test-coverage  Run tests with coverage report"
+	@echo ""
+	@echo "Performance:"
+	@echo "  bench          Run all benchmarks"
+	@echo "  bench-cpu      Run benchmarks with CPU profiling"
+	@echo "  bench-mem      Run benchmarks with memory profiling"
+	@echo "  bench-save     Save current benchmarks as baseline"
+	@echo "  bench-compare  Compare against baseline (requires benchstat)"
+	@echo "  bench-gate     Check against performance targets (CI gate)"
+	@echo ""
+	@echo "PGO (Profile-Guided Optimization):"
+	@echo "  collect-profile  Generate PGO profile from benchmarks"
+	@echo "  clean-pgo        Remove PGO artifacts"
+	@echo ""
+	@echo "Code Quality:"
 	@echo "  vet            Run go vet"
 	@echo "  fmt            Format code"
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
+	@echo "  check          Run all checks (fmt-check, vet, test)"
+	@echo ""
+	@echo "Other:"
 	@echo "  tidy           Tidy go.mod dependencies"
 	@echo "  verify         Verify dependencies"
 	@echo "  clean          Remove build artifacts"
+	@echo "  clean-all      Remove all artifacts (including PGO)"
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  check          Run all checks (local CI gate)"
 	@echo "  run            Build and run"

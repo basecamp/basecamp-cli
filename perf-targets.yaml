@@ -1,0 +1,62 @@
+# Performance targets for bcq CLI hot paths
+# CI fails if any target is exceeded
+# Values are maximum acceptable ns/op (with ~2x headroom for CI variability)
+#
+# Baseline collected on Apple M1 Max - adjust for slower CI runners
+
+targets:
+  # Name resolution - most critical hot path
+  BenchmarkResolve/exact_match:
+    ns_per_op: 400        # Baseline: ~160ns
+  BenchmarkResolve/case_insensitive:
+    ns_per_op: 8000       # Baseline: ~3600ns (involves string allocations)
+  BenchmarkResolve/partial_match:
+    ns_per_op: 16000      # Baseline: ~7400ns (full scan)
+  BenchmarkResolve/no_match:
+    ns_per_op: 14000      # Baseline: ~6600ns (full scan, no match)
+  BenchmarkResolve/first_item:
+    ns_per_op: 100        # Baseline: ~32ns (early exit)
+  BenchmarkSuggest/common_prefix:
+    ns_per_op: 500        # Baseline: ~214ns
+  BenchmarkContainsWord/match_middle:
+    ns_per_op: 100        # Baseline: ~32ns
+
+  # API client parsing
+  BenchmarkParseNextLink/with_next:
+    ns_per_op: 200        # Baseline: ~66ns
+  BenchmarkParseNextLink/empty:
+    ns_per_op: 10         # Baseline: ~2ns
+  BenchmarkCacheKey/typical:
+    ns_per_op: 800        # Baseline: ~306ns (SHA256 hashing)
+  BenchmarkJSONUnmarshal/single_object:
+    ns_per_op: 3000       # Baseline: ~1280ns
+  BenchmarkJSONUnmarshal/small_array:
+    ns_per_op: 5000       # Baseline: ~1940ns
+  BenchmarkJSONUnmarshal/large_array:
+    ns_per_op: 150000     # Baseline: ~72000ns (50 items)
+
+  # Date parsing
+  BenchmarkParseFrom/today:
+    ns_per_op: 200        # Baseline: ~67ns
+  BenchmarkParseFrom/tomorrow:
+    ns_per_op: 250        # Baseline: ~89ns
+  BenchmarkParseFrom/weekday:
+    ns_per_op: 300        # Baseline: ~100ns
+  BenchmarkParseFrom/plus_days:
+    ns_per_op: 250        # Baseline: ~90ns
+  BenchmarkParseFrom/passthrough_date:
+    ns_per_op: 400        # Baseline: ~153ns (regex match)
+  BenchmarkParseWeekday/monday:
+    ns_per_op: 15         # Baseline: ~3.5ns
+
+  # Output formatting
+  BenchmarkNormalizeData/already_normalized_slice:
+    ns_per_op: 50         # Baseline: ~18ns
+  BenchmarkNormalizeData/already_normalized_map:
+    ns_per_op: 10         # Baseline: ~2ns
+  BenchmarkNormalizeData/json_raw_message_array:
+    ns_per_op: 3000       # Baseline: ~1260ns
+  BenchmarkWriteJSON/simple_response:
+    ns_per_op: 2000       # Baseline: ~817ns
+  BenchmarkWriteJSON/array_response:
+    ns_per_op: 4500       # Baseline: ~1790ns
