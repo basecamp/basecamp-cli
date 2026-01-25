@@ -65,6 +65,7 @@ func newAuthLoginCmd() *cobra.Command {
 			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
+				Logger:    func(msg string) { fmt.Println(msg) },
 			}); err != nil {
 				return err
 			}
