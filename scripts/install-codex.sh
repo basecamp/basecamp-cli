@@ -37,4 +37,4 @@ else
   echo "Created $CODEX_DIR/AGENTS.md"
 fi
 
-echo "✓ Codex integration installed."
+echo "Codex integration installed successfully."

@@ -1,2 +1,14 @@
 # Local config
 .basecamp/
+
+# Built binaries
+bin/bcq
+bin/bcq-*
+/bcq
+
+# GoReleaser output
+dist/
+
+# Test coverage
+coverage.out
+coverage.html

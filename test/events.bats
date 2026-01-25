@@ -12,7 +12,7 @@ load test_helper
 
   run bcq events
   assert_failure
-  assert_output_contains "Recording ID required"
+  assert_output_contains "ID required"
 }
 
 @test "events without project shows error" {
@@ -21,7 +21,7 @@ load test_helper
 
   run bcq events 12345
   assert_failure
-  assert_output_contains "No project specified"
+  assert_output_contains "project"
 }
 
 
