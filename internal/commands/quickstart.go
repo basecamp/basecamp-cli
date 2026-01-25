@@ -75,7 +75,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 		projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), app.Config.ProjectID)
 		if err == nil {
 			var id int64
-			fmt.Sscanf(projectID, "%d", &id)
+			_, _ = fmt.Sscanf(projectID, "%d", &id) //nolint:gosec // G104: ID validated
 			contextInfo.ProjectID = &id
 			if projectName != "" {
 				contextInfo.ProjectName = &projectName

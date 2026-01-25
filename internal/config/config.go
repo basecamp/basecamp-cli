@@ -106,7 +106,7 @@ func Load(overrides FlagOverrides) (*Config, error) {
 }
 
 func loadFromFile(cfg *Config, path string, source Source) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: Path is from trusted config locations
 	if err != nil {
 		return // File doesn't exist, skip
 	}

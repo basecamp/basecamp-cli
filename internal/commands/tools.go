@@ -198,8 +198,8 @@ For example, clone a Campfire to create a second chat room in the same project.`
 	cmd.Flags().StringVarP(&sourceID, "source", "s", "", "Source tool ID to clone (required)")
 	cmd.Flags().StringVar(&sourceID, "clone", "", "Source tool ID (alias for --source)")
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Name for the new tool (required)")
-	cmd.MarkFlagRequired("source")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("source")
+	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -276,7 +276,7 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title (required)")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -502,7 +502,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
-	cmd.MarkFlagRequired("position")
+	_ = cmd.MarkFlagRequired("position")
 
 	return cmd
 }

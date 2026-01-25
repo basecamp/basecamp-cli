@@ -80,7 +80,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.CacheDir, "cache-dir", "", "Cache directory")
 
 	// Hide some flags from help
-	cmd.PersistentFlags().MarkHidden("base-url")
+	_ = cmd.PersistentFlags().MarkHidden("base-url") // Error only if flag doesn't exist
 
 	return cmd
 }
@@ -170,7 +170,7 @@ func Execute() {
 			Format: format,
 			Writer: os.Stdout,
 		})
-		writer.Err(err)
+		_ = writer.Err(err) // Error output is best-effort before exit
 
 		os.Exit(apiErr.ExitCode())
 	}

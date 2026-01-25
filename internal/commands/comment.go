@@ -62,7 +62,7 @@ func newCommentsListCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for (required)")
-	cmd.MarkFlagRequired("on")
+	_ = cmd.MarkFlagRequired("on")
 
 	return cmd
 }
@@ -242,7 +242,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "New content (required)")
-	cmd.MarkFlagRequired("content")
+	_ = cmd.MarkFlagRequired("content")
 
 	return cmd
 }

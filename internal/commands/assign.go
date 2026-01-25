@@ -80,7 +80,7 @@ Person can be:
 			// Build new assignee list (add new, preserve existing)
 			assigneeIDs := make([]int64, 0)
 			var assigneeIDInt int64
-			fmt.Sscanf(assigneeID, "%d", &assigneeIDInt)
+			_, _ = fmt.Sscanf(assigneeID, "%d", &assigneeIDInt) //nolint:gosec // G104: ID validated by ResolvePerson
 
 			// Check if already assigned
 			alreadyAssigned := false
@@ -145,7 +145,7 @@ Person can be:
 	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (ID, email, or 'me')")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.MarkFlagRequired("to")
+	_ = cmd.MarkFlagRequired("to")
 
 	return cmd
 }
@@ -201,7 +201,7 @@ Person can be:
 			}
 
 			var assigneeIDInt int64
-			fmt.Sscanf(assigneeID, "%d", &assigneeIDInt)
+			_, _ = fmt.Sscanf(assigneeID, "%d", &assigneeIDInt) //nolint:gosec // G104: ID validated by ResolvePerson
 
 			// Get current todo
 			todoPath := fmt.Sprintf("/buckets/%s/todos/%s.json", resolvedProjectID, todoID)
@@ -259,7 +259,7 @@ Person can be:
 	cmd.Flags().StringVar(&assignee, "from", "", "Person to remove (ID, email, or 'me')")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.MarkFlagRequired("from")
+	_ = cmd.MarkFlagRequired("from")
 
 	return cmd
 }

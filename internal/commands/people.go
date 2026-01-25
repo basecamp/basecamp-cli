@@ -208,7 +208,7 @@ func newPeopleAddCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&projectID, "project", "p", "", "Project to add people to (required)")
-	cmd.MarkFlagRequired("project")
+	_ = cmd.MarkFlagRequired("project")
 
 	return cmd
 }
@@ -230,7 +230,7 @@ func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) erro
 			return err
 		}
 		var id int64
-		fmt.Sscanf(resolvedID, "%d", &id)
+		_, _ = fmt.Sscanf(resolvedID, "%d", &id) //nolint:gosec // G104: ID validated
 		ids = append(ids, id)
 	}
 
@@ -272,7 +272,7 @@ func newPeopleRemoveCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&projectID, "project", "p", "", "Project to remove people from (required)")
-	cmd.MarkFlagRequired("project")
+	_ = cmd.MarkFlagRequired("project")
 
 	return cmd
 }
@@ -294,7 +294,7 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 			return err
 		}
 		var id int64
-		fmt.Sscanf(resolvedID, "%d", &id)
+		_, _ = fmt.Sscanf(resolvedID, "%d", &id) //nolint:gosec // G104: ID validated
 		ids = append(ids, id)
 	}
 

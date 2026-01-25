@@ -204,7 +204,7 @@ func newProjectsCreateCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Project name (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Project description")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
