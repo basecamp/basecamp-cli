@@ -921,6 +921,12 @@ Examples:
 				)
 			}
 
+			// Parse project ID for SDK calls
+			bucketID, err := strconv.ParseInt(project, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Execute actions
 			result := SweepResult{
 				Count:          len(todoIDs),
@@ -933,10 +939,9 @@ Examples:
 
 				// Add comment if specified
 				if comment != "" {
-					commentPath := fmt.Sprintf("/buckets/%s/recordings/%d/comments.json", project, todoID)
-					commentBody := map[string]string{"content": comment}
-					_, err := app.API.Post(cmd.Context(), commentPath, commentBody)
-					if err != nil {
+					req := &basecamp.CreateCommentRequest{Content: comment}
+					_, commentErr := app.SDK.Comments().Create(cmd.Context(), bucketID, todoID, req)
+					if commentErr != nil {
 						result.CommentFailed = append(result.CommentFailed, todoID)
 					} else {
 						result.Commented = append(result.Commented, todoID)
@@ -945,9 +950,8 @@ Examples:
 
 				// Complete if specified
 				if complete {
-					completePath := fmt.Sprintf("/buckets/%s/todos/%d/completion.json", project, todoID)
-					_, err := app.API.Post(cmd.Context(), completePath, nil)
-					if err != nil {
+					completeErr := app.SDK.Todos().Complete(cmd.Context(), bucketID, todoID)
+					if completeErr != nil {
 						result.CompleteFailed = append(result.CompleteFailed, todoID)
 					} else {
 						result.Completed = append(result.Completed, todoID)
