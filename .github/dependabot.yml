@@ -13,6 +13,11 @@ updates:
       go-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
+      semver-minor-days: 3
+      semver-patch-days: 2
     commit-message:
       prefix: "deps"
 
@@ -22,5 +27,11 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 2
     commit-message:
       prefix: "ci"
