@@ -1,26 +1,16 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Project represents a Basecamp project.
-type Project struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Purpose     string `json:"purpose"`
-	Bookmarked  bool   `json:"bookmarked"`
-	URL         string `json:"url"`
-	AppURL      string `json:"app_url"`
-}
 
 // NewProjectsCmd creates the projects command group.
 func NewProjectsCmd() *cobra.Command {
@@ -74,23 +64,14 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
-
-	path := "/projects.json"
+	opts := &basecamp.ProjectListOptions{}
 	if status != "" {
-		path = fmt.Sprintf("/projects.json?status=%s", status)
+		opts.Status = basecamp.ProjectStatus(status)
 	}
 
-	resp, err := app.API.Get(cmd.Context(), path)
+	projects, err := app.SDK.Projects().List(cmd.Context(), opts)
 	if err != nil {
-		return err
-	}
-
-	var projects []Project
-	if err := resp.UnmarshalData(&projects); err != nil {
-		return fmt.Errorf("failed to parse projects: %w", err)
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(projects,
@@ -122,33 +103,26 @@ func newProjectsShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
-
-			projectID := args[0]
-			path := fmt.Sprintf("/projects/%s.json", projectID)
-
-			resp, err := app.API.Get(cmd.Context(), path)
+			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var project json.RawMessage
-			if err := resp.UnmarshalData(&project); err != nil {
-				return fmt.Errorf("failed to parse project: %w", err)
+			project, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(project,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         fmt.Sprintf("bcq todos --project %s", projectID),
+						Cmd:         fmt.Sprintf("bcq todos --project %d", projectID),
 						Description: "List todos in this project",
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("bcq messages --project %s", projectID),
+						Cmd:         fmt.Sprintf("bcq messages --project %d", projectID),
 						Description: "List messages in this project",
 					},
 				),
@@ -171,29 +145,18 @@ func newProjectsCreateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
-
 			if name == "" {
 				return output.ErrUsage("--name is required")
 			}
 
-			body := map[string]string{
-				"name": name,
-			}
-			if description != "" {
-				body["description"] = description
+			req := &basecamp.CreateProjectRequest{
+				Name:        name,
+				Description: description,
 			}
 
-			resp, err := app.API.Post(cmd.Context(), "/projects.json", body)
+			project, err := app.SDK.Projects().Create(cmd.Context(), req)
 			if err != nil {
-				return err
-			}
-
-			var project json.RawMessage
-			if err := resp.UnmarshalData(&project); err != nil {
-				return fmt.Errorf("failed to parse project: %w", err)
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(project,
@@ -224,33 +187,35 @@ func newProjectsUpdateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+			projectID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			projectID := args[0]
-
-			body := make(map[string]string)
-			if name != "" {
-				body["name"] = name
-			}
-			if description != "" {
-				body["description"] = description
-			}
-
-			if len(body) == 0 {
+			if name == "" && description == "" {
 				return output.ErrUsage("At least one of --name or --description is required")
 			}
 
-			path := fmt.Sprintf("/projects/%s.json", projectID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
-			if err != nil {
-				return err
+			// For update, we need to provide name (required by SDK)
+			// If only description is provided, we need to fetch current name first
+			updateName := name
+			if updateName == "" {
+				// Fetch current project to get the name
+				current, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				updateName = current.Name
 			}
 
-			var project json.RawMessage
-			if err := resp.UnmarshalData(&project); err != nil {
-				return fmt.Errorf("failed to parse project: %w", err)
+			req := &basecamp.UpdateProjectRequest{
+				Name:        updateName,
+				Description: description,
+			}
+
+			project, err := app.SDK.Projects().Update(cmd.Context(), projectID, req)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(project,
@@ -278,22 +243,33 @@ func newProjectsDeleteCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
-
-			projectID := args[0]
-			path := fmt.Sprintf("/projects/%s.json", projectID)
-
-			_, err := app.API.Delete(cmd.Context(), path)
+			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(map[string]string{
+			if err := app.SDK.Projects().Trash(cmd.Context(), projectID); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(map[string]any{
 				"id":     projectID,
 				"status": "trashed",
 			}, output.WithSummary("Project moved to trash"))
 		},
 	}
+}
+
+// convertSDKError converts SDK errors to output errors for consistent CLI error handling.
+func convertSDKError(err error) error {
+	if sdkErr, ok := err.(*basecamp.Error); ok {
+		return &output.Error{
+			Code:       sdkErr.Code,
+			Message:    sdkErr.Message,
+			Hint:       sdkErr.Hint,
+			HTTPStatus: sdkErr.HTTPStatus,
+			Retryable:  sdkErr.Retryable,
+		}
+	}
+	return err
 }
