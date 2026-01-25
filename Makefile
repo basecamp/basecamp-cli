@@ -111,21 +111,27 @@ test-coverage:
 bench:
 	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/...
 
-# Run benchmarks with CPU profiling
+# Run benchmarks with CPU profiling (profiles first package only due to Go limitation)
 .PHONY: bench-cpu
 bench-cpu:
 	@mkdir -p profiles
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -cpuprofile=profiles/cpu.pprof ./internal/...
+	@echo "Profiling internal/names (primary hot path)..."
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
 	@echo "CPU profile saved to profiles/cpu.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/cpu.pprof"
+	@echo ""
+	@echo "Note: For full multi-package profiling, use 'make collect-profile'"
 
-# Run benchmarks with memory profiling
+# Run benchmarks with memory profiling (profiles first package only due to Go limitation)
 .PHONY: bench-mem
 bench-mem:
 	@mkdir -p profiles
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -memprofile=profiles/mem.pprof ./internal/...
+	@echo "Profiling internal/names (primary hot path)..."
+	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
 	@echo "Memory profile saved to profiles/mem.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/mem.pprof"
+	@echo ""
+	@echo "Note: For full multi-package profiling, use 'make collect-profile'"
 
 # Save current benchmarks as baseline for comparison
 .PHONY: bench-save

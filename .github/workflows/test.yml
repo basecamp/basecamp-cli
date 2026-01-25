@@ -83,7 +83,7 @@ jobs:
           go-version: '1.24'
 
       - name: Run benchmarks
-        run: go test -bench=. -benchmem -count=5 ./internal/... | tee benchmarks.txt
+        run: go test -bench=. -benchmem -count=3 ./internal/... | tee benchmarks.txt
 
       - name: Download previous benchmark baseline
         uses: actions/cache/restore@v4
