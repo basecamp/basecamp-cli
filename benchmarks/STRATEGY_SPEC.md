@@ -210,15 +210,13 @@ jq -s 'group_by(.strategy) | map({
 
 | File | Purpose |
 |------|---------|
-| `lib/agent_invariants.json` | Source of truth for domain invariants |
 | `benchmarks/strategies.json` | Strategy → skill/prompt mapping |
 | `skills/basecamp/SKILL.md` | Production skill (bcq-full) |
-| `benchmarks/skills/bcq-generated/SKILL.md` | CLI-generated skill |
+| `benchmarks/skills/bcq-generated/SKILL.md` | Manually maintained generated skill |
 | `benchmarks/prompts/bcq-only.md` | Minimal "use --help" |
 | `benchmarks/prompts/api-docs-only.md` | Docs link only |
 | `benchmarks/prompts/api-docs-with-curl-examples.md` | Endpoint examples |
 | `bcq help` | Full categorized help |
-| `bcq skill` | Skill generator |
 
 ## Promotion Strategy
 
@@ -249,9 +247,11 @@ Rationale: The skill adds maintenance burden without measurable reliability lift
 
 ## Regenerating the Generated Skill
 
-When invariants change:
+The generated skill is manually maintained. When domain invariants or preferred patterns change:
+
+1. Edit `benchmarks/skills/bcq-generated/SKILL.md` directly
+2. Commit the changes:
 ```bash
-bcq skill > benchmarks/skills/bcq-generated/SKILL.md
-git add benchmarks/skills/bcq-generated/SKILL.md lib/agent_invariants.json
+git add benchmarks/skills/bcq-generated/SKILL.md
 git commit -m "Update generated skill with new invariants"
 ```

@@ -149,57 +149,6 @@ bcq <singular> "..."              # Create (shorthand)
 
 ## Verification
 
-API coverage is verified automatically via test infrastructure in `test/api_coverage/`.
+API coverage is manually tracked in this document. The coverage matrix above is updated when new endpoints are implemented.
 
-### Running Coverage Tests
-
-```bash
-# Run all API coverage tests
-bats test/api_coverage.bats
-
-# Generate coverage report
-./test/api_coverage/compare.sh
-
-# JSON output for programmatic use
-./test/api_coverage/compare.sh --json
-
-# Verbose mode (shows extra endpoints in implementation)
-./test/api_coverage/compare.sh --verbose
-```
-
-### Test Infrastructure
-
-| File | Purpose |
-|------|---------|
-| `test/api_coverage/extract_docs.sh` | Fetches endpoints from GitHub bc3-api repo (cached 1hr) |
-| `test/api_coverage/extract_impl.sh` | Parses bcq source for API calls |
-| `test/api_coverage/exclusions.txt` | Lists out-of-scope sections |
-| `test/api_coverage/compare.sh` | Compares documented vs implemented endpoints |
-| `test/api_coverage.bats` | Automated coverage verification tests |
-
-### Data Source
-
-Endpoints are fetched from the canonical [bc3-api](https://github.com/basecamp/bc3-api) GitHub repository by default. Results are cached for 1 hour in `~/.cache/bcq/api_docs/`.
-
-```bash
-# Use local clone instead of GitHub (faster, offline)
-BC3_API_DIR=~/Work/basecamp/bc3-api ./test/api_coverage/extract_docs.sh --local
-
-# Clear cache to force re-fetch
-rm -rf ~/.cache/bcq/api_docs
-```
-
-### CI Integration
-
-The coverage tests are designed for CI integration:
-- Fetch from GitHub API (no local clone required)
-- Exit non-zero if coverage drops below threshold
-- Produce JSON output for reporting
-
-```bash
-# Fail if any documented endpoints are missing
-./test/api_coverage/compare.sh --check-missing
-
-# Verify counts match COVERAGE.md claims
-./test/api_coverage/compare.sh --verify-counts
-```
+To verify a specific endpoint is implemented, check the corresponding command in `internal/commands/`.
