@@ -195,6 +195,18 @@ load test_helper
 }
 
 
+# Cards columns --card-table option
+
+@test "cards columns --card-table without value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq cards columns --card-table
+  assert_failure
+  assert_output_contains "--card-table requires a value"
+}
+
+
 # Steps list errors
 
 @test "cards steps without card id shows error" {
