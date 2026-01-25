@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -92,9 +93,10 @@ func (c *Client) Delete(ctx context.Context, path string) (*Response, error) {
 func (c *Client) GetAll(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var allResults []json.RawMessage
 	url := c.buildURL(path)
-	maxPages := 100
+	maxPages := 10000
+	page := 0
 
-	for page := 1; page <= maxPages; page++ {
+	for page = 1; page <= maxPages; page++ {
 		resp, err := c.doRequestURL(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err
@@ -113,6 +115,10 @@ func (c *Client) GetAll(ctx context.Context, path string) ([]json.RawMessage, er
 			break
 		}
 		url = nextURL
+	}
+
+	if page > maxPages {
+		fmt.Fprintf(os.Stderr, "[bcq] Warning: pagination capped at %d pages; results may be incomplete\n", maxPages)
 	}
 
 	return allResults, nil
