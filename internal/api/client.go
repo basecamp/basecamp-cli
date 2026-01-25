@@ -249,7 +249,7 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		// Cache GET responses with ETag
 		if method == "GET" && cacheKey != "" {
 			if etag := resp.Header.Get("ETag"); etag != "" {
-				c.cache.Set(cacheKey, respBody, etag)
+				_ = c.cache.Set(cacheKey, respBody, etag) // Best-effort cache write
 				if c.verbose {
 					fmt.Printf("[bcq] Cache: stored with ETag %s\n", etag)
 				}
@@ -350,7 +350,7 @@ func (c *Client) backoffDelay(attempt int) time.Duration {
 	delay := baseDelay * time.Duration(1<<(attempt-1))
 
 	// Add jitter (0-100ms)
-	jitter := time.Duration(rand.Int63n(int64(maxJitter)))
+	jitter := time.Duration(rand.Int63n(int64(maxJitter))) //nolint:gosec // G404: Jitter doesn't need crypto rand
 
 	return delay + jitter
 }

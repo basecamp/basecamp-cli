@@ -277,7 +277,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().StringVarP(&content, "content", "b", "", "Message body content")
 	cmd.Flags().StringVar(&content, "body", "", "Message body content (alias for --content)")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
-	cmd.MarkFlagRequired("subject")
+	_ = cmd.MarkFlagRequired("subject")
 
 	return cmd
 }
@@ -571,7 +571,7 @@ func NewMessageCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
-	cmd.MarkFlagRequired("subject")
+	_ = cmd.MarkFlagRequired("subject")
 
 	return cmd
 }

@@ -21,6 +21,7 @@ linters:
     - misspell
     - bodyclose
     - noctx
+    - gosec
 
   settings:
     misspell:
