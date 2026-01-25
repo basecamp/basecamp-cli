@@ -77,15 +77,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Check for internal changes
+        if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            internal:
+              - 'internal/**'
+
+      # Run benchmarks on: main pushes (always), PRs (only if internal/ changed)
       - name: Set up Go
+        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
         uses: actions/setup-go@v6
         with:
           go-version: '1.24'
 
       - name: Run benchmarks
+        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
         run: go test -bench=. -benchmem -count=3 ./internal/... | tee benchmarks.txt
 
       - name: Download previous benchmark baseline
+        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
         uses: actions/cache/restore@v4
         with:
           path: benchmarks-baseline.txt
@@ -94,10 +107,11 @@ jobs:
             benchmarks-main
 
       - name: Install benchstat
+        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
         run: go install golang.org/x/perf/cmd/benchstat@latest
 
       - name: Compare benchmarks
-        if: hashFiles('benchmarks-baseline.txt') != ''
+        if: (github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true') && hashFiles('benchmarks-baseline.txt') != ''
         run: |
           echo "## Benchmark Comparison" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -105,7 +119,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Check for significant regression
-        if: hashFiles('benchmarks-baseline.txt') != ''
+        if: (github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true') && hashFiles('benchmarks-baseline.txt') != ''
         run: |
           benchstat benchmarks-baseline.txt benchmarks.txt > comparison.txt 2>&1 || true
           # Warn on >20% regression but don't fail (benchmarks can be noisy)
@@ -132,6 +146,7 @@ jobs:
           key: benchmarks-main
 
       - name: Upload benchmark results
+        if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: benchmarks
