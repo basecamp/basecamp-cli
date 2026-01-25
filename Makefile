@@ -28,7 +28,7 @@ BUILD_FLAGS := -ldflags "$(LDFLAGS)"
 
 # Default target
 .PHONY: all
-all: build
+all: check
 
 # Build the binary
 .PHONY: build
@@ -122,9 +122,9 @@ clean:
 install:
 	$(GOCMD) install ./cmd/bcq
 
-# Run all checks (for CI/pre-commit)
+# Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet test
+check: fmt-check vet lint test test-e2e
 
 # Development: build and run
 .PHONY: run
@@ -153,6 +153,6 @@ help:
 	@echo "  verify         Verify dependencies"
 	@echo "  clean          Remove build artifacts"
 	@echo "  install        Install to GOPATH/bin"
-	@echo "  check          Run all checks (fmt-check, vet, test)"
+	@echo "  check          Run all checks (local CI gate)"
 	@echo "  run            Build and run"
 	@echo "  help           Show this help"
