@@ -43,7 +43,7 @@ make test-bats        # Run BATS integration tests
 make check            # All checks (fmt-check, vet, test)
 ```
 
-Requirements: Go 1.24+, [bats-core](https://github.com/bats-core/bats-core) for integration tests.
+Requirements: Go 1.25+, [bats-core](https://github.com/bats-core/bats-core) for integration tests.
 
 ## OAuth Development
 
