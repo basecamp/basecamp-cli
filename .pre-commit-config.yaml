@@ -4,10 +4,15 @@
 
 repos:
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.62.2
+    rev: v2.1.6
     hooks:
       - id: golangci-lint
         args: [--timeout=5m]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
