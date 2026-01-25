@@ -1,29 +1,16 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// PersonDetail represents a Basecamp person with full details from the API.
-type PersonDetail struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	EmailAddress string `json:"email_address"`
-	Title        string `json:"title,omitempty"`
-	Admin        bool   `json:"admin"`
-	Owner        bool   `json:"owner"`
-	TimeZone     string `json:"time_zone,omitempty"`
-	AvatarURL    string `json:"avatar_url,omitempty"`
-	Company      *struct {
-		Name string `json:"name"`
-	} `json:"company,omitempty"`
-}
 
 func NewMeCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -38,14 +25,9 @@ func NewMeCmd() *cobra.Command {
 func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	resp, err := app.API.Get(cmd.Context(), "/my/profile.json")
+	person, err := app.SDK.People().Me(cmd.Context())
 	if err != nil {
-		return err
-	}
-
-	var person PersonDetail
-	if err := json.Unmarshal(resp.Data, &person); err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	// Store user ID for "me" resolution in future commands (non-fatal if fails)
@@ -58,7 +40,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 		{Action: "auth", Cmd: "bcq auth status", Description: "Auth status"},
 	}
 
-	return app.Output.OK(resp.Data,
+	return app.Output.OK(person,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
@@ -100,26 +82,26 @@ func newPeopleListCmd() *cobra.Command {
 func runPeopleList(cmd *cobra.Command, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	var path string
+	var people []basecamp.Person
+	var err error
+
 	if projectID != "" {
 		// Resolve project name to ID if needed
-		resolvedID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-		if err != nil {
-			return err
+		resolvedID, _, resolveErr := app.Names.ResolveProject(cmd.Context(), projectID)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		path = fmt.Sprintf("/projects/%s/people.json", resolvedID)
+		bucketID, parseErr := strconv.ParseInt(resolvedID, 10, 64)
+		if parseErr != nil {
+			return output.ErrUsage("Invalid project ID")
+		}
+		people, err = app.SDK.People().ListProjectPeople(cmd.Context(), bucketID)
 	} else {
-		path = "/people.json"
+		people, err = app.SDK.People().List(cmd.Context())
 	}
 
-	resp, err := app.API.Get(cmd.Context(), path)
 	if err != nil {
-		return err
-	}
-
-	var people []PersonDetail
-	if err := json.Unmarshal(resp.Data, &people); err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	summary := fmt.Sprintf("%d people", len(people))
@@ -127,7 +109,7 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 		{Action: "show", Cmd: "bcq people show <id>", Description: "Show person details"},
 	}
 
-	return app.Output.OK(resp.Data,
+	return app.Output.OK(people,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
@@ -148,22 +130,22 @@ func runPeopleShow(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Resolve person name/ID
-	personID, _, err := app.Names.ResolvePerson(cmd.Context(), args[0])
+	personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), args[0])
 	if err != nil {
 		return err
 	}
 
-	resp, err := app.API.Get(cmd.Context(), fmt.Sprintf("/people/%s.json", personID))
+	personID, err := strconv.ParseInt(personIDStr, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid person ID")
 	}
 
-	var person PersonDetail
-	if err := json.Unmarshal(resp.Data, &person); err != nil {
-		return err
+	person, err := app.SDK.People().Get(cmd.Context(), personID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
-	return app.Output.OK(resp.Data, output.WithSummary(person.Name))
+	return app.Output.OK(person, output.WithSummary(person.Name))
 }
 
 func newPeoplePingableCmd() *cobra.Command {
@@ -179,19 +161,14 @@ func newPeoplePingableCmd() *cobra.Command {
 func runPeoplePingable(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	resp, err := app.API.Get(cmd.Context(), "/circles/people.json")
+	people, err := app.SDK.People().Pingable(cmd.Context())
 	if err != nil {
-		return err
-	}
-
-	var people []PersonDetail
-	if err := json.Unmarshal(resp.Data, &people); err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	summary := fmt.Sprintf("%d pingable people", len(people))
 
-	return app.Output.OK(resp.Data, output.WithSummary(summary))
+	return app.Output.OK(people, output.WithSummary(summary))
 }
 
 func newPeopleAddCmd() *cobra.Command {
@@ -222,24 +199,33 @@ func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) erro
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Resolve all person IDs
 	var ids []int64
 	for _, pid := range personIDs {
-		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), pid)
-		if err != nil {
-			return err
+		resolvedID, _, resolveErr := app.Names.ResolvePerson(cmd.Context(), pid)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		var id int64
-		_, _ = fmt.Sscanf(resolvedID, "%d", &id) //nolint:gosec // G104: ID validated
+		id, parseErr := strconv.ParseInt(resolvedID, 10, 64)
+		if parseErr != nil {
+			return output.ErrUsage("Invalid person ID")
+		}
 		ids = append(ids, id)
 	}
 
-	// Build request body
-	body := map[string][]int64{"grant": ids}
+	// Build SDK request
+	req := &basecamp.UpdateProjectAccessRequest{
+		Grant: ids,
+	}
 
-	resp, err := app.API.Put(cmd.Context(), fmt.Sprintf("/projects/%s/people/users.json", resolvedProjectID), body)
+	result, err := app.SDK.People().UpdateProjectAccess(cmd.Context(), bucketID, req)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	summary := fmt.Sprintf("Added %d person(s) to project #%s", len(ids), resolvedProjectID)
@@ -247,12 +233,7 @@ func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) erro
 		{Action: "list", Cmd: fmt.Sprintf("bcq people list --project %s", resolvedProjectID), Description: "List project members"},
 	}
 
-	data := resp.Data
-	if len(data) == 0 {
-		data = []byte("{}")
-	}
-
-	return app.Output.OK(data,
+	return app.Output.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
@@ -286,24 +267,33 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Resolve all person IDs
 	var ids []int64
 	for _, pid := range personIDs {
-		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), pid)
-		if err != nil {
-			return err
+		resolvedID, _, resolveErr := app.Names.ResolvePerson(cmd.Context(), pid)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		var id int64
-		_, _ = fmt.Sscanf(resolvedID, "%d", &id) //nolint:gosec // G104: ID validated
+		id, parseErr := strconv.ParseInt(resolvedID, 10, 64)
+		if parseErr != nil {
+			return output.ErrUsage("Invalid person ID")
+		}
 		ids = append(ids, id)
 	}
 
-	// Build request body
-	body := map[string][]int64{"revoke": ids}
+	// Build SDK request
+	req := &basecamp.UpdateProjectAccessRequest{
+		Revoke: ids,
+	}
 
-	resp, err := app.API.Put(cmd.Context(), fmt.Sprintf("/projects/%s/people/users.json", resolvedProjectID), body)
+	result, err := app.SDK.People().UpdateProjectAccess(cmd.Context(), bucketID, req)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	summary := fmt.Sprintf("Removed %d person(s) from project #%s", len(ids), resolvedProjectID)
@@ -311,12 +301,7 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 		{Action: "list", Cmd: fmt.Sprintf("bcq people list --project %s", resolvedProjectID), Description: "List project members"},
 	}
 
-	data := resp.Data
-	if len(data) == 0 {
-		data = []byte("{}")
-	}
-
-	return app.Output.OK(data,
+	return app.Output.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
