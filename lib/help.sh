@@ -34,69 +34,38 @@ BCQ_HELP_TOPICS=(
 
 # Main help output
 _help_full() {
+  local metadata
+  metadata=$(_load_commands_metadata)
+
+  echo "bcq — Basecamp CLI"
+  echo
+  echo "USAGE"
+  echo "  bcq <command> [action] [flags]"
+  echo
+
+  # Generate command sections from JSON
+  local categories
+  categories=$(echo "$metadata" | jq -r '.categories[] | "\(.id)|\(.label)"')
+
+  while IFS='|' read -r cat_id cat_label; do
+    [[ -z "$cat_id" ]] && continue
+
+    # Get commands for this category
+    local commands
+    commands=$(echo "$metadata" | jq -r --arg cat "$cat_id" \
+      '.commands[] | select(.category == $cat) | "\(.name)|\(.description)"')
+
+    [[ -z "$commands" ]] && continue
+
+    # Uppercase label (tr for Bash 3.2 compatibility)
+    echo "$cat_label" | tr '[:lower:]' '[:upper:]'
+    while IFS='|' read -r name desc; do
+      printf "  %-14s %s\n" "$name" "$desc"
+    done <<< "$commands"
+    echo
+  done <<< "$categories"
+
   cat << 'EOF'
-bcq — Basecamp CLI
-
-USAGE
-  bcq <command> [action] [flags]
-
-CORE COMMANDS
-  projects      Manage projects (list, show, create, update, delete)
-  todos         Manage to-dos (list, show, create, complete, uncomplete)
-  todolists     Manage to-do lists
-  messages      Manage messages (list, show, create, pin, unpin)
-  campfire      Chat in Campfire rooms
-  cards         Manage Kanban cards and columns
-
-SHORTCUT COMMANDS
-  todo          Create a to-do (→ todos create)
-  done          Complete a to-do (→ todos complete)
-  reopen        Uncomplete a to-do (→ todos uncomplete)
-  message       Post a message (→ messages create)
-  card          Create a card (→ cards create)
-  comment       Add a comment
-  assign        Assign a recording
-  unassign      Remove assignment
-
-FILES & DOCS
-  files         Manage files, documents, and folders
-  uploads       List and manage uploads
-  vaults        Manage folders (vaults)
-  docs          Manage documents
-
-SCHEDULING & TIME
-  schedule      Manage schedule entries
-  timesheet     View time tracking reports
-  checkins      View automatic check-ins (questionnaires)
-
-ORGANIZATION
-  people        Manage people and access
-  templates     Manage project templates
-  webhooks      Manage webhooks
-  lineup        Manage lineup markers
-
-COMMUNICATION
-  messageboards View message boards
-  messagetypes  Manage message categories
-  forwards      Manage email forwards (inbox)
-  subscriptions Manage notification subscriptions
-
-SEARCH & BROWSE
-  search        Search across projects
-  recordings    Browse recordings by type/status
-  show          Show any recording by ID
-  events        View recording change history
-
-AUTH & CONFIG
-  auth          Authenticate with Basecamp
-  config        Manage configuration
-  me            Show current user profile
-
-ADDITIONAL COMMANDS
-  commands      List all commands (for discovery)
-  mcp           MCP server integration
-  skill         Generate SKILL.md for agent frameworks
-
 FLAGS
   --help, -h    Show help for command
   --json        Output as JSON

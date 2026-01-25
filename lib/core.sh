@@ -679,3 +679,13 @@ urlencode() {
   done
   echo "$encoded"
 }
+
+
+# Verify required dependencies on startup
+_check_dependencies() {
+  require_command curl "Install curl: https://curl.se/"
+  require_command jq "Install jq: brew install jq or https://jqlang.github.io/jq/"
+  require_command git "Install git: https://git-scm.com/"
+}
+
+_check_dependencies
