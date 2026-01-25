@@ -38,10 +38,11 @@ type ClientCredentials struct {
 	ClientSecret string `json:"client_secret,omitempty"`
 }
 
-// Built-in Launchpad OAuth credentials for production
+// Built-in Launchpad OAuth credentials for production.
+// These are public client credentials for the native CLI app, not secrets.
 const (
 	launchpadClientID     = "5fdd0da8e485ae6f80f4ce0a4938640bb22f1348"
-	launchpadClientSecret = "a3dc33d78258e828efd6768ac2cd67f32ec1910a"
+	launchpadClientSecret = "a3dc33d78258e828efd6768ac2cd67f32ec1910a" //nolint:gosec // G101: Public OAuth client secret for native app
 )
 
 // Manager handles OAuth authentication.
@@ -305,7 +306,7 @@ func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *OAuthConf
 
 func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 	clientFile := config.GlobalConfigDir() + "/client.json"
-	data, err := os.ReadFile(clientFile)
+	data, err := os.ReadFile(clientFile) //nolint:gosec // G304: Path is from trusted config dir
 	if err != nil {
 		return nil, err
 	}
@@ -433,6 +434,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	errCh := make(chan error, 1)
 
 	server := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			state := r.URL.Query().Get("state")
 			code := r.URL.Query().Get("code")
@@ -541,7 +543,9 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *OAuthConfig, oauthType,
 
 func generateCodeVerifier() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -552,7 +556,9 @@ func generateCodeChallenge(verifier string) string {
 
 func generateState() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -575,7 +581,7 @@ func openBrowser(url string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	return exec.Command(cmd, args...).Start() //nolint:noctx // Browser launch is fire-and-forget
+	return exec.Command(cmd, args...).Start() //nolint:gosec,noctx // G204: cmd is hardcoded per-platform; fire-and-forget
 }
 
 // GetUserID returns the stored user ID for the current origin.

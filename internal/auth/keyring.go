@@ -41,7 +41,7 @@ func NewStore(fallbackDir string) *Store {
 	testKey := "bcq::test"
 	err := keyring.Set(serviceName, testKey, "test")
 	if err == nil {
-		keyring.Delete(serviceName, testKey)
+		_ = keyring.Delete(serviceName, testKey) // Best-effort cleanup
 		return &Store{useKeyring: true, fallbackDir: fallbackDir}
 	}
 	return &Store{useKeyring: false, fallbackDir: fallbackDir}
@@ -190,7 +190,7 @@ func (s *Store) MigrateToKeyring() error {
 	}
 
 	// Remove the plaintext file after successful migration
-	os.Remove(s.credentialsPath())
+	_ = os.Remove(s.credentialsPath()) // Best-effort cleanup
 	return nil
 }
 

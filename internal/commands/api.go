@@ -102,7 +102,7 @@ func newAPIPostCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required)")
-	cmd.MarkFlagRequired("data")
+	_ = cmd.MarkFlagRequired("data") // Error only if flag doesn't exist
 
 	return cmd
 }
@@ -150,7 +150,7 @@ func newAPIPutCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required)")
-	cmd.MarkFlagRequired("data")
+	_ = cmd.MarkFlagRequired("data") // Error only if flag doesn't exist
 
 	return cmd
 }

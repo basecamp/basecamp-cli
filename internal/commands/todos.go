@@ -1348,7 +1348,7 @@ func newTodosPositionCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
-	cmd.MarkFlagRequired("to")
+	_ = cmd.MarkFlagRequired("to")
 
 	return cmd
 }

@@ -40,7 +40,7 @@ func (c *Cache) GetETag(key string) string {
 	defer c.mu.RUnlock()
 
 	etagsFile := filepath.Join(c.dir, "etags.json")
-	data, err := os.ReadFile(etagsFile)
+	data, err := os.ReadFile(etagsFile) //nolint:gosec // G304: Path is from trusted cache dir
 	if err != nil {
 		return ""
 	}
@@ -59,7 +59,7 @@ func (c *Cache) GetBody(key string) []byte {
 	defer c.mu.RUnlock()
 
 	bodyFile := filepath.Join(c.dir, "responses", key+".body")
-	data, err := os.ReadFile(bodyFile)
+	data, err := os.ReadFile(bodyFile) //nolint:gosec // G304: Path is from trusted cache dir
 	if err != nil {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (c *Cache) Set(key string, body []byte, etag string) error {
 		return err
 	}
 	if err := os.Rename(tmpFile, bodyFile); err != nil {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile) // Best-effort cleanup
 		return err
 	}
 
@@ -93,8 +93,8 @@ func (c *Cache) Set(key string, body []byte, etag string) error {
 	etags := make(map[string]string)
 
 	// Load existing etags
-	if data, err := os.ReadFile(etagsFile); err == nil {
-		json.Unmarshal(data, &etags)
+	if data, err := os.ReadFile(etagsFile); err == nil { //nolint:gosec // G304: Path is from trusted cache dir
+		_ = json.Unmarshal(data, &etags) // Ignore error - will start with empty map
 	}
 
 	etags[key] = etag
@@ -110,7 +110,7 @@ func (c *Cache) Set(key string, body []byte, etag string) error {
 		return err
 	}
 	if err := os.Rename(tmpEtags, etagsFile); err != nil {
-		os.Remove(tmpEtags)
+		_ = os.Remove(tmpEtags) // Best-effort cleanup
 		return err
 	}
 
@@ -128,7 +128,7 @@ func (c *Cache) Clear() error {
 	}
 
 	etagsFile := filepath.Join(c.dir, "etags.json")
-	os.Remove(etagsFile)
+	_ = os.Remove(etagsFile) // Best-effort cleanup
 
 	return nil
 }
@@ -140,14 +140,14 @@ func (c *Cache) Invalidate(key string) error {
 
 	// Remove body file
 	bodyFile := filepath.Join(c.dir, "responses", key+".body")
-	os.Remove(bodyFile)
+	_ = os.Remove(bodyFile) // Best-effort cleanup
 
 	// Remove from etags.json
 	etagsFile := filepath.Join(c.dir, "etags.json")
 	etags := make(map[string]string)
 
-	if data, err := os.ReadFile(etagsFile); err == nil {
-		json.Unmarshal(data, &etags)
+	if data, err := os.ReadFile(etagsFile); err == nil { //nolint:gosec // G304: Path is from trusted cache dir
+		_ = json.Unmarshal(data, &etags) // Ignore error - will start with empty map
 	}
 
 	delete(etags, key)

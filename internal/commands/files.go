@@ -149,7 +149,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	foldersResp, err := app.API.Get(cmd.Context(), foldersPath)
 	var folders []any
 	if err == nil {
-		json.Unmarshal(foldersResp.Data, &folders)
+		_ = json.Unmarshal(foldersResp.Data, &folders) // Best-effort
 	}
 
 	// Get uploads
@@ -157,7 +157,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	uploadsResp, err := app.API.Get(cmd.Context(), uploadsPath)
 	var uploads []any
 	if err == nil {
-		json.Unmarshal(uploadsResp.Data, &uploads)
+		_ = json.Unmarshal(uploadsResp.Data, &uploads) // Best-effort
 	}
 
 	// Get documents
@@ -165,12 +165,12 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	docsResp, err := app.API.Get(cmd.Context(), docsPath)
 	var documents []any
 	if err == nil {
-		json.Unmarshal(docsResp.Data, &documents)
+		_ = json.Unmarshal(docsResp.Data, &documents) // Best-effort
 	}
 
 	// Build result
 	vaultIDNum := int64(0)
-	fmt.Sscanf(resolvedVaultID, "%d", &vaultIDNum)
+	_, _ = fmt.Sscanf(resolvedVaultID, "%d", &vaultIDNum) //nolint:gosec // G104: ID validated
 
 	result := FilesListResult{
 		VaultID:    vaultIDNum,
@@ -347,7 +347,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 			var folder struct {
 				ID int64 `json:"id"`
 			}
-			json.Unmarshal(resp.Data, &folder)
+			_ = json.Unmarshal(resp.Data, &folder) // Best-effort
 
 			return app.Output.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Created folder #%d: %s", folder.ID, name)),
@@ -363,7 +363,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Folder name (required)")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -603,7 +603,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 			var doc struct {
 				ID int64 `json:"id"`
 			}
-			json.Unmarshal(resp.Data, &doc)
+			_ = json.Unmarshal(resp.Data, &doc) // Best-effort
 
 			return app.Output.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Created document #%d: %s", doc.ID, title)),
@@ -626,7 +626,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Document title (required)")
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Document content")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (default: published)")
-	cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -719,7 +719,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 
 			// Parse for summary
 			var data map[string]any
-			json.Unmarshal(resp.Data, &data)
+			_ = json.Unmarshal(resp.Data, &data) // Best-effort
 
 			title := ""
 			if t, ok := data["title"].(string); ok {
