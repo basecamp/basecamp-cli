@@ -307,13 +307,18 @@ _cards_column_show_md() {
 
 # POST /buckets/:bucket/card_tables/:card_table/columns.json
 _cards_column_create() {
-  local title="" description="" project=""
+  local title="" description="" project="" card_table=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
+        shift 2
+        ;;
+      --card-table)
+        [[ -z "${2:-}" ]] && die "--card-table requires a value" $EXIT_USAGE
+        card_table="$2"
         shift 2
         ;;
       --description|-d)
@@ -340,10 +345,10 @@ _cards_column_create() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Discover card table from project dock
+  # Get project data and resolve card table
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project" --id "$card_table")
 
   local payload
   payload=$(jq -n --arg title "$title" '{title: $title}')
@@ -414,13 +419,18 @@ _cards_column_update() {
 
 # POST /buckets/:bucket/card_tables/:card_table/moves.json (for columns)
 _cards_column_move() {
-  local column_id="" position="" project=""
+  local column_id="" position="" project="" card_table=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --in|--project|-p)
         [[ -z "${2:-}" ]] && die "--project requires a value" $EXIT_USAGE
         project="$2"
+        shift 2
+        ;;
+      --card-table)
+        [[ -z "${2:-}" ]] && die "--card-table requires a value" $EXIT_USAGE
+        card_table="$2"
         shift 2
         ;;
       --position|--pos)
@@ -448,10 +458,10 @@ _cards_column_move() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Discover card table from project dock
+  # Get project data and resolve card table
   local project_data card_table_id
   project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
+  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project" --id "$card_table")
 
   local payload
   payload=$(jq -n \
@@ -1220,19 +1230,26 @@ _cards_move() {
   # Resolve project (supports names, IDs, and config fallback)
   project=$(require_project_id "${project:-}")
 
-  # Discover card table from project dock
-  local project_data card_table_id
-  project_data=$(api_get "/projects/$project.json")
-  card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
+  local column_id
 
-  # Get card table with embedded columns (lists)
-  local card_table_data columns column_id
-  card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
-  columns=$(echo "$card_table_data" | jq '.lists // []')
-  column_id=$(_resolve_column "$columns" "$target_column")
+  if [[ "$target_column" =~ ^[0-9]+$ ]]; then
+    # Numeric column ID provided - use directly (skip card table discovery)
+    column_id="$target_column"
+  else
+    # Need discovery: column is a name that needs resolution
+    local project_data card_table_id
+    project_data=$(api_get "/projects/$project.json")
+    card_table_id=$(require_dock_tool "$project_data" "kanban_board" "$project")
 
-  if [[ -z "$column_id" ]]; then
-    die "Column '$target_column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
+    # Get card table with embedded columns (lists)
+    local card_table_data columns
+    card_table_data=$(api_get "/buckets/$project/card_tables/$card_table_id.json")
+    columns=$(echo "$card_table_data" | jq '.lists // []')
+    column_id=$(_resolve_column "$columns" "$target_column")
+
+    if [[ -z "$column_id" ]]; then
+      die "Column '$target_column' not found" $EXIT_NOT_FOUND "Use column ID or exact name"
+    fi
   fi
 
   # Move card to column via moves endpoint
@@ -1429,6 +1446,7 @@ Manage cards in Card Tables (Kanban boards).
 
     --in, -p <project>      Project ID
     --column, -c <id|name>  Filter by or target column (ID preferred for stability)
+    --card-table <id>       Card table ID (for multi-card-table projects)
     --card <id>             Card ID (for step operations)
     --title, -t <text>      Title (for update)
     --content, -b <text>    Card description (for update)

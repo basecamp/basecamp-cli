@@ -206,6 +206,24 @@ load test_helper
   assert_output_contains "--card-table requires a value"
 }
 
+@test "cards column create --card-table without value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq cards column create "Test" --card-table
+  assert_failure
+  assert_output_contains "--card-table requires a value"
+}
+
+@test "cards column move --card-table without value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run bcq cards column move 456 --position 1 --card-table
+  assert_failure
+  assert_output_contains "--card-table requires a value"
+}
+
 
 # Steps list errors
 
