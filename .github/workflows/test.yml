@@ -99,7 +99,7 @@ jobs:
 
       - name: Download previous benchmark baseline
         if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: benchmarks-baseline.txt
           key: benchmarks-${{ github.base_ref || 'main' }}
@@ -129,7 +129,7 @@ jobs:
 
       - name: Save benchmark baseline (main branch only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: benchmarks.txt
           key: benchmarks-main-${{ github.sha }}
@@ -140,14 +140,14 @@ jobs:
 
       - name: Save baseline alias
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: benchmarks-baseline.txt
           key: benchmarks-main
 
       - name: Upload benchmark results
         if: github.event_name != 'pull_request' || steps.filter.outputs.internal == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: benchmarks
           path: benchmarks.txt
