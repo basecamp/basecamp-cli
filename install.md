@@ -1,52 +1,44 @@
-I want you to install bcq CLI and skills for me. Execute all steps autonomously.
+# bcq Installation Guide
 
-OBJECTIVE: Install bcq CLI, authenticate with Basecamp, and install skills for AI agent use.
+Install bcq CLI and connect it to your AI agent. Execute all steps autonomously.
 
-DONE WHEN: `bcq --version && bcq auth status | grep -q Authenticated && ls ${BCQ_DIR:-$HOME/.local/share/bcq}/skills/*/SKILL.md` exits successfully.
+**DONE WHEN:** `bcq --version && bcq auth status` both succeed.
+
+---
 
 ## TODO
 
-- [ ] Verify prerequisites (bash, curl, jq, git)
 - [ ] Install bcq CLI
 - [ ] Authenticate with Basecamp
-- [ ] Install skills
+- [ ] Install skills (optional)
+- [ ] Connect agent (optional)
 
-## Step 0: Verify Prerequisites
-
-The following tools are required for installation:
-
-| Tool | Purpose | Check |
-|------|---------|-------|
-| bash 3.2+ | Script execution | `bash --version` |
-| curl | Download installer | `curl --version` |
-| jq | JSON processing | `jq --version` |
-| git | Repository management | `git --version` |
-
-```bash
-bash --version && curl --version && jq --version && git --version
-```
-
-**Verify:**
-```bash
-bash --version && curl --version && jq --version && git --version
-# Expected: Version numbers for all four tools without errors
-```
-
-If any prerequisite is missing, install it:
-- jq: `brew install jq` (macOS) or `apt install jq` (Linux)
-- git: `brew install git` (macOS) or `apt install git` (Linux)
+---
 
 ## Step 1: Install bcq CLI
 
-Download and run the bcq installer script. This installs the bcq binary and sets up the required directory structure.
+Choose ONE installation method:
 
+### Option A: Homebrew (macOS/Linux) - Recommended
+```bash
+brew install basecamp/tap/bcq
+```
+
+### Option B: Scoop (Windows)
+```bash
+scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+scoop install bcq
+```
+
+### Option C: Go install
+```bash
+go install github.com/basecamp/bcq/cmd/bcq@latest
+```
+
+### Option D: Shell script
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
 ```
-
-The installer places files at:
-- Binary: `~/.local/bin/bcq`
-- Data: `${BCQ_DIR:-$HOME/.local/share/bcq}`
 
 **Verify:**
 ```bash
@@ -57,7 +49,11 @@ bcq --version
 If `bcq: command not found`, add to PATH:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
+# or for go install:
+export PATH="$HOME/go/bin:$PATH"
 ```
+
+---
 
 ## Step 2: Authenticate
 
@@ -73,7 +69,11 @@ bcq auth status
 # Expected: Authenticated as your@email.com
 ```
 
-## Step 3: Install Skills
+---
+
+## Step 3: Install Skills (Optional)
+
+Skills provide AI agents with Basecamp workflow knowledge.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
@@ -85,15 +85,15 @@ ls ${BCQ_DIR:-$HOME/.local/share/bcq}/skills/*/SKILL.md
 # Expected: List of SKILL.md files
 ```
 
-EXECUTE NOW: Start with Step 0. Mark TODO items complete as you go. Stop when `bcq --version && bcq auth status | grep -q Authenticated && ls ${BCQ_DIR:-$HOME/.local/share/bcq}/skills/*/SKILL.md` exits successfully.
+---
+
+EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `bcq --version && bcq auth status` both succeed.
 
 ---
 
 ## Optional: Connect Your Agent
 
 **Do not execute this section unless explicitly requested.** The core installation is complete when DONE WHEN passes.
-
-After core installation, connect bcq to your AI agent:
 
 ### Claude Code
 ```bash
@@ -103,58 +103,72 @@ claude plugin install basecamp
 
 **Verify:**
 ```bash
-claude plugin list | grep bcq
-# Expected: bcq plugin listed
+claude plugin list | grep -i basecamp
 ```
 
 ### Codex (OpenAI)
 ```bash
-./scripts/install-codex.sh
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-codex.sh | bash
 ```
 
 **Verify:**
 ```bash
 ls ~/.codex/skills/bcq
-# Expected: Symlink to bcq skills
 ```
 
 ### OpenCode
 ```bash
-./scripts/install-opencode.sh
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-opencode.sh | bash
 ```
 
 **Verify:**
 ```bash
-ls ~/.opencode/skills/bcq
-# Expected: Skills and agent installed
+ls ~/.config/opencode/skill/bcq
 ```
 
 ### Gemini
 ```bash
-cp templates/gemini/GEMINI.md ~/GEMINI.md
-```
-
-**Verify:**
-```bash
-test -f ~/GEMINI.md && echo "GEMINI.md installed"
-# Expected: GEMINI.md installed
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/templates/gemini/GEMINI.md -o ~/GEMINI.md
 ```
 
 ### GitHub Copilot
 ```bash
-cp templates/copilot/copilot-instructions.md .github/
-```
-
-**Verify:**
-```bash
-test -f .github/copilot-instructions.md && echo "Copilot instructions installed"
-# Expected: Copilot instructions installed
+mkdir -p .github
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/templates/copilot/copilot-instructions.md -o .github/copilot-instructions.md
 ```
 
 ### Other Agents
 Point your agent at skill files:
 ```
-~/.local/share/bcq/skills/
-├── basecamp/SKILL.md
-└── basecamp-api-reference/SKILL.md
+~/.local/share/bcq/skills/basecamp/SKILL.md
+~/.local/share/bcq/skills/basecamp-api-reference/SKILL.md
+```
+
+---
+
+## Quick Test
+
+```bash
+bcq projects --json
+bcq search "meeting" --json
+```
+
+---
+
+## Troubleshooting
+
+**Not authenticated:**
+```bash
+bcq auth login
+```
+
+**Wrong account:**
+```bash
+cat ~/.config/basecamp/config.json
+bcq auth logout && bcq auth login
+```
+
+**Permission denied (read-only):**
+```bash
+bcq auth login --scope full
 ```

@@ -31,4 +31,4 @@ mkdir -p "$OPENCODE_AGENT_DIR"
 cp "$TEMPLATE_DIR/basecamp.md" "$OPENCODE_AGENT_DIR/basecamp.md"
 echo "Installed agent definition to $OPENCODE_AGENT_DIR/basecamp.md"
 
-echo "✓ OpenCode integration installed."
+echo "OpenCode integration installed successfully."

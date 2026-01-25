@@ -3,6 +3,10 @@
 # Runs the bats test suite
 
 set -euo pipefail
+
+# Disable keyring for headless testing (Go binary)
+export BCQ_NO_KEYRING=1
+
 cd "$(dirname "$0")"
 
 if ! command -v bats &>/dev/null; then

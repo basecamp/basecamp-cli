@@ -5,6 +5,9 @@
 # Setup/Teardown
 
 setup() {
+  # Disable keyring for headless testing (Go binary)
+  export BCQ_NO_KEYRING=1
+
   # Store original environment
   _ORIG_HOME="$HOME"
   _ORIG_PWD="$PWD"
