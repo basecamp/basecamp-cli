@@ -49,6 +49,11 @@ func executeTodosCommand(cmd *cobra.Command, app *appctx.App, args ...string) er
 	cmd.SetArgs(args)
 	ctx := appctx.WithApp(context.Background(), app)
 	cmd.SetContext(ctx)
+
+	// Suppress output during tests
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
 	return cmd.Execute()
 }
 
