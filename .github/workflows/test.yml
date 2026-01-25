@@ -137,6 +137,7 @@ jobs:
               - 'internal/api/**'
               - 'internal/names/**'
               - 'internal/dateparse/**'
+              - 'internal/output/**'
               - 'go.mod'
               - 'go.sum'
 
