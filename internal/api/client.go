@@ -19,11 +19,82 @@ import (
 	"github.com/basecamp/bcq/internal/version"
 )
 
+// Default values for client configuration.
 const (
-	maxRetries = 5
-	baseDelay  = 1 * time.Second
-	maxJitter  = 100 * time.Millisecond
+	DefaultMaxRetries = 5
+	DefaultBaseDelay  = 1 * time.Second
+	DefaultMaxJitter  = 100 * time.Millisecond
+	DefaultTimeout    = 30 * time.Second
+	DefaultMaxPages   = 10000
 )
+
+// Logger is the interface for logging debug output.
+type Logger interface {
+	Debug(msg string, args ...any)
+}
+
+// ClientOptions configures the API client behavior.
+type ClientOptions struct {
+	// HTTP settings
+	Timeout   time.Duration // Request timeout (default: 30s)
+	Transport http.RoundTripper
+
+	// Retry settings
+	MaxRetries int           // Maximum retry attempts for GET requests (default: 5)
+	BaseDelay  time.Duration // Initial backoff delay (default: 1s)
+	MaxJitter  time.Duration // Maximum random jitter to add to delays (default: 100ms)
+
+	// Pagination
+	MaxPages int // Maximum pages to fetch in GetAll (default: 10000)
+
+	// Custom User-Agent (appended to default)
+	UserAgent string
+
+	// Logging
+	Logger Logger
+}
+
+// ClientOption is a functional option for configuring the client.
+type ClientOption func(*ClientOptions)
+
+// WithTimeout sets the HTTP request timeout.
+func WithTimeout(d time.Duration) ClientOption {
+	return func(o *ClientOptions) { o.Timeout = d }
+}
+
+// WithMaxRetries sets the maximum number of retry attempts.
+func WithMaxRetries(n int) ClientOption {
+	return func(o *ClientOptions) { o.MaxRetries = n }
+}
+
+// WithLogger sets the debug logger.
+func WithLogger(l Logger) ClientOption {
+	return func(o *ClientOptions) { o.Logger = l }
+}
+
+// WithUserAgent sets a custom User-Agent suffix.
+func WithUserAgent(ua string) ClientOption {
+	return func(o *ClientOptions) { o.UserAgent = ua }
+}
+
+// WithTransport sets a custom HTTP transport.
+func WithTransport(t http.RoundTripper) ClientOption {
+	return func(o *ClientOptions) { o.Transport = t }
+}
+
+// retryableError wraps an error with retry metadata.
+type retryableError struct {
+	err        error
+	retryAfter time.Duration // Server-specified delay (from Retry-After header)
+}
+
+func (r *retryableError) Error() string {
+	return r.err.Error()
+}
+
+func (r *retryableError) Unwrap() error {
+	return r.err
+}
 
 // Client is an HTTP client for the Basecamp API.
 type Client struct {
@@ -31,6 +102,7 @@ type Client struct {
 	auth       *auth.Manager
 	cfg        *config.Config
 	cache      *Cache
+	opts       ClientOptions
 	verbose    bool
 }
 
@@ -48,25 +120,61 @@ func (r *Response) UnmarshalData(v any) error {
 }
 
 // NewClient creates a new API client.
-func NewClient(cfg *config.Config, authMgr *auth.Manager) *Client {
+func NewClient(cfg *config.Config, authMgr *auth.Manager, options ...ClientOption) *Client {
+	// Apply defaults
+	opts := ClientOptions{
+		Timeout:    DefaultTimeout,
+		MaxRetries: DefaultMaxRetries,
+		BaseDelay:  DefaultBaseDelay,
+		MaxJitter:  DefaultMaxJitter,
+		MaxPages:   DefaultMaxPages,
+	}
+
+	// Apply user options
+	for _, opt := range options {
+		opt(&opts)
+	}
+
+	// Set up transport
+	var transport http.RoundTripper
+	if opts.Transport != nil {
+		transport = opts.Transport
+	} else {
+		// Clone DefaultTransport to preserve proxy settings, HTTP/2, dial timeouts, TLS config
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.MaxIdleConns = 100
+		t.MaxIdleConnsPerHost = 10
+		t.IdleConnTimeout = 90 * time.Second
+		transport = t
+	}
+
+	// Normalize BaseURL to prevent double slashes and cache key mismatches
+	cfg.BaseURL = config.NormalizeBaseURL(cfg.BaseURL)
+
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   opts.Timeout,
+			Transport: transport,
 		},
 		auth:  authMgr,
 		cfg:   cfg,
 		cache: NewCache(cfg.CacheDir),
+		opts:  opts,
 	}
 }
 
 // SetVerbose enables verbose output for debugging.
 func (c *Client) SetVerbose(v bool) {
 	c.verbose = v
+}
+
+// log outputs a debug message if verbose mode is enabled or a logger is configured.
+func (c *Client) log(msg string, args ...any) {
+	if c.opts.Logger != nil {
+		c.opts.Logger.Debug(msg, args...)
+	} else if c.verbose {
+		fmt.Printf(msg+"\n", args...)
+	}
 }
 
 // Get performs a GET request.
@@ -93,10 +201,9 @@ func (c *Client) Delete(ctx context.Context, path string) (*Response, error) {
 func (c *Client) GetAll(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var allResults []json.RawMessage
 	url := c.buildURL(path)
-	maxPages := 10000
 	page := 0
 
-	for page = 1; page <= maxPages; page++ {
+	for page = 1; page <= c.opts.MaxPages; page++ {
 		resp, err := c.doRequestURL(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, err
@@ -117,8 +224,8 @@ func (c *Client) GetAll(ctx context.Context, path string) ([]json.RawMessage, er
 		url = nextURL
 	}
 
-	if page > maxPages {
-		fmt.Fprintf(os.Stderr, "[bcq] Warning: pagination capped at %d pages; results may be incomplete\n", maxPages)
+	if page > c.opts.MaxPages {
+		fmt.Fprintf(os.Stderr, "[bcq] Warning: pagination capped at %d pages; results may be incomplete\n", c.opts.MaxPages)
 	}
 
 	return allResults, nil
@@ -130,40 +237,52 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 }
 
 func (c *Client) doRequestURL(ctx context.Context, method, url string, body any) (*Response, error) {
+	// Only retry GET requests to prevent duplicate mutations.
+	// POST/PUT/DELETE are not idempotent and retrying could create duplicate data.
+	if method != "GET" {
+		return c.singleRequest(ctx, method, url, body, 1)
+	}
+
 	var attempt int
 	var lastErr error
 
-	for attempt = 1; attempt <= maxRetries; attempt++ {
+	for attempt = 1; attempt <= c.opts.MaxRetries; attempt++ {
 		resp, err := c.singleRequest(ctx, method, url, body, attempt)
 		if err == nil {
 			return resp, nil
 		}
 
-		// Check if error is retryable
-		if apiErr, ok := err.(*output.Error); ok {
+		// Check for retryable error with server-specified delay
+		var delay time.Duration
+		if re, ok := err.(*retryableError); ok {
+			lastErr = re.err
+			if re.retryAfter > 0 {
+				// Use server-specified Retry-After delay
+				delay = re.retryAfter
+			} else {
+				delay = c.backoffDelay(attempt)
+			}
+		} else if apiErr, ok := err.(*output.Error); ok {
 			if !apiErr.Retryable {
 				return nil, err
 			}
 			lastErr = err
-
-			// Calculate backoff delay
-			delay := c.backoffDelay(attempt)
-			if c.verbose {
-				fmt.Printf("[bcq] Retry %d/%d in %v: %s\n", attempt, maxRetries, delay, err)
-			}
-
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-				continue
-			}
+			delay = c.backoffDelay(attempt)
+		} else {
+			return nil, err
 		}
 
-		return nil, err
+		c.log("[bcq] Retry %d/%d in %v: %s", attempt, c.opts.MaxRetries, delay, lastErr)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+			continue
+		}
 	}
 
-	return nil, fmt.Errorf("request failed after %d retries: %w", maxRetries, lastErr)
+	return nil, fmt.Errorf("request failed after %d retries: %w", c.opts.MaxRetries, lastErr)
 }
 
 func (c *Client) singleRequest(ctx context.Context, method, url string, body any, attempt int) (*Response, error) {
@@ -190,7 +309,11 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", version.UserAgent())
+	ua := version.UserAgent()
+	if c.opts.UserAgent != "" {
+		ua += " " + c.opts.UserAgent
+	}
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
@@ -200,15 +323,11 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		cacheKey = c.cache.Key(url, c.cfg.AccountID, token)
 		if etag := c.cache.GetETag(cacheKey); etag != "" {
 			req.Header.Set("If-None-Match", etag)
-			if c.verbose {
-				fmt.Printf("[bcq] Cache: If-None-Match %s\n", etag)
-			}
+			c.log("[bcq] Cache: If-None-Match %s", etag)
 		}
 	}
 
-	if c.verbose {
-		fmt.Printf("[bcq] %s %s (attempt %d)\n", method, url, attempt)
-	}
+	c.log("[bcq] %s %s (attempt %d)", method, url, attempt)
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -217,19 +336,15 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 	}
 	defer resp.Body.Close()
 
-	if c.verbose {
-		fmt.Printf("[bcq] HTTP %d\n", resp.StatusCode)
-	}
+	c.log("[bcq] HTTP %d", resp.StatusCode)
 
 	// Handle response based on status code
 	switch resp.StatusCode {
 	case http.StatusNotModified: // 304
 		if cacheKey != "" {
-			if c.verbose {
-				fmt.Println("[bcq] Cache hit: 304 Not Modified")
-			}
 			cached := c.cache.GetBody(cacheKey)
 			if cached != nil {
+				c.log("[bcq] Cache hit: 304 Not Modified")
 				return &Response{
 					Data:       cached,
 					StatusCode: http.StatusOK,
@@ -237,6 +352,11 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 					FromCache:  true,
 				}, nil
 			}
+			// Cache corrupted (etag exists but body missing)—invalidate and refetch
+			c.log("[bcq] Cache corrupted: 304 but body missing, refetching")
+			_ = c.cache.Invalidate(cacheKey) // Best-effort invalidation
+			// Retry without If-None-Match header by recursing with fresh attempt
+			return c.singleRequest(ctx, method, url, body, attempt)
 		}
 		return nil, output.ErrAPI(304, "304 received but no cached response available")
 
@@ -250,9 +370,7 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		if method == "GET" && cacheKey != "" {
 			if etag := resp.Header.Get("ETag"); etag != "" {
 				_ = c.cache.Set(cacheKey, respBody, etag) // Best-effort cache write
-				if c.verbose {
-					fmt.Printf("[bcq] Cache: stored with ETag %s\n", etag)
-				}
+				c.log("[bcq] Cache: stored with ETag %s", etag)
 			}
 		}
 
@@ -263,8 +381,11 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		}, nil
 
 	case http.StatusTooManyRequests: // 429
-		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return nil, output.ErrRateLimit(retryAfter)
+		retryAfterSecs := parseRetryAfter(resp.Header.Get("Retry-After"))
+		return nil, &retryableError{
+			err:        output.ErrRateLimit(retryAfterSecs),
+			retryAfter: time.Duration(retryAfterSecs) * time.Second,
+		}
 
 	case http.StatusUnauthorized: // 401
 		// Try token refresh on first 401
@@ -347,12 +468,15 @@ func (c *Client) buildURL(path string) string {
 
 func (c *Client) backoffDelay(attempt int) time.Duration {
 	// Exponential backoff: base * 2^(attempt-1)
-	delay := baseDelay * time.Duration(1<<(attempt-1))
+	delay := c.opts.BaseDelay * time.Duration(1<<(attempt-1))
 
-	// Add jitter (0-100ms)
-	jitter := time.Duration(rand.Int63n(int64(maxJitter))) //nolint:gosec // G404: Jitter doesn't need crypto rand
+	// Add jitter
+	if c.opts.MaxJitter > 0 {
+		jitter := time.Duration(rand.Int63n(int64(c.opts.MaxJitter))) //nolint:gosec // G404: Jitter doesn't need crypto rand
+		delay += jitter
+	}
 
-	return delay + jitter
+	return delay
 }
 
 // parseNextLink extracts the next URL from a Link header.
