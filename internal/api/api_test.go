@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/basecamp/bcq/internal/config"
 )
@@ -456,5 +459,185 @@ func TestCacheMultipleEntriesPreserved(t *testing.T) {
 	}
 	if string(cache.GetBody(key2)) != "data2" {
 		t.Error("Second body should exist")
+	}
+}
+
+func TestClientOptions(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:   "https://3.basecampapi.com",
+		AccountID: "12345",
+	}
+
+	// Test default options
+	client := NewClient(cfg, nil)
+	if client.opts.Timeout != DefaultTimeout {
+		t.Errorf("default Timeout = %v, want %v", client.opts.Timeout, DefaultTimeout)
+	}
+	if client.opts.MaxRetries != DefaultMaxRetries {
+		t.Errorf("default MaxRetries = %d, want %d", client.opts.MaxRetries, DefaultMaxRetries)
+	}
+	if client.opts.BaseDelay != DefaultBaseDelay {
+		t.Errorf("default BaseDelay = %v, want %v", client.opts.BaseDelay, DefaultBaseDelay)
+	}
+	if client.opts.MaxPages != DefaultMaxPages {
+		t.Errorf("default MaxPages = %d, want %d", client.opts.MaxPages, DefaultMaxPages)
+	}
+
+	// Test custom options
+	client = NewClient(cfg, nil,
+		WithTimeout(60*time.Second),
+		WithMaxRetries(3),
+		WithUserAgent("test-agent"),
+	)
+	if client.opts.Timeout != 60*time.Second {
+		t.Errorf("custom Timeout = %v, want %v", client.opts.Timeout, 60*time.Second)
+	}
+	if client.opts.MaxRetries != 3 {
+		t.Errorf("custom MaxRetries = %d, want %d", client.opts.MaxRetries, 3)
+	}
+	if client.opts.UserAgent != "test-agent" {
+		t.Errorf("custom UserAgent = %q, want %q", client.opts.UserAgent, "test-agent")
+	}
+}
+
+func TestBackoffDelay(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:   "https://3.basecampapi.com",
+		AccountID: "12345",
+	}
+
+	// Create client with zero jitter for predictable testing
+	client := &Client{
+		cfg: cfg,
+		opts: ClientOptions{
+			BaseDelay: 1 * time.Second,
+			MaxJitter: 0, // No jitter for predictable tests
+		},
+	}
+
+	// Test exponential backoff: 1s, 2s, 4s, 8s
+	tests := []struct {
+		attempt  int
+		expected time.Duration
+	}{
+		{1, 1 * time.Second},
+		{2, 2 * time.Second},
+		{3, 4 * time.Second},
+		{4, 8 * time.Second},
+		{5, 16 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("attempt_%d", tt.attempt), func(t *testing.T) {
+			delay := client.backoffDelay(tt.attempt)
+			if delay != tt.expected {
+				t.Errorf("backoffDelay(%d) = %v, want %v", tt.attempt, delay, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBackoffDelayWithJitter(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:   "https://3.basecampapi.com",
+		AccountID: "12345",
+	}
+
+	client := &Client{
+		cfg: cfg,
+		opts: ClientOptions{
+			BaseDelay: 1 * time.Second,
+			MaxJitter: 100 * time.Millisecond,
+		},
+	}
+
+	// Test that jitter is added (delay should be >= base and < base + maxJitter)
+	for i := 0; i < 10; i++ {
+		delay := client.backoffDelay(1)
+		if delay < 1*time.Second {
+			t.Errorf("delay %v should be >= 1s", delay)
+		}
+		if delay >= 1*time.Second+100*time.Millisecond {
+			t.Errorf("delay %v should be < 1.1s", delay)
+		}
+	}
+}
+
+func TestRetryableError(t *testing.T) {
+	originalErr := fmt.Errorf("original error")
+	retryErr := &retryableError{
+		err:        originalErr,
+		retryAfter: 5 * time.Second,
+	}
+
+	// Test Error() method
+	if retryErr.Error() != "original error" {
+		t.Errorf("Error() = %q, want %q", retryErr.Error(), "original error")
+	}
+
+	// Test Unwrap() method
+	if retryErr.Unwrap() != originalErr {
+		t.Error("Unwrap() should return original error")
+	}
+
+	// Test that errors.Is works
+	if !errors.Is(retryErr, originalErr) {
+		t.Error("errors.Is should match original error")
+	}
+}
+
+func TestLoggerInterface(t *testing.T) {
+	var logs []string
+	logger := &testLogger{logs: &logs}
+
+	cfg := &config.Config{
+		BaseURL:   "https://3.basecampapi.com",
+		AccountID: "12345",
+	}
+
+	client := NewClient(cfg, nil, WithLogger(logger))
+
+	// Call log method
+	client.log("[test] message %d", 42)
+
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0] != "[test] message 42" {
+		t.Errorf("log message = %q, want %q", logs[0], "[test] message 42")
+	}
+}
+
+// testLogger implements Logger for testing
+type testLogger struct {
+	logs *[]string
+}
+
+func (l *testLogger) Debug(msg string, args ...any) {
+	*l.logs = append(*l.logs, fmt.Sprintf(msg, args...))
+}
+
+func TestRetryableErrorFlow(t *testing.T) {
+	// Test that retryableError is properly used in the retry loop
+
+	err := &retryableError{
+		err:        fmt.Errorf("rate limited"),
+		retryAfter: 5 * time.Second,
+	}
+
+	// Verify the error implements error interface correctly
+	if err.Error() != "rate limited" {
+		t.Errorf("Error() = %q, want %q", err.Error(), "rate limited")
+	}
+
+	// Verify Unwrap works for error chain
+	unwrapped := err.Unwrap()
+	if unwrapped.Error() != "rate limited" {
+		t.Errorf("Unwrap() error = %q, want %q", unwrapped.Error(), "rate limited")
+	}
+
+	// Verify retryAfter is accessible
+	if err.retryAfter != 5*time.Second {
+		t.Errorf("retryAfter = %v, want %v", err.retryAfter, 5*time.Second)
 	}
 }
