@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/basecamp/bcq/internal/api"
 	"github.com/basecamp/bcq/internal/auth"
@@ -53,7 +54,12 @@ type GlobalFlags struct {
 
 // NewApp creates a new App with the given configuration.
 func NewApp(cfg *config.Config) *App {
-	httpClient := &http.Client{}
+	// Use a timeout to prevent auth operations from hanging forever on network issues.
+	// DefaultTransport is used to preserve proxy settings, HTTP/2, dial timeouts, etc.
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: http.DefaultTransport,
+	}
 	authMgr := auth.NewManager(cfg, httpClient)
 	apiClient := api.NewClient(cfg, authMgr)
 	nameResolver := names.NewResolver(apiClient, authMgr)
