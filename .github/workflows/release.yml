@@ -50,6 +50,9 @@ jobs:
           owner: basecamp
           repositories: homebrew-tap
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
