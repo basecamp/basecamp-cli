@@ -1,9 +1,9 @@
 module github.com/basecamp/bcq
 
-go 1.25.5
+go 1.24.0
 
 require (
-	github.com/basecamp/basecamp-sdk v0.0.0
+	github.com/basecamp/basecamp-sdk v0.0.0-20260125210849-789947cf2736
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v0.8.0
@@ -41,5 +41,3 @@ require (
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )
-
-replace github.com/basecamp/basecamp-sdk => /Users/jeremy/Work/basecamp/basecamp-sdk
