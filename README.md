@@ -1,5 +1,10 @@
 # bcq
 
+[![CI](https://github.com/basecamp/bcq/actions/workflows/test.yml/badge.svg)](https://github.com/basecamp/bcq/actions/workflows/test.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/basecamp/bcq)](https://goreportcard.com/report/github.com/basecamp/bcq)
+[![Release](https://img.shields.io/github/v/release/basecamp/bcq)](https://github.com/basecamp/bcq/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+
 **Basecamp automation for agents, skills, MCPs, and plugins.**
 
 - Stable command grammar for agent workflows
@@ -10,8 +15,29 @@
 
 ### 1. Install bcq CLI
 
+**Homebrew (macOS/Linux):**
+```bash
+brew install basecamp/tap/bcq
+```
+
+**Scoop (Windows):**
+```bash
+scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+scoop install bcq
+```
+
+**Go install:**
+```bash
+go install github.com/basecamp/bcq/cmd/bcq@latest
+```
+
+**Shell script:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
+```
+
+Then authenticate:
+```bash
 bcq auth login
 ```
 
@@ -174,9 +200,14 @@ Skills are at `~/.local/share/bcq/skills/`. Update with `cd ~/.local/share/bcq &
 ## Development
 
 ```bash
-./test/run.sh         # Run all tests
-bats test/*.bats      # Run bats directly
+make build            # Build binary
+make test             # Run Go tests
+make test-bats        # Run integration tests
+make lint             # Run linter
+make check            # All checks (fmt, vet, test)
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## License
 
