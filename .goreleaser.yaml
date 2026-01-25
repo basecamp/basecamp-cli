@@ -51,10 +51,9 @@ sboms:
       - sbom
 
 # Sign checksums with cosign (keyless via Sigstore)
+# Requires: permissions.id-token: write in workflow for OIDC
 signs:
   - cmd: cosign
-    env:
-      - COSIGN_EXPERIMENTAL=1
     certificate: '${artifact}.pem'
     args:
       - sign-blob
