@@ -98,7 +98,7 @@ load test_helper
   # Run with verbose and capture stderr
   run bash -c "bcq -v projects 2>&1"
 
-  # Go binary uses [bcq] prefix for verbose output
-  assert_output_contains "[bcq]"
+  # SDK uses [basecamp-sdk] prefix for verbose output
+  assert_output_contains "[basecamp-sdk]"
   assert_output_contains "GET"
 }
