@@ -24,7 +24,7 @@ Strategies are defined in `strategies.json`. Each strategy specifies either a sk
 | `api-docs-only` | prompt | Raw API with docs link only |
 | `api-docs-with-curl-examples` | prompt | Raw API with endpoint examples |
 
-See `SKILL_BENCH.md` for detailed comparison methodology.
+See `STRATEGY_SPEC.md` for detailed comparison methodology.
 
 ## Dependencies
 
