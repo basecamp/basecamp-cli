@@ -43,7 +43,7 @@ Track implementation progress here. Check off items as completed.
 - [ ] `bcq auth login`
 - [ ] `bcq auth logout`
 - [ ] `bcq auth status`
-- [ ] Fallback: `BASECAMP_ACCESS_TOKEN` env var
+- [ ] Fallback: `BASECAMP_TOKEN` env var
 
 ### API Layer
 - [ ] `lib/api.sh` — HTTP helpers
