@@ -24,7 +24,7 @@ setup() {
 
   # Clear environment variables that might interfere with tests
   # Tests can set these as needed
-  unset BASECAMP_ACCESS_TOKEN
+  unset BASECAMP_TOKEN
   unset BASECAMP_ACCOUNT_ID
   unset BASECAMP_PROJECT_ID
   unset BCQ_ACCOUNT

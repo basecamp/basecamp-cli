@@ -158,12 +158,12 @@ setup_strategy() {
 
   if strategy_uses_bcq; then
     # bcq-based strategies (bcq-full, bcq-generated, bcq-only)
-    # CRITICAL: Unset BASECAMP_ACCESS_TOKEN for bcq strategies
+    # CRITICAL: Unset BASECAMP_TOKEN for bcq strategies
     # bcq skips token refresh when this is set, which would poison Task 08 results
-    if [[ -n "${BASECAMP_ACCESS_TOKEN:-}" ]]; then
-      log "WARNING: BASECAMP_ACCESS_TOKEN is set; unsetting to allow bcq token refresh"
+    if [[ -n "${BASECAMP_TOKEN:-}" ]]; then
+      log "WARNING: BASECAMP_TOKEN is set; unsetting to allow bcq token refresh"
     fi
-    unset BASECAMP_ACCESS_TOKEN
+    unset BASECAMP_TOKEN
 
     export BCQ_BENCH_USE_BCQ=true
     export BCQ_CACHE_ENABLED=true  # Real-world product behavior
@@ -418,7 +418,7 @@ export BCQ_BENCH_RUN_START="$BCQ_BENCH_RUN_START"
 ENVEOF
 
   # IMPORTANT: Only export token for api-* strategies
-  # bcq skips token refresh when BASECAMP_ACCESS_TOKEN is set
+  # bcq skips token refresh when BASECAMP_TOKEN is set
   if ! strategy_uses_bcq; then
     cat >> "$env_file" << ENVEOF
 # API strategy: provide token directly (no refresh available)
@@ -428,9 +428,9 @@ ENVEOF
   else
     cat >> "$env_file" << ENVEOF
 # bcq strategy: let bcq read from credentials and handle refresh
-# CRITICAL: Unset BASECAMP_ACCESS_TOKEN to enable bcq token refresh
+# CRITICAL: Unset BASECAMP_TOKEN to enable bcq token refresh
 # (prevents stale token from raw runs poisoning Task 08)
-unset BASECAMP_ACCESS_TOKEN
+unset BASECAMP_TOKEN
 ENVEOF
   fi
 
