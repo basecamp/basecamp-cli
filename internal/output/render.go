@@ -460,19 +460,37 @@ func formatCell(val any) string {
 	case int, int64:
 		return fmt.Sprintf("%d", v)
 	case []any:
-		// Handle arrays like assignees
+		// Handle arrays (assignees, tags, etc.)
 		if len(v) == 0 {
 			return ""
 		}
-		var names []string
+		var items []string
 		for _, item := range v {
-			if m, ok := item.(map[string]any); ok {
-				if name, ok := m["name"].(string); ok {
-					names = append(names, name)
+			switch elem := item.(type) {
+			case string:
+				items = append(items, elem)
+			case float64:
+				if elem == float64(int(elem)) {
+					items = append(items, fmt.Sprintf("%d", int(elem)))
+				} else {
+					items = append(items, fmt.Sprintf("%.2f", elem))
 				}
+			case int, int64:
+				items = append(items, fmt.Sprintf("%d", elem))
+			case map[string]any:
+				// Try name, then title, then id, then fallback
+				if name, ok := elem["name"].(string); ok {
+					items = append(items, name)
+				} else if title, ok := elem["title"].(string); ok {
+					items = append(items, title)
+				} else if id, ok := elem["id"]; ok {
+					items = append(items, fmt.Sprintf("%v", id))
+				}
+			default:
+				items = append(items, fmt.Sprintf("%v", item))
 			}
 		}
-		return strings.Join(names, ", ")
+		return strings.Join(items, ", ")
 	default:
 		return fmt.Sprintf("%v", v)
 	}

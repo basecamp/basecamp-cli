@@ -777,6 +777,72 @@ func TestNormalizeDataWithNil(t *testing.T) {
 }
 
 // =============================================================================
+// formatCell Tests
+// =============================================================================
+
+func TestFormatCellWithScalarArray(t *testing.T) {
+	// Test string arrays (e.g., tags)
+	tags := []any{"frontend", "bug", "urgent"}
+	result := formatCell(tags)
+	if result != "frontend, bug, urgent" {
+		t.Errorf("formatCell(string array) = %q, want %q", result, "frontend, bug, urgent")
+	}
+
+	// Test number arrays
+	numbers := []any{float64(1), float64(2), float64(3)}
+	result = formatCell(numbers)
+	if result != "1, 2, 3" {
+		t.Errorf("formatCell(number array) = %q, want %q", result, "1, 2, 3")
+	}
+
+	// Test mixed arrays
+	mixed := []any{"a", float64(1), "b"}
+	result = formatCell(mixed)
+	if result != "a, 1, b" {
+		t.Errorf("formatCell(mixed array) = %q, want %q", result, "a, 1, b")
+	}
+
+	// Test empty array
+	empty := []any{}
+	result = formatCell(empty)
+	if result != "" {
+		t.Errorf("formatCell(empty array) = %q, want %q", result, "")
+	}
+}
+
+func TestFormatCellWithMapArray(t *testing.T) {
+	// Test maps with name key (assignees)
+	assignees := []any{
+		map[string]any{"id": float64(1), "name": "Alice"},
+		map[string]any{"id": float64(2), "name": "Bob"},
+	}
+	result := formatCell(assignees)
+	if result != "Alice, Bob" {
+		t.Errorf("formatCell(assignees) = %q, want %q", result, "Alice, Bob")
+	}
+
+	// Test maps with title key (no name)
+	items := []any{
+		map[string]any{"id": float64(1), "title": "Task A"},
+		map[string]any{"id": float64(2), "title": "Task B"},
+	}
+	result = formatCell(items)
+	if result != "Task A, Task B" {
+		t.Errorf("formatCell(items with title) = %q, want %q", result, "Task A, Task B")
+	}
+
+	// Test maps with only id (fallback)
+	attachments := []any{
+		map[string]any{"id": float64(100)},
+		map[string]any{"id": float64(200)},
+	}
+	result = formatCell(attachments)
+	if result != "100, 200" {
+		t.Errorf("formatCell(attachments) = %q, want %q", result, "100, 200")
+	}
+}
+
+// =============================================================================
 // Markdown Format Tests
 // =============================================================================
 
