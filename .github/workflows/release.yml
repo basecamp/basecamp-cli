@@ -41,6 +41,22 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Collect PGO profile
+        env:
+          BCQ_NO_KEYRING: "1"
+        run: |
+          echo "Collecting PGO profile from benchmarks..."
+          mkdir -p profiles
+          # Go's -cpuprofile doesn't work with multiple packages, so profile each and merge
+          for pkg in $(go list ./internal/...); do
+            pkg_name=$(basename "$pkg")
+            echo "  Profiling $pkg_name..."
+            go test -cpuprofile="profiles/${pkg_name}.pprof" -bench=. -benchtime=3s "$pkg" >/dev/null 2>&1 || true
+          done
+          # Merge all profiles
+          go tool pprof -proto profiles/*.pprof > default.pgo
+          echo "PGO profile generated: $(du -h default.pgo | cut -f1)"
+
       - name: Generate Homebrew tap token
         id: app-token
         uses: actions/create-github-app-token@v1

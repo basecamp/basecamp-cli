@@ -6,6 +6,8 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    # Generate PGO profile if not present (for optimized releases)
+    - sh -c 'if [ ! -f default.pgo ]; then echo "Collecting PGO profile..." && mkdir -p profiles && go test -cpuprofile=profiles/bench.pprof -bench=. -benchtime=3s ./internal/... >/dev/null 2>&1 && go tool pprof -proto profiles/bench.pprof > default.pgo && echo "PGO profile generated"; else echo "Using existing PGO profile"; fi'
 
 builds:
   - id: bcq
@@ -22,6 +24,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    # PGO: Use profile if available (Go 1.21+)
+    flags:
+      - -pgo=auto
     ldflags:
       - -s -w
       - -X github.com/basecamp/bcq/internal/version.Version={{.Version}}
