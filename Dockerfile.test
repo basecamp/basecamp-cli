@@ -9,4 +9,4 @@ COPY . .
 
 ENV BCQ_NO_KEYRING=1
 
-CMD ["sh", "-c", "go test ./... && go build -o bin/bcq ./cmd/bcq && BCQ_BIN=./bin/bcq bats test/"]
+CMD ["sh", "-c", "go test ./... && go build -o bin/bcq ./cmd/bcq && BCQ_BIN=./bin/bcq bats e2e/"]

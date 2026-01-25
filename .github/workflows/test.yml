@@ -67,4 +67,4 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Run BATS integration tests
-        run: bats test/
+        run: bats e2e/
