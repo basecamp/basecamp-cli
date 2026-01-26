@@ -1,26 +1,17 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// ScheduleEntry represents a schedule entry from Basecamp.
-type ScheduleEntry struct {
-	ID        int64  `json:"id"`
-	Summary   string `json:"summary"`
-	StartsAt  string `json:"starts_at"`
-	EndsAt    string `json:"ends_at"`
-	AllDay    bool   `json:"all_day"`
-	CreatedAt string `json:"created_at"`
-}
 
 // NewScheduleCmd creates the schedule command for managing schedules.
 func NewScheduleCmd() *cobra.Command {
@@ -37,7 +28,7 @@ Use 'bcq schedule entries' to list schedule entries.
 Use 'bcq schedule create' to create new entries.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -74,7 +65,7 @@ func newScheduleShowCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "Display project schedule information.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 			return runScheduleShow(cmd, app, *project, *scheduleID)
@@ -108,29 +99,17 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/schedules/%s.json", resolvedProjectID, scheduleID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
+
+	schedule, err := app.SDK.Schedules().Get(cmd.Context(), bucketID, scheduleIDInt)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
-	var schedule map[string]any
-	if err := json.Unmarshal(resp.Data, &schedule); err != nil {
-		return err
-	}
+	summary := fmt.Sprintf("%d entries (include due assignments: %t)", schedule.EntriesCount, schedule.IncludeDueAssignments)
 
-	entriesCount := 0
-	if ec, ok := schedule["entries_count"].(float64); ok {
-		entriesCount = int(ec)
-	}
-	includeDue := false
-	if id, ok := schedule["include_due_assignments"].(bool); ok {
-		includeDue = id
-	}
-
-	summary := fmt.Sprintf("%d entries (include due assignments: %t)", entriesCount, includeDue)
-
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(schedule,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -156,7 +135,7 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "List all entries in a project schedule.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 			return runScheduleEntries(cmd, app, *project, *scheduleID, status)
@@ -194,20 +173,26 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/schedules/%s/entries.json?status=%s", resolvedProjectID, scheduleID, status)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
+
+	entries, err := app.SDK.Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
-	var entries []json.RawMessage
-	if err := resp.UnmarshalData(&entries); err != nil {
-		return fmt.Errorf("failed to parse schedule entries: %w", err)
+	// Filter by status if not "active" (default)
+	// Note: The SDK returns all entries, so we filter client-side
+	var filteredEntries []basecamp.ScheduleEntry
+	for _, e := range entries {
+		if status == "" || e.Status == status {
+			filteredEntries = append(filteredEntries, e)
+		}
 	}
 
-	summary := fmt.Sprintf("%d schedule entries", len(entries))
+	summary := fmt.Sprintf("%d schedule entries", len(filteredEntries))
 
-	return app.Output.OK(entries,
+	return app.Output.OK(filteredEntries,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -234,7 +219,7 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 			return runScheduleEntryShow(cmd, app, args[0], *project, occurrenceDate)
@@ -265,26 +250,52 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		return err
 	}
 
-	var path string
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
+
+	// For occurrences, we need to use raw API since SDK doesn't support it yet
 	if occurrenceDate != "" {
-		path = fmt.Sprintf("/buckets/%s/schedule_entries/%s/occurrences/%s.json", resolvedProjectID, entryID, occurrenceDate)
-	} else {
-		path = fmt.Sprintf("/buckets/%s/schedule_entries/%s.json", resolvedProjectID, entryID)
+		path := fmt.Sprintf("/buckets/%s/schedule_entries/%s/occurrences/%s.json", resolvedProjectID, entryID, occurrenceDate)
+		resp, err := app.SDK.Get(cmd.Context(), path)
+		if err != nil {
+			return convertSDKError(err)
+		}
+
+		var entry basecamp.ScheduleEntry
+		if err := resp.UnmarshalData(&entry); err != nil {
+			return fmt.Errorf("failed to parse schedule entry: %w", err)
+		}
+
+		title := entry.Summary
+		if title == "" {
+			title = entry.Title
+		}
+		if title == "" {
+			title = "Entry"
+		}
+
+		summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
+
+		return app.Output.OK(entry,
+			output.WithSummary(summary),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "update",
+					Cmd:         fmt.Sprintf("bcq schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
+					Description: "Update entry",
+				},
+				output.Breadcrumb{
+					Action:      "entries",
+					Cmd:         fmt.Sprintf("bcq schedule entries --project %s", resolvedProjectID),
+					Description: "View all entries",
+				},
+			),
+		)
 	}
 
-	resp, err := app.API.Get(cmd.Context(), path)
+	entry, err := app.SDK.Schedules().GetEntry(cmd.Context(), bucketID, entryIDInt)
 	if err != nil {
-		return err
-	}
-
-	var entry struct {
-		Summary  string `json:"summary"`
-		Title    string `json:"title"`
-		StartsAt string `json:"starts_at"`
-		EndsAt   string `json:"ends_at"`
-	}
-	if err := json.Unmarshal(resp.Data, &entry); err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	title := entry.Summary
@@ -295,9 +306,9 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		title = "Entry"
 	}
 
-	summary := fmt.Sprintf("%s: %s → %s", title, entry.StartsAt, entry.EndsAt)
+	summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(entry,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -330,7 +341,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -395,22 +406,19 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		}
 	}
 
-	// Build request body
-	body := map[string]any{
-		"summary":   summary,
-		"starts_at": startsAt,
-		"ends_at":   endsAt,
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
+
+	// Build request
+	req := &basecamp.CreateScheduleEntryRequest{
+		Summary:     summary,
+		StartsAt:    startsAt,
+		EndsAt:      endsAt,
+		Description: description,
+		AllDay:      allDay,
+		Notify:      notify,
 	}
 
-	if description != "" {
-		body["description"] = description
-	}
-	if allDay {
-		body["all_day"] = true
-	}
-	if notify {
-		body["notify"] = true
-	}
 	if participants != "" {
 		var ids []int64
 		for _, idStr := range strings.Split(participants, ",") {
@@ -420,26 +428,18 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 			}
 		}
 		if len(ids) > 0 {
-			body["participant_ids"] = ids
+			req.ParticipantIDs = ids
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/schedules/%s/entries.json", resolvedProjectID, scheduleID)
-	resp, err := app.API.Post(cmd.Context(), path, body)
+	entry, err := app.SDK.Schedules().CreateEntry(cmd.Context(), bucketID, scheduleIDInt, req)
 	if err != nil {
-		return err
-	}
-
-	var entry struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(resp.Data, &entry); err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	resultSummary := fmt.Sprintf("Created schedule entry #%d: %s", entry.ID, summary)
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(entry,
 		output.WithSummary(resultSummary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -472,7 +472,7 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -495,26 +495,36 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Build request body with provided fields only
-			body := make(map[string]any)
+			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
+
+			// Build request with provided fields only
+			req := &basecamp.UpdateScheduleEntryRequest{}
+			hasChanges := false
 
 			if summary != "" {
-				body["summary"] = summary
+				req.Summary = summary
+				hasChanges = true
 			}
 			if startsAt != "" {
-				body["starts_at"] = startsAt
+				req.StartsAt = startsAt
+				hasChanges = true
 			}
 			if endsAt != "" {
-				body["ends_at"] = endsAt
+				req.EndsAt = endsAt
+				hasChanges = true
 			}
 			if description != "" {
-				body["description"] = description
+				req.Description = description
+				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
-				body["all_day"] = allDay
+				req.AllDay = allDay
+				hasChanges = true
 			}
 			if cmd.Flags().Changed("notify") {
-				body["notify"] = notify
+				req.Notify = notify
+				hasChanges = true
 			}
 			if participants != "" {
 				var ids []int64
@@ -525,23 +535,23 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 					}
 				}
 				if len(ids) > 0 {
-					body["participant_ids"] = ids
+					req.ParticipantIDs = ids
+					hasChanges = true
 				}
 			}
 
-			if len(body) == 0 {
+			if !hasChanges {
 				return output.ErrUsage("No update fields provided")
 			}
 
-			path := fmt.Sprintf("/buckets/%s/schedule_entries/%s.json", resolvedProjectID, entryID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			entry, err := app.SDK.Schedules().UpdateEntry(cmd.Context(), bucketID, entryIDInt, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			resultSummary := fmt.Sprintf("Updated schedule entry #%s", entryID)
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(entry,
 				output.WithSummary(resultSummary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -579,7 +589,7 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "Update schedule settings like including due assignments.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -613,19 +623,25 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 				}
 			}
 
+			// Use raw API for settings update since SDK doesn't have this method
 			body := map[string]bool{
 				"include_due_assignments": includeDue,
 			}
 
 			path := fmt.Sprintf("/buckets/%s/schedules/%s.json", resolvedProjectID, effectiveScheduleID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			resp, err := app.SDK.Put(cmd.Context(), path, body)
 			if err != nil {
-				return err
+				return convertSDKError(err)
+			}
+
+			var schedule basecamp.Schedule
+			if err := resp.UnmarshalData(&schedule); err != nil {
+				return fmt.Errorf("failed to parse schedule: %w", err)
 			}
 
 			resultSummary := "Updated schedule settings"
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(schedule,
 				output.WithSummary(resultSummary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
