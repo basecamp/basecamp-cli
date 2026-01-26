@@ -1,23 +1,23 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/api"
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
 
 // FilesListResult represents the combined contents of a vault.
 type FilesListResult struct {
-	VaultID    int64  `json:"vault_id"`
-	VaultTitle string `json:"vault_title"`
-	Folders    []any  `json:"folders"`
-	Files      []any  `json:"files"`
-	Documents  []any  `json:"documents"`
+	VaultID    int64               `json:"vault_id"`
+	VaultTitle string              `json:"vault_title"`
+	Folders    []basecamp.Vault    `json:"folders"`
+	Files      []basecamp.Upload   `json:"files"`
+	Documents  []basecamp.Document `json:"documents"`
 }
 
 // NewFilesCmd creates the files command group.
@@ -96,9 +96,6 @@ func newFilesListCmd(project, vaultID *string) *cobra.Command {
 
 func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -117,6 +114,11 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -126,52 +128,41 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		}
 	}
 
-	// Get vault details
-	vaultPath := fmt.Sprintf("/buckets/%s/vaults/%s.json", resolvedProjectID, resolvedVaultID)
-	vaultResp, err := app.API.Get(cmd.Context(), vaultPath)
+	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid vault ID")
 	}
 
-	var vaultData struct {
-		Title string `json:"title"`
+	// Get vault details using SDK
+	vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		return convertSDKError(err)
 	}
-	if err := json.Unmarshal(vaultResp.Data, &vaultData); err != nil {
-		return err
-	}
-	vaultTitle := vaultData.Title
+
+	vaultTitle := vault.Title
 	if vaultTitle == "" {
 		vaultTitle = "Docs & Files"
 	}
 
-	// Get folders (subvaults)
-	foldersPath := fmt.Sprintf("/buckets/%s/vaults/%s/vaults.json", resolvedProjectID, resolvedVaultID)
-	foldersResp, err := app.API.Get(cmd.Context(), foldersPath)
-	var folders []any
-	if err == nil {
-		_ = json.Unmarshal(foldersResp.Data, &folders) // Best-effort
+	// Get folders (subvaults) using SDK
+	folders, err := app.SDK.Vaults().List(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		folders = []basecamp.Vault{} // Best-effort
 	}
 
-	// Get uploads
-	uploadsPath := fmt.Sprintf("/buckets/%s/vaults/%s/uploads.json", resolvedProjectID, resolvedVaultID)
-	uploadsResp, err := app.API.Get(cmd.Context(), uploadsPath)
-	var uploads []any
-	if err == nil {
-		_ = json.Unmarshal(uploadsResp.Data, &uploads) // Best-effort
+	// Get uploads using SDK
+	uploads, err := app.SDK.Uploads().List(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		uploads = []basecamp.Upload{} // Best-effort
 	}
 
-	// Get documents
-	docsPath := fmt.Sprintf("/buckets/%s/vaults/%s/documents.json", resolvedProjectID, resolvedVaultID)
-	docsResp, err := app.API.Get(cmd.Context(), docsPath)
-	var documents []any
-	if err == nil {
-		_ = json.Unmarshal(docsResp.Data, &documents) // Best-effort
+	// Get documents using SDK
+	documents, err := app.SDK.Documents().List(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		documents = []basecamp.Document{} // Best-effort
 	}
 
 	// Build result
-	vaultIDNum := int64(0)
-	_, _ = fmt.Sscanf(resolvedVaultID, "%d", &vaultIDNum) //nolint:gosec // G104: ID validated
-
 	result := FilesListResult{
 		VaultID:    vaultIDNum,
 		VaultTitle: vaultTitle,
@@ -234,9 +225,6 @@ func newFoldersListCmd(project, vaultID *string) *cobra.Command {
 
 func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -255,6 +243,11 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -264,15 +257,15 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/vaults/%s/vaults.json", resolvedProjectID, resolvedVaultID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid vault ID")
 	}
 
-	var folders []any
-	if err := resp.UnmarshalData(&folders); err != nil {
-		return fmt.Errorf("failed to parse folders: %w", err)
+	// Get folders using SDK
+	folders, err := app.SDK.Vaults().List(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(folders,
@@ -300,9 +293,6 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 		Short: "Create a new folder",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if name == "" {
 				return output.ErrUsage("--name is required")
@@ -325,6 +315,11 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get vault ID
 			resolvedVaultID := *vaultID
 			if resolvedVaultID == "" {
@@ -334,22 +329,22 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				}
 			}
 
-			body := map[string]string{
-				"title": name,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/vaults/%s/vaults.json", resolvedProjectID, resolvedVaultID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid vault ID")
 			}
 
-			var folder struct {
-				ID int64 `json:"id"`
+			// Create folder using SDK
+			req := &basecamp.CreateVaultRequest{
+				Title: name,
 			}
-			_ = json.Unmarshal(resp.Data, &folder) // Best-effort
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			folder, err := app.SDK.Vaults().Create(cmd.Context(), bucketID, vaultIDNum, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(folder,
 				output.WithSummary(fmt.Sprintf("Created folder #%d: %s", folder.ID, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -397,9 +392,6 @@ func newUploadsListCmd(project, vaultID *string) *cobra.Command {
 
 func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -418,6 +410,11 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -427,15 +424,15 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/vaults/%s/uploads.json", resolvedProjectID, resolvedVaultID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid vault ID")
 	}
 
-	var uploads []any
-	if err := resp.UnmarshalData(&uploads); err != nil {
-		return fmt.Errorf("failed to parse uploads: %w", err)
+	// Get uploads using SDK
+	uploads, err := app.SDK.Uploads().List(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(uploads,
@@ -480,9 +477,6 @@ func newDocsListCmd(project, vaultID *string) *cobra.Command {
 
 func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -501,6 +495,11 @@ func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -510,15 +509,15 @@ func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/vaults/%s/documents.json", resolvedProjectID, resolvedVaultID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid vault ID")
 	}
 
-	var documents []any
-	if err := resp.UnmarshalData(&documents); err != nil {
-		return fmt.Errorf("failed to parse documents: %w", err)
+	// Get documents using SDK
+	documents, err := app.SDK.Documents().List(cmd.Context(), bucketID, vaultIDNum)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(documents,
@@ -548,9 +547,6 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 		Short: "Create a new document",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -573,6 +569,11 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get vault ID
 			resolvedVaultID := *vaultID
 			if resolvedVaultID == "" {
@@ -582,30 +583,28 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				}
 			}
 
-			body := map[string]string{
-				"title": title,
+			vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid vault ID")
 			}
-			if content != "" {
-				body["content"] = content
+
+			// Create document using SDK
+			req := &basecamp.CreateDocumentRequest{
+				Title:   title,
+				Content: content,
 			}
 			if draft {
-				body["status"] = "drafted"
+				req.Status = "drafted"
 			} else {
-				body["status"] = "active"
+				req.Status = "active"
 			}
 
-			path := fmt.Sprintf("/buckets/%s/vaults/%s/documents.json", resolvedProjectID, resolvedVaultID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			doc, err := app.SDK.Documents().Create(cmd.Context(), bucketID, vaultIDNum, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var doc struct {
-				ID int64 `json:"id"`
-			}
-			_ = json.Unmarshal(resp.Data, &doc) // Best-effort
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(doc,
 				output.WithSummary(fmt.Sprintf("Created document #%d: %s", doc.ID, title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -641,11 +640,12 @@ func newFilesShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			itemID := args[0]
+			itemIDStr := args[0]
+			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid item ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -664,81 +664,90 @@ func newFilesShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Try to detect type if not specified
-			var resp *api.Response
+			var result any
 			var detectedType string
+			var title string
 
 			if itemType == "" {
 				// Try vault first
-				path := fmt.Sprintf("/buckets/%s/vaults/%s.json", resolvedProjectID, itemID)
-				resp, err = app.API.Get(cmd.Context(), path)
-				if err == nil && len(resp.Data) > 0 {
+				vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
+				if err == nil {
+					result = vault
 					detectedType = "vault"
+					title = vault.Title
 				} else {
 					// Try upload
-					path = fmt.Sprintf("/buckets/%s/uploads/%s.json", resolvedProjectID, itemID)
-					resp, err = app.API.Get(cmd.Context(), path)
-					if err == nil && len(resp.Data) > 0 {
+					upload, err := app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
+					if err == nil {
+						result = upload
 						detectedType = "upload"
+						title = upload.Filename
+						if title == "" {
+							title = upload.Title
+						}
 					} else {
 						// Try document
-						path = fmt.Sprintf("/buckets/%s/documents/%s.json", resolvedProjectID, itemID)
-						resp, err = app.API.Get(cmd.Context(), path)
-						if err == nil && len(resp.Data) > 0 {
+						doc, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
+						if err == nil {
+							result = doc
 							detectedType = "document"
+							title = doc.Title
 						}
 					}
 				}
 			} else {
-				var path string
 				switch itemType {
 				case "vault", "folder":
-					path = fmt.Sprintf("/buckets/%s/vaults/%s.json", resolvedProjectID, itemID)
+					vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = vault
 					detectedType = "vault"
+					title = vault.Title
 				case "upload", "file":
-					path = fmt.Sprintf("/buckets/%s/uploads/%s.json", resolvedProjectID, itemID)
+					upload, err := app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = upload
 					detectedType = "upload"
+					title = upload.Filename
+					if title == "" {
+						title = upload.Title
+					}
 				case "document", "doc":
-					path = fmt.Sprintf("/buckets/%s/documents/%s.json", resolvedProjectID, itemID)
+					doc, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = doc
 					detectedType = "document"
+					title = doc.Title
 				default:
 					return output.ErrUsageHint(
 						fmt.Sprintf("Invalid type: %s", itemType),
 						"Use: vault, upload, or document",
 					)
 				}
-				resp, err = app.API.Get(cmd.Context(), path)
 			}
 
-			if err != nil {
-				return err
-			}
-			if resp == nil || len(resp.Data) == 0 {
-				return output.ErrNotFound("item", itemID)
+			if result == nil {
+				return output.ErrNotFound("item", itemIDStr)
 			}
 
-			// Parse for summary
-			var data map[string]any
-			_ = json.Unmarshal(resp.Data, &data) // Best-effort
-
-			title := ""
-			if t, ok := data["title"].(string); ok {
-				title = t
-			} else if f, ok := data["filename"].(string); ok {
-				title = f
-			}
-
-			itemTypeDisplay := detectedType
-			if t, ok := data["type"].(string); ok {
-				itemTypeDisplay = t
-			}
-
-			summary := fmt.Sprintf("%s: %s", itemTypeDisplay, title)
+			summary := fmt.Sprintf("%s: %s", detectedType, title)
 
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "update",
-					Cmd:         fmt.Sprintf("bcq files update %s --in %s", itemID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("bcq files update %s --in %s", itemIDStr, resolvedProjectID),
 					Description: "Update item",
 				},
 			}
@@ -746,12 +755,12 @@ func newFilesShowCmd(project *string) *cobra.Command {
 			if detectedType == "vault" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "contents",
-					Cmd:         fmt.Sprintf("bcq files --vault %s --in %s", itemID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("bcq files --vault %s --in %s", itemIDStr, resolvedProjectID),
 					Description: "List contents",
 				})
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
@@ -774,11 +783,12 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			itemID := args[0]
+			itemIDStr := args[0]
+			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid item ID")
+			}
 
 			if title == "" && content == "" {
 				return output.ErrUsage("at least one of --title or --content is required")
@@ -801,20 +811,43 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Auto-detect type if not specified
-			var endpoint string
+			var result any
 			var detectedType string
 
 			if itemType != "" {
 				switch itemType {
 				case "vault", "folder":
-					endpoint = fmt.Sprintf("/buckets/%s/vaults/%s.json", resolvedProjectID, itemID)
+					req := &basecamp.UpdateVaultRequest{Title: title}
+					vault, err := app.SDK.Vaults().Update(cmd.Context(), bucketID, itemID, req)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					endpoint = fmt.Sprintf("/buckets/%s/documents/%s.json", resolvedProjectID, itemID)
+					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
+					doc, err := app.SDK.Documents().Update(cmd.Context(), bucketID, itemID, req)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = doc
 					detectedType = "document"
 				case "upload", "file":
-					endpoint = fmt.Sprintf("/buckets/%s/uploads/%s.json", resolvedProjectID, itemID)
+					req := &basecamp.UpdateUploadRequest{Description: content}
+					if title != "" {
+						req.BaseName = title
+					}
+					upload, err := app.SDK.Uploads().Update(cmd.Context(), bucketID, itemID, req)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = upload
 					detectedType = "upload"
 				default:
 					return output.ErrUsageHint(
@@ -824,28 +857,43 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				}
 			} else {
 				// Try document first (most common update case)
-				path := fmt.Sprintf("/buckets/%s/documents/%s.json", resolvedProjectID, itemID)
-				_, err := app.API.Get(cmd.Context(), path)
+				_, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
 				if err == nil {
-					endpoint = path
+					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
+					doc, err := app.SDK.Documents().Update(cmd.Context(), bucketID, itemID, req)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = doc
 					detectedType = "document"
 				} else {
 					// Try vault
-					path = fmt.Sprintf("/buckets/%s/vaults/%s.json", resolvedProjectID, itemID)
-					_, err = app.API.Get(cmd.Context(), path)
+					_, err = app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
 					if err == nil {
-						endpoint = path
+						req := &basecamp.UpdateVaultRequest{Title: title}
+						vault, err := app.SDK.Vaults().Update(cmd.Context(), bucketID, itemID, req)
+						if err != nil {
+							return convertSDKError(err)
+						}
+						result = vault
 						detectedType = "vault"
 					} else {
 						// Try upload
-						path = fmt.Sprintf("/buckets/%s/uploads/%s.json", resolvedProjectID, itemID)
-						_, err = app.API.Get(cmd.Context(), path)
+						_, err = app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
 						if err == nil {
-							endpoint = path
+							req := &basecamp.UpdateUploadRequest{Description: content}
+							if title != "" {
+								req.BaseName = title
+							}
+							upload, err := app.SDK.Uploads().Update(cmd.Context(), bucketID, itemID, req)
+							if err != nil {
+								return convertSDKError(err)
+							}
+							result = upload
 							detectedType = "upload"
 						} else {
 							return output.ErrUsageHint(
-								fmt.Sprintf("Item %s not found", itemID),
+								fmt.Sprintf("Item %s not found", itemIDStr),
 								"Specify --type if needed",
 							)
 						}
@@ -853,25 +901,12 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				}
 			}
 
-			body := make(map[string]string)
-			if title != "" {
-				body["title"] = title
-			}
-			if content != "" {
-				body["content"] = content
-			}
-
-			resp, err := app.API.Put(cmd.Context(), endpoint, body)
-			if err != nil {
-				return err
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated %s #%s", detectedType, itemID)),
+			return app.Output.OK(result,
+				output.WithSummary(fmt.Sprintf("Updated %s #%s", detectedType, itemIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq files show %s --in %s", itemID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq files show %s --in %s", itemIDStr, resolvedProjectID),
 						Description: "View item",
 					},
 				),
