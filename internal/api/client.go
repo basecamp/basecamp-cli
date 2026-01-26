@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +28,6 @@ const (
 	DefaultMaxPages   = 10000
 )
 
-// Logger is the interface for logging debug output.
-type Logger interface {
-	Debug(msg string, args ...any)
-}
-
 // ClientOptions configures the API client behavior.
 type ClientOptions struct {
 	// HTTP settings
@@ -49,9 +44,6 @@ type ClientOptions struct {
 
 	// Custom User-Agent (appended to default)
 	UserAgent string
-
-	// Logging
-	Logger Logger
 }
 
 // ClientOption is a functional option for configuring the client.
@@ -65,11 +57,6 @@ func WithTimeout(d time.Duration) ClientOption {
 // WithMaxRetries sets the maximum number of retry attempts.
 func WithMaxRetries(n int) ClientOption {
 	return func(o *ClientOptions) { o.MaxRetries = n }
-}
-
-// WithLogger sets the debug logger.
-func WithLogger(l Logger) ClientOption {
-	return func(o *ClientOptions) { o.Logger = l }
 }
 
 // WithUserAgent sets a custom User-Agent suffix.
@@ -103,7 +90,7 @@ type Client struct {
 	cfg        *config.Config
 	cache      *Cache
 	opts       ClientOptions
-	verbose    bool
+	logger     *slog.Logger
 }
 
 // Response wraps an API response.
@@ -163,17 +150,26 @@ func NewClient(cfg *config.Config, authMgr *auth.Manager, options ...ClientOptio
 	}
 }
 
-// SetVerbose enables verbose output for debugging.
-func (c *Client) SetVerbose(v bool) {
-	c.verbose = v
+// SetLogger sets the structured logger for debug output.
+func (c *Client) SetLogger(l *slog.Logger) {
+	c.logger = l
 }
 
-// log outputs a debug message if verbose mode is enabled or a logger is configured.
+// log outputs a debug message if a logger is configured.
 func (c *Client) log(msg string, args ...any) {
-	if c.opts.Logger != nil {
-		c.opts.Logger.Debug(msg, args...)
-	} else if c.verbose {
-		fmt.Printf(msg+"\n", args...)
+	if c.logger != nil {
+		c.logger.Debug(msg, args...)
+	}
+}
+
+// warn outputs a warning message. Falls back to stderr if no logger configured,
+// since warnings indicate user-facing issues like incomplete results.
+func (c *Client) warn(msg string, args ...any) {
+	if c.logger != nil {
+		c.logger.Warn(msg, args...)
+	} else {
+		// Always show warnings to users even without -v flag
+		slog.Default().Warn(msg, args...)
 	}
 }
 
@@ -225,7 +221,7 @@ func (c *Client) GetAll(ctx context.Context, path string) ([]json.RawMessage, er
 	}
 
 	if page > c.opts.MaxPages {
-		fmt.Fprintf(os.Stderr, "[bcq] Warning: pagination capped at %d pages; results may be incomplete\n", c.opts.MaxPages)
+		c.warn("pagination capped", "maxPages", c.opts.MaxPages)
 	}
 
 	return allResults, nil
@@ -246,7 +242,7 @@ func (c *Client) doRequestURL(ctx context.Context, method, url string, body any)
 		}
 		// Only retry if this was a 401 that triggered successful token refresh
 		if apiErr, ok := err.(*output.Error); ok && apiErr.Retryable && apiErr.Code == output.CodeAuth {
-			c.log("[bcq] Token refreshed, retrying %s request", method)
+			c.log("token refreshed, retrying", "method", method)
 			return c.singleRequest(ctx, method, url, body, 2)
 		}
 		return nil, err
@@ -281,7 +277,7 @@ func (c *Client) doRequestURL(ctx context.Context, method, url string, body any)
 			return nil, err
 		}
 
-		c.log("[bcq] Retry %d/%d in %v: %s", attempt, c.opts.MaxRetries, delay, lastErr)
+		c.log("retrying", "attempt", attempt, "max", c.opts.MaxRetries, "delay", delay, "error", lastErr)
 
 		select {
 		case <-ctx.Done():
@@ -332,11 +328,11 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		cacheKey = c.cache.Key(url, c.cfg.AccountID, token)
 		if etag := c.cache.GetETag(cacheKey); etag != "" {
 			req.Header.Set("If-None-Match", etag)
-			c.log("[bcq] Cache: If-None-Match %s", etag)
+			c.log("cache conditional", "etag", etag)
 		}
 	}
 
-	c.log("[bcq] %s %s (attempt %d)", method, url, attempt)
+	c.log("http request", "method", method, "url", url, "attempt", attempt)
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -345,7 +341,7 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 	}
 	defer resp.Body.Close()
 
-	c.log("[bcq] HTTP %d", resp.StatusCode)
+	c.log("http response", "status", resp.StatusCode)
 
 	// Handle response based on status code
 	switch resp.StatusCode {
@@ -353,7 +349,7 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		if cacheKey != "" {
 			cached := c.cache.GetBody(cacheKey)
 			if cached != nil {
-				c.log("[bcq] Cache hit: 304 Not Modified")
+				c.log("cache hit")
 				return &Response{
 					Data:       cached,
 					StatusCode: http.StatusOK,
@@ -362,7 +358,7 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 				}, nil
 			}
 			// Cache corrupted (etag exists but body missing)—invalidate and refetch
-			c.log("[bcq] Cache corrupted: 304 but body missing, refetching")
+			c.log("cache corrupted, refetching")
 			_ = c.cache.Invalidate(cacheKey) // Best-effort invalidation
 			// Retry without If-None-Match header by recursing with fresh attempt
 			return c.singleRequest(ctx, method, url, body, attempt)
@@ -379,7 +375,7 @@ func (c *Client) singleRequest(ctx context.Context, method, url string, body any
 		if method == "GET" && cacheKey != "" {
 			if etag := resp.Header.Get("ETag"); etag != "" {
 				_ = c.cache.Set(cacheKey, respBody, etag) // Best-effort cache write
-				c.log("[bcq] Cache: stored with ETag %s", etag)
+				c.log("cache stored", "etag", etag)
 			}
 		}
 

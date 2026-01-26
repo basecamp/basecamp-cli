@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -404,21 +407,22 @@ func TestRequireAccount(t *testing.T) {
 	}
 }
 
-func TestSetVerbose(t *testing.T) {
+func TestSetLogger(t *testing.T) {
 	client := &Client{}
 
-	if client.verbose {
-		t.Error("verbose should default to false")
+	if client.logger != nil {
+		t.Error("logger should default to nil")
 	}
 
-	client.SetVerbose(true)
-	if !client.verbose {
-		t.Error("SetVerbose(true) should set verbose to true")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	client.SetLogger(logger)
+	if client.logger != logger {
+		t.Error("SetLogger should set the logger")
 	}
 
-	client.SetVerbose(false)
-	if client.verbose {
-		t.Error("SetVerbose(false) should set verbose to false")
+	client.SetLogger(nil)
+	if client.logger != nil {
+		t.Error("SetLogger(nil) should set logger to nil")
 	}
 }
 
@@ -586,35 +590,36 @@ func TestRetryableError(t *testing.T) {
 	}
 }
 
-func TestLoggerInterface(t *testing.T) {
-	var logs []string
-	logger := &testLogger{logs: &logs}
-
+func TestSlogLoggerIntegration(t *testing.T) {
 	cfg := &config.Config{
 		BaseURL:   "https://3.basecampapi.com",
 		AccountID: "12345",
 	}
 
-	client := NewClient(cfg, nil, WithLogger(logger))
+	// Create client without logger - log calls should be no-ops
+	client := NewClient(cfg, nil)
+	client.log("test message", "key", "value") // Should not panic
 
-	// Call log method
-	client.log("[test] message %d", 42)
+	// Create client with logger that writes to buffer
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	client.SetLogger(logger)
 
-	if len(logs) != 1 {
-		t.Fatalf("expected 1 log, got %d", len(logs))
+	// Log call should produce structured output
+	client.log("test message", "key", "value")
+
+	output := buf.String()
+	if !strings.Contains(output, "level=DEBUG") {
+		t.Errorf("expected level=DEBUG in output, got: %s", output)
 	}
-	if logs[0] != "[test] message 42" {
-		t.Errorf("log message = %q, want %q", logs[0], "[test] message 42")
+	if !strings.Contains(output, "msg=\"test message\"") {
+		t.Errorf("expected msg=\"test message\" in output, got: %s", output)
 	}
-}
-
-// testLogger implements Logger for testing
-type testLogger struct {
-	logs *[]string
-}
-
-func (l *testLogger) Debug(msg string, args ...any) {
-	*l.logs = append(*l.logs, fmt.Sprintf(msg, args...))
+	if !strings.Contains(output, "key=value") {
+		t.Errorf("expected key=value in output, got: %s", output)
+	}
 }
 
 func TestRetryableErrorFlow(t *testing.T) {
