@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -29,11 +29,12 @@ Events track all changes to a recording. Common event actions:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			recordingID := args[0]
+			recordingIDStr := args[0]
+			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid recording ID")
+			}
 
 			// Resolve project
 			projectID := project
@@ -52,23 +53,22 @@ Events track all changes to a recording. Common event actions:
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/events.json", resolvedProjectID, recordingID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var events []json.RawMessage
-			if err := json.Unmarshal(resp.Data, &events); err != nil {
-				return fmt.Errorf("failed to parse events: %w", err)
+			events, err := app.SDK.Events().List(cmd.Context(), bucketID, recordingID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("%d events for recording #%s", len(events), recordingID)),
+			return app.Output.OK(events,
+				output.WithSummary(fmt.Sprintf("%d events for recording #%s", len(events), recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "recording",
-						Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "View the recording",
 					},
 				),
