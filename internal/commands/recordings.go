@@ -1,29 +1,15 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/url"
+	"strconv"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Recording represents a Basecamp recording from the recordings endpoint.
-type Recording struct {
-	ID        int64  `json:"id"`
-	Type      string `json:"type"`
-	Title     string `json:"title,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Status    string `json:"status"`
-	UpdatedAt string `json:"updated_at"`
-	Bucket    struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
-	} `json:"bucket"`
-}
 
 // NewRecordingsCmd creates the recordings command for cross-project browsing.
 func NewRecordingsCmd() *cobra.Command {
@@ -57,10 +43,6 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 					"Type required",
 					"Use --type or shorthand: bcq recordings todos|messages|documents|comments|cards|uploads",
 				)
-			}
-
-			if err := app.API.RequireAccount(); err != nil {
-				return err
 			}
 
 			return runRecordingsList(cmd, app, effectiveType, project, status, sortBy, direction, limit)
@@ -139,10 +121,6 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 				)
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
-
 			return runRecordingsList(cmd, app, effectiveType, *project, status, sortBy, direction, limit)
 		},
 	}
@@ -157,30 +135,28 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 }
 
 func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, project, status, sortBy, direction string, limit int) error {
-	// Build query string
-	params := url.Values{}
-	params.Set("type", recordingType)
-	params.Set("status", status)
-	params.Set("sort", sortBy)
-	params.Set("direction", direction)
+	// Build options
+	opts := &basecamp.RecordingsListOptions{
+		Status:    status,
+		Sort:      sortBy,
+		Direction: direction,
+	}
 
 	if project != "" {
 		resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), project)
 		if err != nil {
 			return err
 		}
-		params.Set("bucket", resolvedProjectID)
+		projectID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid project ID")
+		}
+		opts.Bucket = []int64{projectID}
 	}
 
-	path := fmt.Sprintf("/projects/recordings.json?%s", params.Encode())
-	resp, err := app.API.Get(cmd.Context(), path)
+	recordings, err := app.SDK.Recordings().List(cmd.Context(), basecamp.RecordingType(recordingType), opts)
 	if err != nil {
-		return err
-	}
-
-	var recordings []json.RawMessage
-	if err := resp.UnmarshalData(&recordings); err != nil {
-		return fmt.Errorf("failed to parse recordings: %w", err)
+		return convertSDKError(err)
 	}
 
 	// Apply client-side limit if specified
@@ -211,9 +187,6 @@ func newRecordingsTrashCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 			return runRecordingsStatus(cmd, app, args[0], *project, "trashed")
 		},
 	}
@@ -229,9 +202,6 @@ func newRecordingsArchiveCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 			return runRecordingsStatus(cmd, app, args[0], *project, "archived")
 		},
 	}
@@ -247,43 +217,55 @@ func newRecordingsRestoreCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 			return runRecordingsStatus(cmd, app, args[0], *project, "active")
 		},
 	}
 	return cmd
 }
 
-func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingID, project, newStatus string) error {
+func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, project, newStatus string) error {
+	// Parse recording ID
+	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid recording ID")
+	}
+
 	// Resolve project
-	projectID := project
-	if projectID == "" {
-		projectID = app.Flags.Project
+	projectIDStr := project
+	if projectIDStr == "" {
+		projectIDStr = app.Flags.Project
 	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
+	if projectIDStr == "" {
+		projectIDStr = app.Config.ProjectID
 	}
-	if projectID == "" {
+	if projectIDStr == "" {
 		return output.ErrUsage("--project is required")
 	}
 
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	resolvedProjectIDStr, _, err := app.Names.ResolveProject(cmd.Context(), projectIDStr)
 	if err != nil {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/recordings/%s/status/%s.json", resolvedProjectID, recordingID, newStatus)
-	resp, err := app.API.Put(cmd.Context(), path, map[string]string{})
+	bucketID, err := strconv.ParseInt(resolvedProjectIDStr, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	// Handle 204 No Content
-	var data any = map[string]any{}
-	if len(resp.Data) > 0 {
-		data = json.RawMessage(resp.Data)
+	// Call appropriate SDK method based on status
+	switch newStatus {
+	case "trashed":
+		err = app.SDK.Recordings().Trash(cmd.Context(), bucketID, recordingID)
+	case "archived":
+		err = app.SDK.Recordings().Archive(cmd.Context(), bucketID, recordingID)
+	case "active":
+		err = app.SDK.Recordings().Unarchive(cmd.Context(), bucketID, recordingID)
+	default:
+		return output.ErrUsage(fmt.Sprintf("Unknown status: %s", newStatus))
+	}
+
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	var statusMsg string
@@ -298,14 +280,14 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingID, proje
 		statusMsg = fmt.Sprintf("Changed to %s", newStatus)
 	}
 
-	summary := fmt.Sprintf("%s recording #%s", statusMsg, recordingID)
+	summary := fmt.Sprintf("%s recording #%s", statusMsg, recordingIDStr)
 
-	return app.Output.OK(data,
+	return app.Output.OK(map[string]any{"id": recordingID, "status": newStatus},
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingIDStr, resolvedProjectIDStr),
 				Description: "View recording",
 			},
 		),
@@ -324,11 +306,12 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			recordingID := args[0]
+			recordingIDStr := args[0]
+			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid recording ID")
+			}
 
 			// Determine visibility
 			var isVisible bool
@@ -341,51 +324,45 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 			isVisible = visible
 
 			// Resolve project
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
+			projectIDStr := *project
+			if projectIDStr == "" {
+				projectIDStr = app.Flags.Project
 			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
+			if projectIDStr == "" {
+				projectIDStr = app.Config.ProjectID
 			}
-			if projectID == "" {
+			if projectIDStr == "" {
 				return output.ErrUsage("--project is required")
 			}
 
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectIDStr, _, err := app.Names.ResolveProject(cmd.Context(), projectIDStr)
 			if err != nil {
 				return err
 			}
 
-			body := map[string]bool{
-				"visible_to_clients": isVisible,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/client_visibility.json", resolvedProjectID, recordingID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectIDStr, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			// Handle 204 No Content
-			var data any = map[string]any{}
-			if len(resp.Data) > 0 {
-				data = json.RawMessage(resp.Data)
+			recording, err := app.SDK.Recordings().SetClientVisibility(cmd.Context(), bucketID, recordingID, isVisible)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			var summary string
 			if isVisible {
-				summary = fmt.Sprintf("Recording #%s now visible to clients", recordingID)
+				summary = fmt.Sprintf("Recording #%s now visible to clients", recordingIDStr)
 			} else {
-				summary = fmt.Sprintf("Recording #%s now hidden from clients", recordingID)
+				summary = fmt.Sprintf("Recording #%s now hidden from clients", recordingIDStr)
 			}
 
-			return app.Output.OK(data,
+			return app.Output.OK(recording,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingIDStr, resolvedProjectIDStr),
 						Description: "View recording",
 					},
 				),
