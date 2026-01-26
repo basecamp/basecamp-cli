@@ -78,7 +78,6 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
@@ -115,7 +114,6 @@ jobs:
   race-check:
     name: Race Detection
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       BCQ_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
