@@ -1,10 +1,10 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/url"
+	"strconv"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
@@ -60,9 +60,6 @@ func newTimesheetReportCmd(startDate, endDate, personID, bucketID *string) *cobr
 
 func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucketID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Validate: if one date is provided, both are required
 	if startDate != "" && endDate == "" {
@@ -72,47 +69,55 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 		return output.ErrUsage("--start required when --end is provided")
 	}
 
-	// Build query params
-	params := url.Values{}
-	if startDate != "" {
-		params.Set("start_date", startDate)
-	}
-	if endDate != "" {
-		params.Set("end_date", endDate)
+	// Build options
+	opts := &basecamp.TimesheetReportOptions{
+		From: startDate,
+		To:   endDate,
 	}
 	if personID != "" {
-		params.Set("person_id", personID)
+		pid, err := strconv.ParseInt(personID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid person ID")
+		}
+		opts.PersonID = pid
 	}
+
+	// If bucketID is provided, use ProjectReport instead of Report
 	if bucketID != "" {
-		params.Set("bucket_id", bucketID)
+		bid, err := strconv.ParseInt(bucketID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid bucket ID")
+		}
+		entries, err := app.SDK.Timesheet().ProjectReport(cmd.Context(), bid, opts)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		totalHours := sumTimesheetHours(entries)
+		return app.Output.OK(entries,
+			output.WithSummary(fmt.Sprintf("%d timesheet entries (%.1fh total)", len(entries), totalHours)),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "project",
+					Cmd:         "bcq timesheet project <id>",
+					Description: "View project timesheet",
+				},
+				output.Breadcrumb{
+					Action:      "recording",
+					Cmd:         "bcq timesheet recording <id> --project <project>",
+					Description: "View recording timesheet",
+				},
+			),
+		)
 	}
 
-	path := "/reports/timesheet.json"
-	if len(params) > 0 {
-		path = path + "?" + params.Encode()
-	}
-
-	resp, err := app.API.Get(cmd.Context(), path)
+	entries, err := app.SDK.Timesheet().Report(cmd.Context(), opts)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
-	var entries []struct {
-		Hours string `json:"hours"`
-	}
-	if err := json.Unmarshal(resp.Data, &entries); err != nil {
-		return fmt.Errorf("failed to parse timesheet: %w", err)
-	}
+	totalHours := sumTimesheetHours(entries)
 
-	// Calculate total hours
-	var totalHours float64
-	for _, e := range entries {
-		var hours float64
-		_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: ID validated
-		totalHours += hours
-	}
-
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(entries,
 		output.WithSummary(fmt.Sprintf("%d timesheet entries (%.1fh total)", len(entries), totalHours)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -129,6 +134,16 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 	)
 }
 
+func sumTimesheetHours(entries []basecamp.TimesheetEntry) float64 {
+	var total float64
+	for _, e := range entries {
+		var hours float64
+		_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: Hours string from API
+		total += hours
+	}
+	return total
+}
+
 func newTimesheetProjectCmd() *cobra.Command {
 	var project string
 
@@ -139,9 +154,6 @@ func newTimesheetProjectCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Project from positional arg or flag
 			if len(args) > 0 && project == "" {
@@ -165,28 +177,19 @@ func newTimesheetProjectCmd() *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/projects/%s/timesheet.json", resolvedProjectID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var entries []struct {
-				Hours string `json:"hours"`
-			}
-			if err := json.Unmarshal(resp.Data, &entries); err != nil {
-				return fmt.Errorf("failed to parse timesheet: %w", err)
+			entries, err := app.SDK.Timesheet().ProjectReport(cmd.Context(), bucketID, nil)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			// Calculate total hours
-			var totalHours float64
-			for _, e := range entries {
-				var hours float64
-				_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: ID validated
-				totalHours += hours
-			}
+			totalHours := sumTimesheetHours(entries)
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(entries,
 				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(entries), totalHours)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -220,11 +223,12 @@ func newTimesheetRecordingCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			recordingID := args[0]
+			recordingIDStr := args[0]
+			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid recording ID")
+			}
 
 			// Resolve project
 			projectID := project
@@ -243,28 +247,19 @@ func newTimesheetRecordingCmd() *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/projects/%s/recordings/%s/timesheet.json", resolvedProjectID, recordingID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var entries []struct {
-				Hours string `json:"hours"`
-			}
-			if err := json.Unmarshal(resp.Data, &entries); err != nil {
-				return fmt.Errorf("failed to parse timesheet: %w", err)
+			entries, err := app.SDK.Timesheet().RecordingReport(cmd.Context(), bucketID, recordingID, nil)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			// Calculate total hours
-			var totalHours float64
-			for _, e := range entries {
-				var hours float64
-				_, _ = fmt.Sscanf(e.Hours, "%f", &hours) //nolint:gosec // G104: ID validated
-				totalHours += hours
-			}
+			totalHours := sumTimesheetHours(entries)
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(entries,
 				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(entries), totalHours)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
