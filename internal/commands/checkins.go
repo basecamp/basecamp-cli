@@ -797,18 +797,16 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid answer ID")
 			}
 
-			// The SDK doesn't have UpdateAnswer, so we use the API directly
-			body := map[string]any{
-				"content": fmt.Sprintf("<div>%s</div>", content),
+			req := &basecamp.UpdateAnswerRequest{
+				Content: fmt.Sprintf("<div>%s</div>", content),
 			}
 
-			path := fmt.Sprintf("/buckets/%d/question_answers/%d.json", bucketID, answerID)
-			_, err = app.API.Put(cmd.Context(), path, body)
+			err = app.SDK.Checkins().UpdateAnswer(cmd.Context(), bucketID, answerID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			// Fetch the updated answer using SDK
+			// Fetch the updated answer for display
 			answer, err := app.SDK.Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
 			if err != nil {
 				return convertSDKError(err)
