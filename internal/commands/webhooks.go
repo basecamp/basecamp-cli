@@ -216,7 +216,8 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			// Build type array from comma-separated string
+			// Build type array from comma-separated string if specified
+			// If not specified, leave nil to let server use its defaults
 			var typeArray []string
 			if types != "" {
 				typeParts := strings.Split(types, ",")
@@ -227,14 +228,11 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 						typeArray = append(typeArray, t)
 					}
 				}
-			} else {
-				// Default to all types if not specified
-				typeArray = []string{"Todo", "Todolist", "Message", "Comment", "Document", "Upload", "Vault", "Schedule::Entry", "Kanban::Card", "Question", "Question::Answer"}
 			}
 
 			req := &basecamp.CreateWebhookRequest{
 				PayloadURL: url,
-				Types:      typeArray,
+				Types:      typeArray, // nil = server defaults
 			}
 
 			webhook, err := app.SDK.Webhooks().Create(cmd.Context(), bucketID, req)

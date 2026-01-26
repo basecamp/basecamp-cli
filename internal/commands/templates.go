@@ -57,21 +57,30 @@ func newTemplatesListCmd(status *string) *cobra.Command {
 func runTemplatesList(cmd *cobra.Command, status string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	templates, err := app.SDK.Templates().List(cmd.Context())
-	if err != nil {
-		return convertSDKError(err)
-	}
+	var templates []basecamp.Template
+	var err error
 
-	// Filter by status client-side since SDK List doesn't support status parameter
-	filtered := make([]basecamp.Template, 0, len(templates))
-	for _, t := range templates {
-		if t.Status == status {
-			filtered = append(filtered, t)
+	// SDK List() defaults to active status (API default)
+	// For archived/trashed, use raw API with status parameter
+	if status == "active" || status == "" {
+		templates, err = app.SDK.Templates().List(cmd.Context())
+		if err != nil {
+			return convertSDKError(err)
+		}
+	} else {
+		// Fall back to raw API for non-active statuses
+		path := fmt.Sprintf("/templates.json?status=%s", status)
+		resp, err := app.SDK.Get(cmd.Context(), path)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		if err := resp.UnmarshalData(&templates); err != nil {
+			return fmt.Errorf("failed to parse templates: %w", err)
 		}
 	}
 
-	return app.Output.OK(filtered,
-		output.WithSummary(fmt.Sprintf("%d templates", len(filtered))),
+	return app.Output.OK(templates,
+		output.WithSummary(fmt.Sprintf("%d templates", len(templates))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",

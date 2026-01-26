@@ -675,6 +675,10 @@ func newFilesShowCmd(project *string) *cobra.Command {
 			var title string
 
 			if itemType == "" {
+				// Auto-detect type by trying each in order
+				// Track first error to return if all fail (may be auth error, not 404)
+				var firstErr error
+
 				// Try vault first
 				vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
 				if err == nil {
@@ -682,6 +686,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 					detectedType = "vault"
 					title = vault.Title
 				} else {
+					firstErr = err
 					// Try upload
 					upload, err := app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
 					if err == nil {
@@ -699,6 +704,15 @@ func newFilesShowCmd(project *string) *cobra.Command {
 							detectedType = "document"
 							title = doc.Title
 						}
+					}
+				}
+
+				// If all probes failed, check if first error was 404 or something else
+				if result == nil && firstErr != nil {
+					sdkErr := basecamp.AsError(firstErr)
+					if sdkErr.Code != basecamp.CodeNotFound {
+						// Return actual error (auth, permission, network, etc.)
+						return convertSDKError(firstErr)
 					}
 				}
 			} else {
@@ -856,6 +870,10 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 					)
 				}
 			} else {
+				// Auto-detect type by trying each in order
+				// Track first error to check if it was 404 or something else
+				var firstErr error
+
 				// Try document first (most common update case)
 				_, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
 				if err == nil {
@@ -867,6 +885,7 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 					result = doc
 					detectedType = "document"
 				} else {
+					firstErr = err
 					// Try vault
 					_, err = app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
 					if err == nil {
@@ -892,6 +911,12 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 							result = upload
 							detectedType = "upload"
 						} else {
+							// All probes failed - check if first error was 404 or something else
+							sdkErr := basecamp.AsError(firstErr)
+							if sdkErr.Code != basecamp.CodeNotFound {
+								// Return actual error (auth, permission, network, etc.)
+								return convertSDKError(firstErr)
+							}
 							return output.ErrUsageHint(
 								fmt.Sprintf("Item %s not found", itemIDStr),
 								"Specify --type if needed",
