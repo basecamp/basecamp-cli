@@ -1,9 +1,10 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
@@ -54,9 +55,6 @@ The --date flag accepts natural language dates:
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Name and date from positional args or flags
 			if len(args) > 0 && name == "" {
@@ -80,24 +78,18 @@ The --date flag accepts natural language dates:
 				parsedDate = date // fallback to raw value
 			}
 
-			body := map[string]string{
-				"name": name,
-				"date": parsedDate,
+			req := &basecamp.CreateMarkerRequest{
+				Title:    name,
+				StartsOn: parsedDate,
+				EndsOn:   parsedDate,
 			}
 
-			resp, err := app.API.Post(cmd.Context(), "/lineup/markers.json", body)
+			marker, err := app.SDK.Lineup().CreateMarker(cmd.Context(), req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var marker struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &marker); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(marker,
 				output.WithSummary(fmt.Sprintf("Created lineup marker #%d: %s on %s", marker.ID, name, parsedDate)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -132,19 +124,20 @@ func newLineupUpdateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			markerID := args[0]
+			markerIDStr := args[0]
+			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid marker ID")
+			}
 
 			if name == "" && date == "" {
 				return output.ErrUsage("Provide --name and/or --date to update")
 			}
 
-			body := map[string]any{}
+			req := &basecamp.UpdateMarkerRequest{}
 			if name != "" {
-				body["name"] = name
+				req.Title = name
 			}
 			if date != "" {
 				// Parse natural date if needed
@@ -152,28 +145,21 @@ func newLineupUpdateCmd() *cobra.Command {
 				if parsedDate == "" {
 					parsedDate = date // fallback to raw value
 				}
-				body["date"] = parsedDate
+				req.StartsOn = parsedDate
+				req.EndsOn = parsedDate
 			}
 
-			path := fmt.Sprintf("/lineup/markers/%s.json", markerID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			marker, err := app.SDK.Lineup().UpdateMarker(cmd.Context(), markerID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var marker struct {
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(resp.Data, &marker); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated lineup marker #%s: %s", markerID, marker.Name)),
+			return app.Output.OK(marker,
+				output.WithSummary(fmt.Sprintf("Updated lineup marker #%d: %s", marker.ID, marker.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq lineup delete %s", markerID),
+						Cmd:         fmt.Sprintf("bcq lineup delete %d", marker.ID),
 						Description: "Delete marker",
 					},
 				),
@@ -195,20 +181,19 @@ func newLineupDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+
+			markerIDStr := args[0]
+			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid marker ID")
 			}
 
-			markerID := args[0]
-
-			path := fmt.Sprintf("/lineup/markers/%s.json", markerID)
-			_, err := app.API.Delete(cmd.Context(), path)
-			if err != nil {
-				return err
+			if err := app.SDK.Lineup().DeleteMarker(cmd.Context(), markerID); err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"id": markerID, "deleted": true},
-				output.WithSummary(fmt.Sprintf("Deleted lineup marker #%s", markerID)),
+				output.WithSummary(fmt.Sprintf("Deleted lineup marker #%d", markerID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "create",
