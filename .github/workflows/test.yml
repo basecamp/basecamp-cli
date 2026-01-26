@@ -102,7 +102,7 @@ jobs:
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Cache Go tools
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/go/bin
           key: go-tools-${{ runner.os }}-govulncheck-v1.1.4
@@ -173,7 +173,7 @@ jobs:
 
       - name: Cache BATS
         id: cache-bats
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /usr/local/libexec/bats-core
           key: bats-1.11.0
