@@ -1,25 +1,16 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Message represents a Basecamp message.
-type Message struct {
-	ID        int64  `json:"id"`
-	Subject   string `json:"subject"`
-	Content   string `json:"content,omitempty"`
-	CreatedAt string `json:"created_at"`
-	Creator   struct {
-		Name string `json:"name"`
-	} `json:"creator"`
-}
 
 // NewMessagesCmd creates the messages command group.
 func NewMessagesCmd() *cobra.Command {
@@ -79,31 +70,31 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string) er
 		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
-
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 	if err != nil {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get message board ID from project dock
-	messageBoardID, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
+	messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
 	if err != nil {
 		return err
 	}
 
-	// Get messages
-	path := fmt.Sprintf("/buckets/%s/message_boards/%s/messages.json", resolvedProjectID, messageBoardID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	boardID, err := strconv.ParseInt(messageBoardIDStr, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid message board ID")
 	}
 
-	var messages []Message
-	if err := resp.UnmarshalData(&messages); err != nil {
-		return fmt.Errorf("failed to parse messages: %w", err)
+	// Get messages using SDK
+	messages, err := app.SDK.Messages().List(cmd.Context(), bucketID, boardID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(messages,
@@ -131,11 +122,12 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			messageID := args[0]
+			messageIDStr := args[0]
+			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -154,23 +146,22 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/messages/%s.json", resolvedProjectID, messageID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var message Message
-			if err := json.Unmarshal(resp.Data, &message); err != nil {
-				return err
+			message, err := app.SDK.Messages().Get(cmd.Context(), bucketID, messageID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(message,
 				output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s --in %s", messageID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "Add comment",
 					},
 					output.Breadcrumb{
@@ -196,9 +187,6 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 		Long:  "Post a new message to a project's message board.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if subject == "" {
 				return output.ErrUsage("--subject is required")
@@ -221,41 +209,41 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get message board ID from project dock
-			messageBoardID, err := getMessageBoardID(cmd, app, resolvedProjectID, *messageBoard)
+			messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, *messageBoard)
 			if err != nil {
 				return err
 			}
 
-			// Build request body
-			body := map[string]string{
-				"subject": subject,
+			boardID, err := strconv.ParseInt(messageBoardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message board ID")
 			}
-			if content != "" {
-				body["content"] = content
+
+			// Build SDK request
+			req := &basecamp.CreateMessageRequest{
+				Subject: subject,
+				Content: content,
 			}
 
 			// Default to active (published) status unless --draft is specified
 			if draft {
-				body["status"] = "drafted"
+				req.Status = "drafted"
 			} else {
-				body["status"] = "active"
+				req.Status = "active"
 			}
 
-			path := fmt.Sprintf("/buckets/%s/message_boards/%s/messages.json", resolvedProjectID, messageBoardID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			message, err := app.SDK.Messages().Create(cmd.Context(), bucketID, boardID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var message struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &message); err != nil {
-				return err
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(message,
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -293,11 +281,12 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			messageID := args[0]
+			messageIDStr := args[0]
+			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message ID")
+			}
 
 			if subject == "" && content == "" {
 				return output.ErrUsage("at least one of --subject or --content is required")
@@ -320,27 +309,28 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Build request body
-			body := make(map[string]string)
-			if subject != "" {
-				body["subject"] = subject
-			}
-			if content != "" {
-				body["content"] = content
-			}
-
-			path := fmt.Sprintf("/buckets/%s/messages/%s.json", resolvedProjectID, messageID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated message #%s", messageID)),
+			// Build SDK request
+			req := &basecamp.UpdateMessageRequest{
+				Subject: subject,
+				Content: content,
+			}
+
+			message, err := app.SDK.Messages().Update(cmd.Context(), bucketID, messageID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(message,
+				output.WithSummary(fmt.Sprintf("Updated message #%s", messageIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "View message",
 					},
 				),
@@ -363,11 +353,12 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			messageID := args[0]
+			messageIDStr := args[0]
+			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -386,26 +377,30 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/pin.json", resolvedProjectID, messageID)
-			_, err = app.API.Post(cmd.Context(), path, map[string]string{})
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Messages().Pin(cmd.Context(), bucketID, messageID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]string{
-				"id":     messageID,
+				"id":     messageIDStr,
 				"status": "pinned",
 			},
-				output.WithSummary(fmt.Sprintf("Pinned message #%s", messageID)),
+				output.WithSummary(fmt.Sprintf("Pinned message #%s", messageIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "unpin",
-						Cmd:         fmt.Sprintf("bcq messages unpin %s --in %s", messageID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messages unpin %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "Unpin message",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "View message",
 					},
 				),
@@ -423,11 +418,12 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			messageID := args[0]
+			messageIDStr := args[0]
+			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -446,26 +442,30 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/pin.json", resolvedProjectID, messageID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Messages().Unpin(cmd.Context(), bucketID, messageID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]string{
-				"id":     messageID,
+				"id":     messageIDStr,
 				"status": "unpinned",
 			},
-				output.WithSummary(fmt.Sprintf("Unpinned message #%s", messageID)),
+				output.WithSummary(fmt.Sprintf("Unpinned message #%s", messageIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "pin",
-						Cmd:         fmt.Sprintf("bcq messages pin %s --in %s", messageID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messages pin %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "Pin message",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "View message",
 					},
 				),
@@ -489,9 +489,6 @@ func NewMessageCmd() *cobra.Command {
 		Long:  "Post a message to a project's message board. Shortcut for 'bcq messages create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if subject == "" {
 				return output.ErrUsage("--subject is required")
@@ -514,39 +511,39 @@ func NewMessageCmd() *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get message board ID from project dock
-			messageBoardID, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
+			messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
 			if err != nil {
 				return err
 			}
 
-			// Build request body
-			body := map[string]string{
-				"subject": subject,
+			boardID, err := strconv.ParseInt(messageBoardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message board ID")
 			}
-			if content != "" {
-				body["content"] = content
+
+			// Build SDK request
+			req := &basecamp.CreateMessageRequest{
+				Subject: subject,
+				Content: content,
 			}
 			if draft {
-				body["status"] = "drafted"
+				req.Status = "drafted"
 			} else {
-				body["status"] = "active"
+				req.Status = "active"
 			}
 
-			path := fmt.Sprintf("/buckets/%s/message_boards/%s/messages.json", resolvedProjectID, messageBoardID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			message, err := app.SDK.Messages().Create(cmd.Context(), bucketID, boardID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var message struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &message); err != nil {
-				return err
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(message,
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

@@ -1,10 +1,12 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
@@ -53,9 +55,6 @@ func newMessagetypesListCmd(project *string) *cobra.Command {
 
 func runMessagetypesList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -74,18 +73,17 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/categories.json", resolvedProjectID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	var types []json.RawMessage
-	if err := json.Unmarshal(resp.Data, &types); err != nil {
-		return fmt.Errorf("failed to parse message types: %w", err)
+	types, err := app.SDK.MessageTypes().List(cmd.Context(), bucketID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(types,
 		output.WithSummary(fmt.Sprintf("%d message types", len(types))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -110,11 +108,12 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			typeID := args[0]
+			typeIDStr := args[0]
+			typeID, err := strconv.ParseInt(typeIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message type ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -133,31 +132,27 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/categories/%s.json", resolvedProjectID, typeID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var msgType struct {
-				Name string `json:"name"`
-				Icon string `json:"icon"`
-			}
-			if err := json.Unmarshal(resp.Data, &msgType); err != nil {
-				return fmt.Errorf("failed to parse message type: %w", err)
+			msgType, err := app.SDK.MessageTypes().Get(cmd.Context(), bucketID, typeID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(msgType,
 				output.WithSummary(fmt.Sprintf("%s %s", msgType.Icon, msgType.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq messagetypes update %s --name \"New Name\" --in %s", typeID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messagetypes update %s --name \"New Name\" --in %s", typeIDStr, resolvedProjectID),
 						Description: "Update message type",
 					},
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq messagetypes delete %s --in %s", typeID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messagetypes delete %s --in %s", typeIDStr, resolvedProjectID),
 						Description: "Delete message type",
 					},
 					output.Breadcrumb{
@@ -182,9 +177,6 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Name from positional arg or flag
 			if len(args) > 0 && name == "" {
@@ -216,30 +208,27 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{
-				"name": name,
-				"icon": icon,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/categories.json", resolvedProjectID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var created struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &created); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
+			req := &basecamp.CreateMessageTypeRequest{
+				Name: name,
+				Icon: icon,
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Created message type #%d: %s %s", created.ID, icon, name)),
+			msgType, err := app.SDK.MessageTypes().Create(cmd.Context(), bucketID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(msgType,
+				output.WithSummary(fmt.Sprintf("Created message type #%d: %s %s", msgType.ID, icon, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messagetypes show %d --in %s", created.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messagetypes show %d --in %s", msgType.ID, resolvedProjectID),
 						Description: "View message type",
 					},
 					output.Breadcrumb{
@@ -269,11 +258,12 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			typeID := args[0]
+			typeIDStr := args[0]
+			typeID, err := strconv.ParseInt(typeIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message type ID")
+			}
 
 			if name == "" && icon == "" {
 				return output.ErrUsage("Use --name or --icon to update")
@@ -296,26 +286,27 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{}
-			if name != "" {
-				body["name"] = name
-			}
-			if icon != "" {
-				body["icon"] = icon
-			}
-
-			path := fmt.Sprintf("/buckets/%s/categories/%s.json", resolvedProjectID, typeID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated message type #%s", typeID)),
+			req := &basecamp.UpdateMessageTypeRequest{
+				Name: name,
+				Icon: icon,
+			}
+
+			msgType, err := app.SDK.MessageTypes().Update(cmd.Context(), bucketID, typeID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(msgType,
+				output.WithSummary(fmt.Sprintf("Updated message type #%s", typeIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messagetypes show %s --in %s", typeID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq messagetypes show %s --in %s", typeIDStr, resolvedProjectID),
 						Description: "View message type",
 					},
 				),
@@ -337,11 +328,12 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			typeID := args[0]
+			typeIDStr := args[0]
+			typeID, err := strconv.ParseInt(typeIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message type ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -360,14 +352,18 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/categories/%s.json", resolvedProjectID, typeID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.MessageTypes().Delete(cmd.Context(), bucketID, typeID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"deleted": true},
-				output.WithSummary(fmt.Sprintf("Deleted message type #%s", typeID)),
+				output.WithSummary(fmt.Sprintf("Deleted message type #%s", typeIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
