@@ -10,6 +10,8 @@ github.com/aymanbagabas/go-udiff v0.3.1 h1:LV+qyBQ2pqe0u42ZsUEtPiCaUoqgA9gYRDs3v
 github.com/aymanbagabas/go-udiff v0.3.1/go.mod h1:G0fsKmG+P6ylD0r6N/KgQD/nWzgfnl8ZBcNLgcbrw8E=
 github.com/basecamp/basecamp-sdk/go v0.0.0-20260126043202-c255cd77d9ba h1:OXu3Ss8sexO8aMDRwYiIhCHNOZrX/9E+l1Xy/nAT/zg=
 github.com/basecamp/basecamp-sdk/go v0.0.0-20260126043202-c255cd77d9ba/go.mod h1:RnIREa1vKW6DqkxUjXwAdmlKY8NcOk/9iYeUZoXHHAs=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260126052129-231a747954b4 h1:ynYRlGsvI+/E8A+5GmApgPAtlOyH+OsGw1AQjwFQpK8=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260126052129-231a747954b4/go.mod h1:RnIREa1vKW6DqkxUjXwAdmlKY8NcOk/9iYeUZoXHHAs=
 github.com/catppuccin/go v0.3.0 h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=
 github.com/catppuccin/go v0.3.0/go.mod h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=
 github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7 h1:JFgG/xnwFfbezlUnFMJy0nusZvytYysV4SCS2cYbvws=
