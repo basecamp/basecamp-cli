@@ -1197,11 +1197,9 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			// Watch via subscriptions - using API client since SDK doesn't have this
-			path := fmt.Sprintf("/buckets/%d/card_tables/lists/%d/subscription.json", bucketID, columnID)
-			_, err = app.API.Post(cmd.Context(), path, map[string]any{})
+			_, err = app.SDK.CardColumns().Watch(cmd.Context(), bucketID, columnID)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{
@@ -1250,11 +1248,9 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			// Unwatch via subscriptions - using API client since SDK doesn't have this
-			path := fmt.Sprintf("/buckets/%d/card_tables/lists/%d/subscription.json", bucketID, columnID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			err = app.SDK.CardColumns().Unwatch(cmd.Context(), bucketID, columnID)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{
