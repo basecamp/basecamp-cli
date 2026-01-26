@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -54,11 +54,11 @@ func newToolsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			toolID := args[0]
+			toolID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid tool ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -77,34 +77,33 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/dock/tools/%s.json", resolvedProjectID, toolID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var tool struct {
-				Title    string `json:"title"`
-				Type     string `json:"type"`
-				Position int    `json:"position"`
-			}
-			if err := json.Unmarshal(resp.Data, &tool); err != nil {
-				return fmt.Errorf("failed to parse tool: %w", err)
+			tool, err := app.SDK.Tools().Get(cmd.Context(), bucketID, toolID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			summary := fmt.Sprintf("%s (%s) at position %d", tool.Title, tool.Type, tool.Position)
+			posStr := "disabled"
+			if tool.Position != nil {
+				posStr = fmt.Sprintf("%d", *tool.Position)
+			}
+			summary := fmt.Sprintf("%s (%s) at position %s", tool.Title, tool.Name, posStr)
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(tool,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "rename",
-						Cmd:         fmt.Sprintf("bcq tools update %s --title \"New Name\" --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq tools update %d --title \"New Name\" --in %s", toolID, resolvedProjectID),
 						Description: "Rename tool",
 					},
 					output.Breadcrumb{
 						Action:      "reposition",
-						Cmd:         fmt.Sprintf("bcq tools reposition %s --position 1 --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq tools reposition %d --position 1 --in %s", toolID, resolvedProjectID),
 						Description: "Move tool",
 					},
 					output.Breadcrumb{
@@ -130,15 +129,14 @@ func newToolsCreateCmd(project *string) *cobra.Command {
 For example, clone a Campfire to create a second chat room in the same project.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if sourceID == "" {
 				return output.ErrUsage("--source is required (ID of tool to clone)")
 			}
-			if title == "" {
-				return output.ErrUsage("--title is required")
+
+			sourceToolID, err := strconv.ParseInt(sourceID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid source tool ID")
 			}
 
 			// Resolve project
@@ -158,26 +156,25 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				return err
 			}
 
-			body := map[string]any{
-				"source_recording_id": sourceID,
-				"title":               title,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/dock/tools.json", resolvedProjectID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var created struct {
-				ID    int64  `json:"id"`
-				Title string `json:"title"`
-			}
-			if err := json.Unmarshal(resp.Data, &created); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
+			created, err := app.SDK.Tools().Create(cmd.Context(), bucketID, sourceToolID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			// Rename the tool if a title was provided
+			if title != "" {
+				created, err = app.SDK.Tools().Update(cmd.Context(), bucketID, created.ID, title)
+				if err != nil {
+					return convertSDKError(err)
+				}
+			}
+
+			return app.Output.OK(created,
 				output.WithSummary(fmt.Sprintf("Created: %s", created.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -197,9 +194,8 @@ For example, clone a Campfire to create a second chat room in the same project.`
 
 	cmd.Flags().StringVarP(&sourceID, "source", "s", "", "Source tool ID to clone (required)")
 	cmd.Flags().StringVar(&sourceID, "clone", "", "Source tool ID (alias for --source)")
-	cmd.Flags().StringVarP(&title, "title", "t", "", "Name for the new tool (required)")
+	cmd.Flags().StringVarP(&title, "title", "t", "", "Name for the new tool (optional)")
 	_ = cmd.MarkFlagRequired("source")
-	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -215,11 +211,11 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			toolID := args[0]
+			toolID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid tool ID")
+			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -242,27 +238,22 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{"title": title}
-
-			path := fmt.Sprintf("/buckets/%s/dock/tools/%s.json", resolvedProjectID, toolID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var tool struct {
-				Title string `json:"title"`
-			}
-			if err := json.Unmarshal(resp.Data, &tool); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
+			tool, err := app.SDK.Tools().Update(cmd.Context(), bucketID, toolID, title)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(tool,
 				output.WithSummary(fmt.Sprintf("Renamed to: %s", tool.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %s --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", toolID, resolvedProjectID),
 						Description: "View tool",
 					},
 					output.Breadcrumb{
@@ -292,11 +283,11 @@ WARNING: This permanently removes the tool and all its content.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			toolID := args[0]
+			toolID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid tool ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -315,14 +306,18 @@ WARNING: This permanently removes the tool and all its content.`,
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/dock/tools/%s.json", resolvedProjectID, toolID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Tools().Delete(cmd.Context(), bucketID, toolID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"trashed": true},
-				output.WithSummary(fmt.Sprintf("Tool %s trashed", toolID)),
+				output.WithSummary(fmt.Sprintf("Tool %d trashed", toolID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "project",
@@ -345,11 +340,11 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			toolID := args[0]
+			toolID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid tool ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -368,18 +363,22 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/position.json", resolvedProjectID, toolID)
-			_, err = app.API.Post(cmd.Context(), path, map[string]any{})
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Tools().Enable(cmd.Context(), bucketID, toolID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"enabled": true},
-				output.WithSummary(fmt.Sprintf("Tool %s enabled in dock", toolID)),
+				output.WithSummary(fmt.Sprintf("Tool %d enabled in dock", toolID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %s --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", toolID, resolvedProjectID),
 						Description: "View tool",
 					},
 				),
@@ -398,11 +397,11 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			toolID := args[0]
+			toolID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid tool ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -421,18 +420,22 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/position.json", resolvedProjectID, toolID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Tools().Disable(cmd.Context(), bucketID, toolID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"disabled": true},
-				output.WithSummary(fmt.Sprintf("Tool %s disabled (hidden from dock)", toolID)),
+				output.WithSummary(fmt.Sprintf("Tool %d disabled (hidden from dock)", toolID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "enable",
-						Cmd:         fmt.Sprintf("bcq tools enable %s --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq tools enable %d --in %s", toolID, resolvedProjectID),
 						Description: "Re-enable tool",
 					},
 				),
@@ -452,11 +455,11 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			toolID := args[0]
+			toolID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid tool ID")
+			}
 
 			if position == 0 {
 				return output.ErrUsage("--position is required (1-based)")
@@ -479,20 +482,22 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]int{"position": position}
-
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/position.json", resolvedProjectID, toolID)
-			_, err = app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Tools().Reposition(cmd.Context(), bucketID, toolID, position)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"repositioned": true, "position": position},
-				output.WithSummary(fmt.Sprintf("Tool %s moved to position %d", toolID, position)),
+				output.WithSummary(fmt.Sprintf("Tool %d moved to position %d", toolID, position)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %s --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", toolID, resolvedProjectID),
 						Description: "View tool",
 					},
 				),
