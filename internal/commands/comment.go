@@ -1,25 +1,17 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Comment represents a Basecamp comment.
-type Comment struct {
-	ID      int64  `json:"id"`
-	Content string `json:"content"`
-	Creator struct {
-		Name string `json:"name"`
-	} `json:"creator"`
-	CreatedAt string `json:"created_at"`
-}
 
 // NewCommentsCmd creates the comments command group (list/show/update).
 func NewCommentsCmd() *cobra.Command {
@@ -96,15 +88,19 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/recordings/%s/comments.json", resolvedProjectID, recordingID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	var comments []Comment
-	if err := resp.UnmarshalData(&comments); err != nil {
-		return fmt.Errorf("failed to parse comments: %w", err)
+	recID, err := strconv.ParseInt(recordingID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid recording ID")
+	}
+
+	comments, err := app.SDK.Comments().List(cmd.Context(), bucketID, recID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(comments,
@@ -136,7 +132,7 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			commentID := args[0]
+			commentIDStr := args[0]
 
 			// Resolve project
 			projectID := *project
@@ -155,23 +151,32 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/comments/%s.json", resolvedProjectID, commentID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var comment Comment
-			if err := json.Unmarshal(resp.Data, &comment); err != nil {
-				return err
+			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid comment ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Comment #%s by %s", commentID, comment.Creator.Name)),
+			comment, err := app.SDK.Comments().Get(cmd.Context(), bucketID, commentID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			creatorName := ""
+			if comment.Creator != nil {
+				creatorName = comment.Creator.Name
+			}
+
+			return app.Output.OK(comment,
+				output.WithSummary(fmt.Sprintf("Comment #%s by %s", commentIDStr, creatorName)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq comments update %s --content <text> --in %s", commentID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq comments update %s --content <text> --in %s", commentIDStr, resolvedProjectID),
 						Description: "Update comment",
 					},
 				),
@@ -195,7 +200,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			commentID := args[0]
+			commentIDStr := args[0]
 
 			if content == "" {
 				return output.ErrUsage("--content is required")
@@ -218,22 +223,31 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{
-				"content": content,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/comments/%s.json", resolvedProjectID, commentID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated comment #%s", commentID)),
+			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid comment ID")
+			}
+
+			req := &basecamp.UpdateCommentRequest{
+				Content: content,
+			}
+
+			comment, err := app.SDK.Comments().Update(cmd.Context(), bucketID, commentID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(comment,
+				output.WithSummary(fmt.Sprintf("Updated comment #%s", commentIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq comments show %s --in %s", commentID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq comments show %s --in %s", commentIDStr, resolvedProjectID),
 						Description: "View comment",
 					},
 				),
@@ -292,6 +306,11 @@ Supports batch commenting on multiple recordings at once.`,
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Expand comma-separated IDs
 			var expandedIDs []string
 			for _, id := range recordingIDs {
@@ -305,29 +324,29 @@ Supports batch commenting on multiple recordings at once.`,
 			}
 
 			// Create comments on all recordings
-			body := map[string]string{
-				"content": content,
+			req := &basecamp.CreateCommentRequest{
+				Content: content,
 			}
 
 			var commented []string
 			var commentIDs []string
 			var failed []string
 
-			for _, recordingID := range expandedIDs {
-				path := fmt.Sprintf("/buckets/%s/recordings/%s/comments.json", resolvedProjectID, recordingID)
-				resp, err := app.API.Post(cmd.Context(), path, body)
-				if err != nil {
-					failed = append(failed, recordingID)
+			for _, recordingIDStr := range expandedIDs {
+				recordingID, parseErr := strconv.ParseInt(recordingIDStr, 10, 64)
+				if parseErr != nil {
+					failed = append(failed, recordingIDStr)
 					continue
 				}
 
-				var comment struct {
-					ID int64 `json:"id"`
+				comment, createErr := app.SDK.Comments().Create(cmd.Context(), bucketID, recordingID, req)
+				if createErr != nil {
+					failed = append(failed, recordingIDStr)
+					continue
 				}
-				if err := json.Unmarshal(resp.Data, &comment); err == nil {
-					commentIDs = append(commentIDs, fmt.Sprintf("%d", comment.ID))
-				}
-				commented = append(commented, recordingID)
+
+				commentIDs = append(commentIDs, fmt.Sprintf("%d", comment.ID))
+				commented = append(commented, recordingIDStr)
 			}
 
 			// Build result
