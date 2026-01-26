@@ -1,12 +1,11 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/api"
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
@@ -61,9 +60,6 @@ func newForwardsListCmd(project, inboxID *string) *cobra.Command {
 
 func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -82,24 +78,28 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get inbox ID
 	resolvedInboxID, err := getInboxID(cmd, app, resolvedProjectID, inboxID)
 	if err != nil {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/inboxes/%s/forwards.json", resolvedProjectID, resolvedInboxID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	inboxIDInt, err := strconv.ParseInt(resolvedInboxID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid inbox ID")
 	}
 
-	var forwards []json.RawMessage
-	if err := json.Unmarshal(resp.Data, &forwards); err != nil {
-		return fmt.Errorf("failed to parse forwards: %w", err)
+	forwards, err := app.SDK.Forwards().List(cmd.Context(), bucketID, inboxIDInt)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(forwards,
 		output.WithSummary(fmt.Sprintf("%d forwards", len(forwards))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -124,11 +124,12 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			forwardID := args[0]
+			forwardIDStr := args[0]
+			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid forward ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -147,17 +148,14 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/inbox_forwards/%s.json", resolvedProjectID, forwardID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var forward struct {
-				Subject string `json:"subject"`
-			}
-			if err := json.Unmarshal(resp.Data, &forward); err != nil {
-				return fmt.Errorf("failed to parse forward: %w", err)
+			forward, err := app.SDK.Forwards().Get(cmd.Context(), bucketID, forwardID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			subject := forward.Subject
@@ -165,12 +163,12 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 				subject = "Forward"
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(forward,
 				output.WithSummary(subject),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "replies",
-						Cmd:         fmt.Sprintf("bcq forwards replies %s --in %s", forwardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View replies",
 					},
 					output.Breadcrumb{
@@ -191,9 +189,6 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 		Long:  "Display detailed information about the project inbox.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Resolve project
 			projectID := *project
@@ -212,24 +207,25 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get inbox ID
 			resolvedInboxID, err := getInboxID(cmd, app, resolvedProjectID, *inboxID)
 			if err != nil {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/inboxes/%s.json", resolvedProjectID, resolvedInboxID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			inboxIDInt, err := strconv.ParseInt(resolvedInboxID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid inbox ID")
 			}
 
-			var inbox struct {
-				Title         string `json:"title"`
-				ForwardsCount int    `json:"forwards_count"`
-			}
-			if err := json.Unmarshal(resp.Data, &inbox); err != nil {
-				return fmt.Errorf("failed to parse inbox: %w", err)
+			inbox, err := app.SDK.Forwards().GetInbox(cmd.Context(), bucketID, inboxIDInt)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			title := inbox.Title
@@ -237,8 +233,8 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 				title = "Inbox"
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("%s (%d forwards)", title, inbox.ForwardsCount)),
+			return app.Output.OK(inbox,
+				output.WithSummary(title),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forwards",
@@ -259,11 +255,12 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			forwardID := args[0]
+			forwardIDStr := args[0]
+			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid forward ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -282,28 +279,27 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/inbox_forwards/%s/replies.json", resolvedProjectID, forwardID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var replies []json.RawMessage
-			if err := json.Unmarshal(resp.Data, &replies); err != nil {
-				return fmt.Errorf("failed to parse replies: %w", err)
+			replies, err := app.SDK.Forwards().ListReplies(cmd.Context(), bucketID, forwardID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("%d replies to forward #%s", len(replies), forwardID)),
+			return app.Output.OK(replies,
+				output.WithSummary(fmt.Sprintf("%d replies to forward #%s", len(replies), forwardIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forward",
-						Cmd:         fmt.Sprintf("bcq forwards show %s --in %s", forwardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq forwards show %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View the forward",
 					},
 					output.Breadcrumb{
 						Action:      "reply",
-						Cmd:         fmt.Sprintf("bcq forwards reply %s <reply_id> --in %s", forwardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq forwards reply %s <reply_id> --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View a reply",
 					},
 				),
@@ -320,12 +316,18 @@ func newForwardsReplyCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+
+			forwardIDStr := args[0]
+			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid forward ID")
 			}
 
-			forwardID := args[0]
-			replyID := args[1]
+			replyIDStr := args[1]
+			replyID, err := strconv.ParseInt(replyIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid reply ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -344,35 +346,27 @@ func newForwardsReplyCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/inbox_forwards/%s/replies/%s.json", resolvedProjectID, forwardID, replyID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var reply struct {
-				Title string `json:"title"`
-			}
-			if err := json.Unmarshal(resp.Data, &reply); err != nil {
-				return fmt.Errorf("failed to parse reply: %w", err)
+			reply, err := app.SDK.Forwards().GetReply(cmd.Context(), bucketID, forwardID, replyID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			title := reply.Title
-			if title == "" {
-				title = "Reply"
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(title),
+			return app.Output.OK(reply,
+				output.WithSummary("Reply"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forward",
-						Cmd:         fmt.Sprintf("bcq forwards show %s --in %s", forwardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq forwards show %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View the forward",
 					},
 					output.Breadcrumb{
 						Action:      "replies",
-						Cmd:         fmt.Sprintf("bcq forwards replies %s --in %s", forwardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "List all replies",
 					},
 				),
@@ -380,6 +374,3 @@ func newForwardsReplyCmd(project *string) *cobra.Command {
 		},
 	}
 }
-
-// Ensure api package is imported for type reference
-var _ *api.Response
