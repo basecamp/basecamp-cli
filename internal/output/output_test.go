@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // =============================================================================
@@ -925,12 +926,12 @@ func TestWriterMarkdownFormatObject(t *testing.T) {
 	if strings.Contains(output, `"ok":`) {
 		t.Errorf("Markdown object output should not contain JSON, got: %s", output)
 	}
-	// Should contain key-value pairs
-	if !strings.Contains(output, "id") || !strings.Contains(output, "123") {
-		t.Errorf("Markdown output should contain id: 123, got: %s", output)
+	// Should contain key-value pairs (keys are now title-cased via formatHeader)
+	if !strings.Contains(output, "Id") || !strings.Contains(output, "123") {
+		t.Errorf("Markdown output should contain Id: 123, got: %s", output)
 	}
-	if !strings.Contains(output, "completed") || !strings.Contains(output, "no") {
-		t.Errorf("Markdown output should contain completed: no, got: %s", output)
+	if !strings.Contains(output, "Completed") || !strings.Contains(output, "no") {
+		t.Errorf("Markdown output should contain Completed: no, got: %s", output)
 	}
 }
 
@@ -1152,5 +1153,325 @@ func TestErrorRetryable(t *testing.T) {
 				t.Error("Expected error not to be retryable")
 			}
 		})
+	}
+}
+
+// =============================================================================
+// formatDateValue Tests
+// =============================================================================
+
+func TestFormatDateValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		value    any
+		expected string
+	}{
+		// Non-date columns should pass through to formatCell
+		{"non-date column string", "name", "Test Project", "Test Project"},
+		{"non-date column number", "id", float64(123), "123"},
+		{"non-date column bool", "completed", true, "yes"},
+
+		// Date-only format (YYYY-MM-DD)
+		{"date-only format", "due_on", "2024-03-15", "Mar 15, 2024"},
+		{"due_date format", "due_date", "2024-12-25", "Dec 25, 2024"},
+
+		// Empty or nil values
+		{"empty string", "created_at", "", ""},
+		{"nil value", "updated_at", nil, ""},
+
+		// Non-string date column
+		{"non-string date value", "created_at", float64(12345), "12345"},
+
+		// Invalid date format
+		{"invalid date format", "created_at", "not-a-date", "not-a-date"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatDateValue(tt.key, tt.value)
+			if result != tt.expected {
+				t.Errorf("formatDateValue(%q, %v) = %q, want %q", tt.key, tt.value, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatDateValueRelativeTimes(t *testing.T) {
+	// Test relative time formatting with dynamically generated timestamps
+	now := time.Now()
+
+	tests := []struct {
+		name     string
+		offset   time.Duration
+		contains string
+	}{
+		{"just now", -30 * time.Second, "just now"},
+		{"minutes ago", -5 * time.Minute, "minutes ago"},
+		{"1 hour ago", -1 * time.Hour, "1 hour ago"},
+		{"hours ago", -3 * time.Hour, "hours ago"},
+		{"yesterday", -25 * time.Hour, "yesterday"},
+		{"days ago", -3 * 24 * time.Hour, "days ago"},
+		{"old date formatted", -30 * 24 * time.Hour, "2"}, // Will contain year like "2025" or "2026"
+		{"future date formatted", 24 * time.Hour, "2"},    // Future dates show formatted date
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			timestamp := now.Add(tt.offset).Format(time.RFC3339)
+			result := formatDateValue("created_at", timestamp)
+
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("formatDateValue(%q) = %q, expected to contain %q", timestamp, result, tt.contains)
+			}
+		})
+	}
+}
+
+func TestFormatDateValueColumnDetection(t *testing.T) {
+	// Test that only _at, _on, _date suffixes are treated as date columns
+	testCases := []struct {
+		key       string
+		isDateCol bool
+	}{
+		{"created_at", true},
+		{"updated_at", true},
+		{"due_on", true},
+		{"starts_on", true},
+		{"due_date", true},
+		{"start_date", true},
+		{"name", false},
+		{"status", false},
+		{"creator", false},
+		{"content", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.key, func(t *testing.T) {
+			// For date columns with valid date, should format
+			// For non-date columns, should pass through unchanged
+			testValue := "2024-06-15"
+			result := formatDateValue(tc.key, testValue)
+
+			if tc.isDateCol {
+				// Date columns should format the date
+				if result == testValue {
+					t.Errorf("Date column %q should format the date, got raw value", tc.key)
+				}
+			} else {
+				// Non-date columns should return value unchanged
+				if result != testValue {
+					t.Errorf("Non-date column %q should return value unchanged, got %q", tc.key, result)
+				}
+			}
+		})
+	}
+}
+
+// =============================================================================
+// formatHeader Tests
+// =============================================================================
+
+func TestFormatHeader(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"id", "Id"},
+		{"name", "Name"},
+		{"created_at", "Created"},
+		{"updated_at", "Updated"},
+		{"due_on", "Due"},
+		{"due_date", "Due Date"},
+		{"starts_on", "Starts"},
+		{"project_id", "Project Id"},
+		{"app_url", "App Url"},
+		{"content", "Content"},
+		{"some_long_field_name", "Some Long Field Name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := formatHeader(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatHeader(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// renderObject Ordering Tests
+// =============================================================================
+
+func TestRenderObjectOrdering(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	// Create data with fields that have different priorities
+	data := map[string]any{
+		"updated_at":  "2024-01-15T10:00:00Z", // priority 9
+		"created_at":  "2024-01-10T10:00:00Z", // priority 8
+		"description": "Test description",     // priority 7
+		"status":      "active",               // priority 4
+		"name":        "Test Item",            // priority 2
+		"id":          float64(123),           // priority 1
+	}
+
+	err := w.OK(data)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Verify that id appears before name, name before status, etc.
+	idPos := strings.Index(output, "Id")
+	namePos := strings.Index(output, "Name")
+	statusPos := strings.Index(output, "Status")
+	descPos := strings.Index(output, "Description")
+	createdPos := strings.Index(output, "Created")
+	updatedPos := strings.Index(output, "Updated")
+
+	if idPos == -1 {
+		t.Error("Output should contain 'Id'")
+	}
+	if namePos == -1 {
+		t.Error("Output should contain 'Name'")
+	}
+
+	// Verify ordering: id < name < status < description < created < updated
+	if idPos > namePos {
+		t.Errorf("Id (priority 1) should appear before Name (priority 2)")
+	}
+	if namePos > statusPos {
+		t.Errorf("Name (priority 2) should appear before Status (priority 4)")
+	}
+	if statusPos > descPos {
+		t.Errorf("Status (priority 4) should appear before Description (priority 7)")
+	}
+	if descPos > createdPos {
+		t.Errorf("Description (priority 7) should appear before Created (priority 8)")
+	}
+	if createdPos > updatedPos {
+		t.Errorf("Created (priority 8) should appear before Updated (priority 9)")
+	}
+}
+
+// =============================================================================
+// renderObject Header Humanization Tests
+// =============================================================================
+
+func TestRenderObjectHeaders(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":         float64(123),
+		"created_at": "2024-01-10T10:00:00Z",
+		"due_on":     "2024-02-01",
+	}
+
+	err := w.OK(data)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should use humanized headers
+	if !strings.Contains(output, "Id") {
+		t.Error("Output should contain humanized 'Id' header")
+	}
+	if !strings.Contains(output, "Created") {
+		t.Error("Output should contain humanized 'Created' header (not 'created_at')")
+	}
+	if strings.Contains(output, "created_at") {
+		t.Error("Output should NOT contain raw 'created_at' key")
+	}
+	if !strings.Contains(output, "Due") {
+		t.Error("Output should contain humanized 'Due' header (not 'due_on')")
+	}
+	if strings.Contains(output, "due_on") {
+		t.Error("Output should NOT contain raw 'due_on' key")
+	}
+}
+
+// =============================================================================
+// skipObjectColumns Tests
+// =============================================================================
+
+func TestSkipObjectColumns(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	// Include fields that should be skipped
+	data := map[string]any{
+		"id":               float64(123),
+		"name":             "Test",
+		"bucket":           map[string]any{"id": 1},    // should skip (nested)
+		"creator":          map[string]any{"id": 2},    // should skip (nested + in skipObjectColumns)
+		"url":              "https://example.com",      // should skip (in skipObjectColumns)
+		"app_url":          "https://app.example.com",  // should skip (in skipObjectColumns)
+		"type":             "Todo",                     // visible (not skipped)
+		"bookmark_url":     "https://bookmark.example", // should skip (in skipObjectColumns)
+		"subscription_url": "https://sub.example",      // should skip (in skipObjectColumns)
+		"comments_count":   float64(5),                 // should skip (in skipObjectColumns)
+		"comments_url":     "https://comments.example", // should skip (in skipObjectColumns)
+		"position":         float64(1),                 // should skip (in skipObjectColumns)
+		"inherits_status":  true,                       // should skip (in skipObjectColumns)
+	}
+
+	err := w.OK(data)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should contain visible fields
+	if !strings.Contains(output, "Id") {
+		t.Error("Output should contain 'Id'")
+	}
+	if !strings.Contains(output, "Name") {
+		t.Error("Output should contain 'Name'")
+	}
+
+	// Should NOT contain skipped fields
+	skippedFields := []string{
+		"bucket", "creator", "url", "app_url",
+		"bookmark_url", "subscription_url", "comments_count",
+		"comments_url", "position", "inherits_status",
+	}
+	for _, field := range skippedFields {
+		// Check for both raw key and title-cased version
+		if strings.Contains(strings.ToLower(output), field) {
+			t.Errorf("Output should NOT contain skipped field %q", field)
+		}
+	}
+}
+
+func TestSkipObjectColumnsMap(t *testing.T) {
+	// Verify the skipObjectColumns map contains expected fields
+	expectedSkipped := []string{
+		"bucket", "creator", "parent", "dock", "inherits_status",
+		"url", "app_url", "bookmark_url", "subscription_url",
+		"comments_count", "comments_url", "position",
+		"attachable_sgid", "personable_type", "recording_type",
+	}
+
+	for _, field := range expectedSkipped {
+		if !skipObjectColumns[field] {
+			t.Errorf("skipObjectColumns should contain %q", field)
+		}
 	}
 }
