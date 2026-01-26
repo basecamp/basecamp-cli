@@ -32,10 +32,16 @@ type Renderer struct {
 	CellMuted lipgloss.Style
 }
 
-// NewRenderer creates a renderer with styles from the default theme.
+// NewRenderer creates a renderer with styles from the resolved theme.
 // Styling is enabled when writing to a TTY, or when forceStyled is true.
+// Theme resolution follows: NO_COLOR env → BCQ_THEME env → user theme
+// (~/.config/bcq/theme/colors.toml, which may be symlinked to system themes) → default.
 func NewRenderer(w io.Writer, forceStyled bool) *Renderer {
-	theme := tui.DefaultTheme()
+	return NewRendererWithTheme(w, forceStyled, tui.ResolveTheme())
+}
+
+// NewRendererWithTheme creates a renderer with a specific theme (for testing).
+func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Renderer {
 	width, isTTY := terminalInfo(w)
 	styled := isTTY || forceStyled
 
