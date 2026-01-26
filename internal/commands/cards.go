@@ -2,39 +2,18 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/dateparse"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// Card represents a Basecamp card.
-type Card struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Content   string `json:"content,omitempty"`
-	DueOn     string `json:"due_on,omitempty"`
-	CreatedAt string `json:"created_at"`
-	Parent    struct {
-		Title string `json:"title"`
-	} `json:"parent"`
-	Assignees []struct {
-		Name string `json:"name"`
-	} `json:"assignees"`
-}
-
-// CardColumn represents a card table column.
-type CardColumn struct {
-	ID         int64  `json:"id"`
-	Title      string `json:"title"`
-	CardsCount int    `json:"cards_count"`
-}
 
 // NewCardsCmd creates the cards command group.
 func NewCardsCmd() *cobra.Command {
@@ -110,30 +89,31 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 		return output.ErrUsage("--card-table is required when using --column with a name")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
-
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 	if err != nil {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Optimization: If column is a numeric ID, skip card table discovery
 	// and fetch cards directly from the column endpoint
 	if column != "" && isNumericID(column) {
-		var allCards []Card
-		cardsPath := fmt.Sprintf("/buckets/%s/card_tables/lists/%s/cards.json", resolvedProjectID, column)
-		cardsResp, err := app.API.Get(cmd.Context(), cardsPath)
+		columnID, err := strconv.ParseInt(column, 10, 64)
 		if err != nil {
-			return err
-		}
-		if err := cardsResp.UnmarshalData(&allCards); err != nil {
-			return fmt.Errorf("failed to parse cards: %w", err)
+			return output.ErrUsage("Invalid column ID")
 		}
 
-		return app.Output.OK(allCards,
-			output.WithSummary(fmt.Sprintf("%d cards", len(allCards))),
+		cards, err := app.SDK.Cards().List(cmd.Context(), bucketID, columnID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+
+		return app.Output.OK(cards,
+			output.WithSummary(fmt.Sprintf("%d cards", len(cards))),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
@@ -155,50 +135,39 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 		return err
 	}
 
-	// Get card table with embedded columns (lists)
-	cardTablePath := fmt.Sprintf("/buckets/%s/card_tables/%s.json", resolvedProjectID, cardTableID)
-	cardTableResp, err := app.API.Get(cmd.Context(), cardTablePath)
+	cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid card table ID")
 	}
 
-	var cardTableData struct {
-		Lists []CardColumn `json:"lists"`
-	}
-	if err := json.Unmarshal(cardTableResp.Data, &cardTableData); err != nil {
-		return fmt.Errorf("failed to parse card table: %w", err)
+	// Get card table with embedded columns (lists)
+	cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	// Get cards from all columns or specific column
-	var allCards []Card
+	var allCards []basecamp.Card
 	if column != "" {
 		// Find column by ID or name
 		columnID := resolveColumn(cardTableData.Lists, column)
-		if columnID == "" {
+		if columnID == 0 {
 			return output.ErrUsageHint(
 				fmt.Sprintf("Column '%s' not found", column),
 				"Use column ID or exact name",
 			)
 		}
-		cardsPath := fmt.Sprintf("/buckets/%s/card_tables/lists/%s/cards.json", resolvedProjectID, columnID)
-		cardsResp, err := app.API.Get(cmd.Context(), cardsPath)
+		cards, err := app.SDK.Cards().List(cmd.Context(), bucketID, columnID)
 		if err != nil {
-			return err
+			return convertSDKError(err)
 		}
-		if err := cardsResp.UnmarshalData(&allCards); err != nil {
-			return fmt.Errorf("failed to parse cards: %w", err)
-		}
+		allCards = cards
 	} else {
 		// Get cards from all columns
 		for _, col := range cardTableData.Lists {
-			cardsPath := fmt.Sprintf("/buckets/%s/card_tables/lists/%d/cards.json", resolvedProjectID, col.ID)
-			cardsResp, err := app.API.Get(cmd.Context(), cardsPath)
+			cards, err := app.SDK.Cards().List(cmd.Context(), bucketID, col.ID)
 			if err != nil {
 				continue // Skip columns with errors
-			}
-			var cards []Card
-			if err := cardsResp.UnmarshalData(&cards); err != nil {
-				continue
 			}
 			allCards = append(allCards, cards...)
 		}
@@ -234,11 +203,12 @@ func newCardsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			cardID := args[0]
+			cardIDStr := args[0]
+			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -257,23 +227,22 @@ func newCardsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/cards/%s.json", resolvedProjectID, cardID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var card Card
-			if err := json.Unmarshal(resp.Data, &card); err != nil {
-				return err
+			card, err := app.SDK.Cards().Get(cmd.Context(), bucketID, cardID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Card #%s: %s", cardID, card.Title)),
+			return app.Output.OK(card,
+				output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s", cardID),
+						Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s", cardIDStr),
 						Description: "Add comment",
 					},
 					output.Breadcrumb{
@@ -299,9 +268,6 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 		Long:  "Create a new card in a project's card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -330,37 +296,42 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// If column is a numeric ID, use it directly without card table discovery
-			var columnID string
-			var cardTableID string
+			var columnID int64
+			var cardTableIDVal string
 			if column != "" && isNumericID(column) {
-				columnID = column
-				cardTableID = "" // Not needed for numeric column ID
+				columnID, err = strconv.ParseInt(column, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid column ID")
+				}
+				cardTableIDVal = "" // Not needed for numeric column ID
 			} else {
 				// Need to discover card table and resolve column
-				cardTableID, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+				cardTableIDVal, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 				if err != nil {
 					return err
+				}
+
+				cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid card table ID")
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTablePath := fmt.Sprintf("/buckets/%s/card_tables/%s.json", resolvedProjectID, cardTableID)
-				cardTableResp, err := app.API.Get(cmd.Context(), cardTablePath)
+				cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 				if err != nil {
-					return err
-				}
-
-				var cardTableData struct {
-					Lists []CardColumn `json:"lists"`
-				}
-				if err := json.Unmarshal(cardTableResp.Data, &cardTableData); err != nil {
-					return fmt.Errorf("failed to parse card table: %w", err)
+					return convertSDKError(err)
 				}
 
 				// Find target column
 				if column != "" {
 					columnID = resolveColumn(cardTableData.Lists, column)
-					if columnID == "" {
+					if columnID == 0 {
 						return output.ErrUsageHint(
 							fmt.Sprintf("Column '%s' not found", column),
 							"Use column ID or exact name",
@@ -371,29 +342,19 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 					if len(cardTableData.Lists) == 0 {
 						return output.ErrNotFound("columns", resolvedProjectID)
 					}
-					columnID = fmt.Sprintf("%d", cardTableData.Lists[0].ID)
+					columnID = cardTableData.Lists[0].ID
 				}
 			}
 
-			// Build request body
-			body := map[string]string{
-				"title": title,
-			}
-			if content != "" {
-				body["content"] = content
+			// Build request
+			req := &basecamp.CreateCardRequest{
+				Title:   title,
+				Content: content,
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/lists/%s/cards.json", resolvedProjectID, columnID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			card, err := app.SDK.Cards().Create(cmd.Context(), bucketID, columnID, req)
 			if err != nil {
-				return err
-			}
-
-			var card struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &card); err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			// Build breadcrumbs - only include --card-table when known
@@ -404,10 +365,10 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 					Description: "View card",
 				},
 			}
-			if cardTableID != "" {
+			if cardTableIDVal != "" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "move",
-					Cmd:         fmt.Sprintf("bcq cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("bcq cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableIDVal, resolvedProjectID),
 					Description: "Move card",
 				})
 			} else {
@@ -424,7 +385,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				Description: "List cards",
 			})
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(card,
 				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
@@ -453,11 +414,12 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			cardID := args[0]
+			cardIDStr := args[0]
+			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
+			}
 
 			if title == "" && content == "" && due == "" && assignee == "" {
 				return output.ErrUsage("At least one field required")
@@ -480,15 +442,20 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]any{}
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			req := &basecamp.UpdateCardRequest{}
 			if title != "" {
-				body["title"] = title
+				req.Title = title
 			}
 			if content != "" {
-				body["content"] = content
+				req.Content = content
 			}
 			if due != "" {
-				body["due_on"] = dateparse.Parse(due)
+				req.DueOn = dateparse.Parse(due)
 			}
 			if assignee != "" {
 				assigneeID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
@@ -496,21 +463,20 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 					return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
 				}
 				assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
-				body["assignee_ids"] = []int64{assigneeIDInt}
+				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/cards/%s.json", resolvedProjectID, cardID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			card, err := app.SDK.Cards().Update(cmd.Context(), bucketID, cardID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated card #%s", cardID)),
+			return app.Output.OK(card,
+				output.WithSummary(fmt.Sprintf("Updated card #%s", cardIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardIDStr, resolvedProjectID),
 						Description: "View card",
 					},
 					output.Breadcrumb{
@@ -542,11 +508,12 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			cardID := args[0]
+			cardIDStr := args[0]
+			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
+			}
 
 			if targetColumn == "" {
 				return output.ErrUsage("--to is required")
@@ -554,7 +521,6 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 
 			// Check if --to is a column name (not numeric) - requires --card-table
 			// Do this validation early, before any API calls
-			// Use isNumericID for full-string check (not partial match like Sscanf)
 			isNumericColumn := isNumericID(targetColumn)
 			if !isNumericColumn && *cardTable == "" {
 				return output.ErrUsage("--card-table is required when --to is a column name")
@@ -577,39 +543,43 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Determine column ID - numeric IDs bypass card table resolution
-			var columnID string
-			var cardTableID string // Will be empty if using numeric column ID directly
+			var columnID int64
+			var cardTableIDVal string // Will be empty if using numeric column ID directly
 			if isNumericColumn {
 				// Numeric column ID - use directly without card table lookup
-				columnID = targetColumn
+				columnID, err = strconv.ParseInt(targetColumn, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid column ID")
+				}
 			} else {
 				// Column name - need card table to resolve (already validated above)
 
 				// Get card table ID from project dock
-				var err error
-				cardTableID, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+				cardTableIDVal, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 				if err != nil {
 					return err
+				}
+
+				cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid card table ID")
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTablePath := fmt.Sprintf("/buckets/%s/card_tables/%s.json", resolvedProjectID, cardTableID)
-				cardTableResp, err := app.API.Get(cmd.Context(), cardTablePath)
+				cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 				if err != nil {
-					return err
-				}
-
-				var cardTableData struct {
-					Lists []CardColumn `json:"lists"`
-				}
-				if err := json.Unmarshal(cardTableResp.Data, &cardTableData); err != nil {
-					return fmt.Errorf("failed to parse card table: %w", err)
+					return convertSDKError(err)
 				}
 
 				// Find target column by name
 				columnID = resolveColumn(cardTableData.Lists, targetColumn)
-				if columnID == "" {
+				if columnID == 0 {
 					return output.ErrUsageHint(
 						fmt.Sprintf("Column '%s' not found", targetColumn),
 						"Use column ID or exact name",
@@ -618,41 +588,33 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 			}
 
 			// Move card to column
-			var columnIDInt int64
-			_, _ = fmt.Sscanf(columnID, "%d", &columnIDInt) //nolint:gosec // G104: ID validated by ResolveColumn
-
-			body := map[string]int64{
-				"column_id": columnIDInt,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/card_tables/cards/%s/moves.json", resolvedProjectID, cardID)
-			_, err = app.API.Post(cmd.Context(), path, body)
+			err = app.SDK.Cards().Move(cmd.Context(), bucketID, cardID, columnID)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			// Build breadcrumbs - only include --card-table when known
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
-					Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardIDStr, resolvedProjectID),
 					Description: "View card",
 				},
 			}
-			if cardTableID != "" {
+			if cardTableIDVal != "" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "list",
-					Cmd:         fmt.Sprintf("bcq cards --in %s --card-table %s --column \"%s\"", resolvedProjectID, cardTableID, targetColumn),
+					Cmd:         fmt.Sprintf("bcq cards --in %s --card-table %s --column \"%s\"", resolvedProjectID, cardTableIDVal, targetColumn),
 					Description: "List cards in column",
 				})
 			}
 
 			return app.Output.OK(map[string]string{
-				"id":     cardID,
+				"id":     cardIDStr,
 				"status": "moved",
 				"column": targetColumn,
 			},
-				output.WithSummary(fmt.Sprintf("Moved card #%s to '%s'", cardID, targetColumn)),
+				output.WithSummary(fmt.Sprintf("Moved card #%s to '%s'", cardIDStr, targetColumn)),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
 		},
@@ -671,9 +633,6 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 		Long:  "List all columns in a project's card table with their IDs.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Resolve project
 			projectID := *project
@@ -692,24 +651,26 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get card table ID from project dock
 			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 			if err != nil {
 				return err
 			}
 
-			// Get card table with embedded columns (lists)
-			cardTablePath := fmt.Sprintf("/buckets/%s/card_tables/%s.json", resolvedProjectID, cardTableID)
-			cardTableResp, err := app.API.Get(cmd.Context(), cardTablePath)
+			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid card table ID")
 			}
 
-			var cardTableData struct {
-				Lists []CardColumn `json:"lists"`
-			}
-			if err := json.Unmarshal(cardTableResp.Data, &cardTableData); err != nil {
-				return fmt.Errorf("failed to parse card table: %w", err)
+			// Get card table with embedded columns (lists)
+			cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(cardTableData.Lists,
@@ -746,9 +707,6 @@ func NewCardCmd() *cobra.Command {
 		Long:  "Create a card in a project's card table. Shortcut for 'bcq cards create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -777,11 +735,19 @@ func NewCardCmd() *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// If column is a numeric ID, use it directly without card table discovery
-			var columnID string
+			var columnID int64
 			var cardTableIDVal string
 			if column != "" && isNumericID(column) {
-				columnID = column
+				columnID, err = strconv.ParseInt(column, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid column ID")
+				}
 				cardTableIDVal = "" // Not needed for numeric column ID
 			} else {
 				// Need to discover card table and resolve column
@@ -790,24 +756,21 @@ func NewCardCmd() *cobra.Command {
 					return err
 				}
 
-				// Get card table with embedded columns (lists)
-				cardTablePath := fmt.Sprintf("/buckets/%s/card_tables/%s.json", resolvedProjectID, cardTableIDVal)
-				cardTableResp, err := app.API.Get(cmd.Context(), cardTablePath)
+				cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
 				if err != nil {
-					return err
+					return output.ErrUsage("Invalid card table ID")
 				}
 
-				var cardTableData struct {
-					Lists []CardColumn `json:"lists"`
-				}
-				if err := json.Unmarshal(cardTableResp.Data, &cardTableData); err != nil {
-					return fmt.Errorf("failed to parse card table: %w", err)
+				// Get card table with embedded columns (lists)
+				cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				if err != nil {
+					return convertSDKError(err)
 				}
 
 				// Find target column
 				if column != "" {
 					columnID = resolveColumn(cardTableData.Lists, column)
-					if columnID == "" {
+					if columnID == 0 {
 						return output.ErrUsageHint(
 							fmt.Sprintf("Column '%s' not found", column),
 							"Use column ID or exact name",
@@ -818,29 +781,19 @@ func NewCardCmd() *cobra.Command {
 					if len(cardTableData.Lists) == 0 {
 						return output.ErrNotFound("columns", resolvedProjectID)
 					}
-					columnID = fmt.Sprintf("%d", cardTableData.Lists[0].ID)
+					columnID = cardTableData.Lists[0].ID
 				}
 			}
 
-			// Build request body
-			body := map[string]string{
-				"title": title,
-			}
-			if content != "" {
-				body["content"] = content
+			// Build request
+			req := &basecamp.CreateCardRequest{
+				Title:   title,
+				Content: content,
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/lists/%s/cards.json", resolvedProjectID, columnID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			card, err := app.SDK.Cards().Create(cmd.Context(), bucketID, columnID, req)
 			if err != nil {
-				return err
-			}
-
-			var card struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &card); err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			// Build breadcrumbs - only include --card-table when known
@@ -870,7 +823,7 @@ func NewCardCmd() *cobra.Command {
 				Description: "List cards",
 			})
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(card,
 				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
 				output.WithBreadcrumbs(cardBreadcrumbs...),
 			)
@@ -925,11 +878,12 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -948,26 +902,22 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/columns/%s.json", resolvedProjectID, columnID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var col struct {
-				Title      string `json:"title"`
-				CardsCount int    `json:"cards_count"`
-			}
-			if err := json.Unmarshal(resp.Data, &col); err != nil {
-				return err
+			col, err := app.SDK.CardColumns().Get(cmd.Context(), bucketID, columnID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(col,
 				output.WithSummary(fmt.Sprintf("%s (%d cards)", col.Title, col.CardsCount)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq cards column update %s --in %s", columnID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq cards column update %s --in %s", columnIDStr, resolvedProjectID),
 						Description: "Update column",
 					},
 					output.Breadcrumb{
@@ -992,9 +942,6 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 		Long:  "Create a new column in the card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -1017,32 +964,33 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get card table ID
 			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 			if err != nil {
 				return err
 			}
 
-			body := map[string]string{"title": title}
-			if description != "" {
-				body["description"] = description
-			}
-
-			path := fmt.Sprintf("/buckets/%s/card_tables/%s/columns.json", resolvedProjectID, cardTableID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid card table ID")
 			}
 
-			var col struct {
-				ID    int64  `json:"id"`
-				Title string `json:"title"`
-			}
-			if err := json.Unmarshal(resp.Data, &col); err != nil {
-				return err
+			req := &basecamp.CreateColumnRequest{
+				Title:       title,
+				Description: description,
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			col, err := app.SDK.CardColumns().Create(cmd.Context(), bucketID, cardTableIDInt, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(col,
 				output.WithSummary(fmt.Sprintf("Created column: %s", col.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1078,11 +1026,12 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			if title == "" && description == "" {
 				return output.ErrUsage("No update fields provided")
@@ -1105,22 +1054,23 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{}
-			if title != "" {
-				body["title"] = title
-			}
-			if description != "" {
-				body["description"] = description
-			}
-
-			path := fmt.Sprintf("/buckets/%s/card_tables/columns/%s.json", resolvedProjectID, columnID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated column #%s", columnID)),
+			req := &basecamp.UpdateColumnRequest{
+				Title:       title,
+				Description: description,
+			}
+
+			col, err := app.SDK.CardColumns().Update(cmd.Context(), bucketID, columnID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(col,
+				output.WithSummary(fmt.Sprintf("Updated column #%s", columnIDStr)),
 			)
 		},
 	}
@@ -1141,11 +1091,12 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Column ID must be numeric")
+			}
 
 			if position <= 0 {
 				return output.ErrUsage("--position required (1-indexed)")
@@ -1168,38 +1119,38 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get card table ID
 			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 			if err != nil {
 				return err
 			}
 
-			columnIDInt, err := strconv.ParseInt(columnID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Column ID must be numeric")
-			}
 			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Card table ID must be numeric")
 			}
 
-			body := map[string]any{
-				"source_id": columnIDInt,
-				"target_id": cardTableIDInt,
-				"position":  position,
+			req := &basecamp.MoveColumnRequest{
+				SourceID: columnID,
+				TargetID: cardTableIDInt,
+				Position: position,
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/%s/moves.json", resolvedProjectID, cardTableID)
-			_, err = app.API.Post(cmd.Context(), path, body)
+			err = app.SDK.CardColumns().Move(cmd.Context(), bucketID, cardTableIDInt, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{
 				"moved":    true,
-				"id":       columnID,
+				"id":       columnIDStr,
 				"position": position,
-			}, output.WithSummary(fmt.Sprintf("Moved column #%s to position %d", columnID, position)))
+			}, output.WithSummary(fmt.Sprintf("Moved column #%s to position %d", columnIDStr, position)))
 		},
 	}
 
@@ -1217,11 +1168,12 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1240,7 +1192,13 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/lists/%s/subscription.json", resolvedProjectID, columnID)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Watch via subscriptions - using API client since SDK doesn't have this
+			path := fmt.Sprintf("/buckets/%d/card_tables/lists/%d/subscription.json", bucketID, columnID)
 			_, err = app.API.Post(cmd.Context(), path, map[string]any{})
 			if err != nil {
 				return err
@@ -1248,8 +1206,8 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 
 			return app.Output.OK(map[string]any{
 				"watching": true,
-				"id":       columnID,
-			}, output.WithSummary(fmt.Sprintf("Now watching column #%s", columnID)))
+				"id":       columnIDStr,
+			}, output.WithSummary(fmt.Sprintf("Now watching column #%s", columnIDStr)))
 		},
 	}
 	return cmd
@@ -1263,11 +1221,12 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1286,7 +1245,13 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/lists/%s/subscription.json", resolvedProjectID, columnID)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Unwatch via subscriptions - using API client since SDK doesn't have this
+			path := fmt.Sprintf("/buckets/%d/card_tables/lists/%d/subscription.json", bucketID, columnID)
 			_, err = app.API.Delete(cmd.Context(), path)
 			if err != nil {
 				return err
@@ -1294,8 +1259,8 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 
 			return app.Output.OK(map[string]any{
 				"watching": false,
-				"id":       columnID,
-			}, output.WithSummary(fmt.Sprintf("Stopped watching column #%s", columnID)))
+				"id":       columnIDStr,
+			}, output.WithSummary(fmt.Sprintf("Stopped watching column #%s", columnIDStr)))
 		},
 	}
 	return cmd
@@ -1309,11 +1274,12 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1332,14 +1298,18 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/columns/%s/on_hold.json", resolvedProjectID, columnID)
-			resp, err := app.API.Post(cmd.Context(), path, map[string]any{})
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Enabled on-hold for column #%s", columnID)),
+			col, err := app.SDK.CardColumns().EnableOnHold(cmd.Context(), bucketID, columnID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(col,
+				output.WithSummary(fmt.Sprintf("Enabled on-hold for column #%s", columnIDStr)),
 			)
 		},
 	}
@@ -1354,11 +1324,12 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1377,14 +1348,18 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/columns/%s/on_hold.json", resolvedProjectID, columnID)
-			resp, err := app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Disabled on-hold for column #%s", columnID)),
+			col, err := app.SDK.CardColumns().DisableOnHold(cmd.Context(), bucketID, columnID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(col,
+				output.WithSummary(fmt.Sprintf("Disabled on-hold for column #%s", columnIDStr)),
 			)
 		},
 	}
@@ -1401,11 +1376,12 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			columnID := args[0]
+			columnIDStr := args[0]
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
 
 			if color == "" {
 				return output.ErrUsage("--color is required")
@@ -1428,15 +1404,18 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{"color": color}
-			path := fmt.Sprintf("/buckets/%s/card_tables/columns/%s/color.json", resolvedProjectID, columnID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Set column #%s color to %s", columnID, color)),
+			col, err := app.SDK.CardColumns().SetColor(cmd.Context(), bucketID, columnID, color)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(col,
+				output.WithSummary(fmt.Sprintf("Set column #%s color to %s", columnIDStr, color)),
 			)
 		},
 	}
@@ -1456,9 +1435,6 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 		Long:  "Display all steps (checklist items) on a card.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Accept card ID as positional arg or flag
 			if len(args) > 0 {
@@ -1466,6 +1442,11 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 			}
 			if cardID == "" {
 				return output.ErrUsage("Card ID required (bcq cards steps <card_id>)")
+			}
+
+			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
 			}
 
 			// Resolve project
@@ -1485,18 +1466,15 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Get card with steps
-			path := fmt.Sprintf("/buckets/%s/card_tables/cards/%s.json", resolvedProjectID, cardID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var card struct {
-				Steps []CardStep `json:"steps"`
-			}
-			if err := json.Unmarshal(resp.Data, &card); err != nil {
-				return err
+			// Get card with steps
+			card, err := app.SDK.Cards().Get(cmd.Context(), bucketID, cardIDInt)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(card.Steps,
@@ -1520,17 +1498,6 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVarP(&cardID, "card", "c", "", "Card ID")
 
 	return cmd
-}
-
-// CardStep represents a step on a card.
-type CardStep struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	DueOn     string `json:"due_on,omitempty"`
-	Completed bool   `json:"completed"`
-	Assignees []struct {
-		Name string `json:"name"`
-	} `json:"assignees,omitempty"`
 }
 
 // newCardsStepCmd creates the step management subcommand.
@@ -1565,15 +1532,17 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 		Long:  "Add a new step (checklist item) to a card.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
 			}
 			if cardID == "" {
 				return output.ErrUsage("--card is required")
+			}
+
+			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
 			}
 
 			// Resolve project
@@ -1593,33 +1562,31 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{"title": title}
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			req := &basecamp.CreateStepRequest{
+				Title: title,
+			}
 			if dueOn != "" {
-				body["due_on"] = dateparse.Parse(dueOn)
+				req.DueOn = dateparse.Parse(dueOn)
 			}
 			if assignees != "" {
 				assigneesCSV, err := resolveAssigneesCSV(cmd.Context(), app, assignees)
 				if err != nil {
 					return err
 				}
-				body["assignees"] = assigneesCSV
+				req.Assignees = assigneesCSV
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/cards/%s/steps.json", resolvedProjectID, cardID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			step, err := app.SDK.CardSteps().Create(cmd.Context(), bucketID, cardIDInt, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var step struct {
-				ID    int64  `json:"id"`
-				Title string `json:"title"`
-			}
-			if err := json.Unmarshal(resp.Data, &step); err != nil {
-				return err
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(step,
 				output.WithSummary(fmt.Sprintf("Created step: %s", step.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1659,11 +1626,12 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			stepID := args[0]
+			stepIDStr := args[0]
+			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid step ID")
+			}
 
 			if title == "" && dueOn == "" && assignees == "" {
 				return output.ErrUsage("No update fields provided")
@@ -1686,29 +1654,33 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{}
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			req := &basecamp.UpdateStepRequest{}
 			if title != "" {
-				body["title"] = title
+				req.Title = title
 			}
 			if dueOn != "" {
-				body["due_on"] = dateparse.Parse(dueOn)
+				req.DueOn = dateparse.Parse(dueOn)
 			}
 			if assignees != "" {
 				assigneesCSV, err := resolveAssigneesCSV(cmd.Context(), app, assignees)
 				if err != nil {
 					return err
 				}
-				body["assignees"] = assigneesCSV
+				req.Assignees = assigneesCSV
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/steps/%s.json", resolvedProjectID, stepID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			step, err := app.SDK.CardSteps().Update(cmd.Context(), bucketID, stepID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated step #%s", stepID)),
+			return app.Output.OK(step,
+				output.WithSummary(fmt.Sprintf("Updated step #%s", stepIDStr)),
 			)
 		},
 	}
@@ -1728,11 +1700,12 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			stepID := args[0]
+			stepIDStr := args[0]
+			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid step ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1751,15 +1724,18 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{"completion": "on"}
-			path := fmt.Sprintf("/buckets/%s/card_tables/steps/%s/completions.json", resolvedProjectID, stepID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Completed step #%s", stepID)),
+			step, err := app.SDK.CardSteps().Complete(cmd.Context(), bucketID, stepID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(step,
+				output.WithSummary(fmt.Sprintf("Completed step #%s", stepIDStr)),
 			)
 		},
 	}
@@ -1774,11 +1750,12 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			stepID := args[0]
+			stepIDStr := args[0]
+			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid step ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1797,15 +1774,18 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]string{"completion": "off"}
-			path := fmt.Sprintf("/buckets/%s/card_tables/steps/%s/completions.json", resolvedProjectID, stepID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Uncompleted step #%s", stepID)),
+			step, err := app.SDK.CardSteps().Uncomplete(cmd.Context(), bucketID, stepID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(step,
+				output.WithSummary(fmt.Sprintf("Uncompleted step #%s", stepIDStr)),
 			)
 		},
 	}
@@ -1823,17 +1803,23 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			stepID := args[0]
+			stepIDStr := args[0]
+			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Step ID must be numeric")
+			}
 
 			if cardID == "" {
 				return output.ErrUsage("--card is required")
 			}
 			if position < 0 {
 				return output.ErrUsage("--position is required (0-indexed)")
+			}
+
+			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
 			}
 
 			// Resolve project
@@ -1853,27 +1839,21 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			stepIDInt, err := strconv.ParseInt(stepID, 10, 64)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Step ID must be numeric")
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			body := map[string]any{
-				"source_id": stepIDInt,
-				"position":  position,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/card_tables/cards/%s/positions.json", resolvedProjectID, cardID)
-			_, err = app.API.Post(cmd.Context(), path, body)
+			err = app.SDK.CardSteps().Reposition(cmd.Context(), bucketID, cardIDInt, stepID, position)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{
 				"moved":    true,
-				"id":       stepID,
+				"id":       stepIDStr,
 				"position": position,
-			}, output.WithSummary(fmt.Sprintf("Moved step #%s to position %d", stepID, position)))
+			}, output.WithSummary(fmt.Sprintf("Moved step #%s to position %d", stepIDStr, position)))
 		},
 	}
 
@@ -1892,11 +1872,12 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			stepID := args[0]
+			stepIDStr := args[0]
+			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid step ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -1915,14 +1896,18 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/card_tables/steps/%s.json", resolvedProjectID, stepID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.CardSteps().Delete(cmd.Context(), bucketID, stepID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"deleted": true},
-				output.WithSummary(fmt.Sprintf("Deleted step #%s", stepID)),
+				output.WithSummary(fmt.Sprintf("Deleted step #%s", stepIDStr)),
 			)
 		},
 	}
@@ -1947,7 +1932,7 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 			Title string `json:"title"`
 		} `json:"dock"`
 	}
-	if err := json.Unmarshal(resp.Data, &project); err != nil {
+	if err := resp.UnmarshalData(&project); err != nil {
 		return "", fmt.Errorf("failed to parse project: %w", err)
 	}
 
@@ -2042,13 +2027,13 @@ func isNumericID(s string) bool {
 }
 
 // resolveColumn finds a column by ID or name.
-func resolveColumn(columns []CardColumn, identifier string) string {
+func resolveColumn(columns []basecamp.CardColumn, identifier string) int64 {
 	// Try by ID first
-	var idInt int64
-	if _, err := fmt.Sscanf(identifier, "%d", &idInt); err == nil {
+	idInt, err := strconv.ParseInt(identifier, 10, 64)
+	if err == nil {
 		for _, col := range columns {
 			if col.ID == idInt {
-				return fmt.Sprintf("%d", col.ID)
+				return col.ID
 			}
 		}
 	}
@@ -2056,11 +2041,11 @@ func resolveColumn(columns []CardColumn, identifier string) string {
 	// Fall back to name match
 	for _, col := range columns {
 		if col.Title == identifier {
-			return fmt.Sprintf("%d", col.ID)
+			return col.ID
 		}
 	}
 
-	return ""
+	return 0
 }
 
 func resolveAssigneesCSV(ctx context.Context, app *appctx.App, input string) (string, error) {
