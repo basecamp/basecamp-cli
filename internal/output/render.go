@@ -34,7 +34,8 @@ type Renderer struct {
 
 // NewRenderer creates a renderer with styles from the resolved theme.
 // Styling is enabled when writing to a TTY, or when forceStyled is true.
-// Theme resolution follows: NO_COLOR env → BCQ_THEME env → Omarchy → default.
+// Theme resolution follows: NO_COLOR env → BCQ_THEME env → user theme
+// (~/.config/bcq/theme/colors.toml, which may be symlinked to system themes) → default.
 func NewRenderer(w io.Writer, forceStyled bool) *Renderer {
 	return NewRendererWithTheme(w, forceStyled, tui.ResolveTheme())
 }

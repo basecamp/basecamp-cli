@@ -107,6 +107,12 @@ func parseSimpleTOML(data []byte) (map[string]string, error) {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 
+		// Strip inline comments: "value" # comment -> "value"
+		// Find comment marker outside quotes
+		if idx := findInlineComment(value); idx > 0 {
+			value = strings.TrimSpace(value[:idx])
+		}
+
 		// Remove quotes
 		value = strings.Trim(value, `"'`)
 
@@ -119,6 +125,24 @@ func parseSimpleTOML(data []byte) (map[string]string, error) {
 	}
 
 	return result, nil
+}
+
+// findInlineComment returns the index of an inline comment marker (#) that
+// appears outside of quotes, or -1 if none found.
+func findInlineComment(s string) int {
+	inQuote := false
+	quoteChar := rune(0)
+	for i, c := range s {
+		if !inQuote && (c == '"' || c == '\'') {
+			inQuote = true
+			quoteChar = c
+		} else if inQuote && c == quoteChar {
+			inQuote = false
+		} else if !inQuote && c == '#' {
+			return i
+		}
+	}
+	return -1
 }
 
 // isValidHexColor checks if a string is a valid hex color (#RGB or #RRGGBB).

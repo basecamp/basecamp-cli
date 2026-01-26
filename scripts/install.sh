@@ -149,9 +149,9 @@ setup_theme() {
 
   # Link to Omarchy theme if available
   if [[ -d "$omarchy_theme_dir" ]]; then
-    info "Linking bcq theme to Omarchy theme"
+    info "Linking bcq theme to system theme"
     mkdir -p "$HOME/.config/bcq"
-    ln -s "$omarchy_theme_dir" "$bcq_theme_dir"
+    ln -s "$omarchy_theme_dir" "$bcq_theme_dir" || info "Note: Could not link theme (continuing anyway)"
   fi
 }
 

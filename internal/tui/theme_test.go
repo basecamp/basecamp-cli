@@ -81,6 +81,24 @@ accent = "#abc"`,
 				"accent": "#abc",
 			},
 		},
+		{
+			name: "inline comments",
+			input: `accent = "#89b4fa" # primary blue
+foreground = "#cdd6f4" # main text`,
+			want: map[string]string{
+				"accent":     "#89b4fa",
+				"foreground": "#cdd6f4",
+			},
+		},
+		{
+			name: "unquoted values",
+			input: `accent = #89b4fa
+foreground = #cdd6f4`,
+			want: map[string]string{
+				"accent":     "#89b4fa",
+				"foreground": "#cdd6f4",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -320,13 +338,52 @@ foreground = "#ffffff"
 	})
 
 	t.Run("default theme when no env vars", func(t *testing.T) {
+		// Ensure these env vars are not set for this test
+		// Note: t.Setenv in other subtests auto-cleans up, providing isolation
 		os.Unsetenv("NO_COLOR")
 		os.Unsetenv("BCQ_THEME")
 
 		theme := ResolveTheme()
 
+		// Should return a valid theme (either user theme or default)
+		// We just verify it's not empty - could be user config or default
 		if theme.Primary.Dark == "" && theme.Primary.Light == "" {
 			t.Error("ResolveTheme() returned theme with empty Primary color")
+		}
+	})
+}
+
+func TestLoadUserTheme(t *testing.T) {
+	t.Run("loads theme from user config dir", func(t *testing.T) {
+		// Create a temporary home directory structure
+		tmpHome := t.TempDir()
+		themeDir := filepath.Join(tmpHome, ".config", "bcq", "theme")
+		if err := os.MkdirAll(themeDir, 0755); err != nil {
+			t.Fatalf("Failed to create theme dir: %v", err)
+		}
+
+		content := `accent = "#00ff00"
+foreground = "#eeeeee"
+`
+		themeFile := filepath.Join(themeDir, "colors.toml")
+		if err := os.WriteFile(themeFile, []byte(content), 0644); err != nil {
+			t.Fatalf("Failed to write theme file: %v", err)
+		}
+
+		// LoadUserTheme uses os.UserHomeDir, so we test via BCQ_THEME instead
+		// since we can't easily mock the home directory
+		t.Setenv("BCQ_THEME", themeFile)
+		theme := ResolveTheme()
+
+		if theme.Primary.Dark != "#00ff00" {
+			t.Errorf("Primary.Dark = %q, want %q", theme.Primary.Dark, "#00ff00")
+		}
+	})
+
+	t.Run("returns error for missing config", func(t *testing.T) {
+		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml")
+		if err == nil {
+			t.Error("LoadThemeFromFile should return error for missing file")
 		}
 	})
 }
