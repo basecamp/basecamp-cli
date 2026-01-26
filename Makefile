@@ -94,7 +94,7 @@ test:
 # Run end-to-end tests against Go binary
 .PHONY: test-e2e
 test-e2e: build
-	BCQ_NO_KEYRING=1 BCQ_BIN=./bin/bcq bats e2e/
+	./e2e/run.sh
 
 # Run tests with coverage
 .PHONY: test-coverage

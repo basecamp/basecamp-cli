@@ -166,9 +166,6 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Build binary
-        run: go build -o bin/bcq ./cmd/bcq
-
       - name: Cache BATS
         id: cache-bats
         uses: actions/cache@v5
@@ -183,7 +180,7 @@ jobs:
           sudo /tmp/bats-core/install.sh /usr/local
 
       - name: Run BATS integration tests
-        run: bats e2e/
+        run: make test-e2e
 
   benchmarks:
     name: Benchmarks
