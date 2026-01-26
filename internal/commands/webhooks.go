@@ -1,11 +1,13 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
@@ -62,9 +64,6 @@ func newWebhooksListCmd(project *string) *cobra.Command {
 
 func runWebhooksList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -83,15 +82,14 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/webhooks.json", resolvedProjectID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	var webhooks []any
-	if err := resp.UnmarshalData(&webhooks); err != nil {
-		return fmt.Errorf("failed to parse webhooks: %w", err)
+	webhooks, err := app.SDK.Webhooks().List(cmd.Context(), bucketID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	return app.Output.OK(webhooks,
@@ -118,11 +116,12 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			webhookID := args[0]
+			webhookIDStr := args[0]
+			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid webhook ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -141,30 +140,29 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/webhooks/%s.json", resolvedProjectID, webhookID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var data struct {
-				PayloadURL string `json:"payload_url"`
+			webhook, err := app.SDK.Webhooks().Get(cmd.Context(), bucketID, webhookID)
+			if err != nil {
+				return convertSDKError(err)
 			}
-			_ = json.Unmarshal(resp.Data, &data) // Best-effort
 
-			summary := fmt.Sprintf("Webhook #%s: %s", webhookID, data.PayloadURL)
+			summary := fmt.Sprintf("Webhook #%s: %s", webhookIDStr, webhook.PayloadURL)
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(webhook,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq webhooks update %s --in %s", webhookID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq webhooks update %s --in %s", webhookIDStr, resolvedProjectID),
 						Description: "Update webhook",
 					},
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq webhooks delete %s --in %s", webhookID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq webhooks delete %s --in %s", webhookIDStr, resolvedProjectID),
 						Description: "Delete webhook",
 					},
 					output.Breadcrumb{
@@ -191,9 +189,6 @@ Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if url == "" {
 				return output.ErrUsage("--url is required")
@@ -216,34 +211,38 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				return err
 			}
 
-			body := map[string]any{
-				"payload_url": url,
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
 			}
 
+			// Build type array from comma-separated string
+			var typeArray []string
 			if types != "" {
 				typeParts := strings.Split(types, ",")
-				typeArray := make([]string, 0, len(typeParts))
+				typeArray = make([]string, 0, len(typeParts))
 				for _, t := range typeParts {
 					t = strings.TrimSpace(t)
 					if t != "" {
 						typeArray = append(typeArray, t)
 					}
 				}
-				body["types"] = typeArray
+			} else {
+				// Default to all types if not specified
+				typeArray = []string{"Todo", "Todolist", "Message", "Comment", "Document", "Upload", "Vault", "Schedule::Entry", "Kanban::Card", "Question", "Question::Answer"}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/webhooks.json", resolvedProjectID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			req := &basecamp.CreateWebhookRequest{
+				PayloadURL: url,
+				Types:      typeArray,
+			}
+
+			webhook, err := app.SDK.Webhooks().Create(cmd.Context(), bucketID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var webhook struct {
-				ID int64 `json:"id"`
-			}
-			_ = json.Unmarshal(resp.Data, &webhook) // Best-effort
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(webhook,
 				output.WithSummary(fmt.Sprintf("Created webhook #%d", webhook.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -280,11 +279,12 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			webhookID := args[0]
+			webhookIDStr := args[0]
+			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid webhook ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -303,16 +303,28 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := make(map[string]any)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Build update request
+			req := &basecamp.UpdateWebhookRequest{}
+			hasChanges := false
 
 			if url != "" {
-				body["payload_url"] = url
+				req.PayloadURL = url
+				hasChanges = true
 			}
 
 			if active {
-				body["active"] = true
+				activeVal := true
+				req.Active = &activeVal
+				hasChanges = true
 			} else if inactive {
-				body["active"] = false
+				activeVal := false
+				req.Active = &activeVal
+				hasChanges = true
 			}
 
 			if types != "" {
@@ -324,25 +336,25 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 						typeArray = append(typeArray, t)
 					}
 				}
-				body["types"] = typeArray
+				req.Types = typeArray
+				hasChanges = true
 			}
 
-			if len(body) == 0 {
+			if !hasChanges {
 				return output.ErrUsage("at least one of --url, --types, --active, or --inactive is required")
 			}
 
-			path := fmt.Sprintf("/buckets/%s/webhooks/%s.json", resolvedProjectID, webhookID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			webhook, err := app.SDK.Webhooks().Update(cmd.Context(), bucketID, webhookID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated webhook #%s", webhookID)),
+			return app.Output.OK(webhook,
+				output.WithSummary(fmt.Sprintf("Updated webhook #%s", webhookIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq webhooks show %s --in %s", webhookID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq webhooks show %s --in %s", webhookIDStr, resolvedProjectID),
 						Description: "View webhook",
 					},
 					output.Breadcrumb{
@@ -370,11 +382,12 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			webhookID := args[0]
+			webhookIDStr := args[0]
+			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid webhook ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -393,19 +406,23 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/webhooks/%s.json", resolvedProjectID, webhookID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			err = app.SDK.Webhooks().Delete(cmd.Context(), bucketID, webhookID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			result := map[string]any{
 				"deleted": true,
-				"id":      webhookID,
+				"id":      webhookIDStr,
 			}
 
 			return app.Output.OK(result,
-				output.WithSummary(fmt.Sprintf("Deleted webhook #%s", webhookID)),
+				output.WithSummary(fmt.Sprintf("Deleted webhook #%s", webhookIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
