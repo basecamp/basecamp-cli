@@ -1,12 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -598,14 +600,26 @@ func TestSlogLoggerIntegration(t *testing.T) {
 	client := NewClient(cfg, nil)
 	client.log("test message", "key", "value") // Should not panic
 
-	// Create client with logger
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	// Create client with logger that writes to buffer
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
 	client.SetLogger(logger)
 
-	// Log calls should work without error
+	// Log call should produce structured output
 	client.log("test message", "key", "value")
+
+	output := buf.String()
+	if !strings.Contains(output, "level=DEBUG") {
+		t.Errorf("expected level=DEBUG in output, got: %s", output)
+	}
+	if !strings.Contains(output, "msg=\"test message\"") {
+		t.Errorf("expected msg=\"test message\" in output, got: %s", output)
+	}
+	if !strings.Contains(output, "key=value") {
+		t.Errorf("expected key=value in output, got: %s", output)
+	}
 }
 
 func TestRetryableErrorFlow(t *testing.T) {

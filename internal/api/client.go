@@ -162,10 +162,14 @@ func (c *Client) log(msg string, args ...any) {
 	}
 }
 
-// warn outputs a warning message if a logger is configured.
+// warn outputs a warning message. Falls back to stderr if no logger configured,
+// since warnings indicate user-facing issues like incomplete results.
 func (c *Client) warn(msg string, args ...any) {
 	if c.logger != nil {
 		c.logger.Warn(msg, args...)
+	} else {
+		// Always show warnings to users even without -v flag
+		slog.Default().Warn(msg, args...)
 	}
 }
 
