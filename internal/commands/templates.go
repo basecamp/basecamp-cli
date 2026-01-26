@@ -1,10 +1,12 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
@@ -54,23 +56,22 @@ func newTemplatesListCmd(status *string) *cobra.Command {
 
 func runTemplatesList(cmd *cobra.Command, status string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
-	path := fmt.Sprintf("/templates.json?status=%s", status)
-	resp, err := app.API.Get(cmd.Context(), path)
+	templates, err := app.SDK.Templates().List(cmd.Context())
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
-	var templates []json.RawMessage
-	if err := json.Unmarshal(resp.Data, &templates); err != nil {
-		return fmt.Errorf("failed to parse templates: %w", err)
+	// Filter by status client-side since SDK List doesn't support status parameter
+	filtered := make([]basecamp.Template, 0, len(templates))
+	for _, t := range templates {
+		if t.Status == status {
+			filtered = append(filtered, t)
+		}
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
-		output.WithSummary(fmt.Sprintf("%d templates", len(templates))),
+	return app.Output.OK(filtered,
+		output.WithSummary(fmt.Sprintf("%d templates", len(filtered))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
@@ -99,36 +100,28 @@ func newTemplatesShowCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			templateID := args[0]
-
-			path := fmt.Sprintf("/templates/%s.json", templateID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid template ID")
 			}
 
-			var template struct {
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(resp.Data, &template); err != nil {
-				return fmt.Errorf("failed to parse template: %w", err)
+			template, err := app.SDK.Templates().Get(cmd.Context(), templateID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(template,
 				output.WithSummary(template.Name),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "construct",
-						Cmd:         fmt.Sprintf("bcq templates construct %s --name \"Project Name\"", templateID),
+						Cmd:         fmt.Sprintf("bcq templates construct %d --name \"Project Name\"", templateID),
 						Description: "Create project from template",
 					},
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq templates update %s --name \"New Name\"", templateID),
+						Cmd:         fmt.Sprintf("bcq templates update %d --name \"New Name\"", templateID),
 						Description: "Update template",
 					},
 					output.Breadcrumb{
@@ -153,9 +146,6 @@ func newTemplatesCreateCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Name from positional arg or flag
 			if len(args) > 0 && name == "" {
@@ -166,36 +156,27 @@ func newTemplatesCreateCmd() *cobra.Command {
 				return output.ErrUsage("Template name is required")
 			}
 
-			body := map[string]any{
-				"name": name,
-			}
-			if description != "" {
-				body["description"] = description
+			req := &basecamp.CreateTemplateRequest{
+				Name:        name,
+				Description: description,
 			}
 
-			resp, err := app.API.Post(cmd.Context(), "/templates.json", body)
+			template, err := app.SDK.Templates().Create(cmd.Context(), req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var created struct {
-				ID int64 `json:"id"`
-			}
-			if err := json.Unmarshal(resp.Data, &created); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Created template #%d: %s", created.ID, name)),
+			return app.Output.OK(template,
+				output.WithSummary(fmt.Sprintf("Created template #%d: %s", template.ID, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq templates show %d", created.ID),
+						Cmd:         fmt.Sprintf("bcq templates show %d", template.ID),
 						Description: "View template",
 					},
 					output.Breadcrumb{
 						Action:      "construct",
-						Cmd:         fmt.Sprintf("bcq templates construct %d --name \"Project Name\"", created.ID),
+						Cmd:         fmt.Sprintf("bcq templates construct %d --name \"Project Name\"", template.ID),
 						Description: "Create project from template",
 					},
 				),
@@ -221,36 +202,42 @@ func newTemplatesUpdateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			templateID := args[0]
+			templateID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid template ID")
+			}
 
 			if name == "" && description == "" {
 				return output.ErrUsage("Use --name or --description to update")
 			}
 
-			body := map[string]any{}
-			if name != "" {
-				body["name"] = name
-			}
-			if description != "" {
-				body["description"] = description
+			// SDK requires name for update, fetch current if not provided
+			updateName := name
+			if updateName == "" {
+				current, err := app.SDK.Templates().Get(cmd.Context(), templateID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				updateName = current.Name
 			}
 
-			path := fmt.Sprintf("/templates/%s.json", templateID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			req := &basecamp.UpdateTemplateRequest{
+				Name:        updateName,
+				Description: description,
+			}
+
+			template, err := app.SDK.Templates().Update(cmd.Context(), templateID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated template #%s", templateID)),
+			return app.Output.OK(template,
+				output.WithSummary(fmt.Sprintf("Updated template #%d", templateID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq templates show %s", templateID),
+						Cmd:         fmt.Sprintf("bcq templates show %d", templateID),
 						Description: "View template",
 					},
 				),
@@ -273,20 +260,19 @@ func newTemplatesDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
+
+			templateID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid template ID")
 			}
 
-			templateID := args[0]
-
-			path := fmt.Sprintf("/templates/%s.json", templateID)
-			_, err := app.API.Delete(cmd.Context(), path)
+			err = app.SDK.Templates().Delete(cmd.Context(), templateID)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(map[string]any{"deleted": true},
-				output.WithSummary(fmt.Sprintf("Trashed template #%s", templateID)),
+				output.WithSummary(fmt.Sprintf("Trashed template #%d", templateID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
@@ -318,45 +304,27 @@ which can be polled via 'templates construction' until the status is "completed"
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			templateID := args[0]
+			templateID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid template ID")
+			}
 
 			if projectName == "" {
 				return output.ErrUsage("--name is required (project name)")
 			}
 
-			body := map[string]any{
-				"project": map[string]any{
-					"name": projectName,
-				},
-			}
-			if projectDesc != "" {
-				body["project"].(map[string]any)["description"] = projectDesc
-			}
-
-			path := fmt.Sprintf("/templates/%s/project_constructions.json", templateID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			construction, err := app.SDK.Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var construction struct {
-				ID     int64  `json:"id"`
-				Status string `json:"status"`
-			}
-			if err := json.Unmarshal(resp.Data, &construction); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
-			}
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(construction,
 				output.WithSummary(fmt.Sprintf("Started project construction #%d (%s)", construction.ID, construction.Status)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "status",
-						Cmd:         fmt.Sprintf("bcq templates construction %s %d", templateID, construction.ID),
+						Cmd:         fmt.Sprintf("bcq templates construction %d %d", templateID, construction.ID),
 						Description: "Check construction status",
 					},
 				),
@@ -383,34 +351,26 @@ the response includes the newly created project.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			templateID := args[0]
-			constructionID := args[1]
-
-			path := fmt.Sprintf("/templates/%s/project_constructions/%s.json", templateID, constructionID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid template ID")
 			}
 
-			var construction struct {
-				Status  string `json:"status"`
-				Project struct {
-					ID   int64  `json:"id"`
-					Name string `json:"name"`
-				} `json:"project"`
+			constructionID, err := strconv.ParseInt(args[1], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid construction ID")
 			}
-			if err := json.Unmarshal(resp.Data, &construction); err != nil {
-				return fmt.Errorf("failed to parse response: %w", err)
+
+			construction, err := app.SDK.Templates().GetConstruction(cmd.Context(), templateID, constructionID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			var summary string
 			var breadcrumbs []output.Breadcrumb
 
-			if construction.Status == "completed" {
+			if construction.Status == "completed" && construction.Project != nil {
 				summary = fmt.Sprintf("Construction complete: %s (project #%d)", construction.Project.Name, construction.Project.ID)
 				breadcrumbs = []output.Breadcrumb{
 					{
@@ -424,13 +384,13 @@ the response includes the newly created project.`,
 				breadcrumbs = []output.Breadcrumb{
 					{
 						Action:      "poll",
-						Cmd:         fmt.Sprintf("bcq templates construction %s %s", templateID, constructionID),
+						Cmd:         fmt.Sprintf("bcq templates construction %d %d", templateID, constructionID),
 						Description: "Check again",
 					},
 				}
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(construction,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
