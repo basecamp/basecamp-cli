@@ -1,11 +1,11 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
@@ -47,9 +47,6 @@ on a schedule (e.g., "What did you work on today?").`,
 
 func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -68,6 +65,11 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get questionnaire ID
 	resolvedQuestionnaireID := questionnaireID
 	if resolvedQuestionnaireID == "" {
@@ -77,25 +79,23 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		}
 	}
 
-	path := fmt.Sprintf("/buckets/%s/questionnaires/%s.json", resolvedProjectID, resolvedQuestionnaireID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	qID, err := strconv.ParseInt(resolvedQuestionnaireID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid questionnaire ID")
 	}
 
-	var data struct {
-		Name           string `json:"name"`
-		QuestionsCount int    `json:"questions_count"`
+	questionnaire, err := app.SDK.Checkins().GetQuestionnaire(cmd.Context(), bucketID, qID)
+	if err != nil {
+		return convertSDKError(err)
 	}
-	_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary display
 
-	name := data.Name
+	name := questionnaire.Name
 	if name == "" {
 		name = "Automatic Check-ins"
 	}
-	summary := fmt.Sprintf("%s (%d questions)", name, data.QuestionsCount)
+	summary := fmt.Sprintf("%s (%d questions)", name, questionnaire.QuestionsCount)
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(questionnaire,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -113,9 +113,6 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 		Short: "List check-in questions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Resolve project
 			projectID := *project
@@ -134,6 +131,11 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get questionnaire ID
 			resolvedQuestionnaireID := *questionnaireID
 			if resolvedQuestionnaireID == "" {
@@ -143,15 +145,14 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/questionnaires/%s/questions.json", resolvedProjectID, resolvedQuestionnaireID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			qID, err := strconv.ParseInt(resolvedQuestionnaireID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid questionnaire ID")
 			}
 
-			var questions []any
-			if err := resp.UnmarshalData(&questions); err != nil {
-				return fmt.Errorf("failed to parse questions: %w", err)
+			questions, err := app.SDK.Checkins().ListQuestions(cmd.Context(), bucketID, qID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(questions,
@@ -206,11 +207,8 @@ func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
 	}
 }
 
-func runCheckinsQuestionShow(cmd *cobra.Command, project, questionID string) error {
+func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -229,26 +227,29 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionID string) err
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/questions/%s.json", resolvedProjectID, questionID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	var data struct {
-		Title        string `json:"title"`
-		AnswersCount int    `json:"answers_count"`
+	questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid question ID")
 	}
-	_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary display
 
-	summary := fmt.Sprintf("%s (%d answers)", data.Title, data.AnswersCount)
+	question, err := app.SDK.Checkins().GetQuestion(cmd.Context(), bucketID, questionID)
+	if err != nil {
+		return convertSDKError(err)
+	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	summary := fmt.Sprintf("%s (%d answers)", question.Title, question.AnswersCount)
+
+	return app.Output.OK(question,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "answers",
-				Cmd:         fmt.Sprintf("bcq checkins answers %s --in %s", questionID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq checkins answers %s --in %s", questionIDStr, resolvedProjectID),
 				Description: "View answers",
 			},
 			output.Breadcrumb{
@@ -276,9 +277,6 @@ Frequency options: every_day, every_week, every_other_week, every_month, on_cert
 Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -301,6 +299,11 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				return err
 			}
 
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
 			// Get questionnaire ID
 			resolvedQuestionnaireID := questionnaireID
 			if resolvedQuestionnaireID == "" {
@@ -310,51 +313,59 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				}
 			}
 
+			qID, err := strconv.ParseInt(resolvedQuestionnaireID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid questionnaire ID")
+			}
+
 			// Default values
 			if frequency == "" {
 				frequency = "every_day"
-			}
-			if timeOfDay == "" {
-				timeOfDay = "5:00pm"
 			}
 			if days == "" {
 				days = "1,2,3,4,5"
 			}
 
-			// Parse days into array
+			// Parse days into array of ints
 			dayParts := strings.Split(days, ",")
-			daysArray := make([]string, 0, len(dayParts))
+			daysArray := make([]int, 0, len(dayParts))
 			for _, d := range dayParts {
 				d = strings.TrimSpace(d)
 				if d != "" {
-					daysArray = append(daysArray, d)
+					dayInt, err := strconv.Atoi(d)
+					if err != nil {
+						return output.ErrUsage("Invalid day value: " + d)
+					}
+					daysArray = append(daysArray, dayInt)
 				}
 			}
 
-			body := map[string]any{
-				"question": map[string]any{
-					"title": title,
-					"schedule": map[string]any{
-						"frequency":   frequency,
-						"time_of_day": timeOfDay,
-						"days":        daysArray,
-					},
+			// Parse time of day (default 5:00pm = 17:00)
+			hour := 17
+			minute := 0
+			if timeOfDay != "" {
+				hour, minute, err = parseTimeOfDay(timeOfDay)
+				if err != nil {
+					return output.ErrUsage("Invalid time format: " + timeOfDay)
+				}
+			}
+
+			req := &basecamp.CreateQuestionRequest{
+				Title: title,
+				Schedule: &basecamp.QuestionSchedule{
+					Frequency: frequency,
+					Days:      daysArray,
+					Hour:      hour,
+					Minute:    minute,
 				},
 			}
 
-			path := fmt.Sprintf("/buckets/%s/questionnaires/%s/questions.json", resolvedProjectID, resolvedQuestionnaireID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			question, err := app.SDK.Checkins().CreateQuestion(cmd.Context(), bucketID, qID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var question struct {
-				ID    int64  `json:"id"`
-				Title string `json:"title"`
-			}
-			_ = json.Unmarshal(resp.Data, &question) // Best-effort for summary
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(question,
 				output.WithSummary(fmt.Sprintf("Created question #%d: %s", question.ID, question.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -394,11 +405,8 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			questionID := args[0]
+			questionIDStr := args[0]
 
 			// Resolve project
 			projectID := *project
@@ -417,59 +425,68 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Build payload
-			question := make(map[string]any)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid question ID")
+			}
+
+			// Build request
+			req := &basecamp.UpdateQuestionRequest{}
 			if title != "" {
-				question["title"] = title
+				req.Title = title
 			}
 
 			if frequency != "" || timeOfDay != "" || days != "" {
-				schedule := make(map[string]any)
+				schedule := &basecamp.QuestionSchedule{}
 				if frequency != "" {
-					schedule["frequency"] = frequency
+					schedule.Frequency = frequency
 				}
 				if timeOfDay != "" {
-					schedule["time_of_day"] = timeOfDay
+					hour, minute, err := parseTimeOfDay(timeOfDay)
+					if err != nil {
+						return output.ErrUsage("Invalid time format: " + timeOfDay)
+					}
+					schedule.Hour = hour
+					schedule.Minute = minute
 				}
 				if days != "" {
 					dayParts := strings.Split(days, ",")
-					daysArray := make([]string, 0, len(dayParts))
+					daysArray := make([]int, 0, len(dayParts))
 					for _, d := range dayParts {
 						d = strings.TrimSpace(d)
 						if d != "" {
-							daysArray = append(daysArray, d)
+							dayInt, err := strconv.Atoi(d)
+							if err != nil {
+								return output.ErrUsage("Invalid day value: " + d)
+							}
+							daysArray = append(daysArray, dayInt)
 						}
 					}
-					schedule["days"] = daysArray
+					schedule.Days = daysArray
 				}
-				question["schedule"] = schedule
+				req.Schedule = schedule
 			}
 
-			if len(question) == 0 {
+			if req.Title == "" && req.Schedule == nil {
 				return output.ErrUsage("at least one of --title, --frequency, --time, or --days is required")
 			}
 
-			body := map[string]any{
-				"question": question,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/questions/%s.json", resolvedProjectID, questionID)
-			resp, err := app.API.Put(cmd.Context(), path, body)
+			question, err := app.SDK.Checkins().UpdateQuestion(cmd.Context(), bucketID, questionID, req)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var data struct {
-				Title string `json:"title"`
-			}
-			_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary
-
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Updated question #%s: %s", questionID, data.Title)),
+			return app.Output.OK(question,
+				output.WithSummary(fmt.Sprintf("Updated question #%s: %s", questionIDStr, question.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "question",
-						Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionIDStr, resolvedProjectID),
 						Description: "View question",
 					},
 				),
@@ -492,11 +509,8 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			questionID := args[0]
+			questionIDStr := args[0]
 
 			// Resolve project
 			projectID := *project
@@ -515,15 +529,19 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/questions/%s/answers.json", resolvedProjectID, questionID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var answers []any
-			if err := resp.UnmarshalData(&answers); err != nil {
-				return fmt.Errorf("failed to parse answers: %w", err)
+			questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid question ID")
+			}
+
+			answers, err := app.SDK.Checkins().ListAnswers(cmd.Context(), bucketID, questionID)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(answers,
@@ -536,7 +554,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "question",
-						Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionIDStr, resolvedProjectID),
 						Description: "View question",
 					},
 				),
@@ -578,11 +596,8 @@ func newCheckinsAnswerShowCmd(project *string) *cobra.Command {
 	}
 }
 
-func runCheckinsAnswerShow(cmd *cobra.Command, project, answerID string) error {
+func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -601,36 +616,37 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerID string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/question_answers/%s.json", resolvedProjectID, answerID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	var data struct {
-		Creator struct {
-			Name string `json:"name"`
-		} `json:"creator"`
-		GroupOn string `json:"group_on"`
-		Parent  struct {
-			ID int64 `json:"id"`
-		} `json:"parent"`
+	answerID, err := strconv.ParseInt(answerIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid answer ID")
 	}
-	_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary
 
-	author := data.Creator.Name
-	if author == "" {
-		author = "Unknown"
+	answer, err := app.SDK.Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
+	if err != nil {
+		return convertSDKError(err)
 	}
-	date := data.GroupOn
+
+	author := "Unknown"
+	if answer.Creator != nil && answer.Creator.Name != "" {
+		author = answer.Creator.Name
+	}
+	date := answer.GroupOn
 	if len(date) > 10 {
 		date = date[:10]
 	}
 	summary := fmt.Sprintf("Answer by %s on %s", author, date)
 
-	questionID := strconv.FormatInt(data.Parent.ID, 10)
+	questionID := ""
+	if answer.Parent != nil {
+		questionID = strconv.FormatInt(answer.Parent.ID, 10)
+	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(answer,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -657,9 +673,6 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 		Short: "Create an answer to a question",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
 			// Allow question ID as positional arg
 			if questionID == "" && len(args) > 0 {
@@ -690,42 +703,37 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			answer := map[string]any{
-				"content": fmt.Sprintf("<div>%s</div>", content),
-			}
-			if groupOn != "" {
-				answer["group_on"] = groupOn
-			}
-
-			body := map[string]any{
-				"question_answer": answer,
-			}
-
-			path := fmt.Sprintf("/buckets/%s/questions/%s/answers.json", resolvedProjectID, questionID)
-			resp, err := app.API.Post(cmd.Context(), path, body)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			var data struct {
-				ID      int64 `json:"id"`
-				Creator struct {
-					Name string `json:"name"`
-				} `json:"creator"`
-			}
-			_ = json.Unmarshal(resp.Data, &data) // Best-effort for summary
-
-			author := data.Creator.Name
-			if author == "" {
-				author = "You"
+			qID, err := strconv.ParseInt(questionID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid question ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			req := &basecamp.CreateAnswerRequest{
+				Content: fmt.Sprintf("<div>%s</div>", content),
+				GroupOn: groupOn,
+			}
+
+			answer, err := app.SDK.Checkins().CreateAnswer(cmd.Context(), bucketID, qID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			author := "You"
+			if answer.Creator != nil && answer.Creator.Name != "" {
+				author = answer.Creator.Name
+			}
+
+			return app.Output.OK(answer,
 				output.WithSummary(fmt.Sprintf("Answer created by %s", author)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "answer",
-						Cmd:         fmt.Sprintf("bcq checkins answer %d --in %s", data.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq checkins answer %d --in %s", answer.ID, resolvedProjectID),
 						Description: "View answer",
 					},
 					output.Breadcrumb{
@@ -755,11 +763,8 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			answerID := args[0]
+			answerIDStr := args[0]
 
 			if content == "" {
 				return output.ErrUsage("--content is required")
@@ -782,39 +787,44 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			body := map[string]any{
-				"question_answer": map[string]any{
-					"content": fmt.Sprintf("<div>%s</div>", content),
-				},
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			path := fmt.Sprintf("/buckets/%s/question_answers/%s.json", resolvedProjectID, answerID)
+			answerID, err := strconv.ParseInt(answerIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid answer ID")
+			}
+
+			// The SDK doesn't have UpdateAnswer, so we use the API directly
+			body := map[string]any{
+				"content": fmt.Sprintf("<div>%s</div>", content),
+			}
+
+			path := fmt.Sprintf("/buckets/%d/question_answers/%d.json", bucketID, answerID)
 			_, err = app.API.Put(cmd.Context(), path, body)
 			if err != nil {
 				return err
 			}
 
-			// Fetch the updated answer
-			resp, err := app.API.Get(cmd.Context(), path)
+			// Fetch the updated answer using SDK
+			answer, err := app.SDK.Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
-			var data struct {
-				Parent struct {
-					ID int64 `json:"id"`
-				} `json:"parent"`
+			questionID := ""
+			if answer.Parent != nil {
+				questionID = strconv.FormatInt(answer.Parent.ID, 10)
 			}
-			_ = json.Unmarshal(resp.Data, &data) // Best-effort for breadcrumbs
 
-			questionID := strconv.FormatInt(data.Parent.ID, 10)
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(answer,
 				output.WithSummary("Answer updated"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "answer",
-						Cmd:         fmt.Sprintf("bcq checkins answer %s --in %s", answerID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq checkins answer %s --in %s", answerIDStr, resolvedProjectID),
 						Description: "View answer",
 					},
 					output.Breadcrumb{
@@ -836,4 +846,54 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 // getQuestionnaireID retrieves the questionnaire ID from a project's dock, handling multi-dock projects.
 func getQuestionnaireID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "questionnaire", "", "questionnaire")
+}
+
+// parseTimeOfDay parses a time string like "5:00pm" or "17:00" and returns hour and minute.
+func parseTimeOfDay(t string) (int, int, error) {
+	t = strings.ToLower(strings.TrimSpace(t))
+
+	// Handle 24-hour format
+	if strings.Contains(t, ":") && !strings.Contains(t, "am") && !strings.Contains(t, "pm") {
+		parts := strings.Split(t, ":")
+		if len(parts) != 2 {
+			return 0, 0, fmt.Errorf("invalid time format")
+		}
+		hour, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return 0, 0, err
+		}
+		minute, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return 0, 0, err
+		}
+		return hour, minute, nil
+	}
+
+	// Handle 12-hour format with am/pm
+	isPM := strings.Contains(t, "pm")
+	t = strings.TrimSuffix(t, "am")
+	t = strings.TrimSuffix(t, "pm")
+	t = strings.TrimSpace(t)
+
+	parts := strings.Split(t, ":")
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	minute := 0
+	if len(parts) > 1 {
+		minute, err = strconv.Atoi(parts[1])
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+
+	if isPM && hour != 12 {
+		hour += 12
+	} else if !isPM && hour == 12 {
+		hour = 0
+	}
+
+	return hour, minute, nil
 }
