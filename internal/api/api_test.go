@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -404,21 +405,22 @@ func TestRequireAccount(t *testing.T) {
 	}
 }
 
-func TestSetVerbose(t *testing.T) {
+func TestSetLogger(t *testing.T) {
 	client := &Client{}
 
-	if client.verbose {
-		t.Error("verbose should default to false")
+	if client.logger != nil {
+		t.Error("logger should default to nil")
 	}
 
-	client.SetVerbose(true)
-	if !client.verbose {
-		t.Error("SetVerbose(true) should set verbose to true")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	client.SetLogger(logger)
+	if client.logger != logger {
+		t.Error("SetLogger should set the logger")
 	}
 
-	client.SetVerbose(false)
-	if client.verbose {
-		t.Error("SetVerbose(false) should set verbose to false")
+	client.SetLogger(nil)
+	if client.logger != nil {
+		t.Error("SetLogger(nil) should set logger to nil")
 	}
 }
 
@@ -586,35 +588,24 @@ func TestRetryableError(t *testing.T) {
 	}
 }
 
-func TestLoggerInterface(t *testing.T) {
-	var logs []string
-	logger := &testLogger{logs: &logs}
-
+func TestSlogLoggerIntegration(t *testing.T) {
 	cfg := &config.Config{
 		BaseURL:   "https://3.basecampapi.com",
 		AccountID: "12345",
 	}
 
-	client := NewClient(cfg, nil, WithLogger(logger))
+	// Create client without logger - log calls should be no-ops
+	client := NewClient(cfg, nil)
+	client.log("test message", "key", "value") // Should not panic
 
-	// Call log method
-	client.log("[test] message %d", 42)
+	// Create client with logger
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	client.SetLogger(logger)
 
-	if len(logs) != 1 {
-		t.Fatalf("expected 1 log, got %d", len(logs))
-	}
-	if logs[0] != "[test] message 42" {
-		t.Errorf("log message = %q, want %q", logs[0], "[test] message 42")
-	}
-}
-
-// testLogger implements Logger for testing
-type testLogger struct {
-	logs *[]string
-}
-
-func (l *testLogger) Debug(msg string, args ...any) {
-	*l.logs = append(*l.logs, fmt.Sprintf(msg, args...))
+	// Log calls should work without error
+	client.log("test message", "key", "value")
 }
 
 func TestRetryableErrorFlow(t *testing.T) {

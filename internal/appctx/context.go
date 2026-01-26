@@ -3,6 +3,7 @@ package appctx
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -155,10 +156,13 @@ func (a *App) ApplyFlags() {
 		})
 	}
 
-	// Apply verbose mode
+	// Apply verbose mode - enable debug logging via slog
 	if a.Flags.Verbose {
-		a.API.SetVerbose(true)
-		a.SDK.SetVerbose(true)
+		debugLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
+		a.API.SetLogger(debugLogger)
+		a.SDK.SetLogger(debugLogger)
 	}
 }
 
