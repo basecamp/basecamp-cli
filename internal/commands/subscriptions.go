@@ -1,11 +1,11 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
@@ -55,10 +55,12 @@ func newSubscriptionsShowCmd(project *string) *cobra.Command {
 	}
 }
 
-func runSubscriptionsShow(cmd *cobra.Command, project, recordingID string) error {
+func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
+
+	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid recording ID")
 	}
 
 	// Resolve project
@@ -78,21 +80,14 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingID string) error
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/recordings/%s/subscription.json", resolvedProjectID, recordingID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid project ID")
 	}
 
-	var subscription struct {
-		Subscribed  bool `json:"subscribed"`
-		Count       int  `json:"count"`
-		Subscribers []struct {
-			Name string `json:"name"`
-		} `json:"subscribers"`
-	}
-	if err := json.Unmarshal(resp.Data, &subscription); err != nil {
-		return fmt.Errorf("failed to parse subscription: %w", err)
+	subscription, err := app.SDK.Subscriptions().Get(cmd.Context(), bucketID, recordingID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	subscribedStr := "no"
@@ -100,17 +95,17 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingID string) error
 		subscribedStr = "yes"
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(subscription,
 		output.WithSummary(fmt.Sprintf("%d subscribers (you: %s)", subscription.Count, subscribedStr)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "subscribe",
-				Cmd:         fmt.Sprintf("bcq subscriptions subscribe %s --in %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq subscriptions subscribe %s --in %s", recordingIDStr, resolvedProjectID),
 				Description: "Subscribe yourself",
 			},
 			output.Breadcrumb{
 				Action:      "unsubscribe",
-				Cmd:         fmt.Sprintf("bcq subscriptions unsubscribe %s --in %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq subscriptions unsubscribe %s --in %s", recordingIDStr, resolvedProjectID),
 				Description: "Unsubscribe yourself",
 			},
 		),
@@ -125,11 +120,12 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			recordingID := args[0]
+			recordingIDStr := args[0]
+			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid recording ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -148,23 +144,27 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/subscription.json", resolvedProjectID, recordingID)
-			resp, err := app.API.Post(cmd.Context(), path, map[string]any{})
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
-				return err
+				return output.ErrUsage("Invalid project ID")
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
-				output.WithSummary(fmt.Sprintf("Subscribed to recording #%s", recordingID)),
+			subscription, err := app.SDK.Subscriptions().Subscribe(cmd.Context(), bucketID, recordingID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.Output.OK(subscription,
+				output.WithSummary(fmt.Sprintf("Subscribed to recording #%s", recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "View subscribers",
 					},
 					output.Breadcrumb{
 						Action:      "unsubscribe",
-						Cmd:         fmt.Sprintf("bcq subscriptions unsubscribe %s --in %s", recordingID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq subscriptions unsubscribe %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "Unsubscribe",
 					},
 				),
@@ -181,11 +181,12 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
-				return err
-			}
 
-			recordingID := args[0]
+			recordingIDStr := args[0]
+			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid recording ID")
+			}
 
 			// Resolve project
 			projectID := *project
@@ -204,21 +205,25 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			path := fmt.Sprintf("/buckets/%s/recordings/%s/subscription.json", resolvedProjectID, recordingID)
-			// DELETE request - ignore errors for idempotency
-			_, _ = app.API.Delete(cmd.Context(), path)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Unsubscribe - ignore errors for idempotency
+			_ = app.SDK.Subscriptions().Unsubscribe(cmd.Context(), bucketID, recordingID)
 
 			return app.Output.OK(map[string]any{},
-				output.WithSummary(fmt.Sprintf("Unsubscribed from recording #%s", recordingID)),
+				output.WithSummary(fmt.Sprintf("Unsubscribed from recording #%s", recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "View subscribers",
 					},
 					output.Breadcrumb{
 						Action:      "subscribe",
-						Cmd:         fmt.Sprintf("bcq subscriptions subscribe %s --in %s", recordingID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("bcq subscriptions subscribe %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "Re-subscribe",
 					},
 				),
@@ -265,11 +270,12 @@ func newSubscriptionsRemoveCmd(project *string) *cobra.Command {
 
 func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, peopleIDs, mode string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
-	recordingID := args[0]
+	recordingIDStr := args[0]
+	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid recording ID")
+	}
 
 	// Person IDs can come from second argument or --people flag
 	if len(args) > 1 && peopleIDs == "" {
@@ -297,6 +303,11 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Parse comma-separated IDs into array
 	var ids []int64
 	for _, idStr := range strings.Split(peopleIDs, ",") {
@@ -311,18 +322,17 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		ids = append(ids, id)
 	}
 
-	// Build payload
-	var body map[string]any
+	// Build request
+	req := &basecamp.UpdateSubscriptionRequest{}
 	if mode == "add" {
-		body = map[string]any{"subscriptions": ids}
+		req.Subscriptions = ids
 	} else {
-		body = map[string]any{"unsubscriptions": ids}
+		req.Unsubscriptions = ids
 	}
 
-	path := fmt.Sprintf("/buckets/%s/recordings/%s/subscription.json", resolvedProjectID, recordingID)
-	resp, err := app.API.Put(cmd.Context(), path, body)
+	subscription, err := app.SDK.Subscriptions().Update(cmd.Context(), bucketID, recordingID, req)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	actionWord := "Added"
@@ -330,12 +340,12 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		actionWord = "Removed"
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
-		output.WithSummary(fmt.Sprintf("%s subscribers for recording #%s", actionWord, recordingID)),
+	return app.Output.OK(subscription,
+		output.WithSummary(fmt.Sprintf("%s subscribers for recording #%s", actionWord, recordingIDStr)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
 				Description: "View subscribers",
 			},
 		),
