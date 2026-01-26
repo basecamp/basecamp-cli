@@ -1,24 +1,14 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// CampfireLine represents a line (message) in a Campfire chat.
-type CampfireLine struct {
-	ID        int64           `json:"id"`
-	Content   string          `json:"content"`
-	Creator   basecamp.Person `json:"creator"`
-	CreatedAt string          `json:"created_at"`
-}
 
 // NewCampfireCmd creates the campfire command for real-time chat.
 func NewCampfireCmd() *cobra.Command {
@@ -37,7 +27,7 @@ Use 'bcq campfire post "message"' to post a message.`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -90,7 +80,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 		Long:  "List campfires in a project or account-wide with --all.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 			return runCampfireList(cmd, app, *project, all)
@@ -105,14 +95,9 @@ func newCampfireListCmd(project *string) *cobra.Command {
 func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bool) error {
 	// Account-wide campfire listing
 	if all {
-		resp, err := app.API.Get(cmd.Context(), "/chats.json")
+		campfires, err := app.SDK.Campfires().List(cmd.Context())
 		if err != nil {
 			return err
-		}
-
-		var campfires []json.RawMessage
-		if err := resp.UnmarshalData(&campfires); err != nil {
-			return fmt.Errorf("failed to parse campfires: %w", err)
 		}
 
 		summary := fmt.Sprintf("%d campfires", len(campfires))
@@ -155,30 +140,27 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 	}
 
 	// Get campfire from project dock
-	campfireID, err := getCampfireID(cmd, app, resolvedProjectID)
+	campfireIDStr, err := getCampfireID(cmd, app, resolvedProjectID)
 	if err != nil {
 		return err
 	}
 
-	// Get campfire details
-	path := fmt.Sprintf("/buckets/%s/chats/%s.json", resolvedProjectID, campfireID)
-	resp, err := app.API.Get(cmd.Context(), path)
-	if err != nil {
-		return err
-	}
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	campfireIDInt, _ := strconv.ParseInt(campfireIDStr, 10, 64)
 
-	var campfire map[string]any
-	if err := json.Unmarshal(resp.Data, &campfire); err != nil {
+	// Get campfire details using SDK
+	campfire, err := app.SDK.Campfires().Get(cmd.Context(), bucketID, campfireIDInt)
+	if err != nil {
 		return err
 	}
 
 	title := "Campfire"
-	if t, ok := campfire["title"].(string); ok && t != "" {
-		title = t
+	if campfire.Title != "" {
+		title = campfire.Title
 	}
 
 	// Return as array for consistency
-	result := []json.RawMessage{resp.Data}
+	result := []any{campfire}
 	summary := fmt.Sprintf("Campfire: %s", title)
 
 	return app.Output.OK(result,
@@ -186,12 +168,12 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("bcq campfire %s messages --in %s", campfireID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq campfire %s messages --in %s", campfireIDStr, resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("bcq campfire %s post \"message\" --in %s", campfireID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("bcq campfire %s post \"message\" --in %s", campfireIDStr, resolvedProjectID),
 				Description: "Post message",
 			},
 		),
@@ -207,7 +189,7 @@ func newCampfireMessagesCmd(project, campfireID *string) *cobra.Command {
 		Long:  "View recent messages from a Campfire.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 			return runCampfireMessages(cmd, app, *campfireID, *project, limit)
@@ -245,26 +227,23 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		}
 	}
 
-	// Get recent messages (lines)
-	path := fmt.Sprintf("/buckets/%s/chats/%s/lines.json", resolvedProjectID, campfireID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
+
+	// Get recent messages (lines) using SDK
+	lines, err := app.SDK.Campfires().ListLines(cmd.Context(), bucketID, campfireIDInt)
 	if err != nil {
 		return err
 	}
 
-	var messages []json.RawMessage
-	if err := resp.UnmarshalData(&messages); err != nil {
-		return fmt.Errorf("failed to parse messages: %w", err)
-	}
-
 	// Take last N messages
-	if limit > 0 && len(messages) > limit {
-		messages = messages[len(messages)-limit:]
+	if limit > 0 && len(lines) > limit {
+		lines = lines[len(lines)-limit:]
 	}
 
-	summary := fmt.Sprintf("%d messages", len(messages))
+	summary := fmt.Sprintf("%d messages", len(lines))
 
-	return app.Output.OK(messages,
+	return app.Output.OK(lines,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -302,7 +281,7 @@ func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
 				return output.ErrUsage("Message content required")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -341,27 +320,18 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 		}
 	}
 
-	// Post message
-	body := map[string]string{
-		"content": content,
-	}
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
 
-	path := fmt.Sprintf("/buckets/%s/chats/%s/lines.json", resolvedProjectID, campfireID)
-	resp, err := app.API.Post(cmd.Context(), path, body)
+	// Post message using SDK
+	line, err := app.SDK.Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content)
 	if err != nil {
-		return err
-	}
-
-	var line struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(resp.Data, &line); err != nil {
 		return err
 	}
 
 	summary := fmt.Sprintf("Posted message #%d", line.ID)
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(line,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -387,7 +357,7 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -419,24 +389,23 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 				}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/chats/%s/lines/%s.json", resolvedProjectID, effectiveCampfireID, lineID)
-			resp, err := app.API.Get(cmd.Context(), path)
+			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+			campfireIDInt, _ := strconv.ParseInt(effectiveCampfireID, 10, 64)
+			lineIDInt, _ := strconv.ParseInt(lineID, 10, 64)
+
+			// Get line using SDK
+			line, err := app.SDK.Campfires().GetLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
 			if err != nil {
 				return err
 			}
 
-			var line struct {
-				Creator struct {
-					Name string `json:"name"`
-				} `json:"creator"`
+			creatorName := ""
+			if line.Creator != nil {
+				creatorName = line.Creator.Name
 			}
-			if err := json.Unmarshal(resp.Data, &line); err != nil {
-				return err
-			}
+			summary := fmt.Sprintf("Line #%s by %s", lineID, creatorName)
 
-			summary := fmt.Sprintf("Line #%s by %s", lineID, line.Creator.Name)
-
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.Output.OK(line,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -464,7 +433,7 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -496,8 +465,12 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 				}
 			}
 
-			path := fmt.Sprintf("/buckets/%s/chats/%s/lines/%s.json", resolvedProjectID, effectiveCampfireID, lineID)
-			_, err = app.API.Delete(cmd.Context(), path)
+			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+			campfireIDInt, _ := strconv.ParseInt(effectiveCampfireID, 10, 64)
+			lineIDInt, _ := strconv.ParseInt(lineID, 10, 64)
+
+			// Delete line using SDK
+			err = app.SDK.Campfires().DeleteLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
 			if err != nil {
 				return err
 			}
