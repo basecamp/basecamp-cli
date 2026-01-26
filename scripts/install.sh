@@ -138,6 +138,23 @@ verify_install() {
   error "Installation failed - bcq not working"
 }
 
+setup_theme() {
+  local bcq_theme_dir="$HOME/.config/bcq/theme"
+  local omarchy_theme_dir="$HOME/.config/omarchy/current/theme"
+
+  # Skip if bcq theme already configured
+  if [[ -e "$bcq_theme_dir" ]]; then
+    return 0
+  fi
+
+  # Link to Omarchy theme if available
+  if [[ -d "$omarchy_theme_dir" ]]; then
+    info "Linking bcq theme to system theme"
+    mkdir -p "$HOME/.config/bcq"
+    ln -s "$omarchy_theme_dir" "$bcq_theme_dir" || info "Note: Could not link theme (continuing anyway)"
+  fi
+}
+
 main() {
   echo ""
   echo "bcq (Basecamp Query) - Installer"
@@ -160,6 +177,7 @@ main() {
 
   download_binary "$version" "$platform"
   setup_path
+  setup_theme
   verify_install
 
   echo ""
