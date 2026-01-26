@@ -465,9 +465,18 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 				}
 			}
 
-			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			campfireIDInt, _ := strconv.ParseInt(effectiveCampfireID, 10, 64)
-			lineIDInt, _ := strconv.ParseInt(lineID, 10, 64)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+			campfireIDInt, err := strconv.ParseInt(effectiveCampfireID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid campfire ID")
+			}
+			lineIDInt, err := strconv.ParseInt(lineID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid line ID")
+			}
 
 			// Delete line using SDK
 			err = app.SDK.Campfires().DeleteLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)

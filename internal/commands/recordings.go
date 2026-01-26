@@ -259,6 +259,8 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 	case "archived":
 		err = app.SDK.Recordings().Archive(cmd.Context(), bucketID, recordingID)
 	case "active":
+		// Unarchive() sets status to active via PUT /status/active.json
+		// This works for both archived AND trashed recordings
 		err = app.SDK.Recordings().Unarchive(cmd.Context(), bucketID, recordingID)
 	default:
 		return output.ErrUsage(fmt.Sprintf("Unknown status: %s", newStatus))
