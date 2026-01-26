@@ -78,7 +78,6 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
@@ -105,7 +104,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/go/bin
-          key: go-tools-${{ runner.os }}-govulncheck-v1.1.4
+          key: go-tools-${{ runner.os }}-go1.25-govulncheck-v1.1.4
 
       - name: Run govulncheck
         run: |
@@ -115,7 +114,6 @@ jobs:
   race-check:
     name: Race Detection
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       BCQ_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
