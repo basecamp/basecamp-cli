@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -57,11 +57,8 @@ func newMessageboardShowCmd(project, boardID *string) *cobra.Command {
 	}
 }
 
-func runMessageboardShow(cmd *cobra.Command, project, boardID string) error {
+func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
-	if err := app.API.RequireAccount(); err != nil {
-		return err
-	}
 
 	// Resolve project
 	projectID := project
@@ -80,26 +77,28 @@ func runMessageboardShow(cmd *cobra.Command, project, boardID string) error {
 		return err
 	}
 
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
 	// Get message board ID
-	resolvedBoardID, err := getMessageboardID(cmd, app, resolvedProjectID, boardID)
+	resolvedBoardIDStr, err := getMessageboardID(cmd, app, resolvedProjectID, boardIDStr)
 	if err != nil {
 		return err
 	}
 
-	path := fmt.Sprintf("/buckets/%s/message_boards/%s.json", resolvedProjectID, resolvedBoardID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	boardID, err := strconv.ParseInt(resolvedBoardIDStr, 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage("Invalid message board ID")
 	}
 
-	var board struct {
-		MessagesCount int `json:"messages_count"`
-	}
-	if err := json.Unmarshal(resp.Data, &board); err != nil {
-		return fmt.Errorf("failed to parse message board: %w", err)
+	board, err := app.SDK.MessageBoards().Get(cmd.Context(), bucketID, boardID)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
-	return app.Output.OK(json.RawMessage(resp.Data),
+	return app.Output.OK(board,
 		output.WithSummary(fmt.Sprintf("%d messages", board.MessagesCount)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
