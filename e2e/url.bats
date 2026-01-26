@@ -184,7 +184,7 @@ load test_helper
   # Since bats runs non-TTY, force --md
   run bcq url parse "https://3.basecamp.com/123/buckets/456/messages/789" --md
   assert_success
-  # Check for styled terminal output (key-value pairs)
-  assert_output_contains "type"
+  # Check for styled terminal output (key-value pairs with humanized headers)
+  assert_output_contains "Type"
   assert_output_contains "message"
 }

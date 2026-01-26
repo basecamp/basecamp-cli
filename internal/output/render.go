@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -374,11 +375,37 @@ func (r *Renderer) selectColumns(cols []column, data []map[string]any) []column 
 	return selected
 }
 
+// renderField represents a field to render with its priority for ordering.
+type renderField struct {
+	key      string
+	priority int
+}
+
+// Columns to skip in object rendering (internal fields, nested objects)
+var skipObjectColumns = map[string]bool{
+	"bucket":           true,
+	"creator":          true,
+	"parent":           true,
+	"dock":             true,
+	"inherits_status":  true,
+	"url":              true,
+	"app_url":          true,
+	"bookmark_url":     true,
+	"subscription_url": true,
+	"comments_count":   true,
+	"comments_url":     true,
+	"position":         true,
+	"attachable_sgid":  true,
+	"personable_type":  true,
+	"recording_type":   true,
+}
+
 func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
-	// Collect keys, sorted
-	var keys []string
+	// Collect fields with priority ordering
+	var fields []renderField
+
 	for k := range data {
-		if skipColumns[k] {
+		if skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects
@@ -386,28 +413,48 @@ func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 		case map[string]any, []map[string]any:
 			continue
 		}
-		keys = append(keys, k)
+		priority := columnPriority[k]
+		if priority == 0 {
+			priority = 50
+		}
+		fields = append(fields, renderField{key: k, priority: priority})
 	}
-	sort.Strings(keys)
 
-	if len(keys) == 0 {
+	// Sort by priority (lower = higher priority)
+	sort.Slice(fields, func(i, j int) bool {
+		if fields[i].priority != fields[j].priority {
+			return fields[i].priority < fields[j].priority
+		}
+		return fields[i].key < fields[j].key
+	})
+
+	if len(fields) == 0 {
 		b.WriteString(r.Muted.Render("(no data)"))
 		b.WriteString("\n")
 		return
 	}
 
-	// Find max key length for alignment
+	// Find max label length for alignment (using formatted headers)
 	maxLen := 0
-	for _, k := range keys {
-		if len(k) > maxLen {
-			maxLen = len(k)
+	for _, f := range fields {
+		label := formatHeader(f.key)
+		if len(label) > maxLen {
+			maxLen = len(label)
 		}
 	}
 
-	for _, key := range keys {
-		label := r.Muted.Render(fmt.Sprintf("%-*s: ", maxLen, key))
-		value := r.Data.Render(formatCell(data[key]))
-		b.WriteString(label + value + "\n")
+	for _, f := range fields {
+		label := formatHeader(f.key)
+		labelStyled := r.Muted.Render(fmt.Sprintf("%-*s: ", maxLen, label))
+
+		// Apply muted styling to metadata fields
+		var valueStyled string
+		if mutedColumns[f.key] {
+			valueStyled = r.CellMuted.Render(formatDateValue(f.key, data[f.key]))
+		} else {
+			valueStyled = r.Data.Render(formatDateValue(f.key, data[f.key]))
+		}
+		b.WriteString(labelStyled + valueStyled + "\n")
 	}
 }
 
@@ -500,6 +547,69 @@ func formatCell(val any) string {
 		return strings.Join(items, ", ")
 	default:
 		return fmt.Sprintf("%v", v)
+	}
+}
+
+// formatDateValue formats date fields in a human-readable way.
+// For date columns (created_at, updated_at, due_on, due_date), it converts
+// ISO8601 timestamps to a more readable format.
+func formatDateValue(key string, val any) string {
+	// Check if this is a date column
+	isDateColumn := strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on") || strings.HasSuffix(key, "_date")
+
+	if !isDateColumn {
+		return formatCell(val)
+	}
+
+	str, ok := val.(string)
+	if !ok || str == "" {
+		return formatCell(val)
+	}
+
+	// Try to parse as ISO8601 timestamp
+	t, err := time.Parse(time.RFC3339, str)
+	if err != nil {
+		// Try date-only format
+		t, err = time.Parse("2006-01-02", str)
+		if err != nil {
+			return formatCell(val)
+		}
+		// Date-only: return formatted date
+		return t.Format("Jan 2, 2006")
+	}
+
+	// Full timestamp: show relative time for recent dates, otherwise formatted date
+	now := time.Now()
+	diff := now.Sub(t)
+
+	// Future dates: just show the formatted date
+	if diff < 0 {
+		return t.Format("Jan 2, 2006")
+	}
+
+	switch {
+	case diff < time.Minute:
+		return "just now"
+	case diff < time.Hour:
+		mins := int(diff.Minutes())
+		if mins == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", mins)
+	case diff < 24*time.Hour:
+		hours := int(diff.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	case diff < 7*24*time.Hour:
+		days := int(diff.Hours() / 24)
+		if days == 1 {
+			return "yesterday"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	default:
+		return t.Format("Jan 2, 2006")
 	}
 }
 
@@ -670,26 +780,42 @@ func (r *MarkdownRenderer) detectColumns(data []map[string]any) []column {
 }
 
 func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any) {
-	var keys []string
+	// Collect fields with priority ordering (same as styled renderer)
+	var fields []renderField
+
 	for k := range data {
-		if skipColumns[k] {
+		if skipObjectColumns[k] {
 			continue
 		}
+		// Skip nested objects
 		switch data[k].(type) {
 		case map[string]any, []map[string]any:
 			continue
 		}
-		keys = append(keys, k)
+		priority := columnPriority[k]
+		if priority == 0 {
+			priority = 50
+		}
+		fields = append(fields, renderField{key: k, priority: priority})
 	}
-	sort.Strings(keys)
 
-	if len(keys) == 0 {
+	// Sort by priority (lower = higher priority)
+	sort.Slice(fields, func(i, j int) bool {
+		if fields[i].priority != fields[j].priority {
+			return fields[i].priority < fields[j].priority
+		}
+		return fields[i].key < fields[j].key
+	})
+
+	if len(fields) == 0 {
 		b.WriteString("*No data*\n")
 		return
 	}
 
-	for _, key := range keys {
-		b.WriteString("- **" + key + ":** " + formatCell(data[key]) + "\n")
+	for _, f := range fields {
+		label := formatHeader(f.key)
+		value := formatDateValue(f.key, data[f.key])
+		b.WriteString("- **" + label + ":** " + value + "\n")
 	}
 }
 
