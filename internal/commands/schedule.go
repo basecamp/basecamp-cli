@@ -253,17 +253,11 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
 
-	// For occurrences, we need to use raw API since SDK doesn't support it yet
+	// Use SDK method for specific occurrences of recurring entries
 	if occurrenceDate != "" {
-		path := fmt.Sprintf("/buckets/%s/schedule_entries/%s/occurrences/%s.json", resolvedProjectID, entryID, occurrenceDate)
-		resp, err := app.SDK.Get(cmd.Context(), path)
+		entry, err := app.SDK.Schedules().GetEntryOccurrence(cmd.Context(), bucketID, entryIDInt, occurrenceDate)
 		if err != nil {
 			return convertSDKError(err)
-		}
-
-		var entry basecamp.ScheduleEntry
-		if err := resp.UnmarshalData(&entry); err != nil {
-			return fmt.Errorf("failed to parse schedule entry: %w", err)
 		}
 
 		title := entry.Summary
@@ -623,20 +617,16 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 				}
 			}
 
-			// Use raw API for settings update since SDK doesn't have this method
-			body := map[string]bool{
-				"include_due_assignments": includeDue,
+			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+			scheduleIDInt, _ := strconv.ParseInt(effectiveScheduleID, 10, 64)
+
+			req := &basecamp.UpdateScheduleSettingsRequest{
+				IncludeDueAssignments: includeDue,
 			}
 
-			path := fmt.Sprintf("/buckets/%s/schedules/%s.json", resolvedProjectID, effectiveScheduleID)
-			resp, err := app.SDK.Put(cmd.Context(), path, body)
+			schedule, err := app.SDK.Schedules().UpdateSettings(cmd.Context(), bucketID, scheduleIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
-			}
-
-			var schedule basecamp.Schedule
-			if err := resp.UnmarshalData(&schedule); err != nil {
-				return fmt.Errorf("failed to parse schedule: %w", err)
 			}
 
 			resultSummary := "Updated schedule settings"
