@@ -27,7 +27,7 @@ Person can be:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -62,7 +62,7 @@ Person can be:
 
 			// Get current todo to preserve existing assignees
 			todoPath := fmt.Sprintf("/buckets/%s/todos/%s.json", resolvedProjectID, todoID)
-			todoResp, err := app.API.Get(cmd.Context(), todoPath)
+			todoResp, err := app.SDK.Get(cmd.Context(), todoPath)
 			if err != nil {
 				return err
 			}
@@ -100,7 +100,7 @@ Person can be:
 				"assignee_ids": assigneeIDs,
 			}
 
-			resp, err := app.API.Put(cmd.Context(), todoPath, body)
+			resp, err := app.SDK.Put(cmd.Context(), todoPath, body)
 			if err != nil {
 				return err
 			}
@@ -167,7 +167,7 @@ Person can be:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -205,7 +205,7 @@ Person can be:
 
 			// Get current todo
 			todoPath := fmt.Sprintf("/buckets/%s/todos/%s.json", resolvedProjectID, todoID)
-			todoResp, err := app.API.Get(cmd.Context(), todoPath)
+			todoResp, err := app.SDK.Get(cmd.Context(), todoPath)
 			if err != nil {
 				return err
 			}
@@ -233,7 +233,7 @@ Person can be:
 				"assignee_ids": assigneeIDs,
 			}
 
-			resp, err := app.API.Put(cmd.Context(), todoPath, body)
+			resp, err := app.SDK.Put(cmd.Context(), todoPath, body)
 			if err != nil {
 				return err
 			}

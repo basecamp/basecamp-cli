@@ -99,7 +99,7 @@ func NewTodoCmd() *cobra.Command {
 				)
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -257,7 +257,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
+	if err := app.SDK.RequireAccount(); err != nil {
 		return err
 	}
 
@@ -535,7 +535,7 @@ func newTodosCreateCmd() *cobra.Command {
 				)
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -858,7 +858,7 @@ Examples:
   bcq todos sweep --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 

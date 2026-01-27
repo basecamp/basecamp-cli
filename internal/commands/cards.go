@@ -1916,7 +1916,7 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 // an error is returned with the available card table IDs.
 func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string) (string, error) {
 	path := fmt.Sprintf("/projects/%s.json", projectID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	resp, err := app.SDK.Get(cmd.Context(), path)
 	if err != nil {
 		return "", err
 	}

@@ -14,14 +14,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/basecamp/bcq/internal/api"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/auth"
 	"github.com/basecamp/bcq/internal/output"
 )
 
 // Resolver resolves names to IDs for projects, people, and todolists.
 type Resolver struct {
-	api  *api.Client
+	sdk  *basecamp.Client
 	auth *auth.Manager
 
 	// Session-scoped cache
@@ -52,9 +53,9 @@ type Todolist struct {
 }
 
 // NewResolver creates a new name resolver.
-func NewResolver(apiClient *api.Client, authMgr *auth.Manager) *Resolver {
+func NewResolver(sdkClient *basecamp.Client, authMgr *auth.Manager) *Resolver {
 	return &Resolver{
-		api:       apiClient,
+		sdk:       sdkClient,
 		auth:      authMgr,
 		todolists: make(map[string][]Todolist),
 	}
@@ -260,7 +261,7 @@ func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {
 	}
 
 	// Fetch from API
-	resp, err := r.api.Get(ctx, "/projects.json")
+	resp, err := r.sdk.Get(ctx, "/projects.json")
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +292,7 @@ func (r *Resolver) getPeople(ctx context.Context) ([]Person, error) {
 	}
 
 	// Fetch from API
-	resp, err := r.api.Get(ctx, "/people.json")
+	resp, err := r.sdk.Get(ctx, "/people.json")
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +323,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 	}
 
 	// First get the project to find the todoset ID
-	projectResp, err := r.api.Get(ctx, "/projects/"+projectID+".json")
+	projectResp, err := r.sdk.Get(ctx, "/projects/"+projectID+".json")
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +355,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 
 	// Fetch todolists from todoset
 	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", projectID, todosetID)
-	resp, err := r.api.Get(ctx, todolistsPath)
+	resp, err := r.sdk.Get(ctx, todolistsPath)
 	if err != nil {
 		return nil, err
 	}

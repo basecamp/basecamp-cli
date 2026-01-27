@@ -4,13 +4,10 @@ package appctx
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
-	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/bcq/internal/api"
 	"github.com/basecamp/bcq/internal/auth"
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/names"
@@ -26,7 +23,6 @@ const appKey contextKey = "app"
 type App struct {
 	Config *config.Config
 	Auth   *auth.Manager
-	API    *api.Client
 	SDK    *basecamp.Client
 	Names  *names.Resolver
 	Output *output.Writer
@@ -68,15 +64,7 @@ func (a *authAdapter) AccessToken(ctx context.Context) (string, error) {
 
 // NewApp creates a new App with the given configuration.
 func NewApp(cfg *config.Config) *App {
-	// Use a timeout to prevent auth operations from hanging forever on network issues.
-	// DefaultTransport is used to preserve proxy settings, HTTP/2, dial timeouts, etc.
-	httpClient := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: http.DefaultTransport,
-	}
-	authMgr := auth.NewManager(cfg, httpClient)
-	apiClient := api.NewClient(cfg, authMgr)
-	nameResolver := names.NewResolver(apiClient, authMgr)
+	authMgr := auth.NewManager(cfg, nil)
 
 	// Create SDK client with auth adapter
 	sdkCfg := &basecamp.Config{
@@ -88,6 +76,9 @@ func NewApp(cfg *config.Config) *App {
 		CacheEnabled: cfg.CacheEnabled,
 	}
 	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr})
+
+	// Create name resolver using SDK client
+	nameResolver := names.NewResolver(sdkClient, authMgr)
 
 	// Determine output format from config (default to auto)
 	format := output.FormatAuto
@@ -103,7 +94,6 @@ func NewApp(cfg *config.Config) *App {
 	return &App{
 		Config: cfg,
 		Auth:   authMgr,
-		API:    apiClient,
 		SDK:    sdkClient,
 		Names:  nameResolver,
 		Output: output.New(output.Options{
@@ -161,7 +151,6 @@ func (a *App) ApplyFlags() {
 		debugLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 		}))
-		a.API.SetLogger(debugLogger)
 		a.SDK.SetLogger(debugLogger)
 	}
 }

@@ -20,7 +20,7 @@ func TestNewApp(t *testing.T) {
 	if app.Auth == nil {
 		t.Error("Auth manager not initialized")
 	}
-	if app.API == nil {
+	if app.SDK == nil {
 		t.Error("API client not initialized")
 	}
 	if app.Names == nil {
