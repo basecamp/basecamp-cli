@@ -123,12 +123,18 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 
 	// Start mock Launchpad server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Expect requests to /authorization.json
+		if r.URL.Path != "/authorization.json" {
+			t.Errorf("unexpected path: %s, expected /authorization.json", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(launchpadResponse)
 	}))
 	t.Cleanup(server.Close)
 
-	// Override Launchpad URL to use mock server
+	// Override Launchpad URL to use mock server (base URL, not full path)
 	t.Setenv("BCQ_LAUNCHPAD_URL", server.URL)
 
 	// Disable keyring access during tests

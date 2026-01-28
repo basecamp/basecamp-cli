@@ -263,7 +263,7 @@ func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, err
 
 func (m *Manager) launchpadURL() string {
 	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
-		return strings.TrimSuffix(url, "/authorization.json")
+		return url
 	}
 	return "https://launchpad.37signals.com"
 }
@@ -504,11 +504,14 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType
 		return nil, output.ErrAPI(0, fmt.Sprintf("token exchange failed: %v", err))
 	}
 
-	return &Credentials{
+	creds := &Credentials{
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
-		ExpiresAt:    token.ExpiresAt.Unix(),
-	}, nil
+	}
+	if !token.ExpiresAt.IsZero() {
+		creds.ExpiresAt = token.ExpiresAt.Unix()
+	}
+	return creds, nil
 }
 
 // PKCE helpers
