@@ -440,3 +440,97 @@ type testError struct {
 func (e *testError) Error() string {
 	return e.msg
 }
+
+// Test Account() returns an account-scoped client
+func TestAppAccount(t *testing.T) {
+	cfg := &config.Config{AccountID: "12345"}
+	app := NewApp(cfg)
+
+	account := app.Account()
+	if account == nil {
+		t.Fatal("Account() returned nil")
+	}
+	// Account() returns *AccountClient (via ForAccount), not *Client
+}
+
+// Test RequireAccount() validates account configuration
+func TestAppRequireAccount(t *testing.T) {
+	tests := []struct {
+		name      string
+		accountID string
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:      "no account configured",
+			accountID: "",
+			wantErr:   true,
+			errMsg:    "Account ID required",
+		},
+		{
+			name:      "valid numeric account",
+			accountID: "12345",
+			wantErr:   false,
+		},
+		{
+			name:      "invalid non-numeric account",
+			accountID: "my-account",
+			wantErr:   true,
+			errMsg:    "must contain only digits",
+		},
+		{
+			name:      "invalid mixed account",
+			accountID: "123abc",
+			wantErr:   true,
+			errMsg:    "must contain only digits",
+		},
+		{
+			name:      "invalid signed positive",
+			accountID: "+123",
+			wantErr:   true,
+			errMsg:    "must contain only digits",
+		},
+		{
+			name:      "invalid signed negative",
+			accountID: "-1",
+			wantErr:   true,
+			errMsg:    "must contain only digits",
+		},
+		{
+			name:      "invalid with spaces",
+			accountID: "123 456",
+			wantErr:   true,
+			errMsg:    "must contain only digits",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{AccountID: tt.accountID}
+			app := NewApp(cfg)
+
+			err := app.RequireAccount()
+			if tt.wantErr {
+				if err == nil {
+					t.Error("RequireAccount() should return error")
+				} else if tt.errMsg != "" {
+					errStr := err.Error()
+					found := false
+					for i := 0; i <= len(errStr)-len(tt.errMsg); i++ {
+						if errStr[i:i+len(tt.errMsg)] == tt.errMsg {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("error should contain %q, got %q", tt.errMsg, errStr)
+					}
+				}
+			} else {
+				if err != nil {
+					t.Errorf("RequireAccount() should succeed: %v", err)
+				}
+			}
+		})
+	}
+}

@@ -4,7 +4,6 @@ package appctx
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -104,9 +103,9 @@ func NewApp(cfg *config.Config) *App {
 	hooks := basecamp.NewChainHooks(gatingHooks, cliHooks)
 
 	// Create SDK client with auth adapter and chained hooks
+	// Note: AccountID is NOT set here - use app.Account() for account-scoped operations
 	sdkCfg := &basecamp.Config{
 		BaseURL:      cfg.BaseURL,
-		AccountID:    cfg.AccountID,
 		ProjectID:    cfg.ProjectID,
 		TodolistID:   cfg.TodolistID,
 		CacheDir:     cfg.CacheDir,
@@ -114,8 +113,8 @@ func NewApp(cfg *config.Config) *App {
 	}
 	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr}, basecamp.WithHooks(hooks))
 
-	// Create name resolver using SDK client
-	nameResolver := names.NewResolver(sdkClient, authMgr)
+	// Create name resolver using SDK client and account ID
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
 	// Determine output format from config (default to auto)
 	format := output.FormatAuto
@@ -202,14 +201,6 @@ func (a *App) ApplyFlags() {
 	if a.Hooks != nil {
 		a.Hooks.SetLevel(verboseLevel)
 	}
-
-	// Apply verbose mode - enable debug logging via slog
-	if verboseLevel > 0 {
-		debugLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		}))
-		a.SDK.SetLogger(debugLogger)
-	}
 }
 
 // OK outputs a success response, automatically including stats if --stats flag is set.
@@ -288,4 +279,39 @@ func WithApp(ctx context.Context, app *App) context.Context {
 func FromContext(ctx context.Context) *App {
 	app, _ := ctx.Value(appKey).(*App)
 	return app
+}
+
+// Account returns an account-scoped client for the configured account.
+// This is the preferred way to access the SDK for operations that require
+// an account context (projects, todos, people, etc.).
+//
+// Call RequireAccount() first to validate the account is properly configured.
+// ForAccount() will panic if accountID is empty or non-numeric.
+//
+// For account-agnostic operations (like Authorization().GetInfo()),
+// use app.SDK directly.
+func (a *App) Account() *basecamp.AccountClient {
+	return a.SDK.ForAccount(a.Config.AccountID)
+}
+
+// RequireAccount validates that an account is configured and is a valid numeric ID.
+// Returns an error if no account ID is set or if it contains non-digit characters.
+// Commands that perform account-scoped operations should call this
+// before using Account().
+//
+// Note: ForAccount() panics on invalid account IDs, so this validation must
+// match exactly - only ASCII digits 0-9 are allowed (no signs, spaces, etc.).
+func (a *App) RequireAccount() error {
+	if a.Config == nil || a.Config.AccountID == "" {
+		return output.ErrUsage("Account ID required. Set via --account flag, BCQ_ACCOUNT env, or config file.")
+	}
+
+	// Validate that account ID contains only digits (matches ForAccount requirements)
+	for _, c := range a.Config.AccountID {
+		if c < '0' || c > '9' {
+			return output.ErrUsage(fmt.Sprintf("Invalid account ID %q: must contain only digits", a.Config.AccountID))
+		}
+	}
+
+	return nil
 }

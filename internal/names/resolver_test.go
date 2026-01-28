@@ -677,6 +677,42 @@ func TestResolverResolveTodolistNotFound(t *testing.T) {
 // Edge Case Tests
 // =============================================================================
 
+// Test SetAccountID method
+func TestResolverSetAccountID(t *testing.T) {
+	r := newMockResolver()
+	r.setProjects([]Project{{ID: 1, Name: "Test"}})
+	r.setPeople([]Person{{ID: 2, Name: "Alice"}})
+	r.setTodolists("123", []Todolist{{ID: 3, Name: "Tasks"}})
+
+	// Set same account ID - should not clear cache
+	r.accountID = "12345"
+	r.SetAccountID("12345")
+
+	r.mu.RLock()
+	if r.projects == nil {
+		t.Error("projects should not be cleared when setting same account ID")
+	}
+	r.mu.RUnlock()
+
+	// Set different account ID - should clear cache
+	r.SetAccountID("67890")
+
+	r.mu.RLock()
+	if r.projects != nil {
+		t.Error("projects should be nil after changing account ID")
+	}
+	if r.people != nil {
+		t.Error("people should be nil after changing account ID")
+	}
+	if len(r.todolists) != 0 {
+		t.Error("todolists should be empty after changing account ID")
+	}
+	if r.accountID != "67890" {
+		t.Errorf("accountID should be 67890, got %s", r.accountID)
+	}
+	r.mu.RUnlock()
+}
+
 func TestResolveEmptyInput(t *testing.T) {
 	projects := []Project{
 		{ID: 1, Name: "Project Alpha"},
