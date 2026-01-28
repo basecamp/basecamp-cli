@@ -19,18 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
+
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/output"
 )
-
-// OAuthConfig holds discovered OAuth endpoints.
-type OAuthConfig struct {
-	Issuer                string   `json:"issuer"`
-	AuthorizationEndpoint string   `json:"authorization_endpoint"`
-	TokenEndpoint         string   `json:"token_endpoint"`
-	RegistrationEndpoint  string   `json:"registration_endpoint,omitempty"`
-	ScopesSupported       []string `json:"scopes_supported,omitempty"`
-}
 
 // ClientCredentials holds OAuth client ID and secret.
 type ClientCredentials struct {
@@ -138,48 +131,25 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 		return output.ErrAuth("No token endpoint stored")
 	}
 
-	data := url.Values{}
-	data.Set("grant_type", "refresh_token")
-	data.Set("refresh_token", creds.RefreshToken)
+	exchanger := oauth.NewExchanger(m.httpClient)
 
-	// Add client credentials if Launchpad
-	if creds.OAuthType == "launchpad" {
-		// For Launchpad, use legacy format
-		data.Set("type", "refresh")
+	req := oauth.RefreshRequest{
+		TokenEndpoint:   tokenEndpoint,
+		RefreshToken:    creds.RefreshToken,
+		UseLegacyFormat: creds.OAuthType == "launchpad",
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", tokenEndpoint, strings.NewReader(data.Encode()))
+	token, err := exchanger.Refresh(ctx, req)
 	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return output.ErrNetwork(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return output.ErrAPI(resp.StatusCode, fmt.Sprintf("token refresh failed: %s", string(body)))
+		return output.ErrAPI(0, fmt.Sprintf("token refresh failed: %v", err))
 	}
 
-	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int64  `json:"expires_in"`
+	creds.AccessToken = token.AccessToken
+	if token.RefreshToken != "" {
+		creds.RefreshToken = token.RefreshToken
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return err
-	}
-
-	creds.AccessToken = tokenResp.AccessToken
-	if tokenResp.RefreshToken != "" {
-		creds.RefreshToken = tokenResp.RefreshToken
-	}
-	if tokenResp.ExpiresIn > 0 {
-		creds.ExpiresAt = time.Now().Unix() + tokenResp.ExpiresIn
+	if !token.ExpiresAt.IsZero() {
+		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
 	return m.store.Save(origin, creds)
@@ -278,31 +248,27 @@ func (m *Manager) Logout() error {
 	return m.store.Delete(origin)
 }
 
-func (m *Manager) discoverOAuth(ctx context.Context) (*OAuthConfig, string, error) {
-	// Try BC3 OAuth 2.1 discovery first
-	wellKnownURL := m.cfg.BaseURL + "/.well-known/oauth-authorization-server"
-	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownURL, nil)
+func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) {
+	discoverer := oauth.NewDiscoverer(m.httpClient)
+	cfg, err := discoverer.Discover(ctx, m.cfg.BaseURL)
 	if err != nil {
-		return nil, "", err
+		// Fallback to Launchpad
+		return &oauth.Config{
+			AuthorizationEndpoint: m.launchpadURL() + "/authorization/new",
+			TokenEndpoint:         m.launchpadURL() + "/authorization/token",
+		}, "launchpad", nil
 	}
-
-	resp, err := m.httpClient.Do(req)
-	if err == nil && resp.StatusCode == http.StatusOK {
-		defer resp.Body.Close()
-		var cfg OAuthConfig
-		if err := json.NewDecoder(resp.Body).Decode(&cfg); err == nil {
-			return &cfg, "bc3", nil
-		}
-	}
-
-	// Fallback to Launchpad
-	return &OAuthConfig{
-		AuthorizationEndpoint: "https://launchpad.37signals.com/authorization/new",
-		TokenEndpoint:         "https://launchpad.37signals.com/authorization/token",
-	}, "launchpad", nil
+	return cfg, "bc3", nil
 }
 
-func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *OAuthConfig, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
+func (m *Manager) launchpadURL() string {
+	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
+		return strings.TrimSuffix(url, "/authorization.json")
+	}
+	return "https://launchpad.37signals.com"
+}
+
+func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Config, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
 	if oauthType == "bc3" {
 		// BC3: Try to load from stored file, otherwise register via DCR
 		creds, err := m.loadBC3Client()
@@ -428,7 +394,7 @@ func (m *Manager) saveBC3Client(creds *ClientCredentials) error {
 	return os.WriteFile(clientFile, data, 0600)
 }
 
-func (m *Manager) buildAuthURL(cfg *OAuthConfig, oauthType, scope, state, codeChallenge, clientID string, opts *LoginOptions) (string, error) {
+func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeChallenge, clientID string, opts *LoginOptions) (string, error) {
 	u, err := url.Parse(cfg.AuthorizationEndpoint)
 	if err != nil {
 		return "", err
@@ -520,58 +486,28 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	}
 }
 
-func (m *Manager) exchangeCode(ctx context.Context, cfg *OAuthConfig, oauthType, code, codeVerifier string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
-	redirectURI := "http://" + opts.CallbackAddr + "/callback"
-	data := url.Values{}
-	data.Set("grant_type", "authorization_code")
-	data.Set("code", code)
-	data.Set("redirect_uri", redirectURI)
-	data.Set("client_id", clientCreds.ClientID)
+func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType, code, codeVerifier string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
+	exchanger := oauth.NewExchanger(m.httpClient)
 
-	switch oauthType {
-	case "bc3":
-		if codeVerifier != "" {
-			data.Set("code_verifier", codeVerifier)
-		}
-		// Only include client_secret for confidential clients
-		if clientCreds.ClientSecret != "" {
-			data.Set("client_secret", clientCreds.ClientSecret)
-		}
-	case "launchpad":
-		data.Set("type", "web_server")
-		data.Set("client_secret", clientCreds.ClientSecret)
+	req := oauth.ExchangeRequest{
+		TokenEndpoint:   cfg.TokenEndpoint,
+		Code:            code,
+		RedirectURI:     "http://" + opts.CallbackAddr + "/callback",
+		ClientID:        clientCreds.ClientID,
+		ClientSecret:    clientCreds.ClientSecret,
+		CodeVerifier:    codeVerifier,
+		UseLegacyFormat: oauthType == "launchpad",
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cfg.TokenEndpoint, strings.NewReader(data.Encode()))
+	token, err := exchanger.Exchange(ctx, req)
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return nil, output.ErrNetwork(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf("token exchange failed: %s", string(body)))
-	}
-
-	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int64  `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, err
+		return nil, output.ErrAPI(0, fmt.Sprintf("token exchange failed: %v", err))
 	}
 
 	return &Credentials{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		ExpiresAt:    time.Now().Unix() + tokenResp.ExpiresIn,
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		ExpiresAt:    token.ExpiresAt.Unix(),
 	}, nil
 }
 
@@ -618,6 +554,16 @@ func openBrowser(url string) error {
 	}
 
 	return exec.Command(cmd, args...).Start() //nolint:gosec,noctx // G204: cmd is hardcoded per-platform; fire-and-forget
+}
+
+// GetOAuthType returns the OAuth type for the current origin ("bc3" or "launchpad").
+func (m *Manager) GetOAuthType() string {
+	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
+	creds, err := m.store.Load(origin)
+	if err != nil {
+		return ""
+	}
+	return creds.OAuthType
 }
 
 // GetUserID returns the stored user ID for the current origin.
