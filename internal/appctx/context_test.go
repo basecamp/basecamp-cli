@@ -336,3 +336,107 @@ func TestAppOKWithNilCollector(t *testing.T) {
 		t.Errorf("OK with nil collector failed: %v", err)
 	}
 }
+
+// Test isMachineOutput detects flag-driven machine output modes
+func TestIsMachineOutputFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		setFlag  func(*App)
+		expected bool
+	}{
+		{"default", func(a *App) {}, false},
+		{"agent flag", func(a *App) { a.Flags.Agent = true }, true},
+		{"quiet flag", func(a *App) { a.Flags.Quiet = true }, true},
+		{"ids-only flag", func(a *App) { a.Flags.IDsOnly = true }, true},
+		{"count flag", func(a *App) { a.Flags.Count = true }, true},
+		{"json flag", func(a *App) { a.Flags.JSON = true }, false},
+		{"md flag", func(a *App) { a.Flags.MD = true }, false},
+		{"styled flag", func(a *App) { a.Flags.Styled = true }, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+			tt.setFlag(app)
+
+			if got := app.isMachineOutput(); got != tt.expected {
+				t.Errorf("isMachineOutput() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// Test isMachineOutput detects config-driven quiet mode
+func TestIsMachineOutputConfigFormat(t *testing.T) {
+	tests := []struct {
+		format   string
+		expected bool
+	}{
+		{"", false},
+		{"json", false},
+		{"markdown", false},
+		{"md", false},
+		{"quiet", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			cfg := &config.Config{Format: tt.format}
+			app := NewApp(cfg)
+
+			if got := app.isMachineOutput(); got != tt.expected {
+				t.Errorf("isMachineOutput() with config format %q = %v, want %v", tt.format, got, tt.expected)
+			}
+		})
+	}
+}
+
+// Test that app.Err doesn't print stats in machine output modes
+func TestAppErrMachineOutputNoStats(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(*App)
+		machine bool
+	}{
+		{"flag quiet", func(a *App) { a.Flags.Quiet = true }, true},
+		{"flag agent", func(a *App) { a.Flags.Agent = true }, true},
+		{"flag ids-only", func(a *App) { a.Flags.IDsOnly = true }, true},
+		{"flag count", func(a *App) { a.Flags.Count = true }, true},
+		{"config quiet", func(a *App) { a.Config.Format = "quiet" }, true},
+		{"flag json", func(a *App) { a.Flags.JSON = true }, false},
+		{"default", func(a *App) {}, false},
+	}
+
+	testErr := &testError{msg: "test error"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+			app.Flags.Stats = true // Enable stats
+			tt.setup(app)
+			app.ApplyFlags()
+
+			// Verify isMachineOutput returns expected value
+			if got := app.isMachineOutput(); got != tt.machine {
+				t.Errorf("isMachineOutput() = %v, want %v", got, tt.machine)
+			}
+
+			// app.Err should not panic regardless of mode
+			err := app.Err(testErr)
+			if err != nil {
+				t.Errorf("Err() returned error: %v", err)
+			}
+		})
+	}
+}
+
+// testError is a simple error type for testing
+type testError struct {
+	msg string
+}
+
+func (e *testError) Error() string {
+	return e.msg
+}

@@ -221,8 +221,17 @@ func (a *App) Err(err error) error {
 }
 
 // isMachineOutput returns true if the output mode is intended for programmatic consumption.
+// Checks both flags and config-driven format settings.
 func (a *App) isMachineOutput() bool {
-	return a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count
+	// Flag-driven machine output modes
+	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count {
+		return true
+	}
+	// Config-driven quiet mode (format: "quiet" in config file)
+	if a.Config != nil && a.Config.Format == "quiet" {
+		return true
+	}
+	return false
 }
 
 // printStatsToStderr outputs a compact stats line to stderr.
