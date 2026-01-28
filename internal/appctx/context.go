@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/basecamp/bcq/internal/names"
 	"github.com/basecamp/bcq/internal/observability"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/resilience"
 )
 
 // contextKey is a private type for context keys.
@@ -84,9 +86,24 @@ func NewApp(cfg *config.Config) *App {
 	// Level 0 initially; ApplyFlags sets the actual level from -v flags
 	collector := observability.NewSessionCollector()
 	traceWriter := observability.NewTraceWriter()
-	hooks := observability.NewCLIHooks(0, collector, traceWriter)
+	cliHooks := observability.NewCLIHooks(0, collector, traceWriter)
 
-	// Create SDK client with auth adapter and observability hooks
+	// Create resilience components for cross-process state coordination
+	// State is stored in <cacheDir>/resilience/state.json
+	// If CacheDir is empty, NewStore uses the default (~/.cache/bcq/resilience/)
+	var resilienceDir string
+	if cfg.CacheDir != "" {
+		resilienceDir = filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
+	}
+	resilienceStore := resilience.NewStore(resilienceDir)
+	resilienceCfg := resilience.DefaultConfig()
+	gatingHooks := resilience.NewGatingHooksFromConfig(resilienceStore, resilienceCfg)
+
+	// Chain hooks: gating hooks first (to gate requests), then CLI hooks (for observability)
+	// Note: resilience.GatingHooks implements basecamp.GatingHooks, while CLIHooks implements basecamp.Hooks
+	hooks := basecamp.NewChainHooks(gatingHooks, cliHooks)
+
+	// Create SDK client with auth adapter and chained hooks
 	sdkCfg := &basecamp.Config{
 		BaseURL:      cfg.BaseURL,
 		AccountID:    cfg.AccountID,
@@ -117,7 +134,7 @@ func NewApp(cfg *config.Config) *App {
 		SDK:       sdkClient,
 		Names:     nameResolver,
 		Collector: collector,
-		Hooks:     hooks,
+		Hooks:     cliHooks,
 		Output: output.New(output.Options{
 			Format: format,
 			Writer: os.Stdout,
