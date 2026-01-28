@@ -126,15 +126,19 @@ func (s *Store) loadUnsafe() (*Cache, error) {
 // Save writes the cache to disk atomically.
 // Sets ProjectsUpdatedAt, PeopleUpdatedAt, and UpdatedAt to now.
 // AccountsUpdatedAt is NOT set here; use UpdateAccounts for that.
+// Note: Works on a copy to avoid mutating the caller's cache instance.
 func (s *Store) Save(cache *Cache) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Work on a copy so we don't mutate the caller's cache instance
+	cacheCopy := *cache
+
 	now := time.Now()
-	cache.ProjectsUpdatedAt = now
-	cache.PeopleUpdatedAt = now
-	cache.UpdatedAt = now
-	return s.saveUnsafe(cache)
+	cacheCopy.ProjectsUpdatedAt = now
+	cacheCopy.PeopleUpdatedAt = now
+	cacheCopy.UpdatedAt = now
+	return s.saveUnsafe(&cacheCopy)
 }
 
 // saveUnsafe writes the cache without locking (caller must hold lock).
@@ -212,6 +216,8 @@ func (s *Store) UpdateAccounts(accounts []CachedAccount) error {
 
 	cache.Accounts = accounts
 	cache.AccountsUpdatedAt = time.Now()
+	// Update legacy field to oldest of all sections
+	cache.UpdatedAt = oldestTime(oldestTime(cache.ProjectsUpdatedAt, cache.PeopleUpdatedAt), cache.AccountsUpdatedAt)
 	return s.saveUnsafe(cache)
 }
 
