@@ -37,13 +37,28 @@ func NewStore(dir string) *Store {
 }
 
 // defaultStateDir returns the default state directory path.
+// Uses platform-specific cache directories with proper fallbacks.
 func defaultStateDir() string {
-	cacheDir := os.Getenv("XDG_CACHE_HOME")
-	if cacheDir == "" {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".cache")
+	// First, check XDG_CACHE_HOME (Linux/BSD convention)
+	if cacheDir := os.Getenv("XDG_CACHE_HOME"); cacheDir != "" {
+		return filepath.Join(cacheDir, "bcq", DefaultDirName)
 	}
-	return filepath.Join(cacheDir, "bcq", DefaultDirName)
+
+	// Use os.UserCacheDir() which handles platform-specific paths:
+	// - macOS: ~/Library/Caches
+	// - Linux: ~/.cache (respects XDG_CACHE_HOME)
+	// - Windows: %LocalAppData%
+	if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
+		return filepath.Join(cacheDir, "bcq", DefaultDirName)
+	}
+
+	// Fall back to home directory
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".cache", "bcq", DefaultDirName)
+	}
+
+	// Last resort: use temp directory to avoid relative paths
+	return filepath.Join(os.TempDir(), "bcq", DefaultDirName)
 }
 
 // Dir returns the state directory path.
@@ -62,7 +77,7 @@ func (s *Store) lockPath() string {
 }
 
 // LockTimeout is the maximum time to wait for acquiring the file lock.
-// If exceeded, operations fail open to avoid blocking indefinitely.
+// If exceeded, operations proceed without locking (fail-open) to avoid CLI hangs.
 const LockTimeout = 100 * time.Millisecond
 
 // fileLock represents an acquired file lock.
@@ -72,8 +87,17 @@ type fileLock struct {
 
 // acquireLock obtains an exclusive lock on the state directory.
 // The caller must call release() when done.
-// Returns nil (with no error) if the lock cannot be acquired within LockTimeout,
-// allowing the caller to proceed without locking (fail-open semantics).
+//
+// Fail-open semantics: Returns nil (with no error) if the lock cannot be
+// acquired within LockTimeout. This is intentional - we prefer brief windows
+// of potential race conditions over CLI commands hanging indefinitely when
+// another process holds the lock (e.g., crashed process, NFS issues).
+//
+// The resilience primitives are designed to tolerate occasional state
+// inconsistencies: circuit breaker may let a few extra requests through,
+// bulkhead may briefly exceed limits, rate limiter may over-count tokens.
+// These are acceptable tradeoffs for a CLI tool where user experience
+// (no hangs) takes priority over perfect coordination.
 func (s *Store) acquireLock() (*fileLock, error) {
 	// Ensure directory exists
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
@@ -82,18 +106,18 @@ func (s *Store) acquireLock() (*fileLock, error) {
 
 	fl := flock.New(s.lockPath())
 
-	// Try to acquire lock with timeout (fail open on timeout)
+	// Try to acquire lock with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), LockTimeout)
 	defer cancel()
 
 	// TryLockContext retries every 10ms until context expires
 	locked, err := fl.TryLockContext(ctx, 10*time.Millisecond)
 	if err != nil {
-		// Lock error (including context deadline) - return nil to fail open
+		// Lock error (including context deadline) - proceed without lock
 		return nil, nil
 	}
 	if !locked {
-		// Could not acquire - return nil to fail open
+		// Timeout - proceed without lock
 		return nil, nil
 	}
 

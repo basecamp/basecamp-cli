@@ -65,7 +65,7 @@ func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.Operation
 		if !acquired {
 			return ctx, basecamp.ErrBulkheadFull
 		}
-		// Store release function in context for OnOperationEnd to call
+		// Store marker in context so OnOperationEnd knows to release the slot
 		ctx = context.WithValue(ctx, releaseKey{}, true)
 	}
 
