@@ -289,6 +289,37 @@ func newProjectsDeleteCmd() *cobra.Command {
 
 // convertSDKError converts SDK errors to output errors for consistent CLI error handling.
 func convertSDKError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Handle resilience sentinel errors (use errors.Is for wrapped errors)
+	if errors.Is(err, basecamp.ErrRateLimited) {
+		return &output.Error{
+			Code:      basecamp.CodeRateLimit,
+			Message:   "Rate limit exceeded",
+			Hint:      "Too many requests. Please wait before trying again.",
+			Retryable: true,
+		}
+	}
+	if errors.Is(err, basecamp.ErrCircuitOpen) {
+		return &output.Error{
+			Code:      basecamp.CodeAPI,
+			Message:   "Service temporarily unavailable",
+			Hint:      "The circuit breaker is open due to recent failures. Please wait before trying again.",
+			Retryable: true,
+		}
+	}
+	if errors.Is(err, basecamp.ErrBulkheadFull) {
+		return &output.Error{
+			Code:      basecamp.CodeRateLimit,
+			Message:   "Too many concurrent requests",
+			Hint:      "Maximum concurrent operations reached. Please wait for other operations to complete.",
+			Retryable: true,
+		}
+	}
+
+	// Handle structured SDK errors
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
 		return &output.Error{
