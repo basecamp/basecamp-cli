@@ -305,3 +305,91 @@ func TestProjectNameCompletionWithSpaces(t *testing.T) {
 		t.Errorf("expected 'Simple', got %s", second)
 	}
 }
+
+func TestCompleterAccountCompletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewStore(tmpDir)
+
+	accounts := []CachedAccount{
+		{ID: 1234567, Name: "Acme Corp"},
+		{ID: 9876543, Name: "Beta Inc"},
+		{ID: 5555555, Name: "Zeta LLC"},
+	}
+	if err := store.UpdateAccounts(accounts); err != nil {
+		t.Fatalf("failed to update accounts: %v", err)
+	}
+
+	completer := newTestCompleter(tmpDir)
+	fn := completer.AccountCompletion()
+
+	tests := []struct {
+		name       string
+		toComplete string
+		wantIDs    []string // Expected IDs in alphabetical order by name
+	}{
+		{
+			name:       "empty prefix returns all sorted",
+			toComplete: "",
+			wantIDs:    []string{"1234567", "9876543", "5555555"}, // Acme, Beta, Zeta
+		},
+		{
+			name:       "name prefix filter",
+			toComplete: "acme",
+			wantIDs:    []string{"1234567"},
+		},
+		{
+			name:       "name contains filter",
+			toComplete: "inc",
+			wantIDs:    []string{"9876543"},
+		},
+		{
+			name:       "ID prefix filter",
+			toComplete: "123",
+			wantIDs:    []string{"1234567"},
+		},
+		{
+			name:       "no matches",
+			toComplete: "xyz",
+			wantIDs:    []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			completions, directive := fn(newTestCmd(), nil, tt.toComplete)
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Errorf("expected NoFileComp directive, got %v", directive)
+			}
+
+			if len(completions) != len(tt.wantIDs) {
+				t.Errorf("expected %d completions, got %d", len(tt.wantIDs), len(completions))
+				return
+			}
+
+			for i, wantID := range tt.wantIDs {
+				// Completion format is "ID\tDescription"
+				got := string(completions[i])
+				if len(got) < len(wantID) || got[:len(wantID)] != wantID {
+					t.Errorf("completion %d: expected to start with %s, got %s", i, wantID, got)
+				}
+			}
+		})
+	}
+}
+
+func TestCompleterAccountEmptyCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Initialize empty store
+	_ = NewStore(tmpDir)
+
+	completer := newTestCompleter(tmpDir)
+	fn := completer.AccountCompletion()
+
+	completions, directive := fn(newTestCmd(), nil, "")
+	if len(completions) != 0 {
+		t.Errorf("expected no completions with empty cache, got %d", len(completions))
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("expected NoFileComp directive, got %v", directive)
+	}
+}

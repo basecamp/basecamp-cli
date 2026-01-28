@@ -503,3 +503,111 @@ func TestStore_UpdatedAtReflectsOldestSection(t *testing.T) {
 		t.Error("UpdatedAt should equal the older timestamp (projects)")
 	}
 }
+
+func TestStore_UpdateAccounts(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	// Save initial cache with projects and people
+	initial := &Cache{
+		Projects: []CachedProject{{ID: 1, Name: "Project"}},
+		People:   []CachedPerson{{ID: 100, Name: "Person"}},
+	}
+	if err := store.Save(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update just accounts
+	accounts := []CachedAccount{
+		{ID: 1234567, Name: "Acme Corp"},
+		{ID: 9876543, Name: "Beta Inc"},
+	}
+	if err := store.UpdateAccounts(accounts); err != nil {
+		t.Fatalf("UpdateAccounts failed: %v", err)
+	}
+
+	// Verify all sections are present
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(loaded.Accounts) != 2 {
+		t.Errorf("Expected 2 accounts, got %d", len(loaded.Accounts))
+	}
+	if loaded.Accounts[0].Name != "Acme Corp" {
+		t.Errorf("Expected 'Acme Corp', got %q", loaded.Accounts[0].Name)
+	}
+	if len(loaded.Projects) != 1 {
+		t.Errorf("Expected 1 project (preserved), got %d", len(loaded.Projects))
+	}
+	if len(loaded.People) != 1 {
+		t.Errorf("Expected 1 person (preserved), got %d", len(loaded.People))
+	}
+	if loaded.AccountsUpdatedAt.IsZero() {
+		t.Error("AccountsUpdatedAt should be set")
+	}
+}
+
+func TestStore_Accounts(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	// Empty cache returns nil
+	if accounts := store.Accounts(); accounts != nil {
+		t.Errorf("Expected nil, got %v", accounts)
+	}
+
+	// Update and retrieve
+	expected := []CachedAccount{{ID: 1234567, Name: "Acme Corp"}}
+	if err := store.UpdateAccounts(expected); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts := store.Accounts()
+	if len(accounts) != 1 {
+		t.Errorf("Expected 1 account, got %d", len(accounts))
+	}
+	if accounts[0].ID != 1234567 {
+		t.Errorf("Expected ID 1234567, got %d", accounts[0].ID)
+	}
+}
+
+func TestStore_AccountsPreservedOnOtherUpdates(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	// Add accounts first
+	accounts := []CachedAccount{{ID: 1234567, Name: "Acme Corp"}}
+	if err := store.UpdateAccounts(accounts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update projects
+	if err := store.UpdateProjects([]CachedProject{{ID: 1, Name: "Project"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Accounts should still be there
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Accounts) != 1 {
+		t.Errorf("Expected accounts to be preserved, got %d", len(loaded.Accounts))
+	}
+
+	// Update people
+	if err := store.UpdatePeople([]CachedPerson{{ID: 100, Name: "Person"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Accounts should still be there
+	loaded, err = store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Accounts) != 1 {
+		t.Errorf("Expected accounts to be preserved after people update, got %d", len(loaded.Accounts))
+	}
+}

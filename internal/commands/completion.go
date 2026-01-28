@@ -193,6 +193,10 @@ and updates the local cache used for tab completion. Requires authentication.
 The cache is also updated automatically when you run commands like:
   bcq projects
   bcq people list
+  bcq me
+
+Note: If you set cache_dir in a config file, completions won't find it.
+Set BCQ_CACHE_DIR or BASECAMP_CACHE_DIR in your environment instead.
 `,
 		RunE: runCompletionRefresh,
 	}
@@ -271,10 +275,13 @@ func newCompletionStatusCmd() *cobra.Command {
 		Long: `Show the status of the completion cache.
 
 Displays information about the cached completion data including:
-- Number of cached projects and people
+- Number of cached projects, people, and accounts
 - When the cache was last updated
 - Whether the cache is stale
 - Cache file location
+
+Note: If you set cache_dir in a config file, completions won't find it.
+Set BCQ_CACHE_DIR or BASECAMP_CACHE_DIR in your environment instead.
 `,
 		RunE: runCompletionStatus,
 	}
