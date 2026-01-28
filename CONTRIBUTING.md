@@ -7,6 +7,9 @@
 git clone https://github.com/basecamp/bcq
 cd bcq
 
+# Install dev tools (golangci-lint, govulncheck, etc.)
+make tools
+
 # Build
 make build
 

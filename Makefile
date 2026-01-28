@@ -240,7 +240,7 @@ security: lint vuln secrets
 .PHONY: vuln
 vuln:
 	@echo "Running govulncheck..."
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	govulncheck ./...
 
 # Run secret scanner
 .PHONY: secrets
@@ -261,6 +261,15 @@ fuzz:
 fuzz-quick:
 	go test -fuzz=FuzzParseFrom -fuzztime=10s ./internal/dateparse/
 	go test -fuzz=FuzzURLPathParsing -fuzztime=10s ./internal/commands/
+
+# Install development tools
+.PHONY: tools
+tools:
+	$(GOCMD) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
+	$(GOCMD) install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+	$(GOCMD) install golang.org/x/perf/cmd/benchstat@v0.0.0-20250106171221-62ad9bd2d39e
+	$(GOCMD) install github.com/zricethezav/gitleaks/v8@v8.21.2
+	$(GOCMD) install github.com/mikefarah/yq/v4@v4.50.1
 
 # Show help
 .PHONY: help
@@ -298,9 +307,10 @@ help:
 	@echo "  fmt            Format code"
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
-	@echo "  check          Run all checks (fmt-check, vet, test)"
+	@echo "  check          Run all checks (fmt-check, vet, lint, test, test-e2e)"
 	@echo ""
 	@echo "Other:"
+	@echo "  tools          Install development tools (golangci-lint, govulncheck, etc.)"
 	@echo "  tidy           Tidy go.mod dependencies"
 	@echo "  verify         Verify dependencies"
 	@echo "  clean          Remove build artifacts"

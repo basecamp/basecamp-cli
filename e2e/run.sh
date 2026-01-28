@@ -10,7 +10,7 @@ export BCQ_NO_KEYRING=1
 cd "$(dirname "$0")"
 
 if ! command -v bats &>/dev/null; then
-  echo "Error: bats not found. Install with: apt install bats (Linux) or brew install bats-core (macOS)" >&2
+  echo "Error: bats not found. Install with your package manager (e.g., pacman -S bats, brew install bats-core)" >&2
   exit 1
 fi
 
