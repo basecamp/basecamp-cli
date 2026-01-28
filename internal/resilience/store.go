@@ -209,6 +209,12 @@ func (s *Store) saveUnsafe(state *State) error {
 	}
 
 	// On Windows, os.Rename fails if destination exists. Remove it first.
+	// Note: This creates a brief window where the file doesn't exist. In fail-open
+	// scenarios (no lock held), another process may observe the missing file and
+	// treat it as a fresh state. This is acceptable given the fail-open design:
+	// the resilience primitives tolerate occasional state resets, and the lock
+	// is held in the common case. Using MoveFileEx with MOVEFILE_REPLACE_EXISTING
+	// would avoid this but adds x/sys/windows dependency.
 	if runtime.GOOS == "windows" {
 		_ = os.Remove(s.Path()) // Ignore error if file doesn't exist
 	}

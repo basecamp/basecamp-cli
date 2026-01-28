@@ -116,18 +116,9 @@ func (h *GatingHooks) OnOperationEnd(ctx context.Context, op basecamp.OperationI
 		}
 	}
 
-	// Handle rate limiting from API response
-	if h.rateLimiter != nil && err != nil {
-		apiErr := basecamp.AsError(err)
-		if apiErr != nil && apiErr.Code == basecamp.CodeRateLimit {
-			// Default to 60 seconds if no Retry-After specified
-			retryAfter := 60 * time.Second
-			if apiErr.HTTPStatus == 429 {
-				// The SDK might have already handled this, but set it just in case
-				_ = h.rateLimiter.SetRetryAfterDuration(retryAfter)
-			}
-		}
-	}
+	// Note: Retry-After handling is done in OnRequestEnd which has access to the
+	// HTTP response headers. We don't duplicate it here to avoid overriding a
+	// shorter Retry-After from the server with the 60s default.
 }
 
 // OnRequestStart is called before an HTTP request is sent.
