@@ -58,6 +58,10 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -95,7 +99,7 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 	}
 
 	// Use SDK to get todoset
-	todoset, err := app.SDK.Todosets().Get(cmd.Context(), bucketID, tsID)
+	todoset, err := app.Account().Todosets().Get(cmd.Context(), bucketID, tsID)
 	if err != nil {
 		return convertSDKError(err)
 	}

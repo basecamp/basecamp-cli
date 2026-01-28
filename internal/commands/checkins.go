@@ -48,6 +48,10 @@ on a schedule (e.g., "What did you work on today?").`,
 func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -84,7 +88,7 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		return output.ErrUsage("Invalid questionnaire ID")
 	}
 
-	questionnaire, err := app.SDK.Checkins().GetQuestionnaire(cmd.Context(), bucketID, qID)
+	questionnaire, err := app.Account().Checkins().GetQuestionnaire(cmd.Context(), bucketID, qID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -113,6 +117,10 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 		Short: "List check-in questions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			// Resolve project
 			projectID := *project
@@ -150,7 +158,7 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				return output.ErrUsage("Invalid questionnaire ID")
 			}
 
-			questions, err := app.SDK.Checkins().ListQuestions(cmd.Context(), bucketID, qID)
+			questions, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -210,6 +218,10 @@ func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
 func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -237,7 +249,7 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 		return output.ErrUsage("Invalid question ID")
 	}
 
-	question, err := app.SDK.Checkins().GetQuestion(cmd.Context(), bucketID, questionID)
+	question, err := app.Account().Checkins().GetQuestion(cmd.Context(), bucketID, questionID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -277,6 +289,10 @@ Frequency options: every_day, every_week, every_other_week, every_month, on_cert
 Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -360,7 +376,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				},
 			}
 
-			question, err := app.SDK.Checkins().CreateQuestion(cmd.Context(), bucketID, qID, req)
+			question, err := app.Account().Checkins().CreateQuestion(cmd.Context(), bucketID, qID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -405,6 +421,10 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			questionIDStr := args[0]
 
@@ -476,7 +496,7 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --title, --frequency, --time, or --days is required")
 			}
 
-			question, err := app.SDK.Checkins().UpdateQuestion(cmd.Context(), bucketID, questionID, req)
+			question, err := app.Account().Checkins().UpdateQuestion(cmd.Context(), bucketID, questionID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -510,6 +530,10 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			questionIDStr := args[0]
 
 			// Resolve project
@@ -539,7 +563,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid question ID")
 			}
 
-			answers, err := app.SDK.Checkins().ListAnswers(cmd.Context(), bucketID, questionID)
+			answers, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -599,6 +623,10 @@ func newCheckinsAnswerShowCmd(project *string) *cobra.Command {
 func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -626,7 +654,7 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		return output.ErrUsage("Invalid answer ID")
 	}
 
-	answer, err := app.SDK.Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
+	answer, err := app.Account().Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -674,6 +702,10 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Allow question ID as positional arg
 			if questionID == "" && len(args) > 0 {
 				questionID = args[0]
@@ -718,7 +750,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				GroupOn: groupOn,
 			}
 
-			answer, err := app.SDK.Checkins().CreateAnswer(cmd.Context(), bucketID, qID, req)
+			answer, err := app.Account().Checkins().CreateAnswer(cmd.Context(), bucketID, qID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -764,6 +796,10 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			answerIDStr := args[0]
 
 			if content == "" {
@@ -801,13 +837,13 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				Content: fmt.Sprintf("<div>%s</div>", content),
 			}
 
-			err = app.SDK.Checkins().UpdateAnswer(cmd.Context(), bucketID, answerID, req)
+			err = app.Account().Checkins().UpdateAnswer(cmd.Context(), bucketID, answerID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
 			// Fetch the updated answer for display
-			answer, err := app.SDK.Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
+			answer, err := app.Account().Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
 			if err != nil {
 				return convertSDKError(err)
 			}

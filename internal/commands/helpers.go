@@ -32,9 +32,13 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 		return explicitID, nil
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return "", err
+	}
+
 	// Fetch project to get dock
 	path := fmt.Sprintf("/projects/%s.json", projectID)
-	resp, err := app.SDK.Get(ctx, path)
+	resp, err := app.Account().Get(ctx, path)
 	if err != nil {
 		return "", convertSDKError(err)
 	}

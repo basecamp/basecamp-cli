@@ -59,7 +59,7 @@ If no type specified, uses generic recording lookup.`,
 				return output.ErrUsage("--project is required")
 			}
 
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -96,7 +96,7 @@ If no type specified, uses generic recording lookup.`,
 				)
 			}
 
-			resp, err := app.SDK.Get(cmd.Context(), endpoint)
+			resp, err := app.Account().Get(cmd.Context(), endpoint)
 			if err != nil {
 				return convertSDKError(err)
 			}

@@ -38,6 +38,10 @@ Use 'bcq search metadata' to see available search scopes.`,
 
 			query := args[0]
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Build search options
 			var opts *basecamp.SearchOptions
 			if sortBy != "" {
@@ -46,7 +50,7 @@ Use 'bcq search metadata' to see available search scopes.`,
 				}
 			}
 
-			results, err := app.SDK.Search().Search(cmd.Context(), query, opts)
+			results, err := app.Account().Search().Search(cmd.Context(), query, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -93,7 +97,11 @@ func newSearchMetadataCmd() *cobra.Command {
 }
 
 func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
-	metadata, err := app.SDK.Search().Metadata(cmd.Context())
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
+	metadata, err := app.Account().Search().Metadata(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
 	}

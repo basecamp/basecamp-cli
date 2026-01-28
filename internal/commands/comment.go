@@ -67,7 +67,7 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return output.ErrUsage("Recording ID required")
 	}
 
-	if err := app.SDK.RequireAccount(); err != nil {
+	if err := app.RequireAccount(); err != nil {
 		return err
 	}
 
@@ -98,7 +98,7 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return output.ErrUsage("Invalid recording ID")
 	}
 
-	comments, err := app.SDK.Comments().List(cmd.Context(), bucketID, recID)
+	comments, err := app.Account().Comments().List(cmd.Context(), bucketID, recID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -128,7 +128,7 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -161,7 +161,7 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid comment ID")
 			}
 
-			comment, err := app.SDK.Comments().Get(cmd.Context(), bucketID, commentID)
+			comment, err := app.Account().Comments().Get(cmd.Context(), bucketID, commentID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -196,7 +196,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -237,7 +237,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 				Content: content,
 			}
 
-			comment, err := app.SDK.Comments().Update(cmd.Context(), bucketID, commentID, req)
+			comment, err := app.Account().Comments().Update(cmd.Context(), bucketID, commentID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -285,7 +285,7 @@ Supports batch commenting on multiple recordings at once.`,
 				return output.ErrUsage("--on requires a recording ID")
 			}
 
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -339,7 +339,7 @@ Supports batch commenting on multiple recordings at once.`,
 					continue
 				}
 
-				comment, createErr := app.SDK.Comments().Create(cmd.Context(), bucketID, recordingID, req)
+				comment, createErr := app.Account().Comments().Create(cmd.Context(), bucketID, recordingID, req)
 				if createErr != nil {
 					failed = append(failed, recordingIDStr)
 					continue

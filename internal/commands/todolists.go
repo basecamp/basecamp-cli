@@ -24,6 +24,13 @@ func NewTodolistsCmd() *cobra.Command {
 
 A "todoset" is the container; "todolists" are the actual lists inside it.
 Each project has one todoset containing multiple todolists.`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runTodolistsList(cmd, project)
@@ -60,6 +67,10 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -94,7 +105,7 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 	}
 
 	// Get todolists via SDK
-	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -128,6 +139,10 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			todolistIDStr := args[0]
 
 			// Resolve project
@@ -158,7 +173,7 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 			}
 
 			// Get todolist via SDK
-			todolist, err := app.SDK.Todolists().Get(cmd.Context(), bucketID, todolistID)
+			todolist, err := app.Account().Todolists().Get(cmd.Context(), bucketID, todolistID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -195,6 +210,10 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			if name == "" {
@@ -241,7 +260,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 			}
 
 			// Create todolist via SDK
-			todolist, err := app.SDK.Todolists().Create(cmd.Context(), bucketID, todosetID, req)
+			todolist, err := app.Account().Todolists().Create(cmd.Context(), bucketID, todosetID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -288,6 +307,10 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			todolistIDStr := args[0]
 
 			if name == "" && description == "" {
@@ -328,7 +351,7 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 			}
 
 			// Update todolist via SDK
-			todolist, err := app.SDK.Todolists().Update(cmd.Context(), bucketID, todolistID, req)
+			todolist, err := app.Account().Todolists().Update(cmd.Context(), bucketID, todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

@@ -38,12 +38,12 @@ func newAPIGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
 			path := parsePath(args[0])
-			resp, err := app.SDK.Get(cmd.Context(), path)
+			resp, err := app.Account().Get(cmd.Context(), path)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -69,7 +69,7 @@ func newAPIPostCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -88,7 +88,7 @@ func newAPIPostCmd() *cobra.Command {
 				)
 			}
 
-			resp, err := app.SDK.Post(cmd.Context(), path, body)
+			resp, err := app.Account().Post(cmd.Context(), path, body)
 			if err != nil {
 				return err
 			}
@@ -117,7 +117,7 @@ func newAPIPutCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -136,7 +136,7 @@ func newAPIPutCmd() *cobra.Command {
 				)
 			}
 
-			resp, err := app.SDK.Put(cmd.Context(), path, body)
+			resp, err := app.Account().Put(cmd.Context(), path, body)
 			if err != nil {
 				return err
 			}
@@ -163,12 +163,12 @@ func newAPIDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
 			path := parsePath(args[0])
-			resp, err := app.SDK.Delete(cmd.Context(), path)
+			resp, err := app.Account().Delete(cmd.Context(), path)
 			if err != nil {
 				return err
 			}

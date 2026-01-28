@@ -58,7 +58,11 @@ func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
 func runMessagesList(cmd *cobra.Command, project string, messageBoard string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	// Resolve project first (validate before account check)
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
+	// Resolve project from CLI flags and config
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -92,7 +96,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string) er
 	}
 
 	// Get messages using SDK
-	messages, err := app.SDK.Messages().List(cmd.Context(), bucketID, boardID)
+	messages, err := app.Account().Messages().List(cmd.Context(), bucketID, boardID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -123,6 +127,10 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			messageIDStr := args[0]
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -151,7 +159,7 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			message, err := app.SDK.Messages().Get(cmd.Context(), bucketID, messageID)
+			message, err := app.Account().Messages().Get(cmd.Context(), bucketID, messageID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -187,6 +195,10 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 		Long:  "Post a new message to a project's message board.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if subject == "" {
 				return output.ErrUsage("--subject is required")
@@ -238,7 +250,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				req.Status = "active"
 			}
 
-			message, err := app.SDK.Messages().Create(cmd.Context(), bucketID, boardID, req)
+			message, err := app.Account().Messages().Create(cmd.Context(), bucketID, boardID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -282,6 +294,10 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			messageIDStr := args[0]
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -320,7 +336,7 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				Content: content,
 			}
 
-			message, err := app.SDK.Messages().Update(cmd.Context(), bucketID, messageID, req)
+			message, err := app.Account().Messages().Update(cmd.Context(), bucketID, messageID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -354,6 +370,10 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			messageIDStr := args[0]
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -382,7 +402,7 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Messages().Pin(cmd.Context(), bucketID, messageID)
+			err = app.Account().Messages().Pin(cmd.Context(), bucketID, messageID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -419,6 +439,10 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			messageIDStr := args[0]
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -447,7 +471,7 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Messages().Unpin(cmd.Context(), bucketID, messageID)
+			err = app.Account().Messages().Unpin(cmd.Context(), bucketID, messageID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -489,6 +513,10 @@ func NewMessageCmd() *cobra.Command {
 		Long:  "Post a message to a project's message board. Shortcut for 'bcq messages create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if subject == "" {
 				return output.ErrUsage("--subject is required")
@@ -538,7 +566,7 @@ func NewMessageCmd() *cobra.Command {
 				req.Status = "active"
 			}
 
-			message, err := app.SDK.Messages().Create(cmd.Context(), bucketID, boardID, req)
+			message, err := app.Account().Messages().Create(cmd.Context(), bucketID, boardID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

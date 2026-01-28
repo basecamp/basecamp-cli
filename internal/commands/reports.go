@@ -40,7 +40,11 @@ func newReportsAssignableCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			people, err := app.SDK.Reports().AssignablePeople(cmd.Context())
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
+			people, err := app.Account().Reports().AssignablePeople(cmd.Context())
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -80,6 +84,10 @@ Results can be grouped by bucket (project) or date.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Default to "me" if no person specified
 			person := "me"
 			if len(args) > 0 {
@@ -106,7 +114,7 @@ Results can be grouped by bucket (project) or date.`,
 				opts = &basecamp.AssignedTodosOptions{GroupBy: groupBy}
 			}
 
-			result, err := app.SDK.Reports().AssignedTodos(cmd.Context(), personID, opts)
+			result, err := app.Account().Reports().AssignedTodos(cmd.Context(), personID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -163,7 +171,11 @@ Todos are grouped into categories:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			result, err := app.SDK.Reports().OverdueTodos(cmd.Context())
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
+			result, err := app.Account().Reports().OverdueTodos(cmd.Context())
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -234,12 +246,16 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Parse dates if provided (dateparse handles natural language like "today", "+7")
 			// Unrecognized formats are normalized (trimmed/lowercased) and passed through for the API to validate
 			parsedStart := dateparse.Parse(startDate)
 			parsedEnd := dateparse.Parse(endDate)
 
-			result, err := app.SDK.Reports().UpcomingSchedule(cmd.Context(), parsedStart, parsedEnd)
+			result, err := app.Account().Reports().UpcomingSchedule(cmd.Context(), parsedStart, parsedEnd)
 			if err != nil {
 				return convertSDKError(err)
 			}

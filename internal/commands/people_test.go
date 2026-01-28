@@ -54,14 +54,12 @@ func setupPeopleTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	// Create auth manager without any stored credentials
 	authMgr := auth.NewManager(cfg, nil)
 
-	sdkCfg := &basecamp.Config{
-		AccountID: cfg.AccountID,
-	}
+	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
 		basecamp.WithTransport(peopleNoNetworkTransport{}),
 		basecamp.WithMaxRetries(0), // Disable retries for instant failure
 	)
-	nameResolver := names.NewResolver(sdkClient, authMgr)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
 	app := &appctx.App{
 		Config: cfg,
@@ -177,14 +175,12 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 	// Create auth manager
 	authMgr := auth.NewManager(cfg, nil)
 
-	sdkCfg := &basecamp.Config{
-		AccountID: cfg.AccountID,
-	}
+	sdkCfg := &basecamp.Config{}
 	// Use default transport to allow HTTP requests to the mock server
 	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
 		basecamp.WithMaxRetries(0),
 	)
-	nameResolver := names.NewResolver(sdkClient, authMgr)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
 	app := &appctx.App{
 		Config: cfg,

@@ -70,8 +70,8 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 
 	// Build context info
 	contextInfo := ContextInfo{}
-	if app.Config.ProjectID != "" {
-		// Try to resolve project name
+	if app.Config.ProjectID != "" && app.RequireAccount() == nil {
+		// Try to resolve project name (best-effort, skip if account not configured)
 		projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), app.Config.ProjectID)
 		if err == nil {
 			var id int64

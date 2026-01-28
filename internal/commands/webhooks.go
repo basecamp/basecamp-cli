@@ -25,6 +25,13 @@ func NewWebhooksCmd() *cobra.Command {
 
 Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check for unknown subcommand
 			if len(args) > 0 {
@@ -65,6 +72,10 @@ func newWebhooksListCmd(project *string) *cobra.Command {
 func runWebhooksList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -87,7 +98,7 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	webhooks, err := app.SDK.Webhooks().List(cmd.Context(), bucketID)
+	webhooks, err := app.Account().Webhooks().List(cmd.Context(), bucketID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -117,6 +128,10 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			webhookIDStr := args[0]
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
 			if err != nil {
@@ -145,7 +160,7 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			webhook, err := app.SDK.Webhooks().Get(cmd.Context(), bucketID, webhookID)
+			webhook, err := app.Account().Webhooks().Get(cmd.Context(), bucketID, webhookID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -189,6 +204,10 @@ Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if url == "" {
 				return output.ErrUsage("--url is required")
@@ -235,7 +254,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				Types:      typeArray, // nil = server defaults
 			}
 
-			webhook, err := app.SDK.Webhooks().Create(cmd.Context(), bucketID, req)
+			webhook, err := app.Account().Webhooks().Create(cmd.Context(), bucketID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -277,6 +296,10 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			webhookIDStr := args[0]
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
@@ -342,7 +365,7 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --url, --types, --active, or --inactive is required")
 			}
 
-			webhook, err := app.SDK.Webhooks().Update(cmd.Context(), bucketID, webhookID, req)
+			webhook, err := app.Account().Webhooks().Update(cmd.Context(), bucketID, webhookID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -381,6 +404,10 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			webhookIDStr := args[0]
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
 			if err != nil {
@@ -409,7 +436,7 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Webhooks().Delete(cmd.Context(), bucketID, webhookID)
+			err = app.Account().Webhooks().Delete(cmd.Context(), bucketID, webhookID)
 			if err != nil {
 				return convertSDKError(err)
 			}

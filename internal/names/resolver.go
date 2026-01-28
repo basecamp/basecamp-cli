@@ -23,8 +23,9 @@ import (
 
 // Resolver resolves names to IDs for projects, people, and todolists.
 type Resolver struct {
-	sdk  *basecamp.Client
-	auth *auth.Manager
+	sdk       *basecamp.Client
+	auth      *auth.Manager
+	accountID string
 
 	// Session-scoped cache
 	mu        sync.RWMutex
@@ -54,12 +55,34 @@ type Todolist struct {
 }
 
 // NewResolver creates a new name resolver.
-func NewResolver(sdkClient *basecamp.Client, authMgr *auth.Manager) *Resolver {
+// The accountID is used to configure the SDK client for account-scoped API calls.
+func NewResolver(sdkClient *basecamp.Client, authMgr *auth.Manager, accountID string) *Resolver {
 	return &Resolver{
 		sdk:       sdkClient,
 		auth:      authMgr,
+		accountID: accountID,
 		todolists: make(map[string][]Todolist),
 	}
+}
+
+// SetAccountID updates the account ID used by the resolver.
+// This clears the cache since cached data is account-specific.
+func (r *Resolver) SetAccountID(accountID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.accountID != accountID {
+		r.accountID = accountID
+		// Clear cache since data is account-specific
+		r.projects = nil
+		r.people = nil
+		r.todolists = make(map[string][]Todolist)
+	}
+}
+
+// forAccount returns an account-scoped client for the resolver's account.
+// This should be called before making account-scoped API requests.
+func (r *Resolver) forAccount() *basecamp.AccountClient {
+	return r.sdk.ForAccount(r.accountID)
 }
 
 // ResolveProject resolves a project name or ID to an ID.
@@ -262,7 +285,7 @@ func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {
 	}
 
 	// Fetch from API
-	resp, err := r.sdk.Get(ctx, "/projects.json")
+	resp, err := r.forAccount().Get(ctx, "/projects.json")
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -293,7 +316,7 @@ func (r *Resolver) getPeople(ctx context.Context) ([]Person, error) {
 	}
 
 	// Fetch from API
-	resp, err := r.sdk.Get(ctx, "/people.json")
+	resp, err := r.forAccount().Get(ctx, "/people.json")
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -324,7 +347,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 	}
 
 	// First get the project to find the todoset ID
-	projectResp, err := r.sdk.Get(ctx, "/projects/"+projectID+".json")
+	projectResp, err := r.forAccount().Get(ctx, "/projects/"+projectID+".json")
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -356,7 +379,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 
 	// Fetch todolists from todoset
 	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", projectID, todosetID)
-	resp, err := r.sdk.Get(ctx, todolistsPath)
+	resp, err := r.forAccount().Get(ctx, todolistsPath)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}

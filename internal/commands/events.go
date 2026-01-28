@@ -30,6 +30,10 @@ Events track all changes to a recording. Common event actions:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			recordingIDStr := args[0]
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
@@ -58,7 +62,7 @@ Events track all changes to a recording. Common event actions:
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			events, err := app.SDK.Events().List(cmd.Context(), bucketID, recordingID)
+			events, err := app.Account().Events().List(cmd.Context(), bucketID, recordingID)
 			if err != nil {
 				return convertSDKError(err)
 			}

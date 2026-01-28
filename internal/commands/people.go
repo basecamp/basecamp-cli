@@ -196,6 +196,10 @@ func newPeopleListCmd() *cobra.Command {
 func runPeopleList(cmd *cobra.Command, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	var people []basecamp.Person
 	var err error
 
@@ -209,9 +213,9 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 		if parseErr != nil {
 			return output.ErrUsage("Invalid project ID")
 		}
-		people, err = app.SDK.People().ListProjectPeople(cmd.Context(), bucketID)
+		people, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID)
 	} else {
-		people, err = app.SDK.People().List(cmd.Context())
+		people, err = app.Account().People().List(cmd.Context())
 	}
 
 	if err != nil {
@@ -265,6 +269,10 @@ func newPeopleShowCmd() *cobra.Command {
 func runPeopleShow(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve person name/ID
 	personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), args[0])
 	if err != nil {
@@ -276,7 +284,7 @@ func runPeopleShow(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage("Invalid person ID")
 	}
 
-	person, err := app.SDK.People().Get(cmd.Context(), personID)
+	person, err := app.Account().People().Get(cmd.Context(), personID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -297,7 +305,11 @@ func newPeoplePingableCmd() *cobra.Command {
 func runPeoplePingable(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	people, err := app.SDK.People().Pingable(cmd.Context())
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
+	people, err := app.Account().People().Pingable(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -329,6 +341,10 @@ func newPeopleAddCmd() *cobra.Command {
 func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 	if err != nil {
@@ -359,7 +375,7 @@ func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) erro
 		Grant: ids,
 	}
 
-	result, err := app.SDK.People().UpdateProjectAccess(cmd.Context(), bucketID, req)
+	result, err := app.Account().People().UpdateProjectAccess(cmd.Context(), bucketID, req)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -397,6 +413,10 @@ func newPeopleRemoveCmd() *cobra.Command {
 func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 	if err != nil {
@@ -427,7 +447,7 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 		Revoke: ids,
 	}
 
-	result, err := app.SDK.People().UpdateProjectAccess(cmd.Context(), bucketID, req)
+	result, err := app.Account().People().UpdateProjectAccess(cmd.Context(), bucketID, req)
 	if err != nil {
 		return convertSDKError(err)
 	}

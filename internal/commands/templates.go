@@ -57,20 +57,24 @@ func newTemplatesListCmd(status *string) *cobra.Command {
 func runTemplatesList(cmd *cobra.Command, status string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	var templates []basecamp.Template
 	var err error
 
 	// SDK List() defaults to active status (API default)
 	// For archived/trashed, use raw API with status parameter
 	if status == "active" || status == "" {
-		templates, err = app.SDK.Templates().List(cmd.Context())
+		templates, err = app.Account().Templates().List(cmd.Context())
 		if err != nil {
 			return convertSDKError(err)
 		}
 	} else {
 		// Fall back to raw API for non-active statuses
 		path := fmt.Sprintf("/templates.json?status=%s", status)
-		resp, err := app.SDK.Get(cmd.Context(), path)
+		resp, err := app.Account().Get(cmd.Context(), path)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -110,12 +114,16 @@ func newTemplatesShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
 			}
 
-			template, err := app.SDK.Templates().Get(cmd.Context(), templateID)
+			template, err := app.Account().Templates().Get(cmd.Context(), templateID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -156,6 +164,10 @@ func newTemplatesCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Name from positional arg or flag
 			if len(args) > 0 && name == "" {
 				name = args[0]
@@ -170,7 +182,7 @@ func newTemplatesCreateCmd() *cobra.Command {
 				Description: description,
 			}
 
-			template, err := app.SDK.Templates().Create(cmd.Context(), req)
+			template, err := app.Account().Templates().Create(cmd.Context(), req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -212,6 +224,10 @@ func newTemplatesUpdateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
@@ -224,7 +240,7 @@ func newTemplatesUpdateCmd() *cobra.Command {
 			// SDK requires name for update, fetch current if not provided
 			updateName := name
 			if updateName == "" {
-				current, err := app.SDK.Templates().Get(cmd.Context(), templateID)
+				current, err := app.Account().Templates().Get(cmd.Context(), templateID)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -236,7 +252,7 @@ func newTemplatesUpdateCmd() *cobra.Command {
 				Description: description,
 			}
 
-			template, err := app.SDK.Templates().Update(cmd.Context(), templateID, req)
+			template, err := app.Account().Templates().Update(cmd.Context(), templateID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -270,12 +286,16 @@ func newTemplatesDeleteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
 			}
 
-			err = app.SDK.Templates().Delete(cmd.Context(), templateID)
+			err = app.Account().Templates().Delete(cmd.Context(), templateID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -314,6 +334,10 @@ which can be polled via 'templates construction' until the status is "completed"
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
@@ -323,7 +347,7 @@ which can be polled via 'templates construction' until the status is "completed"
 				return output.ErrUsage("--name is required (project name)")
 			}
 
-			construction, err := app.SDK.Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc)
+			construction, err := app.Account().Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -361,6 +385,10 @@ the response includes the newly created project.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
@@ -371,7 +399,7 @@ the response includes the newly created project.`,
 				return output.ErrUsage("Invalid construction ID")
 			}
 
-			construction, err := app.SDK.Templates().GetConstruction(cmd.Context(), templateID, constructionID)
+			construction, err := app.Account().Templates().GetConstruction(cmd.Context(), templateID, constructionID)
 			if err != nil {
 				return convertSDKError(err)
 			}
