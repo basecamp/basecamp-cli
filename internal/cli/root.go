@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/commands"
+	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/output"
 	"github.com/basecamp/bcq/internal/version"
@@ -82,6 +83,11 @@ func NewRootCmd() *cobra.Command {
 	// Hide some flags from help
 	_ = cmd.PersistentFlags().MarkHidden("base-url") // Error only if flag doesn't exist
 
+	// Register tab completion for flags.
+	// DefaultCacheDirFunc checks --cache-dir flag, then app context, then default.
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+
 	return cmd
 }
 
@@ -137,6 +143,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewCommandsCmd())
 	cmd.AddCommand(commands.NewTimelineCmd())
 	cmd.AddCommand(commands.NewReportsCmd())
+	cmd.AddCommand(commands.NewCompletionCmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()

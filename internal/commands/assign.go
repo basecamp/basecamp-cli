@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/output"
 )
 
@@ -147,6 +148,11 @@ Person can be:
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	_ = cmd.MarkFlagRequired("to")
 
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+
 	return cmd
 }
 
@@ -260,6 +266,11 @@ Person can be:
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	_ = cmd.MarkFlagRequired("from")
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("from", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
 
 	return cmd
 }

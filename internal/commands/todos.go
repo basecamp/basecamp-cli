@@ -10,6 +10,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/dateparse"
 	"github.com/basecamp/bcq/internal/output"
 )
@@ -54,6 +55,10 @@ func NewTodosCmd() *cobra.Command {
 		newTodosSweepCmd(),
 		newTodosPositionCmd(),
 	)
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
 	return cmd
 }

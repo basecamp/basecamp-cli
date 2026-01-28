@@ -11,6 +11,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/dateparse"
 	"github.com/basecamp/bcq/internal/output"
 )
@@ -494,6 +495,10 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVar(&content, "body", "", "Card body/description (alias for --content)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
+
+	// Register tab completion for assignee flag
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
 	return cmd
 }
