@@ -34,13 +34,11 @@ func NewRootCmd() *cobra.Command {
 
 			// Load configuration with flag overrides
 			cfg, err := config.Load(config.FlagOverrides{
-				Account:    flags.Account,
-				Project:    flags.Project,
-				Todolist:   flags.Todolist,
-				BaseURL:    flags.BaseURL,
-				CacheDir:   flags.CacheDir,
-				Verbose:    flags.Verbose,
-				VerboseSet: cmd.Flags().Changed("verbose"),
+				Account:  flags.Account,
+				Project:  flags.Project,
+				Todolist: flags.Todolist,
+				BaseURL:  flags.BaseURL,
+				CacheDir: flags.CacheDir,
 			})
 			if err != nil {
 				return err
@@ -147,7 +145,13 @@ func Execute() {
 		// Convert error to structured output
 		apiErr := output.AsError(err)
 
-		// Determine output format from flags (read from command's persistent flags)
+		// Try to use app.Err() if app is available (for --stats support)
+		if app := appctx.FromContext(cmd.Context()); app != nil {
+			_ = app.Err(err)
+			os.Exit(apiErr.ExitCode())
+		}
+
+		// Fallback: output error directly (app not available, e.g., during setup)
 		pf := cmd.PersistentFlags()
 		format := output.FormatAuto // Default to auto (TTY → styled, non-TTY → JSON)
 		agent, _ := pf.GetBool("agent")
@@ -172,12 +176,11 @@ func Execute() {
 			format = output.FormatJSON
 		}
 
-		// Output error with correct format
 		writer := output.New(output.Options{
 			Format: format,
 			Writer: os.Stdout,
 		})
-		_ = writer.Err(err) // Error output is best-effort before exit
+		_ = writer.Err(err)
 
 		os.Exit(apiErr.ExitCode())
 	}

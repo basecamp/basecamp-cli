@@ -46,14 +46,12 @@ const (
 
 // FlagOverrides holds command-line flag values.
 type FlagOverrides struct {
-	Account    string
-	Project    string
-	Todolist   string
-	BaseURL    string
-	CacheDir   string
-	Format     string
-	Verbose    int  // 0=normal, 1=operations, 2=operations+requests
-	VerboseSet bool // true if -v was passed (even with 0 count)
+	Account  string
+	Project  string
+	Todolist string
+	BaseURL  string
+	CacheDir string
+	Format   string
 }
 
 // Default returns the default configuration.

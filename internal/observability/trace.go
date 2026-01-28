@@ -13,19 +13,17 @@ import (
 )
 
 // sensitiveParams are query parameter names that should be scrubbed from trace output.
+// This list is intentionally specific to avoid hiding useful debug info.
 var sensitiveParams = map[string]bool{
-	"access_token":  true,
-	"token":         true,
-	"api_key":       true,
-	"apikey":        true,
-	"key":           true,
-	"password":      true,
-	"secret":        true,
-	"auth":          true,
-	"authorization": true,
-	"bearer":        true,
-	"credential":    true,
-	"credentials":   true,
+	"access_token":  true, // OAuth tokens
+	"refresh_token": true, // OAuth refresh
+	"api_key":       true, // API keys
+	"apikey":        true, // API keys (no underscore)
+	"password":      true, // Passwords
+	"passwd":        true, // Passwords (short form)
+	"secret":        true, // Generic secrets
+	"client_secret": true, // OAuth client secret
+	"private_key":   true, // Private keys
 }
 
 // TraceWriter outputs human-readable trace information to stderr.
@@ -127,10 +125,12 @@ func (t *TraceWriter) Reset() {
 }
 
 // scrubURL redacts sensitive query parameters from a URL for safe logging.
+// Returns a safe placeholder if the URL cannot be parsed.
 func scrubURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return rawURL // Return as-is if parsing fails
+		// Don't leak potentially sensitive malformed URLs
+		return "[unparseable URL]"
 	}
 
 	query := u.Query()
