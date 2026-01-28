@@ -25,6 +25,10 @@ func NewMeCmd() *cobra.Command {
 func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if !app.Auth.IsAuthenticated() {
+		return output.ErrAuth("Not authenticated")
+	}
+
 	person, err := app.SDK.People().Me(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
