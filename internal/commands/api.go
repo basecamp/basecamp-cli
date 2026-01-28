@@ -45,7 +45,7 @@ func newAPIGetCmd() *cobra.Command {
 			path := parsePath(args[0])
 			resp, err := app.SDK.Get(cmd.Context(), path)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			summary := apiSummary(resp.Data)

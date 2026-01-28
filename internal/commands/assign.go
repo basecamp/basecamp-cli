@@ -64,7 +64,7 @@ Person can be:
 			todoPath := fmt.Sprintf("/buckets/%s/todos/%s.json", resolvedProjectID, todoID)
 			todoResp, err := app.SDK.Get(cmd.Context(), todoPath)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			var todo struct {
@@ -102,7 +102,7 @@ Person can be:
 
 			resp, err := app.SDK.Put(cmd.Context(), todoPath, body)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			// Get assignee name from response
@@ -207,7 +207,7 @@ Person can be:
 			todoPath := fmt.Sprintf("/buckets/%s/todos/%s.json", resolvedProjectID, todoID)
 			todoResp, err := app.SDK.Get(cmd.Context(), todoPath)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			var todo struct {
@@ -235,7 +235,7 @@ Person can be:
 
 			resp, err := app.SDK.Put(cmd.Context(), todoPath, body)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			return app.Output.OK(json.RawMessage(resp.Data),

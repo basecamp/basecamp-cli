@@ -358,7 +358,7 @@ func newConfigProjectCmd() *cobra.Command {
 			// Fetch projects
 			resp, err := app.SDK.Get(cmd.Context(), "/projects.json")
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			var projects []struct {

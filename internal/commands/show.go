@@ -98,7 +98,7 @@ If no type specified, uses generic recording lookup.`,
 
 			resp, err := app.SDK.Get(cmd.Context(), endpoint)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			// Check for empty response (204 No Content)

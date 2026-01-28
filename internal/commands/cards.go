@@ -1918,7 +1918,7 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 	path := fmt.Sprintf("/projects/%s.json", projectID)
 	resp, err := app.SDK.Get(cmd.Context(), path)
 	if err != nil {
-		return "", err
+		return "", convertSDKError(err)
 	}
 
 	var project struct {

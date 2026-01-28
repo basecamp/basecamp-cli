@@ -36,7 +36,7 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 	path := fmt.Sprintf("/projects/%s.json", projectID)
 	resp, err := app.SDK.Get(ctx, path)
 	if err != nil {
-		return "", err
+		return "", convertSDKError(err)
 	}
 
 	var project struct {

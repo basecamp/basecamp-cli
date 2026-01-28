@@ -263,7 +263,7 @@ func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {
 	// Fetch from API
 	resp, err := r.sdk.Get(ctx, "/projects.json")
 	if err != nil {
-		return nil, err
+		return nil, convertSDKError(err)
 	}
 
 	var projects []Project
@@ -294,7 +294,7 @@ func (r *Resolver) getPeople(ctx context.Context) ([]Person, error) {
 	// Fetch from API
 	resp, err := r.sdk.Get(ctx, "/people.json")
 	if err != nil {
-		return nil, err
+		return nil, convertSDKError(err)
 	}
 
 	var people []Person
@@ -325,7 +325,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 	// First get the project to find the todoset ID
 	projectResp, err := r.sdk.Get(ctx, "/projects/"+projectID+".json")
 	if err != nil {
-		return nil, err
+		return nil, convertSDKError(err)
 	}
 
 	var projectData struct {
@@ -357,7 +357,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", projectID, todosetID)
 	resp, err := r.sdk.Get(ctx, todolistsPath)
 	if err != nil {
-		return nil, err
+		return nil, convertSDKError(err)
 	}
 
 	var todolists []Todolist
@@ -471,4 +471,18 @@ func (r *Resolver) GetPeople(ctx context.Context) ([]Person, error) {
 // GetTodolists returns all todolists for a project (useful for pickers).
 func (r *Resolver) GetTodolists(ctx context.Context, projectID string) ([]Todolist, error) {
 	return r.getTodolists(ctx, projectID)
+}
+
+// convertSDKError converts SDK errors to output errors for consistent error handling.
+func convertSDKError(err error) error {
+	if sdkErr, ok := err.(*basecamp.Error); ok {
+		return &output.Error{
+			Code:       sdkErr.Code,
+			Message:    sdkErr.Message,
+			Hint:       sdkErr.Hint,
+			HTTPStatus: sdkErr.HTTPStatus,
+			Retryable:  sdkErr.Retryable,
+		}
+	}
+	return err
 }
