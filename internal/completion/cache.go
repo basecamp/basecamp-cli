@@ -28,12 +28,20 @@ type CachedPerson struct {
 	EmailAddress string `json:"email_address,omitempty"`
 }
 
+// CachedAccount holds account data for tab completion.
+type CachedAccount struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // Cache stores completion data with metadata for staleness detection.
 type Cache struct {
 	Projects          []CachedProject `json:"projects,omitempty"`
 	People            []CachedPerson  `json:"people,omitempty"`
+	Accounts          []CachedAccount `json:"accounts,omitempty"`
 	ProjectsUpdatedAt time.Time       `json:"projects_updated_at,omitempty"`
 	PeopleUpdatedAt   time.Time       `json:"people_updated_at,omitempty"`
+	AccountsUpdatedAt time.Time       `json:"accounts_updated_at,omitempty"`
 	UpdatedAt         time.Time       `json:"updated_at"` // Legacy, kept for backwards compat
 	Version           int             `json:"version"`    // Schema version for future migrations
 }
@@ -188,6 +196,24 @@ func (s *Store) UpdatePeople(people []CachedPerson) error {
 	return s.saveUnsafe(cache)
 }
 
+// UpdateAccounts updates just the accounts in the cache.
+// Only updates AccountsUpdatedAt, preserving other timestamps.
+// Note: Accounts are user-level (not account-scoped like projects/people),
+// so they're refreshed separately via `bcq me`.
+func (s *Store) UpdateAccounts(accounts []CachedAccount) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cache, err := s.loadUnsafe()
+	if err != nil {
+		cache = &Cache{Version: CacheVersion}
+	}
+
+	cache.Accounts = accounts
+	cache.AccountsUpdatedAt = time.Now()
+	return s.saveUnsafe(cache)
+}
+
 // oldestTime returns the oldest time, treating zero as infinitely old.
 // This ensures a missing section (zero timestamp) makes the cache appear stale.
 func oldestTime(a, b time.Time) time.Time {
@@ -248,4 +274,13 @@ func (s *Store) People() []CachedPerson {
 		return nil
 	}
 	return cache.People
+}
+
+// Accounts returns cached accounts, or nil if cache is empty/missing.
+func (s *Store) Accounts() []CachedAccount {
+	cache, err := s.Load()
+	if err != nil {
+		return nil
+	}
+	return cache.Accounts
 }

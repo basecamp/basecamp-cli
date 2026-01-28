@@ -135,10 +135,27 @@ func runMe(cmd *cobra.Command, args []string) error {
 	}
 	breadcrumbs = append(breadcrumbs, output.Breadcrumb{Action: "auth", Cmd: "bcq auth status", Description: "Auth status"})
 
+	// Opportunistically update accounts cache for tab completion
+	go updateAccountsCache(accounts, app.Config.CacheDir)
+
 	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
+}
+
+// updateAccountsCache updates the completion cache with account data.
+// This runs asynchronously and silently ignores errors.
+func updateAccountsCache(accounts []AccountInfo, cacheDir string) {
+	store := completion.NewStore(cacheDir)
+	cached := make([]completion.CachedAccount, len(accounts))
+	for i, a := range accounts {
+		cached[i] = completion.CachedAccount{
+			ID:   a.ID,
+			Name: a.Name,
+		}
+	}
+	_ = store.UpdateAccounts(cached) // Ignore errors - this is best-effort
 }
 
 func NewPeopleCmd() *cobra.Command {

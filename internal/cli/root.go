@@ -84,9 +84,10 @@ func NewRootCmd() *cobra.Command {
 	_ = cmd.PersistentFlags().MarkHidden("base-url") // Error only if flag doesn't exist
 
 	// Register tab completion for flags.
-	// DefaultCacheDirFunc checks --cache-dir flag, then app context, then default.
+	// DefaultCacheDirFunc checks --cache-dir flag, then app context, then env vars.
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
 
 	return cmd
 }

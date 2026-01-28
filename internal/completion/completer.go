@@ -216,6 +216,40 @@ func (c *Completer) PeopleNameCompletion() cobra.CompletionFunc {
 	}
 }
 
+// AccountCompletion returns a Cobra completion function for account arguments.
+// Accounts are sorted alphabetically by name. The --account flag takes an ID.
+func (c *Completer) AccountCompletion() cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		accounts := c.store(cmd).Accounts()
+		if len(accounts) == 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		// Sort alphabetically by name
+		sorted := make([]CachedAccount, len(accounts))
+		copy(sorted, accounts)
+		sort.Slice(sorted, func(i, j int) bool {
+			return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
+		})
+
+		// Filter by prefix (match on ID or name)
+		toCompleteLower := strings.ToLower(toComplete)
+		var completions []cobra.Completion
+		for _, a := range sorted {
+			idStr := fmt.Sprintf("%d", a.ID)
+			nameLower := strings.ToLower(a.Name)
+			if strings.HasPrefix(idStr, toComplete) ||
+				strings.HasPrefix(nameLower, toCompleteLower) ||
+				strings.Contains(nameLower, toCompleteLower) {
+				// Use ID as completion value with name as description
+				completions = append(completions, cobra.CompletionWithDesc(idStr, a.Name))
+			}
+		}
+
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // rankProjects returns projects sorted by priority:
 // 1. HQ (purpose="hq")
 // 2. Bookmarked
