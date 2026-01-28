@@ -122,7 +122,7 @@ func TestApplyFlagsMD(t *testing.T) {
 func TestApplyFlagsVerbose(t *testing.T) {
 	cfg := &config.Config{}
 	app := NewApp(cfg)
-	app.Flags.Verbose = true
+	app.Flags.Verbose = 1 // -v
 
 	// Should not panic
 	app.ApplyFlags()
@@ -222,8 +222,8 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 	if flags.Count {
 		t.Error("Count should default to false")
 	}
-	if flags.Verbose {
-		t.Error("Verbose should default to false")
+	if flags.Verbose != 0 {
+		t.Error("Verbose should default to 0")
 	}
 
 	// All strings should default to empty
@@ -301,4 +301,142 @@ func TestOutputWriterType(t *testing.T) {
 	cfg := &config.Config{}
 	app := NewApp(cfg)
 	_ = app.Output // Verify it's assignable to *output.Writer
+}
+
+// Test app.OK includes stats when --stats flag is set
+func TestAppOKWithStats(t *testing.T) {
+	cfg := &config.Config{}
+	app := NewApp(cfg)
+
+	// Without stats flag - should not panic
+	app.Flags.Stats = false
+	err := app.OK(map[string]string{"test": "data"})
+	if err != nil {
+		t.Errorf("OK without stats failed: %v", err)
+	}
+
+	// With stats flag - should not panic and include stats
+	app.Flags.Stats = true
+	err = app.OK(map[string]string{"test": "data"})
+	if err != nil {
+		t.Errorf("OK with stats failed: %v", err)
+	}
+}
+
+// Test app.OK with nil collector doesn't panic
+func TestAppOKWithNilCollector(t *testing.T) {
+	cfg := &config.Config{}
+	app := NewApp(cfg)
+	app.Collector = nil
+	app.Flags.Stats = true
+
+	// Should not panic even with nil collector
+	err := app.OK(map[string]string{"test": "data"})
+	if err != nil {
+		t.Errorf("OK with nil collector failed: %v", err)
+	}
+}
+
+// Test isMachineOutput detects flag-driven machine output modes
+func TestIsMachineOutputFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		setFlag  func(*App)
+		expected bool
+	}{
+		{"default", func(a *App) {}, false},
+		{"agent flag", func(a *App) { a.Flags.Agent = true }, true},
+		{"quiet flag", func(a *App) { a.Flags.Quiet = true }, true},
+		{"ids-only flag", func(a *App) { a.Flags.IDsOnly = true }, true},
+		{"count flag", func(a *App) { a.Flags.Count = true }, true},
+		{"json flag", func(a *App) { a.Flags.JSON = true }, false},
+		{"md flag", func(a *App) { a.Flags.MD = true }, false},
+		{"styled flag", func(a *App) { a.Flags.Styled = true }, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+			tt.setFlag(app)
+
+			if got := app.isMachineOutput(); got != tt.expected {
+				t.Errorf("isMachineOutput() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// Test isMachineOutput detects config-driven quiet mode
+func TestIsMachineOutputConfigFormat(t *testing.T) {
+	tests := []struct {
+		format   string
+		expected bool
+	}{
+		{"", false},
+		{"json", false},
+		{"markdown", false},
+		{"md", false},
+		{"quiet", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			cfg := &config.Config{Format: tt.format}
+			app := NewApp(cfg)
+
+			if got := app.isMachineOutput(); got != tt.expected {
+				t.Errorf("isMachineOutput() with config format %q = %v, want %v", tt.format, got, tt.expected)
+			}
+		})
+	}
+}
+
+// Test that app.Err doesn't print stats in machine output modes
+func TestAppErrMachineOutputNoStats(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(*App)
+		machine bool
+	}{
+		{"flag quiet", func(a *App) { a.Flags.Quiet = true }, true},
+		{"flag agent", func(a *App) { a.Flags.Agent = true }, true},
+		{"flag ids-only", func(a *App) { a.Flags.IDsOnly = true }, true},
+		{"flag count", func(a *App) { a.Flags.Count = true }, true},
+		{"config quiet", func(a *App) { a.Config.Format = "quiet" }, true},
+		{"flag json", func(a *App) { a.Flags.JSON = true }, false},
+		{"default", func(a *App) {}, false},
+	}
+
+	testErr := &testError{msg: "test error"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+			app.Flags.Stats = true // Enable stats
+			tt.setup(app)
+			app.ApplyFlags()
+
+			// Verify isMachineOutput returns expected value
+			if got := app.isMachineOutput(); got != tt.machine {
+				t.Errorf("isMachineOutput() = %v, want %v", got, tt.machine)
+			}
+
+			// app.Err should not panic regardless of mode
+			err := app.Err(testErr)
+			if err != nil {
+				t.Errorf("Err() returned error: %v", err)
+			}
+		})
+	}
+}
+
+// testError is a simple error type for testing
+type testError struct {
+	msg string
+}
+
+func (e *testError) Error() string {
+	return e.msg
 }

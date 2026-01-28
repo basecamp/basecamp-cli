@@ -63,7 +63,7 @@ Events track all changes to a recording. Common event actions:
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(events,
+			return app.OK(events,
 				output.WithSummary(fmt.Sprintf("%d events for recording #%s", len(events), recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

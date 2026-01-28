@@ -105,7 +105,7 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		completedRatio = "0.0"
 	}
 
-	return app.Output.OK(todoset,
+	return app.OK(todoset,
 		output.WithSummary(fmt.Sprintf("%d todolists (%s%% complete)", todoset.TodolistsCount, completedRatio)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

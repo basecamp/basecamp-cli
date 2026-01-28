@@ -74,7 +74,7 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(projects,
+	return app.OK(projects,
 		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -113,7 +113,7 @@ func newProjectsShowCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(project,
+			return app.OK(project,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
@@ -159,7 +159,7 @@ func newProjectsCreateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(project,
+			return app.OK(project,
 				output.WithSummary(fmt.Sprintf("Created project: %s", name)),
 			)
 		},
@@ -218,7 +218,7 @@ func newProjectsUpdateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(project,
+			return app.OK(project,
 				output.WithSummary("Project updated"),
 			)
 		},
@@ -252,7 +252,7 @@ func newProjectsDeleteCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"id":     projectID,
 				"status": "trashed",
 			}, output.WithSummary("Project moved to trash"))

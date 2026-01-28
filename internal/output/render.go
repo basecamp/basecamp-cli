@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/x/term"
 
+	"github.com/basecamp/bcq/internal/observability"
 	"github.com/basecamp/bcq/internal/tui"
 )
 
@@ -122,6 +123,12 @@ func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	if len(resp.Breadcrumbs) > 0 {
 		b.WriteString("\n")
 		r.renderBreadcrumbs(&b, resp.Breadcrumbs)
+	}
+
+	// Stats (from --stats flag)
+	if stats := extractStats(resp.Meta); stats != nil {
+		b.WriteString("\n")
+		r.renderStats(&b, stats)
 	}
 
 	_, err := io.WriteString(w, b.String())
@@ -477,6 +484,16 @@ func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
 	}
 }
 
+// renderStats renders session statistics in a compact one-liner.
+func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
+	metrics := observability.SessionMetricsFromMap(stats)
+	parts := metrics.FormatParts()
+	if len(parts) > 0 {
+		line := r.Muted.Render("Stats: " + strings.Join(parts, " | "))
+		b.WriteString(line + "\n")
+	}
+}
+
 func formatHeader(key string) string {
 	key = strings.ReplaceAll(key, "_", " ")
 	key = strings.TrimSuffix(key, " on")
@@ -647,6 +664,12 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 			}
 			b.WriteString(line + "\n")
 		}
+	}
+
+	// Stats (from --stats flag)
+	if stats := extractStats(resp.Meta); stats != nil {
+		b.WriteString("\n")
+		r.renderStats(&b, stats)
 	}
 
 	_, err := io.WriteString(w, b.String())
@@ -823,4 +846,22 @@ func (r *MarkdownRenderer) renderList(b *strings.Builder, data []any) {
 	for _, item := range data {
 		b.WriteString("- " + formatCell(item) + "\n")
 	}
+}
+
+// renderStats renders session statistics in Markdown format.
+func (r *MarkdownRenderer) renderStats(b *strings.Builder, stats map[string]any) {
+	metrics := observability.SessionMetricsFromMap(stats)
+	parts := metrics.FormatParts()
+	if len(parts) > 0 {
+		b.WriteString("*Stats: " + strings.Join(parts, " | ") + "*\n")
+	}
+}
+
+// extractStats pulls stats from response meta if present.
+func extractStats(meta map[string]any) map[string]any {
+	if meta == nil {
+		return nil
+	}
+	stats, _ := meta["stats"].(map[string]any)
+	return stats
 }

@@ -166,7 +166,7 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 
 	summary := fmt.Sprintf("%d %ss", len(recordings), recordingType)
 
-	return app.Output.OK(recordings,
+	return app.OK(recordings,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -284,7 +284,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 
 	summary := fmt.Sprintf("%s recording #%s", statusMsg, recordingIDStr)
 
-	return app.Output.OK(map[string]any{"id": recordingID, "status": newStatus},
+	return app.OK(map[string]any{"id": recordingID, "status": newStatus},
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -359,7 +359,7 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 				summary = fmt.Sprintf("Recording #%s now hidden from clients", recordingIDStr)
 			}
 
-			return app.Output.OK(recording,
+			return app.OK(recording,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

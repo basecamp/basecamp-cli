@@ -126,7 +126,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	return app.Output.OK(json.RawMessage(data),
+	return app.OK(json.RawMessage(data),
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)

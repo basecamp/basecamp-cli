@@ -102,7 +102,7 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 
 		summary := fmt.Sprintf("%d campfires", len(campfires))
 
-		return app.Output.OK(campfires,
+		return app.OK(campfires,
 			output.WithSummary(summary),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
@@ -163,7 +163,7 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 	result := []any{campfire}
 	summary := fmt.Sprintf("Campfire: %s", title)
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -243,7 +243,7 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 
 	summary := fmt.Sprintf("%d messages", len(lines))
 
-	return app.Output.OK(lines,
+	return app.OK(lines,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -331,7 +331,7 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 
 	summary := fmt.Sprintf("Posted message #%d", line.ID)
 
-	return app.Output.OK(line,
+	return app.OK(line,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -405,7 +405,7 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 			}
 			summary := fmt.Sprintf("Line #%s by %s", lineID, creatorName)
 
-			return app.Output.OK(line,
+			return app.OK(line,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -486,7 +486,7 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 
 			summary := fmt.Sprintf("Deleted line #%s", lineID)
 
-			return app.Output.OK(map[string]any{},
+			return app.OK(map[string]any{},
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

@@ -25,8 +25,7 @@ type Config struct {
 	CacheEnabled bool   `json:"cache_enabled"`
 
 	// Output settings
-	Format  string `json:"format"`
-	Verbose bool   `json:"verbose"`
+	Format string `json:"format"`
 
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
@@ -47,14 +46,12 @@ const (
 
 // FlagOverrides holds command-line flag values.
 type FlagOverrides struct {
-	Account    string
-	Project    string
-	Todolist   string
-	BaseURL    string
-	CacheDir   string
-	Format     string
-	Verbose    bool
-	VerboseSet bool
+	Account  string
+	Project  string
+	Todolist string
+	BaseURL  string
+	CacheDir string
+	Format   string
 }
 
 // Default returns the default configuration.
@@ -241,10 +238,6 @@ func applyOverrides(cfg *Config, o FlagOverrides) {
 	if o.Format != "" {
 		cfg.Format = o.Format
 		cfg.Sources["format"] = string(SourceFlag)
-	}
-	if o.VerboseSet {
-		cfg.Verbose = o.Verbose
-		cfg.Sources["verbose"] = string(SourceFlag)
 	}
 }
 

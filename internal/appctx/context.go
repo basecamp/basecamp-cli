@@ -3,9 +3,12 @@ package appctx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -13,6 +16,7 @@ import (
 	"github.com/basecamp/bcq/internal/auth"
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/names"
+	"github.com/basecamp/bcq/internal/observability"
 	"github.com/basecamp/bcq/internal/output"
 )
 
@@ -28,6 +32,10 @@ type App struct {
 	SDK    *basecamp.Client
 	Names  *names.Resolver
 	Output *output.Writer
+
+	// Observability
+	Collector *observability.SessionCollector
+	Hooks     *observability.CLIHooks
 
 	// Flags holds the global flag values
 	Flags GlobalFlags
@@ -51,7 +59,8 @@ type GlobalFlags struct {
 	BaseURL  string
 
 	// Behavior flags
-	Verbose  bool
+	Verbose  int // 0=off, 1=operations, 2=operations+requests (stacks with -v -v or -vv)
+	Stats    bool
 	CacheDir string
 }
 
@@ -70,7 +79,14 @@ func NewApp(cfg *config.Config) *App {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	authMgr := auth.NewManager(cfg, httpClient)
 
-	// Create SDK client with auth adapter
+	// Create observability components
+	// Collector always runs to gather stats; hooks control output verbosity
+	// Level 0 initially; ApplyFlags sets the actual level from -v flags
+	collector := observability.NewSessionCollector()
+	traceWriter := observability.NewTraceWriter()
+	hooks := observability.NewCLIHooks(0, collector, traceWriter)
+
+	// Create SDK client with auth adapter and observability hooks
 	sdkCfg := &basecamp.Config{
 		BaseURL:      cfg.BaseURL,
 		AccountID:    cfg.AccountID,
@@ -79,7 +95,7 @@ func NewApp(cfg *config.Config) *App {
 		CacheDir:     cfg.CacheDir,
 		CacheEnabled: cfg.CacheEnabled,
 	}
-	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr})
+	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr}, basecamp.WithHooks(hooks))
 
 	// Create name resolver using SDK client
 	nameResolver := names.NewResolver(sdkClient, authMgr)
@@ -96,10 +112,12 @@ func NewApp(cfg *config.Config) *App {
 	}
 
 	return &App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  nameResolver,
+		Config:    cfg,
+		Auth:      authMgr,
+		SDK:       sdkClient,
+		Names:     nameResolver,
+		Collector: collector,
+		Hooks:     hooks,
 		Output: output.New(output.Options{
 			Format: format,
 			Writer: os.Stdout,
@@ -150,12 +168,81 @@ func (a *App) ApplyFlags() {
 		})
 	}
 
+	// Determine verbosity level from flags and BCQ_DEBUG env var
+	verboseLevel := a.Flags.Verbose
+	if debugEnv := os.Getenv("BCQ_DEBUG"); debugEnv != "" {
+		// BCQ_DEBUG can be "1", "2", or "true" (treated as 2 for full debug)
+		if level, err := strconv.Atoi(debugEnv); err == nil {
+			if level > verboseLevel {
+				verboseLevel = level
+			}
+		} else if debugEnv == "true" {
+			verboseLevel = 2 // Full debug output
+		}
+	}
+
+	// Apply verbose level to hooks for trace output
+	if a.Hooks != nil {
+		a.Hooks.SetLevel(verboseLevel)
+	}
+
 	// Apply verbose mode - enable debug logging via slog
-	if a.Flags.Verbose {
+	if verboseLevel > 0 {
 		debugLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 		}))
 		a.SDK.SetLogger(debugLogger)
+	}
+}
+
+// OK outputs a success response, automatically including stats if --stats flag is set.
+func (a *App) OK(data any, opts ...output.ResponseOption) error {
+	if a.Flags.Stats && a.Collector != nil {
+		stats := a.Collector.Summary()
+		opts = append(opts, output.WithStats(&stats))
+	}
+	return a.Output.OK(data, opts...)
+}
+
+// Err outputs an error response, printing stats to stderr if --stats flag is set.
+func (a *App) Err(err error) error {
+	// Print the error response first
+	if outputErr := a.Output.Err(err); outputErr != nil {
+		return outputErr
+	}
+
+	// Print stats to stderr if enabled, but not in machine-consumable modes
+	// (agent, quiet, ids-only, count are meant for programmatic consumption)
+	if a.Flags.Stats && a.Collector != nil && !a.isMachineOutput() {
+		stats := a.Collector.Summary()
+		a.printStatsToStderr(&stats)
+	}
+	return nil
+}
+
+// isMachineOutput returns true if the output mode is intended for programmatic consumption.
+// Checks both flags and config-driven format settings.
+func (a *App) isMachineOutput() bool {
+	// Flag-driven machine output modes
+	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count {
+		return true
+	}
+	// Config-driven quiet mode (format: "quiet" in config file)
+	if a.Config != nil && a.Config.Format == "quiet" {
+		return true
+	}
+	return false
+}
+
+// printStatsToStderr outputs a compact stats line to stderr.
+func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
+	if stats == nil {
+		return
+	}
+
+	parts := stats.FormatParts()
+	if len(parts) > 0 {
+		fmt.Fprintf(os.Stderr, "\nStats: %s\n", strings.Join(parts, " | "))
 	}
 }
 

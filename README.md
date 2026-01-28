@@ -152,7 +152,14 @@ bcq search "authentication"      # Search across projects
 bcq projects              # Markdown when TTY, JSON when piped
 bcq projects --json       # Force JSON envelope
 bcq projects --quiet      # Raw JSON data only
+bcq projects --stats      # Show session stats (styled/Markdown + JSON meta)
+bcq projects -v           # Trace SDK operations
+bcq projects -vv          # Trace operations + HTTP requests
 ```
+
+Notes:
+- `--stats` adds `meta.stats` to JSON output and renders a one-line summary in styled/Markdown output.
+- Stats are not shown in machine modes (`--quiet`, `--agent`, `--ids-only`, `--count`).
 
 ### JSON Envelope
 

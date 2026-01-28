@@ -124,7 +124,7 @@ Person can be:
 				}
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Assigned todo #%s to %s", todoID, assigneeName)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -238,7 +238,7 @@ Person can be:
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(json.RawMessage(resp.Data),
+			return app.OK(json.RawMessage(resp.Data),
 				output.WithSummary(fmt.Sprintf("Removed assignee from todo #%s", todoID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

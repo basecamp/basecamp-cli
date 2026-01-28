@@ -93,7 +93,7 @@ func newToolsShowCmd(project *string) *cobra.Command {
 			}
 			summary := fmt.Sprintf("%s (%s) at position %s", tool.Title, tool.Name, posStr)
 
-			return app.Output.OK(tool,
+			return app.OK(tool,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -174,7 +174,7 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				}
 			}
 
-			return app.Output.OK(created,
+			return app.OK(created,
 				output.WithSummary(fmt.Sprintf("Created: %s", created.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -248,7 +248,7 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(tool,
+			return app.OK(tool,
 				output.WithSummary(fmt.Sprintf("Renamed to: %s", tool.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -316,7 +316,7 @@ WARNING: This permanently removes the tool and all its content.`,
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"trashed": true},
+			return app.OK(map[string]any{"trashed": true},
 				output.WithSummary(fmt.Sprintf("Tool %d trashed", toolID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -373,7 +373,7 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"enabled": true},
+			return app.OK(map[string]any{"enabled": true},
 				output.WithSummary(fmt.Sprintf("Tool %d enabled in dock", toolID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -430,7 +430,7 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"disabled": true},
+			return app.OK(map[string]any{"disabled": true},
 				output.WithSummary(fmt.Sprintf("Tool %d disabled (hidden from dock)", toolID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -492,7 +492,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"repositioned": true, "position": position},
+			return app.OK(map[string]any{"repositioned": true, "position": position},
 				output.WithSummary(fmt.Sprintf("Tool %d moved to position %d", toolID, position)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

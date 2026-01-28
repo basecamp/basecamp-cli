@@ -182,7 +182,7 @@ func NewTodoCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(todo,
+			return app.OK(todo,
 				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -312,7 +312,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(todos,
+	return app.OK(todos,
 		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -414,7 +414,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		result = append(result, todo)
 	}
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(fmt.Sprintf("%d todos", len(result))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -482,7 +482,7 @@ func newTodosShowCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(todo,
+			return app.OK(todo,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "complete",
@@ -618,7 +618,7 @@ func newTodosCreateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(todo,
+			return app.OK(todo,
 				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -775,7 +775,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		summary = fmt.Sprintf("Completed %d, failed %d", len(completed), len(failed))
 	}
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -897,7 +897,7 @@ Examples:
 			}
 
 			if len(matchingTodos) == 0 {
-				return app.Output.OK(SweepResult{Count: 0},
+				return app.OK(SweepResult{Count: 0},
 					output.WithSummary("No todos match the filter"),
 				)
 			}
@@ -910,7 +910,7 @@ Examples:
 
 			// Dry run - just show what would happen
 			if dryRun {
-				return app.Output.OK(SweepResult{
+				return app.OK(SweepResult{
 					DryRun:         true,
 					WouldSweep:     todoIDs,
 					Count:          len(todoIDs),
@@ -967,7 +967,7 @@ Examples:
 				summary += fmt.Sprintf(", completed %d", len(result.Completed))
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1150,7 +1150,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		summary = fmt.Sprintf("Reopened %d, failed %d", len(reopened), len(failed))
 	}
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -1219,7 +1219,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"repositioned": true, "position": position},
+			return app.OK(map[string]any{"repositioned": true, "position": position},
 				output.WithSummary(fmt.Sprintf("Moved todo #%d to position %d", todoID, position)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
