@@ -136,6 +136,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewTodolistgroupsCmd())
 	cmd.AddCommand(commands.NewMCPCmd())
 	cmd.AddCommand(commands.NewCommandsCmd())
+	cmd.AddCommand(commands.NewTimelineCmd())
 
 	if err := cmd.Execute(); err != nil {
 		// Transform Cobra errors to match Bash CLI error format

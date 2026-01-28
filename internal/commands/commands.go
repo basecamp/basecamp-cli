@@ -65,6 +65,7 @@ func commandCategories() []CommandCategory {
 				{Name: "schedule", Category: "scheduling", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},
 				{Name: "timesheet", Category: "scheduling", Description: "View time tracking reports", Actions: []string{"report", "project", "recording"}},
 				{Name: "checkins", Category: "scheduling", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
+				{Name: "timeline", Category: "scheduling", Description: "View activity timelines", Actions: []string{}},
 			},
 		},
 		{
