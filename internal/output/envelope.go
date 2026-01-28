@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/basecamp/bcq/internal/observability"
 )
 
 // Response is the success envelope for JSON output.
@@ -300,4 +302,34 @@ func WithMeta(key string, value any) ResponseOption {
 		}
 		r.Meta[key] = value
 	}
+}
+
+// WithStats adds session metrics to the response metadata.
+func WithStats(metrics *observability.SessionMetrics) ResponseOption {
+	return func(r *Response) {
+		if metrics == nil {
+			return
+		}
+		if r.Meta == nil {
+			r.Meta = make(map[string]any)
+		}
+		r.Meta["stats"] = map[string]any{
+			"requests":    metrics.TotalRequests,
+			"cache_hits":  metrics.CacheHits,
+			"cache_rate":  cacheRate(metrics),
+			"operations":  metrics.TotalOperations,
+			"failed":      metrics.FailedOps,
+			"retries":     metrics.TotalRetries,
+			"latency_ms":  metrics.TotalLatency.Milliseconds(),
+			"duration_ms": metrics.EndTime.Sub(metrics.StartTime).Milliseconds(),
+		}
+	}
+}
+
+// cacheRate calculates the cache hit rate as a percentage.
+func cacheRate(m *observability.SessionMetrics) float64 {
+	if m.TotalRequests == 0 {
+		return 0
+	}
+	return float64(m.CacheHits) / float64(m.TotalRequests) * 100
 }

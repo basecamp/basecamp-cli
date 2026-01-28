@@ -299,7 +299,7 @@ func runURLParse(app *appctx.App, url string) error {
 		}
 	}
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)

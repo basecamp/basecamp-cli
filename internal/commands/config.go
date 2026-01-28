@@ -89,7 +89,7 @@ func runConfigShow(cmd *cobra.Command) error {
 		}
 	}
 
-	return app.Output.OK(configData,
+	return app.OK(configData,
 		output.WithSummary("Effective configuration"),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -119,7 +119,7 @@ func newConfigInitCmd() *cobra.Command {
 
 			// Check if already exists
 			if _, err := os.Stat(configFile); err == nil {
-				return app.Output.OK(map[string]any{
+				return app.OK(map[string]any{
 					"exists": true,
 					"path":   configFile,
 				}, output.WithSummary(fmt.Sprintf("Config file already exists: %s", configFile)))
@@ -135,7 +135,7 @@ func newConfigInitCmd() *cobra.Command {
 				return fmt.Errorf("failed to create config file: %w", err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"created": true,
 				"path":    configFile,
 			},
@@ -230,7 +230,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"key":    key,
 				"value":  valueOut,
 				"scope":  scope,
@@ -295,7 +295,7 @@ func newConfigUnsetCmd() *cobra.Command {
 			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
 				_ = json.Unmarshal(data, &configData) // Ignore error - treat as empty
 			} else {
-				return app.Output.OK(map[string]any{
+				return app.OK(map[string]any{
 					"key":    key,
 					"status": "not_found",
 				}, output.WithSummary(fmt.Sprintf("Config file not found: %s", configPath)))
@@ -303,7 +303,7 @@ func newConfigUnsetCmd() *cobra.Command {
 
 			// Check if key exists
 			if _, exists := configData[key]; !exists {
-				return app.Output.OK(map[string]any{
+				return app.OK(map[string]any{
 					"key":    key,
 					"status": "not_set",
 				}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
@@ -322,7 +322,7 @@ func newConfigUnsetCmd() *cobra.Command {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"key":    key,
 				"scope":  scope,
 				"status": "unset",
@@ -417,7 +417,7 @@ func newConfigProjectCmd() *cobra.Command {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"project_id":   selected.ID,
 				"project_name": selected.Name,
 				"status":       "set",

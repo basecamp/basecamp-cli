@@ -44,7 +44,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 		{Action: "auth", Cmd: "bcq auth status", Description: "Auth status"},
 	}
 
-	return app.Output.OK(person,
+	return app.OK(person,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
@@ -113,7 +113,7 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 		{Action: "show", Cmd: "bcq people show <id>", Description: "Show person details"},
 	}
 
-	return app.Output.OK(people,
+	return app.OK(people,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
@@ -149,7 +149,7 @@ func runPeopleShow(cmd *cobra.Command, args []string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(person, output.WithSummary(person.Name))
+	return app.OK(person, output.WithSummary(person.Name))
 }
 
 func newPeoplePingableCmd() *cobra.Command {
@@ -172,7 +172,7 @@ func runPeoplePingable(cmd *cobra.Command, args []string) error {
 
 	summary := fmt.Sprintf("%d pingable people", len(people))
 
-	return app.Output.OK(people, output.WithSummary(summary))
+	return app.OK(people, output.WithSummary(summary))
 }
 
 func newPeopleAddCmd() *cobra.Command {
@@ -237,7 +237,7 @@ func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) erro
 		{Action: "list", Cmd: fmt.Sprintf("bcq people list --project %s", resolvedProjectID), Description: "List project members"},
 	}
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
@@ -305,7 +305,7 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 		{Action: "list", Cmd: fmt.Sprintf("bcq people list --project %s", resolvedProjectID), Description: "List project members"},
 	}
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)

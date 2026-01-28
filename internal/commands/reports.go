@@ -47,7 +47,7 @@ func newReportsAssignableCmd() *cobra.Command {
 
 			summary := fmt.Sprintf("%d assignable people", len(people))
 
-			return app.Output.OK(people,
+			return app.OK(people,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -126,7 +126,7 @@ Results can be grouped by bucket (project) or date.`,
 				summary += fmt.Sprintf(" (grouped by %s)", result.GroupedBy)
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -201,7 +201,7 @@ Todos are grouped into categories:
 				}
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -274,7 +274,7 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 				summary += ")"
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

@@ -111,7 +111,7 @@ func newAuthLogoutCmd() *cobra.Command {
 				return err
 			}
 
-			return app.Output.OK(map[string]string{
+			return app.OK(map[string]string{
 				"status": "logged_out",
 			}, output.WithSummary("Successfully logged out"))
 		},
@@ -133,7 +133,7 @@ func newAuthStatusCmd() *cobra.Command {
 
 			// Check if using BASECAMP_TOKEN environment variable
 			if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
-				return app.Output.OK(map[string]any{
+				return app.OK(map[string]any{
 					"authenticated": true,
 					"origin":        origin,
 					"source":        "BASECAMP_TOKEN",
@@ -141,7 +141,7 @@ func newAuthStatusCmd() *cobra.Command {
 			}
 
 			if !app.Auth.IsAuthenticated() {
-				return app.Output.OK(map[string]any{
+				return app.OK(map[string]any{
 					"authenticated": false,
 					"origin":        origin,
 				}, output.WithSummary("Not authenticated"))
@@ -178,7 +178,7 @@ func newAuthStatusCmd() *cobra.Command {
 				summary += fmt.Sprintf(" (scope: %s)", creds.Scope)
 			}
 
-			return app.Output.OK(status, output.WithSummary(summary))
+			return app.OK(status, output.WithSummary(summary))
 		},
 	}
 }
@@ -198,7 +198,7 @@ func newAuthRefreshCmd() *cobra.Command {
 				return err
 			}
 
-			return app.Output.OK(map[string]string{
+			return app.OK(map[string]string{
 				"status": "refreshed",
 			}, output.WithSummary("Token refreshed successfully"))
 		},

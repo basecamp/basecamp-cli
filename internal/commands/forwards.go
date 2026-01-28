@@ -99,7 +99,7 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(forwards,
+	return app.OK(forwards,
 		output.WithSummary(fmt.Sprintf("%d forwards", len(forwards))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -163,7 +163,7 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 				subject = "Forward"
 			}
 
-			return app.Output.OK(forward,
+			return app.OK(forward,
 				output.WithSummary(subject),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -233,7 +233,7 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 				title = "Inbox"
 			}
 
-			return app.Output.OK(inbox,
+			return app.OK(inbox,
 				output.WithSummary(title),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -289,7 +289,7 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(replies,
+			return app.OK(replies,
 				output.WithSummary(fmt.Sprintf("%d replies to forward #%s", len(replies), forwardIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -356,7 +356,7 @@ func newForwardsReplyCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(reply,
+			return app.OK(reply,
 				output.WithSummary("Reply"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

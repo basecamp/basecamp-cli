@@ -11,8 +11,8 @@ github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiE
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/aymanbagabas/go-udiff v0.3.1 h1:LV+qyBQ2pqe0u42ZsUEtPiCaUoqgA9gYRDs3vj1nolY=
 github.com/aymanbagabas/go-udiff v0.3.1/go.mod h1:G0fsKmG+P6ylD0r6N/KgQD/nWzgfnl8ZBcNLgcbrw8E=
-github.com/basecamp/basecamp-sdk/go v0.0.0-20260128054241-c856b2d2b56e h1:xk+phvIXB7l1fyw84OExvzeVKh9bOZ9us2wgSZygzAA=
-github.com/basecamp/basecamp-sdk/go v0.0.0-20260128054241-c856b2d2b56e/go.mod h1:9DVbzvhPE5xRSFeYyxm7dCw5/7LuCiRLh7MMS/GZp0Q=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260128055532-044c1d9d23f3 h1:xePZq05D+sZV2LjXETBbKvIDgTUJANkqGR68zSXiy3c=
+github.com/basecamp/basecamp-sdk/go v0.0.0-20260128055532-044c1d9d23f3/go.mod h1:9DVbzvhPE5xRSFeYyxm7dCw5/7LuCiRLh7MMS/GZp0Q=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/catppuccin/go v0.3.0 h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=
 github.com/catppuccin/go v0.3.0/go.mod h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=

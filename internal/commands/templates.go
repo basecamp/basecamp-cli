@@ -79,7 +79,7 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 		}
 	}
 
-	return app.Output.OK(templates,
+	return app.OK(templates,
 		output.WithSummary(fmt.Sprintf("%d templates", len(templates))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -120,7 +120,7 @@ func newTemplatesShowCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(template,
+			return app.OK(template,
 				output.WithSummary(template.Name),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -175,7 +175,7 @@ func newTemplatesCreateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(template,
+			return app.OK(template,
 				output.WithSummary(fmt.Sprintf("Created template #%d: %s", template.ID, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -241,7 +241,7 @@ func newTemplatesUpdateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(template,
+			return app.OK(template,
 				output.WithSummary(fmt.Sprintf("Updated template #%d", templateID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -280,7 +280,7 @@ func newTemplatesDeleteCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"deleted": true},
+			return app.OK(map[string]any{"deleted": true},
 				output.WithSummary(fmt.Sprintf("Trashed template #%d", templateID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -328,7 +328,7 @@ which can be polled via 'templates construction' until the status is "completed"
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(construction,
+			return app.OK(construction,
 				output.WithSummary(fmt.Sprintf("Started project construction #%d (%s)", construction.ID, construction.Status)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -399,7 +399,7 @@ the response includes the newly created project.`,
 				}
 			}
 
-			return app.Output.OK(construction,
+			return app.OK(construction,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)

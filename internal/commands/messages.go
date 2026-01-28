@@ -97,7 +97,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string) er
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(messages,
+	return app.OK(messages,
 		output.WithSummary(fmt.Sprintf("%d messages", len(messages))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -156,7 +156,7 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(message,
+			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -243,7 +243,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(message,
+			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -325,7 +325,7 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(message,
+			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Updated message #%s", messageIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -387,7 +387,7 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]string{
+			return app.OK(map[string]string{
 				"id":     messageIDStr,
 				"status": "pinned",
 			},
@@ -452,7 +452,7 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]string{
+			return app.OK(map[string]string{
 				"id":     messageIDStr,
 				"status": "unpinned",
 			},
@@ -543,7 +543,7 @@ func NewMessageCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(message,
+			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

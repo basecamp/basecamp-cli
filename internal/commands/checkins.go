@@ -95,7 +95,7 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 	}
 	summary := fmt.Sprintf("%s (%d questions)", name, questionnaire.QuestionsCount)
 
-	return app.Output.OK(questionnaire,
+	return app.OK(questionnaire,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -155,7 +155,7 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(questions,
+			return app.OK(questions,
 				output.WithSummary(fmt.Sprintf("%d check-in questions", len(questions))),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -244,7 +244,7 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 
 	summary := fmt.Sprintf("%s (%d answers)", question.Title, question.AnswersCount)
 
-	return app.Output.OK(question,
+	return app.OK(question,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -365,7 +365,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(question,
+			return app.OK(question,
 				output.WithSummary(fmt.Sprintf("Created question #%d: %s", question.ID, question.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -481,7 +481,7 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(question,
+			return app.OK(question,
 				output.WithSummary(fmt.Sprintf("Updated question #%s: %s", questionIDStr, question.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -544,7 +544,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(answers,
+			return app.OK(answers,
 				output.WithSummary(fmt.Sprintf("%d answers", len(answers))),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -646,7 +646,7 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		questionID = strconv.FormatInt(answer.Parent.ID, 10)
 	}
 
-	return app.Output.OK(answer,
+	return app.OK(answer,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -728,7 +728,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				author = answer.Creator.Name
 			}
 
-			return app.Output.OK(answer,
+			return app.OK(answer,
 				output.WithSummary(fmt.Sprintf("Answer created by %s", author)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -817,7 +817,7 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				questionID = strconv.FormatInt(answer.Parent.ID, 10)
 			}
 
-			return app.Output.OK(answer,
+			return app.OK(answer,
 				output.WithSummary("Answer updated"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
