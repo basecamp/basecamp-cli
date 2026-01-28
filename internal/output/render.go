@@ -494,14 +494,6 @@ func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
 	}
 }
 
-// formatDuration formats a duration for display.
-func formatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	return fmt.Sprintf("%.1fs", d.Seconds())
-}
-
 func formatHeader(key string) string {
 	key = strings.ReplaceAll(key, "_", " ")
 	key = strings.TrimSuffix(key, " on")
