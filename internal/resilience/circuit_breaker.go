@@ -39,6 +39,10 @@ func (cb *CircuitBreaker) now() time.Time {
 // In half-open state, atomically reserves an attempt slot to prevent thundering herd.
 //
 // Optimization: closed state only reads (no disk write), open/half-open may write.
+//
+// Stale attempt cleanup: If half-open attempts are stuck at max (e.g., from a crashed
+// process that never called RecordSuccess/RecordFailure), they are automatically
+// reset after OpenTimeout. This prevents permanent blocking from process crashes.
 func (cb *CircuitBreaker) Allow() (bool, error) {
 	// First, do a read-only check for the common case (closed state)
 	state, err := cb.store.Load()
@@ -74,6 +78,11 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 				allowed = true
 			} else if s.CircuitBreaker.IsHalfOpen() {
 				// Another process already transitioned, try to reserve a slot
+				// Clean up stale attempts from crashed processes if stuck for too long
+				if cb.shouldResetStaleAttempts(s, now) {
+					s.CircuitBreaker.HalfOpenAttempts = 0
+					s.UpdatedAt = now
+				}
 				if cb.config.HalfOpenMaxRequests > 0 && s.CircuitBreaker.HalfOpenAttempts >= cb.config.HalfOpenMaxRequests {
 					allowed = false
 				} else {
@@ -114,6 +123,11 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 				}
 				return nil
 			}
+			// Clean up stale attempts from crashed processes if stuck for too long
+			if cb.shouldResetStaleAttempts(s, now) {
+				s.CircuitBreaker.HalfOpenAttempts = 0
+				s.UpdatedAt = now
+			}
 			if s.CircuitBreaker.HalfOpenAttempts >= cb.config.HalfOpenMaxRequests {
 				allowed = false
 			} else {
@@ -130,6 +144,21 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 	}
 
 	return true, nil
+}
+
+// shouldResetStaleAttempts returns true if half-open attempts should be reset.
+// This handles the case where a process crashes before calling RecordSuccess/RecordFailure,
+// leaving HalfOpenAttempts stuck at max. We reset after OpenTimeout to allow recovery.
+func (cb *CircuitBreaker) shouldResetStaleAttempts(s *State, now time.Time) bool {
+	if !s.CircuitBreaker.IsHalfOpen() {
+		return false
+	}
+	if s.CircuitBreaker.HalfOpenAttempts < cb.config.HalfOpenMaxRequests {
+		return false
+	}
+	// If attempts are maxed out and state hasn't been updated in OpenTimeout,
+	// assume the attempts are from crashed processes
+	return now.Sub(s.UpdatedAt) >= cb.config.OpenTimeout
 }
 
 // RecordSuccess records a successful request.

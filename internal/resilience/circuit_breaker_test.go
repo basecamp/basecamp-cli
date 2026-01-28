@@ -327,3 +327,57 @@ func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
 		t.Errorf("expected closed, got %s", state)
 	}
 }
+
+func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	openTimeout := 10 * time.Millisecond
+
+	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
+		FailureThreshold:    2,
+		SuccessThreshold:    1,
+		OpenTimeout:         openTimeout,
+		HalfOpenMaxRequests: 1,
+	})
+
+	// Open the circuit
+	cb.RecordFailure()
+	cb.RecordFailure()
+
+	// Wait for timeout to allow half-open
+	time.Sleep(openTimeout * 2)
+
+	// First Allow() transitions to half-open and reserves a slot
+	allowed, err := cb.Allow()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowed {
+		t.Error("expected first request to be allowed in half-open state")
+	}
+
+	// Simulate a crash: don't call RecordSuccess/RecordFailure
+	// The HalfOpenAttempts is now at max (1)
+
+	// Second Allow() should be rejected (max reached)
+	allowed, err = cb.Allow()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if allowed {
+		t.Error("expected second request to be rejected when half-open slots exhausted")
+	}
+
+	// Wait for another timeout period (stale attempt cleanup threshold)
+	time.Sleep(openTimeout * 2)
+
+	// Now Allow() should reset stale attempts and allow
+	allowed, err = cb.Allow()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowed {
+		t.Error("expected request to be allowed after stale attempts are reset")
+	}
+}

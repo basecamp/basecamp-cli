@@ -48,6 +48,10 @@ func NewGatingHooksFromConfig(store *Store, cfg *Config) *GatingHooks {
 // atomically. If we checked circuit breaker first and then rate limiter
 // rejected, the half-open slot would leak (never released).
 //
+// Tradeoff: This ordering means rate limiter tokens are consumed even if
+// bulkhead is full or circuit is open. This is acceptable for a CLI tool
+// where occasional token waste is preferable to half-open slot leaks.
+//
 // Returns a context that should be used for the operation and an error
 // if the operation should be rejected.
 func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.OperationInfo) (context.Context, error) {
@@ -141,8 +145,9 @@ func (h *GatingHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInf
 	// Honor Retry-After header from rate-limited or overloaded responses
 	if result.RetryAfter > 0 {
 		_ = h.rateLimiter.SetRetryAfterDuration(time.Duration(result.RetryAfter) * time.Second)
-	} else if result.StatusCode == 429 || result.StatusCode == 503 {
-		// Default to 60 seconds if no Retry-After specified (SDK parity)
+	} else if result.StatusCode == 429 {
+		// Default to 60 seconds if no Retry-After specified (SDK parity for 429 only)
+		// Note: 503 requires explicit Retry-After header per SDK behavior
 		_ = h.rateLimiter.SetRetryAfterDuration(60 * time.Second)
 	}
 }
