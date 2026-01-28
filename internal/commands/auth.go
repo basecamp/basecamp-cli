@@ -27,6 +27,7 @@ func NewAuthCmd() *cobra.Command {
 		newAuthLogoutCmd(),
 		newAuthStatusCmd(),
 		newAuthRefreshCmd(),
+		newAuthTokenCmd(),
 	)
 
 	return cmd
@@ -203,4 +204,57 @@ func newAuthRefreshCmd() *cobra.Command {
 			}, output.WithSummary("Token refreshed successfully"))
 		},
 	}
+}
+
+func newAuthTokenCmd() *cobra.Command {
+	var stored bool
+
+	cmd := &cobra.Command{
+		Use:   "token",
+		Short: "Print the auth token",
+		Long: `Print the current access token to stdout for use with other tools.
+
+If BASECAMP_TOKEN env is set, it is returned directly (no refresh).
+Otherwise, stored OAuth credentials are used and auto-refreshed if near expiry.
+
+Examples:
+  export BASECAMP_TOKEN=$(bcq auth token)
+  curl -H "Authorization: Bearer $(bcq auth token)" ...
+
+Get tokens for different environments using the global --host flag:
+  bcq --host localhost:3000 auth token
+  bcq --host staging.example.com auth token
+
+The --stored flag ignores BASECAMP_TOKEN and uses stored OAuth credentials:
+  bcq auth token --stored`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			var token string
+			var err error
+
+			if stored {
+				// Use stored OAuth credentials (ignores BASECAMP_TOKEN env)
+				// This also handles auto-refresh for near-expiry tokens
+				token, err = app.Auth.StoredAccessToken(cmd.Context())
+			} else {
+				// Normal path: checks BASECAMP_TOKEN env first, then stored OAuth
+				token, err = app.Auth.AccessToken(cmd.Context())
+			}
+
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(token)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&stored, "stored", false, "Use stored OAuth token, ignoring BASECAMP_TOKEN env var")
+
+	return cmd
 }
