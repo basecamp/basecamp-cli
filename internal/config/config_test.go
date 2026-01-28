@@ -212,13 +212,11 @@ func TestApplyOverrides(t *testing.T) {
 	cfg.Sources["project_id"] = "global"
 
 	overrides := FlagOverrides{
-		Account:    "from-flag",
-		Project:    "from-flag",
-		BaseURL:    "http://flag.example.com",
-		CacheDir:   "/flag/cache",
-		Format:     "json",
-		Verbose:    2, // -vv
-		VerboseSet: true,
+		Account:  "from-flag",
+		Project:  "from-flag",
+		BaseURL:  "http://flag.example.com",
+		CacheDir: "/flag/cache",
+		Format:   "json",
 	}
 
 	applyOverrides(cfg, overrides)
@@ -238,16 +236,10 @@ func TestApplyOverrides(t *testing.T) {
 	if cfg.Format != "json" {
 		t.Errorf("Format = %q, want %q", cfg.Format, "json")
 	}
-	if cfg.Verbose != 2 {
-		t.Errorf("Verbose = %v, want 2", cfg.Verbose)
-	}
 
 	// Verify source tracking
 	if cfg.Sources["account_id"] != "flag" {
 		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "flag")
-	}
-	if cfg.Sources["verbose"] != "flag" {
-		t.Errorf("Sources[verbose] = %q, want %q", cfg.Sources["verbose"], "flag")
 	}
 }
 
@@ -267,22 +259,6 @@ func TestApplyOverridesSkipsEmpty(t *testing.T) {
 	}
 	if cfg.Sources["account_id"] != "global" {
 		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "global")
-	}
-}
-
-func TestApplyOverridesVerboseRequiresSet(t *testing.T) {
-	cfg := Default()
-	cfg.Verbose = 1 // was set earlier
-
-	overrides := FlagOverrides{
-		Verbose:    0,     // trying to reset
-		VerboseSet: false, // Not explicitly set
-	}
-
-	applyOverrides(cfg, overrides)
-
-	if cfg.Verbose != 1 {
-		t.Errorf("Verbose = %v, want 1 (VerboseSet=false should not change)", cfg.Verbose)
 	}
 }
 

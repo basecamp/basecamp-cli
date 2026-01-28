@@ -25,8 +25,7 @@ type Config struct {
 	CacheEnabled bool   `json:"cache_enabled"`
 
 	// Output settings
-	Format  string `json:"format"`
-	Verbose int    `json:"verbose"` // 0=normal, 1=operations, 2=operations+requests
+	Format string `json:"format"`
 
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
@@ -241,10 +240,6 @@ func applyOverrides(cfg *Config, o FlagOverrides) {
 	if o.Format != "" {
 		cfg.Format = o.Format
 		cfg.Sources["format"] = string(SourceFlag)
-	}
-	if o.VerboseSet {
-		cfg.Verbose = o.Verbose
-		cfg.Sources["verbose"] = string(SourceFlag)
 	}
 }
 
