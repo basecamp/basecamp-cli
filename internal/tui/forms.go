@@ -189,3 +189,28 @@ func Note(title, body string) error {
 		Description(body).
 		Run()
 }
+
+// ConfirmSetDefault asks the user if they want to save a value as the default.
+func ConfirmSetDefault(valueName string) (bool, error) {
+	var result bool
+	err := huh.NewConfirm().
+		Title("Save as default?").
+		Description("Set " + valueName + " as the default for future commands.").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&result).
+		Run()
+	if err != nil {
+		return false, err
+	}
+	return result, nil
+}
+
+// SelectScope shows a prompt for selecting the config scope (global or local).
+func SelectScope() (string, error) {
+	options := []SelectOption{
+		{Value: "local", Label: "Local (.basecamp/config.json)"},
+		{Value: "global", Label: "Global (~/.config/basecamp/config.json)"},
+	}
+	return Select("Where should this be saved?", options)
+}

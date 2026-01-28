@@ -253,3 +253,8 @@ func PickTodolist(todolists []PickerItem) (*PickerItem, error) {
 func PickPerson(people []PickerItem) (*PickerItem, error) {
 	return Pick("Select a person", people)
 }
+
+// PickAccount shows a picker for accounts.
+func PickAccount(accounts []PickerItem) (*PickerItem, error) {
+	return Pick("Select an account", accounts)
+}
