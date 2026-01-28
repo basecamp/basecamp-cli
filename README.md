@@ -181,6 +181,17 @@ OAuth 2.1 with Dynamic Client Registration. First login opens browser.
 bcq auth login              # Full read/write access
 bcq auth login --scope read # Read-only access
 bcq auth login --no-browser # Headless mode
+bcq auth token              # Print token for use with other tools
+```
+
+Export the token for use with curl or other tools:
+
+```bash
+export BASECAMP_TOKEN=$(bcq auth token)
+
+# Different environments (--host is a global flag)
+bcq --host localhost:3000 auth login
+export LOCAL_TOKEN=$(bcq --host localhost:3000 auth token)
 ```
 
 ## Configuration
