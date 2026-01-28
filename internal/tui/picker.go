@@ -59,6 +59,7 @@ func WithMaxVisible(n int) PickerOption {
 func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
+	ti.Width = 40
 	ti.Focus()
 
 	m := pickerModel{
