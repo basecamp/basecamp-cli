@@ -34,8 +34,8 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Run unit tests
-        run: go test -v ./...
+      - name: Run unit tests with coverage
+        run: go test -v -coverprofile=coverage.out ./...
 
       - name: Build binary
         run: go build -o bin/bcq ./cmd/bcq
