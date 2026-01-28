@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/bcq/internal/observability"
 	"github.com/basecamp/bcq/internal/output"
 	"github.com/basecamp/bcq/internal/resilience"
+	"github.com/basecamp/bcq/internal/tui/resolve"
 )
 
 // contextKey is a private type for context keys.
@@ -314,4 +315,27 @@ func (a *App) RequireAccount() error {
 	}
 
 	return nil
+}
+
+// Resolve returns a Resolver for interactive prompts when CLI options are missing.
+// The resolver uses the app's SDK, auth manager, and config to fetch available
+// options and prompt the user to select interactively.
+//
+// Usage:
+//
+//	accountID, err := app.Resolve().Account(ctx)
+//	if err != nil {
+//	    return err
+//	}
+func (a *App) Resolve() *resolve.Resolver {
+	return resolve.New(
+		a.SDK,
+		a.Auth,
+		a.Config,
+		resolve.WithFlags(&resolve.Flags{
+			Account:  a.Flags.Account,
+			Project:  a.Flags.Project,
+			Todolist: a.Flags.Todolist,
+		}),
+	)
 }

@@ -28,7 +28,7 @@ func NewProjectsCmd() *cobra.Command {
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return app.RequireAccount()
+			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
@@ -73,7 +73,8 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	// Resolve account if not configured (enables interactive prompt)
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -141,7 +142,8 @@ func newProjectsShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			// Resolve account if not configured (enables interactive prompt)
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -187,7 +189,8 @@ func newProjectsCreateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			// Resolve account if not configured (enables interactive prompt)
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -233,7 +236,8 @@ func newProjectsUpdateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			// Resolve account if not configured (enables interactive prompt)
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -293,7 +297,8 @@ func newProjectsDeleteCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			// Resolve account if not configured (enables interactive prompt)
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -312,6 +317,20 @@ func newProjectsDeleteCmd() *cobra.Command {
 			}, output.WithSummary("Project moved to trash"))
 		},
 	}
+}
+
+// ensureAccount resolves the account ID if not already configured.
+// This enables interactive prompts when --account flag and config are both missing.
+func ensureAccount(cmd *cobra.Command, app *appctx.App) error {
+	if app.Config.AccountID != "" {
+		return nil
+	}
+	resolved, err := app.Resolve().Account(cmd.Context())
+	if err != nil {
+		return err
+	}
+	app.Config.AccountID = resolved.Value
+	return nil
 }
 
 // convertSDKError converts SDK errors to output errors for consistent CLI error handling.
