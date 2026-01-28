@@ -30,8 +30,8 @@ Use "me" or --person to view a person's activity timeline.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&project, "in", "", "Project ID or name")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name (alias for --in)")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.Flags().StringVar(&project, "in", "", "Project ID or name (alias for --project)")
 	cmd.Flags().StringVar(&person, "person", "", "Person ID or name")
 
 	return cmd
@@ -40,8 +40,21 @@ Use "me" or --person to view a person's activity timeline.`,
 func runTimeline(cmd *cobra.Command, args []string, project, person string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	// Validate positional argument - only "me" is supported
+	if len(args) > 0 && args[0] != "me" {
+		return output.ErrUsageHint(
+			fmt.Sprintf("invalid argument %q", args[0]),
+			"Only \"me\" is supported as a positional argument. Use --person <name> for other people.",
+		)
+	}
+
+	// Check for mutually exclusive flags
+	if person != "" && project != "" {
+		return output.ErrUsage("--person and --project are mutually exclusive")
+	}
+
 	// Determine which timeline to show based on args and flags
-	// Priority: positional "me" > --person flag > --in/--project flag > default (account-wide)
+	// Priority: positional "me" > --person flag > --project flag > default (account-wide)
 
 	// Check for "me" positional argument
 	if len(args) > 0 && args[0] == "me" {
@@ -53,7 +66,7 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 		return runPersonTimeline(cmd, person)
 	}
 
-	// Check for --in or --project flag
+	// Check for --project flag
 	if project != "" {
 		return runProjectTimeline(cmd, project)
 	}

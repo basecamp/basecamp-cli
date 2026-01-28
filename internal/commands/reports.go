@@ -136,8 +136,8 @@ Results can be grouped by bucket (project) or date.`,
 					},
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         "bcq todos list --assignee " + personIDStr,
-						Description: "List todos in a project",
+						Cmd:         "bcq todos --in <project> --assignee " + personIDStr,
+						Description: "List todos in a specific project",
 					},
 				),
 			)
@@ -235,7 +235,7 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 			app := appctx.FromContext(cmd.Context())
 
 			// Parse dates if provided (dateparse handles natural language like "today", "+7")
-			// Invalid formats pass through unchanged and the API will validate
+			// Unrecognized formats are normalized (trimmed/lowercased) and passed through for the API to validate
 			parsedStart := dateparse.Parse(startDate)
 			parsedEnd := dateparse.Parse(endDate)
 
