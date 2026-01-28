@@ -9,6 +9,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/output"
 )
 
@@ -74,6 +75,14 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		return convertSDKError(err)
 	}
 
+	// Opportunistic cache refresh: update completion cache as a side-effect.
+	// Only cache when listing all active projects (no filter), as filtered
+	// results wouldn't be suitable for general-purpose completion.
+	// Done synchronously to ensure write completes before process exits.
+	if status == "" {
+		updateProjectsCache(projects, app.Config.CacheDir)
+	}
+
 	return app.OK(projects,
 		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
 		output.WithBreadcrumbs(
@@ -89,6 +98,23 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 			},
 		),
 	)
+}
+
+// updateProjectsCache updates the completion cache with fresh project data.
+// Runs synchronously; errors are ignored (best-effort).
+func updateProjectsCache(projects []basecamp.Project, cacheDir string) {
+	store := completion.NewStore(cacheDir)
+	cached := make([]completion.CachedProject, len(projects))
+	for i, p := range projects {
+		cached[i] = completion.CachedProject{
+			ID:         p.ID,
+			Name:       p.Name,
+			Purpose:    p.Purpose,
+			Bookmarked: p.Bookmarked,
+			UpdatedAt:  p.UpdatedAt,
+		}
+	}
+	_ = store.UpdateProjects(cached) // Ignore errors - this is best-effort
 }
 
 func newProjectsShowCmd() *cobra.Command {
