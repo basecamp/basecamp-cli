@@ -124,7 +124,8 @@ func (s *Store) loadUnsafe() (*Cache, error) {
 }
 
 // Save writes the cache to disk atomically.
-// Sets all timestamps to now.
+// Sets ProjectsUpdatedAt, PeopleUpdatedAt, and UpdatedAt to now.
+// AccountsUpdatedAt is NOT set here; use UpdateAccounts for that.
 func (s *Store) Save(cache *Cache) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

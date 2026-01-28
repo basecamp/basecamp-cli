@@ -208,7 +208,12 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	// Check authentication and account
+	// Check authentication first for friendly error message
+	if !app.Auth.IsAuthenticated() {
+		return output.ErrAuth("Not authenticated. Run: bcq auth login")
+	}
+
+	// Then check account is configured
 	if err := app.SDK.RequireAccount(); err != nil {
 		return err
 	}
@@ -299,20 +304,29 @@ func runCompletionStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine staleness using the package constant
+	// Determine staleness using the package constant (projects + people only)
 	isStale := store.IsStale(completion.DefaultMaxAge)
 
-	// Use oldest per-section timestamp for age calculation
+	// Find oldest timestamp across all sections for age calculation
 	oldest := cache.ProjectsUpdatedAt
 	if !cache.PeopleUpdatedAt.IsZero() && (oldest.IsZero() || cache.PeopleUpdatedAt.Before(oldest)) {
 		oldest = cache.PeopleUpdatedAt
 	}
+	if !cache.AccountsUpdatedAt.IsZero() && (oldest.IsZero() || cache.AccountsUpdatedAt.Before(oldest)) {
+		oldest = cache.AccountsUpdatedAt
+	}
 
+	// Determine status: empty if nothing cached, otherwise stale/fresh
+	hasAnyData := len(cache.Projects) > 0 || len(cache.People) > 0 || len(cache.Accounts) > 0
 	var age string
 	var status string
-	if oldest.IsZero() {
+	if !hasAnyData {
 		age = "never"
 		status = "empty"
+	} else if oldest.IsZero() {
+		// Has data but no timestamps (legacy cache)
+		age = "unknown"
+		status = "stale"
 	} else {
 		age = time.Since(oldest).Round(time.Second).String()
 		if isStale {
@@ -325,15 +339,18 @@ func runCompletionStatus(cmd *cobra.Command, args []string) error {
 	result := map[string]any{
 		"projects":            len(cache.Projects),
 		"people":              len(cache.People),
+		"accounts":            len(cache.Accounts),
 		"projects_updated_at": cache.ProjectsUpdatedAt,
 		"people_updated_at":   cache.PeopleUpdatedAt,
+		"accounts_updated_at": cache.AccountsUpdatedAt,
 		"age":                 age,
 		"status":              status,
 		"stale":               isStale,
 		"cache_path":          store.Path(),
 	}
 
-	summary := fmt.Sprintf("%d projects, %d people (%s)", len(cache.Projects), len(cache.People), status)
+	summary := fmt.Sprintf("%d projects, %d people, %d accounts (%s)",
+		len(cache.Projects), len(cache.People), len(cache.Accounts), status)
 
 	return app.Output.OK(result, output.WithSummary(summary))
 }
