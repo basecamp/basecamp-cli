@@ -152,6 +152,7 @@ Person can be:
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
@@ -271,6 +272,7 @@ Person can be:
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("from", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }

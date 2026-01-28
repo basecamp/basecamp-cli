@@ -214,26 +214,36 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	refresher := completion.NewRefresher(store, app.SDK)
 
 	// Perform synchronous refresh
-	if err := refresher.RefreshAll(cmd.Context()); err != nil {
-		return err
-	}
+	refreshResult := refresher.RefreshAll(cmd.Context())
 
-	// Load and display results
-	cache, err := store.Load()
-	if err != nil {
-		return err
-	}
-
+	// Build result with details
 	result := map[string]any{
-		"projects":   len(cache.Projects),
-		"people":     len(cache.People),
-		"updated_at": cache.UpdatedAt,
+		"projects":   refreshResult.ProjectsCount,
+		"people":     refreshResult.PeopleCount,
 		"cache_path": store.Path(),
 	}
 
-	return app.Output.OK(result,
-		output.WithSummary(fmt.Sprintf("Cached %d projects and %d people", len(cache.Projects), len(cache.People))),
-	)
+	// Include errors if any
+	if refreshResult.ProjectsErr != nil {
+		result["projects_error"] = refreshResult.ProjectsErr.Error()
+	}
+	if refreshResult.PeopleErr != nil {
+		result["people_error"] = refreshResult.PeopleErr.Error()
+	}
+
+	// Build summary
+	var summary string
+	if refreshResult.ProjectsErr != nil && refreshResult.PeopleErr != nil {
+		return fmt.Errorf("refresh failed: %v", refreshResult.Error())
+	} else if refreshResult.HasError() {
+		summary = fmt.Sprintf("Partial refresh: %d projects, %d people (warning: %v)",
+			refreshResult.ProjectsCount, refreshResult.PeopleCount, refreshResult.Error())
+	} else {
+		summary = fmt.Sprintf("Cached %d projects and %d people",
+			refreshResult.ProjectsCount, refreshResult.PeopleCount)
+	}
+
+	return app.Output.OK(result, output.WithSummary(summary))
 }
 
 func newCompletionStatusCmd() *cobra.Command {
@@ -245,7 +255,7 @@ func newCompletionStatusCmd() *cobra.Command {
 Displays information about the cached completion data including:
 - Number of cached projects and people
 - When the cache was last updated
-- Whether the cache is stale (older than 1 hour)
+- Whether the cache is stale
 - Cache file location
 `,
 		RunE: runCompletionStatus,
@@ -264,17 +274,22 @@ func runCompletionStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine staleness (1 hour TTL)
-	maxAge := time.Hour
-	isStale := store.IsStale(maxAge)
+	// Determine staleness using the package constant
+	isStale := store.IsStale(completion.DefaultMaxAge)
+
+	// Use oldest per-section timestamp for age calculation
+	oldest := cache.ProjectsUpdatedAt
+	if !cache.PeopleUpdatedAt.IsZero() && (oldest.IsZero() || cache.PeopleUpdatedAt.Before(oldest)) {
+		oldest = cache.PeopleUpdatedAt
+	}
 
 	var age string
 	var status string
-	if cache.UpdatedAt.IsZero() {
+	if oldest.IsZero() {
 		age = "never"
 		status = "empty"
 	} else {
-		age = time.Since(cache.UpdatedAt).Round(time.Second).String()
+		age = time.Since(oldest).Round(time.Second).String()
 		if isStale {
 			status = "stale"
 		} else {
@@ -283,13 +298,14 @@ func runCompletionStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	result := map[string]any{
-		"projects":   len(cache.Projects),
-		"people":     len(cache.People),
-		"updated_at": cache.UpdatedAt,
-		"age":        age,
-		"status":     status,
-		"stale":      isStale,
-		"cache_path": store.Path(),
+		"projects":            len(cache.Projects),
+		"people":              len(cache.People),
+		"projects_updated_at": cache.ProjectsUpdatedAt,
+		"people_updated_at":   cache.PeopleUpdatedAt,
+		"age":                 age,
+		"status":              status,
+		"stale":               isStale,
+		"cache_path":          store.Path(),
 	}
 
 	summary := fmt.Sprintf("%d projects, %d people (%s)", len(cache.Projects), len(cache.People), status)

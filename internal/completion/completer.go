@@ -115,12 +115,20 @@ func (c *Completer) ProjectNameCompletion() cobra.CompletionFunc {
 }
 
 // PeopleCompletion returns a Cobra completion function for person arguments.
-// People are sorted alphabetically by name.
+// People are sorted alphabetically by name, with "me" always first if it matches the filter.
 func (c *Completer) PeopleCompletion() cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		toCompleteLower := strings.ToLower(toComplete)
+		var completions []cobra.Completion
+
+		// Add "me" as a special completion option (always available, even with empty cache)
+		if strings.HasPrefix("me", toCompleteLower) {
+			completions = append(completions, cobra.CompletionWithDesc("me", "Current authenticated user"))
+		}
+
 		people := c.store(cmd).People()
 		if len(people) == 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
+			return completions, cobra.ShellCompDirectiveNoFileComp
 		}
 
 		// Sort alphabetically by name
@@ -131,8 +139,6 @@ func (c *Completer) PeopleCompletion() cobra.CompletionFunc {
 		})
 
 		// Filter by prefix
-		toCompleteLower := strings.ToLower(toComplete)
-		var completions []cobra.Completion
 		for _, p := range sorted {
 			nameLower := strings.ToLower(p.Name)
 			emailLower := strings.ToLower(p.EmailAddress)
@@ -152,23 +158,25 @@ func (c *Completer) PeopleCompletion() cobra.CompletionFunc {
 			}
 		}
 
-		// Add "me" as a special completion option
-		if strings.HasPrefix("me", toCompleteLower) {
-			completions = append([]cobra.Completion{
-				cobra.CompletionWithDesc("me", "Current authenticated user"),
-			}, completions...)
-		}
-
 		return completions, cobra.ShellCompDirectiveNoFileComp
 	}
 }
 
 // PeopleNameCompletion returns a Cobra completion function for person name arguments.
+// People are sorted alphabetically by name, with "me" always first if it matches the filter.
 func (c *Completer) PeopleNameCompletion() cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		toCompleteLower := strings.ToLower(toComplete)
+		var completions []cobra.Completion
+
+		// Add "me" as a special completion option (always available, even with empty cache)
+		if strings.HasPrefix("me", toCompleteLower) {
+			completions = append(completions, "me")
+		}
+
 		people := c.store(cmd).People()
 		if len(people) == 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
+			return completions, cobra.ShellCompDirectiveNoFileComp
 		}
 
 		// Sort alphabetically
@@ -178,8 +186,6 @@ func (c *Completer) PeopleNameCompletion() cobra.CompletionFunc {
 			return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
 		})
 
-		toCompleteLower := strings.ToLower(toComplete)
-		var completions []cobra.Completion
 		for _, p := range sorted {
 			nameLower := strings.ToLower(p.Name)
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
@@ -187,11 +193,6 @@ func (c *Completer) PeopleNameCompletion() cobra.CompletionFunc {
 				// Return name as-is; Cobra's completion scripts handle escaping
 				completions = append(completions, cobra.Completion(p.Name))
 			}
-		}
-
-		// Add "me" as a special completion option
-		if strings.HasPrefix("me", toCompleteLower) {
-			completions = append([]cobra.Completion{"me"}, completions...)
 		}
 
 		return completions, cobra.ShellCompDirectiveNoFileComp

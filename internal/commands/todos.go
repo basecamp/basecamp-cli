@@ -58,6 +58,7 @@ func NewTodosCmd() *cobra.Command {
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
 	return cmd
@@ -218,6 +219,13 @@ func NewTodoCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date")
 
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
+
 	return cmd
 }
 
@@ -239,6 +247,11 @@ func newTodosListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
 	return cmd
 }
@@ -507,6 +520,11 @@ func newTodosShowCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+
 	return cmd
 }
 
@@ -654,6 +672,13 @@ func newTodosCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee ID (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (YYYY-MM-DD)")
 
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
+
 	return cmd
 }
 
@@ -703,6 +728,11 @@ func newTodosCompleteCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+
 	return cmd
 }
 
@@ -721,6 +751,11 @@ func newDoneCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
@@ -813,6 +848,11 @@ func newTodosUncompleteCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
@@ -994,6 +1034,12 @@ Examples:
 	cmd.Flags().BoolVar(&complete, "done", false, "Mark matching todos as complete (alias)")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Preview without making changes")
 
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
+
 	return cmd
 }
 
@@ -1096,6 +1142,11 @@ func newReopenCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
@@ -1247,6 +1298,11 @@ func newTodosPositionCmd() *cobra.Command {
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
 	_ = cmd.MarkFlagRequired("to")
+
+	// Register tab completion for flags
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }

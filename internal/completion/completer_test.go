@@ -213,7 +213,7 @@ func TestCompleterEmptyCache(t *testing.T) {
 
 	completer := newTestCompleter(tmpDir)
 
-	// Project completion with empty cache
+	// Project completion with empty cache returns nothing
 	projectFn := completer.ProjectCompletion()
 	completions, directive := projectFn(newTestCmd(), nil, "")
 	if len(completions) != 0 {
@@ -223,11 +223,14 @@ func TestCompleterEmptyCache(t *testing.T) {
 		t.Errorf("expected NoFileComp directive, got %v", directive)
 	}
 
-	// People completion with empty cache
+	// People completion with empty cache still returns "me"
 	peopleFn := completer.PeopleCompletion()
 	completions, _ = peopleFn(newTestCmd(), nil, "")
-	if len(completions) != 0 {
-		t.Errorf("expected no completions with empty cache, got %d", len(completions))
+	if len(completions) != 1 {
+		t.Errorf("expected 1 completion (me) with empty cache, got %d", len(completions))
+	}
+	if len(completions) > 0 && string(completions[0]) != "me\tCurrent authenticated user" {
+		t.Errorf("expected 'me' completion, got %q", completions[0])
 	}
 }
 

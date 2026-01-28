@@ -2,11 +2,39 @@ package completion
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
+
+// RefreshResult contains the outcome of a refresh operation.
+type RefreshResult struct {
+	ProjectsCount int
+	PeopleCount   int
+	ProjectsErr   error
+	PeopleErr     error
+}
+
+// HasError returns true if any refresh operation failed.
+func (r RefreshResult) HasError() bool {
+	return r.ProjectsErr != nil || r.PeopleErr != nil
+}
+
+// Error returns a combined error message if any operation failed.
+func (r RefreshResult) Error() error {
+	if r.ProjectsErr != nil && r.PeopleErr != nil {
+		return fmt.Errorf("projects: %v; people: %v", r.ProjectsErr, r.PeopleErr)
+	}
+	if r.ProjectsErr != nil {
+		return fmt.Errorf("projects: %v", r.ProjectsErr)
+	}
+	if r.PeopleErr != nil {
+		return fmt.Errorf("people: %v", r.PeopleErr)
+	}
+	return nil
+}
 
 // Refresher handles background cache refresh operations.
 type Refresher struct {
@@ -53,61 +81,56 @@ func (r *Refresher) RefreshIfStale(maxAge time.Duration) {
 		defer cancel()
 
 		// Errors are intentionally ignored in background refresh - this is best-effort
-		_ = r.RefreshAll(ctx)
+		r.RefreshAll(ctx)
 	}()
 }
 
 // RefreshAll fetches fresh data from the API and updates the cache.
 // This is a synchronous operation - use RefreshIfStale for async.
 // On partial failure, preserves existing cached data for the failed portion.
-func (r *Refresher) RefreshAll(ctx context.Context) error {
+// Returns RefreshResult with counts and any errors encountered.
+func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
+	var result RefreshResult
+
 	// Fetch projects and people in parallel
 	var projects []basecamp.Project
 	var people []basecamp.Person
-	var projectsErr, peopleErr error
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		projects, projectsErr = r.sdk.Projects().List(ctx, nil)
+		projects, result.ProjectsErr = r.sdk.Projects().List(ctx, nil)
 	}()
 
 	go func() {
 		defer wg.Done()
-		people, peopleErr = r.sdk.People().List(ctx)
+		people, result.PeopleErr = r.sdk.People().List(ctx)
 	}()
 
 	wg.Wait()
 
 	// Update each portion independently to preserve existing data on partial failure
-	projectsOK := false
-	if projectsErr == nil && projects != nil {
-		if err := r.store.UpdateProjects(convertProjects(projects)); err != nil {
-			projectsErr = err
+	if result.ProjectsErr == nil && projects != nil {
+		converted := convertProjects(projects)
+		if err := r.store.UpdateProjects(converted); err != nil {
+			result.ProjectsErr = err
 		} else {
-			projectsOK = true
+			result.ProjectsCount = len(converted)
 		}
 	}
 
-	peopleOK := false
-	if peopleErr == nil && people != nil {
-		if err := r.store.UpdatePeople(convertPeople(people)); err != nil {
-			peopleErr = err
+	if result.PeopleErr == nil && people != nil {
+		converted := convertPeople(people)
+		if err := r.store.UpdatePeople(converted); err != nil {
+			result.PeopleErr = err
 		} else {
-			peopleOK = true
+			result.PeopleCount = len(converted)
 		}
 	}
 
-	// Only return error if both failed; partial success is acceptable
-	if !projectsOK && !peopleOK {
-		if projectsErr != nil {
-			return projectsErr
-		}
-		return peopleErr
-	}
-	return nil
+	return result
 }
 
 // RefreshProjects fetches fresh project data and updates the cache.

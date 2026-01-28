@@ -42,8 +42,8 @@ const (
 	// CacheVersion is the current cache schema version.
 	CacheVersion = 1
 
-	// DefaultMaxAge is the default cache staleness threshold.
-	DefaultMaxAge = 24 * time.Hour
+	// DefaultMaxAge is the default cache staleness threshold (1 hour).
+	DefaultMaxAge = time.Hour
 
 	// CacheFileName is the default cache file name.
 	CacheFileName = "completion.json"
@@ -201,17 +201,23 @@ func oldestTime(a, b time.Time) time.Time {
 	return b
 }
 
-// IsStale returns true if the cache is older than maxAge.
-// An empty or missing cache is always considered stale.
+// IsStale returns true if the cache is older than maxAge or incomplete.
+// A cache is considered stale if:
+// - It doesn't exist or can't be loaded
+// - Either per-section timestamp is missing (legacy cache or incomplete)
+// - The oldest section timestamp exceeds maxAge
 func (s *Store) IsStale(maxAge time.Duration) bool {
 	cache, err := s.Load()
 	if err != nil {
 		return true
 	}
-	if cache.UpdatedAt.IsZero() {
+	// Both sections must have timestamps (handles legacy caches without per-section timestamps)
+	if cache.ProjectsUpdatedAt.IsZero() || cache.PeopleUpdatedAt.IsZero() {
 		return true
 	}
-	return time.Since(cache.UpdatedAt) > maxAge
+	// Check the oldest section against maxAge
+	oldest := oldestTime(cache.ProjectsUpdatedAt, cache.PeopleUpdatedAt)
+	return time.Since(oldest) > maxAge
 }
 
 // Clear removes the cache file.
