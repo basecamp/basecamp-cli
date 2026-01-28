@@ -25,7 +25,7 @@ func NewWebhooksCmd() *cobra.Command {
 
 Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -128,6 +128,10 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			webhookIDStr := args[0]
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
 			if err != nil {
@@ -200,6 +204,10 @@ Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if url == "" {
 				return output.ErrUsage("--url is required")
@@ -288,6 +296,10 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			webhookIDStr := args[0]
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
@@ -391,6 +403,10 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			webhookIDStr := args[0]
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)

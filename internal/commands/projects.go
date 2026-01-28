@@ -23,7 +23,7 @@ func NewProjectsCmd() *cobra.Command {
 		Aliases: []string{"project"},
 		Short:   "Manage projects",
 		Long:    "List, show, create, and manage Basecamp projects.",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -141,6 +141,10 @@ func newProjectsShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
@@ -183,6 +187,10 @@ func newProjectsCreateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			if name == "" {
 				return output.ErrUsage("--name is required")
 			}
@@ -223,6 +231,10 @@ func newProjectsUpdateCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			projectID, err := strconv.ParseInt(args[0], 10, 64)
@@ -279,6 +291,10 @@ func newProjectsDeleteCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			projectID, err := strconv.ParseInt(args[0], 10, 64)

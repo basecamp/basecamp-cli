@@ -24,7 +24,7 @@ func NewSubscriptionsCmd() *cobra.Command {
 Subscriptions control who receives notifications when a recording is updated,
 commented on, or otherwise changed.`,
 		Args: cobra.ExactArgs(1),
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -132,6 +132,10 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			recordingIDStr := args[0]
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
@@ -192,6 +196,10 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			recordingIDStr := args[0]
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
