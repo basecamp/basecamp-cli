@@ -468,6 +468,10 @@ func newTodosShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Use project from flag or config
 			if project == "" {
 				project = app.Flags.Project
@@ -764,6 +768,10 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
+	}
+
+	if err := app.RequireAccount(); err != nil {
+		return err
 	}
 
 	// Use project from flag or config
@@ -1157,6 +1165,10 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Use project from flag or config
 	if project == "" {
 		project = app.Flags.Project
@@ -1237,6 +1249,10 @@ func newTodosPositionCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			if position == 0 {

@@ -24,6 +24,13 @@ func NewTodolistsCmd() *cobra.Command {
 
 A "todoset" is the container; "todolists" are the actual lists inside it.
 Each project has one todoset containing multiple todolists.`,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runTodolistsList(cmd, project)

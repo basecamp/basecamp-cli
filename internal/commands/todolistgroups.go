@@ -24,6 +24,13 @@ func NewTodolistgroupsCmd() *cobra.Command {
 		Long: `Manage todolist groups (folders for organizing todolists).
 
 Todolist groups allow you to organize todolists into collapsible sections.`,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runTodolistgroupsList(cmd, project, todolist)

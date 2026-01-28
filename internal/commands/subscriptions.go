@@ -24,6 +24,13 @@ func NewSubscriptionsCmd() *cobra.Command {
 Subscriptions control who receives notifications when a recording is updated,
 commented on, or otherwise changed.`,
 		Args: cobra.ExactArgs(1),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsShow(cmd, project, args[0])
 		},

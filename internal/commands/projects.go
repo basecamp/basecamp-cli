@@ -23,6 +23,13 @@ func NewProjectsCmd() *cobra.Command {
 		Aliases: []string{"project"},
 		Short:   "Manage projects",
 		Long:    "List, show, create, and manage Basecamp projects.",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runProjectsList(cmd, status)

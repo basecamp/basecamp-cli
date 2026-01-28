@@ -28,6 +28,13 @@ func NewRecordingsCmd() *cobra.Command {
 Provides filtered view of content across all projects.
 Type is required: todos, messages, documents, comments, cards, uploads.`,
 		Args: cobra.MaximumNArgs(1),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 

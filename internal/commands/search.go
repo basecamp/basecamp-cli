@@ -97,6 +97,10 @@ func newSearchMetadataCmd() *cobra.Command {
 }
 
 func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	metadata, err := app.Account().Search().Metadata(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
