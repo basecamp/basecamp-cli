@@ -34,8 +34,8 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Run unit tests with coverage
-        run: go test -v -coverprofile=coverage.out ./...
+      - name: Run unit tests
+        run: go test -v ./...
 
       - name: Build binary
         run: go build -o bin/bcq ./cmd/bcq
@@ -236,13 +236,13 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: benchmarks-baseline.txt
-          key: benchmarks-main
+          key: benchmarks-baseline-${{ github.sha }}
           restore-keys: |
-            benchmarks-main
+            benchmarks-baseline-
 
       - name: Install benchstat
         if: steps.filter.outputs.bench == 'true'
-        run: go install golang.org/x/perf/cmd/benchstat@latest
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20250106192532-ecc6f4f50f75
 
       - name: Compare benchmarks
         if: steps.filter.outputs.bench == 'true' && hashFiles('benchmarks-baseline.txt') != ''
@@ -262,21 +262,14 @@ jobs:
 
       - name: Save benchmark baseline
         if: steps.filter.outputs.bench == 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: benchmarks.txt
-          key: benchmarks-main-${{ github.sha }}
-
-      - name: Update baseline cache alias
-        if: steps.filter.outputs.bench == 'true'
         run: cp benchmarks.txt benchmarks-baseline.txt
 
-      - name: Save baseline alias
+      - name: Cache benchmark baseline
         if: steps.filter.outputs.bench == 'true'
         uses: actions/cache/save@v5
         with:
           path: benchmarks-baseline.txt
-          key: benchmarks-main
+          key: benchmarks-baseline-${{ github.sha }}
 
       - name: Upload benchmark results
         if: steps.filter.outputs.bench == 'true'
