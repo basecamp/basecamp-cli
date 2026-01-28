@@ -117,7 +117,7 @@ func (s *Store) loadUnsafe() (*Cache, error) {
 	if err := json.Unmarshal(data, &cache); err != nil {
 		// Invalid JSON - return empty cache rather than error
 		// This handles corrupted files gracefully
-		return &Cache{Version: CacheVersion}, nil
+		return &Cache{Version: CacheVersion}, nil //nolint:nilerr // graceful degradation for corrupted cache
 	}
 
 	return &cache, nil

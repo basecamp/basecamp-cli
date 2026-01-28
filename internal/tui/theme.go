@@ -87,7 +87,7 @@ func LoadThemeFromFile(path string) (Theme, error) {
 
 // parseSimpleTOML parses a simple TOML file with key = "value" format.
 // This is a lightweight parser for colors.toml theme files.
-func parseSimpleTOML(data []byte) (map[string]string, error) {
+func parseSimpleTOML(data []byte) (map[string]string, error) { //nolint:unparam // error return for future extensibility
 	result := make(map[string]string)
 
 	for _, line := range strings.Split(string(data), "\n") {

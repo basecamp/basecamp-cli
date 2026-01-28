@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -288,7 +289,8 @@ func newProjectsDeleteCmd() *cobra.Command {
 
 // convertSDKError converts SDK errors to output errors for consistent CLI error handling.
 func convertSDKError(err error) error {
-	if sdkErr, ok := err.(*basecamp.Error); ok {
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
 		return &output.Error{
 			Code:       sdkErr.Code,
 			Message:    sdkErr.Message,

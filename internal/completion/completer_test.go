@@ -127,7 +127,7 @@ func TestCompleterProjectCompletion(t *testing.T) {
 
 			for i, wantID := range tt.wantIDs {
 				// Completion format is "ID\tDescription"
-				got := string(completions[i])
+				got := completions[i]
 				if len(got) < len(wantID) || got[:len(wantID)] != wantID {
 					t.Errorf("completion %d: expected to start with %s, got %s", i, wantID, got)
 				}
@@ -197,7 +197,7 @@ func TestCompleterPeopleCompletion(t *testing.T) {
 			}
 
 			if len(completions) > 0 {
-				got := string(completions[0])
+				got := completions[0]
 				if len(got) < len(tt.wantFirst) || got[:len(tt.wantFirst)] != tt.wantFirst {
 					t.Errorf("first completion: expected to start with %s, got %s", tt.wantFirst, got)
 				}
@@ -229,7 +229,7 @@ func TestCompleterEmptyCache(t *testing.T) {
 	if len(completions) != 1 {
 		t.Errorf("expected 1 completion (me) with empty cache, got %d", len(completions))
 	}
-	if len(completions) > 0 && string(completions[0]) != "me\tCurrent authenticated user" {
+	if len(completions) > 0 && completions[0] != "me\tCurrent authenticated user" {
 		t.Errorf("expected 'me' completion, got %q", completions[0])
 	}
 }
@@ -295,12 +295,12 @@ func TestProjectNameCompletionWithSpaces(t *testing.T) {
 
 	// First should be "Has Spaces" (alphabetically first H < S)
 	// Names are returned as-is; Cobra's completion scripts handle escaping
-	first := string(completions[0])
+	first := completions[0]
 	if first != "Has Spaces" {
 		t.Errorf("expected 'Has Spaces', got %s", first)
 	}
 
-	second := string(completions[1])
+	second := completions[1]
 	if second != "Simple" {
 		t.Errorf("expected 'Simple', got %s", second)
 	}
@@ -368,7 +368,7 @@ func TestCompleterAccountCompletion(t *testing.T) {
 
 			for i, wantID := range tt.wantIDs {
 				// Completion format is "ID\tDescription"
-				got := string(completions[i])
+				got := completions[i]
 				if len(got) < len(wantID) || got[:len(wantID)] != wantID {
 					t.Errorf("completion %d: expected to start with %s, got %s", i, wantID, got)
 				}

@@ -51,7 +51,7 @@ func newAPIGetCmd() *cobra.Command {
 			summary := apiSummary(resp.Data)
 			breadcrumbs := apiBreadcrumbs(path)
 
-			return app.OK(json.RawMessage(resp.Data),
+			return app.OK(resp.Data,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
@@ -95,7 +95,7 @@ func newAPIPostCmd() *cobra.Command {
 
 			summary := fmt.Sprintf("POST %s: %s", path, apiSummary(resp.Data))
 
-			return app.OK(json.RawMessage(resp.Data),
+			return app.OK(resp.Data,
 				output.WithSummary(summary),
 			)
 		},
@@ -143,7 +143,7 @@ func newAPIPutCmd() *cobra.Command {
 
 			summary := fmt.Sprintf("PUT %s: %s", path, apiSummary(resp.Data))
 
-			return app.OK(json.RawMessage(resp.Data),
+			return app.OK(resp.Data,
 				output.WithSummary(summary),
 			)
 		},
@@ -181,7 +181,7 @@ func newAPIDeleteCmd() *cobra.Command {
 
 			summary := fmt.Sprintf("DELETE %s", path)
 
-			return app.OK(json.RawMessage(data),
+			return app.OK(data,
 				output.WithSummary(summary),
 			)
 		},

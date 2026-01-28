@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/basecamp/bcq/internal/appctx"
@@ -315,8 +316,8 @@ func TestURLParseFailsForNonBasecampURL(t *testing.T) {
 		t.Fatal("expected error for non-Basecamp URL")
 	}
 
-	outErr, ok := err.(*output.Error)
-	if !ok {
+	var outErr *output.Error
+	if !errors.As(err, &outErr) {
 		t.Fatalf("expected *output.Error, got %T", err)
 	}
 	if outErr.Code != output.CodeUsage {

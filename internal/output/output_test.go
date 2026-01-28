@@ -118,7 +118,7 @@ func TestErrorUnwrap(t *testing.T) {
 	}
 
 	unwrapped := err.Unwrap()
-	if unwrapped != cause {
+	if unwrapped != cause { //nolint:errorlint // testing Unwrap returns exact wrapped error
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, cause)
 	}
 }
@@ -296,7 +296,7 @@ func TestErrNetwork(t *testing.T) {
 	if !err.Retryable {
 		t.Error("Network error should be retryable")
 	}
-	if err.Cause != cause {
+	if err.Cause != cause { //nolint:errorlint // testing Cause field is exact wrapped error
 		t.Error("Cause should be set")
 	}
 	if err.Hint != "connection refused" {
@@ -366,7 +366,7 @@ func TestAsErrorWithStandardError(t *testing.T) {
 	if result.Message != "something went wrong" {
 		t.Errorf("Message = %q, want %q", result.Message, "something went wrong")
 	}
-	if result.Cause != original {
+	if result.Cause != original { //nolint:errorlint // testing Cause field is exact original error
 		t.Error("Cause should be original error")
 	}
 }

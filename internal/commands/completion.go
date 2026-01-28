@@ -260,7 +260,7 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	// Build summary
 	var summary string
 	if refreshResult.ProjectsErr != nil && refreshResult.PeopleErr != nil {
-		return fmt.Errorf("refresh failed: %v", refreshResult.Error())
+		return fmt.Errorf("refresh failed: %w", refreshResult.Error())
 	} else if refreshResult.HasError() {
 		// Report actual cached counts with warning about what failed
 		summary = fmt.Sprintf("Cached %d projects, %d people (warning: %v)",
