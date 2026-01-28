@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/x/term"
 
+	"github.com/basecamp/bcq/internal/observability"
 	"github.com/basecamp/bcq/internal/tui"
 )
 
@@ -485,67 +486,8 @@ func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
 
 // renderStats renders session statistics in a compact one-liner.
 func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
-	var parts []string
-
-	// Duration
-	if durationMS, ok := stats["duration_ms"].(int64); ok {
-		parts = append(parts, formatDuration(time.Duration(durationMS)*time.Millisecond))
-	} else if durationMS, ok := stats["duration_ms"].(float64); ok {
-		parts = append(parts, formatDuration(time.Duration(int64(durationMS))*time.Millisecond))
-	}
-
-	// Requests
-	if requests, ok := stats["requests"].(int); ok && requests > 0 {
-		if requests == 1 {
-			parts = append(parts, "1 request")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d requests", requests))
-		}
-	} else if requests, ok := stats["requests"].(float64); ok && requests > 0 {
-		if int(requests) == 1 {
-			parts = append(parts, "1 request")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d requests", int(requests)))
-		}
-	}
-
-	// Cache hits
-	if cacheHits, ok := stats["cache_hits"].(int); ok && cacheHits > 0 {
-		rate := 0.0
-		if r, ok := stats["cache_rate"].(float64); ok {
-			rate = r
-		}
-		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", cacheHits, rate))
-	} else if cacheHits, ok := stats["cache_hits"].(float64); ok && cacheHits > 0 {
-		rate := 0.0
-		if r, ok := stats["cache_rate"].(float64); ok {
-			rate = r
-		}
-		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", int(cacheHits), rate))
-	}
-
-	// Retries
-	if retries, ok := stats["retries"].(int); ok && retries > 0 {
-		if retries == 1 {
-			parts = append(parts, "1 retry")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d retries", retries))
-		}
-	} else if retries, ok := stats["retries"].(float64); ok && retries > 0 {
-		if int(retries) == 1 {
-			parts = append(parts, "1 retry")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d retries", int(retries)))
-		}
-	}
-
-	// Failed ops
-	if failed, ok := stats["failed"].(int); ok && failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", failed))
-	} else if failed, ok := stats["failed"].(float64); ok && failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", int(failed)))
-	}
-
+	metrics := observability.SessionMetricsFromMap(stats)
+	parts := metrics.FormatParts()
 	if len(parts) > 0 {
 		line := r.Muted.Render("Stats: " + strings.Join(parts, " | "))
 		b.WriteString(line + "\n")
@@ -916,67 +858,8 @@ func (r *MarkdownRenderer) renderList(b *strings.Builder, data []any) {
 
 // renderStats renders session statistics in Markdown format.
 func (r *MarkdownRenderer) renderStats(b *strings.Builder, stats map[string]any) {
-	var parts []string
-
-	// Duration
-	if durationMS, ok := stats["duration_ms"].(int64); ok {
-		parts = append(parts, formatDuration(time.Duration(durationMS)*time.Millisecond))
-	} else if durationMS, ok := stats["duration_ms"].(float64); ok {
-		parts = append(parts, formatDuration(time.Duration(int64(durationMS))*time.Millisecond))
-	}
-
-	// Requests
-	if requests, ok := stats["requests"].(int); ok && requests > 0 {
-		if requests == 1 {
-			parts = append(parts, "1 request")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d requests", requests))
-		}
-	} else if requests, ok := stats["requests"].(float64); ok && requests > 0 {
-		if int(requests) == 1 {
-			parts = append(parts, "1 request")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d requests", int(requests)))
-		}
-	}
-
-	// Cache hits
-	if cacheHits, ok := stats["cache_hits"].(int); ok && cacheHits > 0 {
-		rate := 0.0
-		if r, ok := stats["cache_rate"].(float64); ok {
-			rate = r
-		}
-		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", cacheHits, rate))
-	} else if cacheHits, ok := stats["cache_hits"].(float64); ok && cacheHits > 0 {
-		rate := 0.0
-		if r, ok := stats["cache_rate"].(float64); ok {
-			rate = r
-		}
-		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", int(cacheHits), rate))
-	}
-
-	// Retries
-	if retries, ok := stats["retries"].(int); ok && retries > 0 {
-		if retries == 1 {
-			parts = append(parts, "1 retry")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d retries", retries))
-		}
-	} else if retries, ok := stats["retries"].(float64); ok && retries > 0 {
-		if int(retries) == 1 {
-			parts = append(parts, "1 retry")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d retries", int(retries)))
-		}
-	}
-
-	// Failed ops
-	if failed, ok := stats["failed"].(int); ok && failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", failed))
-	} else if failed, ok := stats["failed"].(float64); ok && failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", int(failed)))
-	}
-
+	metrics := observability.SessionMetricsFromMap(stats)
+	parts := metrics.FormatParts()
 	if len(parts) > 0 {
 		b.WriteString("*Stats: " + strings.Join(parts, " | ") + "*\n")
 	}

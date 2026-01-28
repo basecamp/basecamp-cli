@@ -2,6 +2,7 @@
 package observability
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -174,4 +175,82 @@ func (c *SessionCollector) Reset() {
 	c.failedOps = 0
 	c.totalRetries = 0
 	c.totalLatency = 0
+}
+
+// FormatParts returns the formatted parts for a stats summary line.
+// The parts are: duration, requests, cached, retries, failed.
+// Zero-value fields are omitted (except duration which is always included).
+func (m *SessionMetrics) FormatParts() []string {
+	var parts []string
+
+	// Duration (always included)
+	duration := m.EndTime.Sub(m.StartTime)
+	if duration < time.Second {
+		parts = append(parts, fmt.Sprintf("%dms", duration.Milliseconds()))
+	} else {
+		parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
+	}
+
+	// Requests
+	if m.TotalRequests > 0 {
+		if m.TotalRequests == 1 {
+			parts = append(parts, "1 request")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d requests", m.TotalRequests))
+		}
+	}
+
+	// Cache hits
+	if m.CacheHits > 0 {
+		rate := 0.0
+		if m.TotalRequests > 0 {
+			rate = float64(m.CacheHits) / float64(m.TotalRequests) * 100
+		}
+		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", m.CacheHits, rate))
+	}
+
+	// Retries
+	if m.TotalRetries > 0 {
+		if m.TotalRetries == 1 {
+			parts = append(parts, "1 retry")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d retries", m.TotalRetries))
+		}
+	}
+
+	// Failed ops
+	if m.FailedOps > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", m.FailedOps))
+	}
+
+	return parts
+}
+
+// SessionMetricsFromMap creates a SessionMetrics from a stats map (as used in JSON output).
+// This allows renderers to use the same formatting logic as direct SessionMetrics consumers.
+func SessionMetricsFromMap(stats map[string]any) *SessionMetrics {
+	m := &SessionMetrics{}
+
+	// Helper to extract int from either int or float64 (JSON unmarshaling)
+	getInt := func(key string) int {
+		if v, ok := stats[key].(int); ok {
+			return v
+		}
+		if v, ok := stats[key].(float64); ok {
+			return int(v)
+		}
+		return 0
+	}
+
+	m.TotalRequests = getInt("requests")
+	m.CacheHits = getInt("cache_hits")
+	m.TotalRetries = getInt("retries")
+	m.FailedOps = getInt("failed")
+
+	// Reconstruct duration from duration_ms
+	if durationMS := getInt("duration_ms"); durationMS > 0 {
+		m.EndTime = m.StartTime.Add(time.Duration(durationMS) * time.Millisecond)
+	}
+
+	return m
 }

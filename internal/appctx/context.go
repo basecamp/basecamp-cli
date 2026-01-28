@@ -240,48 +240,7 @@ func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
 		return
 	}
 
-	var parts []string
-
-	// Duration
-	duration := stats.EndTime.Sub(stats.StartTime)
-	if duration < time.Second {
-		parts = append(parts, fmt.Sprintf("%dms", duration.Milliseconds()))
-	} else {
-		parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
-	}
-
-	// Requests
-	if stats.TotalRequests > 0 {
-		if stats.TotalRequests == 1 {
-			parts = append(parts, "1 request")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d requests", stats.TotalRequests))
-		}
-	}
-
-	// Cache hits
-	if stats.CacheHits > 0 {
-		rate := 0.0
-		if stats.TotalRequests > 0 {
-			rate = float64(stats.CacheHits) / float64(stats.TotalRequests) * 100
-		}
-		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", stats.CacheHits, rate))
-	}
-
-	// Retries
-	if stats.TotalRetries > 0 {
-		if stats.TotalRetries == 1 {
-			parts = append(parts, "1 retry")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d retries", stats.TotalRetries))
-		}
-	}
-
-	// Failed ops
-	if stats.FailedOps > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", stats.FailedOps))
-	}
-
+	parts := stats.FormatParts()
 	if len(parts) > 0 {
 		fmt.Fprintf(os.Stderr, "\nStats: %s\n", strings.Join(parts, " | "))
 	}
