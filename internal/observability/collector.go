@@ -231,15 +231,20 @@ func (m *SessionMetrics) FormatParts() []string {
 func SessionMetricsFromMap(stats map[string]any) *SessionMetrics {
 	m := &SessionMetrics{}
 
-	// Helper to extract int from either int or float64 (JSON unmarshaling)
+	// Helper to extract int from int, int64, or float64.
+	// Direct map access yields int64 (from time.Duration.Milliseconds()),
+	// while JSON round-tripping yields float64.
 	getInt := func(key string) int {
-		if v, ok := stats[key].(int); ok {
+		switch v := stats[key].(type) {
+		case int:
 			return v
-		}
-		if v, ok := stats[key].(float64); ok {
+		case int64:
 			return int(v)
+		case float64:
+			return int(v)
+		default:
+			return 0
 		}
-		return 0
 	}
 
 	m.TotalRequests = getInt("requests")
