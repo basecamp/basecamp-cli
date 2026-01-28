@@ -1,0 +1,298 @@
+package commands
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/bcq/internal/completion"
+	"github.com/basecamp/bcq/internal/output"
+)
+
+// NewCompletionCmd creates the completion command group.
+func NewCompletionCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "completion [shell]",
+		Short: "Generate shell completion scripts",
+		Long: `Generate shell completion scripts for bcq.
+
+To load completions:
+
+Bash:
+  $ source <(bcq completion bash)
+
+  # To load completions for each session, execute once:
+  # Linux:
+  $ bcq completion bash > /etc/bash_completion.d/bcq
+  # macOS:
+  $ bcq completion bash > $(brew --prefix)/etc/bash_completion.d/bcq
+
+Zsh:
+  # If shell completion is not already enabled in your environment,
+  # you will need to enable it. You can execute the following once:
+  $ echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+  # To load completions for each session, execute once:
+  $ bcq completion zsh > "${fpath[1]}/_bcq"
+
+  # You will need to start a new shell for this setup to take effect.
+
+Fish:
+  $ bcq completion fish | source
+
+  # To load completions for each session, execute once:
+  $ bcq completion fish > ~/.config/fish/completions/bcq.fish
+
+PowerShell:
+  PS> bcq completion powershell | Out-String | Invoke-Expression
+
+  # To load completions for every new session, run:
+  PS> bcq completion powershell > bcq.ps1
+  # and source this file from your PowerShell profile.
+`,
+		DisableFlagsInUseLine: true,
+		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
+		Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCompletion(cmd.Root(), args[0])
+		},
+	}
+
+	// Add shell-specific subcommands for convenience
+	cmd.AddCommand(newCompletionBashCmd())
+	cmd.AddCommand(newCompletionZshCmd())
+	cmd.AddCommand(newCompletionFishCmd())
+	cmd.AddCommand(newCompletionPowershellCmd())
+
+	// Add cache management subcommands
+	cmd.AddCommand(newCompletionRefreshCmd())
+	cmd.AddCommand(newCompletionStatusCmd())
+
+	return cmd
+}
+
+func runCompletion(rootCmd *cobra.Command, shell string) error {
+	switch shell {
+	case "bash":
+		return rootCmd.GenBashCompletionV2(os.Stdout, true)
+	case "zsh":
+		return rootCmd.GenZshCompletion(os.Stdout)
+	case "fish":
+		return rootCmd.GenFishCompletion(os.Stdout, true)
+	case "powershell":
+		return rootCmd.GenPowerShellCompletionWithDesc(os.Stdout)
+	default:
+		return fmt.Errorf("unknown shell: %s", shell)
+	}
+}
+
+func newCompletionBashCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "bash",
+		Short: "Generate bash completion script",
+		Long: `Generate the autocompletion script for bash.
+
+This script depends on the 'bash-completion' package.
+If it is not installed already, you can install it via your OS's package manager.
+
+To load completions in your current shell session:
+  $ source <(bcq completion bash)
+
+To load completions for every new session, execute once:
+
+Linux:
+  $ bcq completion bash > /etc/bash_completion.d/bcq
+
+macOS:
+  $ bcq completion bash > $(brew --prefix)/etc/bash_completion.d/bcq
+`,
+		DisableFlagsInUseLine: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Root().GenBashCompletionV2(os.Stdout, true)
+		},
+	}
+}
+
+func newCompletionZshCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "zsh",
+		Short: "Generate zsh completion script",
+		Long: `Generate the autocompletion script for zsh.
+
+If shell completion is not already enabled in your environment you will need
+to enable it. You can execute the following once:
+  $ echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+To load completions in your current shell session:
+  $ source <(bcq completion zsh)
+
+To load completions for every new session, execute once:
+  $ bcq completion zsh > "${fpath[1]}/_bcq"
+
+You will need to start a new shell for this setup to take effect.
+`,
+		DisableFlagsInUseLine: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Root().GenZshCompletion(os.Stdout)
+		},
+	}
+}
+
+func newCompletionFishCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "fish",
+		Short: "Generate fish completion script",
+		Long: `Generate the autocompletion script for fish.
+
+To load completions in your current shell session:
+  $ bcq completion fish | source
+
+To load completions for every new session, execute once:
+  $ bcq completion fish > ~/.config/fish/completions/bcq.fish
+
+You will need to start a new shell for this setup to take effect.
+`,
+		DisableFlagsInUseLine: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Root().GenFishCompletion(os.Stdout, true)
+		},
+	}
+}
+
+func newCompletionPowershellCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "powershell",
+		Short: "Generate powershell completion script",
+		Long: `Generate the autocompletion script for powershell.
+
+To load completions in your current shell session:
+  PS> bcq completion powershell | Out-String | Invoke-Expression
+
+To load completions for every new session, add the output of the above command
+to your powershell profile.
+`,
+		DisableFlagsInUseLine: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
+		},
+	}
+}
+
+func newCompletionRefreshCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "refresh",
+		Short: "Refresh the completion cache",
+		Long: `Refresh the completion cache by fetching fresh data from Basecamp.
+
+This command fetches the current list of projects and people from Basecamp
+and updates the local cache used for tab completion. Requires authentication.
+
+The cache is also updated automatically when you run commands like:
+  bcq projects
+  bcq people list
+`,
+		RunE: runCompletionRefresh,
+	}
+}
+
+func runCompletionRefresh(cmd *cobra.Command, args []string) error {
+	app := appctx.FromContext(cmd.Context())
+	if app == nil {
+		return fmt.Errorf("app not initialized")
+	}
+
+	// Check authentication first
+	if !app.Auth.IsAuthenticated() {
+		return output.ErrAuth("Not authenticated. Run: bcq auth login")
+	}
+
+	// Create refresher with the app's SDK client
+	store := completion.NewStore(app.Config.CacheDir)
+	refresher := completion.NewRefresher(store, app.SDK)
+
+	// Perform synchronous refresh
+	if err := refresher.RefreshAll(cmd.Context()); err != nil {
+		return err
+	}
+
+	// Load and display results
+	cache, err := store.Load()
+	if err != nil {
+		return err
+	}
+
+	result := map[string]any{
+		"projects":   len(cache.Projects),
+		"people":     len(cache.People),
+		"updated_at": cache.UpdatedAt,
+		"cache_path": store.Path(),
+	}
+
+	return app.Output.OK(result,
+		output.WithSummary(fmt.Sprintf("Cached %d projects and %d people", len(cache.Projects), len(cache.People))),
+	)
+}
+
+func newCompletionStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show completion cache status",
+		Long: `Show the status of the completion cache.
+
+Displays information about the cached completion data including:
+- Number of cached projects and people
+- When the cache was last updated
+- Whether the cache is stale (older than 1 hour)
+- Cache file location
+`,
+		RunE: runCompletionStatus,
+	}
+}
+
+func runCompletionStatus(cmd *cobra.Command, args []string) error {
+	app := appctx.FromContext(cmd.Context())
+	if app == nil {
+		return fmt.Errorf("app not initialized")
+	}
+
+	store := completion.NewStore(app.Config.CacheDir)
+	cache, err := store.Load()
+	if err != nil {
+		return err
+	}
+
+	// Determine staleness (1 hour TTL)
+	maxAge := time.Hour
+	isStale := store.IsStale(maxAge)
+
+	var age string
+	var status string
+	if cache.UpdatedAt.IsZero() {
+		age = "never"
+		status = "empty"
+	} else {
+		age = time.Since(cache.UpdatedAt).Round(time.Second).String()
+		if isStale {
+			status = "stale"
+		} else {
+			status = "fresh"
+		}
+	}
+
+	result := map[string]any{
+		"projects":   len(cache.Projects),
+		"people":     len(cache.People),
+		"updated_at": cache.UpdatedAt,
+		"age":        age,
+		"status":     status,
+		"stale":      isStale,
+		"cache_path": store.Path(),
+	}
+
+	summary := fmt.Sprintf("%d projects, %d people (%s)", len(cache.Projects), len(cache.People), status)
+
+	return app.Output.OK(result, output.WithSummary(summary))
+}
