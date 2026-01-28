@@ -38,10 +38,11 @@ func NewMeCmd() *cobra.Command {
 	return cmd
 }
 
-// getLaunchpadBaseURL returns the Launchpad base URL.
-// Can be overridden via BCQ_LAUNCHPAD_URL for testing.
+// defaultLaunchpadBaseURL is the default Launchpad base URL.
 const defaultLaunchpadBaseURL = "https://launchpad.37signals.com"
 
+// getLaunchpadBaseURL returns the Launchpad base URL.
+// Can be overridden via BCQ_LAUNCHPAD_URL for testing.
 func getLaunchpadBaseURL() string {
 	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
 		return url
