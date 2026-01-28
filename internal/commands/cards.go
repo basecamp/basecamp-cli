@@ -1570,11 +1570,11 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				req.DueOn = dateparse.Parse(dueOn)
 			}
 			if assignees != "" {
-				assigneesCSV, err := resolveAssigneesCSV(cmd.Context(), app, assignees)
+				assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignees)
 				if err != nil {
 					return err
 				}
-				req.Assignees = assigneesCSV
+				req.Assignees = assigneeIDs
 			}
 
 			step, err := app.SDK.CardSteps().Create(cmd.Context(), bucketID, cardIDInt, req)
@@ -1663,11 +1663,11 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 				req.DueOn = dateparse.Parse(dueOn)
 			}
 			if assignees != "" {
-				assigneesCSV, err := resolveAssigneesCSV(cmd.Context(), app, assignees)
+				assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignees)
 				if err != nil {
 					return err
 				}
-				req.Assignees = assigneesCSV
+				req.Assignees = assigneeIDs
 			}
 
 			step, err := app.SDK.CardSteps().Update(cmd.Context(), bucketID, stepID, req)
@@ -1916,9 +1916,9 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 // an error is returned with the available card table IDs.
 func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string) (string, error) {
 	path := fmt.Sprintf("/projects/%s.json", projectID)
-	resp, err := app.API.Get(cmd.Context(), path)
+	resp, err := app.SDK.Get(cmd.Context(), path)
 	if err != nil {
-		return "", err
+		return "", convertSDKError(err)
 	}
 
 	var project struct {
@@ -2044,9 +2044,9 @@ func resolveColumn(columns []basecamp.CardColumn, identifier string) int64 {
 	return 0
 }
 
-func resolveAssigneesCSV(ctx context.Context, app *appctx.App, input string) (string, error) {
+func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]int64, error) {
 	parts := strings.Split(input, ",")
-	ids := make([]string, 0, len(parts))
+	ids := make([]int64, 0, len(parts))
 
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
@@ -2054,21 +2054,25 @@ func resolveAssigneesCSV(ctx context.Context, app *appctx.App, input string) (st
 			continue
 		}
 
-		if _, err := strconv.ParseInt(part, 10, 64); err == nil {
-			ids = append(ids, part)
+		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
+			ids = append(ids, id)
 			continue
 		}
 
 		resolvedID, _, err := app.Names.ResolvePerson(ctx, part)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve assignee '%s': %w", part, err)
+			return nil, fmt.Errorf("failed to resolve assignee '%s': %w", part, err)
 		}
-		ids = append(ids, resolvedID)
+		id, err := strconv.ParseInt(resolvedID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid resolved ID '%s': %w", resolvedID, err)
+		}
+		ids = append(ids, id)
 	}
 
 	if len(ids) == 0 {
-		return "", output.ErrUsage("No valid assignees provided")
+		return nil, output.ErrUsage("No valid assignees provided")
 	}
 
-	return strings.Join(ids, ","), nil
+	return ids, nil
 }

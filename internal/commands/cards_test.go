@@ -7,13 +7,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/api"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/auth"
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/names"
 	"github.com/basecamp/bcq/internal/output"
 )
+
+// testTokenProvider is a mock token provider for tests.
+type testTokenProvider struct{}
+
+func (t *testTokenProvider) AccessToken(_ context.Context) (string, error) {
+	return "test-token", nil
+}
 
 // TestIsNumericID tests the isNumericID helper function.
 func TestIsNumericID(t *testing.T) {
@@ -62,15 +70,18 @@ func setupTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 		AccountID: "99999", // Required for RequireAccount()
 	}
 
-	// Create minimal API client and auth manager
+	// Create SDK client with mock token provider
 	authMgr := auth.NewManager(cfg, nil)
-	apiClient := api.NewClient(cfg, authMgr)
-	nameResolver := names.NewResolver(apiClient, authMgr)
+	sdkCfg := &basecamp.Config{
+		AccountID: cfg.AccountID,
+	}
+	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{})
+	nameResolver := names.NewResolver(sdkClient, authMgr)
 
 	app := &appctx.App{
 		Config: cfg,
 		Auth:   authMgr,
-		API:    apiClient,
+		SDK:    sdkClient,
 		Names:  nameResolver,
 		Output: output.New(output.Options{
 			Format: output.FormatJSON,

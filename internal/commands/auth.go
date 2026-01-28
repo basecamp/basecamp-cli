@@ -73,7 +73,7 @@ func newAuthLoginCmd() *cobra.Command {
 			fmt.Println("\nAuthentication successful!")
 
 			// Try to fetch and store user profile
-			resp, err := app.API.Get(cmd.Context(), "/my/profile.json")
+			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
 			if err == nil {
 				var profile struct {
 					ID   int    `json:"id"`
