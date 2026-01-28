@@ -211,12 +211,18 @@ func (a *App) Err(err error) error {
 		return outputErr
 	}
 
-	// Print stats to stderr if enabled (separate from error response)
-	if a.Flags.Stats && a.Collector != nil {
+	// Print stats to stderr if enabled, but not in machine-consumable modes
+	// (agent, quiet, ids-only, count are meant for programmatic consumption)
+	if a.Flags.Stats && a.Collector != nil && !a.isMachineOutput() {
 		stats := a.Collector.Summary()
 		a.printStatsToStderr(&stats)
 	}
 	return nil
+}
+
+// isMachineOutput returns true if the output mode is intended for programmatic consumption.
+func (a *App) isMachineOutput() bool {
+	return a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count
 }
 
 // printStatsToStderr outputs a compact stats line to stderr.

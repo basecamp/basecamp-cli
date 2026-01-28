@@ -138,7 +138,9 @@ func Execute() {
 	cmd.AddCommand(commands.NewTimelineCmd())
 	cmd.AddCommand(commands.NewReportsCmd())
 
-	if err := cmd.Execute(); err != nil {
+	// Use ExecuteC to get the executed command (for correct context access)
+	executedCmd, err := cmd.ExecuteC()
+	if err != nil {
 		// Transform Cobra errors to match Bash CLI error format
 		err = transformCobraError(err)
 
@@ -146,7 +148,7 @@ func Execute() {
 		apiErr := output.AsError(err)
 
 		// Try to use app.Err() if app is available (for --stats support)
-		if app := appctx.FromContext(cmd.Context()); app != nil {
+		if app := appctx.FromContext(executedCmd.Context()); app != nil {
 			_ = app.Err(err)
 			os.Exit(apiErr.ExitCode())
 		}
