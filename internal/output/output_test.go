@@ -1558,3 +1558,134 @@ func TestSkipObjectColumnsMap(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// Stats Rendering Tests
+// =============================================================================
+
+func TestStyledOutputWithStats(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	startTime := time.Now().Add(-250 * time.Millisecond)
+	metrics := &observability.SessionMetrics{
+		StartTime:       startTime,
+		EndTime:         time.Now(),
+		TotalRequests:   5,
+		CacheHits:       2,
+		CacheMisses:     3,
+		TotalOperations: 3,
+		FailedOps:       0,
+		TotalLatency:    200 * time.Millisecond,
+	}
+
+	err := w.OK(map[string]any{"id": 123}, WithStats(metrics))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should contain Stats line
+	if !strings.Contains(output, "Stats:") {
+		t.Errorf("Styled output with stats should contain 'Stats:', got: %s", output)
+	}
+	// Should contain request count
+	if !strings.Contains(output, "5 requests") {
+		t.Errorf("Styled output should contain '5 requests', got: %s", output)
+	}
+	// Should contain cache info
+	if !strings.Contains(output, "cached") {
+		t.Errorf("Styled output should contain cache info, got: %s", output)
+	}
+}
+
+func TestMarkdownOutputWithStats(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	startTime := time.Now().Add(-500 * time.Millisecond)
+	metrics := &observability.SessionMetrics{
+		StartTime:       startTime,
+		EndTime:         time.Now(),
+		TotalRequests:   3,
+		CacheHits:       1,
+		CacheMisses:     2,
+		TotalOperations: 2,
+		FailedOps:       1,
+		TotalLatency:    400 * time.Millisecond,
+	}
+
+	err := w.OK(map[string]any{"id": 456}, WithStats(metrics))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should contain Stats line in markdown format
+	if !strings.Contains(output, "*Stats:") {
+		t.Errorf("Markdown output with stats should contain '*Stats:', got: %s", output)
+	}
+	// Should contain failed count
+	if !strings.Contains(output, "1 failed") {
+		t.Errorf("Markdown output should contain '1 failed', got: %s", output)
+	}
+}
+
+func TestStyledOutputWithoutStats(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	err := w.OK(map[string]any{"id": 789})
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should NOT contain Stats line when no stats provided
+	if strings.Contains(output, "Stats:") {
+		t.Errorf("Styled output without stats should not contain 'Stats:', got: %s", output)
+	}
+}
+
+func TestStatsRenderingSingleRequest(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	metrics := &observability.SessionMetrics{
+		StartTime:     time.Now().Add(-100 * time.Millisecond),
+		EndTime:       time.Now(),
+		TotalRequests: 1,
+		CacheHits:     0,
+		CacheMisses:   1,
+	}
+
+	err := w.OK(map[string]any{"id": 1}, WithStats(metrics))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should use singular "request" not "requests"
+	if !strings.Contains(output, "1 request") {
+		t.Errorf("Should use singular '1 request', got: %s", output)
+	}
+	if strings.Contains(output, "1 requests") {
+		t.Errorf("Should NOT use plural '1 requests', got: %s", output)
+	}
+}
