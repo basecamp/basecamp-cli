@@ -134,7 +134,8 @@ func TestCardsColumnColorRequiresColor(t *testing.T) {
 	}
 
 	// Check error type
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "--color is required" {
 			t.Errorf("expected '--color is required', got %q", e.Message)
 		}
@@ -159,7 +160,8 @@ func TestCardsStepsRequiresCardID(t *testing.T) {
 	}
 
 	// Check error type
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "Card ID required (bcq cards steps <card_id>)" {
 			t.Errorf("expected 'Card ID required (bcq cards steps <card_id>)', got %q", e.Message)
 		}
@@ -223,7 +225,8 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No update fields provided" {
 			t.Errorf("expected 'No update fields provided', got %q", e.Message)
 		}
@@ -246,7 +249,8 @@ func TestCardsStepMoveRequiresCard(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "--card is required" {
 			t.Errorf("expected '--card is required', got %q", e.Message)
 		}
@@ -269,7 +273,8 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "--position is required (0-indexed)" {
 			t.Errorf("expected '--position is required (0-indexed)', got %q", e.Message)
 		}
@@ -290,7 +295,8 @@ func TestCardsCmdRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -312,7 +318,8 @@ func TestCardsListColumnNameRequiresCardTable(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "--card-table is required when using --column with a name" {
 			t.Errorf("expected '--card-table is required when using --column with a name', got %q", e.Message)
 		}
@@ -336,7 +343,8 @@ func TestCardsColumnCreateRequiresTitle(t *testing.T) {
 	}
 
 	// Check if it's a Cobra required flag error or our custom error
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "--title is required" {
 			t.Errorf("expected '--title is required', got %q", e.Message)
 		}
@@ -362,7 +370,8 @@ func TestCardsColumnUpdateRequiresFields(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No update fields provided" {
 			t.Errorf("expected 'No update fields provided', got %q", e.Message)
 		}
@@ -385,7 +394,8 @@ func TestCardsColumnMoveRequiresPosition(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		// Match the actual error message format
 		if e.Message != "--position required (1-indexed)" {
 			t.Errorf("expected '--position required (1-indexed)', got %q", e.Message)
@@ -432,7 +442,8 @@ func TestCardsMoveRequiresCardTable(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "--card-table is required when --to is a column name" {
 			t.Errorf("expected '--card-table is required when --to is a column name', got %q", e.Message)
 		}
@@ -475,7 +486,8 @@ func TestCardsColumnsRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -497,7 +509,8 @@ func TestCardsColumnShowRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -519,7 +532,8 @@ func TestCardsStepCompleteRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -541,7 +555,8 @@ func TestCardsStepUncompleteRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -569,7 +584,8 @@ func TestCardsListNumericColumnDoesNotRequireCardTable(t *testing.T) {
 
 	// If there's an error, it should NOT be about requiring --card-table
 	if err != nil {
-		if e, ok := err.(*output.Error); ok {
+		var e *output.Error
+		if errors.As(err, &e) {
 			if e.Message == "--card-table is required when using --column with a name" {
 				t.Error("Numeric column ID should not require --card-table")
 			}
@@ -590,7 +606,8 @@ func TestCardsCreateNumericColumnDoesNotRequireCardTable(t *testing.T) {
 
 	// If there's an error, it should NOT be about requiring --card-table
 	if err != nil {
-		if e, ok := err.(*output.Error); ok {
+		var e *output.Error
+		if errors.As(err, &e) {
 			if e.Message == "--card-table is required when using --column with a name" {
 				t.Error("Numeric column ID should not require --card-table for create")
 			}
@@ -616,7 +633,8 @@ func TestCardsMoveWithNumericTo(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		// Should NOT be the card-table error - numeric IDs bypass that requirement
 		if e.Message == "--card-table is required when --to is a column name" {
 			t.Errorf("numeric --to should not require --card-table, got %q", e.Message)
@@ -641,7 +659,8 @@ func TestCardsMovePartialNumericRequiresCardTable(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		// MUST be the card-table error - partial numeric is NOT a valid ID
 		if e.Message != "--card-table is required when --to is a column name" {
 			t.Errorf("expected '--card-table is required when --to is a column name', got %q", e.Message)
@@ -683,14 +702,15 @@ func TestCardsColumnNameVariations(t *testing.T) {
 
 			err := executeCommand(cmd, app, args...)
 
+			var e *output.Error
 			if tt.expectCardTable && err != nil {
-				if e, ok := err.(*output.Error); ok {
+				if errors.As(err, &e) {
 					if e.Message != "--card-table is required when using --column with a name" {
 						t.Errorf("expected card-table required error, got %q", e.Message)
 					}
 				}
 			} else if !tt.expectCardTable && err != nil {
-				if e, ok := err.(*output.Error); ok {
+				if errors.As(err, &e) {
 					if e.Message == "--card-table is required when using --column with a name" {
 						t.Errorf("numeric column %q should not require --card-table", tt.columnArg)
 					}
@@ -885,7 +905,8 @@ func TestCardsUpdateRequiresFields(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "At least one field required" {
 			t.Errorf("expected 'At least one field required', got %q", e.Message)
 		}
@@ -953,7 +974,8 @@ func TestCardShortcutRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -976,7 +998,8 @@ func TestCardsStepDeleteRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}

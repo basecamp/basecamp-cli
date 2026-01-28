@@ -285,12 +285,12 @@ func (m *Manager) Logout() error {
 	return m.store.Delete(origin)
 }
 
-func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) {
+func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) { //nolint:unparam // error return for consistent signature
 	discoverer := oauth.NewDiscoverer(m.httpClient)
 	cfg, err := discoverer.Discover(ctx, m.cfg.BaseURL)
 	if err != nil {
-		// Fallback to Launchpad
-		return &oauth.Config{
+		// Fallback to Launchpad - intentionally return nil error with fallback config
+		return &oauth.Config{ //nolint:nilerr // intentional fallback to Launchpad on discovery error
 			AuthorizationEndpoint: m.launchpadURL() + "/authorization/new",
 			TokenEndpoint:         m.launchpadURL() + "/authorization/token",
 		}, "launchpad", nil

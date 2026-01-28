@@ -104,7 +104,8 @@ func TestMeRequiresAuth(t *testing.T) {
 	}
 
 	// Should be auth required error
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Code != output.CodeAuth {
 			t.Errorf("expected code %q, got %q", output.CodeAuth, e.Code)
 		}

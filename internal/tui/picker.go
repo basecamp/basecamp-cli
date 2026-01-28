@@ -227,7 +227,7 @@ func (p *Picker) Run() (*PickerItem, error) {
 		return nil, err
 	}
 
-	final := finalModel.(pickerModel)
+	final := finalModel.(pickerModel) //nolint:errcheck // type assertion always succeeds here
 	if final.quitting {
 		return nil, nil
 	}

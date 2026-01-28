@@ -144,7 +144,7 @@ If no type specified, uses generic recording lookup.`,
 				},
 			}
 
-			return app.OK(json.RawMessage(resp.Data),
+			return app.OK(resp.Data,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)

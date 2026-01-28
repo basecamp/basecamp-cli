@@ -2,6 +2,7 @@ package names
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/basecamp/bcq/internal/output"
@@ -487,8 +488,8 @@ func TestResolverResolveProjectAmbiguous(t *testing.T) {
 	}
 
 	// Verify it's an ambiguous error
-	outErr, ok := err.(*output.Error)
-	if !ok {
+	var outErr *output.Error
+	if !errors.As(err, &outErr) {
 		t.Fatalf("expected *output.Error, got %T", err)
 	}
 	if outErr.Code != output.CodeAmbiguous {
@@ -509,8 +510,8 @@ func TestResolverResolveProjectNotFound(t *testing.T) {
 	}
 
 	// Verify it's a not found error
-	outErr, ok := err.(*output.Error)
-	if !ok {
+	var outErr *output.Error
+	if !errors.As(err, &outErr) {
 		t.Fatalf("expected *output.Error, got %T", err)
 	}
 	if outErr.Code != output.CodeNotFound {
@@ -602,8 +603,8 @@ func TestResolverResolvePersonAmbiguous(t *testing.T) {
 		t.Fatal("expected error for ambiguous match")
 	}
 
-	outErr, ok := err.(*output.Error)
-	if !ok {
+	var outErr *output.Error
+	if !errors.As(err, &outErr) {
 		t.Fatalf("expected *output.Error, got %T", err)
 	}
 	if outErr.Code != output.CodeAmbiguous {
@@ -663,8 +664,8 @@ func TestResolverResolveTodolistNotFound(t *testing.T) {
 		t.Fatal("expected error for not found")
 	}
 
-	outErr, ok := err.(*output.Error)
-	if !ok {
+	var outErr *output.Error
+	if !errors.As(err, &outErr) {
 		t.Fatalf("expected *output.Error, got %T", err)
 	}
 	if outErr.Code != output.CodeNotFound {

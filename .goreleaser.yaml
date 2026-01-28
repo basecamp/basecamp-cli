@@ -133,3 +133,58 @@ scoops:
     description: "Command-line interface for Basecamp"
     license: MIT
     skip_upload: auto
+
+# Docker images for container deployment
+# Uses Dockerfile.goreleaser which copies the pre-built binary (avoids private SDK auth issues)
+dockers:
+  - id: bcq-amd64
+    ids: [bcq]
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - "ghcr.io/basecamp/bcq:{{ .Version }}-amd64"
+      - "ghcr.io/basecamp/bcq:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=bcq"
+      - "--label=org.opencontainers.image.description=Command-line interface for Basecamp"
+      - "--label=org.opencontainers.image.url=https://github.com/basecamp/bcq"
+      - "--label=org.opencontainers.image.source=https://github.com/basecamp/bcq"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .Commit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    use: buildx
+
+  - id: bcq-arm64
+    ids: [bcq]
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - "ghcr.io/basecamp/bcq:{{ .Version }}-arm64"
+      - "ghcr.io/basecamp/bcq:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=bcq"
+      - "--label=org.opencontainers.image.description=Command-line interface for Basecamp"
+      - "--label=org.opencontainers.image.url=https://github.com/basecamp/bcq"
+      - "--label=org.opencontainers.image.source=https://github.com/basecamp/bcq"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .Commit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    use: buildx
+
+# Multi-arch manifest combining amd64 and arm64
+docker_manifests:
+  - name_template: "ghcr.io/basecamp/bcq:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/basecamp/bcq:{{ .Version }}-amd64"
+      - "ghcr.io/basecamp/bcq:{{ .Version }}-arm64"
+
+  - name_template: "ghcr.io/basecamp/bcq:latest"
+    image_templates:
+      - "ghcr.io/basecamp/bcq:latest-amd64"
+      - "ghcr.io/basecamp/bcq:latest-arm64"

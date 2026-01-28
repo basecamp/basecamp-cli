@@ -95,7 +95,8 @@ func TestTodosRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -116,7 +117,8 @@ func TestTodosListRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -138,7 +140,8 @@ func TestTodosCreateRequiresContent(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "Todo content required" {
 			t.Errorf("expected 'Todo content required', got %q", e.Message)
 		}
@@ -254,7 +257,8 @@ func TestTodoShortcutRequiresContent(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "Todo content required" {
 			t.Errorf("expected 'Todo content required', got %q", e.Message)
 		}
@@ -275,7 +279,8 @@ func TestTodoShortcutRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}

@@ -180,7 +180,7 @@ func (s *Store) MigrateToKeyring() error {
 
 	all, err := s.loadAllFromFile()
 	if err != nil {
-		return nil // No file to migrate
+		return nil //nolint:nilerr // No file to migrate is not an error
 	}
 
 	for origin, creds := range all {
