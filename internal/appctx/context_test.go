@@ -236,8 +236,8 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 	if flags.Todolist != "" {
 		t.Error("Todolist should default to empty")
 	}
-	if flags.BaseURL != "" {
-		t.Error("BaseURL should default to empty")
+	if flags.Host != "" {
+		t.Error("Host should default to empty")
 	}
 	if flags.CacheDir != "" {
 		t.Error("CacheDir should default to empty")

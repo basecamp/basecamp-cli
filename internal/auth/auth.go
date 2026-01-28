@@ -70,7 +70,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
 	creds, err := m.store.Load(origin)
 	if err != nil {
-		return "", output.ErrAuth("Not authenticated")
+		return "", output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", origin, err))
 	}
 
 	// Check if token is expired (with 5 minute buffer).
@@ -83,8 +83,45 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		// Reload refreshed credentials
 		creds, err = m.store.Load(origin)
 		if err != nil {
+			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", origin, err))
+		}
+	}
+
+	if creds.AccessToken == "" {
+		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", origin))
+	}
+
+	return creds.AccessToken, nil
+}
+
+// StoredAccessToken returns a valid access token from the credential store,
+// refreshing if needed. Unlike AccessToken, this ignores the BASECAMP_TOKEN
+// environment variable and always uses stored OAuth credentials.
+func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
+	creds, err := m.store.Load(origin)
+	if err != nil {
+		return "", output.ErrAuth(fmt.Sprintf("No stored credentials for %s: %v", origin, err))
+	}
+
+	// Check if token is expired (with 5 minute buffer)
+	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+		if err := m.refreshLocked(ctx, origin, creds); err != nil {
+			// Preserve the original error type (API, network, etc.)
 			return "", err
 		}
+		// Reload refreshed credentials
+		creds, err = m.store.Load(origin)
+		if err != nil {
+			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", origin, err))
+		}
+	}
+
+	if creds.AccessToken == "" {
+		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", origin))
 	}
 
 	return creds.AccessToken, nil
@@ -114,7 +151,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
 	creds, err := m.store.Load(origin)
 	if err != nil {
-		return output.ErrAuth("Not authenticated")
+		return output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", origin, err))
 	}
 
 	return m.refreshLocked(ctx, origin, creds)
