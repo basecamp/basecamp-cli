@@ -2,7 +2,6 @@ package resilience
 
 import (
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -19,9 +18,6 @@ func NewBulkhead(store *Store, config BulkheadConfig) *Bulkhead {
 	if config.MaxConcurrent <= 0 {
 		config.MaxConcurrent = 10
 	}
-	if config.StaleProcessTimeout <= 0 {
-		config.StaleProcessTimeout = 60 * time.Second
-	}
 
 	return &Bulkhead{
 		config: config,
@@ -32,14 +28,6 @@ func NewBulkhead(store *Store, config BulkheadConfig) *Bulkhead {
 // now returns the current time.
 func (b *Bulkhead) now() time.Time {
 	return time.Now()
-}
-
-// isProcessAlive checks if a process with the given PID is still running.
-func isProcessAlive(pid int) bool {
-	// On Unix systems, sending signal 0 checks if the process exists
-	// and we have permission to send signals to it.
-	err := syscall.Kill(pid, 0)
-	return err == nil
 }
 
 // cleanupStaleSlots removes PIDs from dead processes.

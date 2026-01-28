@@ -118,8 +118,18 @@ func (rl *RateLimiter) Tokens() (float64, error) {
 	var tokens float64
 
 	err := rl.store.Update(func(state *State) error {
+		// Capture previous values to detect changes
+		prevTokens := state.RateLimiter.Tokens
+		prevLastRefillAt := state.RateLimiter.LastRefillAt
+
 		rl.refill(&state.RateLimiter)
 		tokens = state.RateLimiter.Tokens
+
+		// Update timestamp if state changed
+		if state.RateLimiter.Tokens != prevTokens ||
+			!state.RateLimiter.LastRefillAt.Equal(prevLastRefillAt) {
+			state.UpdatedAt = rl.now()
+		}
 		return nil
 	})
 

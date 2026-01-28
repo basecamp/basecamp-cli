@@ -3,15 +3,13 @@ package resilience
 import (
 	"os"
 	"testing"
-	"time"
 )
 
 func TestBulkheadAcquireAndRelease(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Acquire a slot
@@ -53,8 +51,7 @@ func TestBulkheadRejectsWhenFull(t *testing.T) {
 
 	// Create a bulkhead with only 1 slot
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       1, // Only allow 1 concurrent request
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 1, // Only allow 1 concurrent request
 	})
 
 	// First acquire should succeed (current process)
@@ -92,8 +89,7 @@ func TestBulkheadPersistence(t *testing.T) {
 	// First bulkhead instance
 	store1 := NewStore(dir)
 	bh1 := NewBulkhead(store1, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Acquire a slot
@@ -102,8 +98,7 @@ func TestBulkheadPersistence(t *testing.T) {
 	// Second bulkhead instance (same process)
 	store2 := NewStore(dir)
 	bh2 := NewBulkhead(store2, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Should see the slot from the first instance
@@ -120,8 +115,7 @@ func TestBulkheadReset(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Acquire a slot
@@ -166,8 +160,7 @@ func TestBulkheadAvailable(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Initial available
@@ -201,8 +194,7 @@ func TestBulkheadCurrentPIDTracking(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Acquire a slot
@@ -231,8 +223,7 @@ func TestBulkheadDeadProcessCleanup(t *testing.T) {
 	store.Save(initState)
 
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Force cleanup
@@ -257,8 +248,7 @@ func TestBulkheadSamePIDMultipleAcquires(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// First acquire
@@ -285,8 +275,7 @@ func TestBulkheadForceCleanup(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 	bh := NewBulkhead(store, BulkheadConfig{
-		MaxConcurrent:       5,
-		StaleProcessTimeout: 5 * time.Minute,
+		MaxConcurrent: 5,
 	})
 
 	// Acquire a slot

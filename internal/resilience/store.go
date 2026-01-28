@@ -4,10 +4,13 @@
 package resilience
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"syscall"
+	"time"
+
+	"github.com/gofrs/flock"
 )
 
 const (
@@ -58,51 +61,64 @@ func (s *Store) lockPath() string {
 	return filepath.Join(s.dir, ".lock")
 }
 
+// LockTimeout is the maximum time to wait for acquiring the file lock.
+// If exceeded, operations fail open to avoid blocking indefinitely.
+const LockTimeout = 100 * time.Millisecond
+
 // fileLock represents an acquired file lock.
 type fileLock struct {
-	file *os.File
+	flock *flock.Flock
 }
 
 // acquireLock obtains an exclusive lock on the state directory.
 // The caller must call release() when done.
+// Returns nil (with no error) if the lock cannot be acquired within LockTimeout,
+// allowing the caller to proceed without locking (fail-open semantics).
 func (s *Store) acquireLock() (*fileLock, error) {
 	// Ensure directory exists
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
 		return nil, err
 	}
 
-	f, err := os.OpenFile(s.lockPath(), os.O_CREATE|os.O_RDWR, 0600)
+	fl := flock.New(s.lockPath())
+
+	// Try to acquire lock with timeout (fail open on timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), LockTimeout)
+	defer cancel()
+
+	// TryLockContext retries every 10ms until context expires
+	locked, err := fl.TryLockContext(ctx, 10*time.Millisecond)
 	if err != nil {
-		return nil, err
+		// Lock error (including context deadline) - return nil to fail open
+		return nil, nil
+	}
+	if !locked {
+		// Could not acquire - return nil to fail open
+		return nil, nil
 	}
 
-	// Acquire exclusive lock (blocking)
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-
-	return &fileLock{file: f}, nil
+	return &fileLock{flock: fl}, nil
 }
 
 // release releases the file lock.
 func (fl *fileLock) release() error {
-	if fl.file == nil {
+	if fl == nil || fl.flock == nil {
 		return nil
 	}
-	// Unlock then close - ignore unlock error as we're closing anyway
-	_ = syscall.Flock(int(fl.file.Fd()), syscall.LOCK_UN)
-	return fl.file.Close()
+	return fl.flock.Unlock()
 }
 
 // Load reads the state from disk with proper locking.
 // Returns an empty state if the file doesn't exist.
+// If the lock cannot be acquired, proceeds without locking (fail-open).
 func (s *Store) Load() (*State, error) {
 	lock, err := s.acquireLock()
 	if err != nil {
 		return nil, err
 	}
-	defer lock.release()
+	if lock != nil {
+		defer func() { _ = lock.release() }()
+	}
 
 	return s.loadUnsafe()
 }
@@ -128,12 +144,15 @@ func (s *Store) loadUnsafe() (*State, error) {
 }
 
 // Save writes the state to disk atomically with proper locking.
+// If the lock cannot be acquired, proceeds without locking (fail-open).
 func (s *Store) Save(state *State) error {
 	lock, err := s.acquireLock()
 	if err != nil {
 		return err
 	}
-	defer lock.release()
+	if lock != nil {
+		defer func() { _ = lock.release() }()
+	}
 
 	return s.saveUnsafe(state)
 }
@@ -165,12 +184,15 @@ func (s *Store) saveUnsafe(state *State) error {
 // The updateFn receives the current state and should modify it in place.
 // This is the preferred way to update state as it holds the lock
 // throughout the entire read-modify-write cycle.
+// If the lock cannot be acquired, proceeds without locking (fail-open).
 func (s *Store) Update(updateFn func(*State) error) error {
 	lock, err := s.acquireLock()
 	if err != nil {
 		return err
 	}
-	defer lock.release()
+	if lock != nil {
+		defer func() { _ = lock.release() }()
+	}
 
 	state, err := s.loadUnsafe()
 	if err != nil {
@@ -185,12 +207,15 @@ func (s *Store) Update(updateFn func(*State) error) error {
 }
 
 // Clear removes the state file.
+// If the lock cannot be acquired, proceeds without locking (fail-open).
 func (s *Store) Clear() error {
 	lock, err := s.acquireLock()
 	if err != nil {
 		return err
 	}
-	defer lock.release()
+	if lock != nil {
+		defer func() { _ = lock.release() }()
+	}
 
 	err = os.Remove(s.Path())
 	if os.IsNotExist(err) {

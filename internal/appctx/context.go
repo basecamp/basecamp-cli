@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -88,11 +89,10 @@ func NewApp(cfg *config.Config) *App {
 	cliHooks := observability.NewCLIHooks(0, collector, traceWriter)
 
 	// Create resilience components for cross-process state coordination
-	resilienceStore := resilience.NewStore(cfg.CacheDir)
+	// State is stored in <cacheDir>/resilience/state.json
+	resilienceDir := filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
+	resilienceStore := resilience.NewStore(resilienceDir)
 	resilienceCfg := resilience.DefaultConfig()
-	if cfg.CacheDir != "" {
-		resilienceCfg = resilienceCfg.WithStateDir(cfg.CacheDir)
-	}
 	gatingHooks := resilience.NewGatingHooksFromConfig(resilienceStore, resilienceCfg)
 
 	// Chain hooks: gating hooks first (to gate requests), then CLI hooks (for observability)

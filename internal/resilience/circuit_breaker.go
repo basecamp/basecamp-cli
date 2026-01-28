@@ -54,17 +54,30 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 		// Check if we should transition to half-open
 		if now.Sub(cbState.OpenedAt) >= cb.config.OpenTimeout {
 			// Transition to half-open
-			return cb.store.Update(func(s *State) error {
+			err := cb.store.Update(func(s *State) error {
 				s.CircuitBreaker.State = CircuitHalfOpen
 				s.CircuitBreaker.Successes = 0
+				s.CircuitBreaker.Failures = 0
 				s.UpdatedAt = now
 				return nil
-			}) == nil, nil
+			})
+			if err != nil {
+				// On error, allow the request (fail open)
+				return true, nil
+			}
+			return true, nil
 		}
 		return false, nil
 
 	case cbState.IsHalfOpen():
-		// Allow limited requests in half-open state
+		// Allow limited requests in half-open state based on configured max.
+		// Use successes + failures to count attempts during this half-open period.
+		if cb.config.HalfOpenMaxRequests > 0 {
+			attempts := cbState.Successes + cbState.Failures
+			if attempts >= cb.config.HalfOpenMaxRequests {
+				return false, nil
+			}
+		}
 		return true, nil
 
 	default:

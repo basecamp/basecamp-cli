@@ -6,10 +6,6 @@ import (
 
 // Config holds configuration for all resilience primitives.
 type Config struct {
-	// StateDir is the directory where state files are stored.
-	// If empty, uses the default (~/.cache/bcq/resilience/).
-	StateDir string
-
 	// CircuitBreaker configures the circuit breaker pattern.
 	CircuitBreaker CircuitBreakerConfig
 
@@ -60,17 +56,11 @@ type BulkheadConfig struct {
 	// MaxConcurrent is the maximum number of concurrent requests across all processes.
 	// Default: 10
 	MaxConcurrent int
-
-	// StaleProcessTimeout is how long before a process is considered dead
-	// and its permit can be reclaimed.
-	// Default: 60 seconds
-	StaleProcessTimeout time.Duration
 }
 
 // DefaultConfig returns a Config with sensible defaults for the Basecamp API.
 func DefaultConfig() *Config {
 	return &Config{
-		StateDir: "", // Use default location
 		CircuitBreaker: CircuitBreakerConfig{
 			FailureThreshold:    5,
 			SuccessThreshold:    2,
@@ -83,17 +73,9 @@ func DefaultConfig() *Config {
 			TokensPerRequest: 1,
 		},
 		Bulkhead: BulkheadConfig{
-			MaxConcurrent:       10,
-			StaleProcessTimeout: 60 * time.Second,
+			MaxConcurrent: 10,
 		},
 	}
-}
-
-// WithStateDir returns a copy of the config with a custom state directory.
-func (c *Config) WithStateDir(dir string) *Config {
-	copy := *c
-	copy.StateDir = dir
-	return &copy
 }
 
 // WithCircuitBreaker returns a copy of the config with custom circuit breaker settings.
@@ -156,11 +138,5 @@ func (rl RateLimiterConfig) WithRefillRate(n float64) RateLimiterConfig {
 // WithMaxConcurrent sets the maximum concurrent requests for the bulkhead.
 func (bh BulkheadConfig) WithMaxConcurrent(n int) BulkheadConfig {
 	bh.MaxConcurrent = n
-	return bh
-}
-
-// WithStaleProcessTimeout sets the stale process timeout for the bulkhead.
-func (bh BulkheadConfig) WithStaleProcessTimeout(d time.Duration) BulkheadConfig {
-	bh.StaleProcessTimeout = d
 	return bh
 }
