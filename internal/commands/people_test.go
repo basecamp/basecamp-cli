@@ -117,7 +117,7 @@ func TestMeRequiresAuth(t *testing.T) {
 }
 
 // setupAuthenticatedTestApp creates a test app with credentials stored for Launchpad OAuth.
-// It also starts a mock Launchpad server and returns a cleanup function.
+// It also starts a mock Launchpad server (cleaned up via t.Cleanup) and returns the test app and its output buffer.
 func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse *basecamp.AuthorizationInfo) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
