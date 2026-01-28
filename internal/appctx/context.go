@@ -253,6 +253,15 @@ func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
 		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", stats.CacheHits, rate))
 	}
 
+	// Retries
+	if stats.TotalRetries > 0 {
+		if stats.TotalRetries == 1 {
+			parts = append(parts, "1 retry")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d retries", stats.TotalRetries))
+		}
+	}
+
 	// Failed ops
 	if stats.FailedOps > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", stats.FailedOps))

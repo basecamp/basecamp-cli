@@ -524,6 +524,21 @@ func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
 		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", int(cacheHits), rate))
 	}
 
+	// Retries
+	if retries, ok := stats["retries"].(int); ok && retries > 0 {
+		if retries == 1 {
+			parts = append(parts, "1 retry")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d retries", retries))
+		}
+	} else if retries, ok := stats["retries"].(float64); ok && retries > 0 {
+		if int(retries) == 1 {
+			parts = append(parts, "1 retry")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d retries", int(retries)))
+		}
+	}
+
 	// Failed ops
 	if failed, ok := stats["failed"].(int); ok && failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", failed))
@@ -938,6 +953,21 @@ func (r *MarkdownRenderer) renderStats(b *strings.Builder, stats map[string]any)
 			rate = r
 		}
 		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", int(cacheHits), rate))
+	}
+
+	// Retries
+	if retries, ok := stats["retries"].(int); ok && retries > 0 {
+		if retries == 1 {
+			parts = append(parts, "1 retry")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d retries", retries))
+		}
+	} else if retries, ok := stats["retries"].(float64); ok && retries > 0 {
+		if int(retries) == 1 {
+			parts = append(parts, "1 retry")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d retries", int(retries)))
+		}
 	}
 
 	// Failed ops

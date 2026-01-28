@@ -319,6 +319,7 @@ func WithStats(metrics *observability.SessionMetrics) ResponseOption {
 			"cache_rate":  cacheRate(metrics),
 			"operations":  metrics.TotalOperations,
 			"failed":      metrics.FailedOps,
+			"retries":     metrics.TotalRetries,
 			"latency_ms":  metrics.TotalLatency.Milliseconds(),
 			"duration_ms": metrics.EndTime.Sub(metrics.StartTime).Milliseconds(),
 		}
