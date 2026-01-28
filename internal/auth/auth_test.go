@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
+
 	"github.com/basecamp/bcq/internal/config"
 )
 
@@ -454,7 +456,7 @@ func TestCredentialsJSON(t *testing.T) {
 }
 
 func TestOAuthConfigJSON(t *testing.T) {
-	cfg := &OAuthConfig{
+	cfg := &oauth.Config{
 		Issuer:                "https://issuer.example.com",
 		AuthorizationEndpoint: "https://auth.example.com/authorize",
 		TokenEndpoint:         "https://auth.example.com/token",
@@ -467,7 +469,7 @@ func TestOAuthConfigJSON(t *testing.T) {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 
-	var loaded OAuthConfig
+	var loaded oauth.Config
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
