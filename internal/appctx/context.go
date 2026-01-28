@@ -3,10 +3,12 @@ package appctx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -79,9 +81,10 @@ func NewApp(cfg *config.Config) *App {
 
 	// Create observability components
 	// Collector always runs to gather stats; hooks control output verbosity
+	// Level 0 initially; ApplyFlags sets the actual level from -v flags
 	collector := observability.NewSessionCollector()
 	traceWriter := observability.NewTraceWriter()
-	hooks := observability.NewCLIHooks(cfg.Verbose, collector, traceWriter)
+	hooks := observability.NewCLIHooks(0, collector, traceWriter)
 
 	// Create SDK client with auth adapter and observability hooks
 	sdkCfg := &basecamp.Config{
@@ -199,6 +202,65 @@ func (a *App) OK(data any, opts ...output.ResponseOption) error {
 		opts = append(opts, output.WithStats(&stats))
 	}
 	return a.Output.OK(data, opts...)
+}
+
+// Err outputs an error response, printing stats to stderr if --stats flag is set.
+func (a *App) Err(err error) error {
+	// Print the error response first
+	if outputErr := a.Output.Err(err); outputErr != nil {
+		return outputErr
+	}
+
+	// Print stats to stderr if enabled (separate from error response)
+	if a.Flags.Stats && a.Collector != nil {
+		stats := a.Collector.Summary()
+		a.printStatsToStderr(&stats)
+	}
+	return nil
+}
+
+// printStatsToStderr outputs a compact stats line to stderr.
+func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
+	if stats == nil {
+		return
+	}
+
+	var parts []string
+
+	// Duration
+	duration := stats.EndTime.Sub(stats.StartTime)
+	if duration < time.Second {
+		parts = append(parts, fmt.Sprintf("%dms", duration.Milliseconds()))
+	} else {
+		parts = append(parts, fmt.Sprintf("%.1fs", duration.Seconds()))
+	}
+
+	// Requests
+	if stats.TotalRequests > 0 {
+		if stats.TotalRequests == 1 {
+			parts = append(parts, "1 request")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d requests", stats.TotalRequests))
+		}
+	}
+
+	// Cache hits
+	if stats.CacheHits > 0 {
+		rate := 0.0
+		if stats.TotalRequests > 0 {
+			rate = float64(stats.CacheHits) / float64(stats.TotalRequests) * 100
+		}
+		parts = append(parts, fmt.Sprintf("%d cached (%.0f%%)", stats.CacheHits, rate))
+	}
+
+	// Failed ops
+	if stats.FailedOps > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", stats.FailedOps))
+	}
+
+	if len(parts) > 0 {
+		fmt.Fprintf(os.Stderr, "\nStats: %s\n", strings.Join(parts, " | "))
+	}
 }
 
 // IsInteractive returns true if the terminal supports interactive TUI.
