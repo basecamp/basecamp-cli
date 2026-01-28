@@ -4,7 +4,9 @@ package appctx
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -64,7 +66,9 @@ func (a *authAdapter) AccessToken(ctx context.Context) (string, error) {
 
 // NewApp creates a new App with the given configuration.
 func NewApp(cfg *config.Config) *App {
-	authMgr := auth.NewManager(cfg, nil)
+	// Create HTTP client for auth manager (OAuth discovery, token refresh)
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	authMgr := auth.NewManager(cfg, httpClient)
 
 	// Create SDK client with auth adapter
 	sdkCfg := &basecamp.Config{
