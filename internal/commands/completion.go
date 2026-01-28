@@ -217,7 +217,11 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	refreshResult := refresher.RefreshAll(cmd.Context())
 
 	// Load actual cache to get current counts (includes preserved data on partial failure)
-	cache, _ := store.Load()
+	cache, loadErr := store.Load()
+	if loadErr != nil {
+		// Cache load failed - report the error, don't pretend all is well
+		return fmt.Errorf("refresh completed but failed to read cache: %w", loadErr)
+	}
 	projectsCount := len(cache.Projects)
 	peopleCount := len(cache.People)
 
