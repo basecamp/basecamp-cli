@@ -76,13 +76,13 @@ func TestGatingHooksRejectsWhenRateLimited(t *testing.T) {
 	}
 
 	// First request should succeed
-	_, err := hooks.OnOperationGate(context.Background(), op)
+	ctx, err := hooks.OnOperationGate(context.Background(), op)
 	if err != nil {
 		t.Fatalf("expected first request to succeed, got %v", err)
 	}
 
-	// Release bulkhead
-	hooks.OnOperationEnd(context.Background(), op, nil, time.Millisecond)
+	// Release bulkhead (use ctx from OnOperationGate to properly release the slot)
+	hooks.OnOperationEnd(ctx, op, nil, time.Millisecond)
 
 	// Second request should fail (no tokens left)
 	_, err = hooks.OnOperationGate(context.Background(), op)

@@ -100,7 +100,7 @@ func NewApp(cfg *config.Config) *App {
 	gatingHooks := resilience.NewGatingHooksFromConfig(resilienceStore, resilienceCfg)
 
 	// Chain hooks: gating hooks first (to gate requests), then CLI hooks (for observability)
-	// Note: GatingHooks implements GatingHooks interface, while CLIHooks implements Hooks
+	// Note: resilience.GatingHooks implements basecamp.GatingHooks, while CLIHooks implements basecamp.Hooks
 	hooks := basecamp.NewChainHooks(gatingHooks, cliHooks)
 
 	// Create SDK client with auth adapter and chained hooks

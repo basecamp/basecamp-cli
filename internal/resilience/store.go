@@ -6,8 +6,10 @@ package resilience
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -113,11 +115,15 @@ func (s *Store) acquireLock() (*fileLock, error) {
 	// TryLockContext retries every 10ms until context expires
 	locked, err := fl.TryLockContext(ctx, 10*time.Millisecond)
 	if err != nil {
-		// Lock error (including context deadline) - proceed without lock
-		return nil, nil
+		// Only fail-open on context deadline (timeout), not real errors
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, nil
+		}
+		// Real lock error (permissions, filesystem issues) - return error
+		return nil, err
 	}
 	if !locked {
-		// Timeout - proceed without lock
+		// Timeout without error - proceed without lock
 		return nil, nil
 	}
 
@@ -195,13 +201,25 @@ func (s *Store) saveUnsafe(state *State) error {
 		return err
 	}
 
-	// Write atomically via temp file
-	tmpPath := s.Path() + ".tmp"
+	// Write atomically via temp file with unique name (PID + timestamp)
+	// to avoid conflicts when lock cannot be acquired (fail-open scenario)
+	tmpPath := fmt.Sprintf("%s.%d.%d.tmp", s.Path(), os.Getpid(), time.Now().UnixNano())
 	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return err
 	}
 
-	return os.Rename(tmpPath, s.Path())
+	// On Windows, os.Rename fails if destination exists. Remove it first.
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(s.Path()) // Ignore error if file doesn't exist
+	}
+
+	if err := os.Rename(tmpPath, s.Path()); err != nil {
+		// Clean up temp file on error
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
 }
 
 // Update atomically loads, modifies, and saves the state.

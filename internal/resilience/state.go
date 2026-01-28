@@ -118,7 +118,7 @@ func (r *RateLimiterState) BlockedFor() time.Duration {
 // The bulkhead pattern limits concurrent requests to prevent resource exhaustion.
 type BulkheadState struct {
 	// ActivePIDs is the list of process IDs currently holding permits.
-	// Dead processes are cleaned up when the state is loaded.
+	// Stale/dead PIDs are cleaned up by bulkhead operations, not when the state is loaded.
 	ActivePIDs []int `json:"active_pids"`
 }
 
