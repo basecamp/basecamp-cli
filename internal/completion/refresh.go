@@ -2,6 +2,7 @@ package completion
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -25,7 +26,10 @@ func (r RefreshResult) HasError() bool {
 // Error returns a combined error message if any operation failed.
 func (r RefreshResult) Error() error {
 	if r.ProjectsErr != nil && r.PeopleErr != nil {
-		return fmt.Errorf("projects: %w; people: %w", r.ProjectsErr, r.PeopleErr)
+		return errors.Join(
+			fmt.Errorf("projects: %w", r.ProjectsErr),
+			fmt.Errorf("people: %w", r.PeopleErr),
+		)
 	}
 	if r.ProjectsErr != nil {
 		return fmt.Errorf("projects: %w", r.ProjectsErr)
