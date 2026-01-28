@@ -95,7 +95,7 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 		subscribedStr = "yes"
 	}
 
-	return app.Output.OK(subscription,
+	return app.OK(subscription,
 		output.WithSummary(fmt.Sprintf("%d subscribers (you: %s)", subscription.Count, subscribedStr)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -154,7 +154,7 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(subscription,
+			return app.OK(subscription,
 				output.WithSummary(fmt.Sprintf("Subscribed to recording #%s", recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -213,7 +213,7 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 			// Unsubscribe - ignore errors for idempotency
 			_ = app.SDK.Subscriptions().Unsubscribe(cmd.Context(), bucketID, recordingID)
 
-			return app.Output.OK(map[string]any{},
+			return app.OK(map[string]any{},
 				output.WithSummary(fmt.Sprintf("Unsubscribed from recording #%s", recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -340,7 +340,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		actionWord = "Removed"
 	}
 
-	return app.Output.OK(subscription,
+	return app.OK(subscription,
 		output.WithSummary(fmt.Sprintf("%s subscribers for recording #%s", actionWord, recordingIDStr)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

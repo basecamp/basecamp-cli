@@ -93,7 +93,7 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 			return convertSDKError(err)
 		}
 		totalHours := sumTimesheetHours(entries)
-		return app.Output.OK(entries,
+		return app.OK(entries,
 			output.WithSummary(fmt.Sprintf("%d timesheet entries (%.1fh total)", len(entries), totalHours)),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
@@ -117,7 +117,7 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 
 	totalHours := sumTimesheetHours(entries)
 
-	return app.Output.OK(entries,
+	return app.OK(entries,
 		output.WithSummary(fmt.Sprintf("%d timesheet entries (%.1fh total)", len(entries), totalHours)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -189,7 +189,7 @@ func newTimesheetProjectCmd() *cobra.Command {
 
 			totalHours := sumTimesheetHours(entries)
 
-			return app.Output.OK(entries,
+			return app.OK(entries,
 				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(entries), totalHours)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -259,7 +259,7 @@ func newTimesheetRecordingCmd() *cobra.Command {
 
 			totalHours := sumTimesheetHours(entries)
 
-			return app.Output.OK(entries,
+			return app.OK(entries,
 				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(entries), totalHours)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

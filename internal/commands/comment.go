@@ -103,7 +103,7 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(comments,
+	return app.OK(comments,
 		output.WithSummary(fmt.Sprintf("%d comments on recording #%s", len(comments), recordingID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -171,7 +171,7 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 				creatorName = comment.Creator.Name
 			}
 
-			return app.Output.OK(comment,
+			return app.OK(comment,
 				output.WithSummary(fmt.Sprintf("Comment #%s by %s", commentIDStr, creatorName)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -242,7 +242,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(comment,
+			return app.OK(comment,
 				output.WithSummary(fmt.Sprintf("Updated comment #%s", commentIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -363,7 +363,7 @@ Supports batch commenting on multiple recordings at once.`,
 				summary = fmt.Sprintf("Added %d comment(s) to: %s", len(commented), strings.Join(commented, ", "))
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

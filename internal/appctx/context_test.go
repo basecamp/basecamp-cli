@@ -122,7 +122,7 @@ func TestApplyFlagsMD(t *testing.T) {
 func TestApplyFlagsVerbose(t *testing.T) {
 	cfg := &config.Config{}
 	app := NewApp(cfg)
-	app.Flags.Verbose = true
+	app.Flags.Verbose = 1 // -v
 
 	// Should not panic
 	app.ApplyFlags()
@@ -222,8 +222,8 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 	if flags.Count {
 		t.Error("Count should default to false")
 	}
-	if flags.Verbose {
-		t.Error("Verbose should default to false")
+	if flags.Verbose != 0 {
+		t.Error("Verbose should default to 0")
 	}
 
 	// All strings should default to empty
@@ -301,4 +301,38 @@ func TestOutputWriterType(t *testing.T) {
 	cfg := &config.Config{}
 	app := NewApp(cfg)
 	_ = app.Output // Verify it's assignable to *output.Writer
+}
+
+// Test app.OK includes stats when --stats flag is set
+func TestAppOKWithStats(t *testing.T) {
+	cfg := &config.Config{}
+	app := NewApp(cfg)
+
+	// Without stats flag - should not panic
+	app.Flags.Stats = false
+	err := app.OK(map[string]string{"test": "data"})
+	if err != nil {
+		t.Errorf("OK without stats failed: %v", err)
+	}
+
+	// With stats flag - should not panic and include stats
+	app.Flags.Stats = true
+	err = app.OK(map[string]string{"test": "data"})
+	if err != nil {
+		t.Errorf("OK with stats failed: %v", err)
+	}
+}
+
+// Test app.OK with nil collector doesn't panic
+func TestAppOKWithNilCollector(t *testing.T) {
+	cfg := &config.Config{}
+	app := NewApp(cfg)
+	app.Collector = nil
+	app.Flags.Stats = true
+
+	// Should not panic even with nil collector
+	err := app.OK(map[string]string{"test": "data"})
+	if err != nil {
+		t.Errorf("OK with nil collector failed: %v", err)
+	}
 }

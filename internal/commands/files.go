@@ -173,7 +173,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 
 	summary := fmt.Sprintf("%d folders, %d files, %d documents", len(folders), len(uploads), len(documents))
 
-	return app.Output.OK(result,
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -268,7 +268,7 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(folders,
+	return app.OK(folders,
 		output.WithSummary(fmt.Sprintf("%d folders", len(folders))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -344,7 +344,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(folder,
+			return app.OK(folder,
 				output.WithSummary(fmt.Sprintf("Created folder #%d: %s", folder.ID, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -435,7 +435,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(uploads,
+	return app.OK(uploads,
 		output.WithSummary(fmt.Sprintf("%d files", len(uploads))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -520,7 +520,7 @@ func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(documents,
+	return app.OK(documents,
 		output.WithSummary(fmt.Sprintf("%d documents", len(documents))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -604,7 +604,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(doc,
+			return app.OK(doc,
 				output.WithSummary(fmt.Sprintf("Created document #%d: %s", doc.ID, title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -774,7 +774,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 				})
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
@@ -926,7 +926,7 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				}
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(fmt.Sprintf("Updated %s #%s", detectedType, itemIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

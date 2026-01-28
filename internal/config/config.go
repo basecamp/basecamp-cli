@@ -26,7 +26,7 @@ type Config struct {
 
 	// Output settings
 	Format  string `json:"format"`
-	Verbose bool   `json:"verbose"`
+	Verbose int    `json:"verbose"` // 0=normal, 1=operations, 2=operations+requests
 
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
@@ -53,8 +53,8 @@ type FlagOverrides struct {
 	BaseURL    string
 	CacheDir   string
 	Format     string
-	Verbose    bool
-	VerboseSet bool
+	Verbose    int  // 0=normal, 1=operations, 2=operations+requests
+	VerboseSet bool // true if -v was passed (even with 0 count)
 }
 
 // Default returns the default configuration.

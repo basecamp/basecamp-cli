@@ -92,7 +92,7 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(webhooks,
+	return app.OK(webhooks,
 		output.WithSummary(fmt.Sprintf("%d webhooks", len(webhooks))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -152,7 +152,7 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 
 			summary := fmt.Sprintf("Webhook #%s: %s", webhookIDStr, webhook.PayloadURL)
 
-			return app.Output.OK(webhook,
+			return app.OK(webhook,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -240,7 +240,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(webhook,
+			return app.OK(webhook,
 				output.WithSummary(fmt.Sprintf("Created webhook #%d", webhook.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -347,7 +347,7 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(webhook,
+			return app.OK(webhook,
 				output.WithSummary(fmt.Sprintf("Updated webhook #%s", webhookIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -419,7 +419,7 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 				"id":      webhookIDStr,
 			}
 
-			return app.Output.OK(result,
+			return app.OK(result,
 				output.WithSummary(fmt.Sprintf("Deleted webhook #%s", webhookIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

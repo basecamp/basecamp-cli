@@ -58,7 +58,7 @@ Use 'bcq search metadata' to see available search scopes.`,
 
 			summary := fmt.Sprintf("%d results for \"%s\"", len(results), query)
 
-			return app.Output.OK(results,
+			return app.OK(results,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -108,7 +108,7 @@ func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
 
 	summary := fmt.Sprintf("Available projects: %d", len(metadata.Projects))
 
-	return app.Output.OK(metadata,
+	return app.OK(metadata,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

@@ -217,7 +217,7 @@ func TestApplyOverrides(t *testing.T) {
 		BaseURL:    "http://flag.example.com",
 		CacheDir:   "/flag/cache",
 		Format:     "json",
-		Verbose:    true,
+		Verbose:    2, // -vv
 		VerboseSet: true,
 	}
 
@@ -238,8 +238,8 @@ func TestApplyOverrides(t *testing.T) {
 	if cfg.Format != "json" {
 		t.Errorf("Format = %q, want %q", cfg.Format, "json")
 	}
-	if cfg.Verbose != true {
-		t.Errorf("Verbose = %v, want true", cfg.Verbose)
+	if cfg.Verbose != 2 {
+		t.Errorf("Verbose = %v, want 2", cfg.Verbose)
 	}
 
 	// Verify source tracking
@@ -272,17 +272,17 @@ func TestApplyOverridesSkipsEmpty(t *testing.T) {
 
 func TestApplyOverridesVerboseRequiresSet(t *testing.T) {
 	cfg := Default()
-	cfg.Verbose = true
+	cfg.Verbose = 1 // was set earlier
 
 	overrides := FlagOverrides{
-		Verbose:    false,
+		Verbose:    0,     // trying to reset
 		VerboseSet: false, // Not explicitly set
 	}
 
 	applyOverrides(cfg, overrides)
 
-	if cfg.Verbose != true {
-		t.Errorf("Verbose = %v, want true (VerboseSet=false should not change)", cfg.Verbose)
+	if cfg.Verbose != 1 {
+		t.Errorf("Verbose = %v, want 1 (VerboseSet=false should not change)", cfg.Verbose)
 	}
 }
 

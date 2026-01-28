@@ -83,7 +83,7 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(types,
+	return app.OK(types,
 		output.WithSummary(fmt.Sprintf("%d message types", len(types))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -142,7 +142,7 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(msgType,
+			return app.OK(msgType,
 				output.WithSummary(fmt.Sprintf("%s %s", msgType.Icon, msgType.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -223,7 +223,7 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(msgType,
+			return app.OK(msgType,
 				output.WithSummary(fmt.Sprintf("Created message type #%d: %s %s", msgType.ID, icon, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -301,7 +301,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(msgType,
+			return app.OK(msgType,
 				output.WithSummary(fmt.Sprintf("Updated message type #%s", typeIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -362,7 +362,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"deleted": true},
+			return app.OK(map[string]any{"deleted": true},
 				output.WithSummary(fmt.Sprintf("Deleted message type #%s", typeIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

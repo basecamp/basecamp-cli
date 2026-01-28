@@ -110,7 +110,7 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(groups,
+	return app.OK(groups,
 		output.WithSummary(fmt.Sprintf("%d groups in todolist #%s", len(groups), todolist)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -173,7 +173,7 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(group,
+			return app.OK(group,
 				output.WithSummary(group.Name),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -259,7 +259,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(group,
+			return app.OK(group,
 				output.WithSummary(fmt.Sprintf("Created group: %s", group.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -336,7 +336,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(group,
+			return app.OK(group,
 				output.WithSummary(fmt.Sprintf("Renamed to: %s", group.Name)),
 			)
 		},
@@ -401,7 +401,7 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"repositioned": true, "position": position},
+			return app.OK(map[string]any{"repositioned": true, "position": position},
 				output.WithSummary(fmt.Sprintf("Group moved to position %d", position)),
 			)
 		},

@@ -98,7 +98,7 @@ func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(board,
+	return app.OK(board,
 		output.WithSummary(fmt.Sprintf("%d messages", board.MessagesCount)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

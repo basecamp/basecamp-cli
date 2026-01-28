@@ -77,7 +77,7 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(events,
+	return app.OK(events,
 		output.WithSummary(fmt.Sprintf("%d recent events", len(events))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -118,7 +118,7 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		summary = fmt.Sprintf("%d events in project #%s", len(events), resolvedProjectID)
 	}
 
-	return app.Output.OK(events,
+	return app.OK(events,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -165,7 +165,7 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 		summary = fmt.Sprintf("%d events for person #%s", len(result.Events), resolvedPersonID)
 	}
 
-	return app.Output.OK(result.Events,
+	return app.OK(result.Events,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

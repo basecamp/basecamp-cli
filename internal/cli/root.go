@@ -77,7 +77,8 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.BaseURL, "base-url", "", "Basecamp API base URL")
 
 	// Behavior flags
-	cmd.PersistentFlags().BoolVarP(&flags.Verbose, "verbose", "v", false, "Verbose output")
+	cmd.PersistentFlags().CountVarP(&flags.Verbose, "verbose", "v", "Verbose output (-v for ops, -vv for requests)")
+	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", false, "Show session statistics")
 	cmd.PersistentFlags().StringVar(&flags.CacheDir, "cache-dir", "", "Cache directory")
 
 	// Hide some flags from help

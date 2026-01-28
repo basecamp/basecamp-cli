@@ -89,7 +89,7 @@ The --date flag accepts natural language dates:
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(marker,
+			return app.OK(marker,
 				output.WithSummary(fmt.Sprintf("Created lineup marker #%d: %s on %s", marker.ID, name, parsedDate)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -154,7 +154,7 @@ func newLineupUpdateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(marker,
+			return app.OK(marker,
 				output.WithSummary(fmt.Sprintf("Updated lineup marker #%d: %s", marker.ID, marker.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -192,7 +192,7 @@ func newLineupDeleteCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"id": markerID, "deleted": true},
+			return app.OK(map[string]any{"id": markerID, "deleted": true},
 				output.WithSummary(fmt.Sprintf("Deleted lineup marker #%d", markerID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

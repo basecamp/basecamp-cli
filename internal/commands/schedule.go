@@ -109,7 +109,7 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 
 	summary := fmt.Sprintf("%d entries (include due assignments: %t)", schedule.EntriesCount, schedule.IncludeDueAssignments)
 
-	return app.Output.OK(schedule,
+	return app.OK(schedule,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -192,7 +192,7 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 
 	summary := fmt.Sprintf("%d schedule entries", len(filteredEntries))
 
-	return app.Output.OK(filteredEntries,
+	return app.OK(filteredEntries,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -270,7 +270,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 
 		summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-		return app.Output.OK(entry,
+		return app.OK(entry,
 			output.WithSummary(summary),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
@@ -302,7 +302,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 
 	summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-	return app.Output.OK(entry,
+	return app.OK(entry,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -433,7 +433,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 
 	resultSummary := fmt.Sprintf("Created schedule entry #%d: %s", entry.ID, summary)
 
-	return app.Output.OK(entry,
+	return app.OK(entry,
 		output.WithSummary(resultSummary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -545,7 +545,7 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 
 			resultSummary := fmt.Sprintf("Updated schedule entry #%s", entryID)
 
-			return app.Output.OK(entry,
+			return app.OK(entry,
 				output.WithSummary(resultSummary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -631,7 +631,7 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 
 			resultSummary := "Updated schedule settings"
 
-			return app.Output.OK(schedule,
+			return app.OK(schedule,
 				output.WithSummary(resultSummary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

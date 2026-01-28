@@ -143,7 +143,7 @@ func NewCommandsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			return app.Output.OK(commandCategories(),
+			return app.OK(commandCategories(),
 				output.WithSummary("All available bcq commands"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

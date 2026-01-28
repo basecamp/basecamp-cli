@@ -112,7 +112,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 			return convertSDKError(err)
 		}
 
-		return app.Output.OK(cards,
+		return app.OK(cards,
 			output.WithSummary(fmt.Sprintf("%d cards", len(cards))),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
@@ -173,7 +173,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 		}
 	}
 
-	return app.Output.OK(allCards,
+	return app.OK(allCards,
 		output.WithSummary(fmt.Sprintf("%d cards", len(allCards))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -237,7 +237,7 @@ func newCardsShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(card,
+			return app.OK(card,
 				output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -385,7 +385,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				Description: "List cards",
 			})
 
-			return app.Output.OK(card,
+			return app.OK(card,
 				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
@@ -471,7 +471,7 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(card,
+			return app.OK(card,
 				output.WithSummary(fmt.Sprintf("Updated card #%s", cardIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -609,7 +609,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 				})
 			}
 
-			return app.Output.OK(map[string]string{
+			return app.OK(map[string]string{
 				"id":     cardIDStr,
 				"status": "moved",
 				"column": targetColumn,
@@ -673,7 +673,7 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(cardTableData.Lists,
+			return app.OK(cardTableData.Lists,
 				output.WithSummary(fmt.Sprintf("%d columns", len(cardTableData.Lists))),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -823,7 +823,7 @@ func NewCardCmd() *cobra.Command {
 				Description: "List cards",
 			})
 
-			return app.Output.OK(card,
+			return app.OK(card,
 				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
 				output.WithBreadcrumbs(cardBreadcrumbs...),
 			)
@@ -912,7 +912,7 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(col,
+			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("%s (%d cards)", col.Title, col.CardsCount)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -990,7 +990,7 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(col,
+			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("Created column: %s", col.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1069,7 +1069,7 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(col,
+			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("Updated column #%s", columnIDStr)),
 			)
 		},
@@ -1146,7 +1146,7 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"moved":    true,
 				"id":       columnIDStr,
 				"position": position,
@@ -1202,7 +1202,7 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"watching": true,
 				"id":       columnIDStr,
 			}, output.WithSummary(fmt.Sprintf("Now watching column #%s", columnIDStr)))
@@ -1253,7 +1253,7 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"watching": false,
 				"id":       columnIDStr,
 			}, output.WithSummary(fmt.Sprintf("Stopped watching column #%s", columnIDStr)))
@@ -1304,7 +1304,7 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(col,
+			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("Enabled on-hold for column #%s", columnIDStr)),
 			)
 		},
@@ -1354,7 +1354,7 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(col,
+			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("Disabled on-hold for column #%s", columnIDStr)),
 			)
 		},
@@ -1410,7 +1410,7 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(col,
+			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("Set column #%s color to %s", columnIDStr, color)),
 			)
 		},
@@ -1473,7 +1473,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(card.Steps,
+			return app.OK(card.Steps,
 				output.WithSummary(fmt.Sprintf("%d steps on card #%s", len(card.Steps), cardID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1582,7 +1582,7 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(step,
+			return app.OK(step,
 				output.WithSummary(fmt.Sprintf("Created step: %s", step.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1675,7 +1675,7 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(step,
+			return app.OK(step,
 				output.WithSummary(fmt.Sprintf("Updated step #%s", stepIDStr)),
 			)
 		},
@@ -1730,7 +1730,7 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(step,
+			return app.OK(step,
 				output.WithSummary(fmt.Sprintf("Completed step #%s", stepIDStr)),
 			)
 		},
@@ -1780,7 +1780,7 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(step,
+			return app.OK(step,
 				output.WithSummary(fmt.Sprintf("Uncompleted step #%s", stepIDStr)),
 			)
 		},
@@ -1845,7 +1845,7 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{
+			return app.OK(map[string]any{
 				"moved":    true,
 				"id":       stepIDStr,
 				"position": position,
@@ -1902,7 +1902,7 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(map[string]any{"deleted": true},
+			return app.OK(map[string]any{"deleted": true},
 				output.WithSummary(fmt.Sprintf("Deleted step #%s", stepIDStr)),
 			)
 		},

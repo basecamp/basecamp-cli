@@ -99,7 +99,7 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 		return convertSDKError(err)
 	}
 
-	return app.Output.OK(todolists,
+	return app.OK(todolists,
 		output.WithSummary(fmt.Sprintf("%d todolists", len(todolists))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -163,7 +163,7 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(todolist,
+			return app.OK(todolist,
 				output.WithSummary(fmt.Sprintf("Todolist: %s", todolist.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -248,7 +248,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 
 			todolistIDStr := fmt.Sprintf("%d", todolist.ID)
 
-			return app.Output.OK(todolist,
+			return app.OK(todolist,
 				output.WithSummary(fmt.Sprintf("Created todolist #%s: %s", todolistIDStr, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -333,7 +333,7 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return app.Output.OK(todolist,
+			return app.OK(todolist,
 				output.WithSummary(fmt.Sprintf("Updated todolist #%s", todolistIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
