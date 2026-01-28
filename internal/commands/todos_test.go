@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -15,6 +17,14 @@ import (
 	"github.com/basecamp/bcq/internal/names"
 	"github.com/basecamp/bcq/internal/output"
 )
+
+// noNetworkTransport is an http.RoundTripper that fails immediately.
+// Used in tests to prevent real network calls without waiting for timeouts.
+type todosNoNetworkTransport struct{}
+
+func (todosNoNetworkTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("network disabled in tests")
+}
 
 // todosTestTokenProvider is a mock token provider for tests.
 type todosTestTokenProvider struct{}
@@ -35,11 +45,16 @@ func setupTodosTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 		AccountID: "99999",
 	}
 
+	// Create SDK client with mock token provider and no-network transport
+	// The transport prevents real HTTP calls - fails instantly instead of timing out
 	authMgr := auth.NewManager(cfg, nil)
 	sdkCfg := &basecamp.Config{
 		AccountID: cfg.AccountID,
 	}
-	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{})
+	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
+		basecamp.WithTransport(todosNoNetworkTransport{}),
+		basecamp.WithMaxRetries(0), // Disable retries for instant failure
+	)
 	nameResolver := names.NewResolver(sdkClient, authMgr)
 
 	app := &appctx.App{
