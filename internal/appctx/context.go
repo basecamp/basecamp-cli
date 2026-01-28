@@ -56,7 +56,7 @@ type GlobalFlags struct {
 	Project  string
 	Account  string
 	Todolist string
-	BaseURL  string
+	Host     string // Basecamp host with smart protocol detection
 
 	// Behavior flags
 	Verbose  int // 0=off, 1=operations, 2=operations+requests (stacks with -v -v or -vv)

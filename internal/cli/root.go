@@ -33,12 +33,15 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
+			// Normalize --host flag (smart protocol detection)
+			baseURL := normalizeHost(flags.Host)
+
 			// Load configuration with flag overrides
 			cfg, err := config.Load(config.FlagOverrides{
 				Account:  flags.Account,
 				Project:  flags.Project,
 				Todolist: flags.Todolist,
-				BaseURL:  flags.BaseURL,
+				BaseURL:  baseURL,
 				CacheDir: flags.CacheDir,
 			})
 			if err != nil {
@@ -73,15 +76,14 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&flags.Project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVarP(&flags.Account, "account", "a", "", "Account ID")
 	cmd.PersistentFlags().StringVar(&flags.Todolist, "todolist", "", "Todolist ID or name")
-	cmd.PersistentFlags().StringVar(&flags.BaseURL, "base-url", "", "Basecamp API base URL")
+	cmd.PersistentFlags().StringVar(&flags.Host, "host", "", "Basecamp host (e.g., localhost:3000, staging.example.com)")
+	cmd.PersistentFlags().StringVar(&flags.Host, "base-url", "", "Basecamp API base URL (deprecated: use --host)")
+	_ = cmd.PersistentFlags().MarkHidden("base-url")
 
 	// Behavior flags
 	cmd.PersistentFlags().CountVarP(&flags.Verbose, "verbose", "v", "Verbose output (-v for ops, -vv for requests)")
 	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", false, "Show session statistics")
 	cmd.PersistentFlags().StringVar(&flags.CacheDir, "cache-dir", "", "Cache directory")
-
-	// Hide some flags from help
-	_ = cmd.PersistentFlags().MarkHidden("base-url") // Error only if flag doesn't exist
 
 	// Register tab completion for flags.
 	// DefaultCacheDirFunc checks --cache-dir flag, then app context, then env vars.
@@ -194,6 +196,41 @@ func Execute() {
 
 		os.Exit(apiErr.ExitCode())
 	}
+}
+
+// normalizeHost converts a host string to a full URL.
+// - Empty string returns empty (use default)
+// - localhost/127.0.0.1 defaults to http://
+// - Other bare hostnames default to https://
+// - Full URLs are used as-is
+func normalizeHost(host string) string {
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return host
+	}
+	if isLocalhost(host) {
+		return "http://" + host
+	}
+	return "https://" + host
+}
+
+// isLocalhost returns true if host is localhost, 127.0.0.1, or [::1] (with optional port).
+// Does not match localhost.example.com or similar.
+func isLocalhost(host string) bool {
+	// Check for exact match or match with port
+	if host == "localhost" || strings.HasPrefix(host, "localhost:") {
+		return true
+	}
+	if host == "127.0.0.1" || strings.HasPrefix(host, "127.0.0.1:") {
+		return true
+	}
+	// IPv6 loopback
+	if host == "[::1]" || strings.HasPrefix(host, "[::1]:") {
+		return true
+	}
+	return false
 }
 
 // transformCobraError transforms Cobra's default error messages to match the
