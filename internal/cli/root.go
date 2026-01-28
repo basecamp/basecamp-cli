@@ -216,7 +216,7 @@ func normalizeHost(host string) string {
 	return "https://" + host
 }
 
-// isLocalhost returns true if host is localhost, 127.0.0.1, or ::1 (with optional port).
+// isLocalhost returns true if host is localhost, 127.0.0.1, or [::1] (with optional port).
 // Does not match localhost.example.com or similar.
 func isLocalhost(host string) bool {
 	// Check for exact match or match with port
@@ -226,11 +226,8 @@ func isLocalhost(host string) bool {
 	if host == "127.0.0.1" || strings.HasPrefix(host, "127.0.0.1:") {
 		return true
 	}
-	// IPv6 loopback (bracketed or bare)
+	// IPv6 loopback (must be bracketed for valid URL)
 	if host == "[::1]" || strings.HasPrefix(host, "[::1]:") {
-		return true
-	}
-	if host == "::1" {
 		return true
 	}
 	return false

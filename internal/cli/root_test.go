@@ -23,9 +23,10 @@ func TestNormalizeHost(t *testing.T) {
 		{"127.0.0.1:3000", "http://127.0.0.1:3000"},
 		{"[::1]", "http://[::1]"},
 		{"[::1]:3000", "http://[::1]:3000"},
-		{"::1", "http://::1"},
 
 		// Non-localhost → https
+		// Note: bare ::1 without brackets is not a valid URL format,
+		// so it's treated as a hostname and gets https://
 		{"example.com", "https://example.com"},
 		{"api.example.com", "https://api.example.com"},
 		{"staging.basecamp.com:8080", "https://staging.basecamp.com:8080"},
@@ -58,14 +59,12 @@ func TestIsLocalhost(t *testing.T) {
 		{"127.0.0.1", true},
 		{"127.0.0.1:3000", true},
 
-		// IPv6 loopback (bracketed)
+		// IPv6 loopback (must be bracketed for valid URL)
 		{"[::1]", true},
 		{"[::1]:3000", true},
 
-		// IPv6 loopback (bare)
-		{"::1", true},
-
-		// Not localhost
+		// Not localhost (bare ::1 is invalid URL format)
+		{"::1", false},
 		{"example.com", false},
 		{"localhost.example.com", false},
 		{"127.0.0.2", false},
