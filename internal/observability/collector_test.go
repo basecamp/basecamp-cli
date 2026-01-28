@@ -28,11 +28,6 @@ func TestSessionCollector_RecordRequest(t *testing.T) {
 		FromCache:  true,
 	})
 
-	requests := c.Requests()
-	if len(requests) != 2 {
-		t.Errorf("expected 2 requests, got %d", len(requests))
-	}
-
 	summary := c.Summary()
 	if summary.TotalRequests != 2 {
 		t.Errorf("expected 2 total requests, got %d", summary.TotalRequests)
@@ -61,15 +56,12 @@ func TestSessionCollector_RecordRequestFromSDK(t *testing.T) {
 
 	c.RecordRequestFromSDK(info, result)
 
-	requests := c.Requests()
-	if len(requests) != 1 {
-		t.Fatalf("expected 1 request, got %d", len(requests))
+	summary := c.Summary()
+	if summary.TotalRequests != 1 {
+		t.Errorf("expected 1 request, got %d", summary.TotalRequests)
 	}
-	if requests[0].Method != "POST" {
-		t.Errorf("expected POST, got %s", requests[0].Method)
-	}
-	if requests[0].StatusCode != 204 {
-		t.Errorf("expected 204, got %d", requests[0].StatusCode)
+	if summary.TotalLatency != 45*time.Millisecond {
+		t.Errorf("expected 45ms latency, got %v", summary.TotalLatency)
 	}
 }
 
@@ -89,11 +81,6 @@ func TestSessionCollector_RecordOperation(t *testing.T) {
 		Duration:  200 * time.Millisecond,
 		Error:     errors.New("network error"),
 	})
-
-	ops := c.Operations()
-	if len(ops) != 2 {
-		t.Errorf("expected 2 operations, got %d", len(ops))
-	}
 
 	summary := c.Summary()
 	if summary.TotalOperations != 2 {
@@ -118,18 +105,12 @@ func TestSessionCollector_RecordOperationFromSDK(t *testing.T) {
 
 	c.RecordOperationFromSDK(op, nil, 50*time.Millisecond)
 
-	ops := c.Operations()
-	if len(ops) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(ops))
+	summary := c.Summary()
+	if summary.TotalOperations != 1 {
+		t.Errorf("expected 1 operation, got %d", summary.TotalOperations)
 	}
-	if ops[0].Service != "Todos" {
-		t.Errorf("expected Todos, got %s", ops[0].Service)
-	}
-	if ops[0].IsMutation != true {
-		t.Error("expected IsMutation=true")
-	}
-	if ops[0].BucketID != 123 {
-		t.Errorf("expected BucketID=123, got %d", ops[0].BucketID)
+	if summary.FailedOps != 0 {
+		t.Errorf("expected 0 failed ops, got %d", summary.FailedOps)
 	}
 }
 
@@ -142,14 +123,6 @@ func TestSessionCollector_RecordRetry(t *testing.T) {
 		Attempt: 2,
 		Error:   errors.New("connection reset"),
 	})
-
-	retries := c.Retries()
-	if len(retries) != 1 {
-		t.Fatalf("expected 1 retry, got %d", len(retries))
-	}
-	if retries[0].Attempt != 2 {
-		t.Errorf("expected attempt 2, got %d", retries[0].Attempt)
-	}
 
 	summary := c.Summary()
 	if summary.TotalRetries != 1 {
@@ -166,14 +139,15 @@ func TestSessionCollector_Reset(t *testing.T) {
 
 	c.Reset()
 
-	if len(c.Requests()) != 0 {
-		t.Error("expected 0 requests after reset")
+	summary := c.Summary()
+	if summary.TotalRequests != 0 {
+		t.Errorf("expected 0 requests after reset, got %d", summary.TotalRequests)
 	}
-	if len(c.Operations()) != 0 {
-		t.Error("expected 0 operations after reset")
+	if summary.TotalOperations != 0 {
+		t.Errorf("expected 0 operations after reset, got %d", summary.TotalOperations)
 	}
-	if len(c.Retries()) != 0 {
-		t.Error("expected 0 retries after reset")
+	if summary.TotalRetries != 0 {
+		t.Errorf("expected 0 retries after reset, got %d", summary.TotalRetries)
 	}
 }
 

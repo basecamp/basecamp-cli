@@ -46,11 +46,12 @@ func TestCLIHooks_Level0_Silent(t *testing.T) {
 	}
 
 	// But metrics should still be collected
-	if len(collector.Operations()) != 1 {
-		t.Errorf("expected 1 operation recorded, got %d", len(collector.Operations()))
+	summary := collector.Summary()
+	if summary.TotalOperations != 1 {
+		t.Errorf("expected 1 operation recorded, got %d", summary.TotalOperations)
 	}
-	if len(collector.Requests()) != 1 {
-		t.Errorf("expected 1 request recorded, got %d", len(collector.Requests()))
+	if summary.TotalRequests != 1 {
+		t.Errorf("expected 1 request recorded, got %d", summary.TotalRequests)
 	}
 }
 
@@ -138,9 +139,10 @@ func TestCLIHooks_OperationError(t *testing.T) {
 	}
 
 	// Collector should record the error
-	ops := collector.Operations()
-	if len(ops) != 1 || ops[0].Error == nil {
-		t.Error("expected operation with error to be recorded")
+	summary := collector.Summary()
+	if summary.TotalOperations != 1 || summary.FailedOps != 1 {
+		t.Errorf("expected 1 operation with 1 failure, got %d ops with %d failures",
+			summary.TotalOperations, summary.FailedOps)
 	}
 }
 
@@ -190,8 +192,9 @@ func TestCLIHooks_Retry(t *testing.T) {
 	}
 
 	// Collector should record retry
-	if len(collector.Retries()) != 1 {
-		t.Errorf("expected 1 retry recorded, got %d", len(collector.Retries()))
+	summary := collector.Summary()
+	if summary.TotalRetries != 1 {
+		t.Errorf("expected 1 retry recorded, got %d", summary.TotalRetries)
 	}
 }
 
@@ -236,10 +239,11 @@ func TestCLIHooks_NilWriter(t *testing.T) {
 	h.OnRequestEnd(ctx, info, result)
 
 	// Should not panic and should still collect metrics
-	if len(collector.Operations()) != 1 {
-		t.Error("expected 1 operation collected")
+	summary := collector.Summary()
+	if summary.TotalOperations != 1 {
+		t.Errorf("expected 1 operation collected, got %d", summary.TotalOperations)
 	}
-	if len(collector.Requests()) != 1 {
-		t.Error("expected 1 request collected")
+	if summary.TotalRequests != 1 {
+		t.Errorf("expected 1 request collected, got %d", summary.TotalRequests)
 	}
 }

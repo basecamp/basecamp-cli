@@ -54,23 +54,24 @@ type SessionMetrics struct {
 }
 
 // SessionCollector accumulates metrics across a CLI session.
-// It is safe for concurrent use.
+// It is safe for concurrent use and uses counters instead of unbounded slices.
 type SessionCollector struct {
 	mu sync.Mutex
 
-	startTime  time.Time
-	requests   []RequestMetrics
-	operations []OperationMetrics
-	retries    []RetryMetrics
+	startTime       time.Time
+	totalRequests   int
+	cacheHits       int
+	cacheMisses     int
+	totalOperations int
+	failedOps       int
+	totalRetries    int
+	totalLatency    time.Duration
 }
 
 // NewSessionCollector creates a new SessionCollector.
 func NewSessionCollector() *SessionCollector {
 	return &SessionCollector{
-		startTime:  time.Now(),
-		requests:   make([]RequestMetrics, 0),
-		operations: make([]OperationMetrics, 0),
-		retries:    make([]RetryMetrics, 0),
+		startTime: time.Now(),
 	}
 }
 
@@ -78,7 +79,13 @@ func NewSessionCollector() *SessionCollector {
 func (c *SessionCollector) RecordRequest(m RequestMetrics) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.requests = append(c.requests, m)
+	c.totalRequests++
+	c.totalLatency += m.Duration
+	if m.FromCache {
+		c.cacheHits++
+	} else {
+		c.cacheMisses++
+	}
 }
 
 // RecordRequestFromSDK records metrics from SDK types.
@@ -99,7 +106,10 @@ func (c *SessionCollector) RecordRequestFromSDK(info basecamp.RequestInfo, resul
 func (c *SessionCollector) RecordOperation(m OperationMetrics) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.operations = append(c.operations, m)
+	c.totalOperations++
+	if m.Error != nil {
+		c.failedOps++
+	}
 }
 
 // RecordOperationFromSDK records metrics from SDK types.
@@ -117,10 +127,10 @@ func (c *SessionCollector) RecordOperationFromSDK(op basecamp.OperationInfo, err
 }
 
 // RecordRetry records a retry event.
-func (c *SessionCollector) RecordRetry(m RetryMetrics) {
+func (c *SessionCollector) RecordRetry(_ RetryMetrics) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.retries = append(c.retries, m)
+	c.totalRetries++
 }
 
 // RecordRetryFromSDK records a retry event from SDK types.
@@ -138,60 +148,17 @@ func (c *SessionCollector) Summary() SessionMetrics {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	metrics := SessionMetrics{
+	return SessionMetrics{
 		StartTime:       c.startTime,
 		EndTime:         time.Now(),
-		TotalRequests:   len(c.requests),
-		TotalOperations: len(c.operations),
-		TotalRetries:    len(c.retries),
+		TotalRequests:   c.totalRequests,
+		CacheHits:       c.cacheHits,
+		CacheMisses:     c.cacheMisses,
+		TotalOperations: c.totalOperations,
+		FailedOps:       c.failedOps,
+		TotalRetries:    c.totalRetries,
+		TotalLatency:    c.totalLatency,
 	}
-
-	for _, r := range c.requests {
-		metrics.TotalLatency += r.Duration
-		if r.FromCache {
-			metrics.CacheHits++
-		} else {
-			metrics.CacheMisses++
-		}
-	}
-
-	for _, op := range c.operations {
-		if op.Error != nil {
-			metrics.FailedOps++
-		}
-	}
-
-	return metrics
-}
-
-// Requests returns a copy of all recorded request metrics.
-func (c *SessionCollector) Requests() []RequestMetrics {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	result := make([]RequestMetrics, len(c.requests))
-	copy(result, c.requests)
-	return result
-}
-
-// Operations returns a copy of all recorded operation metrics.
-func (c *SessionCollector) Operations() []OperationMetrics {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	result := make([]OperationMetrics, len(c.operations))
-	copy(result, c.operations)
-	return result
-}
-
-// Retries returns a copy of all recorded retry events.
-func (c *SessionCollector) Retries() []RetryMetrics {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	result := make([]RetryMetrics, len(c.retries))
-	copy(result, c.retries)
-	return result
 }
 
 // Reset clears all collected metrics and resets the start time.
@@ -200,7 +167,11 @@ func (c *SessionCollector) Reset() {
 	defer c.mu.Unlock()
 
 	c.startTime = time.Now()
-	c.requests = c.requests[:0]
-	c.operations = c.operations[:0]
-	c.retries = c.retries[:0]
+	c.totalRequests = 0
+	c.cacheHits = 0
+	c.cacheMisses = 0
+	c.totalOperations = 0
+	c.failedOps = 0
+	c.totalRetries = 0
+	c.totalLatency = 0
 }
