@@ -111,6 +111,7 @@ func commandCategories() []CommandCategory {
 			Name: "Additional Commands",
 			Commands: []CommandInfo{
 				{Name: "commands", Category: "additional", Description: "List all commands"},
+				{Name: "completion", Category: "additional", Description: "Generate shell completions", Actions: []string{"bash", "zsh", "fish", "powershell", "refresh", "status"}},
 				{Name: "mcp", Category: "additional", Description: "MCP server integration", Actions: []string{"server"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
