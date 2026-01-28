@@ -4,54 +4,61 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-
-	"github.com/spf13/cobra"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"strings"
 
 	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/pickers"
+	basecamp "github.com/basecamp/go-basecamp"
+	"github.com/spf13/cobra"
 )
 
-// NewProjectsCmd creates the projects command group.
+// NewProjectsCmd creates the projects command and its subcommands.
 func NewProjectsCmd() *cobra.Command {
-	var status string
-
 	cmd := &cobra.Command{
 		Use:     "projects",
-		Aliases: []string{"project"},
+		Aliases: []string{"project", "proj", "p"},
 		Short:   "Manage projects",
-		Long:    "List, show, create, and manage Basecamp projects.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runProjectsList(cmd, status)
-		},
+		Long:    "List, show, create, update, or archive projects.",
 	}
 
-	// Allow --status flag on root command for default list behavior
-	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
-
-	cmd.AddCommand(
-		newProjectsListCmd(),
-		newProjectsShowCmd(),
-		newProjectsCreateCmd(),
-		newProjectsUpdateCmd(),
-		newProjectsDeleteCmd(),
-	)
+	cmd.AddCommand(newProjectsListCmd())
+	cmd.AddCommand(newProjectsShowCmd())
+	cmd.AddCommand(newProjectsCreateCmd())
+	cmd.AddCommand(newProjectsUpdateCmd())
+	cmd.AddCommand(newProjectsArchiveCmd())
+	cmd.AddCommand(newProjectsUnarchiveCmd())
+	cmd.AddCommand(newProjectsTrashCmd())
 
 	return cmd
 }
 
 func newProjectsListCmd() *cobra.Command {
 	var status string
-
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List projects",
-		Long:  "List all accessible projects in the account.",
+		Short: "List all projects",
+		Long: `List all projects accessible to you.
+
+By default, shows active projects. Use --status to filter:
+  --status=active   Active projects (default)
+  --status=archived Archived projects
+  --status=trashed  Trashed projects`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProjectsList(cmd, status)
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
+
+			opts := basecamp.ProjectListOptions{}
+			if status != "" {
+				opts.Status = status
+			}
+
+			projects, err := app.Client.Projects.List(ctx, &opts)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return output.Render(ctx, projects)
 		},
 	}
 
@@ -60,235 +67,323 @@ func newProjectsListCmd() *cobra.Command {
 	return cmd
 }
 
-func runProjectsList(cmd *cobra.Command, status string) error {
-	app := appctx.FromContext(cmd.Context())
-	if app == nil {
-		return fmt.Errorf("app not initialized")
-	}
-
-	opts := &basecamp.ProjectListOptions{}
-	if status != "" {
-		opts.Status = basecamp.ProjectStatus(status)
-	}
-
-	projects, err := app.SDK.Projects().List(cmd.Context(), opts)
-	if err != nil {
-		return convertSDKError(err)
-	}
-
-	// Opportunistic cache refresh: update completion cache as a side-effect.
-	// Only cache when listing all active projects (no filter), as filtered
-	// results wouldn't be suitable for general-purpose completion.
-	// Done synchronously to ensure write completes before process exits.
-	if status == "" {
-		updateProjectsCache(projects, app.Config.CacheDir)
-	}
-
-	return app.OK(projects,
-		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "show",
-				Cmd:         "bcq projects show <id>",
-				Description: "Show project details",
-			},
-			output.Breadcrumb{
-				Action:      "create",
-				Cmd:         "bcq projects create --name <name>",
-				Description: "Create a new project",
-			},
-		),
-	)
-}
-
-// updateProjectsCache updates the completion cache with fresh project data.
-// Runs synchronously; errors are ignored (best-effort).
-func updateProjectsCache(projects []basecamp.Project, cacheDir string) {
-	store := completion.NewStore(cacheDir)
-	cached := make([]completion.CachedProject, len(projects))
-	for i, p := range projects {
-		cached[i] = completion.CachedProject{
-			ID:         p.ID,
-			Name:       p.Name,
-			Purpose:    p.Purpose,
-			Bookmarked: p.Bookmarked,
-			UpdatedAt:  p.UpdatedAt,
-		}
-	}
-	_ = store.UpdateProjects(cached) // Ignore errors - this is best-effort
-}
-
 func newProjectsShowCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show <id>",
+	cmd := &cobra.Command{
+		Use:   "show [project-id]",
 		Short: "Show project details",
-		Long:  "Display detailed information about a project including dock items.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show details for a specific project.
+
+If no project ID is provided, you will be prompted to select one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
+
+			var projectID int64
+			var err error
+
+			if len(args) > 0 {
+				projectID, err = strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					return &output.Error{
+						Code:    basecamp.CodeInvalidRequest,
+						Message: "Invalid project ID",
+						Hint:    fmt.Sprintf("'%s' is not a valid project ID. Use 'bcq projects list' to see available projects.", args[0]),
+					}
+				}
+			} else {
+				projectID, err = pickers.SelectProject(ctx, app.Client)
+				if err != nil {
+					return err
+				}
 			}
 
-			projectID, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			project, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+			project, err := app.Client.Projects.Get(ctx, projectID)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(project,
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "todos",
-						Cmd:         fmt.Sprintf("bcq todos --project %d", projectID),
-						Description: "List todos in this project",
-					},
-					output.Breadcrumb{
-						Action:      "messages",
-						Cmd:         fmt.Sprintf("bcq messages --project %d", projectID),
-						Description: "List messages in this project",
-					},
-				),
-			)
+			return output.Render(ctx, project)
 		},
 	}
+
+	return cmd
 }
 
 func newProjectsCreateCmd() *cobra.Command {
-	var name string
-	var description string
+	var name, description string
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new project",
-		Long:  "Create a new Basecamp project.",
+		Long: `Create a new project.
+
+The --name flag is required. Description is optional.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
 
 			if name == "" {
-				return output.ErrUsage("--name is required")
+				return &output.Error{
+					Code:    basecamp.CodeInvalidRequest,
+					Message: "Project name is required",
+					Hint:    "Use --name to specify the project name",
+				}
 			}
 
-			req := &basecamp.CreateProjectRequest{
+			req := &basecamp.ProjectCreateRequest{
 				Name:        name,
 				Description: description,
 			}
 
-			project, err := app.SDK.Projects().Create(cmd.Context(), req)
+			project, err := app.Client.Projects.Create(ctx, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(project,
-				output.WithSummary(fmt.Sprintf("Created project: %s", name)),
-			)
+			return output.Render(ctx, project, output.WithSummary("Project created"))
 		},
 	}
 
-	cmd.Flags().StringVarP(&name, "name", "n", "", "Project name (required)")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Project description")
-	_ = cmd.MarkFlagRequired("name")
+	cmd.Flags().StringVar(&name, "name", "", "Project name (required)")
+	cmd.Flags().StringVar(&description, "description", "", "Project description")
 
 	return cmd
 }
 
 func newProjectsUpdateCmd() *cobra.Command {
-	var name string
-	var description string
+	var name, description string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
-		Short: "Update a project",
-		Long:  "Update an existing project's name or description.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
+		Use:   "update [project-id]",
+		Short: "Update an existing project",
+		Long: `Update a project's name or description.
 
-			projectID, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
+If no project ID is provided, you will be prompted to select one.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
+
+			var projectID int64
+			var err error
+
+			if len(args) > 0 {
+				projectID, err = strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					return &output.Error{
+						Code:    basecamp.CodeInvalidRequest,
+						Message: "Invalid project ID",
+						Hint:    fmt.Sprintf("'%s' is not a valid project ID. Use 'bcq projects list' to see available projects.", args[0]),
+					}
+				}
+			} else {
+				projectID, err = pickers.SelectProject(ctx, app.Client)
+				if err != nil {
+					return err
+				}
 			}
 
 			if name == "" && description == "" {
-				return output.ErrUsage("At least one of --name or --description is required")
-			}
-
-			// For update, we need to provide name (required by SDK)
-			// If only description is provided, we need to fetch current name first
-			updateName := name
-			if updateName == "" {
-				// Fetch current project to get the name
-				current, err := app.SDK.Projects().Get(cmd.Context(), projectID)
-				if err != nil {
-					return convertSDKError(err)
+				return &output.Error{
+					Code:    basecamp.CodeInvalidRequest,
+					Message: "Nothing to update",
+					Hint:    "Use --name and/or --description to specify what to update",
 				}
-				updateName = current.Name
 			}
 
-			req := &basecamp.UpdateProjectRequest{
-				Name:        updateName,
-				Description: description,
-			}
-
-			project, err := app.SDK.Projects().Update(cmd.Context(), projectID, req)
+			// Get current project to preserve unchanged fields
+			current, err := app.Client.Projects.Get(ctx, projectID)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(project,
-				output.WithSummary("Project updated"),
-			)
+			req := &basecamp.ProjectUpdateRequest{}
+			if name != "" {
+				req.Name = name
+			} else {
+				req.Name = current.Name
+			}
+			if description != "" {
+				req.Description = description
+			} else if current.Description != nil {
+				req.Description = *current.Description
+			}
+
+			project, err := app.Client.Projects.Update(ctx, projectID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return output.Render(ctx, project, output.WithSummary("Project updated"))
 		},
 	}
 
-	cmd.Flags().StringVarP(&name, "name", "n", "", "New project name")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New project description")
+	cmd.Flags().StringVar(&name, "name", "", "New project name")
+	cmd.Flags().StringVar(&description, "description", "", "New project description")
 
 	return cmd
 }
 
-func newProjectsDeleteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "delete <id>",
-		Aliases: []string{"trash"},
-		Short:   "Delete (trash) a project",
-		Long:    "Move a project to the trash. Can be restored later.",
-		Args:    cobra.ExactArgs(1),
+func newProjectsArchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "archive [project-id]",
+		Short: "Archive a project",
+		Long: `Archive a project.
+
+If no project ID is provided, you will be prompted to select one.
+Archived projects can be unarchived with 'bcq projects unarchive'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
+
+			var projectID int64
+			var err error
+
+			if len(args) > 0 {
+				projectID, err = strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					return &output.Error{
+						Code:    basecamp.CodeInvalidRequest,
+						Message: "Invalid project ID",
+						Hint:    fmt.Sprintf("'%s' is not a valid project ID. Use 'bcq projects list' to see available projects.", args[0]),
+					}
+				}
+			} else {
+				projectID, err = pickers.SelectProject(ctx, app.Client)
+				if err != nil {
+					return err
+				}
 			}
 
-			projectID, err := strconv.ParseInt(args[0], 10, 64)
+			project, err := app.Client.Projects.Archive(ctx, projectID)
 			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			if err := app.SDK.Projects().Trash(cmd.Context(), projectID); err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(map[string]any{
-				"id":     projectID,
-				"status": "trashed",
-			}, output.WithSummary("Project moved to trash"))
+			return output.Render(ctx, project, output.WithSummary("Project archived"))
 		},
 	}
+
+	return cmd
+}
+
+func newProjectsUnarchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unarchive [project-id]",
+		Short: "Unarchive a project",
+		Long: `Unarchive a previously archived project.
+
+If no project ID is provided, you will be prompted to select one.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
+
+			var projectID int64
+			var err error
+
+			if len(args) > 0 {
+				projectID, err = strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					return &output.Error{
+						Code:    basecamp.CodeInvalidRequest,
+						Message: "Invalid project ID",
+						Hint:    fmt.Sprintf("'%s' is not a valid project ID. Use 'bcq projects list --status=archived' to see archived projects.", args[0]),
+					}
+				}
+			} else {
+				projectID, err = pickers.SelectProject(ctx, app.Client, pickers.WithStatus("archived"))
+				if err != nil {
+					return err
+				}
+			}
+
+			project, err := app.Client.Projects.Unarchive(ctx, projectID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return output.Render(ctx, project, output.WithSummary("Project unarchived"))
+		},
+	}
+
+	return cmd
+}
+
+func newProjectsTrashCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "trash [project-id]",
+		Short: "Move a project to trash",
+		Long: `Move a project to trash.
+
+If no project ID is provided, you will be prompted to select one.
+Trashed projects are permanently deleted after 30 days.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			app := appctx.FromContext(ctx)
+
+			var projectID int64
+			var err error
+
+			if len(args) > 0 {
+				projectID, err = strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					return &output.Error{
+						Code:    basecamp.CodeInvalidRequest,
+						Message: "Invalid project ID",
+						Hint:    fmt.Sprintf("'%s' is not a valid project ID. Use 'bcq projects list' to see available projects.", args[0]),
+					}
+				}
+			} else {
+				projectID, err = pickers.SelectProject(ctx, app.Client)
+				if err != nil {
+					return err
+				}
+			}
+
+			project, err := app.Client.Projects.Trash(ctx, projectID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return output.Render(ctx, project, output.WithSummary("Project moved to trash"))
+		},
+	}
+
+	return cmd
 }
 
 // convertSDKError converts SDK errors to output errors for consistent CLI error handling.
 func convertSDKError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Handle resilience sentinel errors using errors.Is for robust detection
+	if errors.Is(err, basecamp.ErrRateLimited) {
+		return &output.Error{
+			Code:      basecamp.CodeRateLimit,
+			Message:   "Rate limit exceeded",
+			Hint:      "Too many requests. Please wait before trying again.",
+			Retryable: true,
+		}
+	}
+	if errors.Is(err, basecamp.ErrCircuitOpen) {
+		return &output.Error{
+			Code:      basecamp.CodeAPI,
+			Message:   "Service temporarily unavailable",
+			Hint:      "The circuit breaker is open due to recent failures. Please wait before trying again.",
+			Retryable: true,
+		}
+	}
+	if errors.Is(err, basecamp.ErrBulkheadFull) {
+		return &output.Error{
+			Code:      basecamp.CodeRateLimit,
+			Message:   "Too many concurrent requests",
+			Hint:      "Maximum concurrent operations reached. Please wait for other operations to complete.",
+			Retryable: true,
+		}
+	}
+
+	// Handle structured SDK errors
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
 		return &output.Error{
@@ -300,4 +395,12 @@ func convertSDKError(err error) error {
 		}
 	}
 	return err
+}
+
+// projectNameOrID attempts to parse a string as either a project ID or returns it as a name.
+func projectNameOrID(s string) (int64, string) {
+	if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return id, ""
+	}
+	return 0, strings.TrimSpace(s)
 }

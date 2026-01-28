@@ -90,7 +90,11 @@ func NewApp(cfg *config.Config) *App {
 
 	// Create resilience components for cross-process state coordination
 	// State is stored in <cacheDir>/resilience/state.json
-	resilienceDir := filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
+	// If CacheDir is empty, NewStore uses the default (~/.cache/bcq/resilience/)
+	var resilienceDir string
+	if cfg.CacheDir != "" {
+		resilienceDir = filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
+	}
 	resilienceStore := resilience.NewStore(resilienceDir)
 	resilienceCfg := resilience.DefaultConfig()
 	gatingHooks := resilience.NewGatingHooksFromConfig(resilienceStore, resilienceCfg)

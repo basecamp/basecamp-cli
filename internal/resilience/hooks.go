@@ -120,8 +120,12 @@ func (h *GatingHooks) OnRequestStart(ctx context.Context, info basecamp.RequestI
 }
 
 // OnRequestEnd is called after an HTTP request completes.
+// It honors Retry-After headers from 429/503 responses to back off the rate limiter.
 func (h *GatingHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInfo, result basecamp.RequestResult) {
-	// Nothing to do at request level; handled at operation level
+	// Honor Retry-After header from rate-limited or overloaded responses
+	if h.rateLimiter != nil && result.RetryAfter > 0 {
+		_ = h.rateLimiter.SetRetryAfterDuration(time.Duration(result.RetryAfter) * time.Second)
+	}
 }
 
 // OnRetry is called before a retry attempt.

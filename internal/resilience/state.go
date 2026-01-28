@@ -45,6 +45,11 @@ type CircuitBreakerState struct {
 	// Successes is the count of consecutive successes (used in half_open state).
 	Successes int `json:"successes"`
 
+	// HalfOpenAttempts tracks in-flight requests during half-open state.
+	// Incremented atomically when a request is allowed, decremented on completion.
+	// Used to enforce HalfOpenMaxRequests limit across concurrent processes.
+	HalfOpenAttempts int `json:"half_open_attempts,omitempty"`
+
 	// LastFailureAt is when the most recent failure occurred.
 	LastFailureAt time.Time `json:"last_failure_at,omitempty"`
 
