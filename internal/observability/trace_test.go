@@ -186,3 +186,94 @@ func TestTraceWriter_Reset(t *testing.T) {
 		t.Errorf("second output after reset should start with near-zero timestamp: %s", secondOutput)
 	}
 }
+
+func TestScrubURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no sensitive params",
+			input:    "https://api.example.com/todos?page=1&limit=10",
+			expected: "https://api.example.com/todos?page=1&limit=10",
+		},
+		{
+			name:     "access_token param",
+			input:    "https://api.example.com/todos?access_token=secret123&page=1",
+			expected: "https://api.example.com/todos?access_token=%5BREDACTED%5D&page=1",
+		},
+		{
+			name:     "token param",
+			input:    "https://api.example.com/auth?token=abc123",
+			expected: "https://api.example.com/auth?token=%5BREDACTED%5D",
+		},
+		{
+			name:     "api_key param",
+			input:    "https://api.example.com/data?api_key=key123&format=json",
+			expected: "https://api.example.com/data?api_key=%5BREDACTED%5D&format=json",
+		},
+		{
+			name:     "password param",
+			input:    "https://api.example.com/login?user=admin&password=secret",
+			expected: "https://api.example.com/login?password=%5BREDACTED%5D&user=admin",
+		},
+		{
+			name:     "multiple sensitive params",
+			input:    "https://api.example.com/data?token=abc&secret=xyz&key=123",
+			expected: "https://api.example.com/data?key=%5BREDACTED%5D&secret=%5BREDACTED%5D&token=%5BREDACTED%5D",
+		},
+		{
+			name:     "case insensitive matching",
+			input:    "https://api.example.com/auth?TOKEN=abc&ApiKey=xyz",
+			expected: "https://api.example.com/auth?ApiKey=%5BREDACTED%5D&TOKEN=%5BREDACTED%5D",
+		},
+		{
+			name:     "no query string",
+			input:    "https://api.example.com/todos",
+			expected: "https://api.example.com/todos",
+		},
+		{
+			name:     "invalid url returns as-is",
+			input:    "not a valid url",
+			expected: "not a valid url",
+		},
+		{
+			name:     "relative path with query",
+			input:    "/api/todos?token=secret",
+			expected: "/api/todos?token=%5BREDACTED%5D",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := scrubURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("scrubURL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWriteRequestStart_ScrubsURLs(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewTraceWriterTo(&buf)
+
+	info := basecamp.RequestInfo{
+		Method:  "GET",
+		URL:     "https://api.example.com/todos?access_token=secret123",
+		Attempt: 1,
+	}
+	w.WriteRequestStart(info)
+
+	output := buf.String()
+
+	// Should NOT contain the actual token
+	if strings.Contains(output, "secret123") {
+		t.Errorf("URL should be scrubbed, but output contains secret: %s", output)
+	}
+	// Should contain REDACTED
+	if !strings.Contains(output, "REDACTED") {
+		t.Errorf("URL should contain [REDACTED], got: %s", output)
+	}
+}

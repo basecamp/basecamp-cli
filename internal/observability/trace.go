@@ -3,12 +3,30 @@ package observability
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
+
+// sensitiveParams are query parameter names that should be scrubbed from trace output.
+var sensitiveParams = map[string]bool{
+	"access_token":  true,
+	"token":         true,
+	"api_key":       true,
+	"apikey":        true,
+	"key":           true,
+	"password":      true,
+	"secret":        true,
+	"auth":          true,
+	"authorization": true,
+	"bearer":        true,
+	"credential":    true,
+	"credentials":   true,
+}
 
 // TraceWriter outputs human-readable trace information to stderr.
 // It formats output with timestamps relative to session start.
@@ -61,12 +79,14 @@ func (t *TraceWriter) WriteOperationEnd(op basecamp.OperationInfo, err error, du
 
 // WriteRequestStart writes a request start trace line.
 // Format: [0.234s]   -> GET /buckets/123/todos
+// Sensitive query parameters are redacted.
 func (t *TraceWriter) WriteRequestStart(info basecamp.RequestInfo) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	elapsed := time.Since(t.startTime).Seconds()
-	fmt.Fprintf(t.writer, "[%.3fs]   -> %s %s\n", elapsed, info.Method, info.URL)
+	safeURL := scrubURL(info.URL)
+	fmt.Fprintf(t.writer, "[%.3fs]   -> %s %s\n", elapsed, info.Method, safeURL)
 }
 
 // WriteRequestEnd writes a request completion trace line.
@@ -104,4 +124,28 @@ func (t *TraceWriter) Reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.startTime = time.Now()
+}
+
+// scrubURL redacts sensitive query parameters from a URL for safe logging.
+func scrubURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL // Return as-is if parsing fails
+	}
+
+	query := u.Query()
+	modified := false
+	for key := range query {
+		if sensitiveParams[strings.ToLower(key)] {
+			query.Set(key, "[REDACTED]")
+			modified = true
+		}
+	}
+
+	if !modified {
+		return rawURL
+	}
+
+	u.RawQuery = query.Encode()
+	return u.String()
 }
