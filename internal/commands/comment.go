@@ -67,7 +67,7 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return output.ErrUsage("Recording ID required")
 	}
 
-	if err := app.API.RequireAccount(); err != nil {
+	if err := app.SDK.RequireAccount(); err != nil {
 		return err
 	}
 
@@ -128,7 +128,7 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -196,7 +196,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -285,7 +285,7 @@ Supports batch commenting on multiple recordings at once.`,
 				return output.ErrUsage("--on requires a recording ID")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 

@@ -7,13 +7,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/api"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/auth"
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/names"
 	"github.com/basecamp/bcq/internal/output"
 )
+
+// messagesTestTokenProvider is a mock token provider for tests.
+type messagesTestTokenProvider struct{}
+
+func (t *messagesTestTokenProvider) AccessToken(_ context.Context) (string, error) {
+	return "test-token", nil
+}
 
 // setupMessagesTestApp creates a minimal test app context for messages tests.
 func setupMessagesTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
@@ -28,13 +36,16 @@ func setupMessagesTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	apiClient := api.NewClient(cfg, authMgr)
-	nameResolver := names.NewResolver(apiClient, authMgr)
+	sdkCfg := &basecamp.Config{
+		AccountID: cfg.AccountID,
+	}
+	sdkClient := basecamp.NewClient(sdkCfg, &messagesTestTokenProvider{})
+	nameResolver := names.NewResolver(sdkClient, authMgr)
 
 	app := &appctx.App{
 		Config: cfg,
 		Auth:   authMgr,
-		API:    apiClient,
+		SDK:    sdkClient,
 		Names:  nameResolver,
 		Output: output.New(output.Options{
 			Format: output.FormatJSON,

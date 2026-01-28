@@ -59,7 +59,7 @@ If no type specified, uses generic recording lookup.`,
 				return output.ErrUsage("--project is required")
 			}
 
-			if err := app.API.RequireAccount(); err != nil {
+			if err := app.SDK.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -96,9 +96,9 @@ If no type specified, uses generic recording lookup.`,
 				)
 			}
 
-			resp, err := app.API.Get(cmd.Context(), endpoint)
+			resp, err := app.SDK.Get(cmd.Context(), endpoint)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			// Check for empty response (204 No Content)
