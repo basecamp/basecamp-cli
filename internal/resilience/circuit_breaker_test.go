@@ -381,3 +381,50 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 		t.Error("expected request to be allowed after stale attempts are reset")
 	}
 }
+
+func TestCircuitBreakerSetsHalfOpenLastAttemptAt(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	openTimeout := 10 * time.Millisecond
+
+	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
+		FailureThreshold:    2,
+		SuccessThreshold:    1,
+		OpenTimeout:         openTimeout,
+		HalfOpenMaxRequests: 1,
+	})
+
+	// Open the circuit
+	cb.RecordFailure()
+	cb.RecordFailure()
+
+	// Wait for timeout to allow half-open
+	time.Sleep(openTimeout * 2)
+
+	// Check that HalfOpenLastAttemptAt is zero before Allow()
+	state, _ := store.Load()
+	if !state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero() {
+		t.Error("expected HalfOpenLastAttemptAt to be zero before Allow()")
+	}
+
+	// First Allow() transitions to half-open and reserves a slot
+	before := time.Now()
+	allowed, err := cb.Allow()
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowed {
+		t.Error("expected first request to be allowed")
+	}
+
+	// HalfOpenLastAttemptAt should be set
+	state, _ = store.Load()
+	if state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero() {
+		t.Error("expected HalfOpenLastAttemptAt to be set after Allow()")
+	}
+	if state.CircuitBreaker.HalfOpenLastAttemptAt.Before(before) || state.CircuitBreaker.HalfOpenLastAttemptAt.After(after) {
+		t.Error("HalfOpenLastAttemptAt should be between before and after Allow()")
+	}
+}

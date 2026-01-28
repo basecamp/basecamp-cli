@@ -50,6 +50,10 @@ type CircuitBreakerState struct {
 	// Used to enforce HalfOpenMaxRequests limit across concurrent processes.
 	HalfOpenAttempts int `json:"half_open_attempts,omitempty"`
 
+	// HalfOpenLastAttemptAt is when the last half-open attempt was reserved.
+	// Used to detect stale attempts from crashed processes that never completed.
+	HalfOpenLastAttemptAt time.Time `json:"half_open_last_attempt_at,omitempty"`
+
 	// LastFailureAt is when the most recent failure occurred.
 	LastFailureAt time.Time `json:"last_failure_at,omitempty"`
 

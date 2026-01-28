@@ -74,6 +74,7 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 				s.CircuitBreaker.Successes = 0
 				s.CircuitBreaker.Failures = 0
 				s.CircuitBreaker.HalfOpenAttempts = 1
+				s.CircuitBreaker.HalfOpenLastAttemptAt = now
 				s.UpdatedAt = now
 				allowed = true
 			} else if s.CircuitBreaker.IsHalfOpen() {
@@ -87,6 +88,7 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 					allowed = false
 				} else {
 					s.CircuitBreaker.HalfOpenAttempts++
+					s.CircuitBreaker.HalfOpenLastAttemptAt = now
 					s.UpdatedAt = now
 					allowed = true
 				}
@@ -132,6 +134,7 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 				allowed = false
 			} else {
 				s.CircuitBreaker.HalfOpenAttempts++
+				s.CircuitBreaker.HalfOpenLastAttemptAt = now
 				s.UpdatedAt = now
 				allowed = true
 			}
@@ -149,6 +152,10 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 // shouldResetStaleAttempts returns true if half-open attempts should be reset.
 // This handles the case where a process crashes before calling RecordSuccess/RecordFailure,
 // leaving HalfOpenAttempts stuck at max. We reset after OpenTimeout to allow recovery.
+//
+// Note: We use HalfOpenLastAttemptAt (circuit-breaker-specific) instead of State.UpdatedAt
+// because other components (rate limiter, bulkhead) also update State.UpdatedAt, which
+// would prevent stale detection when they run before the circuit breaker check.
 func (cb *CircuitBreaker) shouldResetStaleAttempts(s *State, now time.Time) bool {
 	if !s.CircuitBreaker.IsHalfOpen() {
 		return false
@@ -156,9 +163,14 @@ func (cb *CircuitBreaker) shouldResetStaleAttempts(s *State, now time.Time) bool
 	if s.CircuitBreaker.HalfOpenAttempts < cb.config.HalfOpenMaxRequests {
 		return false
 	}
-	// If attempts are maxed out and state hasn't been updated in OpenTimeout,
+	// If attempts are maxed out and no attempt has been reserved in OpenTimeout,
 	// assume the attempts are from crashed processes
-	return now.Sub(s.UpdatedAt) >= cb.config.OpenTimeout
+	lastAttempt := s.CircuitBreaker.HalfOpenLastAttemptAt
+	if lastAttempt.IsZero() {
+		// Fallback for state created before this field existed
+		return false
+	}
+	return now.Sub(lastAttempt) >= cb.config.OpenTimeout
 }
 
 // RecordSuccess records a successful request.
@@ -179,6 +191,7 @@ func (cb *CircuitBreaker) RecordSuccess() error {
 				cbState.Failures = 0
 				cbState.Successes = 0
 				cbState.HalfOpenAttempts = 0
+				cbState.HalfOpenLastAttemptAt = time.Time{}
 			}
 		case cbState.IsClosed():
 			// Reset consecutive failure count on success
@@ -215,6 +228,7 @@ func (cb *CircuitBreaker) RecordFailure() error {
 			cbState.OpenedAt = now
 			cbState.Successes = 0
 			cbState.HalfOpenAttempts = 0
+			cbState.HalfOpenLastAttemptAt = time.Time{}
 		}
 
 		state.UpdatedAt = now

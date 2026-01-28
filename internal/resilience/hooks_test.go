@@ -291,3 +291,81 @@ func TestGatingHooksOnOperationStartAndRequestMethods(t *testing.T) {
 	// OnRetry (should not panic)
 	hooks.OnRetry(ctx, basecamp.RequestInfo{}, 1, nil)
 }
+
+func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
+	// This integration test verifies stale cleanup works even when the rate
+	// limiter updates State.UpdatedAt before the circuit breaker runs.
+	// (Unlike the unit test that calls CircuitBreaker.Allow() directly)
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	openTimeout := 10 * time.Millisecond
+
+	cfg := &Config{
+		CircuitBreaker: CircuitBreakerConfig{
+			FailureThreshold:    2,
+			SuccessThreshold:    1,
+			OpenTimeout:         openTimeout,
+			HalfOpenMaxRequests: 1,
+		},
+		RateLimiter: RateLimiterConfig{
+			MaxTokens:        100, // Plenty of tokens so rate limiter doesn't reject
+			RefillRate:       100,
+			TokensPerRequest: 1,
+		},
+		Bulkhead: BulkheadConfig{
+			MaxConcurrent: 100, // Plenty of slots so bulkhead doesn't reject
+		},
+	}
+
+	hooks := NewGatingHooksFromConfig(store, cfg)
+
+	op := basecamp.OperationInfo{
+		Service:   "Todos",
+		Operation: "Complete",
+	}
+
+	// Open the circuit via failures
+	networkErr := basecamp.ErrNetwork(errors.New("connection refused"))
+	ctx1, _ := hooks.OnOperationGate(context.Background(), op)
+	hooks.OnOperationEnd(ctx1, op, networkErr, time.Millisecond)
+	ctx2, _ := hooks.OnOperationGate(context.Background(), op)
+	hooks.OnOperationEnd(ctx2, op, networkErr, time.Millisecond)
+
+	// Wait for timeout to allow half-open
+	time.Sleep(openTimeout * 2)
+
+	// First request transitions to half-open and reserves the slot
+	ctx3, err := hooks.OnOperationGate(context.Background(), op)
+	if err != nil {
+		t.Fatalf("expected first request to succeed, got %v", err)
+	}
+
+	// Simulate a crash: don't call OnOperationEnd
+	// Release the bulkhead slot manually so it doesn't block
+	hooks.OnOperationEnd(ctx3, op, nil, time.Millisecond) // This releases bulkhead but not the CB attempt
+
+	// Actually, OnOperationEnd will call RecordSuccess which releases the CB attempt.
+	// We need to NOT call OnOperationEnd to simulate a crash. But then bulkhead blocks.
+	// So let's create a new hooks instance with a fresh bulkhead to simulate the crash scenario.
+
+	// Reset: Let's approach this differently. Manually set the state to simulate a crash.
+	store.Update(func(state *State) error {
+		state.CircuitBreaker.State = CircuitHalfOpen
+		state.CircuitBreaker.HalfOpenAttempts = 1
+		state.CircuitBreaker.HalfOpenLastAttemptAt = time.Now().Add(-openTimeout * 2) // In the past
+		return nil
+	})
+
+	// Second request should be rejected (max reached, but not stale yet because we just set LastAttemptAt)
+	// Actually we set it in the past, so it should be detected as stale
+
+	// Create fresh hooks to simulate new process
+	hooks2 := NewGatingHooksFromConfig(store, cfg)
+
+	// This should detect stale attempts and allow the request
+	_, err = hooks2.OnOperationGate(context.Background(), op)
+	if err != nil {
+		t.Fatalf("expected request to succeed after stale attempts reset, got %v", err)
+	}
+}
