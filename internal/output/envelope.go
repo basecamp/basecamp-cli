@@ -112,9 +112,9 @@ func (w *Writer) write(v any) error {
 	case FormatQuiet:
 		// Extract just the data field for quiet mode
 		if resp, ok := v.(*Response); ok {
-			return w.writeJSON(resp.Data)
+			return w.writeQuiet(resp.Data)
 		}
-		return w.writeJSON(v)
+		return w.writeQuiet(v)
 	case FormatIDs:
 		return w.writeIDs(v)
 	case FormatCount:
@@ -144,6 +144,12 @@ func (w *Writer) writeJSON(v any) error {
 	enc := json.NewEncoder(w.opts.Writer)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// writeQuiet outputs data for quiet mode as JSON without the envelope.
+// This preserves the JSON contract for --agent and --quiet modes.
+func (w *Writer) writeQuiet(v any) error {
+	return w.writeJSON(v)
 }
 
 func (w *Writer) writeIDs(v any) error {

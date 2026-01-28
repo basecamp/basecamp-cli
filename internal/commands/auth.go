@@ -226,7 +226,12 @@ Get tokens for different environments using the global --host flag:
   bcq --host staging.example.com auth token
 
 The --stored flag ignores BASECAMP_TOKEN and uses stored OAuth credentials:
-  bcq auth token --stored`,
+  bcq auth token --stored
+
+Output modes:
+  bcq auth token           # Raw token (default, for shell substitution)
+  bcq auth token --json    # JSON envelope with token in data field
+  bcq auth token --stats   # Raw token + stats on stderr`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -249,6 +254,13 @@ The --stored flag ignores BASECAMP_TOKEN and uses stored OAuth credentials:
 				return err
 			}
 
+			// Output raw token by default for backwards compatibility with shell scripts.
+			// Only use JSON envelope when --json is explicitly requested.
+			if app.Flags.JSON || app.Flags.Agent {
+				return app.OK(map[string]string{"token": token})
+			}
+
+			// Raw output: print token directly, with optional stats on stderr
 			fmt.Println(token)
 			return nil
 		},

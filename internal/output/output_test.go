@@ -553,6 +553,26 @@ func TestWriterQuietFormat(t *testing.T) {
 	}
 }
 
+func TestWriterQuietFormatString(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatQuiet,
+		Writer: &buf,
+	})
+
+	// Quiet mode outputs JSON (preserves --agent contract)
+	err := w.OK("my-auth-token-value")
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	// Should output JSON-encoded string
+	output := buf.String()
+	if output != "\"my-auth-token-value\"\n" {
+		t.Errorf("Quiet string output = %q, want %q", output, "\"my-auth-token-value\"\n")
+	}
+}
+
 func TestWriterIDsFormat(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{

@@ -24,6 +24,12 @@ func TestNormalizeHost(t *testing.T) {
 		{"[::1]", "http://[::1]"},
 		{"[::1]:3000", "http://[::1]:3000"},
 
+		// .localhost subdomains → http (RFC 6761)
+		{"app.localhost", "http://app.localhost"},
+		{"app.localhost:3000", "http://app.localhost:3000"},
+		{"foo.bar.localhost", "http://foo.bar.localhost"},
+		{"foo.bar.localhost:8080", "http://foo.bar.localhost:8080"},
+
 		// Non-localhost → https
 		// Note: bare ::1 without brackets is not a valid URL format,
 		// so it's treated as a hostname and gets https://
@@ -54,6 +60,12 @@ func TestIsLocalhost(t *testing.T) {
 		{"localhost", true},
 		{"localhost:3000", true},
 		{"localhost:8080", true},
+
+		// .localhost subdomains (RFC 6761)
+		{"app.localhost", true},
+		{"app.localhost:3000", true},
+		{"foo.bar.localhost", true},
+		{"foo.bar.localhost:8080", true},
 
 		// IPv4 loopback
 		{"127.0.0.1", true},
