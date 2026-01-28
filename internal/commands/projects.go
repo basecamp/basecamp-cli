@@ -23,6 +23,13 @@ func NewProjectsCmd() *cobra.Command {
 		Aliases: []string{"project"},
 		Short:   "Manage projects",
 		Long:    "List, show, create, and manage Basecamp projects.",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runProjectsList(cmd, status)
@@ -66,12 +73,16 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	opts := &basecamp.ProjectListOptions{}
 	if status != "" {
 		opts.Status = basecamp.ProjectStatus(status)
 	}
 
-	projects, err := app.SDK.Projects().List(cmd.Context(), opts)
+	projects, err := app.Account().Projects().List(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -130,12 +141,16 @@ func newProjectsShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			project, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+			project, err := app.Account().Projects().Get(cmd.Context(), projectID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -172,6 +187,10 @@ func newProjectsCreateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			if name == "" {
 				return output.ErrUsage("--name is required")
 			}
@@ -181,7 +200,7 @@ func newProjectsCreateCmd() *cobra.Command {
 				Description: description,
 			}
 
-			project, err := app.SDK.Projects().Create(cmd.Context(), req)
+			project, err := app.Account().Projects().Create(cmd.Context(), req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -214,6 +233,10 @@ func newProjectsUpdateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
@@ -228,7 +251,7 @@ func newProjectsUpdateCmd() *cobra.Command {
 			updateName := name
 			if updateName == "" {
 				// Fetch current project to get the name
-				current, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+				current, err := app.Account().Projects().Get(cmd.Context(), projectID)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -240,7 +263,7 @@ func newProjectsUpdateCmd() *cobra.Command {
 				Description: description,
 			}
 
-			project, err := app.SDK.Projects().Update(cmd.Context(), projectID, req)
+			project, err := app.Account().Projects().Update(cmd.Context(), projectID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -270,12 +293,16 @@ func newProjectsDeleteCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			if err := app.SDK.Projects().Trash(cmd.Context(), projectID); err != nil {
+			if err := app.Account().Projects().Trash(cmd.Context(), projectID); err != nil {
 				return convertSDKError(err)
 			}
 

@@ -40,6 +40,10 @@ Use "me" or --person to view a person's activity timeline.`,
 func runTimeline(cmd *cobra.Command, args []string, project, person string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Validate positional argument - only "me" is supported
 	if len(args) > 0 && args[0] != "me" {
 		return output.ErrUsageHint(
@@ -72,7 +76,7 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 	}
 
 	// Default: account-wide activity feed
-	events, err := app.SDK.Timeline().Progress(cmd.Context())
+	events, err := app.Account().Timeline().Progress(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -108,7 +112,7 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	events, err := app.SDK.Timeline().ProjectTimeline(cmd.Context(), projectID)
+	events, err := app.Account().Timeline().ProjectTimeline(cmd.Context(), projectID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -149,7 +153,7 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 		return output.ErrUsage("Invalid person ID")
 	}
 
-	result, err := app.SDK.Timeline().PersonProgress(cmd.Context(), personID)
+	result, err := app.Account().Timeline().PersonProgress(cmd.Context(), personID)
 	if err != nil {
 		return convertSDKError(err)
 	}

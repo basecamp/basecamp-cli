@@ -27,7 +27,7 @@ Use 'bcq campfire post "message"' to post a message.`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -80,7 +80,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 		Long:  "List campfires in a project or account-wide with --all.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 			return runCampfireList(cmd, app, *project, all)
@@ -95,7 +95,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bool) error {
 	// Account-wide campfire listing
 	if all {
-		campfires, err := app.SDK.Campfires().List(cmd.Context())
+		campfires, err := app.Account().Campfires().List(cmd.Context())
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 	campfireIDInt, _ := strconv.ParseInt(campfireIDStr, 10, 64)
 
 	// Get campfire details using SDK
-	campfire, err := app.SDK.Campfires().Get(cmd.Context(), bucketID, campfireIDInt)
+	campfire, err := app.Account().Campfires().Get(cmd.Context(), bucketID, campfireIDInt)
 	if err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func newCampfireMessagesCmd(project, campfireID *string) *cobra.Command {
 		Long:  "View recent messages from a Campfire.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 			return runCampfireMessages(cmd, app, *campfireID, *project, limit)
@@ -231,7 +231,7 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
 
 	// Get recent messages (lines) using SDK
-	lines, err := app.SDK.Campfires().ListLines(cmd.Context(), bucketID, campfireIDInt)
+	lines, err := app.Account().Campfires().ListLines(cmd.Context(), bucketID, campfireIDInt)
 	if err != nil {
 		return err
 	}
@@ -281,7 +281,7 @@ func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
 				return output.ErrUsage("Message content required")
 			}
 
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -324,7 +324,7 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
 
 	// Post message using SDK
-	line, err := app.SDK.Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content)
+	line, err := app.Account().Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content)
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -394,7 +394,7 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 			lineIDInt, _ := strconv.ParseInt(lineID, 10, 64)
 
 			// Get line using SDK
-			line, err := app.SDK.Campfires().GetLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
+			line, err := app.Account().Campfires().GetLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
 			if err != nil {
 				return err
 			}
@@ -433,7 +433,7 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -479,7 +479,7 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 			}
 
 			// Delete line using SDK
-			err = app.SDK.Campfires().DeleteLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
+			err = app.Account().Campfires().DeleteLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
 			if err != nil {
 				return err
 			}

@@ -25,23 +25,23 @@ func (noNetworkTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("network disabled in tests")
 }
 
-func newTestClient(t *testing.T) *basecamp.Client {
+func newTestAccountClient(t *testing.T) *basecamp.AccountClient {
 	t.Helper()
 
 	cfg := &basecamp.Config{
-		AccountID:    "123",
 		CacheEnabled: false,
 	}
-	return basecamp.NewClient(cfg, &mockTokenProvider{},
+	client := basecamp.NewClient(cfg, &mockTokenProvider{},
 		basecamp.WithTransport(noNetworkTransport{}),
 		basecamp.WithMaxRetries(0),
 	)
+	return client.ForAccount("123")
 }
 
 func TestRefresher_RefreshIfStale_Fresh(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	client := newTestClient(t)
+	client := newTestAccountClient(t)
 	refresher := NewRefresher(store, client)
 
 	// Save fresh cache
@@ -64,7 +64,7 @@ func TestRefresher_RefreshIfStale_Fresh(t *testing.T) {
 func TestRefresher_RefreshIfStale_Stale_TriggersRefresh(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	client := newTestClient(t)
+	client := newTestAccountClient(t)
 	refresher := NewRefresher(store, client)
 
 	// Empty cache is stale - this should trigger a background refresh
@@ -93,7 +93,7 @@ func TestRefresher_RefreshIfStale_Stale_TriggersRefresh(t *testing.T) {
 func TestRefresher_RefreshIfStale_DoesNotBlockConcurrent(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	client := newTestClient(t)
+	client := newTestAccountClient(t)
 	refresher := NewRefresher(store, client)
 
 	// Trigger multiple refreshes concurrently - only one should run
@@ -115,7 +115,7 @@ func TestRefresher_RefreshIfStale_DoesNotBlockConcurrent(t *testing.T) {
 func TestRefresher_IsRefreshing(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	client := newTestClient(t)
+	client := newTestAccountClient(t)
 	refresher := NewRefresher(store, client)
 
 	// Initially not refreshing

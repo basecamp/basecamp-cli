@@ -61,6 +61,10 @@ func newTimesheetReportCmd(startDate, endDate, personID, bucketID *string) *cobr
 func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucketID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Validate: if one date is provided, both are required
 	if startDate != "" && endDate == "" {
 		return output.ErrUsage("--end required when --start is provided")
@@ -88,7 +92,7 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 		if err != nil {
 			return output.ErrUsage("Invalid bucket ID")
 		}
-		entries, err := app.SDK.Timesheet().ProjectReport(cmd.Context(), bid, opts)
+		entries, err := app.Account().Timesheet().ProjectReport(cmd.Context(), bid, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -110,7 +114,7 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 		)
 	}
 
-	entries, err := app.SDK.Timesheet().Report(cmd.Context(), opts)
+	entries, err := app.Account().Timesheet().Report(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -155,6 +159,10 @@ func newTimesheetProjectCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Project from positional arg or flag
 			if len(args) > 0 && project == "" {
 				project = args[0]
@@ -182,7 +190,7 @@ func newTimesheetProjectCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			entries, err := app.SDK.Timesheet().ProjectReport(cmd.Context(), bucketID, nil)
+			entries, err := app.Account().Timesheet().ProjectReport(cmd.Context(), bucketID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -224,6 +232,10 @@ func newTimesheetRecordingCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			recordingIDStr := args[0]
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
@@ -252,7 +264,7 @@ func newTimesheetRecordingCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			entries, err := app.SDK.Timesheet().RecordingReport(cmd.Context(), bucketID, recordingID, nil)
+			entries, err := app.Account().Timesheet().RecordingReport(cmd.Context(), bucketID, recordingID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}

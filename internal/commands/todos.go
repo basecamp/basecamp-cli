@@ -105,7 +105,7 @@ func NewTodoCmd() *cobra.Command {
 				)
 			}
 
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -183,7 +183,7 @@ func NewTodoCmd() *cobra.Command {
 				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			todo, err := app.SDK.Todos().Create(cmd.Context(), projectID, todolistID, req)
+			todo, err := app.Account().Todos().Create(cmd.Context(), projectID, todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -275,7 +275,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
 	}
 
-	if err := app.SDK.RequireAccount(); err != nil {
+	if err := app.RequireAccount(); err != nil {
 		return err
 	}
 
@@ -325,7 +325,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		opts.Status = status
 	}
 
-	todos, err := app.SDK.Todos().List(cmd.Context(), projectID, todolistID, opts)
+	todos, err := app.Account().Todos().List(cmd.Context(), projectID, todolistID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -375,7 +375,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 	}
 
 	// Get todolists via SDK
-	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -383,7 +383,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 	// Aggregate todos from all todolists
 	var allTodos []basecamp.Todo
 	for _, tl := range todolists {
-		todos, err := app.SDK.Todos().List(cmd.Context(), bucketID, tl.ID, nil)
+		todos, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, nil)
 		if err != nil {
 			continue // Skip failed todolists
 		}
@@ -468,6 +468,10 @@ func newTodosShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Use project from flag or config
 			if project == "" {
 				project = app.Flags.Project
@@ -495,7 +499,7 @@ func newTodosShowCmd() *cobra.Command {
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			todo, err := app.SDK.Todos().Get(cmd.Context(), projectID, todoID)
+			todo, err := app.Account().Todos().Get(cmd.Context(), projectID, todoID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -558,7 +562,7 @@ func newTodosCreateCmd() *cobra.Command {
 				)
 			}
 
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -636,7 +640,7 @@ func newTodosCreateCmd() *cobra.Command {
 				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			todo, err := app.SDK.Todos().Create(cmd.Context(), projectID, todolistID, req)
+			todo, err := app.Account().Todos().Create(cmd.Context(), projectID, todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -700,7 +704,7 @@ func getFirstTodolistID(cmd *cobra.Command, app *appctx.App, project string) (in
 	}
 
 	// Get first todolist via SDK
-	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
 	if err != nil {
 		return 0, convertSDKError(err)
 	}
@@ -766,6 +770,10 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Use project from flag or config
 	if project == "" {
 		project = app.Flags.Project
@@ -797,7 +805,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 			failed = append(failed, todoIDStr)
 			continue
 		}
-		err = app.SDK.Todos().Complete(cmd.Context(), projectID, todoID)
+		err = app.Account().Todos().Complete(cmd.Context(), projectID, todoID)
 		if err != nil {
 			failed = append(failed, todoIDStr)
 		} else {
@@ -903,7 +911,7 @@ Examples:
   bcq todos sweep --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -985,7 +993,7 @@ Examples:
 				// Add comment if specified
 				if comment != "" {
 					req := &basecamp.CreateCommentRequest{Content: comment}
-					_, commentErr := app.SDK.Comments().Create(cmd.Context(), bucketID, todoID, req)
+					_, commentErr := app.Account().Comments().Create(cmd.Context(), bucketID, todoID, req)
 					if commentErr != nil {
 						result.CommentFailed = append(result.CommentFailed, todoID)
 					} else {
@@ -995,7 +1003,7 @@ Examples:
 
 				// Complete if specified
 				if complete {
-					completeErr := app.SDK.Todos().Complete(cmd.Context(), bucketID, todoID)
+					completeErr := app.Account().Todos().Complete(cmd.Context(), bucketID, todoID)
 					if completeErr != nil {
 						result.CompleteFailed = append(result.CompleteFailed, todoID)
 					} else {
@@ -1072,7 +1080,7 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 	}
 
 	// Get todolists via SDK
-	todolists, err := app.SDK.Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -1080,7 +1088,7 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 	// Aggregate todos from all todolists
 	var allTodos []basecamp.Todo
 	for _, tl := range todolists {
-		todos, err := app.SDK.Todos().List(cmd.Context(), bucketID, tl.ID, nil)
+		todos, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, nil)
 		if err != nil {
 			continue // Skip failed todolists
 		}
@@ -1157,6 +1165,10 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Use project from flag or config
 	if project == "" {
 		project = app.Flags.Project
@@ -1188,7 +1200,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 			failed = append(failed, todoIDStr)
 			continue
 		}
-		err = app.SDK.Todos().Uncomplete(cmd.Context(), projectID, todoID)
+		err = app.Account().Todos().Uncomplete(cmd.Context(), projectID, todoID)
 		if err != nil {
 			failed = append(failed, todoIDStr)
 		} else {
@@ -1239,6 +1251,10 @@ func newTodosPositionCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			if position == 0 {
 				return output.ErrUsage("--to is required (1 = top)")
 			}
@@ -1270,7 +1286,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			err = app.SDK.Todos().Reposition(cmd.Context(), projectID, todoID, position)
+			err = app.Account().Todos().Reposition(cmd.Context(), projectID, todoID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}

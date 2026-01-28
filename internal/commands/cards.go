@@ -72,6 +72,10 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project first (validate before account check)
 	projectID := project
 	if projectID == "" {
@@ -108,7 +112,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cards, err := app.SDK.Cards().List(cmd.Context(), bucketID, columnID)
+		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -142,7 +146,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 	}
 
 	// Get card table with embedded columns (lists)
-	cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+	cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -158,7 +162,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 				"Use column ID or exact name",
 			)
 		}
-		cards, err := app.SDK.Cards().List(cmd.Context(), bucketID, columnID)
+		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -166,7 +170,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 	} else {
 		// Get cards from all columns
 		for _, col := range cardTableData.Lists {
-			cards, err := app.SDK.Cards().List(cmd.Context(), bucketID, col.ID)
+			cards, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID)
 			if err != nil {
 				continue // Skip columns with errors
 			}
@@ -205,6 +209,10 @@ func newCardsShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			cardIDStr := args[0]
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -233,7 +241,7 @@ func newCardsShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			card, err := app.SDK.Cards().Get(cmd.Context(), bucketID, cardID)
+			card, err := app.Account().Cards().Get(cmd.Context(), bucketID, cardID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -269,6 +277,10 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 		Long:  "Create a new card in a project's card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -324,7 +336,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -353,7 +365,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				Content: content,
 			}
 
-			card, err := app.SDK.Cards().Create(cmd.Context(), bucketID, columnID, req)
+			card, err := app.Account().Cards().Create(cmd.Context(), bucketID, columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -416,6 +428,10 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			cardIDStr := args[0]
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -467,7 +483,7 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			card, err := app.SDK.Cards().Update(cmd.Context(), bucketID, cardID, req)
+			card, err := app.Account().Cards().Update(cmd.Context(), bucketID, cardID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -513,6 +529,10 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			cardIDStr := args[0]
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
@@ -577,7 +597,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -593,7 +613,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 			}
 
 			// Move card to column
-			err = app.SDK.Cards().Move(cmd.Context(), bucketID, cardID, columnID)
+			err = app.Account().Cards().Move(cmd.Context(), bucketID, cardID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -639,6 +659,10 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Resolve project
 			projectID := *project
 			if projectID == "" {
@@ -673,7 +697,7 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 			}
 
 			// Get card table with embedded columns (lists)
-			cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -712,6 +736,10 @@ func NewCardCmd() *cobra.Command {
 		Long:  "Create a card in a project's card table. Shortcut for 'bcq cards create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -767,7 +795,7 @@ func NewCardCmd() *cobra.Command {
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTableData, err := app.SDK.CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -796,7 +824,7 @@ func NewCardCmd() *cobra.Command {
 				Content: content,
 			}
 
-			card, err := app.SDK.Cards().Create(cmd.Context(), bucketID, columnID, req)
+			card, err := app.Account().Cards().Create(cmd.Context(), bucketID, columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -884,6 +912,10 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
@@ -912,7 +944,7 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			col, err := app.SDK.CardColumns().Get(cmd.Context(), bucketID, columnID)
+			col, err := app.Account().CardColumns().Get(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -947,6 +979,10 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 		Long:  "Create a new column in the card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -990,7 +1026,7 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				Description: description,
 			}
 
-			col, err := app.SDK.CardColumns().Create(cmd.Context(), bucketID, cardTableIDInt, req)
+			col, err := app.Account().CardColumns().Create(cmd.Context(), bucketID, cardTableIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1032,6 +1068,10 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
@@ -1069,7 +1109,7 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 				Description: description,
 			}
 
-			col, err := app.SDK.CardColumns().Update(cmd.Context(), bucketID, columnID, req)
+			col, err := app.Account().CardColumns().Update(cmd.Context(), bucketID, columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1096,6 +1136,10 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
@@ -1146,7 +1190,7 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 				Position: position,
 			}
 
-			err = app.SDK.CardColumns().Move(cmd.Context(), bucketID, cardTableIDInt, req)
+			err = app.Account().CardColumns().Move(cmd.Context(), bucketID, cardTableIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1174,6 +1218,10 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
@@ -1202,7 +1250,7 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			_, err = app.SDK.CardColumns().Watch(cmd.Context(), bucketID, columnID)
+			_, err = app.Account().CardColumns().Watch(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1225,6 +1273,10 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
@@ -1253,7 +1305,7 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.CardColumns().Unwatch(cmd.Context(), bucketID, columnID)
+			err = app.Account().CardColumns().Unwatch(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1276,6 +1328,10 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
@@ -1304,7 +1360,7 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			col, err := app.SDK.CardColumns().EnableOnHold(cmd.Context(), bucketID, columnID)
+			col, err := app.Account().CardColumns().EnableOnHold(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1326,6 +1382,10 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
@@ -1354,7 +1414,7 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			col, err := app.SDK.CardColumns().DisableOnHold(cmd.Context(), bucketID, columnID)
+			col, err := app.Account().CardColumns().DisableOnHold(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1377,6 +1437,10 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			columnIDStr := args[0]
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
@@ -1410,7 +1474,7 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			col, err := app.SDK.CardColumns().SetColor(cmd.Context(), bucketID, columnID, color)
+			col, err := app.Account().CardColumns().SetColor(cmd.Context(), bucketID, columnID, color)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1436,6 +1500,10 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 		Long:  "Display all steps (checklist items) on a card.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			// Accept card ID as positional arg or flag
 			if len(args) > 0 {
@@ -1473,7 +1541,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 			}
 
 			// Get card with steps
-			card, err := app.SDK.Cards().Get(cmd.Context(), bucketID, cardIDInt)
+			card, err := app.Account().Cards().Get(cmd.Context(), bucketID, cardIDInt)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1534,6 +1602,10 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			if title == "" {
 				return output.ErrUsage("--title is required")
 			}
@@ -1582,7 +1654,7 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				req.Assignees = assigneeIDs
 			}
 
-			step, err := app.SDK.CardSteps().Create(cmd.Context(), bucketID, cardIDInt, req)
+			step, err := app.Account().CardSteps().Create(cmd.Context(), bucketID, cardIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1627,6 +1699,10 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			stepIDStr := args[0]
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
@@ -1675,7 +1751,7 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 				req.Assignees = assigneeIDs
 			}
 
-			step, err := app.SDK.CardSteps().Update(cmd.Context(), bucketID, stepID, req)
+			step, err := app.Account().CardSteps().Update(cmd.Context(), bucketID, stepID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1702,6 +1778,10 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			stepIDStr := args[0]
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
@@ -1730,7 +1810,7 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			step, err := app.SDK.CardSteps().Complete(cmd.Context(), bucketID, stepID)
+			step, err := app.Account().CardSteps().Complete(cmd.Context(), bucketID, stepID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1752,6 +1832,10 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			stepIDStr := args[0]
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
@@ -1780,7 +1864,7 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			step, err := app.SDK.CardSteps().Uncomplete(cmd.Context(), bucketID, stepID)
+			step, err := app.Account().CardSteps().Uncomplete(cmd.Context(), bucketID, stepID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1804,6 +1888,10 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			stepIDStr := args[0]
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
@@ -1845,7 +1933,7 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.CardSteps().Reposition(cmd.Context(), bucketID, cardIDInt, stepID, position)
+			err = app.Account().CardSteps().Reposition(cmd.Context(), bucketID, cardIDInt, stepID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1873,6 +1961,10 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			stepIDStr := args[0]
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
@@ -1902,7 +1994,7 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.CardSteps().Delete(cmd.Context(), bucketID, stepID)
+			err = app.Account().CardSteps().Delete(cmd.Context(), bucketID, stepID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1921,7 +2013,7 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 // an error is returned with the available card table IDs.
 func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string) (string, error) {
 	path := fmt.Sprintf("/projects/%s.json", projectID)
-	resp, err := app.SDK.Get(cmd.Context(), path)
+	resp, err := app.Account().Get(cmd.Context(), path)
 	if err != nil {
 		return "", convertSDKError(err)
 	}

@@ -24,6 +24,13 @@ func NewTodolistgroupsCmd() *cobra.Command {
 		Long: `Manage todolist groups (folders for organizing todolists).
 
 Todolist groups allow you to organize todolists into collapsible sections.`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return app.RequireAccount()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runTodolistgroupsList(cmd, project, todolist)
@@ -60,6 +67,10 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
+	}
+
+	if err := app.RequireAccount(); err != nil {
+		return err
 	}
 
 	// Resolve project
@@ -105,7 +116,7 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	}
 
 	// Get groups via SDK
-	groups, err := app.SDK.TodolistGroups().List(cmd.Context(), bucketID, todolistID)
+	groups, err := app.Account().TodolistGroups().List(cmd.Context(), bucketID, todolistID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -138,6 +149,10 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			groupIDStr := args[0]
 
 			// Resolve project
@@ -168,7 +183,7 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 			}
 
 			// Get group via SDK
-			group, err := app.SDK.TodolistGroups().Get(cmd.Context(), bucketID, groupID)
+			group, err := app.Account().TodolistGroups().Get(cmd.Context(), bucketID, groupID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -198,6 +213,10 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			if name == "" {
@@ -254,7 +273,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 			}
 
 			// Create group via SDK
-			group, err := app.SDK.TodolistGroups().Create(cmd.Context(), bucketID, todolistID, req)
+			group, err := app.Account().TodolistGroups().Create(cmd.Context(), bucketID, todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -290,6 +309,10 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			groupIDStr := args[0]
@@ -331,7 +354,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 			}
 
 			// Update group via SDK
-			group, err := app.SDK.TodolistGroups().Update(cmd.Context(), bucketID, groupID, req)
+			group, err := app.Account().TodolistGroups().Update(cmd.Context(), bucketID, groupID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -360,6 +383,10 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.RequireAccount(); err != nil {
+				return err
 			}
 
 			groupIDStr := args[0]
@@ -396,7 +423,7 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 			}
 
 			// Reposition group via SDK
-			err = app.SDK.TodolistGroups().Reposition(cmd.Context(), bucketID, groupID, position)
+			err = app.Account().TodolistGroups().Reposition(cmd.Context(), bucketID, groupID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}

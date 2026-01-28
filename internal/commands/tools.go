@@ -55,6 +55,10 @@ func newToolsShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid tool ID")
@@ -82,7 +86,7 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			tool, err := app.SDK.Tools().Get(cmd.Context(), bucketID, toolID)
+			tool, err := app.Account().Tools().Get(cmd.Context(), bucketID, toolID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -130,6 +134,10 @@ For example, clone a Campfire to create a second chat room in the same project.`
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			if sourceID == "" {
 				return output.ErrUsage("--source is required (ID of tool to clone)")
 			}
@@ -161,14 +169,14 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			created, err := app.SDK.Tools().Create(cmd.Context(), bucketID, sourceToolID)
+			created, err := app.Account().Tools().Create(cmd.Context(), bucketID, sourceToolID)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
 			// Rename the tool if a title was provided
 			if title != "" {
-				created, err = app.SDK.Tools().Update(cmd.Context(), bucketID, created.ID, title)
+				created, err = app.Account().Tools().Update(cmd.Context(), bucketID, created.ID, title)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -212,6 +220,10 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid tool ID")
@@ -243,7 +255,7 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			tool, err := app.SDK.Tools().Update(cmd.Context(), bucketID, toolID, title)
+			tool, err := app.Account().Tools().Update(cmd.Context(), bucketID, toolID, title)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -284,6 +296,10 @@ WARNING: This permanently removes the tool and all its content.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid tool ID")
@@ -311,7 +327,7 @@ WARNING: This permanently removes the tool and all its content.`,
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Tools().Delete(cmd.Context(), bucketID, toolID)
+			err = app.Account().Tools().Delete(cmd.Context(), bucketID, toolID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -341,6 +357,10 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid tool ID")
@@ -368,7 +388,7 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Tools().Enable(cmd.Context(), bucketID, toolID)
+			err = app.Account().Tools().Enable(cmd.Context(), bucketID, toolID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -398,6 +418,10 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid tool ID")
@@ -425,7 +449,7 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Tools().Disable(cmd.Context(), bucketID, toolID)
+			err = app.Account().Tools().Disable(cmd.Context(), bucketID, toolID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -455,6 +479,10 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
@@ -487,7 +515,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.Tools().Reposition(cmd.Context(), bucketID, toolID, position)
+			err = app.Account().Tools().Reposition(cmd.Context(), bucketID, toolID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}

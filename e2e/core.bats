@@ -98,7 +98,7 @@ load test_helper
   # Run with verbose and capture stderr
   run bash -c "bcq -v projects 2>&1"
 
-  # Check for structured slog output
-  assert_output_contains "level=DEBUG"
-  assert_output_contains "msg="
+  # Check for SDK operation tracing output (format: [timestamp] Calling/Failed <Service>.<Method>)
+  assert_output_contains "Calling"
+  assert_output_contains "Projects.List"
 }
