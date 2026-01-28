@@ -76,7 +76,7 @@ func (b *Bulkhead) Acquire() (bool, error) {
 
 	if err != nil {
 		// On error, allow the request (fail open)
-		return true, nil
+		return true, nil //nolint:nilerr // Intentional fail-open: allow request when state cannot be loaded
 	}
 
 	return acquired, nil
@@ -93,6 +93,8 @@ func (b *Bulkhead) Release() error {
 }
 
 // Available returns the number of available slots.
+// Returns a value in [0, MaxConcurrent] even if Count exceeds MaxConcurrent
+// (possible under fail-open or config changes).
 func (b *Bulkhead) Available() (int, error) {
 	state, err := b.store.Load()
 	if err != nil {
@@ -101,7 +103,11 @@ func (b *Bulkhead) Available() (int, error) {
 
 	bhState := state.Bulkhead
 	b.cleanupStaleSlots(&bhState)
-	return b.config.MaxConcurrent - bhState.Count(), nil
+	available := b.config.MaxConcurrent - bhState.Count()
+	if available < 0 {
+		available = 0
+	}
+	return available, nil
 }
 
 // InUse returns the number of slots currently in use.

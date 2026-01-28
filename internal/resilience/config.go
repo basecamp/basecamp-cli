@@ -34,6 +34,12 @@ type CircuitBreakerConfig struct {
 	// HalfOpenMaxRequests is the max concurrent requests allowed in half-open state.
 	// Default: 1
 	HalfOpenMaxRequests int
+
+	// StaleAttemptTimeout is how long to wait before considering half-open attempts
+	// as stale (from crashed processes). This should be longer than the expected
+	// duration of slow/large operations to avoid resetting legitimate in-flight requests.
+	// Default: 2 minutes (4x OpenTimeout)
+	StaleAttemptTimeout time.Duration
 }
 
 // RateLimiterConfig configures the token bucket rate limiter.
@@ -66,6 +72,7 @@ func DefaultConfig() *Config {
 			SuccessThreshold:    2,
 			OpenTimeout:         30 * time.Second,
 			HalfOpenMaxRequests: 1,
+			StaleAttemptTimeout: 2 * time.Minute, // 4x OpenTimeout to allow slow operations
 		},
 		RateLimiter: RateLimiterConfig{
 			MaxTokens:        50,

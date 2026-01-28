@@ -48,7 +48,7 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 	state, err := cb.store.Load()
 	if err != nil {
 		// On error, allow the request (fail open)
-		return true, nil
+		return true, nil //nolint:nilerr // Intentional fail-open: allow request when state cannot be loaded
 	}
 
 	cbState := &state.CircuitBreaker
@@ -101,7 +101,7 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 			return nil
 		})
 		if err != nil {
-			return true, nil // Fail open
+			return true, nil //nolint:nilerr // Intentional fail-open: allow request when state cannot be updated
 		}
 		return allowed, nil
 	}
@@ -141,7 +141,7 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 			return nil
 		})
 		if err != nil {
-			return true, nil // Fail open
+			return true, nil //nolint:nilerr // Intentional fail-open: allow request when state cannot be updated
 		}
 		return allowed, nil
 	}
@@ -151,11 +151,14 @@ func (cb *CircuitBreaker) Allow() (bool, error) {
 
 // shouldResetStaleAttempts returns true if half-open attempts should be reset.
 // This handles the case where a process crashes before calling RecordSuccess/RecordFailure,
-// leaving HalfOpenAttempts stuck at max. We reset after OpenTimeout to allow recovery.
+// leaving HalfOpenAttempts stuck at max. We reset after StaleAttemptTimeout to allow recovery.
 //
 // Note: We use HalfOpenLastAttemptAt (circuit-breaker-specific) instead of State.UpdatedAt
 // because other components (rate limiter, bulkhead) also update State.UpdatedAt, which
 // would prevent stale detection when they run before the circuit breaker check.
+//
+// StaleAttemptTimeout is intentionally longer than OpenTimeout (default 2min vs 30s) to
+// avoid resetting legitimate slow/large operations that may take longer than OpenTimeout.
 func (cb *CircuitBreaker) shouldResetStaleAttempts(s *State, now time.Time) bool {
 	if !s.CircuitBreaker.IsHalfOpen() {
 		return false
@@ -163,14 +166,21 @@ func (cb *CircuitBreaker) shouldResetStaleAttempts(s *State, now time.Time) bool
 	if s.CircuitBreaker.HalfOpenAttempts < cb.config.HalfOpenMaxRequests {
 		return false
 	}
-	// If attempts are maxed out and no attempt has been reserved in OpenTimeout,
-	// assume the attempts are from crashed processes
+
+	// Determine the stale timeout to use
+	staleTimeout := cb.config.StaleAttemptTimeout
+	if staleTimeout <= 0 {
+		// Fallback to 4x OpenTimeout if not configured
+		staleTimeout = cb.config.OpenTimeout * 4
+	}
+
 	lastAttempt := s.CircuitBreaker.HalfOpenLastAttemptAt
 	if lastAttempt.IsZero() {
-		// Fallback for state created before this field existed
-		return false
+		// State file from before HalfOpenLastAttemptAt was added.
+		// Treat as stale to allow recovery from stuck circuits.
+		return true
 	}
-	return now.Sub(lastAttempt) >= cb.config.OpenTimeout
+	return now.Sub(lastAttempt) >= staleTimeout
 }
 
 // RecordSuccess records a successful request.

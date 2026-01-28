@@ -35,9 +35,8 @@ func (rl *RateLimiter) now() time.Time {
 }
 
 // refill adds tokens based on elapsed time since last refill.
-func (rl *RateLimiter) refill(state *RateLimiterState) {
-	now := rl.now()
-
+// Accepts `now` to ensure consistent timestamps within a transaction.
+func (rl *RateLimiter) refill(state *RateLimiterState, now time.Time) {
 	// Initialize if first access (LastRefillAt is zero)
 	if state.LastRefillAt.IsZero() {
 		state.Tokens = rl.config.MaxTokens
@@ -74,7 +73,7 @@ func (rl *RateLimiter) Allow() (bool, error) {
 			return nil
 		}
 
-		rl.refill(rlState)
+		rl.refill(rlState, now)
 
 		if rlState.Tokens >= rl.config.TokensPerRequest {
 			rlState.Tokens -= rl.config.TokensPerRequest
@@ -89,7 +88,7 @@ func (rl *RateLimiter) Allow() (bool, error) {
 
 	if err != nil {
 		// On error, allow the request (fail open)
-		return true, nil
+		return true, nil //nolint:nilerr // Intentional fail-open: allow request when state cannot be updated
 	}
 
 	return allowed, nil
@@ -118,17 +117,19 @@ func (rl *RateLimiter) Tokens() (float64, error) {
 	var tokens float64
 
 	err := rl.store.Update(func(state *State) error {
+		now := rl.now()
+
 		// Capture previous values to detect changes
 		prevTokens := state.RateLimiter.Tokens
 		prevLastRefillAt := state.RateLimiter.LastRefillAt
 
-		rl.refill(&state.RateLimiter)
+		rl.refill(&state.RateLimiter, now)
 		tokens = state.RateLimiter.Tokens
 
 		// Update timestamp if state changed
 		if state.RateLimiter.Tokens != prevTokens ||
 			!state.RateLimiter.LastRefillAt.Equal(prevLastRefillAt) {
-			state.UpdatedAt = rl.now()
+			state.UpdatedAt = now
 		}
 		return nil
 	})

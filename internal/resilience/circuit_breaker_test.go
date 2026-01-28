@@ -332,13 +332,16 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	openTimeout := 10 * time.Millisecond
+	// Use longer timeouts for CI stability (50ms instead of 10ms)
+	openTimeout := 50 * time.Millisecond
+	staleTimeout := 100 * time.Millisecond
 
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold:    2,
 		SuccessThreshold:    1,
 		OpenTimeout:         openTimeout,
 		HalfOpenMaxRequests: 1,
+		StaleAttemptTimeout: staleTimeout,
 	})
 
 	// Open the circuit
@@ -360,7 +363,7 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 	// Simulate a crash: don't call RecordSuccess/RecordFailure
 	// The HalfOpenAttempts is now at max (1)
 
-	// Second Allow() should be rejected (max reached)
+	// Second Allow() should be rejected (max reached, not yet stale)
 	allowed, err = cb.Allow()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -369,8 +372,8 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 		t.Error("expected second request to be rejected when half-open slots exhausted")
 	}
 
-	// Wait for another timeout period (stale attempt cleanup threshold)
-	time.Sleep(openTimeout * 2)
+	// Wait for stale timeout period
+	time.Sleep(staleTimeout + 50*time.Millisecond)
 
 	// Now Allow() should reset stale attempts and allow
 	allowed, err = cb.Allow()
@@ -386,7 +389,8 @@ func TestCircuitBreakerSetsHalfOpenLastAttemptAt(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	openTimeout := 10 * time.Millisecond
+	// Use longer timeouts for CI stability
+	openTimeout := 50 * time.Millisecond
 
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold:    2,
@@ -426,5 +430,35 @@ func TestCircuitBreakerSetsHalfOpenLastAttemptAt(t *testing.T) {
 	}
 	if state.CircuitBreaker.HalfOpenLastAttemptAt.Before(before) || state.CircuitBreaker.HalfOpenLastAttemptAt.After(after) {
 		t.Error("HalfOpenLastAttemptAt should be between before and after Allow()")
+	}
+}
+
+func TestCircuitBreakerResetsStaleAttemptsWithZeroTimestamp(t *testing.T) {
+	// Test that legacy state files (without HalfOpenLastAttemptAt) are treated as stale
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	// Manually create a stuck half-open state without the timestamp
+	store.Update(func(state *State) error {
+		state.CircuitBreaker.State = CircuitHalfOpen
+		state.CircuitBreaker.HalfOpenAttempts = 1
+		// HalfOpenLastAttemptAt is zero (legacy state)
+		return nil
+	})
+
+	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
+		FailureThreshold:    2,
+		SuccessThreshold:    1,
+		OpenTimeout:         50 * time.Millisecond,
+		HalfOpenMaxRequests: 1,
+	})
+
+	// Should detect the zero timestamp as stale and allow
+	allowed, err := cb.Allow()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowed {
+		t.Error("expected request to be allowed when timestamp is zero (legacy state)")
 	}
 }

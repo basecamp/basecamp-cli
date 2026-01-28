@@ -167,7 +167,7 @@ func (s *Store) loadUnsafe() (*State, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		// Invalid JSON - return empty state rather than error
 		// This handles corrupted files gracefully
-		return NewState(), nil
+		return NewState(), nil //nolint:nilerr // Intentional: return fresh state when JSON is corrupt
 	}
 
 	return &state, nil

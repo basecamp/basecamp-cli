@@ -299,7 +299,9 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	openTimeout := 10 * time.Millisecond
+	// Use longer timeouts for CI stability
+	openTimeout := 50 * time.Millisecond
+	staleTimeout := 100 * time.Millisecond
 
 	cfg := &Config{
 		CircuitBreaker: CircuitBreakerConfig{
@@ -307,6 +309,7 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 			SuccessThreshold:    1,
 			OpenTimeout:         openTimeout,
 			HalfOpenMaxRequests: 1,
+			StaleAttemptTimeout: staleTimeout,
 		},
 		RateLimiter: RateLimiterConfig{
 			MaxTokens:        100, // Plenty of tokens so rate limiter doesn't reject
@@ -350,15 +353,13 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	// So let's create a new hooks instance with a fresh bulkhead to simulate the crash scenario.
 
 	// Reset: Let's approach this differently. Manually set the state to simulate a crash.
+	// Set the timestamp far enough in the past to exceed StaleAttemptTimeout
 	store.Update(func(state *State) error {
 		state.CircuitBreaker.State = CircuitHalfOpen
 		state.CircuitBreaker.HalfOpenAttempts = 1
-		state.CircuitBreaker.HalfOpenLastAttemptAt = time.Now().Add(-openTimeout * 2) // In the past
+		state.CircuitBreaker.HalfOpenLastAttemptAt = time.Now().Add(-staleTimeout * 2) // Beyond stale threshold
 		return nil
 	})
-
-	// Second request should be rejected (max reached, but not stale yet because we just set LastAttemptAt)
-	// Actually we set it in the past, so it should be detected as stale
 
 	// Create fresh hooks to simulate new process
 	hooks2 := NewGatingHooksFromConfig(store, cfg)
