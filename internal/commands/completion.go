@@ -204,9 +204,9 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	// Check authentication first
-	if !app.Auth.IsAuthenticated() {
-		return output.ErrAuth("Not authenticated. Run: bcq auth login")
+	// Check authentication and account
+	if err := app.SDK.RequireAccount(); err != nil {
+		return err
 	}
 
 	// Create refresher with the app's SDK client

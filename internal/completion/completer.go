@@ -23,9 +23,12 @@ type CacheDirFunc func(cmd *cobra.Command) string
 // 5. Default cache directory
 //
 // This is the standard CacheDirFunc that all commands should use.
-// Note: During __complete, PersistentPreRunE doesn't run, so appctx is not set.
-// The env var checks ensure completions honor the same config as regular commands.
-// Precedence matches internal/config/config.go:applyEnv().
+//
+// Limitation: During __complete, PersistentPreRunE doesn't run, so appctx is not
+// set and config files are not loaded. This means cache_dir set in config files
+// is NOT honored during completion—only --cache-dir flag and env vars work.
+// This is intentional: loading config files adds latency that defeats fast completions.
+// Users who set cache_dir in config should also set BCQ_CACHE_DIR or BASECAMP_CACHE_DIR.
 func DefaultCacheDirFunc(cmd *cobra.Command) string {
 	// Check --cache-dir flag on root command
 	if root := cmd.Root(); root != nil {
