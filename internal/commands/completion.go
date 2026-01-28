@@ -216,19 +216,32 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	// Perform synchronous refresh
 	refreshResult := refresher.RefreshAll(cmd.Context())
 
-	// Build result with details
+	// Load actual cache to get current counts (includes preserved data on partial failure)
+	cache, _ := store.Load()
+	projectsCount := len(cache.Projects)
+	peopleCount := len(cache.People)
+
+	// Build result with actual cached counts
 	result := map[string]any{
-		"projects":   refreshResult.ProjectsCount,
-		"people":     refreshResult.PeopleCount,
+		"projects":   projectsCount,
+		"people":     peopleCount,
 		"cache_path": store.Path(),
 	}
 
-	// Include errors if any
-	if refreshResult.ProjectsErr != nil {
-		result["projects_error"] = refreshResult.ProjectsErr.Error()
-	}
-	if refreshResult.PeopleErr != nil {
-		result["people_error"] = refreshResult.PeopleErr.Error()
+	// Include refresh details on partial failure
+	if refreshResult.HasError() {
+		if refreshResult.ProjectsErr != nil {
+			result["projects_error"] = refreshResult.ProjectsErr.Error()
+			result["projects_refreshed"] = false
+		} else {
+			result["projects_refreshed"] = true
+		}
+		if refreshResult.PeopleErr != nil {
+			result["people_error"] = refreshResult.PeopleErr.Error()
+			result["people_refreshed"] = false
+		} else {
+			result["people_refreshed"] = true
+		}
 	}
 
 	// Build summary
@@ -236,11 +249,12 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	if refreshResult.ProjectsErr != nil && refreshResult.PeopleErr != nil {
 		return fmt.Errorf("refresh failed: %v", refreshResult.Error())
 	} else if refreshResult.HasError() {
-		summary = fmt.Sprintf("Partial refresh: %d projects, %d people (warning: %v)",
-			refreshResult.ProjectsCount, refreshResult.PeopleCount, refreshResult.Error())
+		// Report actual cached counts with warning about what failed
+		summary = fmt.Sprintf("Cached %d projects, %d people (warning: %v)",
+			projectsCount, peopleCount, refreshResult.Error())
 	} else {
 		summary = fmt.Sprintf("Cached %d projects and %d people",
-			refreshResult.ProjectsCount, refreshResult.PeopleCount)
+			projectsCount, peopleCount)
 	}
 
 	return app.Output.OK(result, output.WithSummary(summary))
