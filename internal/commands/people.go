@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,21 @@ import (
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
+
+// MeOutput represents the output for the me command
+type MeOutput struct {
+	Identity basecamp.Identity `json:"identity"`
+	Accounts []AccountInfo     `json:"accounts"`
+}
+
+// AccountInfo represents an account in the me command output
+type AccountInfo struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Href    string `json:"href"`
+	AppHref string `json:"app_href"`
+	Current bool   `json:"current,omitempty"`
+}
 
 func NewMeCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -22,29 +38,98 @@ func NewMeCmd() *cobra.Command {
 	return cmd
 }
 
+// launchpadAuthURL is the Launchpad authorization endpoint.
+// Can be overridden via BCQ_LAUNCHPAD_URL for testing.
+const defaultLaunchpadAuthURL = "https://launchpad.37signals.com/authorization.json"
+
+func getLaunchpadAuthURL() string {
+	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
+		return url
+	}
+	return defaultLaunchpadAuthURL
+}
+
 func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if !app.Auth.IsAuthenticated() {
-		return output.ErrAuth("Not authenticated")
+		return output.ErrAuth("Not authenticated. Run: bcq auth login")
 	}
 
-	person, err := app.SDK.People().Me(cmd.Context())
+	// Determine authorization endpoint based on OAuth type
+	var endpoint string
+	switch app.Auth.GetOAuthType() {
+	case "bc3":
+		endpoint = app.Config.BaseURL + "/authorization.json"
+	case "launchpad":
+		endpoint = getLaunchpadAuthURL()
+	default:
+		return output.ErrAuth("Unknown OAuth type")
+	}
+
+	// Fetch identity and accounts using SDK
+	authInfo, err := app.SDK.Authorization().GetInfo(cmd.Context(), &basecamp.GetInfoOptions{
+		Endpoint:      endpoint,
+		FilterProduct: "bc3",
+	})
 	if err != nil {
 		return convertSDKError(err)
 	}
 
 	// Store user ID for "me" resolution in future commands (non-fatal if fails)
-	_ = app.Auth.SetUserID(fmt.Sprintf("%d", person.ID))
+	_ = app.Auth.SetUserID(fmt.Sprintf("%d", authInfo.Identity.ID))
 
-	summary := fmt.Sprintf("%s <%s>", person.Name, person.EmailAddress)
-	breadcrumbs := []output.Breadcrumb{
-		{Action: "projects", Cmd: "bcq projects", Description: "List your projects"},
-		{Action: "todos", Cmd: "bcq todos --assignee me", Description: "Your assigned todos"},
-		{Action: "auth", Cmd: "bcq auth status", Description: "Auth status"},
+	// Build account output (already filtered to bc3 by SDK)
+	var accounts []AccountInfo
+	currentAccountID := app.Config.AccountID
+	for _, acct := range authInfo.Accounts {
+		info := AccountInfo{
+			ID:      acct.ID,
+			Name:    acct.Name,
+			Href:    acct.HREF,
+			AppHref: acct.AppHREF,
+		}
+		// Mark current account if configured (compare string to int64)
+		if currentAccountID != "" && fmt.Sprintf("%d", acct.ID) == currentAccountID {
+			info.Current = true
+		}
+		accounts = append(accounts, info)
 	}
 
-	return app.OK(person,
+	result := MeOutput{
+		Identity: authInfo.Identity,
+		Accounts: accounts,
+	}
+
+	// Build summary
+	name := authInfo.Identity.FirstName
+	if authInfo.Identity.LastName != "" {
+		name += " " + authInfo.Identity.LastName
+	}
+	summary := fmt.Sprintf("%s <%s>", name, authInfo.Identity.EmailAddress)
+	if len(accounts) > 0 {
+		summary += fmt.Sprintf(" - %d Basecamp account(s)", len(accounts))
+	}
+
+	// Build breadcrumbs based on configuration state
+	var breadcrumbs []output.Breadcrumb
+	if currentAccountID == "" && len(accounts) > 0 {
+		// No account configured yet - suggest setup
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "setup",
+			Cmd:         fmt.Sprintf("bcq config set account %d", accounts[0].ID),
+			Description: "Configure your Basecamp account",
+		})
+	} else {
+		// Account configured - show next steps
+		breadcrumbs = append(breadcrumbs,
+			output.Breadcrumb{Action: "projects", Cmd: "bcq projects", Description: "List your projects"},
+			output.Breadcrumb{Action: "todos", Cmd: "bcq todos --assignee me", Description: "Your assigned todos"},
+		)
+	}
+	breadcrumbs = append(breadcrumbs, output.Breadcrumb{Action: "auth", Cmd: "bcq auth status", Description: "Auth status"})
+
+	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
