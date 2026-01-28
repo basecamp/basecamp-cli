@@ -123,7 +123,7 @@ func (c *Completer) ProjectNameCompletion() cobra.CompletionFunc {
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Return name as-is; Cobra's completion scripts handle escaping
-				completions = append(completions, cobra.Completion(p.Name))
+				completions = append(completions, p.Name)
 			}
 		}
 
@@ -208,7 +208,7 @@ func (c *Completer) PeopleNameCompletion() cobra.CompletionFunc {
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Return name as-is; Cobra's completion scripts handle escaping
-				completions = append(completions, cobra.Completion(p.Name))
+				completions = append(completions, p.Name)
 			}
 		}
 

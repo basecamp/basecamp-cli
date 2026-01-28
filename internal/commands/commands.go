@@ -125,8 +125,14 @@ func commandCategories() []CommandCategory {
 // CatalogCommandNames returns all command names from the catalog.
 // Used by tests to verify catalog matches registered commands.
 func CatalogCommandNames() []string {
-	var names []string
-	for _, cat := range commandCategories() {
+	categories := commandCategories()
+	// Count total commands for preallocation
+	total := 0
+	for _, cat := range categories {
+		total += len(cat.Commands)
+	}
+	names := make([]string, 0, total)
+	for _, cat := range categories {
 		for _, cmd := range cat.Commands {
 			names = append(names, cmd.Name)
 		}

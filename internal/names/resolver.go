@@ -9,6 +9,7 @@ package names
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -475,7 +476,8 @@ func (r *Resolver) GetTodolists(ctx context.Context, projectID string) ([]Todoli
 
 // convertSDKError converts SDK errors to output errors for consistent error handling.
 func convertSDKError(err error) error {
-	if sdkErr, ok := err.(*basecamp.Error); ok {
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
 		return &output.Error{
 			Code:       sdkErr.Code,
 			Message:    sdkErr.Message,

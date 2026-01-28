@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# GitHub
+.github
+
+# Build artifacts
+bin/
+dist/
+
+# PGO profiles (not needed in container)
+*.pgo
+
+# Test binaries
+*.test
+
+# Claude/development files
+.claude*
+.superset
+
+# Documentation (except README)
+docs/
+!README.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test and development
+e2e/
+testdata/
+*_test.go
+coverage.out
+benchmarks*.txt

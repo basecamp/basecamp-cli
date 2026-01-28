@@ -165,7 +165,7 @@ func (s *Spinner) Run(fn func() (string, error)) (string, error) {
 		return "", err
 	}
 
-	final := finalModel.(spinnerModel)
+	final := finalModel.(spinnerModel) //nolint:errcheck // type assertion always succeeds here
 	if final.quitting {
 		return "", fmt.Errorf("canceled")
 	}

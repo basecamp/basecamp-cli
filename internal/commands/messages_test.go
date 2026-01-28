@@ -95,7 +95,8 @@ func TestMessagesRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -116,7 +117,8 @@ func TestMessagesListRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
@@ -229,7 +231,8 @@ func TestMessagesUpdateRequiresContent(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "at least one of --subject or --content is required" {
 			t.Errorf("expected 'at least one of --subject or --content is required', got %q", e.Message)
 		}
@@ -270,7 +273,8 @@ func TestMessageShortcutRequiresProject(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if e, ok := err.(*output.Error); ok {
+	var e *output.Error
+	if errors.As(err, &e) {
 		if e.Message != "No project specified" {
 			t.Errorf("expected 'No project specified', got %q", e.Message)
 		}
