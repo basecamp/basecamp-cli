@@ -304,25 +304,30 @@ func runCompletionStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine staleness using the package constant (projects + people only)
+	// Determine staleness for projects/people (refreshed together via `completion refresh`)
+	// Accounts are refreshed separately via `bcq me`, so not included in staleness check
 	isStale := store.IsStale(completion.DefaultMaxAge)
 
-	// Find oldest timestamp across all sections for age calculation
+	// Find oldest timestamp across projects/people for age calculation
+	// (accounts are separate - refreshed via `bcq me`)
 	oldest := cache.ProjectsUpdatedAt
 	if !cache.PeopleUpdatedAt.IsZero() && (oldest.IsZero() || cache.PeopleUpdatedAt.Before(oldest)) {
 		oldest = cache.PeopleUpdatedAt
 	}
-	if !cache.AccountsUpdatedAt.IsZero() && (oldest.IsZero() || cache.AccountsUpdatedAt.Before(oldest)) {
-		oldest = cache.AccountsUpdatedAt
-	}
 
-	// Determine status: empty if nothing cached, otherwise stale/fresh
-	hasAnyData := len(cache.Projects) > 0 || len(cache.People) > 0 || len(cache.Accounts) > 0
+	// Determine status based on projects/people (the main completion data)
+	hasProjectsOrPeople := len(cache.Projects) > 0 || len(cache.People) > 0
 	var age string
 	var status string
-	if !hasAnyData {
-		age = "never"
-		status = "empty"
+	if !hasProjectsOrPeople {
+		if len(cache.Accounts) > 0 {
+			// Only accounts cached - need to run `completion refresh` for projects/people
+			age = "never"
+			status = "needs refresh"
+		} else {
+			age = "never"
+			status = "empty"
+		}
 	} else if oldest.IsZero() {
 		// Has data but no timestamps (legacy cache)
 		age = "unknown"

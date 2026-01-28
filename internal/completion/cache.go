@@ -1,6 +1,6 @@
 // Package completion provides tab completion support for the bcq CLI.
-// It implements a file-based cache for projects and people data that enables
-// fast, offline-capable shell completions without requiring API calls.
+// It implements a file-based cache for projects, people, and accounts data
+// that enables fast, offline-capable shell completions without requiring API calls.
 package completion
 
 import (
