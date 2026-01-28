@@ -137,6 +137,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewMCPCmd())
 	cmd.AddCommand(commands.NewCommandsCmd())
 	cmd.AddCommand(commands.NewTimelineCmd())
+	cmd.AddCommand(commands.NewReportsCmd())
 
 	if err := cmd.Execute(); err != nil {
 		// Transform Cobra errors to match Bash CLI error format
