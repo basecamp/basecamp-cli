@@ -40,20 +40,18 @@ func NewGatingHooksFromConfig(store *Store, cfg *Config) *GatingHooks {
 }
 
 // OnOperationGate is called before OnOperationStart.
-// It checks circuit breaker, rate limiter, and bulkhead before allowing
+// It checks rate limiter, bulkhead, and circuit breaker before allowing
 // the operation to proceed.
+//
+// Gate order is important: rate limiter and bulkhead are checked BEFORE
+// circuit breaker because the circuit breaker reserves a half-open slot
+// atomically. If we checked circuit breaker first and then rate limiter
+// rejected, the half-open slot would leak (never released).
+//
 // Returns a context that should be used for the operation and an error
 // if the operation should be rejected.
 func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.OperationInfo) (context.Context, error) {
-	// Check circuit breaker first (fast fail if circuit is open)
-	if h.circuitBreaker != nil {
-		allowed, _ := h.circuitBreaker.Allow() // Fail open on error
-		if !allowed {
-			return ctx, basecamp.ErrCircuitOpen
-		}
-	}
-
-	// Check rate limiter
+	// Check rate limiter first (no state reservation, safe to reject)
 	if h.rateLimiter != nil {
 		allowed, _ := h.rateLimiter.Allow() // Fail open on error
 		if !allowed {
@@ -61,7 +59,7 @@ func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.Operation
 		}
 	}
 
-	// Acquire bulkhead slot
+	// Acquire bulkhead slot (PID-based, released in OnOperationEnd)
 	if h.bulkhead != nil {
 		acquired, _ := h.bulkhead.Acquire() // Fail open on error
 		if !acquired {
@@ -69,6 +67,20 @@ func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.Operation
 		}
 		// Store release function in context for OnOperationEnd to call
 		ctx = context.WithValue(ctx, releaseKey{}, true)
+	}
+
+	// Check circuit breaker LAST (reserves half-open slot atomically)
+	// By checking this last, we ensure that if we reserve a slot,
+	// the request WILL proceed (rate limiter and bulkhead already passed).
+	if h.circuitBreaker != nil {
+		allowed, _ := h.circuitBreaker.Allow() // Fail open on error
+		if !allowed {
+			// Release bulkhead slot if we acquired one
+			if _, ok := ctx.Value(releaseKey{}).(bool); ok && h.bulkhead != nil {
+				_ = h.bulkhead.Release()
+			}
+			return ctx, basecamp.ErrCircuitOpen
+		}
 	}
 
 	return ctx, nil
@@ -122,9 +134,16 @@ func (h *GatingHooks) OnRequestStart(ctx context.Context, info basecamp.RequestI
 // OnRequestEnd is called after an HTTP request completes.
 // It honors Retry-After headers from 429/503 responses to back off the rate limiter.
 func (h *GatingHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInfo, result basecamp.RequestResult) {
+	if h.rateLimiter == nil {
+		return
+	}
+
 	// Honor Retry-After header from rate-limited or overloaded responses
-	if h.rateLimiter != nil && result.RetryAfter > 0 {
+	if result.RetryAfter > 0 {
 		_ = h.rateLimiter.SetRetryAfterDuration(time.Duration(result.RetryAfter) * time.Second)
+	} else if result.StatusCode == 429 || result.StatusCode == 503 {
+		// Default to 60 seconds if no Retry-After specified (SDK parity)
+		_ = h.rateLimiter.SetRetryAfterDuration(60 * time.Second)
 	}
 }
 

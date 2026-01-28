@@ -480,7 +480,7 @@ func convertSDKError(err error) error {
 		return nil
 	}
 
-	// Handle resilience sentinel errors using errors.Is for robust detection
+	// Handle resilience sentinel errors (use errors.Is for wrapped errors)
 	if errors.Is(err, basecamp.ErrRateLimited) {
 		return &output.Error{
 			Code:      basecamp.CodeRateLimit,

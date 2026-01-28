@@ -37,59 +37,99 @@ func (cb *CircuitBreaker) now() time.Time {
 // Allow checks if a request should be allowed.
 // Returns true if the request can proceed, false if it should be rejected.
 // In half-open state, atomically reserves an attempt slot to prevent thundering herd.
+//
+// Optimization: closed state only reads (no disk write), open/half-open may write.
 func (cb *CircuitBreaker) Allow() (bool, error) {
-	var allowed bool
-
-	err := cb.store.Update(func(state *State) error {
-		cbState := &state.CircuitBreaker
-		now := cb.now()
-
-		switch {
-		case cbState.IsClosed():
-			allowed = true
-
-		case cbState.IsOpen():
-			// Check if we should transition to half-open
-			if now.Sub(cbState.OpenedAt) >= cb.config.OpenTimeout {
-				// Transition to half-open and allow this request
-				cbState.State = CircuitHalfOpen
-				cbState.Successes = 0
-				cbState.Failures = 0
-				cbState.HalfOpenAttempts = 1 // Reserve slot for this request
-				state.UpdatedAt = now
-				allowed = true
-			} else {
-				allowed = false
-			}
-
-		case cbState.IsHalfOpen():
-			// Atomically check and reserve a slot in half-open state
-			if cb.config.HalfOpenMaxRequests > 0 {
-				if cbState.HalfOpenAttempts >= cb.config.HalfOpenMaxRequests {
-					allowed = false
-				} else {
-					cbState.HalfOpenAttempts++
-					state.UpdatedAt = now
-					allowed = true
-				}
-			} else {
-				// No limit configured
-				allowed = true
-			}
-
-		default:
-			allowed = true
-		}
-
-		return nil
-	})
-
+	// First, do a read-only check for the common case (closed state)
+	state, err := cb.store.Load()
 	if err != nil {
 		// On error, allow the request (fail open)
 		return true, nil
 	}
 
-	return allowed, nil
+	cbState := &state.CircuitBreaker
+	now := cb.now()
+
+	// Fast path: closed state - no state change needed
+	if cbState.IsClosed() {
+		return true, nil
+	}
+
+	// Open state: check if timeout expired, may need to transition
+	if cbState.IsOpen() {
+		if now.Sub(cbState.OpenedAt) < cb.config.OpenTimeout {
+			// Still in timeout, reject
+			return false, nil
+		}
+		// Timeout expired, transition to half-open and reserve a slot
+		var allowed bool
+		err := cb.store.Update(func(s *State) error {
+			// Re-check state in case another process changed it
+			if s.CircuitBreaker.IsOpen() && now.Sub(s.CircuitBreaker.OpenedAt) >= cb.config.OpenTimeout {
+				s.CircuitBreaker.State = CircuitHalfOpen
+				s.CircuitBreaker.Successes = 0
+				s.CircuitBreaker.Failures = 0
+				s.CircuitBreaker.HalfOpenAttempts = 1
+				s.UpdatedAt = now
+				allowed = true
+			} else if s.CircuitBreaker.IsHalfOpen() {
+				// Another process already transitioned, try to reserve a slot
+				if cb.config.HalfOpenMaxRequests > 0 && s.CircuitBreaker.HalfOpenAttempts >= cb.config.HalfOpenMaxRequests {
+					allowed = false
+				} else {
+					s.CircuitBreaker.HalfOpenAttempts++
+					s.UpdatedAt = now
+					allowed = true
+				}
+			} else if s.CircuitBreaker.IsClosed() {
+				// Circuit closed while we were checking
+				allowed = true
+			} else {
+				allowed = false
+			}
+			return nil
+		})
+		if err != nil {
+			return true, nil // Fail open
+		}
+		return allowed, nil
+	}
+
+	// Half-open state: atomically reserve a slot
+	if cbState.IsHalfOpen() {
+		if cb.config.HalfOpenMaxRequests <= 0 {
+			// No limit configured
+			return true, nil
+		}
+
+		var allowed bool
+		err := cb.store.Update(func(s *State) error {
+			// Re-check state in case it changed
+			if !s.CircuitBreaker.IsHalfOpen() {
+				// State changed, re-evaluate
+				if s.CircuitBreaker.IsClosed() {
+					allowed = true
+				} else {
+					allowed = false
+				}
+				return nil
+			}
+			if s.CircuitBreaker.HalfOpenAttempts >= cb.config.HalfOpenMaxRequests {
+				allowed = false
+			} else {
+				s.CircuitBreaker.HalfOpenAttempts++
+				s.UpdatedAt = now
+				allowed = true
+			}
+			return nil
+		})
+		if err != nil {
+			return true, nil // Fail open
+		}
+		return allowed, nil
+	}
+
+	return true, nil
 }
 
 // RecordSuccess records a successful request.
