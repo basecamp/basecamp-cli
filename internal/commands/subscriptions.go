@@ -58,6 +58,10 @@ func newSubscriptionsShowCmd(project *string) *cobra.Command {
 func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid recording ID")
@@ -85,7 +89,7 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	subscription, err := app.SDK.Subscriptions().Get(cmd.Context(), bucketID, recordingID)
+	subscription, err := app.Account().Subscriptions().Get(cmd.Context(), bucketID, recordingID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -149,7 +153,7 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			subscription, err := app.SDK.Subscriptions().Subscribe(cmd.Context(), bucketID, recordingID)
+			subscription, err := app.Account().Subscriptions().Subscribe(cmd.Context(), bucketID, recordingID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -211,7 +215,7 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 			}
 
 			// Unsubscribe - ignore errors for idempotency
-			_ = app.SDK.Subscriptions().Unsubscribe(cmd.Context(), bucketID, recordingID)
+			_ = app.Account().Subscriptions().Unsubscribe(cmd.Context(), bucketID, recordingID)
 
 			return app.OK(map[string]any{},
 				output.WithSummary(fmt.Sprintf("Unsubscribed from recording #%s", recordingIDStr)),
@@ -270,6 +274,10 @@ func newSubscriptionsRemoveCmd(project *string) *cobra.Command {
 
 func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, peopleIDs, mode string) error {
 	app := appctx.FromContext(cmd.Context())
+
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
 
 	recordingIDStr := args[0]
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
@@ -330,7 +338,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		req.Unsubscriptions = ids
 	}
 
-	subscription, err := app.SDK.Subscriptions().Update(cmd.Context(), bucketID, recordingID, req)
+	subscription, err := app.Account().Subscriptions().Update(cmd.Context(), bucketID, recordingID, req)
 	if err != nil {
 		return convertSDKError(err)
 	}

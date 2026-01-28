@@ -28,7 +28,7 @@ Use 'bcq schedule entries' to list schedule entries.
 Use 'bcq schedule create' to create new entries.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -65,7 +65,7 @@ func newScheduleShowCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "Display project schedule information.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 			return runScheduleShow(cmd, app, *project, *scheduleID)
@@ -102,7 +102,7 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
-	schedule, err := app.SDK.Schedules().Get(cmd.Context(), bucketID, scheduleIDInt)
+	schedule, err := app.Account().Schedules().Get(cmd.Context(), bucketID, scheduleIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -135,7 +135,7 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "List all entries in a project schedule.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 			return runScheduleEntries(cmd, app, *project, *scheduleID, status)
@@ -176,7 +176,7 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
-	entries, err := app.SDK.Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt)
+	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -219,7 +219,7 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 			return runScheduleEntryShow(cmd, app, args[0], *project, occurrenceDate)
@@ -255,7 +255,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 
 	// Use SDK method for specific occurrences of recurring entries
 	if occurrenceDate != "" {
-		entry, err := app.SDK.Schedules().GetEntryOccurrence(cmd.Context(), bucketID, entryIDInt, occurrenceDate)
+		entry, err := app.Account().Schedules().GetEntryOccurrence(cmd.Context(), bucketID, entryIDInt, occurrenceDate)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -287,7 +287,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		)
 	}
 
-	entry, err := app.SDK.Schedules().GetEntry(cmd.Context(), bucketID, entryIDInt)
+	entry, err := app.Account().Schedules().GetEntry(cmd.Context(), bucketID, entryIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -335,7 +335,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -426,7 +426,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		}
 	}
 
-	entry, err := app.SDK.Schedules().CreateEntry(cmd.Context(), bucketID, scheduleIDInt, req)
+	entry, err := app.Account().Schedules().CreateEntry(cmd.Context(), bucketID, scheduleIDInt, req)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -466,7 +466,7 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -538,7 +538,7 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("No update fields provided")
 			}
 
-			entry, err := app.SDK.Schedules().UpdateEntry(cmd.Context(), bucketID, entryIDInt, req)
+			entry, err := app.Account().Schedules().UpdateEntry(cmd.Context(), bucketID, entryIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -583,7 +583,7 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "Update schedule settings like including due assignments.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.SDK.RequireAccount(); err != nil {
+			if err := app.RequireAccount(); err != nil {
 				return err
 			}
 
@@ -624,7 +624,7 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 				IncludeDueAssignments: includeDue,
 			}
 
-			schedule, err := app.SDK.Schedules().UpdateSettings(cmd.Context(), bucketID, scheduleIDInt, req)
+			schedule, err := app.Account().Schedules().UpdateSettings(cmd.Context(), bucketID, scheduleIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

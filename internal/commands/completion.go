@@ -214,13 +214,13 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	}
 
 	// Then check account is configured
-	if err := app.SDK.RequireAccount(); err != nil {
+	if err := app.RequireAccount(); err != nil {
 		return err
 	}
 
-	// Create refresher with the app's SDK client
+	// Create refresher with the account-scoped client
 	store := completion.NewStore(app.Config.CacheDir)
-	refresher := completion.NewRefresher(store, app.SDK)
+	refresher := completion.NewRefresher(store, app.Account())
 
 	// Perform synchronous refresh
 	refreshResult := refresher.RefreshAll(cmd.Context())

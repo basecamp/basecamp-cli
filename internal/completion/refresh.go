@@ -43,14 +43,14 @@ func (r RefreshResult) Error() error {
 // Refresher handles background cache refresh operations.
 type Refresher struct {
 	store *Store
-	sdk   *basecamp.Client
+	sdk   *basecamp.AccountClient
 
 	mu         sync.Mutex
 	refreshing bool
 }
 
 // NewRefresher creates a new cache refresher.
-func NewRefresher(store *Store, sdk *basecamp.Client) *Refresher {
+func NewRefresher(store *Store, sdk *basecamp.AccountClient) *Refresher {
 	return &Refresher{
 		store: store,
 		sdk:   sdk,

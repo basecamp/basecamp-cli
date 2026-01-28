@@ -97,6 +97,10 @@ func newFilesListCmd(project, vaultID *string) *cobra.Command {
 func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -134,7 +138,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get vault details using SDK
-	vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, vaultIDNum)
+	vault, err := app.Account().Vaults().Get(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -145,19 +149,19 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get folders (subvaults) using SDK
-	folders, err := app.SDK.Vaults().List(cmd.Context(), bucketID, vaultIDNum)
+	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		folders = []basecamp.Vault{} // Best-effort
 	}
 
 	// Get uploads using SDK
-	uploads, err := app.SDK.Uploads().List(cmd.Context(), bucketID, vaultIDNum)
+	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		uploads = []basecamp.Upload{} // Best-effort
 	}
 
 	// Get documents using SDK
-	documents, err := app.SDK.Documents().List(cmd.Context(), bucketID, vaultIDNum)
+	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		documents = []basecamp.Document{} // Best-effort
 	}
@@ -226,6 +230,10 @@ func newFoldersListCmd(project, vaultID *string) *cobra.Command {
 func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -263,7 +271,7 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get folders using SDK
-	folders, err := app.SDK.Vaults().List(cmd.Context(), bucketID, vaultIDNum)
+	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -293,6 +301,10 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 		Short: "Create a new folder",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if name == "" {
 				return output.ErrUsage("--name is required")
@@ -339,7 +351,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				Title: name,
 			}
 
-			folder, err := app.SDK.Vaults().Create(cmd.Context(), bucketID, vaultIDNum, req)
+			folder, err := app.Account().Vaults().Create(cmd.Context(), bucketID, vaultIDNum, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -393,6 +405,10 @@ func newUploadsListCmd(project, vaultID *string) *cobra.Command {
 func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -430,7 +446,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get uploads using SDK
-	uploads, err := app.SDK.Uploads().List(cmd.Context(), bucketID, vaultIDNum)
+	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -478,6 +494,10 @@ func newDocsListCmd(project, vaultID *string) *cobra.Command {
 func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -515,7 +535,7 @@ func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get documents using SDK
-	documents, err := app.SDK.Documents().List(cmd.Context(), bucketID, vaultIDNum)
+	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -547,6 +567,10 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 		Short: "Create a new document",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
@@ -599,7 +623,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				req.Status = "active"
 			}
 
-			doc, err := app.SDK.Documents().Create(cmd.Context(), bucketID, vaultIDNum, req)
+			doc, err := app.Account().Documents().Create(cmd.Context(), bucketID, vaultIDNum, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -641,6 +665,10 @@ func newFilesShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			itemIDStr := args[0]
 			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 			if err != nil {
@@ -680,7 +708,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 				var firstErr error
 
 				// Try vault first
-				vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
+				vault, err := app.Account().Vaults().Get(cmd.Context(), bucketID, itemID)
 				if err == nil {
 					result = vault
 					detectedType = "vault"
@@ -688,7 +716,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 				} else {
 					firstErr = err
 					// Try upload
-					upload, err := app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
+					upload, err := app.Account().Uploads().Get(cmd.Context(), bucketID, itemID)
 					if err == nil {
 						result = upload
 						detectedType = "upload"
@@ -698,7 +726,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 						}
 					} else {
 						// Try document
-						doc, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
+						doc, err := app.Account().Documents().Get(cmd.Context(), bucketID, itemID)
 						if err == nil {
 							result = doc
 							detectedType = "document"
@@ -718,7 +746,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 			} else {
 				switch itemType {
 				case "vault", "folder":
-					vault, err := app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
+					vault, err := app.Account().Vaults().Get(cmd.Context(), bucketID, itemID)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -726,7 +754,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 					detectedType = "vault"
 					title = vault.Title
 				case "upload", "file":
-					upload, err := app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
+					upload, err := app.Account().Uploads().Get(cmd.Context(), bucketID, itemID)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -737,7 +765,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 						title = upload.Title
 					}
 				case "document", "doc":
-					doc, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
+					doc, err := app.Account().Documents().Get(cmd.Context(), bucketID, itemID)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -798,6 +826,10 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			itemIDStr := args[0]
 			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 			if err != nil {
@@ -838,7 +870,7 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				switch itemType {
 				case "vault", "folder":
 					req := &basecamp.UpdateVaultRequest{Title: title}
-					vault, err := app.SDK.Vaults().Update(cmd.Context(), bucketID, itemID, req)
+					vault, err := app.Account().Vaults().Update(cmd.Context(), bucketID, itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -846,7 +878,7 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 					detectedType = "vault"
 				case "document", "doc":
 					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
-					doc, err := app.SDK.Documents().Update(cmd.Context(), bucketID, itemID, req)
+					doc, err := app.Account().Documents().Update(cmd.Context(), bucketID, itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -857,7 +889,7 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 					if title != "" {
 						req.BaseName = title
 					}
-					upload, err := app.SDK.Uploads().Update(cmd.Context(), bucketID, itemID, req)
+					upload, err := app.Account().Uploads().Update(cmd.Context(), bucketID, itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -875,10 +907,10 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				var firstErr error
 
 				// Try document first (most common update case)
-				_, err := app.SDK.Documents().Get(cmd.Context(), bucketID, itemID)
+				_, err := app.Account().Documents().Get(cmd.Context(), bucketID, itemID)
 				if err == nil {
 					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
-					doc, err := app.SDK.Documents().Update(cmd.Context(), bucketID, itemID, req)
+					doc, err := app.Account().Documents().Update(cmd.Context(), bucketID, itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -887,10 +919,10 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				} else {
 					firstErr = err
 					// Try vault
-					_, err = app.SDK.Vaults().Get(cmd.Context(), bucketID, itemID)
+					_, err = app.Account().Vaults().Get(cmd.Context(), bucketID, itemID)
 					if err == nil {
 						req := &basecamp.UpdateVaultRequest{Title: title}
-						vault, err := app.SDK.Vaults().Update(cmd.Context(), bucketID, itemID, req)
+						vault, err := app.Account().Vaults().Update(cmd.Context(), bucketID, itemID, req)
 						if err != nil {
 							return convertSDKError(err)
 						}
@@ -898,13 +930,13 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 						detectedType = "vault"
 					} else {
 						// Try upload
-						_, err = app.SDK.Uploads().Get(cmd.Context(), bucketID, itemID)
+						_, err = app.Account().Uploads().Get(cmd.Context(), bucketID, itemID)
 						if err == nil {
 							req := &basecamp.UpdateUploadRequest{Description: content}
 							if title != "" {
 								req.BaseName = title
 							}
-							upload, err := app.SDK.Uploads().Update(cmd.Context(), bucketID, itemID, req)
+							upload, err := app.Account().Uploads().Update(cmd.Context(), bucketID, itemID, req)
 							if err != nil {
 								return convertSDKError(err)
 							}

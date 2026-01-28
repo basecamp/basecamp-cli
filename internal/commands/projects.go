@@ -66,12 +66,16 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	opts := &basecamp.ProjectListOptions{}
 	if status != "" {
 		opts.Status = basecamp.ProjectStatus(status)
 	}
 
-	projects, err := app.SDK.Projects().List(cmd.Context(), opts)
+	projects, err := app.Account().Projects().List(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -135,7 +139,7 @@ func newProjectsShowCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			project, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+			project, err := app.Account().Projects().Get(cmd.Context(), projectID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -181,7 +185,7 @@ func newProjectsCreateCmd() *cobra.Command {
 				Description: description,
 			}
 
-			project, err := app.SDK.Projects().Create(cmd.Context(), req)
+			project, err := app.Account().Projects().Create(cmd.Context(), req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -228,7 +232,7 @@ func newProjectsUpdateCmd() *cobra.Command {
 			updateName := name
 			if updateName == "" {
 				// Fetch current project to get the name
-				current, err := app.SDK.Projects().Get(cmd.Context(), projectID)
+				current, err := app.Account().Projects().Get(cmd.Context(), projectID)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -240,7 +244,7 @@ func newProjectsUpdateCmd() *cobra.Command {
 				Description: description,
 			}
 
-			project, err := app.SDK.Projects().Update(cmd.Context(), projectID, req)
+			project, err := app.Account().Projects().Update(cmd.Context(), projectID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -275,7 +279,7 @@ func newProjectsDeleteCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			if err := app.SDK.Projects().Trash(cmd.Context(), projectID); err != nil {
+			if err := app.Account().Projects().Trash(cmd.Context(), projectID); err != nil {
 				return convertSDKError(err)
 			}
 

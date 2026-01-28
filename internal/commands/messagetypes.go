@@ -56,6 +56,10 @@ func newMessagetypesListCmd(project *string) *cobra.Command {
 func runMessagetypesList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -78,7 +82,7 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	types, err := app.SDK.MessageTypes().List(cmd.Context(), bucketID)
+	types, err := app.Account().MessageTypes().List(cmd.Context(), bucketID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -109,6 +113,10 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			typeIDStr := args[0]
 			typeID, err := strconv.ParseInt(typeIDStr, 10, 64)
 			if err != nil {
@@ -137,7 +145,7 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			msgType, err := app.SDK.MessageTypes().Get(cmd.Context(), bucketID, typeID)
+			msgType, err := app.Account().MessageTypes().Get(cmd.Context(), bucketID, typeID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -177,6 +185,10 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
 
 			// Name from positional arg or flag
 			if len(args) > 0 && name == "" {
@@ -218,7 +230,7 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				Icon: icon,
 			}
 
-			msgType, err := app.SDK.MessageTypes().Create(cmd.Context(), bucketID, req)
+			msgType, err := app.Account().MessageTypes().Create(cmd.Context(), bucketID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -259,6 +271,10 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			typeIDStr := args[0]
 			typeID, err := strconv.ParseInt(typeIDStr, 10, 64)
 			if err != nil {
@@ -296,7 +312,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				Icon: icon,
 			}
 
-			msgType, err := app.SDK.MessageTypes().Update(cmd.Context(), bucketID, typeID, req)
+			msgType, err := app.Account().MessageTypes().Update(cmd.Context(), bucketID, typeID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -329,6 +345,10 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			typeIDStr := args[0]
 			typeID, err := strconv.ParseInt(typeIDStr, 10, 64)
 			if err != nil {
@@ -357,7 +377,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			err = app.SDK.MessageTypes().Delete(cmd.Context(), bucketID, typeID)
+			err = app.Account().MessageTypes().Delete(cmd.Context(), bucketID, typeID)
 			if err != nil {
 				return convertSDKError(err)
 			}

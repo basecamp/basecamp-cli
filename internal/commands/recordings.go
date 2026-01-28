@@ -135,6 +135,10 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 }
 
 func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, project, status, sortBy, direction string, limit int) error {
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Build options
 	opts := &basecamp.RecordingsListOptions{
 		Status:    status,
@@ -154,7 +158,7 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 		opts.Bucket = []int64{projectID}
 	}
 
-	recordings, err := app.SDK.Recordings().List(cmd.Context(), basecamp.RecordingType(recordingType), opts)
+	recordings, err := app.Account().Recordings().List(cmd.Context(), basecamp.RecordingType(recordingType), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -224,6 +228,10 @@ func newRecordingsRestoreCmd(project *string) *cobra.Command {
 }
 
 func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, project, newStatus string) error {
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Parse recording ID
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
@@ -255,13 +263,13 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 	// Call appropriate SDK method based on status
 	switch newStatus {
 	case "trashed":
-		err = app.SDK.Recordings().Trash(cmd.Context(), bucketID, recordingID)
+		err = app.Account().Recordings().Trash(cmd.Context(), bucketID, recordingID)
 	case "archived":
-		err = app.SDK.Recordings().Archive(cmd.Context(), bucketID, recordingID)
+		err = app.Account().Recordings().Archive(cmd.Context(), bucketID, recordingID)
 	case "active":
 		// Unarchive() sets status to active via PUT /status/active.json
 		// This works for both archived AND trashed recordings
-		err = app.SDK.Recordings().Unarchive(cmd.Context(), bucketID, recordingID)
+		err = app.Account().Recordings().Unarchive(cmd.Context(), bucketID, recordingID)
 	default:
 		return output.ErrUsage(fmt.Sprintf("Unknown status: %s", newStatus))
 	}
@@ -347,7 +355,7 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			recording, err := app.SDK.Recordings().SetClientVisibility(cmd.Context(), bucketID, recordingID, isVisible)
+			recording, err := app.Account().Recordings().SetClientVisibility(cmd.Context(), bucketID, recordingID, isVisible)
 			if err != nil {
 				return convertSDKError(err)
 			}

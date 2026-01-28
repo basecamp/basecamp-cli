@@ -56,6 +56,10 @@ The --date flag accepts natural language dates:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			// Name and date from positional args or flags
 			if len(args) > 0 && name == "" {
 				name = args[0]
@@ -84,7 +88,7 @@ The --date flag accepts natural language dates:
 				EndsOn:   parsedDate,
 			}
 
-			marker, err := app.SDK.Lineup().CreateMarker(cmd.Context(), req)
+			marker, err := app.Account().Lineup().CreateMarker(cmd.Context(), req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -125,6 +129,10 @@ func newLineupUpdateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			markerIDStr := args[0]
 			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
 			if err != nil {
@@ -149,7 +157,7 @@ func newLineupUpdateCmd() *cobra.Command {
 				req.EndsOn = parsedDate
 			}
 
-			marker, err := app.SDK.Lineup().UpdateMarker(cmd.Context(), markerID, req)
+			marker, err := app.Account().Lineup().UpdateMarker(cmd.Context(), markerID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -182,13 +190,17 @@ func newLineupDeleteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
 			markerIDStr := args[0]
 			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid marker ID")
 			}
 
-			if err := app.SDK.Lineup().DeleteMarker(cmd.Context(), markerID); err != nil {
+			if err := app.Account().Lineup().DeleteMarker(cmd.Context(), markerID); err != nil {
 				return convertSDKError(err)
 			}
 

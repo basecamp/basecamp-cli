@@ -60,6 +60,10 @@ func newMessageboardShowCmd(project, boardID *string) *cobra.Command {
 func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
 	// Resolve project
 	projectID := project
 	if projectID == "" {
@@ -93,7 +97,7 @@ func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 		return output.ErrUsage("Invalid message board ID")
 	}
 
-	board, err := app.SDK.MessageBoards().Get(cmd.Context(), bucketID, boardID)
+	board, err := app.Account().MessageBoards().Get(cmd.Context(), bucketID, boardID)
 	if err != nil {
 		return convertSDKError(err)
 	}
