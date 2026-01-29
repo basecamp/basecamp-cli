@@ -72,7 +72,7 @@ func (s Styles) EmphasisStyle(emphasis string) lipgloss.Style {
 }
 
 // RenderDetail renders a single entity using its schema's detail view.
-func RenderDetail(w io.Writer, schema *EntitySchema, data map[string]any, styles Styles) error {
+func RenderDetail(w io.Writer, schema *EntitySchema, data map[string]any, styles Styles, locale Locale) error {
 	var b strings.Builder
 
 	// Headline
@@ -85,11 +85,11 @@ func RenderDetail(w io.Writer, schema *EntitySchema, data map[string]any, styles
 	// Detail sections
 	if len(schema.Views.Detail.Sections) > 0 {
 		for _, section := range schema.Views.Detail.Sections {
-			renderDetailSection(&b, schema, section, data, styles)
+			renderDetailSection(&b, schema, section, data, styles, locale)
 		}
 	} else {
 		// No sections defined: render all fields in role order
-		renderAllFields(&b, schema, data, styles)
+		renderAllFields(&b, schema, data, styles, locale)
 	}
 
 	// Affordances
@@ -102,7 +102,7 @@ func RenderDetail(w io.Writer, schema *EntitySchema, data map[string]any, styles
 }
 
 // RenderList renders a slice of entities using the schema's list view.
-func RenderList(w io.Writer, schema *EntitySchema, data []map[string]any, styles Styles) error {
+func RenderList(w io.Writer, schema *EntitySchema, data []map[string]any, styles Styles, locale Locale) error {
 	var b strings.Builder
 
 	columns := schema.Views.List.Columns
@@ -124,14 +124,14 @@ func RenderList(w io.Writer, schema *EntitySchema, data []map[string]any, styles
 
 	// Render each row as a compact line
 	for _, item := range data {
-		renderListRow(&b, schema, columns, item, styles)
+		renderListRow(&b, schema, columns, item, styles, locale)
 	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
 }
 
-func renderDetailSection(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, styles Styles) {
+func renderDetailSection(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, styles Styles, locale Locale) {
 	// Section heading
 	if section.Heading != "" {
 		b.WriteString("\n")
@@ -174,7 +174,7 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 	for _, name := range visibleFields {
 		spec := schema.Fields[name]
 		val := data[name]
-		formatted := FormatField(spec, name, val)
+		formatted := FormatField(spec, name, val, locale)
 
 		style := resolveEmphasis(spec, name, val, styles)
 		// Fall back to Body style when no emphasis is specified for body fields
@@ -201,7 +201,7 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 	}
 }
 
-func renderAllFields(b *strings.Builder, schema *EntitySchema, data map[string]any, styles Styles) {
+func renderAllFields(b *strings.Builder, schema *EntitySchema, data map[string]any, styles Styles, locale Locale) {
 	// Collect and sort field names for deterministic output
 	fieldNames := make([]string, 0, len(schema.Fields))
 	for name := range schema.Fields {
@@ -225,7 +225,7 @@ func renderAllFields(b *strings.Builder, schema *EntitySchema, data map[string]a
 				continue // Already rendered as headline
 			}
 
-			formatted := FormatField(spec, name, val)
+			formatted := FormatField(spec, name, val, locale)
 			if formatted == "" {
 				continue
 			}
@@ -283,12 +283,12 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 	}
 }
 
-func renderListRow(b *strings.Builder, schema *EntitySchema, columns []string, data map[string]any, styles Styles) {
+func renderListRow(b *strings.Builder, schema *EntitySchema, columns []string, data map[string]any, styles Styles, locale Locale) {
 	parts := make([]string, 0, len(columns))
 	for _, col := range columns {
 		spec := schema.Fields[col]
 		val := data[col]
-		formatted := FormatField(spec, col, val)
+		formatted := FormatField(spec, col, val, locale)
 
 		style := resolveEmphasis(spec, col, val, styles)
 		parts = append(parts, style.Render(formatted))
@@ -351,7 +351,7 @@ func escapePipe(s string) string {
 // =============================================================================
 
 // RenderDetailMarkdown renders a single entity as Markdown.
-func RenderDetailMarkdown(w io.Writer, schema *EntitySchema, data map[string]any) error {
+func RenderDetailMarkdown(w io.Writer, schema *EntitySchema, data map[string]any, locale Locale) error {
 	var b strings.Builder
 
 	// Headline as bold text
@@ -363,10 +363,10 @@ func RenderDetailMarkdown(w io.Writer, schema *EntitySchema, data map[string]any
 	// Sections
 	if len(schema.Views.Detail.Sections) > 0 {
 		for _, section := range schema.Views.Detail.Sections {
-			renderDetailSectionMarkdown(&b, schema, section, data)
+			renderDetailSectionMarkdown(&b, schema, section, data, locale)
 		}
 	} else {
-		renderAllFieldsMarkdown(&b, schema, data)
+		renderAllFieldsMarkdown(&b, schema, data, locale)
 	}
 
 	// Affordances
@@ -379,7 +379,7 @@ func RenderDetailMarkdown(w io.Writer, schema *EntitySchema, data map[string]any
 }
 
 // RenderListMarkdown renders a slice of entities as a Markdown table.
-func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any) error {
+func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any, locale Locale) error {
 	columns := schema.Views.List.Columns
 	if len(columns) == 0 {
 		var candidates []string
@@ -413,7 +413,7 @@ func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any
 		for _, col := range columns {
 			spec := schema.Fields[col]
 			val := item[col]
-			cells = append(cells, escapePipe(FormatField(spec, col, val)))
+			cells = append(cells, escapePipe(FormatField(spec, col, val, locale)))
 		}
 		b.WriteString("| " + strings.Join(cells, " | ") + " |\n")
 	}
@@ -422,7 +422,7 @@ func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any
 	return err
 }
 
-func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any) {
+func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, locale Locale) {
 	if section.Heading != "" {
 		b.WriteString("\n#### " + section.Heading + "\n\n")
 	}
@@ -438,7 +438,7 @@ func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, secti
 			continue
 		}
 
-		formatted := FormatField(spec, name, val)
+		formatted := FormatField(spec, name, val, locale)
 
 		if spec.Role == "body" {
 			if formatted != "" {
@@ -456,7 +456,7 @@ func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, secti
 	}
 }
 
-func renderAllFieldsMarkdown(b *strings.Builder, schema *EntitySchema, data map[string]any) {
+func renderAllFieldsMarkdown(b *strings.Builder, schema *EntitySchema, data map[string]any, locale Locale) {
 	fieldNames := make([]string, 0, len(schema.Fields))
 	for name := range schema.Fields {
 		fieldNames = append(fieldNames, name)
@@ -478,7 +478,7 @@ func renderAllFieldsMarkdown(b *strings.Builder, schema *EntitySchema, data map[
 				continue
 			}
 
-			formatted := FormatField(spec, name, val)
+			formatted := FormatField(spec, name, val, locale)
 			if formatted == "" {
 				continue
 			}

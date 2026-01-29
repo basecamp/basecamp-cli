@@ -24,34 +24,35 @@ func Present(w io.Writer, data any, entityHint string, mode RenderMode) bool {
 	}
 
 	theme := tui.ResolveTheme()
-	return presentWith(w, data, schema, theme, mode)
+	locale := DetectLocale()
+	return presentWith(w, data, schema, theme, locale, mode)
 }
 
-// PresentWithTheme is like Present but accepts a theme directly (for testing).
-func PresentWithTheme(w io.Writer, data any, entityHint string, mode RenderMode, theme tui.Theme) bool {
+// PresentWithTheme is like Present but accepts a theme and locale directly (for testing).
+func PresentWithTheme(w io.Writer, data any, entityHint string, mode RenderMode, theme tui.Theme, locale Locale) bool {
 	schema := Detect(data, entityHint)
 	if schema == nil {
 		return false
 	}
 
-	return presentWith(w, data, schema, theme, mode)
+	return presentWith(w, data, schema, theme, locale, mode)
 }
 
-func presentWith(w io.Writer, data any, schema *EntitySchema, theme tui.Theme, mode RenderMode) bool {
+func presentWith(w io.Writer, data any, schema *EntitySchema, theme tui.Theme, locale Locale, mode RenderMode) bool {
 	switch mode {
 	case ModeMarkdown:
-		return presentMarkdown(w, data, schema)
+		return presentMarkdown(w, data, schema, locale)
 	default:
-		return presentStyled(w, data, schema, theme)
+		return presentStyled(w, data, schema, theme, locale)
 	}
 }
 
-func presentStyled(w io.Writer, data any, schema *EntitySchema, theme tui.Theme) bool {
+func presentStyled(w io.Writer, data any, schema *EntitySchema, theme tui.Theme, locale Locale) bool {
 	styles := NewStyles(theme, true)
 
 	switch d := data.(type) {
 	case map[string]any:
-		if err := RenderDetail(w, schema, d, styles); err != nil {
+		if err := RenderDetail(w, schema, d, styles, locale); err != nil {
 			return false
 		}
 		return true
@@ -59,7 +60,7 @@ func presentStyled(w io.Writer, data any, schema *EntitySchema, theme tui.Theme)
 		if len(d) == 0 {
 			return false
 		}
-		if err := RenderList(w, schema, d, styles); err != nil {
+		if err := RenderList(w, schema, d, styles, locale); err != nil {
 			return false
 		}
 		return true
@@ -67,10 +68,10 @@ func presentStyled(w io.Writer, data any, schema *EntitySchema, theme tui.Theme)
 	return false
 }
 
-func presentMarkdown(w io.Writer, data any, schema *EntitySchema) bool {
+func presentMarkdown(w io.Writer, data any, schema *EntitySchema, locale Locale) bool {
 	switch d := data.(type) {
 	case map[string]any:
-		if err := RenderDetailMarkdown(w, schema, d); err != nil {
+		if err := RenderDetailMarkdown(w, schema, d, locale); err != nil {
 			return false
 		}
 		return true
@@ -78,7 +79,7 @@ func presentMarkdown(w io.Writer, data any, schema *EntitySchema) bool {
 		if len(d) == 0 {
 			return false
 		}
-		if err := RenderListMarkdown(w, schema, d); err != nil {
+		if err := RenderListMarkdown(w, schema, d, locale); err != nil {
 			return false
 		}
 		return true

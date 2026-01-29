@@ -6,19 +6,21 @@ import (
 	"time"
 )
 
-// FormatField formats a field value according to its FieldSpec.
-func FormatField(spec FieldSpec, key string, val any) string {
+// FormatField formats a field value according to its FieldSpec using the given locale.
+func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 	switch spec.Format {
 	case "boolean":
 		return formatBoolean(spec, val)
 	case "date":
-		return formatDate(val)
+		return formatDate(val, locale)
 	case "relative_time":
-		return formatRelativeTime(val)
+		return formatRelativeTime(val, locale)
 	case "people":
 		return formatPeople(val)
+	case "number":
+		return formatNumber(val, locale)
 	default:
-		return formatText(val)
+		return formatText(val, locale)
 	}
 }
 
@@ -35,8 +37,8 @@ func formatBoolean(spec FieldSpec, val any) string {
 	return "no"
 }
 
-// formatDate formats a date string as "Jan 2, 2006".
-func formatDate(val any) string {
+// formatDate formats a date string using the locale's preferred date layout.
+func formatDate(val any, locale Locale) string {
 	str, ok := val.(string)
 	if !ok || str == "" {
 		return ""
@@ -44,17 +46,18 @@ func formatDate(val any) string {
 
 	// Try ISO8601 full timestamp
 	if t, err := time.Parse(time.RFC3339, str); err == nil {
-		return t.Format("Jan 2, 2006")
+		return locale.FormatDate(t)
 	}
 	// Try date-only
 	if t, err := time.Parse("2006-01-02", str); err == nil {
-		return t.Format("Jan 2, 2006")
+		return locale.FormatDate(t)
 	}
 	return str
 }
 
 // formatRelativeTime formats a timestamp as relative time (e.g. "2 hours ago").
-func formatRelativeTime(val any) string {
+// Falls back to the locale's date format for dates older than a week.
+func formatRelativeTime(val any, locale Locale) string {
 	str, ok := val.(string)
 	if !ok || str == "" {
 		return ""
@@ -73,32 +76,36 @@ func formatRelativeTime(val any) string {
 	diff := now.Sub(t)
 
 	if diff < 0 {
-		return t.Format("Jan 2, 2006")
+		return locale.FormatDate(t)
 	}
 
 	switch {
 	case diff < time.Minute:
 		return "just now"
 	case diff < time.Hour:
-		mins := int(diff.Minutes())
-		if mins == 1 {
-			return "1 minute ago"
-		}
-		return fmt.Sprintf("%d minutes ago", mins)
+		return relativeTimeFormat(int(diff.Minutes()), "minute")
 	case diff < 24*time.Hour:
-		hours := int(diff.Hours())
-		if hours == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", hours)
+		return relativeTimeFormat(int(diff.Hours()), "hour")
 	case diff < 7*24*time.Hour:
-		days := int(diff.Hours() / 24)
-		if days == 1 {
-			return "yesterday"
-		}
-		return fmt.Sprintf("%d days ago", days)
+		return relativeTimeFormat(int(diff.Hours()/24), "day")
 	default:
-		return t.Format("Jan 2, 2006")
+		return locale.FormatDate(t)
+	}
+}
+
+// formatNumber formats a numeric value with locale-appropriate separators.
+func formatNumber(val any, locale Locale) string {
+	switch v := val.(type) {
+	case float64:
+		return locale.FormatNumber(v)
+	case int:
+		return locale.FormatNumber(float64(v))
+	case int64:
+		return locale.FormatNumber(float64(v))
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", v)
 	}
 }
 
@@ -121,7 +128,8 @@ func formatPeople(val any) string {
 }
 
 // formatText converts any value to a string representation.
-func formatText(val any) string {
+// Uses locale-aware number formatting for numeric values.
+func formatText(val any, locale Locale) string {
 	switch v := val.(type) {
 	case nil:
 		return ""
@@ -133,16 +141,15 @@ func formatText(val any) string {
 		}
 		return "no"
 	case float64:
-		if v == float64(int(v)) {
-			return fmt.Sprintf("%d", int(v))
-		}
-		return fmt.Sprintf("%.2f", v)
-	case int, int64:
-		return fmt.Sprintf("%d", v)
+		return locale.FormatNumber(v)
+	case int:
+		return locale.FormatNumber(float64(v))
+	case int64:
+		return locale.FormatNumber(float64(v))
 	case []any:
 		var items []string
 		for _, item := range v {
-			items = append(items, formatText(item))
+			items = append(items, formatText(item, locale))
 		}
 		return strings.Join(items, ", ")
 	default:

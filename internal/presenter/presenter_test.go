@@ -8,6 +8,9 @@ import (
 	"github.com/basecamp/bcq/internal/tui"
 )
 
+// enUS is the default locale used by most tests.
+var enUS = NewLocale("en-US")
+
 // =============================================================================
 // Schema Loading Tests
 // =============================================================================
@@ -177,10 +180,10 @@ func TestFormatFieldBoolean(t *testing.T) {
 		Labels: map[string]string{"true": "done", "false": "pending"},
 	}
 
-	if got := FormatField(spec, "completed", true); got != "done" {
+	if got := FormatField(spec, "completed", true, enUS); got != "done" {
 		t.Errorf("FormatField(true) = %q, want %q", got, "done")
 	}
-	if got := FormatField(spec, "completed", false); got != "pending" {
+	if got := FormatField(spec, "completed", false, enUS); got != "pending" {
 		t.Errorf("FormatField(false) = %q, want %q", got, "pending")
 	}
 }
@@ -188,10 +191,10 @@ func TestFormatFieldBoolean(t *testing.T) {
 func TestFormatFieldBooleanNoLabels(t *testing.T) {
 	spec := FieldSpec{Format: "boolean"}
 
-	if got := FormatField(spec, "active", true); got != "yes" {
+	if got := FormatField(spec, "active", true, enUS); got != "yes" {
 		t.Errorf("FormatField(true) = %q, want %q", got, "yes")
 	}
-	if got := FormatField(spec, "active", false); got != "no" {
+	if got := FormatField(spec, "active", false, enUS); got != "no" {
 		t.Errorf("FormatField(false) = %q, want %q", got, "no")
 	}
 }
@@ -199,10 +202,10 @@ func TestFormatFieldBooleanNoLabels(t *testing.T) {
 func TestFormatFieldDate(t *testing.T) {
 	spec := FieldSpec{Format: "date"}
 
-	if got := FormatField(spec, "due_on", "2024-03-15"); got != "Mar 15, 2024" {
+	if got := FormatField(spec, "due_on", "2024-03-15", enUS); got != "Mar 15, 2024" {
 		t.Errorf("FormatField(date) = %q, want %q", got, "Mar 15, 2024")
 	}
-	if got := FormatField(spec, "due_on", ""); got != "" {
+	if got := FormatField(spec, "due_on", "", enUS); got != "" {
 		t.Errorf("FormatField(empty date) = %q, want empty", got)
 	}
 }
@@ -214,7 +217,7 @@ func TestFormatFieldPeople(t *testing.T) {
 		map[string]any{"name": "Bob", "id": float64(2)},
 	}
 
-	got := FormatField(spec, "assignees", people)
+	got := FormatField(spec, "assignees", people, enUS)
 	if got != "Alice, Bob" {
 		t.Errorf("FormatField(people) = %q, want %q", got, "Alice, Bob")
 	}
@@ -223,10 +226,10 @@ func TestFormatFieldPeople(t *testing.T) {
 func TestFormatFieldPeopleEmpty(t *testing.T) {
 	spec := FieldSpec{Format: "people"}
 
-	if got := FormatField(spec, "assignees", []any{}); got != "" {
+	if got := FormatField(spec, "assignees", []any{}, enUS); got != "" {
 		t.Errorf("FormatField(empty people) = %q, want empty", got)
 	}
-	if got := FormatField(spec, "assignees", nil); got != "" {
+	if got := FormatField(spec, "assignees", nil, enUS); got != "" {
 		t.Errorf("FormatField(nil people) = %q, want empty", got)
 	}
 }
@@ -234,10 +237,10 @@ func TestFormatFieldPeopleEmpty(t *testing.T) {
 func TestFormatFieldText(t *testing.T) {
 	spec := FieldSpec{Format: "text"}
 
-	if got := FormatField(spec, "content", "Fix the bug"); got != "Fix the bug" {
+	if got := FormatField(spec, "content", "Fix the bug", enUS); got != "Fix the bug" {
 		t.Errorf("FormatField(text) = %q, want %q", got, "Fix the bug")
 	}
-	if got := FormatField(spec, "id", float64(123)); got != "123" {
+	if got := FormatField(spec, "id", float64(123), enUS); got != "123" {
 		t.Errorf("FormatField(number) = %q, want %q", got, "123")
 	}
 }
@@ -356,7 +359,7 @@ func TestRenderDetailTodo(t *testing.T) {
 	styles := NewStyles(tui.NoColorTheme(), false)
 
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -412,7 +415,7 @@ func TestRenderDetailCompletedTodo(t *testing.T) {
 	styles := NewStyles(tui.NoColorTheme(), false)
 
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -448,7 +451,7 @@ func TestRenderListTodos(t *testing.T) {
 	styles := NewStyles(tui.NoColorTheme(), false)
 
 	var buf strings.Builder
-	if err := RenderList(&buf, schema, data, styles); err != nil {
+	if err := RenderList(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderList failed: %v", err)
 	}
 
@@ -474,7 +477,7 @@ func TestPresentWithSchema(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme())
+	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme(), enUS)
 	if !handled {
 		t.Error("Present should handle todo entity")
 	}
@@ -487,7 +490,7 @@ func TestPresentWithoutSchema(t *testing.T) {
 	data := map[string]any{"name": "something"}
 
 	var buf strings.Builder
-	handled := PresentWithTheme(&buf, data, "", ModeStyled, tui.NoColorTheme())
+	handled := PresentWithTheme(&buf, data, "", ModeStyled, tui.NoColorTheme(), enUS)
 	if handled {
 		t.Error("Present should not handle data without matching schema")
 	}
@@ -500,7 +503,7 @@ func TestPresentSlice(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme())
+	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme(), enUS)
 	if !handled {
 		t.Error("Present should handle todo list")
 	}
@@ -514,7 +517,7 @@ func TestPresentEmptySlice(t *testing.T) {
 	data := []map[string]any{}
 
 	var buf strings.Builder
-	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme())
+	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme(), enUS)
 	if handled {
 		t.Error("Present should not handle empty slice (fall back to generic)")
 	}
@@ -542,7 +545,7 @@ func TestCollapsedFieldsHidden(t *testing.T) {
 	styles := NewStyles(tui.NoColorTheme(), false)
 
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -661,7 +664,7 @@ func TestOverdueEmphasisAppliesToOwnField(t *testing.T) {
 
 	styles := NewStyles(tui.NoColorTheme(), false)
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -691,7 +694,7 @@ func TestBodyFieldUsesFormatField(t *testing.T) {
 
 	styles := NewStyles(tui.NoColorTheme(), false)
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -717,7 +720,7 @@ func TestEmptyNonCollapsedFieldSkipped(t *testing.T) {
 
 	styles := NewStyles(tui.NoColorTheme(), false)
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -751,7 +754,7 @@ func TestRenderAllFieldsIsDeterministic(t *testing.T) {
 	var firstOutput string
 	for i := 0; i < 10; i++ {
 		var buf strings.Builder
-		if err := RenderDetail(&buf, schema, data, styles); err != nil {
+		if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 			t.Fatalf("RenderDetail failed on iteration %d: %v", i, err)
 		}
 		if i == 0 {
@@ -783,7 +786,7 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := RenderDetailMarkdown(&buf, schema, data); err != nil {
+	if err := RenderDetailMarkdown(&buf, schema, data, enUS); err != nil {
 		t.Fatalf("RenderDetailMarkdown failed: %v", err)
 	}
 
@@ -841,7 +844,7 @@ func TestRenderListMarkdown(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := RenderListMarkdown(&buf, schema, data); err != nil {
+	if err := RenderListMarkdown(&buf, schema, data, enUS); err != nil {
 		t.Fatalf("RenderListMarkdown failed: %v", err)
 	}
 
@@ -875,7 +878,7 @@ func TestPresentMarkdownMode(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	handled := PresentWithTheme(&buf, data, "todo", ModeMarkdown, tui.NoColorTheme())
+	handled := PresentWithTheme(&buf, data, "todo", ModeMarkdown, tui.NoColorTheme(), enUS)
 	if !handled {
 		t.Error("Present should handle todo in ModeMarkdown")
 	}
@@ -923,14 +926,14 @@ func TestBodyFieldWithExplicitEmphasis(t *testing.T) {
 	// Render with emphasis:warning
 	styles := NewStyles(tui.NoColorTheme(), false)
 	var bufWarning strings.Builder
-	if err := RenderDetail(&bufWarning, schema, data, styles); err != nil {
+	if err := RenderDetail(&bufWarning, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
 	// Render with no emphasis (should use styles.Body fallback)
 	schema.Fields["body"] = FieldSpec{Role: "body", Format: "text"}
 	var bufDefault strings.Builder
-	if err := RenderDetail(&bufDefault, schema, data, styles); err != nil {
+	if err := RenderDetail(&bufDefault, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
@@ -1030,7 +1033,7 @@ func TestMarkdownTableEscapesPipes(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := RenderListMarkdown(&buf, schema, data); err != nil {
+	if err := RenderListMarkdown(&buf, schema, data, enUS); err != nil {
 		t.Fatalf("RenderListMarkdown failed: %v", err)
 	}
 
@@ -1070,12 +1073,171 @@ func TestBodyStyleFallbackInSchemaWithoutSections(t *testing.T) {
 
 	styles := NewStyles(tui.NoColorTheme(), false)
 	var buf strings.Builder
-	if err := RenderDetail(&buf, schema, data, styles); err != nil {
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 		t.Fatalf("RenderDetail failed: %v", err)
 	}
 
 	out := buf.String()
 	if !strings.Contains(out, "Body text via renderAllFields") {
 		t.Errorf("Body text should appear in renderAllFields path, got:\n%s", out)
+	}
+}
+
+// =============================================================================
+// Locale-Aware Formatting Tests
+// =============================================================================
+
+func TestLocaleDetection(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{"en_US.UTF-8", "en-US"},
+		{"de_DE.UTF-8", "de-DE"},
+		{"fr_FR.ISO8859-1", "fr-FR"},
+		{"ja_JP.UTF-8", "ja-JP"},
+		{"", "en-US"}, // fallback
+	}
+
+	for _, tt := range tests {
+		loc := NewLocale(tt.raw)
+		got := loc.Tag().String()
+		if got != tt.want {
+			t.Errorf("NewLocale(%q).Tag() = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func TestLocaleDateFormats(t *testing.T) {
+	date, _ := time.Parse("2006-01-02", "2026-03-15")
+	spec := FieldSpec{Format: "date"}
+
+	tests := []struct {
+		locale string
+		want   string
+	}{
+		{"en-US", "Mar 15, 2026"}, // US: Month Day, Year
+		{"en-GB", "15 Mar 2026"},  // UK: Day Month Year
+		{"de-DE", "15. Mar 2026"}, // DE: Day. Month Year
+		{"ja-JP", "2026-03-15"},   // JP: Year-Month-Day
+	}
+
+	for _, tt := range tests {
+		loc := NewLocale(tt.locale)
+		got := FormatField(spec, "due_on", "2026-03-15", loc)
+		if got != tt.want {
+			t.Errorf("FormatField(date, %q) = %q, want %q", tt.locale, got, tt.want)
+		}
+		// Also verify via Locale.FormatDate directly
+		direct := loc.FormatDate(date)
+		if direct != tt.want {
+			t.Errorf("FormatDate(%q) = %q, want %q", tt.locale, direct, tt.want)
+		}
+	}
+}
+
+func TestLocaleNumberFormats(t *testing.T) {
+	tests := []struct {
+		locale string
+		value  float64
+		want   string
+	}{
+		{"en-US", 1234.56, "1,234.56"},
+		{"de-DE", 1234.56, "1.234,56"},
+		{"fr-FR", 1234.56, "1\u00a0234,56"}, // French uses non-breaking space
+		{"en-US", 42, "42"},
+		{"de-DE", 42, "42"},
+		{"en-US", 1000000, "1,000,000"},
+		{"de-DE", 1000000, "1.000.000"},
+	}
+
+	for _, tt := range tests {
+		loc := NewLocale(tt.locale)
+		got := loc.FormatNumber(tt.value)
+		if got != tt.want {
+			t.Errorf("FormatNumber(%v, %q) = %q, want %q", tt.value, tt.locale, got, tt.want)
+		}
+	}
+}
+
+func TestLocaleNumberViaFormatField(t *testing.T) {
+	spec := FieldSpec{Format: "number"}
+	de := NewLocale("de-DE")
+
+	got := FormatField(spec, "amount", float64(1234.56), de)
+	if got != "1.234,56" {
+		t.Errorf("FormatField(number, de-DE) = %q, want %q", got, "1.234,56")
+	}
+}
+
+func TestLocaleTextNumberFormatting(t *testing.T) {
+	// formatText should also use locale for numbers
+	spec := FieldSpec{Format: "text"}
+	de := NewLocale("de-DE")
+
+	got := FormatField(spec, "count", float64(1234), de)
+	if got != "1.234" {
+		t.Errorf("FormatField(text/number, de-DE) = %q, want %q", got, "1.234")
+	}
+}
+
+func TestLocaleRelativeTimeFallback(t *testing.T) {
+	// Old dates fall back to locale-formatted date
+	spec := FieldSpec{Format: "relative_time"}
+	gb := NewLocale("en-GB")
+
+	got := FormatField(spec, "created_at", "2020-06-15T10:30:00Z", gb)
+	if got != "15 Jun 2020" {
+		t.Errorf("FormatField(relative_time old date, en-GB) = %q, want %q", got, "15 Jun 2020")
+	}
+}
+
+func TestLocaleRenderDetailUsesLocale(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := map[string]any{
+		"id":        float64(1),
+		"content":   "Test",
+		"completed": false,
+		"due_on":    "2026-03-15",
+	}
+
+	gb := NewLocale("en-GB")
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var buf strings.Builder
+	if err := RenderDetail(&buf, schema, data, styles, gb); err != nil {
+		t.Fatalf("RenderDetail failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "15 Mar 2026") {
+		t.Errorf("en-GB detail should show '15 Mar 2026', got:\n%s", out)
+	}
+}
+
+func TestLocaleRenderListMarkdownUsesLocale(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{"content": "Task", "completed": false, "due_on": "2026-03-15", "assignees": []any{}},
+	}
+
+	de := NewLocale("de-DE")
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, de); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "15. Mar 2026") {
+		t.Errorf("de-DE markdown table should show '15. Mar 2026', got:\n%s", out)
 	}
 }
