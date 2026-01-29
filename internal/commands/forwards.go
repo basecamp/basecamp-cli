@@ -87,7 +87,7 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
 	}
 	if page > 1 {
-		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -339,7 +339,7 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--page cannot be combined with --all or --limit")
 			}
 			if page > 1 {
-				return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+				return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {

@@ -272,7 +272,7 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
 	}
 	if page > 1 {
-		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -493,7 +493,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
 	}
 	if page > 1 {
-		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -625,7 +625,7 @@ func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, a
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
 	}
 	if page > 1 {
-		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {
