@@ -1,0 +1,93 @@
+entity: todo
+kind: recording
+type_key: "Todo"
+
+identity:
+  label: content
+  id: id
+  icon: "[ ]"
+
+headline:
+  default:
+    template: "{{.content}}"
+  completed:
+    template: "[done] {{.content}}"
+
+fields:
+  content:
+    role: title
+    emphasis: primary
+    format: text
+
+  description:
+    role: body
+    format: text
+    collapse: true
+
+  completed:
+    role: detail
+    emphasis: muted
+    format: boolean
+    labels:
+      "true": done
+      "false": pending
+
+  due_on:
+    role: detail
+    format: date
+    when_overdue: warning
+
+  assignees:
+    role: detail
+    format: people
+    collapse: true
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  id:
+    role: meta
+    emphasis: muted
+
+views:
+  list:
+    columns: [content, completed, due_on, assignees]
+  detail:
+    sections:
+      - fields: [content, description]
+      - heading: Status
+        fields: [completed, due_on, assignees]
+      - heading: Metadata
+        fields: [id, created_at]
+  compact:
+    show: [content, completed]
+    inline: true
+
+relationships:
+  parent:
+    entity: todolist
+    via: parent
+    label: "in list"
+  project:
+    entity: project
+    via: bucket
+    label: "in project"
+  comments:
+    entity: comment
+    cardinality: many
+    label: "comments"
+
+affordances:
+  - action: complete
+    cmd: "bcq done {{.id}}"
+    label: "Mark done"
+    when: "{{not .completed}}"
+  - action: reopen
+    cmd: "bcq reopen {{.id}}"
+    label: "Reopen"
+    when: "{{.completed}}"
+  - action: comment
+    cmd: "bcq comment --on {{.id}} --content <text>"
+    label: "Add comment"

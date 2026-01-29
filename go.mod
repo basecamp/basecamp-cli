@@ -3,7 +3,7 @@ module github.com/basecamp/bcq
 go 1.25.6
 
 require (
-	github.com/basecamp/basecamp-sdk/go v0.0.0-20260128205458-781012bb4a7d
+	github.com/basecamp/basecamp-sdk/go v0.0.0-20260129223517-c11e5b17d989
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v0.8.0
@@ -14,6 +14,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/sys v0.40.0
+	golang.org/x/text v0.28.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -48,6 +50,4 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/text v0.28.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

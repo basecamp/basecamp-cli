@@ -97,6 +97,7 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 	}
 
 	return app.OK(projects,
+		output.WithEntity("project"),
 		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -158,6 +159,7 @@ func newProjectsShowCmd() *cobra.Command {
 			}
 
 			return app.OK(project,
+				output.WithEntity("project"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
@@ -209,6 +211,7 @@ func newProjectsCreateCmd() *cobra.Command {
 			}
 
 			return app.OK(project,
+				output.WithEntity("project"),
 				output.WithSummary(fmt.Sprintf("Created project: %s", name)),
 			)
 		},
@@ -273,6 +276,7 @@ func newProjectsUpdateCmd() *cobra.Command {
 			}
 
 			return app.OK(project,
+				output.WithEntity("project"),
 				output.WithSummary("Project updated"),
 			)
 		},

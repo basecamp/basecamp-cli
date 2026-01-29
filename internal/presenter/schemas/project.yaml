@@ -1,0 +1,49 @@
+entity: project
+kind: container
+type_key: "Project"
+
+identity:
+  label: name
+  id: id
+
+headline:
+  default:
+    template: "{{.name}}"
+
+fields:
+  name:
+    role: title
+    emphasis: primary
+    format: text
+
+  description:
+    role: body
+    format: text
+    collapse: true
+
+  status:
+    role: detail
+    format: text
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  id:
+    role: meta
+    emphasis: muted
+
+views:
+  list:
+    columns: [name, status]
+  detail:
+    sections:
+      - fields: [name, description]
+      - heading: Info
+        fields: [status]
+      - heading: Metadata
+        fields: [id, created_at]
+  compact:
+    show: [name, status]
+    inline: true

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/basecamp/bcq/internal/observability"
+	"github.com/basecamp/bcq/internal/presenter"
 )
 
 // Response is the success envelope for JSON output.
@@ -17,6 +19,7 @@ type Response struct {
 	Breadcrumbs []Breadcrumb   `json:"breadcrumbs,omitempty"`
 	Context     map[string]any `json:"context,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
+	Entity      string         `json:"-"` // Schema hint for presenter (not serialized)
 }
 
 // Breadcrumb is a suggested follow-up action.
@@ -93,6 +96,11 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 	resp := &Response{OK: true, Data: data}
 	for _, opt := range opts {
 		opt(resp)
+	}
+	if resp.Entity != "" {
+		if err := checkZeroData(resp.Data); err != nil {
+			return err
+		}
 	}
 	return w.write(resp)
 }
@@ -200,7 +208,7 @@ func (w *Writer) writeIDs(v any) error {
 	}
 
 	// Normalize data to []map[string]any or map[string]any
-	data := normalizeData(resp.Data)
+	data := NormalizeData(resp.Data)
 
 	// Handle slice of objects with ID field
 	switch d := data.(type) {
@@ -225,7 +233,7 @@ func (w *Writer) writeCount(v any) error {
 	}
 
 	// Normalize data to a standard type
-	data := normalizeData(resp.Data)
+	data := NormalizeData(resp.Data)
 
 	switch d := data.(type) {
 	case []any:
@@ -238,8 +246,8 @@ func (w *Writer) writeCount(v any) error {
 	return nil
 }
 
-// normalizeData converts json.RawMessage and other types to standard Go types.
-func normalizeData(data any) any {
+// NormalizeData converts json.RawMessage and other types to standard Go types.
+func NormalizeData(data any) any {
 	// Handle json.RawMessage by unmarshaling it
 	if raw, ok := data.(json.RawMessage); ok {
 		var unmarshaled any
@@ -294,6 +302,15 @@ func normalizeUnmarshaled(v any) any {
 
 // writeStyled outputs ANSI styled terminal output.
 func (w *Writer) writeStyled(v any) error {
+	// Schema-aware presenter is opt-in: only activates when a command
+	// explicitly sets WithEntity. This preserves the generic renderer as
+	// default and avoids surprising users when new schemas are added.
+	if resp, ok := v.(*Response); ok && resp.Entity != "" {
+		if w.presentStyledEntity(resp) {
+			return nil
+		}
+	}
+
 	r := NewRenderer(w.opts.Writer, true) // Force styled
 	switch resp := v.(type) {
 	case *Response:
@@ -307,6 +324,13 @@ func (w *Writer) writeStyled(v any) error {
 
 // writeLiteralMarkdown outputs literal Markdown syntax (portable, pipeable).
 func (w *Writer) writeLiteralMarkdown(v any) error {
+	// Schema-aware presenter is opt-in (see writeStyled comment).
+	if resp, ok := v.(*Response); ok && resp.Entity != "" {
+		if w.presentMarkdownEntity(resp) {
+			return nil
+		}
+	}
+
 	r := NewMarkdownRenderer(w.opts.Writer)
 	switch resp := v.(type) {
 	case *Response:
@@ -370,6 +394,138 @@ func WithStats(metrics *observability.SessionMetrics) ResponseOption {
 			"latency_ms":  metrics.TotalLatency.Milliseconds(),
 			"duration_ms": metrics.EndTime.Sub(metrics.StartTime).Milliseconds(),
 		}
+	}
+}
+
+// WithEntity hints which schema to use for entity-aware presentation.
+func WithEntity(name string) ResponseOption {
+	return func(r *Response) { r.Entity = name }
+}
+
+// presentStyledEntity attempts schema-aware rendering for styled output.
+// Returns true if the presenter handled it, false to fall back to generic.
+func (w *Writer) presentStyledEntity(resp *Response) bool {
+	data := NormalizeData(resp.Data)
+	var buf strings.Builder
+
+	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeStyled) {
+		return false
+	}
+
+	var out strings.Builder
+	r := NewRenderer(w.opts.Writer, true)
+
+	if resp.Summary != "" {
+		out.WriteString(r.Summary.Render(resp.Summary))
+		out.WriteString("\n\n")
+	}
+
+	out.WriteString(buf.String())
+
+	if len(resp.Breadcrumbs) > 0 {
+		out.WriteString("\n")
+		r.renderBreadcrumbs(&out, resp.Breadcrumbs)
+	}
+
+	if stats := extractStats(resp.Meta); stats != nil {
+		out.WriteString("\n")
+		r.renderStats(&out, stats)
+	}
+
+	_, _ = io.WriteString(w.opts.Writer, out.String())
+	return true
+}
+
+// presentMarkdownEntity attempts schema-aware rendering for Markdown output.
+// Returns true if the presenter handled it, false to fall back to generic.
+func (w *Writer) presentMarkdownEntity(resp *Response) bool {
+	data := NormalizeData(resp.Data)
+	var buf strings.Builder
+
+	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeMarkdown) {
+		return false
+	}
+
+	var out strings.Builder
+	mr := NewMarkdownRenderer(w.opts.Writer)
+
+	if resp.Summary != "" {
+		out.WriteString("## " + resp.Summary + "\n\n")
+	}
+
+	out.WriteString(buf.String())
+
+	if len(resp.Breadcrumbs) > 0 {
+		out.WriteString("\n### Next\n\n")
+		for _, bc := range resp.Breadcrumbs {
+			line := "- `" + bc.Cmd + "`"
+			if bc.Description != "" {
+				line += " — " + bc.Description
+			}
+			out.WriteString(line + "\n")
+		}
+	}
+
+	if stats := extractStats(resp.Meta); stats != nil {
+		out.WriteString("\n")
+		mr.renderStats(&out, stats)
+	}
+
+	_, _ = io.WriteString(w.opts.Writer, out.String())
+	return true
+}
+
+// checkZeroData returns an error when entity-tagged data is a map with every
+// value at its zero value (empty string, 0, false, nil). This catches silent
+// deserialization failures where the SDK returns a struct with no fields set.
+func checkZeroData(data any) error {
+	m, ok := toMap(data)
+	if !ok {
+		return nil // not a map — nothing to check
+	}
+	if len(m) == 0 {
+		return &Error{
+			Code:    "empty_response",
+			Message: "API returned empty data",
+			Hint:    "The response contained no fields. This may indicate a deserialization issue.",
+		}
+	}
+	for _, v := range m {
+		if !isZeroValue(v) {
+			return nil // at least one non-zero field
+		}
+	}
+	return &Error{
+		Code:    "empty_response",
+		Message: "API returned empty data",
+		Hint:    "All fields in the response are empty. This may indicate a deserialization issue.",
+	}
+}
+
+// toMap converts data to map[string]any via JSON round-trip if needed.
+func toMap(data any) (map[string]any, bool) {
+	if m, ok := data.(map[string]any); ok {
+		return m, true
+	}
+	normalized := NormalizeData(data)
+	m, ok := normalized.(map[string]any)
+	return m, ok
+}
+
+// isZeroValue returns true for zero-value primitives: "", 0, false, nil,
+// and the Go zero-time JSON sentinel "0001-01-01T00:00:00Z".
+func isZeroValue(v any) bool {
+	switch val := v.(type) {
+	case nil:
+		return true
+	case string:
+		return val == "" || val == "0001-01-01T00:00:00Z"
+	case float64:
+		return val == 0
+	case bool:
+		return !val
+	default:
+		return false
 	}
 }
 

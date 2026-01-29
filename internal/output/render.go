@@ -27,6 +27,8 @@ type Renderer struct {
 	Data    lipgloss.Style
 	Error   lipgloss.Style
 	Hint    lipgloss.Style
+	Warning lipgloss.Style
+	Success lipgloss.Style
 
 	// Table styles
 	Header    lipgloss.Style
@@ -69,6 +71,8 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 		r.Data = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
 		r.Error = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Error.Dark)).Bold(true)
 		r.Hint = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)).Italic(true)
+		r.Warning = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Warning.Dark))
+		r.Success = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Success.Dark))
 		r.Header = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)).Bold(true)
 		r.Cell = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
 		r.CellMuted = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark))
@@ -79,6 +83,8 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 		r.Data = lipgloss.NewStyle()
 		r.Error = lipgloss.NewStyle()
 		r.Hint = lipgloss.NewStyle()
+		r.Warning = lipgloss.NewStyle()
+		r.Success = lipgloss.NewStyle()
 		r.Header = lipgloss.NewStyle()
 		r.Cell = lipgloss.NewStyle()
 		r.CellMuted = lipgloss.NewStyle()
@@ -116,7 +122,7 @@ func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	}
 
 	// Main data
-	data := normalizeData(resp.Data)
+	data := NormalizeData(resp.Data)
 	r.renderData(&b, data)
 
 	// Breadcrumbs
@@ -651,7 +657,7 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 	}
 
 	// Main data
-	data := normalizeData(resp.Data)
+	data := NormalizeData(resp.Data)
 	r.renderData(&b, data)
 
 	// Breadcrumbs
