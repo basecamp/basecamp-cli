@@ -35,23 +35,24 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
-			// Normalize --host flag (smart protocol detection)
-			baseURL := normalizeHost(flags.Host)
-
-			// Load configuration with flag overrides
+			// Load configuration first (without host override to access hosts map)
 			cfg, err := config.Load(config.FlagOverrides{
 				Account:  flags.Account,
 				Project:  flags.Project,
 				Todolist: flags.Todolist,
-				BaseURL:  baseURL,
 				CacheDir: flags.CacheDir,
 			})
 			if err != nil {
 				return err
 			}
 
-			// Resolve host if multiple hosts configured and no explicit host set
-			if baseURL == "" {
+			// Resolve host: check if --host matches a configured host name first,
+			// then fall back to URL normalization
+			baseURL := resolveHostFlag(flags.Host, cfg)
+			if baseURL != "" {
+				cfg.BaseURL = baseURL
+			} else if flags.Host == "" {
+				// No explicit host - try interactive resolution if multiple hosts configured
 				resolvedURL, err := resolveHost(cfg, flags)
 				if err != nil {
 					return err
@@ -210,6 +211,28 @@ func Execute() {
 
 		os.Exit(apiErr.ExitCode())
 	}
+}
+
+// resolveHostFlag resolves a --host flag value to a base URL.
+// First checks if the value matches a configured host name (e.g., "production"),
+// then falls back to URL normalization for hostnames/URLs.
+func resolveHostFlag(host string, cfg *config.Config) string {
+	if host == "" {
+		return ""
+	}
+
+	// Check if host matches a configured host name (case-insensitive)
+	if cfg != nil && len(cfg.Hosts) > 0 {
+		hostLower := strings.ToLower(host)
+		for name, hostConfig := range cfg.Hosts {
+			if strings.ToLower(name) == hostLower {
+				return hostConfig.BaseURL
+			}
+		}
+	}
+
+	// Not a configured host name - treat as hostname/URL
+	return normalizeHost(host)
 }
 
 // normalizeHost converts a host string to a full URL.

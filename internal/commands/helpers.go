@@ -127,8 +127,14 @@ func isValidAssignee(s string) bool {
 
 // ensureAccount resolves the account ID if not already configured.
 // This enables interactive prompts when --account flag and config are both missing.
+// After resolution, validates the account ID is numeric and updates the name resolver.
 func ensureAccount(cmd *cobra.Command, app *appctx.App) error {
 	if app.Config.AccountID != "" {
+		// Still need to validate and sync with name resolver
+		if err := app.RequireAccount(); err != nil {
+			return err
+		}
+		app.Names.SetAccountID(app.Config.AccountID)
 		return nil
 	}
 	resolved, err := app.Resolve().Account(cmd.Context())
@@ -136,6 +142,14 @@ func ensureAccount(cmd *cobra.Command, app *appctx.App) error {
 		return err
 	}
 	app.Config.AccountID = resolved.Value
+
+	// Validate the resolved account ID is numeric (required by SDK.ForAccount)
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
+	// Update the name resolver with the new account ID
+	app.Names.SetAccountID(resolved.Value)
 	return nil
 }
 

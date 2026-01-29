@@ -43,6 +43,7 @@ type pickerModel struct {
 	loading    bool
 	loadingMsg string
 	spinner    spinner.Model
+	loadError  error // Error from async item loading
 
 	// Enhanced features
 	recentItems      []PickerItem // Recently used items shown at top
@@ -193,6 +194,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PickerItemsLoadedMsg:
 		m.loading = false
 		if msg.Err != nil {
+			m.loadError = msg.Err
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -443,7 +445,7 @@ func (p *Picker) runWithLoader() (*PickerItem, error) {
 
 	final := finalModel.(pickerModel) //nolint:errcheck // type assertion always succeeds here
 	if final.quitting {
-		return nil, nil
+		return nil, final.loadError // Return loader error if any (nil if user just canceled)
 	}
 	return final.selected, nil
 }

@@ -337,6 +337,12 @@ func (a *App) Resolve() *resolve.Resolver {
 			Project:  a.Flags.Project,
 			Todolist: a.Flags.Todolist,
 			Host:     a.Flags.Host,
+			// Machine output flags - disable interactive prompts
+			Agent:   a.Flags.Agent,
+			JSON:    a.Flags.JSON,
+			Quiet:   a.Flags.Quiet,
+			IDsOnly: a.Flags.IDsOnly,
+			Count:   a.Flags.Count,
 		}),
 	)
 }

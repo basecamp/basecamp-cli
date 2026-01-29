@@ -217,8 +217,9 @@ func (m paginatedPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Check if we need to fetch more items
-			// Trigger when cursor is within fetchThreshold of the end
-			if m.hasMore && !m.loadingMore && m.textInput.Value() == "" {
+			// Trigger when cursor is within fetchThreshold of the end of filtered results
+			// This works both with and without a filter - new items will be filtered on arrival
+			if m.hasMore && !m.loadingMore {
 				itemsFromEnd := len(m.filtered) - 1 - m.cursor
 				if itemsFromEnd < m.fetchThreshold {
 					m.loadingMore = true
