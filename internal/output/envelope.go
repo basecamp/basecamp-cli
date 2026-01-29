@@ -97,6 +97,11 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 	for _, opt := range opts {
 		opt(resp)
 	}
+	if resp.Entity != "" {
+		if err := checkZeroData(resp.Data); err != nil {
+			return err
+		}
+	}
 	return w.write(resp)
 }
 
@@ -469,6 +474,60 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 
 	_, _ = io.WriteString(w.opts.Writer, out.String())
 	return true
+}
+
+// checkZeroData returns an error when entity-tagged data is a map with every
+// value at its zero value (empty string, 0, false, nil). This catches silent
+// deserialization failures where the SDK returns a struct with no fields set.
+func checkZeroData(data any) error {
+	m, ok := toMap(data)
+	if !ok {
+		return nil // not a map — nothing to check
+	}
+	if len(m) == 0 {
+		return &Error{
+			Code:    "empty_response",
+			Message: "API returned empty data",
+			Hint:    "The response contained no fields. This may indicate a deserialization issue.",
+		}
+	}
+	for _, v := range m {
+		if !isZeroValue(v) {
+			return nil // at least one non-zero field
+		}
+	}
+	return &Error{
+		Code:    "empty_response",
+		Message: "API returned empty data",
+		Hint:    "All fields in the response are empty. This may indicate a deserialization issue.",
+	}
+}
+
+// toMap converts data to map[string]any via JSON round-trip if needed.
+func toMap(data any) (map[string]any, bool) {
+	if m, ok := data.(map[string]any); ok {
+		return m, true
+	}
+	normalized := NormalizeData(data)
+	m, ok := normalized.(map[string]any)
+	return m, ok
+}
+
+// isZeroValue returns true for zero-value primitives: "", 0, false, nil,
+// and the Go zero-time JSON sentinel "0001-01-01T00:00:00Z".
+func isZeroValue(v any) bool {
+	switch val := v.(type) {
+	case nil:
+		return true
+	case string:
+		return val == "" || val == "0001-01-01T00:00:00Z"
+	case float64:
+		return val == 0
+	case bool:
+		return !val
+	default:
+		return false
+	}
 }
 
 // cacheRate calculates the cache hit rate as a percentage.

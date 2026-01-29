@@ -1527,3 +1527,125 @@ func TestTypeFieldDoesNotAutoTriggerPresenter(t *testing.T) {
 		t.Errorf("Without WithEntity, generic renderer should produce 'Id' label, got:\n%s", output)
 	}
 }
+
+// =============================================================================
+// Zero-Data Guard Tests
+// =============================================================================
+
+func TestCheckZeroData_AllZeroFields(t *testing.T) {
+	data := map[string]any{
+		"id":   float64(0),
+		"name": "",
+		"done": false,
+	}
+	err := checkZeroData(data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty data")
+}
+
+func TestCheckZeroData_AllNilFields(t *testing.T) {
+	data := map[string]any{
+		"id":   nil,
+		"name": nil,
+	}
+	err := checkZeroData(data)
+	assert.Error(t, err)
+}
+
+func TestCheckZeroData_EmptyMap(t *testing.T) {
+	data := map[string]any{}
+	err := checkZeroData(data)
+	assert.Error(t, err)
+}
+
+func TestCheckZeroData_NonZeroField(t *testing.T) {
+	data := map[string]any{
+		"id":   float64(123),
+		"name": "",
+	}
+	err := checkZeroData(data)
+	assert.NoError(t, err)
+}
+
+func TestCheckZeroData_ZeroTimeSentinel(t *testing.T) {
+	// time.Time{} marshals to "0001-01-01T00:00:00Z" via JSON round-trip.
+	// This should be treated as zero.
+	data := map[string]any{
+		"id":         float64(0),
+		"name":       "",
+		"created_at": "0001-01-01T00:00:00Z",
+		"updated_at": "0001-01-01T00:00:00Z",
+	}
+	err := checkZeroData(data)
+	assert.Error(t, err, "all-zero data with zero-time sentinels should be rejected")
+}
+
+func TestCheckZeroData_RealTimestamp(t *testing.T) {
+	// A real timestamp should NOT be treated as zero.
+	data := map[string]any{
+		"id":         float64(0),
+		"name":       "",
+		"created_at": "2024-06-15T10:30:00Z",
+	}
+	err := checkZeroData(data)
+	assert.NoError(t, err, "real timestamp should count as non-zero")
+}
+
+func TestCheckZeroData_Struct(t *testing.T) {
+	// Structs get JSON-round-tripped via NormalizeData.
+	type Project struct {
+		ID        int64     `json:"id"`
+		Name      string    `json:"name"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	data := Project{} // all zero values
+	err := checkZeroData(data)
+	assert.Error(t, err, "all-zero struct should be rejected")
+}
+
+func TestCheckZeroData_StructWithData(t *testing.T) {
+	type Project struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	data := Project{ID: 42, Name: "Real"}
+	err := checkZeroData(data)
+	assert.NoError(t, err)
+}
+
+func TestCheckZeroData_NonMapData(t *testing.T) {
+	// Slices, strings, etc. should pass through without error.
+	assert.NoError(t, checkZeroData([]string{"a", "b"}))
+	assert.NoError(t, checkZeroData("hello"))
+	assert.NoError(t, checkZeroData(nil))
+}
+
+func TestWriterOK_RejectsZeroEntityData(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":   float64(0),
+		"name": "",
+	}
+	err := w.OK(data, WithEntity("project"))
+	assert.Error(t, err, "OK with entity should reject all-zero data")
+}
+
+func TestWriterOK_AllowsZeroDataWithoutEntity(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":   float64(0),
+		"name": "",
+	}
+	err := w.OK(data)
+	assert.NoError(t, err, "OK without entity should allow zero data")
+}
