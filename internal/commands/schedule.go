@@ -190,57 +190,57 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-if err != nil {
-	return err
-}
-
-// Get schedule ID from dock if not specified
-if scheduleID == "" {
-	scheduleID, err = getScheduleID(cmd, app, resolvedProjectID)
 	if err != nil {
 		return err
 	}
-}
 
-bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
+	// Get schedule ID from dock if not specified
+	if scheduleID == "" {
+		scheduleID, err = getScheduleID(cmd, app, resolvedProjectID)
+		if err != nil {
+			return err
+		}
+	}
 
-// Build pagination options
-opts := &basecamp.ScheduleEntryListOptions{}
-if all {
-	opts.Limit = -1 // SDK treats -1 as "fetch all"
-} else if limit > 0 {
-	opts.Limit = limit
-}
-if page > 0 {
-	opts.Page = page
-}
-if status != "" {
-	opts.Status = status
-}
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
-entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, opts)
-if err != nil {
-	return convertSDKError(err)
-}
+	// Build pagination options
+	opts := &basecamp.ScheduleEntryListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+	if status != "" {
+		opts.Status = status
+	}
 
-summary := fmt.Sprintf("%d schedule entries", len(entries))
+	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, opts)
+	if err != nil {
+		return convertSDKError(err)
+	}
 
-return app.OK(entries,
-	output.WithSummary(summary),
-	output.WithBreadcrumbs(
-		output.Breadcrumb{
-			Action:      "show",
-			Cmd:         fmt.Sprintf("bcq schedule show <id> --project %s", resolvedProjectID),
-			Description: "View entry details",
-		},
-		output.Breadcrumb{
-			Action:      "create",
-			Cmd:         fmt.Sprintf("bcq schedule create \"Event\" --starts-at <datetime> --ends-at <datetime> --project %s", resolvedProjectID),
-			Description: "Create entry",
-		},
-	),
-)
+	summary := fmt.Sprintf("%d schedule entries", len(entries))
+
+	return app.OK(entries,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("bcq schedule show <id> --project %s", resolvedProjectID),
+				Description: "View entry details",
+			},
+			output.Breadcrumb{
+				Action:      "create",
+				Cmd:         fmt.Sprintf("bcq schedule create \"Event\" --starts-at <datetime> --ends-at <datetime> --project %s", resolvedProjectID),
+				Description: "Create entry",
+			},
+		),
+	)
 }
 
 func newScheduleEntryShowCmd(project *string) *cobra.Command {

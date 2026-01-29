@@ -32,7 +32,7 @@ func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 	// Interactive mode - show picker with loading spinner
 	accountID := r.config.AccountID
 	loader := func() ([]tui.PickerItem, error) {
-		people, err := r.sdk.ForAccount(accountID).People().List(ctx)
+		people, err := r.sdk.ForAccount(accountID).People().List(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch people: %w", err)
 		}
@@ -100,7 +100,7 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 	// Interactive mode - show picker with loading spinner
 	accountID := r.config.AccountID
 	loader := func() ([]tui.PickerItem, error) {
-		people, err := r.sdk.ForAccount(accountID).People().ListProjectPeople(ctx, bucketID)
+		people, err := r.sdk.ForAccount(accountID).People().ListProjectPeople(ctx, bucketID, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch project people: %w", err)
 		}

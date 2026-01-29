@@ -499,7 +499,7 @@ func TestIsMachineOutputFlags(t *testing.T) {
 			app := NewApp(cfg)
 			tt.setFlag(app)
 
-			assert.Equal(t, tt.expected, app.isMachineOutput())
+			assert.Equal(t, tt.expected, app.IsMachineOutput())
 		})
 	}
 }
@@ -522,7 +522,7 @@ func TestIsMachineOutputConfigFormat(t *testing.T) {
 			cfg := &config.Config{Format: tt.format}
 			app := NewApp(cfg)
 
-			assert.Equal(t, tt.expected, app.isMachineOutput(), "isMachineOutput() with config format %q", tt.format)
+			assert.Equal(t, tt.expected, app.IsMachineOutput(), "isMachineOutput() with config format %q", tt.format)
 		})
 	}
 }
@@ -555,7 +555,7 @@ func TestAppErrMachineOutputNoStats(t *testing.T) {
 			app.ApplyFlags()
 
 			// Verify isMachineOutput returns expected value
-			assert.Equal(t, tt.machine, app.isMachineOutput())
+			assert.Equal(t, tt.machine, app.IsMachineOutput())
 
 			// app.Err should not panic regardless of mode
 			err := app.Err(testErr)

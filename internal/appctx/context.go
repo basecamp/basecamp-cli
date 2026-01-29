@@ -243,7 +243,7 @@ func (a *App) shouldIncludeStatsInError() bool {
 		return false
 	}
 	// Include stats in JSON/Markdown error envelopes (not for machine output modes)
-	if a.isMachineOutput() {
+	if a.IsMachineOutput() {
 		return false
 	}
 	if a.Output != nil {
@@ -259,7 +259,7 @@ func (a *App) shouldPrintStatsToStderr() bool {
 	if !a.Flags.Stats || a.Flags.NoStats || a.Collector == nil {
 		return false
 	}
-	if a.isMachineOutput() {
+	if a.IsMachineOutput() {
 		return false
 	}
 	if a.Output != nil {
