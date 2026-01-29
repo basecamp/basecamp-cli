@@ -20,7 +20,7 @@ func TestTraceWriter_WriteOperationStart(t *testing.T) {
 	w.WriteOperationStart(op)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "Calling Todos.Complete"), "expected 'Calling Todos.Complete'")
+	assert.Contains(t, output, "Calling Todos.Complete", "expected 'Calling Todos.Complete'")
 	assert.True(t, strings.HasPrefix(output, "["), "expected timestamp prefix")
 }
 
@@ -32,8 +32,8 @@ func TestTraceWriter_WriteOperationEnd(t *testing.T) {
 	w.WriteOperationEnd(op, nil, 50*time.Millisecond)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "Completed Todos.List"), "expected 'Completed Todos.List'")
-	assert.True(t, strings.Contains(output, "(50ms)"), "expected duration")
+	assert.Contains(t, output, "Completed Todos.List", "expected 'Completed Todos.List'")
+	assert.Contains(t, output, "(50ms)", "expected duration")
 }
 
 func TestTraceWriter_WriteOperationEnd_Error(t *testing.T) {
@@ -44,8 +44,8 @@ func TestTraceWriter_WriteOperationEnd_Error(t *testing.T) {
 	w.WriteOperationEnd(op, errors.New("forbidden"), 50*time.Millisecond)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "Failed Projects.Create"), "expected 'Failed Projects.Create'")
-	assert.True(t, strings.Contains(output, "forbidden"), "expected error message")
+	assert.Contains(t, output, "Failed Projects.Create", "expected 'Failed Projects.Create'")
+	assert.Contains(t, output, "forbidden", "expected error message")
 }
 
 func TestTraceWriter_WriteRequestStart(t *testing.T) {
@@ -56,7 +56,7 @@ func TestTraceWriter_WriteRequestStart(t *testing.T) {
 	w.WriteRequestStart(info)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "-> GET /buckets/123/todos"), "expected request line")
+	assert.Contains(t, output, "-> GET /buckets/123/todos", "expected request line")
 }
 
 func TestTraceWriter_WriteRequestEnd(t *testing.T) {
@@ -68,8 +68,8 @@ func TestTraceWriter_WriteRequestEnd(t *testing.T) {
 	w.WriteRequestEnd(info, result)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "<- 200"), "expected response line")
-	assert.True(t, strings.Contains(output, "(45ms)"), "expected duration")
+	assert.Contains(t, output, "<- 200", "expected response line")
+	assert.Contains(t, output, "(45ms)", "expected duration")
 }
 
 func TestTraceWriter_WriteRequestEnd_Cached(t *testing.T) {
@@ -81,7 +81,7 @@ func TestTraceWriter_WriteRequestEnd_Cached(t *testing.T) {
 	w.WriteRequestEnd(info, result)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "(cached)"), "expected cached indicator")
+	assert.Contains(t, output, "(cached)", "expected cached indicator")
 }
 
 func TestTraceWriter_WriteRequestEnd_Error(t *testing.T) {
@@ -93,8 +93,8 @@ func TestTraceWriter_WriteRequestEnd_Error(t *testing.T) {
 	w.WriteRequestEnd(info, result)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "ERROR"), "expected ERROR")
-	assert.True(t, strings.Contains(output, "connection refused"), "expected error message")
+	assert.Contains(t, output, "ERROR", "expected ERROR")
+	assert.Contains(t, output, "connection refused", "expected error message")
 }
 
 func TestTraceWriter_WriteRetry(t *testing.T) {
@@ -105,8 +105,8 @@ func TestTraceWriter_WriteRetry(t *testing.T) {
 	w.WriteRetry(info, 2, errors.New("timeout"))
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "RETRY #2"), "expected 'RETRY #2'")
-	assert.True(t, strings.Contains(output, "timeout"), "expected error message")
+	assert.Contains(t, output, "RETRY #2", "expected 'RETRY #2'")
+	assert.Contains(t, output, "timeout", "expected error message")
 }
 
 func TestTraceWriter_Timestamps(t *testing.T) {
@@ -236,7 +236,7 @@ func TestWriteRequestStart_ScrubsURLs(t *testing.T) {
 	output := buf.String()
 
 	// Should NOT contain the actual token
-	assert.False(t, strings.Contains(output, "secret123"), "URL should be scrubbed, but output contains secret")
+	assert.NotContains(t, output, "secret123", "URL should be scrubbed, but output contains secret")
 	// Should contain REDACTED
-	assert.True(t, strings.Contains(output, "REDACTED"), "URL should contain [REDACTED]")
+	assert.Contains(t, output, "REDACTED", "URL should contain [REDACTED]")
 }

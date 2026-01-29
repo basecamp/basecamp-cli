@@ -105,7 +105,7 @@ func TestMeRequiresAuth(t *testing.T) {
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
 		assert.Equal(t, output.CodeAuth, e.Code)
-		assert.True(t, strings.Contains(e.Message, "Not authenticated"), "expected 'Not authenticated', got %q", e.Message)
+		assert.Contains(t, e.Message, "Not authenticated", "expected 'Not authenticated', got %q", e.Message)
 	}
 }
 

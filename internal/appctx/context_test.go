@@ -2,7 +2,6 @@ package appctx
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/basecamp/bcq/internal/config"
@@ -432,7 +431,7 @@ func TestAppRequireAccount(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err, "RequireAccount() should return error")
 				if tt.errMsg != "" {
-					assert.True(t, strings.Contains(err.Error(), tt.errMsg),
+					assert.Contains(t, err.Error(), tt.errMsg,
 						"error should contain %q, got %q", tt.errMsg, err.Error())
 				}
 			} else {

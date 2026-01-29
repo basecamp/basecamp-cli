@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -61,9 +60,9 @@ func TestCompletionBashOutput(t *testing.T) {
 	output := buf.String()
 
 	// Should contain bash completion markers
-	assert.True(t, strings.Contains(output, "bash completion"), "expected 'bash completion' in output")
-	assert.True(t, strings.Contains(output, "__bcq_"), "expected '__bcq_' function prefix in output")
-	assert.True(t, strings.Contains(output, "complete -o"), "expected 'complete -o' in output")
+	assert.Contains(t, output, "bash completion", "expected 'bash completion' in output")
+	assert.Contains(t, output, "__bcq_", "expected '__bcq_' function prefix in output")
+	assert.Contains(t, output, "complete -o", "expected 'complete -o' in output")
 }
 
 // TestCompletionZshOutput tests that zsh completion generates valid output.
@@ -79,8 +78,8 @@ func TestCompletionZshOutput(t *testing.T) {
 	output := buf.String()
 
 	// Should contain zsh completion markers
-	assert.True(t, strings.Contains(output, "#compdef bcq"), "expected '#compdef bcq' in output")
-	assert.True(t, strings.Contains(output, "_bcq"), "expected '_bcq' function in output")
+	assert.Contains(t, output, "#compdef bcq", "expected '#compdef bcq' in output")
+	assert.Contains(t, output, "_bcq", "expected '_bcq' function in output")
 }
 
 // TestCompletionFishOutput tests that fish completion generates valid output.
@@ -96,8 +95,8 @@ func TestCompletionFishOutput(t *testing.T) {
 	output := buf.String()
 
 	// Should contain fish completion markers
-	assert.True(t, strings.Contains(output, "fish completion"), "expected 'fish completion' in output")
-	assert.True(t, strings.Contains(output, "__bcq_"), "expected '__bcq_' function prefix in output")
+	assert.Contains(t, output, "fish completion", "expected 'fish completion' in output")
+	assert.Contains(t, output, "__bcq_", "expected '__bcq_' function prefix in output")
 }
 
 // TestCompletionPowershellOutput tests that powershell completion generates valid output.
@@ -113,8 +112,8 @@ func TestCompletionPowershellOutput(t *testing.T) {
 	output := buf.String()
 
 	// Should contain powershell completion markers
-	assert.True(t, strings.Contains(output, "powershell completion"), "expected 'powershell completion' in output")
-	assert.True(t, strings.Contains(output, "__bcq"), "expected '__bcq' function in output")
+	assert.Contains(t, output, "powershell completion", "expected 'powershell completion' in output")
+	assert.Contains(t, output, "__bcq", "expected '__bcq' function in output")
 }
 
 // TestCompletionInvalidShell tests that invalid shell names are rejected.
@@ -131,7 +130,7 @@ func TestCompletionInvalidShell(t *testing.T) {
 	require.NotNil(t, err, "expected error for invalid shell, got nil")
 
 	// Cobra should reject invalid args
-	assert.True(t, strings.Contains(err.Error(), "invalid"), "expected error to mention invalid arg, got: %v", err)
+	assert.Contains(t, err.Error(), "invalid", "expected error to mention invalid arg, got: %v", err)
 }
 
 // TestCompletionRequiresArg tests that completion requires a shell argument.
@@ -148,7 +147,7 @@ func TestCompletionRequiresArg(t *testing.T) {
 	require.NotNil(t, err, "expected error when no shell specified, got nil")
 
 	// Cobra should require exactly 1 arg
-	assert.True(t, strings.Contains(err.Error(), "accepts 1 arg"), "expected error about args, got: %v", err)
+	assert.Contains(t, err.Error(), "accepts 1 arg", "expected error about args, got: %v", err)
 }
 
 // TestCompletionSubcommands tests that shell subcommands exist and have correct use strings.

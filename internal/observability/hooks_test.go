@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -64,11 +63,11 @@ func TestCLIHooks_Level1_OperationsOnly(t *testing.T) {
 	output := buf.String()
 
 	// Should show operation start/end
-	assert.True(t, strings.Contains(output, "Calling Todos.Complete"), "expected operation start")
-	assert.True(t, strings.Contains(output, "Completed Todos.Complete"), "expected operation end")
+	assert.Contains(t, output, "Calling Todos.Complete", "expected operation start")
+	assert.Contains(t, output, "Completed Todos.Complete", "expected operation end")
 
 	// Should NOT show request details at level 1
-	assert.False(t, strings.Contains(output, "POST"), "unexpected request output at level 1")
+	assert.NotContains(t, output, "POST", "unexpected request output at level 1")
 }
 
 func TestCLIHooks_Level2_OperationsAndRequests(t *testing.T) {
@@ -90,9 +89,9 @@ func TestCLIHooks_Level2_OperationsAndRequests(t *testing.T) {
 	output := buf.String()
 
 	// Should show both operation and request details
-	assert.True(t, strings.Contains(output, "Calling Todos.Complete"), "expected operation start")
-	assert.True(t, strings.Contains(output, "-> POST /todos/123/complete"), "expected request start")
-	assert.True(t, strings.Contains(output, "<- 204"), "expected request complete")
+	assert.Contains(t, output, "Calling Todos.Complete", "expected operation start")
+	assert.Contains(t, output, "-> POST /todos/123/complete", "expected request start")
+	assert.Contains(t, output, "<- 204", "expected request complete")
 }
 
 func TestCLIHooks_OperationError(t *testing.T) {
@@ -110,8 +109,8 @@ func TestCLIHooks_OperationError(t *testing.T) {
 	output := buf.String()
 
 	// Should show failed with error
-	assert.True(t, strings.Contains(output, "Failed Todos.Complete"), "expected failure message")
-	assert.True(t, strings.Contains(output, "permission denied"), "expected error message")
+	assert.Contains(t, output, "Failed Todos.Complete", "expected failure message")
+	assert.Contains(t, output, "permission denied", "expected error message")
 
 	// Collector should record the error
 	summary := collector.Summary()
@@ -133,7 +132,7 @@ func TestCLIHooks_CachedRequest(t *testing.T) {
 
 	output := buf.String()
 
-	assert.True(t, strings.Contains(output, "(cached)"), "expected cached indicator")
+	assert.Contains(t, output, "(cached)", "expected cached indicator")
 
 	// Collector should record cache hit
 	summary := collector.Summary()
@@ -153,8 +152,8 @@ func TestCLIHooks_Retry(t *testing.T) {
 
 	output := buf.String()
 
-	assert.True(t, strings.Contains(output, "RETRY #2"), "expected retry message")
-	assert.True(t, strings.Contains(output, "connection reset"), "expected error message")
+	assert.Contains(t, output, "RETRY #2", "expected retry message")
+	assert.Contains(t, output, "connection reset", "expected error message")
 
 	// Collector should record retry
 	summary := collector.Summary()
