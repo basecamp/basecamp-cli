@@ -366,6 +366,17 @@ Supports batch commenting on multiple recordings at once.`,
 				if firstAPIErr != nil {
 					// Convert SDK error to preserve rate-limit hints and exit codes
 					converted := convertSDKError(firstAPIErr)
+					// If it's an output.Error, preserve its fields but add recording IDs to message
+					if outErr, ok := converted.(*output.Error); ok {
+						return &output.Error{
+							Code:       outErr.Code,
+							Message:    fmt.Sprintf("Failed to comment on recordings %s: %s", strings.Join(failed, ", "), outErr.Message),
+							Hint:       outErr.Hint,
+							HTTPStatus: outErr.HTTPStatus,
+							Retryable:  outErr.Retryable,
+							Cause:      outErr,
+						}
+					}
 					return fmt.Errorf("failed to comment on recordings %s: %w", strings.Join(failed, ", "), converted)
 				}
 				return output.ErrUsage(fmt.Sprintf("Failed to comment on all recordings: %s", strings.Join(failed, ", ")))
