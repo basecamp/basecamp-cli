@@ -20,7 +20,7 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 	case "number":
 		return formatNumber(val, locale)
 	default:
-		return formatText(val, locale)
+		return formatText(val)
 	}
 }
 
@@ -128,8 +128,9 @@ func formatPeople(val any) string {
 }
 
 // formatText converts any value to a string representation.
-// Uses locale-aware number formatting for numeric values.
-func formatText(val any, locale Locale) string {
+// Numbers are rendered raw (no locale grouping) so IDs and other numeric
+// values remain copy-paste safe. Use format: "number" for locale-aware output.
+func formatText(val any) string {
 	switch v := val.(type) {
 	case nil:
 		return ""
@@ -141,15 +142,18 @@ func formatText(val any, locale Locale) string {
 		}
 		return "no"
 	case float64:
-		return locale.FormatNumber(v)
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return fmt.Sprintf("%g", v)
 	case int:
-		return locale.FormatNumber(float64(v))
+		return fmt.Sprintf("%d", v)
 	case int64:
-		return locale.FormatNumber(float64(v))
+		return fmt.Sprintf("%d", v)
 	case []any:
 		var items []string
 		for _, item := range v {
-			items = append(items, formatText(item, locale))
+			items = append(items, formatText(item))
 		}
 		return strings.Join(items, ", ")
 	default:

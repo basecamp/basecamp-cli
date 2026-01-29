@@ -293,6 +293,21 @@ func TestRenderTemplateInvalid(t *testing.T) {
 	if got != "<no value>" {
 		t.Errorf("RenderTemplate(missing key) = %q, want %q", got, "<no value>")
 	}
+
+	// Parse errors produce a visible placeholder
+	got = RenderTemplate("{{.bad syntax", map[string]any{})
+	if got != "<template error>" {
+		t.Errorf("RenderTemplate(parse error) = %q, want %q", got, "<template error>")
+	}
+}
+
+func TestRenderTemplateLargeID(t *testing.T) {
+	// JSON-decoded IDs are float64; large values must not use scientific notation
+	data := map[string]any{"id": float64(123456789)}
+	got := RenderTemplate("bcq done {{.id}}", data)
+	if got != "bcq done 123456789" {
+		t.Errorf("RenderTemplate(large ID) = %q, want %q", got, "bcq done 123456789")
+	}
 }
 
 func TestEvalCondition(t *testing.T) {
@@ -1108,6 +1123,24 @@ func TestLocaleDetection(t *testing.T) {
 	}
 }
 
+func TestLocaleSplitDetection(t *testing.T) {
+	// NewLocaleSplit allows different tags for dates vs numbers
+	loc := NewLocaleSplit("en_GB.UTF-8", "de_DE.UTF-8")
+
+	// Dates should use en-GB (Day Month Year)
+	date, _ := time.Parse("2006-01-02", "2026-03-15")
+	gotDate := loc.FormatDate(date)
+	if gotDate != "15 Mar 2026" {
+		t.Errorf("Split locale FormatDate = %q, want %q (en-GB)", gotDate, "15 Mar 2026")
+	}
+
+	// Numbers should use de-DE (dot grouping)
+	gotNum := loc.FormatNumber(1234567.89)
+	if !strings.Contains(gotNum, ".") || !strings.Contains(gotNum, ",") {
+		t.Errorf("Split locale FormatNumber(1234567.89) = %q, expected German separators", gotNum)
+	}
+}
+
 func TestLocaleDateFormats(t *testing.T) {
 	date, _ := time.Parse("2006-01-02", "2026-03-15")
 	spec := FieldSpec{Format: "date"}
@@ -1171,13 +1204,14 @@ func TestLocaleNumberViaFormatField(t *testing.T) {
 }
 
 func TestLocaleTextNumberFormatting(t *testing.T) {
-	// formatText should also use locale for numbers
+	// formatText should NOT localize numbers — IDs and other numeric
+	// values must remain copy-paste safe. Use format: "number" for locale output.
 	spec := FieldSpec{Format: "text"}
 	de := NewLocale("de-DE")
 
-	got := FormatField(spec, "count", float64(1234), de)
-	if got != "1.234" {
-		t.Errorf("FormatField(text/number, de-DE) = %q, want %q", got, "1.234")
+	got := FormatField(spec, "id", float64(1234), de)
+	if got != "1234" {
+		t.Errorf("FormatField(text/number, de-DE) = %q, want %q (raw, no grouping)", got, "1234")
 	}
 }
 

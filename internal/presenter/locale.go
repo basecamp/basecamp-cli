@@ -12,27 +12,58 @@ import (
 )
 
 // Locale holds resolved formatting conventions for dates and numbers.
+// It supports separate tags for date and number formatting to honor
+// POSIX category-specific overrides (LC_TIME vs LC_NUMERIC).
 type Locale struct {
-	tag     language.Tag
+	dateTag language.Tag
+	numTag  language.Tag
 	printer *message.Printer
 }
 
 // DetectLocale resolves the user's locale from environment variables.
-// Falls back to en-US if nothing is set or parseable.
+// Respects the POSIX precedence: LC_ALL overrides everything, then
+// category-specific variables (LC_TIME for dates, LC_NUMERIC for numbers),
+// then LANG as fallback. Falls back to en-US if nothing is set.
 func DetectLocale() Locale {
-	raw := os.Getenv("LC_ALL")
-	if raw == "" {
-		raw = os.Getenv("LC_TIME") // date/number-specific
+	dateRaw := localeEnv("LC_TIME")
+	numRaw := localeEnv("LC_NUMERIC")
+	return NewLocaleSplit(dateRaw, numRaw)
+}
+
+// localeEnv returns the effective locale string for a given LC_ category,
+// respecting the POSIX override chain: LC_ALL → category → LANG.
+func localeEnv(category string) string {
+	if v := os.Getenv("LC_ALL"); v != "" {
+		return v
 	}
-	if raw == "" {
-		raw = os.Getenv("LANG")
+	if v := os.Getenv(category); v != "" {
+		return v
 	}
-	return NewLocale(raw)
+	return os.Getenv("LANG")
 }
 
 // NewLocale creates a Locale from a POSIX locale string (e.g. "de_DE.UTF-8")
-// or BCP 47 tag (e.g. "de-DE"). Returns en-US for empty or unparseable input.
+// or BCP 47 tag (e.g. "de-DE"). Uses the same tag for both date and number
+// formatting. Returns en-US for empty or unparseable input.
 func NewLocale(raw string) Locale {
+	return NewLocaleSplit(raw, raw)
+}
+
+// NewLocaleSplit creates a Locale with separate tags for date and number formatting,
+// matching POSIX behavior where LC_TIME and LC_NUMERIC can differ.
+func NewLocaleSplit(dateRaw, numRaw string) Locale {
+	dateTag := parseTag(dateRaw)
+	numTag := parseTag(numRaw)
+	return Locale{
+		dateTag: dateTag,
+		numTag:  numTag,
+		printer: message.NewPrinter(numTag),
+	}
+}
+
+// parseTag converts a POSIX locale string or BCP 47 tag to a language.Tag.
+// Returns en-US for empty or unparseable input.
+func parseTag(raw string) language.Tag {
 	// Strip encoding suffix: "en_US.UTF-8" → "en_US"
 	if idx := strings.IndexByte(raw, '.'); idx != -1 {
 		raw = raw[:idx]
@@ -44,11 +75,7 @@ func NewLocale(raw string) Locale {
 	if tag == language.Und {
 		tag = language.AmericanEnglish
 	}
-
-	return Locale{
-		tag:     tag,
-		printer: message.NewPrinter(tag),
-	}
+	return tag
 }
 
 // FormatDate formats a time.Time as a locale-appropriate date string.
@@ -64,15 +91,15 @@ func (l Locale) FormatNumber(v float64) string {
 	return l.printer.Sprint(number.Decimal(v, number.MaxFractionDigits(2)))
 }
 
-// Tag returns the resolved language tag.
+// Tag returns the resolved date language tag (used for date formatting decisions).
 func (l Locale) Tag() language.Tag {
-	return l.tag
+	return l.dateTag
 }
 
 // dateLayout returns a Go time layout string for the locale's preferred date format.
 // Uses region-based lookup with sensible defaults.
 func (l Locale) dateLayout() string {
-	region, _ := l.tag.Region()
+	region, _ := l.dateTag.Region()
 	code := region.String()
 
 	if layout, ok := dateLayouts[code]; ok {
@@ -80,7 +107,7 @@ func (l Locale) dateLayout() string {
 	}
 
 	// Fall back by language
-	base, _ := l.tag.Base()
+	base, _ := l.dateTag.Base()
 	if layout, ok := dateLayoutsByLang[base.String()]; ok {
 		return layout
 	}
