@@ -36,7 +36,7 @@ func NewCommentsCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newCommentsListCmd(&project),
@@ -64,7 +64,7 @@ func newCommentsListCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for (required)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 	_ = cmd.MarkFlagRequired("on")
 
 	return cmd
@@ -76,6 +76,12 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 	// Validate flag combinations
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
 	}
 
 	// Validate user input first, before checking account

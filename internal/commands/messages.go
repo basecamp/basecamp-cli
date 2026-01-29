@@ -35,7 +35,7 @@ func NewMessagesCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of messages to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all messages (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newMessagesListCmd(&project, &messageBoard),
@@ -64,7 +64,7 @@ func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of messages to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all messages (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
@@ -75,6 +75,12 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	// Validate flag combinations
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
 	}
 
 	// Resolve account (enables interactive prompt if needed)

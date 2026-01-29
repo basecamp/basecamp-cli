@@ -193,7 +193,7 @@ func newPeopleListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&projectID, "project", "p", "", "List people in a specific project")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of people to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all people (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
@@ -204,6 +204,12 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 	// Validate flag combinations
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {

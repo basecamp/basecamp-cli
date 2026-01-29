@@ -43,7 +43,7 @@ Each project has one todoset containing multiple todolists.`,
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newTodolistsListCmd(&project),
@@ -70,7 +70,7 @@ func newTodolistsListCmd(project *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
@@ -84,6 +84,12 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 	// Validate flag combinations
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {

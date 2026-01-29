@@ -42,7 +42,7 @@ func NewProjectsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newProjectsListCmd(),
@@ -72,7 +72,7 @@ func newProjectsListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
@@ -86,6 +86,12 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 	// Validate flag combinations
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
 	}
 
 	// Resolve account if not configured (enables interactive prompt)

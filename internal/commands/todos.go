@@ -50,7 +50,7 @@ func NewTodosCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
-	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newTodosListCmd(),
@@ -251,7 +251,7 @@ func newTodosListCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
-	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a specific page only (1-indexed)")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Disable pagination and return first page only")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -270,6 +270,12 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	// Validate flag combinations
 	if flags.all && flags.limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if flags.page > 0 && (flags.all || flags.limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if flags.page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
 	}
 
 	// Resolve account (enables interactive prompt if needed)
@@ -315,8 +321,13 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return listTodosInList(cmd, app, project, todolist, flags.status, flags.limit, flags.page, flags.all)
 	}
 
+	// --page is not meaningful when aggregating across todolists
+	if flags.page > 0 {
+		return output.ErrUsage("--page requires --list; use --limit to cap results when listing all todos")
+	}
+
 	// Otherwise, get all todos from project's todoset
-	return listAllTodos(cmd, app, project, flags.assignee, flags.status, flags.overdue, flags.limit, flags.page, flags.all)
+	return listAllTodos(cmd, app, project, flags.assignee, flags.status, flags.overdue, flags.limit, flags.all)
 }
 
 func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit, page int, all bool) error {
@@ -381,7 +392,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	return app.OK(todos, respOpts...)
 }
 
-func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status string, overdue bool, limit, page int, all bool) error {
+func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status string, overdue bool, limit int, all bool) error {
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
 	if assignee != "" {
@@ -420,9 +431,6 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		todoOpts.Limit = -1 // SDK treats -1 as unlimited for todos
 	} else if limit > 0 {
 		todoOpts.Limit = limit
-	}
-	if page > 0 {
-		todoOpts.Page = page
 	}
 
 	// Aggregate todos from all todolists
