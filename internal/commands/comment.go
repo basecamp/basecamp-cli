@@ -18,6 +18,8 @@ import (
 func NewCommentsCmd() *cobra.Command {
 	var project string
 	var recordingID string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "comments",
@@ -25,13 +27,16 @@ func NewCommentsCmd() *cobra.Command {
 		Long:  "List, show, and update comments on recordings.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runCommentsList(cmd, project, recordingID)
+			return runCommentsList(cmd, project, recordingID, limit, page, all)
 		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 
 	cmd.AddCommand(
 		newCommentsListCmd(&project),
@@ -44,23 +49,28 @@ func NewCommentsCmd() *cobra.Command {
 
 func newCommentsListCmd(project *string) *cobra.Command {
 	var recordingID string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List comments on a recording",
 		Long:  "List all comments on a recording.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCommentsList(cmd, *project, recordingID)
+			return runCommentsList(cmd, *project, recordingID, limit, page, all)
 		},
 	}
 
 	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for (required)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 	_ = cmd.MarkFlagRequired("on")
 
 	return cmd
 }
 
-func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
+func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Validate user input first, before checking account
@@ -102,7 +112,18 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return output.ErrUsage("Invalid recording ID")
 	}
 
-	comments, err := app.Account().Comments().List(cmd.Context(), bucketID, recID)
+	// Build pagination options
+	opts := &basecamp.CommentListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as unlimited
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
+	comments, err := app.Account().Comments().List(cmd.Context(), bucketID, recID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}

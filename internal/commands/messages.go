@@ -16,6 +16,8 @@ import (
 func NewMessagesCmd() *cobra.Command {
 	var project string
 	var messageBoard string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:     "messages",
@@ -24,13 +26,16 @@ func NewMessagesCmd() *cobra.Command {
 		Long:    "List, show, create, and manage messages in a project's message board.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runMessagesList(cmd, project, messageBoard)
+			return runMessagesList(cmd, project, messageBoard, limit, page, all)
 		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of messages to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all messages (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 
 	cmd.AddCommand(
 		newMessagesListCmd(&project, &messageBoard),
@@ -45,17 +50,26 @@ func NewMessagesCmd() *cobra.Command {
 }
 
 func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
-	return &cobra.Command{
+	var limit, page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List messages",
 		Long:  "List all messages in a project's message board.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMessagesList(cmd, *project, *messageBoard)
+			return runMessagesList(cmd, *project, *messageBoard, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of messages to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all messages (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+
+	return cmd
 }
 
-func runMessagesList(cmd *cobra.Command, project string, messageBoard string) error {
+func runMessagesList(cmd *cobra.Command, project string, messageBoard string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Resolve account (enables interactive prompt if needed)
@@ -101,8 +115,19 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string) er
 		return output.ErrUsage("Invalid message board ID")
 	}
 
+	// Build pagination options
+	opts := &basecamp.MessageListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as unlimited
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	// Get messages using SDK
-	messages, err := app.Account().Messages().List(cmd.Context(), bucketID, boardID)
+	messages, err := app.Account().Messages().List(cmd.Context(), bucketID, boardID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}

@@ -178,26 +178,42 @@ func NewPeopleCmd() *cobra.Command {
 
 func newPeopleListCmd() *cobra.Command {
 	var projectID string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List people",
 		Long:  "List all people in your Basecamp account, or in a specific project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPeopleList(cmd, projectID)
+			return runPeopleList(cmd, projectID, limit, page, all)
 		},
 	}
 
 	cmd.Flags().StringVarP(&projectID, "project", "p", "", "List people in a specific project")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of people to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all people (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 
 	return cmd
 }
 
-func runPeopleList(cmd *cobra.Command, projectID string) error {
+func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
+	}
+
+	// Build pagination options
+	opts := &basecamp.PeopleListOptions{}
+	if all {
+		opts.Limit = 0 // SDK treats 0 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
 	}
 
 	var people []basecamp.Person
@@ -213,9 +229,9 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 		if parseErr != nil {
 			return output.ErrUsage("Invalid project ID")
 		}
-		people, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID)
+		people, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID, opts)
 	} else {
-		people, err = app.Account().People().List(cmd.Context())
+		people, err = app.Account().People().List(cmd.Context(), opts)
 	}
 
 	if err != nil {
@@ -223,9 +239,9 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 	}
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.
-	// Only cache account-wide people list, not project-specific lists.
+	// Only cache account-wide people list without pagination, not project-specific lists.
 	// Done synchronously to ensure write completes before process exits.
-	if projectID == "" {
+	if projectID == "" && limit == 0 && page == 0 {
 		updatePeopleCache(people, app.Config.CacheDir)
 	}
 

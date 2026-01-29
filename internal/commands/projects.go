@@ -17,6 +17,8 @@ import (
 // NewProjectsCmd creates the projects command group.
 func NewProjectsCmd() *cobra.Command {
 	var status string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:     "projects",
@@ -32,12 +34,15 @@ func NewProjectsCmd() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runProjectsList(cmd, status)
+			return runProjectsList(cmd, status, limit, page, all)
 		},
 	}
 
-	// Allow --status flag on root command for default list behavior
+	// Allow flags on root command for default list behavior
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 
 	cmd.AddCommand(
 		newProjectsListCmd(),
@@ -52,22 +57,27 @@ func NewProjectsCmd() *cobra.Command {
 
 func newProjectsListCmd() *cobra.Command {
 	var status string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List projects",
 		Long:  "List all accessible projects in the account.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProjectsList(cmd, status)
+			return runProjectsList(cmd, status, limit, page, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 
 	return cmd
 }
 
-func runProjectsList(cmd *cobra.Command, status string) error {
+func runProjectsList(cmd *cobra.Command, status string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -83,16 +93,26 @@ func runProjectsList(cmd *cobra.Command, status string) error {
 		opts.Status = basecamp.ProjectStatus(status)
 	}
 
+	// Apply pagination options
+	if all {
+		opts.Limit = 0 // SDK treats 0 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	projects, err := app.Account().Projects().List(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.
-	// Only cache when listing all active projects (no filter), as filtered
+	// Only cache when listing all active projects (no filter/pagination), as filtered
 	// results wouldn't be suitable for general-purpose completion.
 	// Done synchronously to ensure write completes before process exits.
-	if status == "" {
+	if status == "" && limit == 0 && page == 0 {
 		updateProjectsCache(projects, app.Config.CacheDir)
 	}
 

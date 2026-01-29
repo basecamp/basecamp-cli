@@ -15,6 +15,8 @@ import (
 // NewTodolistsCmd creates the todolists command group.
 func NewTodolistsCmd() *cobra.Command {
 	var project string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:     "todolists",
@@ -33,12 +35,15 @@ Each project has one todoset containing multiple todolists.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runTodolistsList(cmd, project)
+			return runTodolistsList(cmd, project, limit, page, all)
 		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
 
 	cmd.AddCommand(
 		newTodolistsListCmd(&project),
@@ -51,17 +56,26 @@ Each project has one todoset containing multiple todolists.`,
 }
 
 func newTodolistsListCmd(project *string) *cobra.Command {
-	return &cobra.Command{
+	var limit, page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List todolists",
 		Long:  "List all todolists in a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTodolistsList(cmd, *project)
+			return runTodolistsList(cmd, *project, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a specific page only (1-indexed)")
+
+	return cmd
 }
 
-func runTodolistsList(cmd *cobra.Command, project string) error {
+func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -107,8 +121,19 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid todoset ID")
 	}
 
+	// Build pagination options
+	opts := &basecamp.TodolistListOptions{}
+	if all {
+		opts.Limit = 0 // SDK treats 0 as "fetch all" for todolists
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	// Get todolists via SDK
-	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
