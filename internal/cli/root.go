@@ -82,7 +82,9 @@ func NewRootCmd() *cobra.Command {
 
 	// Behavior flags
 	cmd.PersistentFlags().CountVarP(&flags.Verbose, "verbose", "v", "Verbose output (-v for ops, -vv for requests)")
-	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", false, "Show session statistics")
+	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", version.IsDev(), "Show session statistics (default: on in dev builds)")
+	cmd.PersistentFlags().BoolVar(&flags.NoStats, "no-stats", false, "Disable session statistics")
+	cmd.MarkFlagsMutuallyExclusive("stats", "no-stats")
 	cmd.PersistentFlags().StringVar(&flags.CacheDir, "cache-dir", "", "Cache directory")
 
 	// Register tab completion for flags.

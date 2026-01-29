@@ -1157,6 +1157,38 @@ func TestFormatConstants(t *testing.T) {
 	}
 }
 
+func TestEffectiveFormat(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   Format
+		expected Format
+	}{
+		{"JSON stays JSON", FormatJSON, FormatJSON},
+		{"Markdown stays Markdown", FormatMarkdown, FormatMarkdown},
+		{"Styled stays Styled", FormatStyled, FormatStyled},
+		{"Quiet stays Quiet", FormatQuiet, FormatQuiet},
+		{"IDs stays IDs", FormatIDs, FormatIDs},
+		{"Count stays Count", FormatCount, FormatCount},
+		// FormatAuto resolves to FormatJSON when writer is not a TTY (bytes.Buffer)
+		{"Auto resolves to JSON for non-TTY", FormatAuto, FormatJSON},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := New(Options{
+				Format: tt.format,
+				Writer: &buf,
+			})
+
+			got := w.EffectiveFormat()
+			if got != tt.expected {
+				t.Errorf("EffectiveFormat() = %d, want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
 // =============================================================================
 // Edge Case Tests
 // =============================================================================
