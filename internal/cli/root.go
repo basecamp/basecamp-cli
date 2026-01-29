@@ -55,13 +55,13 @@ func NewRootCmd() *cobra.Command {
 				cfg.Sources["base_url"] = string(config.SourceFlag)
 			} else if flags.Host == "" {
 				// No explicit host - try interactive resolution if multiple hosts configured
-				resolvedURL, err := resolveHost(cfg, flags)
+				resolved, err := resolveHost(cfg, flags)
 				if err != nil {
 					return err
 				}
-				if resolvedURL != "" {
-					cfg.BaseURL = resolvedURL
-					cfg.Sources["base_url"] = string(config.SourcePrompt)
+				if resolved != nil {
+					cfg.BaseURL = resolved.URL
+					cfg.Sources["base_url"] = string(resolved.Source)
 				}
 			}
 
@@ -306,6 +306,12 @@ func transformCobraError(err error) error {
 	return err
 }
 
+// resolvedHost holds a resolved host URL and its source.
+type resolvedHost struct {
+	URL    string
+	Source config.Source
+}
+
 // resolveHost determines the base URL to use based on configuration.
 // Resolution order:
 // 1. BCQ_HOST environment variable
@@ -313,37 +319,53 @@ func transformCobraError(err error) error {
 // 3. If single host configured → use it
 // 4. If multiple hosts configured → show interactive picker (if TTY)
 // 5. Fall back to config base_url
-func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
+func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (*resolvedHost, error) {
 	// 1. Check BCQ_HOST environment variable
 	if host := os.Getenv("BCQ_HOST"); host != "" {
-		return hostutil.Normalize(host), nil
+		return &resolvedHost{
+			URL:    hostutil.Normalize(host),
+			Source: config.SourceEnv,
+		}, nil
 	}
 
 	// No hosts configured - use existing base_url
 	if len(cfg.Hosts) == 0 {
-		return "", nil
+		return nil, nil
 	}
 
 	// 2. Check default_host in config
 	if cfg.DefaultHost != "" {
 		if hostConfig, ok := cfg.Hosts[cfg.DefaultHost]; ok {
-			return hostConfig.BaseURL, nil
+			return &resolvedHost{
+				URL:    hostConfig.BaseURL,
+				Source: config.SourceGlobal,
+			}, nil
 		}
 	}
 
 	// 3. If only one host configured, use it
 	if len(cfg.Hosts) == 1 {
 		for _, hostConfig := range cfg.Hosts {
-			return hostConfig.BaseURL, nil
+			return &resolvedHost{
+				URL:    hostConfig.BaseURL,
+				Source: config.SourceDefault,
+			}, nil
 		}
 	}
 
 	// 4. Multiple hosts - try interactive picker if TTY
 	if !isInteractiveTTY(flags) {
-		return "", output.ErrUsage("Multiple hosts configured. Use --host flag or set default_host in config.")
+		return nil, output.ErrUsage("Multiple hosts configured. Use --host flag or set default_host in config.")
 	}
 
-	return promptForHost(cfg)
+	url, err := promptForHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &resolvedHost{
+		URL:    url,
+		Source: config.SourcePrompt,
+	}, nil
 }
 
 // isInteractiveTTY returns true if stdout is a terminal and no machine-output mode is set.
