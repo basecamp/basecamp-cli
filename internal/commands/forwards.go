@@ -35,7 +35,7 @@ that can receive forwarded emails.`,
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&inboxID, "inbox", "", "Inbox ID (auto-detected from project)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = default 100)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
@@ -69,7 +69,7 @@ func newForwardsListCmd(project, inboxID *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = default 100)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
@@ -401,7 +401,7 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of replies to fetch (0 = default 100)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of replies to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all replies (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
