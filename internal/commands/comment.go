@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -367,7 +368,8 @@ Supports batch commenting on multiple recordings at once.`,
 					// Convert SDK error to preserve rate-limit hints and exit codes
 					converted := convertSDKError(firstAPIErr)
 					// If it's an output.Error, preserve its fields but add recording IDs to message
-					if outErr, ok := converted.(*output.Error); ok {
+					var outErr *output.Error
+					if errors.As(converted, &outErr) {
 						return &output.Error{
 							Code:       outErr.Code,
 							Message:    fmt.Sprintf("Failed to comment on recordings %s: %s", strings.Join(failed, ", "), outErr.Message),
