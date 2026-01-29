@@ -69,6 +69,11 @@ func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID
 
 // fetchDockTools retrieves enabled dock tools of a specific type from a project.
 func (r *Resolver) fetchDockTools(ctx context.Context, projectID, dockName string) ([]DockTool, error) {
+	// Ensure account is configured before making API calls
+	if r.config.AccountID == "" {
+		return nil, output.ErrUsage("Account must be resolved before fetching dock tools")
+	}
+
 	// Fetch project data
 	path := fmt.Sprintf("/projects/%s.json", projectID)
 	resp, err := r.sdk.ForAccount(r.config.AccountID).Get(ctx, path)

@@ -63,7 +63,7 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 
 	// 4. Multiple todolists - need interactive prompt
 	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No todolist specified", "Use --todolist or set todolist_id in .basecamp/config.json")
+		return nil, output.ErrUsageHint("No todolist specified", "Use --list (or --todolist) or set todolist_id in .basecamp/config.json")
 	}
 
 	// Convert to picker items for interactive selection
