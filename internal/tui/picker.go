@@ -210,6 +210,21 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.items = msg.Items
 		m.filtered = m.filter(m.textInput.Value())
+
+		// Update originalItems map with loaded items
+		if m.originalItems == nil {
+			m.originalItems = make(map[string]PickerItem)
+		}
+		for _, item := range msg.Items {
+			m.originalItems[item.ID] = item
+		}
+
+		// Auto-select if only one item and option is set
+		if m.autoSelectSingle && len(m.items) == 1 {
+			m.selected = m.getOriginalItem(m.items[0].ID)
+			return m, tea.Quit
+		}
+
 		return m, textinput.Blink
 
 	case spinner.TickMsg:
@@ -318,10 +333,17 @@ func (m pickerModel) filter(query string) []PickerItem {
 // This ensures that callers receive clean data without UI decoration
 // (e.g., "* " prefix or "(recent)" suffix from recent items).
 func (m pickerModel) getOriginalItem(id string) *PickerItem {
-	if original, ok := m.originalItems[id]; ok {
-		return &original
+	if m.originalItems != nil {
+		if original, ok := m.originalItems[id]; ok {
+			return &original
+		}
 	}
-	// Fallback: return nil if not found (shouldn't happen in normal use)
+	// Fallback: search in items list (handles edge cases where map wasn't populated)
+	for _, item := range m.items {
+		if item.ID == id {
+			return &item
+		}
+	}
 	return nil
 }
 
