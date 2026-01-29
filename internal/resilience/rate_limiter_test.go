@@ -3,6 +3,9 @@ package resilience
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRateLimiterStartsWithFullBucket(t *testing.T) {
@@ -15,12 +18,8 @@ func TestRateLimiterStartsWithFullBucket(t *testing.T) {
 	})
 
 	tokens, err := rl.Tokens()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if tokens != 5 {
-		t.Errorf("expected 5 tokens, got %f", tokens)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, float64(5), tokens)
 }
 
 func TestRateLimiterAllowsRequests(t *testing.T) {
@@ -35,22 +34,14 @@ func TestRateLimiterAllowsRequests(t *testing.T) {
 	// Should allow up to max tokens requests
 	for i := 0; i < 5; i++ {
 		allowed, err := rl.Allow()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !allowed {
-			t.Errorf("expected request %d to be allowed", i+1)
-		}
+		require.NoError(t, err)
+		assert.True(t, allowed, "expected request %d to be allowed", i+1)
 	}
 
 	// Next request should be rejected (no time to refill)
 	allowed, err := rl.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if allowed {
-		t.Error("expected request to be rejected after tokens exhausted")
-	}
+	require.NoError(t, err)
+	assert.False(t, allowed, "expected request to be rejected after tokens exhausted")
 }
 
 func TestRateLimiterRefillsOverTime(t *testing.T) {
@@ -72,12 +63,8 @@ func TestRateLimiterRefillsOverTime(t *testing.T) {
 
 	// Should have tokens again
 	allowed, err := rl.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected request to be allowed after refill time")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected request to be allowed after refill time")
 }
 
 func TestRateLimiterCapsAtMaxTokens(t *testing.T) {
@@ -97,12 +84,8 @@ func TestRateLimiterCapsAtMaxTokens(t *testing.T) {
 
 	// Should be capped at max tokens
 	tokens, err := rl.Tokens()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if tokens > 5 {
-		t.Errorf("expected tokens capped at 5, got %f", tokens)
-	}
+	require.NoError(t, err)
+	assert.True(t, tokens <= 5, "expected tokens capped at 5, got %f", tokens)
 }
 
 func TestRateLimiterRetryAfter(t *testing.T) {
@@ -115,39 +98,25 @@ func TestRateLimiterRetryAfter(t *testing.T) {
 	})
 
 	// Set retry-after for a short duration
-	if err := rl.SetRetryAfterDuration(50 * time.Millisecond); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, rl.SetRetryAfterDuration(50*time.Millisecond))
 
 	// Should reject requests during retry-after
 	allowed, err := rl.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if allowed {
-		t.Error("expected request to be rejected during retry-after period")
-	}
+	require.NoError(t, err)
+	assert.False(t, allowed, "expected request to be rejected during retry-after period")
 
 	// Check remaining time
 	remaining, err := rl.RetryAfterRemaining()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if remaining <= 0 || remaining > 60*time.Millisecond {
-		t.Errorf("expected remaining time between 0-60ms, got %v", remaining)
-	}
+	require.NoError(t, err)
+	assert.True(t, remaining > 0 && remaining <= 60*time.Millisecond, "expected remaining time between 0-60ms, got %v", remaining)
 
 	// Wait past retry-after
 	time.Sleep(60 * time.Millisecond)
 
 	// Should allow requests now
 	allowed, err = rl.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected request to be allowed after retry-after period")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected request to be allowed after retry-after period")
 }
 
 func TestRateLimiterSetRetryAfter(t *testing.T) {
@@ -161,15 +130,11 @@ func TestRateLimiterSetRetryAfter(t *testing.T) {
 
 	// Set retry-after via absolute time
 	until := time.Now().Add(100 * time.Millisecond)
-	if err := rl.SetRetryAfter(until); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, rl.SetRetryAfter(until))
 
 	// Should reject requests
 	allowed, _ := rl.Allow()
-	if allowed {
-		t.Error("expected request to be rejected during retry-after period")
-	}
+	assert.False(t, allowed, "expected request to be rejected during retry-after period")
 }
 
 func TestRateLimiterRetryAfterOnlyUpdatesIfLater(t *testing.T) {
@@ -189,9 +154,7 @@ func TestRateLimiterRetryAfterOnlyUpdatesIfLater(t *testing.T) {
 
 	// Should still have ~200ms remaining (only updated if later)
 	remaining, _ := rl.RetryAfterRemaining()
-	if remaining < 150*time.Millisecond {
-		t.Errorf("expected ~200ms remaining, got %v", remaining)
-	}
+	assert.True(t, remaining >= 150*time.Millisecond, "expected ~200ms remaining, got %v", remaining)
 }
 
 func TestRateLimiterReset(t *testing.T) {
@@ -212,21 +175,15 @@ func TestRateLimiterReset(t *testing.T) {
 	rl.SetRetryAfterDuration(10 * time.Second)
 
 	// Reset
-	if err := rl.Reset(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, rl.Reset())
 
 	// Should have full bucket
 	tokens, _ := rl.Tokens()
-	if tokens != 5 {
-		t.Errorf("expected 5 tokens after reset, got %f", tokens)
-	}
+	assert.Equal(t, float64(5), tokens)
 
 	// Should allow requests (retry-after cleared)
 	allowed, _ := rl.Allow()
-	if !allowed {
-		t.Error("expected request to be allowed after reset")
-	}
+	assert.True(t, allowed, "expected request to be allowed after reset")
 }
 
 func TestRateLimiterPersistence(t *testing.T) {
@@ -255,13 +212,9 @@ func TestRateLimiterPersistence(t *testing.T) {
 
 	// Should only have ~2 tokens left
 	tokens, err := rl2.Tokens()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 	// Allow for small refill during test execution
-	if tokens > 3 {
-		t.Errorf("expected ~2 tokens, got %f", tokens)
-	}
+	assert.True(t, tokens <= 3, "expected ~2 tokens, got %f", tokens)
 }
 
 func TestRateLimiterAppliesDefaults(t *testing.T) {
@@ -273,12 +226,8 @@ func TestRateLimiterAppliesDefaults(t *testing.T) {
 
 	// Should work with defaults (50 max tokens)
 	tokens, err := rl.Tokens()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if tokens != 50 {
-		t.Errorf("expected 50 tokens (default), got %f", tokens)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, float64(50), tokens)
 }
 
 func TestRateLimiterRetryAfterRemainingWhenNoBlock(t *testing.T) {
@@ -287,12 +236,8 @@ func TestRateLimiterRetryAfterRemainingWhenNoBlock(t *testing.T) {
 	rl := NewRateLimiter(store, RateLimiterConfig{})
 
 	remaining, err := rl.RetryAfterRemaining()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if remaining != 0 {
-		t.Errorf("expected 0 remaining when no block, got %v", remaining)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), remaining)
 }
 
 func TestRateLimiterTokensPerRequest(t *testing.T) {
@@ -307,17 +252,11 @@ func TestRateLimiterTokensPerRequest(t *testing.T) {
 	// Should allow 2 requests (10 tokens / 5 per request)
 	for i := 0; i < 2; i++ {
 		allowed, err := rl.Allow()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !allowed {
-			t.Errorf("expected request %d to be allowed", i+1)
-		}
+		require.NoError(t, err)
+		assert.True(t, allowed, "expected request %d to be allowed", i+1)
 	}
 
 	// Third request should fail
 	allowed, _ := rl.Allow()
-	if allowed {
-		t.Error("expected third request to be rejected")
-	}
+	assert.False(t, allowed, "expected third request to be rejected")
 }

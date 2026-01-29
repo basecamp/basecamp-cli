@@ -3,6 +3,8 @@ package dateparse
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParse(t *testing.T) {
@@ -71,9 +73,7 @@ func TestParse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := ParseFrom(tt.input, ref)
-			if result != tt.expected {
-				t.Errorf("ParseFrom(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "ParseFrom(%q)", tt.input)
 		})
 	}
 }
@@ -93,9 +93,7 @@ func TestIsValid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := IsValid(tt.input)
-			if result != tt.valid {
-				t.Errorf("IsValid(%q) = %v, want %v", tt.input, result, tt.valid)
-			}
+			assert.Equal(t, tt.valid, result, "IsValid(%q)", tt.input)
 		})
 	}
 }
@@ -117,9 +115,7 @@ func TestNextWeekdaySameDay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := ParseFrom(tt.input, monday)
-			if result != tt.expected {
-				t.Errorf("ParseFrom(%q) on Monday = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "ParseFrom(%q) on Monday", tt.input)
 		})
 	}
 }
@@ -140,9 +136,7 @@ func TestEndOfMonth(t *testing.T) {
 		t.Run(tt.date, func(t *testing.T) {
 			ref, _ := time.Parse("2006-01-02", tt.date)
 			result := ParseFrom("eom", ref)
-			if result != tt.expected {
-				t.Errorf("eom for %s = %q, want %q", tt.date, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "eom for %s", tt.date)
 		})
 	}
 }

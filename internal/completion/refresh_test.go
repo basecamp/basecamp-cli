@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockTokenProvider implements basecamp.TokenProvider for testing.
@@ -45,9 +47,7 @@ func TestRefresher_RefreshIfStale_Fresh(t *testing.T) {
 	refresher := NewRefresher(store, client)
 
 	// Save fresh cache
-	if err := store.Save(&Cache{Projects: []CachedProject{{ID: 1, Name: "Test"}}}); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, store.Save(&Cache{Projects: []CachedProject{{ID: 1, Name: "Test"}}}))
 
 	// RefreshIfStale should not refresh fresh cache
 	refresher.RefreshIfStale(time.Hour)
@@ -56,9 +56,7 @@ func TestRefresher_RefreshIfStale_Fresh(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Should not be refreshing
-	if refresher.IsRefreshing() {
-		t.Error("Should not be refreshing fresh cache")
-	}
+	assert.False(t, refresher.IsRefreshing(), "Should not be refreshing fresh cache")
 }
 
 func TestRefresher_RefreshIfStale_Stale_TriggersRefresh(t *testing.T) {
@@ -85,9 +83,7 @@ func TestRefresher_RefreshIfStale_Stale_TriggersRefresh(t *testing.T) {
 
 	// Cache should still be empty since network failed
 	projects := store.Projects()
-	if len(projects) != 0 {
-		t.Errorf("Expected empty cache (network disabled), got %d projects", len(projects))
-	}
+	assert.Empty(t, projects, "Expected empty cache (network disabled)")
 }
 
 func TestRefresher_RefreshIfStale_DoesNotBlockConcurrent(t *testing.T) {
@@ -119,9 +115,7 @@ func TestRefresher_IsRefreshing(t *testing.T) {
 	refresher := NewRefresher(store, client)
 
 	// Initially not refreshing
-	if refresher.IsRefreshing() {
-		t.Error("Should not be refreshing initially")
-	}
+	assert.False(t, refresher.IsRefreshing(), "Should not be refreshing initially")
 }
 
 func TestConvertProjects(t *testing.T) {
@@ -132,18 +126,10 @@ func TestConvertProjects(t *testing.T) {
 
 	cached := convertProjects(sdkProjects)
 
-	if len(cached) != 2 {
-		t.Fatalf("Expected 2 cached projects, got %d", len(cached))
-	}
-	if cached[0].ID != 1 {
-		t.Errorf("Expected ID 1, got %d", cached[0].ID)
-	}
-	if cached[0].Purpose != "hq" {
-		t.Errorf("Expected purpose 'hq', got %q", cached[0].Purpose)
-	}
-	if !cached[0].Bookmarked {
-		t.Error("Expected Bookmarked to be true")
-	}
+	require.Len(t, cached, 2)
+	assert.Equal(t, int64(1), cached[0].ID)
+	assert.Equal(t, "hq", cached[0].Purpose)
+	assert.True(t, cached[0].Bookmarked, "Expected Bookmarked to be true")
 }
 
 func TestConvertPeople(t *testing.T) {
@@ -154,13 +140,7 @@ func TestConvertPeople(t *testing.T) {
 
 	cached := convertPeople(sdkPeople)
 
-	if len(cached) != 2 {
-		t.Fatalf("Expected 2 cached people, got %d", len(cached))
-	}
-	if cached[0].ID != 100 {
-		t.Errorf("Expected ID 100, got %d", cached[0].ID)
-	}
-	if cached[0].EmailAddress != "alice@example.com" {
-		t.Errorf("Expected alice@example.com, got %q", cached[0].EmailAddress)
-	}
+	require.Len(t, cached, 2)
+	assert.Equal(t, int64(100), cached[0].ID)
+	assert.Equal(t, "alice@example.com", cached[0].EmailAddress)
 }

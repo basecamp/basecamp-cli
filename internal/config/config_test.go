@@ -5,27 +5,20 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefault(t *testing.T) {
 	cfg := Default()
 
 	// Check default values
-	if cfg.BaseURL != "https://3.basecampapi.com" {
-		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, "https://3.basecampapi.com")
-	}
-	if cfg.Scope != "read" {
-		t.Errorf("Scope = %q, want %q", cfg.Scope, "read")
-	}
-	if cfg.CacheEnabled != true {
-		t.Errorf("CacheEnabled = %v, want true", cfg.CacheEnabled)
-	}
-	if cfg.Format != "auto" {
-		t.Errorf("Format = %q, want %q", cfg.Format, "auto")
-	}
-	if cfg.Sources == nil {
-		t.Error("Sources map should be initialized, got nil")
-	}
+	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
+	assert.Equal(t, "read", cfg.Scope)
+	assert.True(t, cfg.CacheEnabled)
+	assert.Equal(t, "auto", cfg.Format)
+	assert.NotNil(t, cfg.Sources)
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -44,45 +37,27 @@ func TestLoadFromFile(t *testing.T) {
 		"cache_enabled": false,
 		"format":        "json",
 	}
-	data, _ := json.Marshal(testConfig)
-	os.WriteFile(configPath, data, 0644)
+	data, err := json.Marshal(testConfig)
+	require.NoError(t, err)
+	err = os.WriteFile(configPath, data, 0644)
+	require.NoError(t, err)
 
 	cfg := Default()
 	loadFromFile(cfg, configPath, SourceGlobal)
 
 	// Verify values loaded
-	if cfg.BaseURL != "http://test.example.com" {
-		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, "http://test.example.com")
-	}
-	if cfg.AccountID != "12345" {
-		t.Errorf("AccountID = %q, want %q", cfg.AccountID, "12345")
-	}
-	if cfg.ProjectID != "67890" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "67890")
-	}
-	if cfg.TodolistID != "11111" {
-		t.Errorf("TodolistID = %q, want %q", cfg.TodolistID, "11111")
-	}
-	if cfg.Scope != "read,write" {
-		t.Errorf("Scope = %q, want %q", cfg.Scope, "read,write")
-	}
-	if cfg.CacheDir != "/tmp/cache" {
-		t.Errorf("CacheDir = %q, want %q", cfg.CacheDir, "/tmp/cache")
-	}
-	if cfg.CacheEnabled != false {
-		t.Errorf("CacheEnabled = %v, want false", cfg.CacheEnabled)
-	}
-	if cfg.Format != "json" {
-		t.Errorf("Format = %q, want %q", cfg.Format, "json")
-	}
+	assert.Equal(t, "http://test.example.com", cfg.BaseURL)
+	assert.Equal(t, "12345", cfg.AccountID)
+	assert.Equal(t, "67890", cfg.ProjectID)
+	assert.Equal(t, "11111", cfg.TodolistID)
+	assert.Equal(t, "read,write", cfg.Scope)
+	assert.Equal(t, "/tmp/cache", cfg.CacheDir)
+	assert.False(t, cfg.CacheEnabled)
+	assert.Equal(t, "json", cfg.Format)
 
 	// Verify source tracking
-	if cfg.Sources["base_url"] != "global" {
-		t.Errorf("Sources[base_url] = %q, want %q", cfg.Sources["base_url"], "global")
-	}
-	if cfg.Sources["account_id"] != "global" {
-		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "global")
-	}
+	assert.Equal(t, "global", cfg.Sources["base_url"])
+	assert.Equal(t, "global", cfg.Sources["account_id"])
 }
 
 func TestLoadFromFileSkipsInvalidJSON(t *testing.T) {
@@ -90,15 +65,14 @@ func TestLoadFromFileSkipsInvalidJSON(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.json")
 
 	// Write invalid JSON
-	os.WriteFile(configPath, []byte("not valid json"), 0644)
+	err := os.WriteFile(configPath, []byte("not valid json"), 0644)
+	require.NoError(t, err)
 
 	cfg := Default()
 	loadFromFile(cfg, configPath, SourceGlobal)
 
 	// Should still have defaults
-	if cfg.BaseURL != "https://3.basecampapi.com" {
-		t.Errorf("BaseURL should remain default after invalid JSON, got %q", cfg.BaseURL)
-	}
+	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
 }
 
 func TestLoadFromFileSkipsMissingFile(t *testing.T) {
@@ -106,9 +80,7 @@ func TestLoadFromFileSkipsMissingFile(t *testing.T) {
 	loadFromFile(cfg, "/nonexistent/path/config.json", SourceGlobal)
 
 	// Should still have defaults
-	if cfg.BaseURL != "https://3.basecampapi.com" {
-		t.Errorf("BaseURL should remain default after missing file, got %q", cfg.BaseURL)
-	}
+	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -151,29 +123,15 @@ func TestLoadFromEnv(t *testing.T) {
 	loadFromEnv(cfg)
 
 	// Verify values loaded
-	if cfg.BaseURL != "http://env.example.com" {
-		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, "http://env.example.com")
-	}
-	if cfg.AccountID != "env-account" {
-		t.Errorf("AccountID = %q, want %q", cfg.AccountID, "env-account")
-	}
-	if cfg.ProjectID != "env-project" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "env-project")
-	}
-	if cfg.TodolistID != "env-todolist" {
-		t.Errorf("TodolistID = %q, want %q", cfg.TodolistID, "env-todolist")
-	}
-	if cfg.CacheDir != "/env/cache" {
-		t.Errorf("CacheDir = %q, want %q", cfg.CacheDir, "/env/cache")
-	}
-	if cfg.CacheEnabled != false {
-		t.Errorf("CacheEnabled = %v, want false", cfg.CacheEnabled)
-	}
+	assert.Equal(t, "http://env.example.com", cfg.BaseURL)
+	assert.Equal(t, "env-account", cfg.AccountID)
+	assert.Equal(t, "env-project", cfg.ProjectID)
+	assert.Equal(t, "env-todolist", cfg.TodolistID)
+	assert.Equal(t, "/env/cache", cfg.CacheDir)
+	assert.False(t, cfg.CacheEnabled)
 
 	// Verify source tracking
-	if cfg.Sources["base_url"] != "env" {
-		t.Errorf("Sources[base_url] = %q, want %q", cfg.Sources["base_url"], "env")
-	}
+	assert.Equal(t, "env", cfg.Sources["base_url"])
 }
 
 func TestLoadFromEnvPrecedence(t *testing.T) {
@@ -199,9 +157,7 @@ func TestLoadFromEnvPrecedence(t *testing.T) {
 	loadFromEnv(cfg)
 
 	// BCQ_BASE_URL should win (it's loaded last)
-	if cfg.BaseURL != "http://bcq.example.com" {
-		t.Errorf("BaseURL = %q, want %q (BCQ_ should override BASECAMP_)", cfg.BaseURL, "http://bcq.example.com")
-	}
+	assert.Equal(t, "http://bcq.example.com", cfg.BaseURL)
 }
 
 func TestApplyOverrides(t *testing.T) {
@@ -221,26 +177,14 @@ func TestApplyOverrides(t *testing.T) {
 
 	applyOverrides(cfg, overrides)
 
-	if cfg.AccountID != "from-flag" {
-		t.Errorf("AccountID = %q, want %q", cfg.AccountID, "from-flag")
-	}
-	if cfg.ProjectID != "from-flag" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "from-flag")
-	}
-	if cfg.BaseURL != "http://flag.example.com" {
-		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, "http://flag.example.com")
-	}
-	if cfg.CacheDir != "/flag/cache" {
-		t.Errorf("CacheDir = %q, want %q", cfg.CacheDir, "/flag/cache")
-	}
-	if cfg.Format != "json" {
-		t.Errorf("Format = %q, want %q", cfg.Format, "json")
-	}
+	assert.Equal(t, "from-flag", cfg.AccountID)
+	assert.Equal(t, "from-flag", cfg.ProjectID)
+	assert.Equal(t, "http://flag.example.com", cfg.BaseURL)
+	assert.Equal(t, "/flag/cache", cfg.CacheDir)
+	assert.Equal(t, "json", cfg.Format)
 
 	// Verify source tracking
-	if cfg.Sources["account_id"] != "flag" {
-		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "flag")
-	}
+	assert.Equal(t, "flag", cfg.Sources["account_id"])
 }
 
 func TestApplyOverridesSkipsEmpty(t *testing.T) {
@@ -254,12 +198,8 @@ func TestApplyOverridesSkipsEmpty(t *testing.T) {
 
 	applyOverrides(cfg, overrides)
 
-	if cfg.AccountID != "original" {
-		t.Errorf("AccountID = %q, want %q (empty override should not change)", cfg.AccountID, "original")
-	}
-	if cfg.Sources["account_id"] != "global" {
-		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "global")
-	}
+	assert.Equal(t, "original", cfg.AccountID)
+	assert.Equal(t, "global", cfg.Sources["account_id"])
 }
 
 func TestConfigLayering(t *testing.T) {
@@ -268,22 +208,28 @@ func TestConfigLayering(t *testing.T) {
 
 	// Create global config
 	globalDir := filepath.Join(tmpDir, ".config", "basecamp")
-	os.MkdirAll(globalDir, 0755)
+	err := os.MkdirAll(globalDir, 0755)
+	require.NoError(t, err)
 	globalConfig := map[string]any{
 		"account_id": "global-account",
 		"project_id": "global-project",
 	}
-	data, _ := json.Marshal(globalConfig)
-	os.WriteFile(filepath.Join(globalDir, "config.json"), data, 0644)
+	data, err := json.Marshal(globalConfig)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(globalDir, "config.json"), data, 0644)
+	require.NoError(t, err)
 
 	// Create local config with different values
 	localDir := filepath.Join(tmpDir, "project", ".basecamp")
-	os.MkdirAll(localDir, 0755)
+	err = os.MkdirAll(localDir, 0755)
+	require.NoError(t, err)
 	localConfig := map[string]any{
 		"project_id": "local-project", // overrides global
 	}
-	data, _ = json.Marshal(localConfig)
-	os.WriteFile(filepath.Join(localDir, "config.json"), data, 0644)
+	data, err = json.Marshal(localConfig)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(localDir, "config.json"), data, 0644)
+	require.NoError(t, err)
 
 	cfg := Default()
 
@@ -292,22 +238,14 @@ func TestConfigLayering(t *testing.T) {
 	loadFromFile(cfg, filepath.Join(localDir, "config.json"), SourceLocal)
 
 	// account_id from global (not in local)
-	if cfg.AccountID != "global-account" {
-		t.Errorf("AccountID = %q, want %q", cfg.AccountID, "global-account")
-	}
+	assert.Equal(t, "global-account", cfg.AccountID)
 
 	// project_id from local (overrides global)
-	if cfg.ProjectID != "local-project" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "local-project")
-	}
+	assert.Equal(t, "local-project", cfg.ProjectID)
 
 	// Source tracking
-	if cfg.Sources["account_id"] != "global" {
-		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "global")
-	}
-	if cfg.Sources["project_id"] != "local" {
-		t.Errorf("Sources[project_id] = %q, want %q", cfg.Sources["project_id"], "local")
-	}
+	assert.Equal(t, "global", cfg.Sources["account_id"])
+	assert.Equal(t, "local", cfg.Sources["project_id"])
 }
 
 func TestFullLayeringPrecedence(t *testing.T) {
@@ -329,19 +267,23 @@ func TestFullLayeringPrecedence(t *testing.T) {
 	localConfig := filepath.Join(tmpDir, "local.json")
 
 	// Global: sets all 3 values
-	data, _ := json.Marshal(map[string]any{
+	data, err := json.Marshal(map[string]any{
 		"account_id":  "global",
 		"project_id":  "global",
 		"todolist_id": "global",
 	})
-	os.WriteFile(globalConfig, data, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(globalConfig, data, 0644)
+	require.NoError(t, err)
 
 	// Local: sets project_id and todolist_id (overrides global)
-	data, _ = json.Marshal(map[string]any{
+	data, err = json.Marshal(map[string]any{
 		"project_id":  "local",
 		"todolist_id": "local",
 	})
-	os.WriteFile(localConfig, data, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(localConfig, data, 0644)
+	require.NoError(t, err)
 
 	// Env: sets todolist_id (overrides local)
 	os.Setenv("BASECAMP_TODOLIST_ID", "env")
@@ -358,19 +300,13 @@ func TestFullLayeringPrecedence(t *testing.T) {
 	})
 
 	// account_id: only global sets it
-	if cfg.AccountID != "global" {
-		t.Errorf("AccountID = %q, want %q", cfg.AccountID, "global")
-	}
+	assert.Equal(t, "global", cfg.AccountID)
 
 	// project_id: local overrides global
-	if cfg.ProjectID != "local" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "local")
-	}
+	assert.Equal(t, "local", cfg.ProjectID)
 
 	// todolist_id: env overrides local
-	if cfg.TodolistID != "env" {
-		t.Errorf("TodolistID = %q, want %q", cfg.TodolistID, "env")
-	}
+	assert.Equal(t, "env", cfg.TodolistID)
 
 	// Clean up
 	os.Unsetenv("BASECAMP_TODOLIST_ID")
@@ -391,9 +327,7 @@ func TestNormalizeBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := NormalizeBaseURL(tt.input)
-			if result != tt.expected {
-				t.Errorf("NormalizeBaseURL(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -412,18 +346,15 @@ func TestGlobalConfigDir(t *testing.T) {
 	// Test with XDG_CONFIG_HOME set
 	os.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	result := GlobalConfigDir()
-	if result != "/custom/config/basecamp" {
-		t.Errorf("GlobalConfigDir() = %q, want %q", result, "/custom/config/basecamp")
-	}
+	assert.Equal(t, "/custom/config/basecamp", result)
 
 	// Test without XDG_CONFIG_HOME (falls back to ~/.config)
 	os.Unsetenv("XDG_CONFIG_HOME")
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
 	expected := filepath.Join(home, ".config", "basecamp")
 	result = GlobalConfigDir()
-	if result != expected {
-		t.Errorf("GlobalConfigDir() = %q, want %q", result, expected)
-	}
+	assert.Equal(t, expected, result)
 }
 
 func TestCacheEnabledEnvParsing(t *testing.T) {
@@ -461,9 +392,7 @@ func TestCacheEnabledEnvParsing(t *testing.T) {
 			cfg.CacheEnabled = tt.startValue
 			loadFromEnv(cfg)
 
-			if cfg.CacheEnabled != tt.expected {
-				t.Errorf("CacheEnabled with env=%q: got %v, want %v", tt.envValue, cfg.CacheEnabled, tt.expected)
-			}
+			assert.Equal(t, tt.expected, cfg.CacheEnabled)
 		})
 	}
 }
@@ -486,9 +415,7 @@ func TestCacheEnabledEnvEmpty(t *testing.T) {
 	loadFromEnv(cfg)
 
 	// Should remain true (env var not set, so doesn't change)
-	if cfg.CacheEnabled != true {
-		t.Errorf("CacheEnabled should remain true when env not set, got %v", cfg.CacheEnabled)
-	}
+	assert.True(t, cfg.CacheEnabled)
 }
 
 func TestLoadFromFilePartialConfig(t *testing.T) {
@@ -500,8 +427,10 @@ func TestLoadFromFilePartialConfig(t *testing.T) {
 	partialConfig := map[string]any{
 		"project_id": "only-project",
 	}
-	data, _ := json.Marshal(partialConfig)
-	os.WriteFile(configPath, data, 0644)
+	data, err := json.Marshal(partialConfig)
+	require.NoError(t, err)
+	err = os.WriteFile(configPath, data, 0644)
+	require.NoError(t, err)
 
 	cfg := Default()
 	cfg.AccountID = "pre-existing-account"
@@ -510,19 +439,13 @@ func TestLoadFromFilePartialConfig(t *testing.T) {
 	loadFromFile(cfg, configPath, SourceLocal)
 
 	// project_id should be set
-	if cfg.ProjectID != "only-project" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "only-project")
-	}
+	assert.Equal(t, "only-project", cfg.ProjectID)
 
 	// account_id should remain unchanged
-	if cfg.AccountID != "pre-existing-account" {
-		t.Errorf("AccountID = %q, want %q (should not be changed)", cfg.AccountID, "pre-existing-account")
-	}
+	assert.Equal(t, "pre-existing-account", cfg.AccountID)
 
 	// Source for account_id should remain unchanged
-	if cfg.Sources["account_id"] != "manual" {
-		t.Errorf("Sources[account_id] = %q, want %q", cfg.Sources["account_id"], "manual")
-	}
+	assert.Equal(t, "manual", cfg.Sources["account_id"])
 }
 
 func TestLoadFromFileEmptyValues(t *testing.T) {
@@ -534,8 +457,10 @@ func TestLoadFromFileEmptyValues(t *testing.T) {
 		"account_id": "", // Empty
 		"project_id": "real-value",
 	}
-	data, _ := json.Marshal(configWithEmpty)
-	os.WriteFile(configPath, data, 0644)
+	data, err := json.Marshal(configWithEmpty)
+	require.NoError(t, err)
+	err = os.WriteFile(configPath, data, 0644)
+	require.NoError(t, err)
 
 	cfg := Default()
 	cfg.AccountID = "existing"
@@ -544,12 +469,8 @@ func TestLoadFromFileEmptyValues(t *testing.T) {
 	loadFromFile(cfg, configPath, SourceLocal)
 
 	// account_id should remain unchanged (empty value doesn't override)
-	if cfg.AccountID != "existing" {
-		t.Errorf("AccountID = %q, want %q (empty should not override)", cfg.AccountID, "existing")
-	}
+	assert.Equal(t, "existing", cfg.AccountID)
 
 	// project_id should be set
-	if cfg.ProjectID != "real-value" {
-		t.Errorf("ProjectID = %q, want %q", cfg.ProjectID, "real-value")
-	}
+	assert.Equal(t, "real-value", cfg.ProjectID)
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTraceWriter_WriteOperationStart(t *testing.T) {
@@ -18,12 +20,8 @@ func TestTraceWriter_WriteOperationStart(t *testing.T) {
 	w.WriteOperationStart(op)
 
 	output := buf.String()
-	if !strings.Contains(output, "Calling Todos.Complete") {
-		t.Errorf("expected 'Calling Todos.Complete', got: %s", output)
-	}
-	if !strings.HasPrefix(output, "[") {
-		t.Errorf("expected timestamp prefix, got: %s", output)
-	}
+	assert.Contains(t, output, "Calling Todos.Complete")
+	assert.True(t, strings.HasPrefix(output, "["), "expected timestamp prefix")
 }
 
 func TestTraceWriter_WriteOperationEnd(t *testing.T) {
@@ -34,12 +32,8 @@ func TestTraceWriter_WriteOperationEnd(t *testing.T) {
 	w.WriteOperationEnd(op, nil, 50*time.Millisecond)
 
 	output := buf.String()
-	if !strings.Contains(output, "Completed Todos.List") {
-		t.Errorf("expected 'Completed Todos.List', got: %s", output)
-	}
-	if !strings.Contains(output, "(50ms)") {
-		t.Errorf("expected duration, got: %s", output)
-	}
+	assert.Contains(t, output, "Completed Todos.List")
+	assert.Contains(t, output, "(50ms)", "expected duration")
 }
 
 func TestTraceWriter_WriteOperationEnd_Error(t *testing.T) {
@@ -50,12 +44,8 @@ func TestTraceWriter_WriteOperationEnd_Error(t *testing.T) {
 	w.WriteOperationEnd(op, errors.New("forbidden"), 50*time.Millisecond)
 
 	output := buf.String()
-	if !strings.Contains(output, "Failed Projects.Create") {
-		t.Errorf("expected 'Failed Projects.Create', got: %s", output)
-	}
-	if !strings.Contains(output, "forbidden") {
-		t.Errorf("expected error message, got: %s", output)
-	}
+	assert.Contains(t, output, "Failed Projects.Create")
+	assert.Contains(t, output, "forbidden", "expected error message")
 }
 
 func TestTraceWriter_WriteRequestStart(t *testing.T) {
@@ -66,9 +56,7 @@ func TestTraceWriter_WriteRequestStart(t *testing.T) {
 	w.WriteRequestStart(info)
 
 	output := buf.String()
-	if !strings.Contains(output, "-> GET /buckets/123/todos") {
-		t.Errorf("expected request line, got: %s", output)
-	}
+	assert.Contains(t, output, "-> GET /buckets/123/todos", "expected request line")
 }
 
 func TestTraceWriter_WriteRequestEnd(t *testing.T) {
@@ -80,12 +68,8 @@ func TestTraceWriter_WriteRequestEnd(t *testing.T) {
 	w.WriteRequestEnd(info, result)
 
 	output := buf.String()
-	if !strings.Contains(output, "<- 200") {
-		t.Errorf("expected response line, got: %s", output)
-	}
-	if !strings.Contains(output, "(45ms)") {
-		t.Errorf("expected duration, got: %s", output)
-	}
+	assert.Contains(t, output, "<- 200", "expected response line")
+	assert.Contains(t, output, "(45ms)", "expected duration")
 }
 
 func TestTraceWriter_WriteRequestEnd_Cached(t *testing.T) {
@@ -97,9 +81,7 @@ func TestTraceWriter_WriteRequestEnd_Cached(t *testing.T) {
 	w.WriteRequestEnd(info, result)
 
 	output := buf.String()
-	if !strings.Contains(output, "(cached)") {
-		t.Errorf("expected cached indicator, got: %s", output)
-	}
+	assert.Contains(t, output, "(cached)", "expected cached indicator")
 }
 
 func TestTraceWriter_WriteRequestEnd_Error(t *testing.T) {
@@ -111,12 +93,8 @@ func TestTraceWriter_WriteRequestEnd_Error(t *testing.T) {
 	w.WriteRequestEnd(info, result)
 
 	output := buf.String()
-	if !strings.Contains(output, "ERROR") {
-		t.Errorf("expected ERROR, got: %s", output)
-	}
-	if !strings.Contains(output, "connection refused") {
-		t.Errorf("expected error message, got: %s", output)
-	}
+	assert.Contains(t, output, "ERROR", "expected ERROR")
+	assert.Contains(t, output, "connection refused", "expected error message")
 }
 
 func TestTraceWriter_WriteRetry(t *testing.T) {
@@ -127,12 +105,8 @@ func TestTraceWriter_WriteRetry(t *testing.T) {
 	w.WriteRetry(info, 2, errors.New("timeout"))
 
 	output := buf.String()
-	if !strings.Contains(output, "RETRY #2") {
-		t.Errorf("expected 'RETRY #2', got: %s", output)
-	}
-	if !strings.Contains(output, "timeout") {
-		t.Errorf("expected error message, got: %s", output)
-	}
+	assert.Contains(t, output, "RETRY #2")
+	assert.Contains(t, output, "timeout", "expected error message")
 }
 
 func TestTraceWriter_Timestamps(t *testing.T) {
@@ -146,18 +120,12 @@ func TestTraceWriter_Timestamps(t *testing.T) {
 	w.WriteOperationStart(op2)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d", len(lines))
-	}
+	require.Equal(t, 2, len(lines), "expected 2 lines")
 
 	// Parse timestamps and verify second is later
 	// Format: [0.123s] ...
-	if !strings.HasPrefix(lines[0], "[0.") {
-		t.Errorf("expected timestamp prefix on line 1: %s", lines[0])
-	}
-	if !strings.HasPrefix(lines[1], "[0.") {
-		t.Errorf("expected timestamp prefix on line 2: %s", lines[1])
-	}
+	assert.True(t, strings.HasPrefix(lines[0], "[0."), "expected timestamp prefix on line 1")
+	assert.True(t, strings.HasPrefix(lines[1], "[0."), "expected timestamp prefix on line 2")
 }
 
 func TestTraceWriter_Reset(t *testing.T) {
@@ -179,12 +147,8 @@ func TestTraceWriter_Reset(t *testing.T) {
 
 	// First output should have larger timestamp than second (after reset)
 	// This is a basic check - both should start with [0.0
-	if !strings.HasPrefix(firstOutput, "[0.0") {
-		t.Errorf("first output should start with near-zero timestamp: %s", firstOutput)
-	}
-	if !strings.HasPrefix(secondOutput, "[0.0") {
-		t.Errorf("second output after reset should start with near-zero timestamp: %s", secondOutput)
-	}
+	assert.True(t, strings.HasPrefix(firstOutput, "[0.0"), "first output should start with near-zero timestamp")
+	assert.True(t, strings.HasPrefix(secondOutput, "[0.0"), "second output after reset should start with near-zero timestamp")
 }
 
 func TestScrubURL(t *testing.T) {
@@ -253,9 +217,7 @@ func TestScrubURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := scrubURL(tt.input)
-			if result != tt.expected {
-				t.Errorf("scrubURL(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "scrubURL(%q)", tt.input)
 		})
 	}
 }
@@ -274,11 +236,7 @@ func TestWriteRequestStart_ScrubsURLs(t *testing.T) {
 	output := buf.String()
 
 	// Should NOT contain the actual token
-	if strings.Contains(output, "secret123") {
-		t.Errorf("URL should be scrubbed, but output contains secret: %s", output)
-	}
+	assert.NotContains(t, output, "secret123", "URL should be scrubbed, but output contains secret")
 	// Should contain REDACTED
-	if !strings.Contains(output, "REDACTED") {
-		t.Errorf("URL should contain [REDACTED], got: %s", output)
-	}
+	assert.Contains(t, output, "REDACTED", "URL should contain [REDACTED]")
 }

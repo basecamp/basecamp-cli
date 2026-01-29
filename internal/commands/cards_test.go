@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -60,9 +62,7 @@ func TestIsNumericID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := isNumericID(tt.input)
-			if result != tt.expected {
-				t.Errorf("isNumericID(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "isNumericID(%q)", tt.input)
 		})
 	}
 }
@@ -127,18 +127,12 @@ func TestCardsColumnColorRequiresColor(t *testing.T) {
 	cmd := newCardsColumnColorCmd(&project)
 
 	err := executeCommand(cmd, app, "456") // column ID but no --color
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Check error type
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "--color is required" {
-			t.Errorf("expected '--color is required', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--color is required", e.Message)
 	}
 }
 
@@ -153,18 +147,12 @@ func TestCardsStepsRequiresCardID(t *testing.T) {
 	cmd := newCardsStepsCmd(&project)
 
 	err := executeCommand(cmd, app) // no card ID
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Check error type
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "Card ID required (bcq cards steps <card_id>)" {
-			t.Errorf("expected 'Card ID required (bcq cards steps <card_id>)', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "Card ID required (bcq cards steps <card_id>)", e.Message)
 	}
 }
 
@@ -178,15 +166,10 @@ func TestCardsStepCreateRequiresTitle(t *testing.T) {
 
 	// Only card flag, no title
 	err := executeCommand(cmd, app, "--card", "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates required flags first
-	errStr := err.Error()
-	if errStr != `required flag(s) "title" not set` {
-		t.Errorf("expected required flag error for title, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
 }
 
 // TestCardsStepCreateRequiresCard tests that --card is required for step create.
@@ -199,15 +182,10 @@ func TestCardsStepCreateRequiresCard(t *testing.T) {
 
 	// Only title flag, no card
 	err := executeCommand(cmd, app, "--title", "My step")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates required flags first
-	errStr := err.Error()
-	if errStr != `required flag(s) "card" not set` {
-		t.Errorf("expected required flag error for card, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "card" not set`, err.Error())
 }
 
 // TestCardsStepUpdateRequiresFields tests that at least one field is required for step update.
@@ -219,17 +197,11 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 	cmd := newCardsStepUpdateCmd(&project)
 
 	err := executeCommand(cmd, app, "456") // step ID but no update fields
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No update fields provided" {
-			t.Errorf("expected 'No update fields provided', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No update fields provided", e.Message)
 	}
 }
 
@@ -243,17 +215,11 @@ func TestCardsStepMoveRequiresCard(t *testing.T) {
 
 	// Step ID and position but no card
 	err := executeCommand(cmd, app, "456", "--position", "1")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "--card is required" {
-			t.Errorf("expected '--card is required', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--card is required", e.Message)
 	}
 }
 
@@ -267,17 +233,11 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 
 	// Step ID and card but no position
 	err := executeCommand(cmd, app, "456", "--card", "789")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "--position is required (0-indexed)" {
-			t.Errorf("expected '--position is required (0-indexed)', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--position is required (0-indexed)", e.Message)
 	}
 }
 
@@ -289,17 +249,11 @@ func TestCardsCmdRequiresProject(t *testing.T) {
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "list")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -312,17 +266,11 @@ func TestCardsListColumnNameRequiresCardTable(t *testing.T) {
 
 	// Use column name (not numeric) without --card-table
 	err := executeCommand(cmd, app, "list", "--column", "Done")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "--card-table is required when using --column with a name" {
-			t.Errorf("expected '--card-table is required when using --column with a name', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--card-table is required when using --column with a name", e.Message)
 	}
 }
 
@@ -336,22 +284,15 @@ func TestCardsColumnCreateRequiresTitle(t *testing.T) {
 	cmd := newCardsColumnCreateCmd(&project, &cardTable)
 
 	err := executeCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Check if it's a Cobra required flag error or our custom error
 	var e *output.Error
 	if errors.As(err, &e) {
-		if e.Message != "--title is required" {
-			t.Errorf("expected '--title is required', got %q", e.Message)
-		}
+		assert.Equal(t, "--title is required", e.Message)
 	} else {
 		// Cobra validates required flags with a different error format
-		errStr := err.Error()
-		if errStr != `required flag(s) "title" not set` {
-			t.Errorf("expected required flag error for title, got %q", errStr)
-		}
+		assert.Equal(t, `required flag(s) "title" not set`, err.Error())
 	}
 }
 
@@ -364,17 +305,11 @@ func TestCardsColumnUpdateRequiresFields(t *testing.T) {
 	cmd := newCardsColumnUpdateCmd(&project)
 
 	err := executeCommand(cmd, app, "456") // column ID but no update fields
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No update fields provided" {
-			t.Errorf("expected 'No update fields provided', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No update fields provided", e.Message)
 	}
 }
 
@@ -388,18 +323,12 @@ func TestCardsColumnMoveRequiresPosition(t *testing.T) {
 	cmd := newCardsColumnMoveCmd(&project, &cardTable)
 
 	err := executeCommand(cmd, app, "456") // column ID but no position
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
 		// Match the actual error message format
-		if e.Message != "--position required (1-indexed)" {
-			t.Errorf("expected '--position required (1-indexed)', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+		assert.Equal(t, "--position required (1-indexed)", e.Message)
 	}
 }
 
@@ -414,15 +343,10 @@ func TestCardsMoveRequiresTo(t *testing.T) {
 
 	// Card ID but no --to
 	err := executeCommand(cmd, app, "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates required flags
-	errStr := err.Error()
-	if errStr != `required flag(s) "to" not set` {
-		t.Errorf("expected required flag error for --to, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "to" not set`, err.Error())
 }
 
 // TestCardsMoveRequiresCardTable tests that --card-table is required for cards move when using --to with a column name.
@@ -436,17 +360,11 @@ func TestCardsMoveRequiresCardTable(t *testing.T) {
 
 	// Card ID with --to (column name) but no --card-table
 	err := executeCommand(cmd, app, "456", "--to", "Done")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "--card-table is required when --to is a column name" {
-			t.Errorf("expected '--card-table is required when --to is a column name', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--card-table is required when --to is a column name", e.Message)
 	}
 }
 
@@ -459,15 +377,10 @@ func TestCardShortcutRequiresTitle(t *testing.T) {
 
 	// No --title flag
 	err := executeCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates required flags
-	errStr := err.Error()
-	if errStr != `required flag(s) "title" not set` {
-		t.Errorf("expected required flag error for --title, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
 }
 
 // TestCardsColumnsRequiresProject tests that No project specified for columns listing.
@@ -480,17 +393,11 @@ func TestCardsColumnsRequiresProject(t *testing.T) {
 	cmd := newCardsColumnsCmd(&project, &cardTable)
 
 	err := executeCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -503,17 +410,11 @@ func TestCardsColumnShowRequiresProject(t *testing.T) {
 	cmd := newCardsColumnShowCmd(&project)
 
 	err := executeCommand(cmd, app, "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -526,17 +427,11 @@ func TestCardsStepCompleteRequiresProject(t *testing.T) {
 	cmd := newCardsStepCompleteCmd(&project)
 
 	err := executeCommand(cmd, app, "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -549,17 +444,11 @@ func TestCardsStepUncompleteRequiresProject(t *testing.T) {
 	cmd := newCardsStepUncompleteCmd(&project)
 
 	err := executeCommand(cmd, app, "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -584,9 +473,8 @@ func TestCardsListNumericColumnDoesNotRequireCardTable(t *testing.T) {
 	if err != nil {
 		var e *output.Error
 		if errors.As(err, &e) {
-			if e.Message == "--card-table is required when using --column with a name" {
-				t.Error("Numeric column ID should not require --card-table")
-			}
+			assert.NotEqual(t, "--card-table is required when using --column with a name", e.Message,
+				"Numeric column ID should not require --card-table")
 		}
 	}
 }
@@ -606,9 +494,8 @@ func TestCardsCreateNumericColumnDoesNotRequireCardTable(t *testing.T) {
 	if err != nil {
 		var e *output.Error
 		if errors.As(err, &e) {
-			if e.Message == "--card-table is required when using --column with a name" {
-				t.Error("Numeric column ID should not require --card-table for create")
-			}
+			assert.NotEqual(t, "--card-table is required when using --column with a name", e.Message,
+				"Numeric column ID should not require --card-table for create")
 		}
 	}
 }
@@ -627,16 +514,13 @@ func TestCardsMoveWithNumericTo(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--to", "12345")
 
 	// Expect some error (likely auth), but NOT the card-table requirement error
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
 	if errors.As(err, &e) {
 		// Should NOT be the card-table error - numeric IDs bypass that requirement
-		if e.Message == "--card-table is required when --to is a column name" {
-			t.Errorf("numeric --to should not require --card-table, got %q", e.Message)
-		}
+		assert.NotEqual(t, "--card-table is required when --to is a column name", e.Message,
+			"numeric --to should not require --card-table")
 	}
 }
 
@@ -653,18 +537,12 @@ func TestCardsMovePartialNumericRequiresCardTable(t *testing.T) {
 
 	// "123abc" looks like a number but isn't - should require --card-table
 	err := executeCommand(cmd, app, "456", "--to", "123abc")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
 		// MUST be the card-table error - partial numeric is NOT a valid ID
-		if e.Message != "--card-table is required when --to is a column name" {
-			t.Errorf("expected '--card-table is required when --to is a column name', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+		assert.Equal(t, "--card-table is required when --to is a column name", e.Message)
 	}
 }
 
@@ -703,15 +581,12 @@ func TestCardsColumnNameVariations(t *testing.T) {
 			var e *output.Error
 			if tt.expectCardTable && err != nil {
 				if errors.As(err, &e) {
-					if e.Message != "--card-table is required when using --column with a name" {
-						t.Errorf("expected card-table required error, got %q", e.Message)
-					}
+					assert.Equal(t, "--card-table is required when using --column with a name", e.Message)
 				}
 			} else if !tt.expectCardTable && err != nil {
 				if errors.As(err, &e) {
-					if e.Message == "--card-table is required when using --column with a name" {
-						t.Errorf("numeric column %q should not require --card-table", tt.columnArg)
-					}
+					assert.NotEqual(t, "--card-table is required when using --column with a name", e.Message,
+						"numeric column %q should not require --card-table", tt.columnArg)
 				}
 			}
 		})
@@ -780,9 +655,7 @@ func TestFormatCardTableIDs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatCardTableIDs(tt.cardTables)
-			if result != tt.expected {
-				t.Errorf("formatCardTableIDs() = %q, want %q", result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -835,14 +708,9 @@ func TestFormatCardTableMatches(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatCardTableMatches(tt.cardTables)
-			if len(result) != len(tt.expected) {
-				t.Errorf("formatCardTableMatches() length = %d, want %d", len(result), len(tt.expected))
-				return
-			}
+			assert.Equal(t, len(tt.expected), len(result))
 			for i, v := range result {
-				if v != tt.expected[i] {
-					t.Errorf("formatCardTableMatches()[%d] = %q, want %q", i, v, tt.expected[i])
-				}
+				assert.Equal(t, tt.expected[i], v, "formatCardTableMatches()[%d]", i)
 			}
 		})
 	}
@@ -860,14 +728,9 @@ func TestCardsCreateRequiresTitle(t *testing.T) {
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "create")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
-	errStr := err.Error()
-	if errStr != `required flag(s) "title" not set` {
-		t.Errorf("expected required flag error for --title, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
 }
 
 // TestCardsUpdateRequiresCardID tests that card ID is required for update.
@@ -880,15 +743,10 @@ func TestCardsUpdateRequiresCardID(t *testing.T) {
 
 	// Update with fields but no card ID
 	err := executeCommand(cmd, app, "update", "--title", "New Title")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates args count first
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected Cobra args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestCardsUpdateRequiresFields tests that at least one field is required for update.
@@ -899,17 +757,11 @@ func TestCardsUpdateRequiresFields(t *testing.T) {
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "update", "456") // card ID but no fields
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "At least one field required" {
-			t.Errorf("expected 'At least one field required', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "At least one field required", e.Message)
 	}
 }
 
@@ -922,15 +774,10 @@ func TestCardsShowRequiresCardID(t *testing.T) {
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "show")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates args count first
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected Cobra args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestCardsMoveRequiresCardID tests that card ID is required for move.
@@ -945,15 +792,10 @@ func TestCardsMoveRequiresCardID(t *testing.T) {
 
 	// No card ID, just --to flag
 	err := executeCommand(cmd, app, "--to", "Done")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates args count first
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected Cobra args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // =============================================================================
@@ -968,17 +810,11 @@ func TestCardShortcutRequiresProject(t *testing.T) {
 	cmd := NewCardCmd()
 
 	err := executeCommand(cmd, app, "--title", "Test Card")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -992,17 +828,11 @@ func TestCardsStepDeleteRequiresProject(t *testing.T) {
 	cmd := newCardsStepDeleteCmd(&project)
 
 	err := executeCommand(cmd, app, "456") // step ID but no project
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "No project specified", e.Message)
 	}
 }
 
@@ -1015,13 +845,8 @@ func TestCardsStepDeleteRequiresStepID(t *testing.T) {
 	cmd := newCardsStepDeleteCmd(&project)
 
 	err := executeCommand(cmd, app) // no step ID
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.NotNil(t, err, "expected error, got nil")
 
 	// Cobra validates args count first
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected Cobra args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }

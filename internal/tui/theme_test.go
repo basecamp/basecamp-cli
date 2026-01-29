@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseSimpleTOML(t *testing.T) {
@@ -104,18 +107,14 @@ foreground = #cdd6f4`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parseSimpleTOML([]byte(tt.input))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseSimpleTOML() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err)
 				return
 			}
-			if len(got) != len(tt.want) {
-				t.Errorf("parseSimpleTOML() got %d entries, want %d", len(got), len(tt.want))
-				return
-			}
+			require.NoError(t, err)
+			assert.Equal(t, len(tt.want), len(got))
 			for k, v := range tt.want {
-				if got[k] != v {
-					t.Errorf("parseSimpleTOML()[%q] = %q, want %q", k, got[k], v)
-				}
+				assert.Equal(t, v, got[k], "key %q", k)
 			}
 		})
 	}
@@ -146,9 +145,7 @@ func TestIsValidHexColor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			got := isValidHexColor(tt.input)
-			if got != tt.want {
-				t.Errorf("isValidHexColor(%q) = %v, want %v", tt.input, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -168,30 +165,14 @@ func TestMapColorsToTheme(t *testing.T) {
 
 		theme := mapColorsToTheme(colors)
 
-		if theme.Primary.Dark != "#89b4fa" {
-			t.Errorf("Primary.Dark = %q, want %q", theme.Primary.Dark, "#89b4fa")
-		}
-		if theme.Error.Dark != "#f38ba8" {
-			t.Errorf("Error.Dark = %q, want %q", theme.Error.Dark, "#f38ba8")
-		}
-		if theme.Success.Dark != "#a6e3a1" {
-			t.Errorf("Success.Dark = %q, want %q", theme.Success.Dark, "#a6e3a1")
-		}
-		if theme.Warning.Dark != "#f9e2af" {
-			t.Errorf("Warning.Dark = %q, want %q", theme.Warning.Dark, "#f9e2af")
-		}
-		if theme.Secondary.Dark != "#bac2de" {
-			t.Errorf("Secondary.Dark = %q, want %q", theme.Secondary.Dark, "#bac2de")
-		}
-		if theme.Muted.Dark != "#585b70" {
-			t.Errorf("Muted.Dark = %q, want %q", theme.Muted.Dark, "#585b70")
-		}
-		if theme.Foreground.Dark != "#cdd6f4" {
-			t.Errorf("Foreground.Dark = %q, want %q", theme.Foreground.Dark, "#cdd6f4")
-		}
-		if theme.Background.Dark != "#1e1e2e" {
-			t.Errorf("Background.Dark = %q, want %q", theme.Background.Dark, "#1e1e2e")
-		}
+		assert.Equal(t, "#89b4fa", theme.Primary.Dark)
+		assert.Equal(t, "#f38ba8", theme.Error.Dark)
+		assert.Equal(t, "#a6e3a1", theme.Success.Dark)
+		assert.Equal(t, "#f9e2af", theme.Warning.Dark)
+		assert.Equal(t, "#bac2de", theme.Secondary.Dark)
+		assert.Equal(t, "#585b70", theme.Muted.Dark)
+		assert.Equal(t, "#cdd6f4", theme.Foreground.Dark)
+		assert.Equal(t, "#1e1e2e", theme.Background.Dark)
 	})
 
 	t.Run("partial color set uses defaults", func(t *testing.T) {
@@ -202,16 +183,9 @@ func TestMapColorsToTheme(t *testing.T) {
 		theme := mapColorsToTheme(colors)
 		defaults := DefaultTheme()
 
-		if theme.Primary.Dark != "#89b4fa" {
-			t.Errorf("Primary.Dark = %q, want %q", theme.Primary.Dark, "#89b4fa")
-		}
-
-		if theme.Error.Dark != defaults.Error.Dark {
-			t.Errorf("Error.Dark = %q, want default %q", theme.Error.Dark, defaults.Error.Dark)
-		}
-		if theme.Success.Dark != defaults.Success.Dark {
-			t.Errorf("Success.Dark = %q, want default %q", theme.Success.Dark, defaults.Success.Dark)
-		}
+		assert.Equal(t, "#89b4fa", theme.Primary.Dark)
+		assert.Equal(t, defaults.Error.Dark, theme.Error.Dark)
+		assert.Equal(t, defaults.Success.Dark, theme.Success.Dark)
 	})
 
 	t.Run("empty map returns all defaults", func(t *testing.T) {
@@ -219,12 +193,8 @@ func TestMapColorsToTheme(t *testing.T) {
 		theme := mapColorsToTheme(colors)
 		defaults := DefaultTheme()
 
-		if theme.Primary.Dark != defaults.Primary.Dark {
-			t.Errorf("Primary.Dark = %q, want default %q", theme.Primary.Dark, defaults.Primary.Dark)
-		}
-		if theme.Error.Dark != defaults.Error.Dark {
-			t.Errorf("Error.Dark = %q, want default %q", theme.Error.Dark, defaults.Error.Dark)
-		}
+		assert.Equal(t, defaults.Primary.Dark, theme.Primary.Dark)
+		assert.Equal(t, defaults.Error.Dark, theme.Error.Dark)
 	})
 
 	t.Run("color4 fallback for primary", func(t *testing.T) {
@@ -233,9 +203,7 @@ func TestMapColorsToTheme(t *testing.T) {
 		}
 
 		theme := mapColorsToTheme(colors)
-		if theme.Primary.Dark != "#0000ff" {
-			t.Errorf("Primary.Dark = %q, want %q (color4 fallback)", theme.Primary.Dark, "#0000ff")
-		}
+		assert.Equal(t, "#0000ff", theme.Primary.Dark, "color4 fallback")
 	})
 }
 
@@ -252,46 +220,33 @@ color1 = "#f38ba8"
 color2 = "#a6e3a1"
 color3 = "#f9e2af"
 `
-		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-			t.Fatalf("Failed to write test file: %v", err)
-		}
+		err := os.WriteFile(testFile, []byte(content), 0644)
+		require.NoError(t, err, "Failed to write test file")
 
 		theme, err := LoadThemeFromFile(testFile)
-		if err != nil {
-			t.Fatalf("LoadThemeFromFile failed: %v", err)
-		}
+		require.NoError(t, err)
 
-		if theme.Primary.Dark != "#89b4fa" {
-			t.Errorf("Primary.Dark = %q, want %q", theme.Primary.Dark, "#89b4fa")
-		}
-		if theme.Error.Dark != "#f38ba8" {
-			t.Errorf("Error.Dark = %q, want %q", theme.Error.Dark, "#f38ba8")
-		}
+		assert.Equal(t, "#89b4fa", theme.Primary.Dark)
+		assert.Equal(t, "#f38ba8", theme.Error.Dark)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
 		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml")
-		if err == nil {
-			t.Error("LoadThemeFromFile() should return error for missing file")
-		}
+		assert.Error(t, err, "LoadThemeFromFile() should return error for missing file")
 	})
 }
 
 func TestNoColorTheme(t *testing.T) {
 	theme := NoColorTheme()
 
-	if theme.Primary.Light != "" || theme.Primary.Dark != "" {
-		t.Errorf("Primary should be empty, got Light=%q Dark=%q", theme.Primary.Light, theme.Primary.Dark)
-	}
-	if theme.Error.Light != "" || theme.Error.Dark != "" {
-		t.Errorf("Error should be empty, got Light=%q Dark=%q", theme.Error.Light, theme.Error.Dark)
-	}
-	if theme.Success.Light != "" || theme.Success.Dark != "" {
-		t.Errorf("Success should be empty, got Light=%q Dark=%q", theme.Success.Light, theme.Success.Dark)
-	}
-	if theme.Foreground.Light != "" || theme.Foreground.Dark != "" {
-		t.Errorf("Foreground should be empty, got Light=%q Dark=%q", theme.Foreground.Light, theme.Foreground.Dark)
-	}
+	assert.Empty(t, theme.Primary.Light)
+	assert.Empty(t, theme.Primary.Dark)
+	assert.Empty(t, theme.Error.Light)
+	assert.Empty(t, theme.Error.Dark)
+	assert.Empty(t, theme.Success.Light)
+	assert.Empty(t, theme.Success.Dark)
+	assert.Empty(t, theme.Foreground.Light)
+	assert.Empty(t, theme.Foreground.Dark)
 }
 
 func TestResolveTheme(t *testing.T) {
@@ -300,10 +255,8 @@ func TestResolveTheme(t *testing.T) {
 
 		theme := ResolveTheme()
 
-		if theme.Primary.Light != "" || theme.Primary.Dark != "" {
-			t.Errorf("With NO_COLOR, Primary should be empty, got Light=%q Dark=%q",
-				theme.Primary.Light, theme.Primary.Dark)
-		}
+		assert.Empty(t, theme.Primary.Light)
+		assert.Empty(t, theme.Primary.Dark)
 	})
 
 	t.Run("BCQ_THEME loads custom file", func(t *testing.T) {
@@ -313,17 +266,14 @@ func TestResolveTheme(t *testing.T) {
 		content := `accent = "#ff0000"
 foreground = "#ffffff"
 `
-		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-			t.Fatalf("Failed to write test file: %v", err)
-		}
+		err := os.WriteFile(testFile, []byte(content), 0644)
+		require.NoError(t, err, "Failed to write test file")
 
 		t.Setenv("BCQ_THEME", testFile)
 
 		theme := ResolveTheme()
 
-		if theme.Primary.Dark != "#ff0000" {
-			t.Errorf("With BCQ_THEME, Primary.Dark = %q, want %q", theme.Primary.Dark, "#ff0000")
-		}
+		assert.Equal(t, "#ff0000", theme.Primary.Dark)
 	})
 
 	t.Run("BCQ_THEME invalid file falls back", func(t *testing.T) {
@@ -332,9 +282,8 @@ foreground = "#ffffff"
 		theme := ResolveTheme()
 
 		// Should fall back to Omarchy or default - just check it's not empty
-		if theme.Primary.Dark == "" && theme.Primary.Light == "" {
-			t.Error("With invalid BCQ_THEME, should fall back to a valid theme")
-		}
+		assert.False(t, theme.Primary.Dark == "" && theme.Primary.Light == "",
+			"With invalid BCQ_THEME, should fall back to a valid theme")
 	})
 
 	t.Run("default theme when no env vars", func(t *testing.T) {
@@ -347,9 +296,8 @@ foreground = "#ffffff"
 
 		// Should return a valid theme (either user theme or default)
 		// We just verify it's not empty - could be user config or default
-		if theme.Primary.Dark == "" && theme.Primary.Light == "" {
-			t.Error("ResolveTheme() returned theme with empty Primary color")
-		}
+		assert.False(t, theme.Primary.Dark == "" && theme.Primary.Light == "",
+			"ResolveTheme() returned theme with empty Primary color")
 	})
 }
 
@@ -358,33 +306,27 @@ func TestLoadUserTheme(t *testing.T) {
 		// Create a temporary home directory structure
 		tmpHome := t.TempDir()
 		themeDir := filepath.Join(tmpHome, ".config", "bcq", "theme")
-		if err := os.MkdirAll(themeDir, 0755); err != nil {
-			t.Fatalf("Failed to create theme dir: %v", err)
-		}
+		err := os.MkdirAll(themeDir, 0755)
+		require.NoError(t, err, "Failed to create theme dir")
 
 		content := `accent = "#00ff00"
 foreground = "#eeeeee"
 `
 		themeFile := filepath.Join(themeDir, "colors.toml")
-		if err := os.WriteFile(themeFile, []byte(content), 0644); err != nil {
-			t.Fatalf("Failed to write theme file: %v", err)
-		}
+		err = os.WriteFile(themeFile, []byte(content), 0644)
+		require.NoError(t, err, "Failed to write theme file")
 
 		// LoadUserTheme uses os.UserHomeDir, so we test via BCQ_THEME instead
 		// since we can't easily mock the home directory
 		t.Setenv("BCQ_THEME", themeFile)
 		theme := ResolveTheme()
 
-		if theme.Primary.Dark != "#00ff00" {
-			t.Errorf("Primary.Dark = %q, want %q", theme.Primary.Dark, "#00ff00")
-		}
+		assert.Equal(t, "#00ff00", theme.Primary.Dark)
 	})
 
 	t.Run("returns error for missing config", func(t *testing.T) {
 		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml")
-		if err == nil {
-			t.Error("LoadThemeFromFile should return error for missing file")
-		}
+		assert.Error(t, err, "LoadThemeFromFile should return error for missing file")
 	})
 }
 
@@ -401,8 +343,6 @@ func TestGetOrDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		got := getOrDefault(tt.value, tt.defaultValue)
-		if got != tt.want {
-			t.Errorf("getOrDefault(%q, %q) = %q, want %q", tt.value, tt.defaultValue, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got)
 	}
 }

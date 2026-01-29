@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGatingHooksAllowsWhenAllPrimitivesAllow(t *testing.T) {
@@ -22,12 +24,8 @@ func TestGatingHooksAllowsWhenAllPrimitivesAllow(t *testing.T) {
 	}
 
 	ctx, err := hooks.OnOperationGate(context.Background(), op)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if ctx == nil {
-		t.Fatal("expected non-nil context")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, ctx)
 }
 
 func TestGatingHooksRejectsWhenCircuitOpen(t *testing.T) {
@@ -50,12 +48,8 @@ func TestGatingHooksRejectsWhenCircuitOpen(t *testing.T) {
 	}
 
 	_, err := hooks.OnOperationGate(context.Background(), op)
-	if err == nil {
-		t.Fatal("expected error when circuit is open")
-	}
-	if !errors.Is(err, basecamp.ErrCircuitOpen) {
-		t.Errorf("expected ErrCircuitOpen, got %v", err)
-	}
+	require.Error(t, err, "expected error when circuit is open")
+	assert.True(t, errors.Is(err, basecamp.ErrCircuitOpen), "expected ErrCircuitOpen")
 }
 
 func TestGatingHooksRejectsWhenRateLimited(t *testing.T) {
@@ -77,21 +71,15 @@ func TestGatingHooksRejectsWhenRateLimited(t *testing.T) {
 
 	// First request should succeed
 	ctx, err := hooks.OnOperationGate(context.Background(), op)
-	if err != nil {
-		t.Fatalf("expected first request to succeed, got %v", err)
-	}
+	require.NoError(t, err, "expected first request to succeed")
 
 	// Release bulkhead (use ctx from OnOperationGate to properly release the slot)
 	hooks.OnOperationEnd(ctx, op, nil, time.Millisecond)
 
 	// Second request should fail (no tokens left)
 	_, err = hooks.OnOperationGate(context.Background(), op)
-	if err == nil {
-		t.Fatal("expected error when rate limited")
-	}
-	if !errors.Is(err, basecamp.ErrRateLimited) {
-		t.Errorf("expected ErrRateLimited, got %v", err)
-	}
+	require.Error(t, err, "expected error when rate limited")
+	assert.True(t, errors.Is(err, basecamp.ErrRateLimited), "expected ErrRateLimited")
 }
 
 func TestGatingHooksRejectsWhenBulkheadFull(t *testing.T) {
@@ -120,9 +108,7 @@ func TestGatingHooksRejectsWhenBulkheadFull(t *testing.T) {
 	// This test verifies the hooks don't crash when bulkhead is involved
 	if err != nil {
 		// If it somehow detected the PID as alive, it would be ErrBulkheadFull
-		if !errors.Is(err, basecamp.ErrBulkheadFull) {
-			t.Errorf("expected ErrBulkheadFull or nil, got %v", err)
-		}
+		assert.True(t, errors.Is(err, basecamp.ErrBulkheadFull), "expected ErrBulkheadFull or nil")
 	}
 }
 
@@ -142,24 +128,18 @@ func TestGatingHooksReleasesBulkheadOnEnd(t *testing.T) {
 
 	// Gate should acquire a bulkhead slot
 	ctx, err := hooks.OnOperationGate(context.Background(), op)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
+	require.NoError(t, err)
 
 	// Check that we have a slot
 	state, _ := store.Load()
-	if len(state.Bulkhead.ActivePIDs) != 1 {
-		t.Errorf("expected 1 active PID after gate, got %d", len(state.Bulkhead.ActivePIDs))
-	}
+	assert.Equal(t, 1, len(state.Bulkhead.ActivePIDs), "expected 1 active PID after gate")
 
 	// End should release the slot
 	hooks.OnOperationEnd(ctx, op, nil, time.Millisecond)
 
 	// Check that slot is released
 	state, _ = store.Load()
-	if len(state.Bulkhead.ActivePIDs) != 0 {
-		t.Errorf("expected 0 active PIDs after end, got %d", len(state.Bulkhead.ActivePIDs))
-	}
+	assert.Equal(t, 0, len(state.Bulkhead.ActivePIDs), "expected 0 active PIDs after end")
 }
 
 func TestGatingHooksRecordsCircuitBreakerSuccess(t *testing.T) {
@@ -189,9 +169,7 @@ func TestGatingHooksRecordsCircuitBreakerSuccess(t *testing.T) {
 
 	// Circuit should be closed now
 	state, _ := store.Load()
-	if state.CircuitBreaker.State != CircuitClosed {
-		t.Errorf("expected circuit to close after success, got %s", state.CircuitBreaker.State)
-	}
+	assert.Equal(t, CircuitClosed, state.CircuitBreaker.State, "expected circuit to close after success")
 }
 
 func TestGatingHooksRecordsCircuitBreakerFailure(t *testing.T) {
@@ -219,9 +197,7 @@ func TestGatingHooksRecordsCircuitBreakerFailure(t *testing.T) {
 
 	// Circuit should be open now
 	state, _ := store.Load()
-	if state.CircuitBreaker.State != CircuitOpen {
-		t.Errorf("expected circuit to open after failures, got %s", state.CircuitBreaker.State)
-	}
+	assert.Equal(t, CircuitOpen, state.CircuitBreaker.State, "expected circuit to open after failures")
 }
 
 func TestIsCircuitBreakerError(t *testing.T) {
@@ -244,9 +220,7 @@ func TestIsCircuitBreakerError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isCircuitBreakerError(tt.err)
-			if result != tt.expected {
-				t.Errorf("isCircuitBreakerError(%v) = %v, expected %v", tt.err, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "isCircuitBreakerError(%v)", tt.err)
 		})
 	}
 }
@@ -275,15 +249,11 @@ func TestGatingHooksOnOperationStartAndRequestMethods(t *testing.T) {
 
 	// OnOperationStart
 	newCtx := hooks.OnOperationStart(ctx, basecamp.OperationInfo{})
-	if newCtx == nil {
-		t.Error("OnOperationStart should return non-nil context")
-	}
+	assert.NotNil(t, newCtx, "OnOperationStart should return non-nil context")
 
 	// OnRequestStart
 	newCtx = hooks.OnRequestStart(ctx, basecamp.RequestInfo{})
-	if newCtx == nil {
-		t.Error("OnRequestStart should return non-nil context")
-	}
+	assert.NotNil(t, newCtx, "OnRequestStart should return non-nil context")
 
 	// OnRequestEnd (should not panic)
 	hooks.OnRequestEnd(ctx, basecamp.RequestInfo{}, basecamp.RequestResult{})
@@ -340,9 +310,7 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 
 	// First request transitions to half-open and reserves the slot
 	ctx3, err := hooks.OnOperationGate(context.Background(), op)
-	if err != nil {
-		t.Fatalf("expected first request to succeed, got %v", err)
-	}
+	require.NoError(t, err, "expected first request to succeed")
 
 	// Simulate a crash: don't call OnOperationEnd
 	// Release the bulkhead slot manually so it doesn't block
@@ -366,7 +334,5 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 
 	// This should detect stale attempts and allow the request
 	_, err = hooks2.OnOperationGate(context.Background(), op)
-	if err != nil {
-		t.Fatalf("expected request to succeed after stale attempts reset, got %v", err)
-	}
+	require.NoError(t, err, "expected request to succeed after stale attempts reset")
 }

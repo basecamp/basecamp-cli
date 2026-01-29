@@ -1,6 +1,10 @@
 package commands
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestIsNumeric(t *testing.T) {
 	tests := []struct {
@@ -28,9 +32,7 @@ func TestIsNumeric(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := isNumeric(tt.input)
-			if result != tt.expected {
-				t.Errorf("isNumeric(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "isNumeric(%q)", tt.input)
 		})
 	}
 }

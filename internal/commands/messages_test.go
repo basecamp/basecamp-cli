@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -89,18 +91,11 @@ func TestMessagesRequiresProject(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "No project specified", e.Message)
 }
 
 // TestMessagesListRequiresProject tests that messages list requires --project.
@@ -111,18 +106,11 @@ func TestMessagesListRequiresProject(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "list")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "No project specified", e.Message)
 }
 
 // TestMessagesCreateRequiresSubject tests that messages create requires --subject.
@@ -133,15 +121,10 @@ func TestMessagesCreateRequiresSubject(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "create")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required flags
-	errStr := err.Error()
-	if errStr != `required flag(s) "subject" not set` {
-		t.Errorf("expected required flag error for --subject, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "subject" not set`, err.Error())
 }
 
 // TestMessagesShowRequiresID tests that messages show requires an ID argument.
@@ -152,15 +135,10 @@ func TestMessagesShowRequiresID(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "show")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required args
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestMessagesPinRequiresID tests that messages pin requires an ID argument.
@@ -171,14 +149,9 @@ func TestMessagesPinRequiresID(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "pin")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestMessagesUnpinRequiresID tests that messages unpin requires an ID argument.
@@ -189,14 +162,9 @@ func TestMessagesUnpinRequiresID(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "unpin")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestMessagesUpdateRequiresID tests that messages update requires an ID argument.
@@ -207,14 +175,9 @@ func TestMessagesUpdateRequiresID(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "update")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestMessagesUpdateRequiresContent tests that messages update requires --subject or --content.
@@ -225,18 +188,11 @@ func TestMessagesUpdateRequiresContent(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "update", "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "at least one of --subject or --content is required" {
-			t.Errorf("expected 'at least one of --subject or --content is required', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "at least one of --subject or --content is required", e.Message)
 }
 
 // TestMessageShortcutRequiresSubject tests that message command requires --subject.
@@ -247,15 +203,10 @@ func TestMessageShortcutRequiresSubject(t *testing.T) {
 	cmd := NewMessageCmd()
 
 	err := executeMessagesCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required flags
-	errStr := err.Error()
-	if errStr != `required flag(s) "subject" not set` {
-		t.Errorf("expected required flag error for --subject, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "subject" not set`, err.Error())
 }
 
 // TestMessageShortcutRequiresProject tests that message command requires --project.
@@ -267,18 +218,11 @@ func TestMessageShortcutRequiresProject(t *testing.T) {
 
 	// Need to set subject to bypass that validation
 	err := executeMessagesCommand(cmd, app, "--subject", "Test")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "No project specified", e.Message)
 }
 
 // TestMessagesHasMessageBoardFlag tests that --message-board flag is available.
@@ -286,13 +230,9 @@ func TestMessagesHasMessageBoardFlag(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	flag := cmd.PersistentFlags().Lookup("message-board")
-	if flag == nil {
-		t.Fatal("expected --message-board flag to exist")
-	}
+	require.NotNil(t, flag, "expected --message-board flag to exist")
 
-	if flag.Usage != "Message board ID (required if project has multiple)" {
-		t.Errorf("unexpected flag usage: %q", flag.Usage)
-	}
+	assert.Equal(t, "Message board ID (required if project has multiple)", flag.Usage)
 }
 
 // TestMessageShortcutHasMessageBoardFlag tests that message shortcut has --message-board flag.
@@ -300,13 +240,9 @@ func TestMessageShortcutHasMessageBoardFlag(t *testing.T) {
 	cmd := NewMessageCmd()
 
 	flag := cmd.Flags().Lookup("message-board")
-	if flag == nil {
-		t.Fatal("expected --message-board flag to exist")
-	}
+	require.NotNil(t, flag, "expected --message-board flag to exist")
 
-	if flag.Usage != "Message board ID (required if project has multiple)" {
-		t.Errorf("unexpected flag usage: %q", flag.Usage)
-	}
+	assert.Equal(t, "Message board ID (required if project has multiple)", flag.Usage)
 }
 
 // TestMessagesSubcommands tests that all expected subcommands exist.
@@ -316,12 +252,8 @@ func TestMessagesSubcommands(t *testing.T) {
 	expected := []string{"list", "show", "create", "update", "pin", "unpin"}
 	for _, name := range expected {
 		sub, _, err := cmd.Find([]string{name})
-		if err != nil {
-			t.Errorf("expected subcommand %q to exist, got error: %v", name, err)
-		}
-		if sub == nil {
-			t.Errorf("expected subcommand %q to exist, got nil", name)
-		}
+		require.NoError(t, err, "expected subcommand %q to exist", name)
+		require.NotNil(t, sub, "expected subcommand %q to exist", name)
 	}
 }
 
@@ -329,7 +261,6 @@ func TestMessagesSubcommands(t *testing.T) {
 func TestMessagesAliases(t *testing.T) {
 	cmd := NewMessagesCmd()
 
-	if len(cmd.Aliases) != 1 || cmd.Aliases[0] != "msgs" {
-		t.Errorf("expected alias 'msgs', got %v", cmd.Aliases)
-	}
+	require.Len(t, cmd.Aliases, 1)
+	assert.Equal(t, "msgs", cmd.Aliases[0])
 }

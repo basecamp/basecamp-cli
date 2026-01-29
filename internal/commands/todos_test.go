@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -89,18 +91,11 @@ func TestTodosRequiresProject(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "No project specified", e.Message)
 }
 
 // TestTodosListRequiresProject tests that todos list requires --project.
@@ -111,18 +106,11 @@ func TestTodosListRequiresProject(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "list")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "No project specified", e.Message)
 }
 
 // TestTodosCreateRequiresContent tests that todos create requires content.
@@ -134,18 +122,11 @@ func TestTodosCreateRequiresContent(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "create")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "Todo content required" {
-			t.Errorf("expected 'Todo content required', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "Todo content required", e.Message)
 }
 
 // TestTodosShowRequiresID tests that todos show requires an ID argument.
@@ -156,14 +137,9 @@ func TestTodosShowRequiresID(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "show")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestTodosCompleteRequiresID tests that todos complete requires an ID argument.
@@ -174,15 +150,10 @@ func TestTodosCompleteRequiresID(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "complete")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required args
-	errStr := err.Error()
-	if errStr != "requires at least 1 arg(s), only received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
 }
 
 // TestTodosUncompleteRequiresID tests that todos uncomplete requires an ID argument.
@@ -193,15 +164,10 @@ func TestTodosUncompleteRequiresID(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "uncomplete")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required args
-	errStr := err.Error()
-	if errStr != "requires at least 1 arg(s), only received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
 }
 
 // TestTodosPositionRequiresID tests that todos position requires an ID argument.
@@ -212,15 +178,10 @@ func TestTodosPositionRequiresID(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "position", "--to", "1")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required args
-	errStr := err.Error()
-	if errStr != "accepts 1 arg(s), received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestTodosPositionRequiresPosition tests that todos position requires --to.
@@ -231,15 +192,10 @@ func TestTodosPositionRequiresPosition(t *testing.T) {
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "position", "456")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required flags
-	errStr := err.Error()
-	if errStr != `required flag(s) "to" not set` {
-		t.Errorf("expected required flag error for --to, got %q", errStr)
-	}
+	assert.Equal(t, `required flag(s) "to" not set`, err.Error())
 }
 
 // TestTodoShortcutRequiresContent tests that todo shortcut requires content.
@@ -251,18 +207,11 @@ func TestTodoShortcutRequiresContent(t *testing.T) {
 	cmd := NewTodoCmd()
 
 	err := executeTodosCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "Todo content required" {
-			t.Errorf("expected 'Todo content required', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "Todo content required", e.Message)
 }
 
 // TestTodoShortcutRequiresProject tests that todo shortcut requires project.
@@ -273,18 +222,11 @@ func TestTodoShortcutRequiresProject(t *testing.T) {
 	cmd := NewTodoCmd()
 
 	err := executeTodosCommand(cmd, app, "--content", "Test todo")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Message != "No project specified" {
-			t.Errorf("expected 'No project specified', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
-	}
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "No project specified", e.Message)
 }
 
 // TestDoneRequiresID tests that done command requires an ID.
@@ -295,15 +237,10 @@ func TestDoneRequiresID(t *testing.T) {
 	cmd := NewDoneCmd()
 
 	err := executeTodosCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required args
-	errStr := err.Error()
-	if errStr != "requires at least 1 arg(s), only received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
 }
 
 // TestReopenRequiresID tests that reopen command requires an ID.
@@ -314,15 +251,10 @@ func TestReopenRequiresID(t *testing.T) {
 	cmd := NewReopenCmd()
 
 	err := executeTodosCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Cobra validates required args
-	errStr := err.Error()
-	if errStr != "requires at least 1 arg(s), only received 0" {
-		t.Errorf("expected args error, got %q", errStr)
-	}
+	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
 }
 
 // TestTodosSubcommands tests that all expected subcommands exist.
@@ -332,12 +264,8 @@ func TestTodosSubcommands(t *testing.T) {
 	expected := []string{"list", "show", "create", "complete", "uncomplete", "position"}
 	for _, name := range expected {
 		sub, _, err := cmd.Find([]string{name})
-		if err != nil {
-			t.Errorf("expected subcommand %q to exist, got error: %v", name, err)
-		}
-		if sub == nil {
-			t.Errorf("expected subcommand %q to exist, got nil", name)
-		}
+		require.NoError(t, err, "expected subcommand %q to exist", name)
+		require.NotNil(t, sub, "expected subcommand %q to exist", name)
 	}
 }
 
@@ -358,9 +286,7 @@ func TestTodosHasListFlag(t *testing.T) {
 			flag = listCmd.Flags().Lookup("list")
 		}
 	}
-	if flag == nil {
-		t.Fatal("expected --list flag to exist")
-	}
+	require.NotNil(t, flag, "expected --list flag to exist")
 }
 
 // TestTodosHasAssigneeFlag tests that --assignee flag is available.
@@ -369,14 +295,10 @@ func TestTodosHasAssigneeFlag(t *testing.T) {
 
 	// Check list subcommand for assignee flag
 	listCmd, _, _ := cmd.Find([]string{"list"})
-	if listCmd == nil {
-		t.Fatal("expected list subcommand to exist")
-	}
+	require.NotNil(t, listCmd, "expected list subcommand to exist")
 
 	flag := listCmd.Flags().Lookup("assignee")
-	if flag == nil {
-		t.Fatal("expected --assignee flag on list subcommand")
-	}
+	require.NotNil(t, flag, "expected --assignee flag on list subcommand")
 }
 
 // Note: Invalid assignee format testing requires API mocking because
