@@ -19,60 +19,47 @@ import (
 //
 // Returns the resolved person ID and the source it came from.
 func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
-	// Try interactive prompt if available
-	if !r.IsInteractive() {
-		return nil, output.ErrUsage("Person ID required")
-	}
-
 	// Ensure account is configured
 	if r.config.AccountID == "" {
 		return nil, output.ErrUsage("Account must be resolved before fetching people")
 	}
 
-	// Create a page fetcher for the paginated picker.
-	var cachedPeople []basecamp.Person
-	fetcher := func(ctx context.Context, cursor string) (*tui.PageResult, error) {
-		// Only fetch on the first call (cursor is empty)
-		if cursor != "" {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
-		}
+	// Non-interactive mode requires explicit person ID
+	if !r.IsInteractive() {
+		return nil, output.ErrUsage("Person ID required")
+	}
 
-		// Fetch all people using SDK
-		people, err := r.sdk.ForAccount(r.config.AccountID).People().List(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch people: %w", err)
-		}
+	// Interactive mode - fetch people for picker or auto-selection
+	people, err := r.sdk.ForAccount(r.config.AccountID).People().List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch people: %w", err)
+	}
 
-		if len(people) == 0 {
-			return nil, output.ErrNotFoundHint("people", "", "No people found in this account")
-		}
+	if len(people) == 0 {
+		return nil, output.ErrNotFoundHint("people", "", "No people found in this account")
+	}
 
-		// Cache for potential single-person shortcut
-		cachedPeople = people
-
-		// Sort people alphabetically by name
-		sortPeopleForPicker(people)
-
-		// Convert to picker items
-		items := make([]tui.PickerItem, len(people))
-		for i, p := range people {
-			items[i] = personToPickerItem(p)
-		}
-
-		return &tui.PageResult{
-			Items:      items,
-			HasMore:    false,
-			NextCursor: "done",
+	// Auto-select if exactly one person exists
+	if len(people) == 1 {
+		return &ResolvedValue{
+			Value:  fmt.Sprintf("%d", people[0].ID),
+			Source: SourceDefault,
 		}, nil
 	}
 
-	// Use paginated picker with loading spinner
-	selected, err := tui.NewPaginatedPicker(ctx, fetcher,
-		tui.WithPaginatedPickerTitle("Select a person"),
-		tui.WithLoadingMessage("Loading people..."),
+	// Sort people alphabetically by name
+	sortPeopleForPicker(people)
+
+	// Convert to picker items
+	items := make([]tui.PickerItem, len(people))
+	for i, p := range people {
+		items[i] = personToPickerItem(p)
+	}
+
+	// Show picker
+	selected, err := tui.NewPicker(items,
+		tui.WithPickerTitle("Select a person"),
+		tui.WithEmptyMessage("No people found"),
 	).Run()
 
 	if err != nil {
@@ -82,15 +69,9 @@ func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 		return nil, output.ErrUsage("person selection canceled")
 	}
 
-	// If only one person was available, note the source as default
-	source := SourcePrompt
-	if len(cachedPeople) == 1 {
-		source = SourceDefault
-	}
-
 	return &ResolvedValue{
 		Value:  selected.ID,
-		Source: source,
+		Source: SourcePrompt,
 	}, nil
 }
 
@@ -98,11 +79,6 @@ func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 // This is useful when you want to limit the selection to people who have
 // access to a specific project.
 func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*ResolvedValue, error) {
-	// Try interactive prompt if available
-	if !r.IsInteractive() {
-		return nil, output.ErrUsage("Person ID required")
-	}
-
 	// Ensure account is configured
 	if r.config.AccountID == "" {
 		return nil, output.ErrUsage("Account must be resolved before fetching people")
@@ -112,56 +88,48 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 		return nil, output.ErrUsage("Project must be resolved before fetching project people")
 	}
 
-	// Create a page fetcher for the paginated picker.
-	var cachedPeople []basecamp.Person
-	fetcher := func(ctx context.Context, cursor string) (*tui.PageResult, error) {
-		// Only fetch on the first call (cursor is empty)
-		if cursor != "" {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
-		}
+	// Non-interactive mode requires explicit person ID
+	if !r.IsInteractive() {
+		return nil, output.ErrUsage("Person ID required")
+	}
 
-		// Parse project ID
-		bucketID, err := strconv.ParseInt(projectID, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid project ID: %w", err)
-		}
+	// Parse project ID
+	bucketID, err := strconv.ParseInt(projectID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid project ID: %w", err)
+	}
 
-		// Fetch project people using SDK
-		people, err := r.sdk.ForAccount(r.config.AccountID).People().ListProjectPeople(ctx, bucketID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch project people: %w", err)
-		}
+	// Interactive mode - fetch project people for picker or auto-selection
+	people, err := r.sdk.ForAccount(r.config.AccountID).People().ListProjectPeople(ctx, bucketID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch project people: %w", err)
+	}
 
-		if len(people) == 0 {
-			return nil, output.ErrNotFoundHint("people", projectID, "No members found in this project")
-		}
+	if len(people) == 0 {
+		return nil, output.ErrNotFoundHint("people", projectID, "No members found in this project")
+	}
 
-		// Cache for potential single-person shortcut
-		cachedPeople = people
-
-		// Sort people alphabetically by name
-		sortPeopleForPicker(people)
-
-		// Convert to picker items
-		items := make([]tui.PickerItem, len(people))
-		for i, p := range people {
-			items[i] = personToPickerItem(p)
-		}
-
-		return &tui.PageResult{
-			Items:      items,
-			HasMore:    false,
-			NextCursor: "done",
+	// Auto-select if exactly one person exists
+	if len(people) == 1 {
+		return &ResolvedValue{
+			Value:  fmt.Sprintf("%d", people[0].ID),
+			Source: SourceDefault,
 		}, nil
 	}
 
-	// Use paginated picker with loading spinner
-	selected, err := tui.NewPaginatedPicker(ctx, fetcher,
-		tui.WithPaginatedPickerTitle("Select a person"),
-		tui.WithLoadingMessage("Loading project members..."),
+	// Sort people alphabetically by name
+	sortPeopleForPicker(people)
+
+	// Convert to picker items
+	items := make([]tui.PickerItem, len(people))
+	for i, p := range people {
+		items[i] = personToPickerItem(p)
+	}
+
+	// Show picker
+	selected, err := tui.NewPicker(items,
+		tui.WithPickerTitle("Select a person"),
+		tui.WithEmptyMessage("No people found"),
 	).Run()
 
 	if err != nil {
@@ -171,15 +139,9 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 		return nil, output.ErrUsage("person selection canceled")
 	}
 
-	// If only one person was available, note the source as default
-	source := SourcePrompt
-	if len(cachedPeople) == 1 {
-		source = SourceDefault
-	}
-
 	return &ResolvedValue{
 		Value:  selected.ID,
-		Source: source,
+		Source: SourcePrompt,
 	}, nil
 }
 

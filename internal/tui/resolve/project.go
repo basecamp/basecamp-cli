@@ -36,64 +36,47 @@ func (r *Resolver) Project(ctx context.Context) (*ResolvedValue, error) {
 		}, nil
 	}
 
-	// 3. Try interactive prompt if available
-	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
-	}
-
 	// Ensure account is configured
 	if r.config.AccountID == "" {
 		return nil, output.ErrUsage("Account must be resolved before fetching projects")
 	}
 
-	// Create a page fetcher for the paginated picker.
-	// The Basecamp SDK handles pagination internally, so we load all projects
-	// in the first fetch. The paginated picker still provides a nice loading
-	// spinner and progressive UI.
-	var cachedProjects []basecamp.Project
-	fetcher := func(ctx context.Context, cursor string) (*tui.PageResult, error) {
-		// Only fetch on the first call (cursor is empty)
-		if cursor != "" {
-			// Already loaded all projects
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
-		}
+	// 3. Non-interactive mode requires explicit project
+	if !r.IsInteractive() {
+		return nil, output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+	}
 
-		// Fetch all projects using SDK (SDK handles pagination internally)
-		projects, err := r.sdk.ForAccount(r.config.AccountID).Projects().List(ctx, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch projects: %w", err)
-		}
+	// 4. Interactive mode - fetch projects for picker or auto-selection
+	projects, err := r.sdk.ForAccount(r.config.AccountID).Projects().List(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch projects: %w", err)
+	}
 
-		if len(projects) == 0 {
-			return nil, output.ErrNotFoundHint("projects", "", "No projects found in this account")
-		}
+	if len(projects) == 0 {
+		return nil, output.ErrNotFoundHint("projects", "", "No projects found in this account")
+	}
 
-		// Cache for potential single-project shortcut
-		cachedProjects = projects
-
-		// Sort projects: bookmarked first, then by name
-		sortProjectsForPicker(projects)
-
-		// Convert to picker items
-		items := make([]tui.PickerItem, len(projects))
-		for i, proj := range projects {
-			items[i] = projectToPickerItem(proj)
-		}
-
-		return &tui.PageResult{
-			Items:      items,
-			HasMore:    false,
-			NextCursor: "done", // Mark as done so we don't fetch again
+	// Auto-select if exactly one project exists
+	if len(projects) == 1 {
+		return &ResolvedValue{
+			Value:  fmt.Sprintf("%d", projects[0].ID),
+			Source: SourceDefault,
 		}, nil
 	}
 
-	// Use paginated picker with loading spinner
-	selected, err := tui.NewPaginatedPicker(ctx, fetcher,
-		tui.WithPaginatedPickerTitle("Select a project"),
-		tui.WithLoadingMessage("Loading projects..."),
+	// Sort projects: bookmarked first, then by name
+	sortProjectsForPicker(projects)
+
+	// Convert to picker items
+	items := make([]tui.PickerItem, len(projects))
+	for i, proj := range projects {
+		items[i] = projectToPickerItem(proj)
+	}
+
+	// Show picker
+	selected, err := tui.NewPicker(items,
+		tui.WithPickerTitle("Select a project"),
+		tui.WithEmptyMessage("No projects found"),
 	).Run()
 
 	if err != nil {
@@ -103,15 +86,9 @@ func (r *Resolver) Project(ctx context.Context) (*ResolvedValue, error) {
 		return nil, output.ErrUsage("project selection canceled")
 	}
 
-	// If only one project was available, note the source as default
-	source := SourcePrompt
-	if len(cachedProjects) == 1 {
-		source = SourceDefault
-	}
-
 	return &ResolvedValue{
 		Value:  selected.ID,
-		Source: source,
+		Source: SourcePrompt,
 	}, nil
 }
 

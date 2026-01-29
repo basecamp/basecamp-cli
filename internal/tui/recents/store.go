@@ -22,10 +22,11 @@ type Item struct {
 
 // Store manages recently used items.
 type Store struct {
-	mu       sync.RWMutex
-	items    map[string][]Item // keyed by type (e.g., "project", "todolist", "recording")
-	maxItems int
-	path     string
+	mu        sync.RWMutex
+	items     map[string][]Item // keyed by type (e.g., "project", "todolist", "recording")
+	maxItems  int
+	path      string
+	lastError error // last error from save(), for debugging
 }
 
 // NewStore creates a new recent items store.
@@ -127,19 +128,34 @@ func (s *Store) load() {
 }
 
 // save writes the store to disk.
+// Errors are stored in lastError for debugging (recents are non-critical).
 func (s *Store) save() {
 	// Ensure directory exists
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0750); err != nil {
+		s.lastError = err
 		return
 	}
 
 	data, err := json.MarshalIndent(s.items, "", "  ")
 	if err != nil {
+		s.lastError = err
 		return
 	}
 
-	_ = os.WriteFile(s.path, data, 0600)
+	if err := os.WriteFile(s.path, data, 0600); err != nil {
+		s.lastError = err
+		return
+	}
+	s.lastError = nil
+}
+
+// LastError returns the last error from a save operation, if any.
+// Useful for debugging persistence issues.
+func (s *Store) LastError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastError
 }
 
 // ItemTypes for common entities.

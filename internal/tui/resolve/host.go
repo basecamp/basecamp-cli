@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/basecamp/bcq/internal/output"
 	"github.com/basecamp/bcq/internal/tui"
@@ -21,7 +22,7 @@ func (r *Resolver) Host(ctx context.Context) (*ResolvedValue, error) {
 	// 1. Check CLI flag
 	if r.flags.Host != "" {
 		return &ResolvedValue{
-			Value:  r.flags.Host,
+			Value:  normalizeHost(r.flags.Host),
 			Source: SourceFlag,
 		}, nil
 	}
@@ -29,7 +30,7 @@ func (r *Resolver) Host(ctx context.Context) (*ResolvedValue, error) {
 	// 2. Check environment variable
 	if host := os.Getenv("BCQ_HOST"); host != "" {
 		return &ResolvedValue{
-			Value:  host,
+			Value:  normalizeHost(host),
 			Source: SourceConfig, // Treat env var as config-level
 		}, nil
 	}
@@ -114,6 +115,50 @@ func (r *Resolver) promptForHost() (*ResolvedValue, error) {
 		Value:  selected.ID, // ID is the base URL
 		Source: SourcePrompt,
 	}, nil
+}
+
+// normalizeHost converts a host string to a full URL.
+// - Empty string returns empty
+// - localhost/127.0.0.1 defaults to http://
+// - Other bare hostnames default to https://
+// - Full URLs are used as-is
+func normalizeHost(host string) string {
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return host
+	}
+	if isLocalhost(host) {
+		return "http://" + host
+	}
+	return "https://" + host
+}
+
+// isLocalhost returns true if host is localhost, a .localhost subdomain,
+// 127.0.0.1, or [::1] (with optional port).
+func isLocalhost(host string) bool {
+	// Strip port if present for easier matching
+	hostWithoutPort := host
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		// Check if this is IPv6 bracketed address
+		if !strings.HasPrefix(host, "[") || strings.HasPrefix(host, "[::1]:") {
+			hostWithoutPort = host[:idx]
+		}
+	}
+
+	// Check for localhost or .localhost subdomain
+	if hostWithoutPort == "localhost" || strings.HasSuffix(hostWithoutPort, ".localhost") {
+		return true
+	}
+	if hostWithoutPort == "127.0.0.1" {
+		return true
+	}
+	// IPv6 loopback (must be bracketed for valid URL)
+	if hostWithoutPort == "[::1]" {
+		return true
+	}
+	return false
 }
 
 // HostWithPersist resolves the host and optionally prompts to save it.

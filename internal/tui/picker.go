@@ -78,7 +78,7 @@ func WithLoading(msg string) PickerOption {
 	}
 }
 
-// WithRecentItems prepends recently used items to the list with a separator.
+// WithRecentItems prepends recently used items to the list, marked with a prefix.
 func WithRecentItems(items []PickerItem) PickerOption {
 	return func(m *pickerModel) {
 		m.recentItems = items
@@ -372,7 +372,18 @@ func (m pickerModel) View() string {
 
 	// Items
 	if len(m.filtered) == 0 {
-		b.WriteString(m.styles.Muted.Render(m.emptyMessage))
+		query := strings.TrimSpace(m.textInput.Value())
+		switch {
+		// True empty state: no items available at all
+		case len(m.items) == 0:
+			b.WriteString(m.styles.Muted.Render(m.emptyMessage))
+		// There are items, but none match the current query
+		case len(m.items) > 0 && query != "":
+			b.WriteString(m.styles.Muted.Render("No matches found"))
+		// Fallback
+		default:
+			b.WriteString(m.styles.Muted.Render(m.emptyMessage))
+		}
 	} else {
 		// Calculate visible range
 		start := m.scrollOffset

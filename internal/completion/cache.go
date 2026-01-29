@@ -346,11 +346,14 @@ func loadConfigForCompletion() *configForCompletion {
 	// Try global config
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
-		home, _ := os.UserHomeDir()
-		configDir = filepath.Join(home, ".config")
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			configDir = filepath.Join(home, ".config")
+		}
 	}
-	globalPath := filepath.Join(configDir, "basecamp", "config.json")
-	loadHostsFromFile(cfg, globalPath)
+	if configDir != "" {
+		globalPath := filepath.Join(configDir, "basecamp", "config.json")
+		loadHostsFromFile(cfg, globalPath)
+	}
 
 	// Try local config
 	localPath := filepath.Join(".basecamp", "config.json")
