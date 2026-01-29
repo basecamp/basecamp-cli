@@ -281,10 +281,6 @@ Supports batch commenting on multiple recordings at once.`,
 				return output.ErrUsage("Comment content required")
 			}
 
-			if len(recordingIDs) == 0 {
-				return output.ErrUsage("--on requires a recording ID")
-			}
-
 			if err := app.RequireAccount(); err != nil {
 				return err
 			}
@@ -309,6 +305,19 @@ Supports batch commenting on multiple recordings at once.`,
 			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
+			}
+
+			// If no recording specified, try interactive resolution
+			if len(recordingIDs) == 0 {
+				onFlag := ""
+				if len(recordingIDs) > 0 {
+					onFlag = recordingIDs[0]
+				}
+				target, err := app.Resolve().Comment(cmd.Context(), onFlag, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				recordingIDs = []string{fmt.Sprintf("%d", target.RecordingID)}
 			}
 
 			// Expand comma-separated IDs
