@@ -63,7 +63,7 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 
 	// 4. Multiple todolists - need interactive prompt
 	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No todolist specified", "Use --list or set todolist_id in .basecamp/config.json")
+		return nil, output.ErrUsageHint("No todolist specified", "Use --todolist or set todolist_id in .basecamp/config.json")
 	}
 
 	// Convert to picker items for interactive selection
@@ -93,6 +93,11 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 
 // fetchTodolists retrieves all todolists for a project.
 func (r *Resolver) fetchTodolists(ctx context.Context, projectID string) ([]basecamp.Todolist, error) {
+	// Ensure account is configured
+	if r.config.AccountID == "" {
+		return nil, output.ErrUsage("Account must be resolved before fetching todolists")
+	}
+
 	// Parse project ID
 	bucketID, err := strconv.ParseInt(projectID, 10, 64)
 	if err != nil {

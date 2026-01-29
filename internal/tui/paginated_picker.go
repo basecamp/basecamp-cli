@@ -164,6 +164,7 @@ func (m paginatedPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hasMore = msg.hasMore
 		m.nextCursor = msg.nextCursor
 		m.loadingMore = false
+		m.fetchError = nil // Clear any previous transient error on success
 
 		if msg.isInitial {
 			m.initialLoading = false

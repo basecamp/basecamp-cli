@@ -285,7 +285,7 @@ Supports batch commenting on multiple recordings at once.`,
 				return err
 			}
 
-			// Resolve project
+			// Resolve project - check local flag, app flag, config, then interactive
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -294,7 +294,10 @@ Supports batch commenting on multiple recordings at once.`,
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
