@@ -47,10 +47,7 @@ func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 		}
 
 		if len(people) == 0 {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
+			return nil, output.ErrNotFoundHint("people", "", "No people found in this account")
 		}
 
 		// Cache for potential single-person shortcut
@@ -139,10 +136,7 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 		}
 
 		if len(people) == 0 {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
+			return nil, output.ErrNotFoundHint("people", projectID, "No members found in this project")
 		}
 
 		// Cache for potential single-person shortcut

@@ -51,6 +51,7 @@ func NewRootCmd() *cobra.Command {
 			baseURL := resolveHostFlag(flags.Host, cfg)
 			if baseURL != "" {
 				cfg.BaseURL = baseURL
+				cfg.Sources["base_url"] = string(config.SourceFlag)
 			} else if flags.Host == "" {
 				// No explicit host - try interactive resolution if multiple hosts configured
 				resolvedURL, err := resolveHost(cfg, flags)
@@ -59,6 +60,7 @@ func NewRootCmd() *cobra.Command {
 				}
 				if resolvedURL != "" {
 					cfg.BaseURL = resolvedURL
+					cfg.Sources["base_url"] = "prompt"
 				}
 			}
 

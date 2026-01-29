@@ -453,7 +453,7 @@ func (p *Picker) Run() (*PickerItem, error) {
 
 	// Auto-select if only one item and option is set
 	if m.autoSelectSingle && len(m.items) == 1 {
-		return &m.items[0], nil
+		return m.getOriginalItem(m.items[0].ID), nil
 	}
 
 	program := tea.NewProgram(m)

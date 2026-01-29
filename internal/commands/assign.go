@@ -53,6 +53,9 @@ Person can be:
 
 			// If no assignee specified, try interactive selection
 			if assignee == "" {
+				if !app.IsInteractive() {
+					return output.ErrUsageHint("Person to assign is required", "Use --to <person>")
+				}
 				selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
 				if err != nil {
 					return err
@@ -203,6 +206,9 @@ Person can be:
 
 			// If no assignee specified, try interactive selection
 			if assignee == "" {
+				if !app.IsInteractive() {
+					return output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
+				}
 				selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
 				if err != nil {
 					return err

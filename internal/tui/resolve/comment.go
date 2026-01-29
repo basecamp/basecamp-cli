@@ -122,6 +122,7 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 
 	// Fetch different types of recordings that support comments
 	var allRecordings []basecamp.Recording
+	var errs []error
 
 	// Fetch todos
 	todos, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
@@ -130,7 +131,9 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 		Sort:      "updated_at",
 		Direction: "desc",
 	})
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("todos: %w", err))
+	} else {
 		allRecordings = append(allRecordings, todos...)
 	}
 
@@ -141,7 +144,9 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 		Sort:      "updated_at",
 		Direction: "desc",
 	})
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("messages: %w", err))
+	} else {
 		allRecordings = append(allRecordings, messages...)
 	}
 
@@ -152,8 +157,15 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 		Sort:      "updated_at",
 		Direction: "desc",
 	})
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("documents: %w", err))
+	} else {
 		allRecordings = append(allRecordings, docs...)
+	}
+
+	// If all fetches failed, return the combined error
+	if len(errs) > 0 && len(allRecordings) == 0 {
+		return nil, fmt.Errorf("failed to fetch recordings: %v", errs)
 	}
 
 	// Limit to most recent items across all types

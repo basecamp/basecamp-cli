@@ -166,8 +166,11 @@ func loadFromFile(cfg *Config, path string, source Source) {
 		for name, hostData := range v {
 			if hostMap, ok := hostData.(map[string]any); ok {
 				hostConfig := &HostConfig{}
-				if baseURL, ok := hostMap["base_url"].(string); ok {
+				if baseURL, ok := hostMap["base_url"].(string); ok && baseURL != "" {
 					hostConfig.BaseURL = baseURL
+				} else {
+					// Skip hosts with empty or missing base_url
+					continue
 				}
 				if clientID, ok := hostMap["client_id"].(string); ok {
 					hostConfig.ClientID = clientID

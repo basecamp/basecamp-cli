@@ -68,10 +68,7 @@ func (r *Resolver) Project(ctx context.Context) (*ResolvedValue, error) {
 		}
 
 		if len(projects) == 0 {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
+			return nil, output.ErrNotFoundHint("projects", "", "No projects found in this account")
 		}
 
 		// Cache for potential single-project shortcut
