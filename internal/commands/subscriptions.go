@@ -29,7 +29,7 @@ commented on, or otherwise changed.`,
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return app.RequireAccount()
+			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsShow(cmd, project, args[0])
@@ -65,7 +65,7 @@ func newSubscriptionsShowCmd(project *string) *cobra.Command {
 func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -74,7 +74,7 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 		return output.ErrUsage("Invalid recording ID")
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -83,7 +83,10 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -132,7 +135,7 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -142,7 +145,7 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -151,7 +154,10 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -197,7 +203,7 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -207,7 +213,7 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -216,7 +222,10 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -290,7 +299,7 @@ func newSubscriptionsRemoveCmd(project *string) *cobra.Command {
 func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, peopleIDs, mode string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -309,7 +318,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		return output.ErrUsage("Person ID(s) required. Provide comma-separated person IDs")
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -318,7 +327,10 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

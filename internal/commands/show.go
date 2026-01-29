@@ -47,7 +47,11 @@ If no type specified, uses generic recording lookup.`,
 				)
 			}
 
-			// Resolve project
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Resolve project, with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -56,11 +60,10 @@ If no type specified, uses generic recording lookup.`,
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
-			}
-
-			if err := app.RequireAccount(); err != nil {
-				return err
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID if needed

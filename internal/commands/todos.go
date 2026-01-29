@@ -97,19 +97,11 @@ func NewTodoCmd() *cobra.Command {
 				return output.ErrUsage("Todo content required")
 			}
 
-			// Validate assignee format early (before API calls)
-			if assignee != "" && !isValidAssignee(assignee) {
-				return output.ErrUsageHint(
-					"Invalid assignee format",
-					"Use a numeric person ID (run 'bcq people' to list)",
-				)
-			}
-
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -117,7 +109,10 @@ func NewTodoCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -127,27 +122,27 @@ func NewTodoCmd() *cobra.Command {
 			}
 			project = resolvedProject
 
-			// Use todolist from flag or config
+			// Use todolist from flag, config, or interactive prompt
 			if todolist == "" {
 				todolist = app.Flags.Todolist
 			}
 			if todolist == "" {
 				todolist = app.Config.TodolistID
 			}
-			// If still no todolist, get first one from project
+			// If still no todolist, try interactive selection
 			if todolist == "" {
-				tlID, err := getFirstTodolistID(cmd, app, project)
+				selectedTodolist, err := ensureTodolist(cmd, app, project)
 				if err != nil {
 					return err
 				}
-				todolist = fmt.Sprintf("%d", tlID)
+				todolist = selectedTodolist
 			}
 
 			if todolist == "" {
 				return output.ErrUsage("--list is required (no default todolist found)")
 			}
 
-			// Resolve todolist name to ID (if it's not already numeric from getFirstTodolistID)
+			// Resolve todolist name to ID
 			resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 			if err != nil {
 				return err
@@ -262,7 +257,12 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	// Use project from flag or config
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	// Use project from flag or config, with interactive fallback
 	project := flags.project
 	if project == "" {
 		project = app.Flags.Project
@@ -270,13 +270,13 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	if project == "" {
 		project = app.Config.ProjectID
 	}
-	// Validate project before checking account
-	if project == "" {
-		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
-	}
 
-	if err := app.RequireAccount(); err != nil {
-		return err
+	// If no project specified, try interactive resolution
+	if project == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	// Resolve project name to ID
@@ -468,11 +468,11 @@ func newTodosShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -480,7 +480,10 @@ func newTodosShowCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -554,19 +557,11 @@ func newTodosCreateCmd() *cobra.Command {
 				return output.ErrUsage("Todo content required")
 			}
 
-			// Validate assignee format early (before API calls)
-			if assignee != "" && !isValidAssignee(assignee) {
-				return output.ErrUsageHint(
-					"Invalid assignee format",
-					"Use a numeric person ID (run 'bcq people' to list)",
-				)
-			}
-
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -574,7 +569,10 @@ func newTodosCreateCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -584,27 +582,27 @@ func newTodosCreateCmd() *cobra.Command {
 			}
 			project = resolvedProject
 
-			// Use todolist from flag or config
+			// Use todolist from flag, config, or interactive prompt
 			if todolist == "" {
 				todolist = app.Flags.Todolist
 			}
 			if todolist == "" {
 				todolist = app.Config.TodolistID
 			}
-			// If still no todolist, get first one from project
+			// If still no todolist, try interactive selection
 			if todolist == "" {
-				tlID, err := getFirstTodolistID(cmd, app, project)
+				selectedTodolist, err := ensureTodolist(cmd, app, project)
 				if err != nil {
 					return err
 				}
-				todolist = fmt.Sprintf("%d", tlID)
+				todolist = selectedTodolist
 			}
 
 			if todolist == "" {
 				return output.ErrUsage("--list is required (no default todolist found)")
 			}
 
-			// Resolve todolist name to ID (if it's not already numeric from getFirstTodolistID)
+			// Resolve todolist name to ID
 			resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 			if err != nil {
 				return err
@@ -686,36 +684,6 @@ func newTodosCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func getFirstTodolistID(cmd *cobra.Command, app *appctx.App, project string) (int64, error) {
-	// Parse project ID
-	bucketID, err := strconv.ParseInt(project, 10, 64)
-	if err != nil {
-		return 0, output.ErrUsage("Invalid project ID")
-	}
-
-	// Get todoset ID from project dock
-	todosetIDStr, err := getTodosetID(cmd, app, project)
-	if err != nil {
-		return 0, err
-	}
-	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
-	if err != nil {
-		return 0, output.ErrUsage("Invalid todoset ID")
-	}
-
-	// Get first todolist via SDK
-	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
-	if err != nil {
-		return 0, convertSDKError(err)
-	}
-
-	if len(todolists) == 0 {
-		return 0, output.ErrNotFound("todolists", project)
-	}
-
-	return todolists[0].ID, nil
-}
-
 func newTodosCompleteCmd() *cobra.Command {
 	var project string
 
@@ -770,11 +738,11 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Use project from flag or config
+	// Use project from flag or config, with interactive fallback
 	if project == "" {
 		project = app.Flags.Project
 	}
@@ -782,7 +750,10 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		project = app.Config.ProjectID
 	}
 	if project == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	// Resolve project name to ID
@@ -911,7 +882,7 @@ Examples:
   bcq todos sweep --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -925,7 +896,7 @@ Examples:
 				return output.ErrUsageHint("Sweep requires an action", "Use --comment and/or --complete")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -933,7 +904,10 @@ Examples:
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -1165,11 +1139,11 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Use project from flag or config
+	// Use project from flag or config, with interactive fallback
 	if project == "" {
 		project = app.Flags.Project
 	}
@@ -1177,7 +1151,10 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		project = app.Config.ProjectID
 	}
 	if project == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	// Resolve project name to ID
@@ -1251,7 +1228,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -1259,7 +1236,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return output.ErrUsage("--to is required (1 = top)")
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -1267,7 +1244,10 @@ func newTodosPositionCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID

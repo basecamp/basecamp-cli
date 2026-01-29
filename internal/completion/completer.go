@@ -250,6 +250,39 @@ func (c *Completer) AccountCompletion() cobra.CompletionFunc {
 	}
 }
 
+// HostCompletion returns a Cobra completion function for host arguments.
+// Hosts come from the config file's hosts map. Since completion runs before
+// PersistentPreRunE, we need to load the config directly here.
+func (c *Completer) HostCompletion() cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		hosts := c.store(cmd).Hosts()
+		if len(hosts) == 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		// Sort alphabetically by name
+		sorted := make([]CachedHost, len(hosts))
+		copy(sorted, hosts)
+		sort.Slice(sorted, func(i, j int) bool {
+			return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
+		})
+
+		// Filter by prefix
+		toCompleteLower := strings.ToLower(toComplete)
+		var completions []cobra.Completion
+		for _, h := range sorted {
+			nameLower := strings.ToLower(h.Name)
+			if strings.HasPrefix(nameLower, toCompleteLower) ||
+				strings.Contains(nameLower, toCompleteLower) {
+				// Use name as completion value with base URL as description
+				completions = append(completions, cobra.CompletionWithDesc(h.Name, h.BaseURL))
+			}
+		}
+
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // rankProjects returns projects sorted by priority:
 // 1. HQ (purpose="hq")
 // 2. Bookmarked

@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -11,7 +12,9 @@ import (
 	"github.com/basecamp/bcq/internal/commands"
 	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/config"
+	"github.com/basecamp/bcq/internal/hostutil"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/tui"
 	"github.com/basecamp/bcq/internal/version"
 )
 
@@ -33,19 +36,33 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
-			// Normalize --host flag (smart protocol detection)
-			baseURL := normalizeHost(flags.Host)
-
-			// Load configuration with flag overrides
+			// Load configuration first (without host override to access hosts map)
 			cfg, err := config.Load(config.FlagOverrides{
 				Account:  flags.Account,
 				Project:  flags.Project,
 				Todolist: flags.Todolist,
-				BaseURL:  baseURL,
 				CacheDir: flags.CacheDir,
 			})
 			if err != nil {
 				return err
+			}
+
+			// Resolve host: check if --host matches a configured host name first,
+			// then fall back to URL normalization
+			baseURL := resolveHostFlag(flags.Host, cfg)
+			if baseURL != "" {
+				cfg.BaseURL = baseURL
+				cfg.Sources["base_url"] = string(config.SourceFlag)
+			} else if flags.Host == "" {
+				// No explicit host - try interactive resolution if multiple hosts configured
+				resolved, err := resolveHost(cfg, flags)
+				if err != nil {
+					return err
+				}
+				if resolved != nil {
+					cfg.BaseURL = resolved.URL
+					cfg.Sources["base_url"] = string(resolved.Source)
+				}
 			}
 
 			// Create app and store in context
@@ -90,6 +107,7 @@ func NewRootCmd() *cobra.Command {
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("host", completer.HostCompletion())
 
 	return cmd
 }
@@ -198,49 +216,26 @@ func Execute() {
 	}
 }
 
-// normalizeHost converts a host string to a full URL.
-// - Empty string returns empty (use default)
-// - localhost/127.0.0.1 defaults to http://
-// - Other bare hostnames default to https://
-// - Full URLs are used as-is
-func normalizeHost(host string) string {
+// resolveHostFlag resolves a --host flag value to a base URL.
+// First checks if the value matches a configured host name (e.g., "production"),
+// then falls back to URL normalization for hostnames/URLs.
+func resolveHostFlag(host string, cfg *config.Config) string {
 	if host == "" {
 		return ""
 	}
-	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-		return host
-	}
-	if isLocalhost(host) {
-		return "http://" + host
-	}
-	return "https://" + host
-}
 
-// isLocalhost returns true if host is localhost, a .localhost subdomain,
-// 127.0.0.1, or [::1] (with optional port).
-// Matches localhost and *.localhost per RFC 6761, but not localhost.example.com.
-func isLocalhost(host string) bool {
-	// Strip port if present for easier matching
-	hostWithoutPort := host
-	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		// Check if this is IPv6 bracketed address
-		if !strings.HasPrefix(host, "[") || strings.HasPrefix(host, "[::1]:") {
-			hostWithoutPort = host[:idx]
+	// Check if host matches a configured host name (case-insensitive)
+	if cfg != nil && len(cfg.Hosts) > 0 {
+		hostLower := strings.ToLower(host)
+		for name, hostConfig := range cfg.Hosts {
+			if strings.ToLower(name) == hostLower {
+				return hostConfig.BaseURL
+			}
 		}
 	}
 
-	// Check for localhost or .localhost subdomain
-	if hostWithoutPort == "localhost" || strings.HasSuffix(hostWithoutPort, ".localhost") {
-		return true
-	}
-	if hostWithoutPort == "127.0.0.1" {
-		return true
-	}
-	// IPv6 loopback (must be bracketed for valid URL)
-	if hostWithoutPort == "[::1]" {
-		return true
-	}
-	return false
+	// Not a configured host name - treat as hostname/URL
+	return hostutil.Normalize(host)
 }
 
 // transformCobraError transforms Cobra's default error messages to match the
@@ -309,4 +304,113 @@ func transformCobraError(err error) error {
 	}
 
 	return err
+}
+
+// resolvedHost holds a resolved host URL and its source.
+type resolvedHost struct {
+	URL    string
+	Source config.Source
+}
+
+// resolveHost determines the base URL to use based on configuration.
+// Resolution order:
+// 1. BCQ_HOST environment variable
+// 2. Config default_host (lookup in hosts map)
+// 3. If single host configured → use it
+// 4. If multiple hosts configured → show interactive picker (if TTY)
+// 5. Fall back to config base_url
+func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (*resolvedHost, error) {
+	// 1. Check BCQ_HOST environment variable
+	if host := os.Getenv("BCQ_HOST"); host != "" {
+		return &resolvedHost{
+			URL:    hostutil.Normalize(host),
+			Source: config.SourceEnv,
+		}, nil
+	}
+
+	// No hosts configured - use existing base_url
+	if len(cfg.Hosts) == 0 {
+		return nil, nil
+	}
+
+	// 2. Check default_host in config
+	if cfg.DefaultHost != "" {
+		if hostConfig, ok := cfg.Hosts[cfg.DefaultHost]; ok {
+			return &resolvedHost{
+				URL:    hostConfig.BaseURL,
+				Source: config.SourceGlobal,
+			}, nil
+		}
+	}
+
+	// 3. If only one host configured, use it
+	if len(cfg.Hosts) == 1 {
+		for _, hostConfig := range cfg.Hosts {
+			return &resolvedHost{
+				URL:    hostConfig.BaseURL,
+				Source: config.SourceDefault,
+			}, nil
+		}
+	}
+
+	// 4. Multiple hosts - try interactive picker if TTY
+	if !isInteractiveTTY(flags) {
+		return nil, output.ErrUsage("Multiple hosts configured. Use --host flag or set default_host in config.")
+	}
+
+	url, err := promptForHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &resolvedHost{
+		URL:    url,
+		Source: config.SourcePrompt,
+	}, nil
+}
+
+// isInteractiveTTY returns true if stdout is a terminal and no machine-output mode is set.
+func isInteractiveTTY(flags appctx.GlobalFlags) bool {
+	// Not interactive if any machine-output mode is set
+	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count {
+		return false
+	}
+
+	// Check if stdout is a terminal
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// promptForHost shows an interactive picker for host selection.
+func promptForHost(cfg *config.Config) (string, error) {
+	// Build picker items from configured hosts
+	items := make([]tui.PickerItem, 0, len(cfg.Hosts))
+
+	// Sort host names for consistent ordering
+	hostNames := make([]string, 0, len(cfg.Hosts))
+	for name := range cfg.Hosts {
+		hostNames = append(hostNames, name)
+	}
+	sort.Strings(hostNames)
+
+	for _, name := range hostNames {
+		hostConfig := cfg.Hosts[name]
+		items = append(items, tui.PickerItem{
+			ID:          hostConfig.BaseURL,
+			Title:       name,
+			Description: hostConfig.BaseURL,
+		})
+	}
+
+	selected, err := tui.PickHost(items)
+	if err != nil {
+		return "", err
+	}
+	if selected == nil {
+		return "", output.ErrUsage("host selection canceled")
+	}
+
+	return selected.ID, nil
 }

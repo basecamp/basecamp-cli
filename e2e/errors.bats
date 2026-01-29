@@ -217,14 +217,16 @@ load test_helper
 
 # Assignee validation
 
-@test "invalid assignee format shows clear error" {
+@test "email assignee is passed to resolver" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123, "todolist_id": 456}'
 
+  # Email assignees are valid input and passed to ResolvePerson
+  # With a fake account, this will fail on API call (not input validation)
   run bcq todo --content "test" --assignee "john@example.com"
   assert_failure
-  assert_output_contains "Invalid assignee"
-  assert_output_contains "numeric person ID"
+  # Should NOT fail with "Invalid assignee" - emails are valid
+  assert_output_not_contains "Invalid assignee"
 }
 
 @test "search without query shows error" {

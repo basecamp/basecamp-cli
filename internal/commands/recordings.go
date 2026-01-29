@@ -33,7 +33,7 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return app.RequireAccount()
+			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -142,7 +142,7 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 }
 
 func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, project, status, sortBy, direction string, limit int) error {
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -235,7 +235,7 @@ func newRecordingsRestoreCmd(project *string) *cobra.Command {
 }
 
 func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, project, newStatus string) error {
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -245,7 +245,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 		return output.ErrUsage("Invalid recording ID")
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectIDStr := project
 	if projectIDStr == "" {
 		projectIDStr = app.Flags.Project
@@ -254,7 +254,10 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 		projectIDStr = app.Config.ProjectID
 	}
 	if projectIDStr == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectIDStr = app.Config.ProjectID
 	}
 
 	resolvedProjectIDStr, _, err := app.Names.ResolveProject(cmd.Context(), projectIDStr)
@@ -324,7 +327,7 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -344,7 +347,7 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 			}
 			isVisible = visible
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectIDStr := *project
 			if projectIDStr == "" {
 				projectIDStr = app.Flags.Project
@@ -353,7 +356,10 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 				projectIDStr = app.Config.ProjectID
 			}
 			if projectIDStr == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectIDStr = app.Config.ProjectID
 			}
 
 			resolvedProjectIDStr, _, err := app.Names.ResolveProject(cmd.Context(), projectIDStr)

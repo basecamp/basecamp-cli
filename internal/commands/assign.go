@@ -28,17 +28,13 @@ Person can be:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			todoID := args[0]
 
-			if assignee == "" {
-				return output.ErrUsage("--to is required")
-			}
-
-			// Resolve project
+			// Resolve project first (needed for person selection), with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -47,12 +43,27 @@ Person can be:
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 			if err != nil {
 				return err
+			}
+
+			// If no assignee specified, try interactive selection
+			if assignee == "" {
+				if !app.IsInteractive() {
+					return output.ErrUsageHint("Person to assign is required", "Use --to <person>")
+				}
+				selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				assignee = selectedPerson
 			}
 
 			// Resolve assignee to ID
@@ -143,10 +154,9 @@ Person can be:
 		},
 	}
 
-	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (ID, email, or 'me')")
+	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (ID, email, or 'me'); prompts interactively if omitted")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	_ = cmd.MarkFlagRequired("to")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -174,17 +184,13 @@ Person can be:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			todoID := args[0]
 
-			if assignee == "" {
-				return output.ErrUsage("--from is required")
-			}
-
-			// Resolve project
+			// Resolve project first (needed for person selection), with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -193,12 +199,27 @@ Person can be:
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 			if err != nil {
 				return err
+			}
+
+			// If no assignee specified, try interactive selection
+			if assignee == "" {
+				if !app.IsInteractive() {
+					return output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
+				}
+				selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				assignee = selectedPerson
 			}
 
 			// Resolve assignee to ID
@@ -263,10 +284,9 @@ Person can be:
 		},
 	}
 
-	cmd.Flags().StringVar(&assignee, "from", "", "Person to remove (ID, email, or 'me')")
+	cmd.Flags().StringVar(&assignee, "from", "", "Person to remove (ID, email, or 'me'); prompts interactively if omitted")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	_ = cmd.MarkFlagRequired("from")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)

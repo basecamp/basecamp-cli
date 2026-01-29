@@ -1,4 +1,4 @@
-package cli
+package hostutil
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNormalizeHost(t *testing.T) {
+func TestNormalize(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -35,8 +35,6 @@ func TestNormalizeHost(t *testing.T) {
 		{"foo.bar.localhost:8080", "http://foo.bar.localhost:8080"},
 
 		// Non-localhost → https
-		// Note: bare ::1 without brackets is not a valid URL format,
-		// so it's treated as a hostname and gets https://
 		{"example.com", "https://example.com"},
 		{"api.example.com", "https://api.example.com"},
 		{"staging.basecamp.com:8080", "https://staging.basecamp.com:8080"},
@@ -47,8 +45,8 @@ func TestNormalizeHost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := normalizeHost(tt.input)
-			assert.Equal(t, tt.expected, result, "normalizeHost(%q)", tt.input)
+			result := Normalize(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -77,8 +75,8 @@ func TestIsLocalhost(t *testing.T) {
 		{"[::1]", true},
 		{"[::1]:3000", true},
 
-		// Not localhost (bare ::1 is invalid URL format)
-		{"::1", false},
+		// Not localhost
+		{"::1", false}, // bare ::1 is invalid URL format
 		{"example.com", false},
 		{"localhost.example.com", false},
 		{"127.0.0.2", false},
@@ -88,8 +86,8 @@ func TestIsLocalhost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := isLocalhost(tt.input)
-			assert.Equal(t, tt.expected, result, "isLocalhost(%q)", tt.input)
+			result := IsLocalhost(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

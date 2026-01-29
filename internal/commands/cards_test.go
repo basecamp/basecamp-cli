@@ -241,7 +241,7 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 	}
 }
 
-// TestCardsCmdRequiresProject tests that No project specified when not in config.
+// TestCardsCmdRequiresProject tests that Project ID required when not in config.
 func TestCardsCmdRequiresProject(t *testing.T) {
 	app, _ := setupTestApp(t)
 	// No project in config
@@ -253,7 +253,7 @@ func TestCardsCmdRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
@@ -383,7 +383,7 @@ func TestCardShortcutRequiresTitle(t *testing.T) {
 	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
 }
 
-// TestCardsColumnsRequiresProject tests that No project specified for columns listing.
+// TestCardsColumnsRequiresProject tests that Project ID required for columns listing.
 func TestCardsColumnsRequiresProject(t *testing.T) {
 	app, _ := setupTestApp(t)
 	// No project in config
@@ -397,11 +397,11 @@ func TestCardsColumnsRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
-// TestCardsColumnShowRequiresProject tests that No project specified for column show.
+// TestCardsColumnShowRequiresProject tests that Project ID required for column show.
 func TestCardsColumnShowRequiresProject(t *testing.T) {
 	app, _ := setupTestApp(t)
 	// No project in config
@@ -414,11 +414,11 @@ func TestCardsColumnShowRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
-// TestCardsStepCompleteRequiresProject tests that No project specified for step complete.
+// TestCardsStepCompleteRequiresProject tests that Project ID required for step complete.
 func TestCardsStepCompleteRequiresProject(t *testing.T) {
 	app, _ := setupTestApp(t)
 	// No project in config
@@ -431,11 +431,11 @@ func TestCardsStepCompleteRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
-// TestCardsStepUncompleteRequiresProject tests that No project specified for step uncomplete.
+// TestCardsStepUncompleteRequiresProject tests that Project ID required for step uncomplete.
 func TestCardsStepUncompleteRequiresProject(t *testing.T) {
 	app, _ := setupTestApp(t)
 	// No project in config
@@ -448,7 +448,7 @@ func TestCardsStepUncompleteRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
@@ -814,7 +814,7 @@ func TestCardShortcutRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
@@ -832,7 +832,7 @@ func TestCardsStepDeleteRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "No project specified", e.Message)
+		assert.Equal(t, "Project ID required", e.Message)
 	}
 }
 
