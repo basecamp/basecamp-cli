@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -168,7 +169,12 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 		return nil, fmt.Errorf("failed to fetch recordings: %v", errs)
 	}
 
-	// Limit to most recent items across all types
+	// Sort by UpdatedAt (descending) to get truly most recent across all types
+	sort.Slice(allRecordings, func(i, j int) bool {
+		return allRecordings[i].UpdatedAt.After(allRecordings[j].UpdatedAt)
+	})
+
+	// Limit to most recent items
 	maxItems := 50
 	if len(allRecordings) > maxItems {
 		allRecordings = allRecordings[:maxItems]

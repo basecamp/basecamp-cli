@@ -358,6 +358,11 @@ Supports batch commenting on multiple recordings at once.`,
 				commented = append(commented, recordingIDStr)
 			}
 
+			// If all operations failed, return an error for automation
+			if len(commented) == 0 && len(failed) > 0 {
+				return output.ErrUsage(fmt.Sprintf("Failed to comment on all recordings: %s", strings.Join(failed, ", ")))
+			}
+
 			// Build result
 			result := map[string]any{
 				"commented_recordings": commented,

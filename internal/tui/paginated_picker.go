@@ -238,6 +238,13 @@ func (m paginatedPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filtered = m.filter(m.textInput.Value())
 			m.cursor = 0
 			m.scrollOffset = 0
+
+			// If filter yields no results but more pages exist, fetch more
+			// This allows discovering matches beyond the initial page
+			if m.hasMore && !m.loadingMore && len(m.filtered) == 0 && len(m.items) > 0 {
+				m.loadingMore = true
+				return m, tea.Batch(cmd, m.spinner.Tick, m.fetchPage(false))
+			}
 			return m, cmd
 		}
 	}

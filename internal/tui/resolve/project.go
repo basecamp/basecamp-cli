@@ -46,37 +46,36 @@ func (r *Resolver) Project(ctx context.Context) (*ResolvedValue, error) {
 		return nil, output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
 	}
 
-	// 4. Interactive mode - fetch projects for picker or auto-selection
-	projects, err := r.sdk.ForAccount(r.config.AccountID).Projects().List(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch projects: %w", err)
+	// 4. Interactive mode - show picker with loading spinner
+	// Capture accountID for the loader closure
+	accountID := r.config.AccountID
+	loader := func() ([]tui.PickerItem, error) {
+		projects, err := r.sdk.ForAccount(accountID).Projects().List(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch projects: %w", err)
+		}
+
+		if len(projects) == 0 {
+			return nil, output.ErrNotFoundHint("projects", "", "No projects found in this account")
+		}
+
+		// Sort projects: bookmarked first, then by name
+		sortProjectsForPicker(projects)
+
+		// Convert to picker items
+		items := make([]tui.PickerItem, len(projects))
+		for i, proj := range projects {
+			items[i] = projectToPickerItem(proj)
+		}
+		return items, nil
 	}
 
-	if len(projects) == 0 {
-		return nil, output.ErrNotFoundHint("projects", "", "No projects found in this account")
-	}
-
-	// Auto-select if exactly one project exists
-	if len(projects) == 1 {
-		return &ResolvedValue{
-			Value:  fmt.Sprintf("%d", projects[0].ID),
-			Source: SourceDefault,
-		}, nil
-	}
-
-	// Sort projects: bookmarked first, then by name
-	sortProjectsForPicker(projects)
-
-	// Convert to picker items
-	items := make([]tui.PickerItem, len(projects))
-	for i, proj := range projects {
-		items[i] = projectToPickerItem(proj)
-	}
-
-	// Show picker
-	selected, err := tui.NewPicker(items,
+	// Show picker with loading state (auto-selects if only one project)
+	selected, err := tui.NewPickerWithLoader(loader,
 		tui.WithPickerTitle("Select a project"),
 		tui.WithEmptyMessage("No projects found"),
+		tui.WithAutoSelectSingle(),
+		tui.WithLoading("Loading projects..."),
 	).Run()
 
 	if err != nil {

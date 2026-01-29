@@ -29,37 +29,35 @@ func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 		return nil, output.ErrUsage("Person ID required")
 	}
 
-	// Interactive mode - fetch people for picker or auto-selection
-	people, err := r.sdk.ForAccount(r.config.AccountID).People().List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch people: %w", err)
+	// Interactive mode - show picker with loading spinner
+	accountID := r.config.AccountID
+	loader := func() ([]tui.PickerItem, error) {
+		people, err := r.sdk.ForAccount(accountID).People().List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch people: %w", err)
+		}
+
+		if len(people) == 0 {
+			return nil, output.ErrNotFoundHint("people", "", "No people found in this account")
+		}
+
+		// Sort people alphabetically by name
+		sortPeopleForPicker(people)
+
+		// Convert to picker items
+		items := make([]tui.PickerItem, len(people))
+		for i, p := range people {
+			items[i] = personToPickerItem(p)
+		}
+		return items, nil
 	}
 
-	if len(people) == 0 {
-		return nil, output.ErrNotFoundHint("people", "", "No people found in this account")
-	}
-
-	// Auto-select if exactly one person exists
-	if len(people) == 1 {
-		return &ResolvedValue{
-			Value:  fmt.Sprintf("%d", people[0].ID),
-			Source: SourceDefault,
-		}, nil
-	}
-
-	// Sort people alphabetically by name
-	sortPeopleForPicker(people)
-
-	// Convert to picker items
-	items := make([]tui.PickerItem, len(people))
-	for i, p := range people {
-		items[i] = personToPickerItem(p)
-	}
-
-	// Show picker
-	selected, err := tui.NewPicker(items,
+	// Show picker with loading state (auto-selects if only one person)
+	selected, err := tui.NewPickerWithLoader(loader,
 		tui.WithPickerTitle("Select a person"),
 		tui.WithEmptyMessage("No people found"),
+		tui.WithAutoSelectSingle(),
+		tui.WithLoading("Loading people..."),
 	).Run()
 
 	if err != nil {
@@ -99,37 +97,35 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 		return nil, fmt.Errorf("invalid project ID: %w", err)
 	}
 
-	// Interactive mode - fetch project people for picker or auto-selection
-	people, err := r.sdk.ForAccount(r.config.AccountID).People().ListProjectPeople(ctx, bucketID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch project people: %w", err)
+	// Interactive mode - show picker with loading spinner
+	accountID := r.config.AccountID
+	loader := func() ([]tui.PickerItem, error) {
+		people, err := r.sdk.ForAccount(accountID).People().ListProjectPeople(ctx, bucketID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch project people: %w", err)
+		}
+
+		if len(people) == 0 {
+			return nil, output.ErrNotFoundHint("people", projectID, "No members found in this project")
+		}
+
+		// Sort people alphabetically by name
+		sortPeopleForPicker(people)
+
+		// Convert to picker items
+		items := make([]tui.PickerItem, len(people))
+		for i, p := range people {
+			items[i] = personToPickerItem(p)
+		}
+		return items, nil
 	}
 
-	if len(people) == 0 {
-		return nil, output.ErrNotFoundHint("people", projectID, "No members found in this project")
-	}
-
-	// Auto-select if exactly one person exists
-	if len(people) == 1 {
-		return &ResolvedValue{
-			Value:  fmt.Sprintf("%d", people[0].ID),
-			Source: SourceDefault,
-		}, nil
-	}
-
-	// Sort people alphabetically by name
-	sortPeopleForPicker(people)
-
-	// Convert to picker items
-	items := make([]tui.PickerItem, len(people))
-	for i, p := range people {
-		items[i] = personToPickerItem(p)
-	}
-
-	// Show picker
-	selected, err := tui.NewPicker(items,
+	// Show picker with loading state (auto-selects if only one person)
+	selected, err := tui.NewPickerWithLoader(loader,
 		tui.WithPickerTitle("Select a person"),
 		tui.WithEmptyMessage("No people found"),
+		tui.WithAutoSelectSingle(),
+		tui.WithLoading("Loading people..."),
 	).Run()
 
 	if err != nil {
