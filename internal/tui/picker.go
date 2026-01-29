@@ -482,8 +482,12 @@ func (p *Picker) Run() (*PickerItem, error) {
 }
 
 func (p *Picker) runWithLoader() (*PickerItem, error) {
-	opts := append(p.opts, WithLoading("Loading..."))
-	m := newPickerModel(nil, opts...)
+	// Apply user options first, then set default loading message only if not already set
+	m := newPickerModel(nil, p.opts...)
+	if !m.loading {
+		m.loading = true
+		m.loadingMsg = "Loading..."
+	}
 	program := tea.NewProgram(m)
 
 	// Load items in background

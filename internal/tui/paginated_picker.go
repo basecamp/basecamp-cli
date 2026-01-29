@@ -173,6 +173,14 @@ func (m paginatedPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Re-filter with new items
 		m.filtered = m.filter(m.textInput.Value())
+
+		// If filter still yields no results and more pages exist, continue fetching
+		// This auto-drains pages until matches are found or no more pages
+		query := strings.TrimSpace(m.textInput.Value())
+		if m.hasMore && len(m.filtered) == 0 && query != "" {
+			m.loadingMore = true
+			return m, tea.Batch(m.spinner.Tick, m.fetchPage(false))
+		}
 		return m, nil
 
 	case spinner.TickMsg:

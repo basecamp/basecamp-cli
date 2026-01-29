@@ -336,6 +336,7 @@ Supports batch commenting on multiple recordings at once.`,
 			var commented []string
 			var commentIDs []string
 			var failed []string
+			var firstAPIErr error // Capture first API error for better error reporting
 
 			for _, recordingIDStr := range expandedIDs {
 				recordingID, parseErr := strconv.ParseInt(recordingIDStr, 10, 64)
@@ -347,6 +348,9 @@ Supports batch commenting on multiple recordings at once.`,
 				comment, createErr := app.Account().Comments().Create(cmd.Context(), bucketID, recordingID, req)
 				if createErr != nil {
 					failed = append(failed, recordingIDStr)
+					if firstAPIErr == nil {
+						firstAPIErr = createErr
+					}
 					continue
 				}
 
@@ -356,6 +360,9 @@ Supports batch commenting on multiple recordings at once.`,
 
 			// If all operations failed, return an error for automation
 			if len(commented) == 0 && len(failed) > 0 {
+				if firstAPIErr != nil {
+					return fmt.Errorf("failed to comment on recordings %s: %w", strings.Join(failed, ", "), firstAPIErr)
+				}
 				return output.ErrUsage(fmt.Sprintf("Failed to comment on all recordings: %s", strings.Join(failed, ", ")))
 			}
 
