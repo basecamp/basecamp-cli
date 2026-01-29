@@ -83,7 +83,7 @@ func executeMessagesCommand(cmd *cobra.Command, app *appctx.App, args ...string)
 	return cmd.Execute()
 }
 
-// TestMessagesRequiresProject tests that No project specified for messages.
+// TestMessagesRequiresProject tests that Project ID required for messages.
 func TestMessagesRequiresProject(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	// No project in config
@@ -95,7 +95,7 @@ func TestMessagesRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "No project specified", e.Message)
+	assert.Equal(t, "Project ID required", e.Message)
 }
 
 // TestMessagesListRequiresProject tests that messages list requires --project.
@@ -110,7 +110,7 @@ func TestMessagesListRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "No project specified", e.Message)
+	assert.Equal(t, "Project ID required", e.Message)
 }
 
 // TestMessagesCreateRequiresSubject tests that messages create requires --subject.
@@ -222,7 +222,7 @@ func TestMessageShortcutRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "No project specified", e.Message)
+	assert.Equal(t, "Project ID required", e.Message)
 }
 
 // TestMessagesHasMessageBoardFlag tests that --message-board flag is available.

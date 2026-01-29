@@ -97,11 +97,11 @@ func NewTodoCmd() *cobra.Command {
 				return output.ErrUsage("Todo content required")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -109,7 +109,10 @@ func NewTodoCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -465,11 +468,11 @@ func newTodosShowCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -477,7 +480,10 @@ func newTodosShowCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -551,11 +557,11 @@ func newTodosCreateCmd() *cobra.Command {
 				return output.ErrUsage("Todo content required")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -563,7 +569,10 @@ func newTodosCreateCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -729,11 +738,11 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Use project from flag or config
+	// Use project from flag or config, with interactive fallback
 	if project == "" {
 		project = app.Flags.Project
 	}
@@ -741,7 +750,10 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		project = app.Config.ProjectID
 	}
 	if project == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	// Resolve project name to ID
@@ -870,7 +882,7 @@ Examples:
   bcq todos sweep --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -884,7 +896,7 @@ Examples:
 				return output.ErrUsageHint("Sweep requires an action", "Use --comment and/or --complete")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -892,7 +904,10 @@ Examples:
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID
@@ -1124,11 +1139,11 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Use project from flag or config
+	// Use project from flag or config, with interactive fallback
 	if project == "" {
 		project = app.Flags.Project
 	}
@@ -1136,7 +1151,10 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		project = app.Config.ProjectID
 	}
 	if project == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	// Resolve project name to ID
@@ -1210,7 +1228,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -1218,7 +1236,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return output.ErrUsage("--to is required (1 = top)")
 			}
 
-			// Use project from flag or config
+			// Use project from flag or config, with interactive fallback
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -1226,7 +1244,10 @@ func newTodosPositionCmd() *cobra.Command {
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				project = app.Config.ProjectID
 			}
 
 			// Resolve project name to ID

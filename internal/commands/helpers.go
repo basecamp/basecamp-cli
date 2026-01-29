@@ -34,8 +34,9 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 		return explicitID, nil
 	}
 
-	if err := app.RequireAccount(); err != nil {
-		return "", err
+	// Account must already be resolved by calling command
+	if app.Config.AccountID == "" {
+		return "", output.ErrUsage("Account must be resolved before accessing dock tools")
 	}
 
 	// Fetch project to get dock

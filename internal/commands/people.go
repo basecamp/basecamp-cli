@@ -196,7 +196,7 @@ func newPeopleListCmd() *cobra.Command {
 func runPeopleList(cmd *cobra.Command, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -269,7 +269,7 @@ func newPeopleShowCmd() *cobra.Command {
 func runPeopleShow(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -305,7 +305,7 @@ func newPeoplePingableCmd() *cobra.Command {
 func runPeoplePingable(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -341,7 +341,7 @@ func newPeopleAddCmd() *cobra.Command {
 func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -413,7 +413,7 @@ func newPeopleRemoveCmd() *cobra.Command {
 func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 

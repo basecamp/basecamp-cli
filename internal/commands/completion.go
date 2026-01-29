@@ -214,7 +214,7 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 	}
 
 	// Then check account is configured
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 

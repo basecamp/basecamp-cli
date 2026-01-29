@@ -43,7 +43,7 @@ func (r *Resolver) Project(ctx context.Context) (*ResolvedValue, error) {
 
 	// 3. Non-interactive mode requires explicit project
 	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+		return nil, output.ErrUsageHint("Project ID required", "Use --project or set in .basecamp/config.json")
 	}
 
 	// 4. Interactive mode - show picker with loading spinner

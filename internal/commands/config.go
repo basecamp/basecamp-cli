@@ -351,7 +351,7 @@ func newConfigProjectCmd() *cobra.Command {
 		Long:  "Interactively select a project and set it as the default in local config.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 

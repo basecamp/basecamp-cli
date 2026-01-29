@@ -38,7 +38,7 @@ Use 'bcq search metadata' to see available search scopes.`,
 
 			query := args[0]
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -97,7 +97,7 @@ func newSearchMetadataCmd() *cobra.Command {
 }
 
 func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 

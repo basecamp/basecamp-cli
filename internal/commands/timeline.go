@@ -40,7 +40,7 @@ Use "me" or --person to view a person's activity timeline.`,
 func runTimeline(cmd *cobra.Command, args []string, project, person string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 

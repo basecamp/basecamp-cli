@@ -29,7 +29,7 @@ Todolist groups allow you to organize todolists into collapsible sections.`,
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return app.RequireAccount()
+			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
@@ -69,11 +69,11 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	if project == "" {
 		project = app.Flags.Project
 	}
@@ -81,7 +81,10 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 		project = app.Config.ProjectID
 	}
 	if project == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), project)
@@ -149,13 +152,13 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			groupIDStr := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -164,7 +167,10 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -215,7 +221,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -223,7 +229,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				return output.ErrUsage("--name is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -232,7 +238,10 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			// Resolve todolist - fall back to config
@@ -311,7 +320,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -321,7 +330,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--name is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -330,7 +339,10 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -385,7 +397,7 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -395,7 +407,7 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--position is required (1-based)")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -404,7 +416,10 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
