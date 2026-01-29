@@ -275,6 +275,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "ctrl+d":
 			// Page down
+			if len(m.filtered) == 0 {
+				break
+			}
 			m.cursor += m.maxVisible / 2
 			if m.cursor >= len(m.filtered) {
 				m.cursor = len(m.filtered) - 1
@@ -297,6 +300,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scrollOffset = 0
 		case "G":
 			// Go to last item
+			if len(m.filtered) == 0 {
+				break
+			}
 			m.cursor = len(m.filtered) - 1
 			if m.cursor >= m.maxVisible {
 				m.scrollOffset = m.cursor - m.maxVisible + 1

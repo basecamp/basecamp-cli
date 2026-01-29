@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/basecamp/bcq/internal/hostutil"
 	"github.com/basecamp/bcq/internal/output"
@@ -21,6 +22,17 @@ import (
 func (r *Resolver) Host(ctx context.Context) (*ResolvedValue, error) {
 	// 1. Check CLI flag
 	if r.flags.Host != "" {
+		// Check if it's a configured host name (case-insensitive)
+		hostLower := strings.ToLower(r.flags.Host)
+		for name, hostConfig := range r.config.Hosts {
+			if strings.ToLower(name) == hostLower {
+				return &ResolvedValue{
+					Value:  hostConfig.BaseURL,
+					Source: SourceFlag,
+				}, nil
+			}
+		}
+		// Not a configured name - treat as hostname/URL
 		return &ResolvedValue{
 			Value:  hostutil.Normalize(r.flags.Host),
 			Source: SourceFlag,

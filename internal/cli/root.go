@@ -310,8 +310,8 @@ func transformCobraError(err error) error {
 // Resolution order:
 // 1. BCQ_HOST environment variable
 // 2. Config default_host (lookup in hosts map)
-// 3. If multiple hosts configured → show interactive picker (if TTY)
-// 4. If single host configured → use it
+// 3. If single host configured → use it
+// 4. If multiple hosts configured → show interactive picker (if TTY)
 // 5. Fall back to config base_url
 func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
 	// 1. Check BCQ_HOST environment variable
