@@ -322,8 +322,9 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	}
 
 	// --page is not meaningful when aggregating across todolists
+	// Each todolist has its own pages; there's no single "page 2" for all todos
 	if flags.page > 0 {
-		return output.ErrUsage("--page requires --list; use --limit to cap results when listing all todos")
+		return output.ErrUsage("--page is only meaningful when listing a single todolist (--list); use --limit to cap results instead")
 	}
 
 	// Otherwise, get all todos from project's todoset
