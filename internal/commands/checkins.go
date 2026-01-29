@@ -213,7 +213,7 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of questions to fetch (0 = SDK default)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of questions to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all questions (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
@@ -662,7 +662,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = SDK default)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all answers (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
