@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/basecamp/bcq/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/bcq/internal/config"
 )
 
 func TestNewApp(t *testing.T) {

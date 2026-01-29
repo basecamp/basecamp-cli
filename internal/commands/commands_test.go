@@ -4,9 +4,10 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/basecamp/bcq/internal/cli"
 	"github.com/basecamp/bcq/internal/commands"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCatalogMatchesRegisteredCommands(t *testing.T) {

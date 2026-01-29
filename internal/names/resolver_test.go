@@ -5,9 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/basecamp/bcq/internal/output"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/bcq/internal/output"
 )
 
 func TestResolve(t *testing.T) {
