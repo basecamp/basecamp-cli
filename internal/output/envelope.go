@@ -376,6 +376,11 @@ func TruncationNotice(count, defaultLimit int, all bool, explicitLimit int) stri
 		limit = explicitLimit
 	}
 
+	// No notice if no limit was applied (defaultLimit=0 and no explicit limit)
+	if limit == 0 {
+		return ""
+	}
+
 	// If count equals the limit, results are likely truncated
 	if count > 0 && count >= limit {
 		return fmt.Sprintf("Showing %d results (use --all for complete list)", count)
