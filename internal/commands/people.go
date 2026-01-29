@@ -256,22 +256,22 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 		updatePeopleCache(people, app.Config.CacheDir)
 	}
 
-	// Show truncation notice when user explicitly limits results (human output only)
-	if !app.IsMachineOutput() {
-		if notice := output.TruncationNotice(len(people), 0, all, limit); notice != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), notice)
-		}
-	}
-
 	summary := fmt.Sprintf("%d people", len(people))
 	breadcrumbs := []output.Breadcrumb{
 		{Action: "show", Cmd: "bcq people show <id>", Description: "Show person details"},
 	}
 
-	return app.OK(people,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(people), 0, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(people, respOpts...)
 }
 
 // updatePeopleCache updates the completion cache with fresh people data.

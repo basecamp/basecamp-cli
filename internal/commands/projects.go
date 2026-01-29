@@ -128,14 +128,7 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		updateProjectsCache(projects, app.Config.CacheDir)
 	}
 
-	// Show truncation notice when user explicitly limits results (human output only)
-	if !app.IsMachineOutput() {
-		if notice := output.TruncationNotice(len(projects), 0, all, limit); notice != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), notice)
-		}
-	}
-
-	return app.OK(projects,
+	respOpts := []output.ResponseOption{
 		output.WithEntity("project"),
 		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
 		output.WithBreadcrumbs(
@@ -150,7 +143,14 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 				Description: "Create a new project",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(projects), 0, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(projects, respOpts...)
 }
 
 // updateProjectsCache updates the completion cache with fresh project data.

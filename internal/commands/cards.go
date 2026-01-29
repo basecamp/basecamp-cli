@@ -21,6 +21,9 @@ func NewCardsCmd() *cobra.Command {
 	var project string
 	var column string
 	var cardTable string
+	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "cards",
@@ -28,7 +31,7 @@ func NewCardsCmd() *cobra.Command {
 		Long:  "List, show, create, and manage cards in Card Tables (Kanban boards).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runCardsList(cmd, project, column, cardTable)
+			return runCardsList(cmd, project, column, cardTable, limit, page, all)
 		},
 	}
 
@@ -36,6 +39,9 @@ func NewCardsCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newCardsListCmd(&project, &cardTable),
@@ -54,23 +60,49 @@ func NewCardsCmd() *cobra.Command {
 
 func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	var column string
+	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cards",
 		Long:  "List all cards in a project's card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCardsList(cmd, *project, column, *cardTable)
+			return runCardsList(cmd, *project, column, *cardTable, limit, page, all)
 		},
 	}
 
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
 
-func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
+func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+	}
+
+	// Pagination flags only make sense when listing a single column
+	// When aggregating across columns, pagination is per-column which is confusing
+	if column == "" && (page > 0 || limit > 0 || all) {
+		return output.ErrUsageHint(
+			"Pagination flags require --column",
+			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column.",
+		)
+	}
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
@@ -110,6 +142,17 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
+	// Build pagination options
+	opts := &basecamp.CardListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	// Optimization: If column is a numeric ID, skip card table discovery
 	// and fetch cards directly from the column endpoint
 	if column != "" && isNumericID(column) {
@@ -118,7 +161,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, nil)
+		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -168,13 +211,13 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 				"Use column ID or exact name",
 			)
 		}
-		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, nil)
+		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
 		allCards = cards
 	} else {
-		// Get cards from all columns
+		// Get cards from all columns (no pagination - already validated above)
 		for _, col := range cardTableData.Lists {
 			cards, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID, nil)
 			if err != nil {

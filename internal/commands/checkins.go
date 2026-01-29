@@ -115,11 +115,26 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 }
 
 func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "questions",
 		Short: "List check-in questions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Validate flag combinations
+			if all && limit > 0 {
+				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+			if page > 0 && (all || limit > 0) {
+				return output.ErrUsage("--page cannot be combined with --all or --limit")
+			}
+			if page > 1 {
+				return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -164,7 +179,18 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				return output.ErrUsage("Invalid questionnaire ID")
 			}
 
-			questions, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID, nil)
+			// Build pagination options
+			opts := &basecamp.QuestionListOptions{}
+			if all {
+				opts.Limit = -1 // SDK treats -1 as "fetch all"
+			} else if limit > 0 {
+				opts.Limit = limit
+			}
+			if page > 0 {
+				opts.Page = page
+			}
+
+			questions, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -186,6 +212,12 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 			)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of questions to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all questions (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
 func newCheckinsQuestionCmd(project *string) *cobra.Command {
@@ -538,12 +570,27 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 }
 
 func newCheckinsAnswersCmd(project *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "answers <question_id>",
 		Short: "List answers for a question",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Validate flag combinations
+			if all && limit > 0 {
+				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+			if page > 0 && (all || limit > 0) {
+				return output.ErrUsage("--page cannot be combined with --all or --limit")
+			}
+			if page > 1 {
+				return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -581,7 +628,18 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid question ID")
 			}
 
-			answers, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID, nil)
+			// Build pagination options
+			opts := &basecamp.AnswerListOptions{}
+			if all {
+				opts.Limit = -1 // SDK treats -1 as "fetch all"
+			} else if limit > 0 {
+				opts.Limit = limit
+			}
+			if page > 0 {
+				opts.Page = page
+			}
+
+			answers, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -603,6 +661,12 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 			)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all answers (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
 func newCheckinsAnswerCmd(project *string) *cobra.Command {

@@ -149,14 +149,7 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 		return convertSDKError(err)
 	}
 
-	// Show truncation notice when user explicitly limits results (human output only)
-	if !app.IsMachineOutput() {
-		if notice := output.TruncationNotice(len(todolists), 0, all, limit); notice != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), notice)
-		}
-	}
-
-	return app.OK(todolists,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d todolists", len(todolists))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -170,7 +163,14 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 				Description: "Create todolist",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(todolists), 0, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(todolists, respOpts...)
 }
 
 func newTodolistsShowCmd(project *string) *cobra.Command {

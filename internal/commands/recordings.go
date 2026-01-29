@@ -19,6 +19,8 @@ func NewRecordingsCmd() *cobra.Command {
 	var sortBy string
 	var direction string
 	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "recordings [type]",
@@ -52,7 +54,7 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 				)
 			}
 
-			return runRecordingsList(cmd, app, effectiveType, project, status, sortBy, direction, limit)
+			return runRecordingsList(cmd, app, effectiveType, project, status, sortBy, direction, limit, page, all)
 		},
 	}
 
@@ -63,7 +65,9 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 	cmd.Flags().StringVarP(&status, "status", "s", "active", "Recording status (active, trashed, archived)")
 	cmd.Flags().StringVar(&sortBy, "sort", "updated_at", "Sort field (updated_at, created_at)")
 	cmd.Flags().StringVar(&direction, "direction", "desc", "Sort direction (asc, desc)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Limit number of results")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newRecordingsListCmd(&project),
@@ -105,6 +109,8 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 	var sortBy string
 	var direction string
 	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list [type]",
@@ -128,7 +134,7 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 				)
 			}
 
-			return runRecordingsList(cmd, app, effectiveType, *project, status, sortBy, direction, limit)
+			return runRecordingsList(cmd, app, effectiveType, *project, status, sortBy, direction, limit, page, all)
 		},
 	}
 
@@ -136,12 +142,25 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVarP(&status, "status", "s", "active", "Recording status (active, trashed, archived)")
 	cmd.Flags().StringVar(&sortBy, "sort", "updated_at", "Sort field")
 	cmd.Flags().StringVar(&direction, "direction", "desc", "Sort direction (asc, desc)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Limit number of results")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
 
-func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, project, status, sortBy, direction string, limit int) error {
+func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, project, status, sortBy, direction string, limit, page int, all bool) error {
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+	}
+
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -151,6 +170,16 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 		Status:    status,
 		Sort:      sortBy,
 		Direction: direction,
+	}
+
+	// Apply pagination options
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
 	}
 
 	if project != "" {
@@ -170,14 +199,9 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 		return convertSDKError(err)
 	}
 
-	// Apply client-side limit if specified
-	if limit > 0 && len(recordings) > limit {
-		recordings = recordings[:limit]
-	}
-
 	summary := fmt.Sprintf("%d %ss", len(recordings), recordingType)
 
-	return app.OK(recordings,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -186,7 +210,14 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 				Description: "Show recording (use bucket.id from result)",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(recordings), basecamp.DefaultRecordingLimit, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(recordings, respOpts...)
 }
 
 func newRecordingsTrashCmd(project *string) *cobra.Command {

@@ -183,7 +183,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 
 	summary := fmt.Sprintf("%d folders, %d files, %d documents", len(folders), len(uploads), len(documents))
 
-	return app.OK(result,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -202,18 +202,36 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 				Description: "Create document",
 			},
 		),
-	)
+	}
+
+	// Add notice for large result sets pointing to subcommands with pagination
+	total := len(folders) + len(uploads) + len(documents)
+	if total > 50 {
+		respOpts = append(respOpts, output.WithNotice(
+			"For pagination control, use: bcq files folders, bcq files uploads, or bcq files documents",
+		))
+	}
+
+	return app.OK(result, respOpts...)
 }
 
 func newFoldersCmd(project, vaultID *string) *cobra.Command {
+	var limit int
+	var page int
+	var all bool
+
 	cmd := &cobra.Command{
 		Use:     "folders",
 		Aliases: []string{"folder", "vaults", "vault"},
 		Short:   "Manage folders/vaults",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFoldersList(cmd, *project, *vaultID)
+			return runFoldersList(cmd, *project, *vaultID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of folders to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all folders (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newFoldersListCmd(project, vaultID),
@@ -224,17 +242,38 @@ func newFoldersCmd(project, vaultID *string) *cobra.Command {
 }
 
 func newFoldersListCmd(project, vaultID *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List folders in a vault",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFoldersList(cmd, *project, *vaultID)
+			return runFoldersList(cmd, *project, *vaultID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of folders to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all folders (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
-func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
+func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -279,8 +318,19 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 		return output.ErrUsage("Invalid vault ID")
 	}
 
+	// Build pagination options
+	opts := &basecamp.VaultListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	// Get folders using SDK
-	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -388,14 +438,22 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 }
 
 func newUploadsCmd(project, vaultID *string) *cobra.Command {
+	var limit int
+	var page int
+	var all bool
+
 	cmd := &cobra.Command{
 		Use:     "uploads",
 		Aliases: []string{"upload"},
 		Short:   "Manage uploaded files",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUploadsList(cmd, *project, *vaultID)
+			return runUploadsList(cmd, *project, *vaultID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of files to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all files (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newUploadsListCmd(project, vaultID),
@@ -405,17 +463,38 @@ func newUploadsCmd(project, vaultID *string) *cobra.Command {
 }
 
 func newUploadsListCmd(project, vaultID *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List uploaded files in a vault",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUploadsList(cmd, *project, *vaultID)
+			return runUploadsList(cmd, *project, *vaultID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of files to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all files (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
-func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
+func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -460,8 +539,19 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 		return output.ErrUsage("Invalid vault ID")
 	}
 
+	// Build pagination options
+	opts := &basecamp.UploadListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	// Get uploads using SDK
-	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -479,14 +569,22 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 }
 
 func newDocsCmd(project, vaultID *string) *cobra.Command {
+	var limit int
+	var page int
+	var all bool
+
 	cmd := &cobra.Command{
 		Use:     "documents",
 		Aliases: []string{"document", "doc"},
 		Short:   "Manage documents",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDocsList(cmd, *project, *vaultID)
+			return runDocsList(cmd, *project, *vaultID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of documents to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all documents (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newDocsListCmd(project, vaultID),
@@ -497,17 +595,38 @@ func newDocsCmd(project, vaultID *string) *cobra.Command {
 }
 
 func newDocsListCmd(project, vaultID *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List documents in a vault",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDocsList(cmd, *project, *vaultID)
+			return runDocsList(cmd, *project, *vaultID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of documents to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all documents (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
-func runDocsList(cmd *cobra.Command, project, vaultID string) error {
+func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("--page values >1 are not supported; use --all to fetch all results")
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -552,8 +671,19 @@ func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 		return output.ErrUsage("Invalid vault ID")
 	}
 
+	// Build pagination options
+	opts := &basecamp.DocumentListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
 	// Get documents using SDK
-	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
