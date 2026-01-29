@@ -21,7 +21,7 @@ import (
 func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 	// Try interactive prompt if available
 	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No person specified", "Use --to or --assignee to specify a person")
+		return nil, output.ErrUsage("Person ID required")
 	}
 
 	// Ensure account is configured
@@ -103,7 +103,7 @@ func (r *Resolver) Person(ctx context.Context) (*ResolvedValue, error) {
 func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*ResolvedValue, error) {
 	// Try interactive prompt if available
 	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No person specified", "Use --to or --assignee to specify a person")
+		return nil, output.ErrUsage("Person ID required")
 	}
 
 	// Ensure account is configured

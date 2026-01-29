@@ -46,10 +46,11 @@ type pickerModel struct {
 	loadError  error // Error from async item loading
 
 	// Enhanced features
-	recentItems      []PickerItem // Recently used items shown at top
-	emptyMessage     string       // Custom message when no items
-	autoSelectSingle bool         // Auto-select if only one item
-	showHelp         bool         // Show keyboard shortcuts help
+	recentItems      []PickerItem          // Recently used items shown at top
+	originalItems    map[string]PickerItem // Original items by ID (for returning undecorated values)
+	emptyMessage     string                // Custom message when no items
+	autoSelectSingle bool                  // Auto-select if only one item
+	showHelp         bool                  // Show keyboard shortcuts help
 }
 
 // PickerOption configures a picker.
@@ -117,23 +118,32 @@ func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	s.Style = lipgloss.NewStyle().Foreground(styles.theme.Primary)
 
 	m := pickerModel{
-		items:        items,
-		filtered:     items,
-		textInput:    ti,
-		styles:       styles,
-		title:        "Select an item",
-		maxVisible:   10,
-		spinner:      s,
-		loadingMsg:   "Loading...",
-		emptyMessage: "No items found",
-		showHelp:     true,
+		items:         items,
+		filtered:      items,
+		textInput:     ti,
+		styles:        styles,
+		title:         "Select an item",
+		maxVisible:    10,
+		spinner:       s,
+		loadingMsg:    "Loading...",
+		emptyMessage:  "No items found",
+		showHelp:      true,
+		originalItems: make(map[string]PickerItem),
 	}
 
 	for _, opt := range opts {
 		opt(&m)
 	}
 
-	// Prepend recent items if provided
+	// Build original items map before any decoration
+	for _, item := range items {
+		m.originalItems[item.ID] = item
+	}
+	for _, item := range m.recentItems {
+		m.originalItems[item.ID] = item
+	}
+
+	// Prepend recent items if provided (this decorates titles for display)
 	if len(m.recentItems) > 0 {
 		m.items = m.mergeWithRecents(m.items)
 		m.filtered = m.items
@@ -225,7 +235,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
-				m.selected = &m.filtered[m.cursor]
+				m.selected = m.getOriginalItem(m.filtered[m.cursor].ID)
 			}
 			return m, tea.Quit
 		case "up", "ctrl+p", "k":
@@ -273,7 +283,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// Tab to select first match
 			if len(m.filtered) > 0 {
-				m.selected = &m.filtered[0]
+				m.selected = m.getOriginalItem(m.filtered[0].ID)
 			}
 			return m, tea.Quit
 		default:
@@ -302,6 +312,17 @@ func (m pickerModel) filter(query string) []PickerItem {
 		}
 	}
 	return result
+}
+
+// getOriginalItem returns the original (undecorated) item by ID.
+// This ensures that callers receive clean data without UI decoration
+// (e.g., "* " prefix or "(recent)" suffix from recent items).
+func (m pickerModel) getOriginalItem(id string) *PickerItem {
+	if original, ok := m.originalItems[id]; ok {
+		return &original
+	}
+	// Fallback: return nil if not found (shouldn't happen in normal use)
+	return nil
 }
 
 func (m pickerModel) View() string {

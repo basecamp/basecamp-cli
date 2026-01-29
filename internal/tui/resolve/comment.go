@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -27,11 +28,21 @@ type CommentTarget struct {
 // The project must be resolved before calling this method.
 // Returns the resolved recording ID and project ID.
 func (r *Resolver) Comment(ctx context.Context, onFlag string, projectID string) (*CommentTarget, error) {
+	// Validate project ID is numeric
+	parsedProjectID, err := parseRequiredInt64(projectID, "project ID")
+	if err != nil {
+		return nil, err
+	}
+
 	// 1. Check if recording ID is provided directly
 	if onFlag != "" {
+		recordingID, err := parseRequiredInt64(onFlag, "recording ID (--on)")
+		if err != nil {
+			return nil, err
+		}
 		return &CommentTarget{
-			RecordingID: parseInt64(onFlag),
-			ProjectID:   parseInt64(projectID),
+			RecordingID: recordingID,
+			ProjectID:   parsedProjectID,
 		}, nil
 	}
 
@@ -41,7 +52,7 @@ func (r *Resolver) Comment(ctx context.Context, onFlag string, projectID string)
 	}
 
 	// Fetch recent recordings from the project to show as options
-	recordings, err := r.fetchCommentableRecordings(ctx, projectID)
+	recordings, err := r.fetchCommentableRecordings(ctx, parsedProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,23 +103,21 @@ func (r *Resolver) Comment(ctx context.Context, onFlag string, projectID string)
 		}
 	}
 
+	// Parse selected recording ID (should always succeed since we created the picker items)
+	selectedRecordingID, _ := strconv.ParseInt(selected.ID, 10, 64)
+
 	return &CommentTarget{
-		RecordingID: parseInt64(selected.ID),
-		ProjectID:   parseInt64(projectID),
+		RecordingID: selectedRecordingID,
+		ProjectID:   parsedProjectID,
 		Type:        selectedType,
 		Title:       selected.Title,
 	}, nil
 }
 
 // fetchCommentableRecordings retrieves recent recordings that can be commented on.
-func (r *Resolver) fetchCommentableRecordings(ctx context.Context, projectID string) ([]basecamp.Recording, error) {
+func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int64) ([]basecamp.Recording, error) {
 	if r.config.AccountID == "" {
 		return nil, output.ErrUsage("Account must be resolved before fetching recordings")
-	}
-
-	bucketID := parseInt64(projectID)
-	if bucketID == 0 {
-		return nil, output.ErrUsage("Invalid project ID")
 	}
 
 	// Fetch different types of recordings that support comments
@@ -156,9 +165,17 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, projectID str
 	return allRecordings, nil
 }
 
-// parseInt64 safely parses a string to int64, returning 0 on error.
-func parseInt64(s string) int64 {
-	var result int64
-	fmt.Sscanf(s, "%d", &result)
-	return result
+// parseRequiredInt64 parses a string to int64 and returns a usage error if invalid.
+func parseRequiredInt64(s string, name string) (int64, error) {
+	if s == "" {
+		return 0, output.ErrUsage(name + " is required")
+	}
+	result, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage(fmt.Sprintf("Invalid %s %q: must be a numeric ID", name, s))
+	}
+	if result <= 0 {
+		return 0, output.ErrUsage(fmt.Sprintf("Invalid %s %q: must be a positive number", name, s))
+	}
+	return result, nil
 }

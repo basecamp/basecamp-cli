@@ -14,8 +14,9 @@ import (
 // Todolist resolves the todolist ID using the following precedence:
 // 1. CLI flag (--todolist or --list)
 // 2. Config file (todolist_id)
-// 3. Interactive prompt (if terminal is interactive)
-// 4. Error (if no todolist can be determined)
+// 3. Auto-select if exactly one todolist exists (non-interactive fallback)
+// 4. Interactive prompt (if terminal is interactive)
+// 5. Error (if no todolist can be determined)
 //
 // The project must be resolved before calling this method.
 // Returns the resolved todolist ID and the source it came from.
@@ -36,72 +37,45 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 		}, nil
 	}
 
-	// 3. Try interactive prompt if available
-	if !r.IsInteractive() {
-		return nil, output.ErrUsageHint("No todolist specified", "Use --list or set todolist_id in .basecamp/config.json")
-	}
-
-	// Ensure project is configured
+	// Ensure project is configured before fetching
 	if projectID == "" {
 		return nil, output.ErrUsage("Project must be resolved before fetching todolists")
 	}
 
-	// Create a page fetcher for the paginated picker.
-	var cachedTodolists []basecamp.Todolist
-	fetcher := func(ctx context.Context, cursor string) (*tui.PageResult, error) {
-		// Only fetch on the first call (cursor is empty)
-		if cursor != "" {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
-		}
+	// Fetch todolists to check count (needed for both interactive and non-interactive paths)
+	todolists, err := r.fetchTodolists(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 
-		// Parse project ID
-		bucketID, err := strconv.ParseInt(projectID, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid project ID: %w", err)
-		}
-
-		// Get todoset ID from project dock
-		todosetID, err := r.getTodosetID(ctx, bucketID)
-		if err != nil {
-			return nil, err
-		}
-
-		// Fetch todolists using SDK
-		todolists, err := r.sdk.ForAccount(r.config.AccountID).Todolists().List(ctx, bucketID, todosetID, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch todolists: %w", err)
-		}
-
-		if len(todolists) == 0 {
-			return &tui.PageResult{
-				Items:   nil,
-				HasMore: false,
-			}, nil
-		}
-
-		// Cache for potential single-todolist shortcut
-		cachedTodolists = todolists
-
-		// Convert to picker items
-		items := make([]tui.PickerItem, len(todolists))
-		for i, tl := range todolists {
-			items[i] = todolistToPickerItem(tl)
-		}
-
-		return &tui.PageResult{
-			Items:      items,
-			HasMore:    false,
-			NextCursor: "done",
+	// 3. Auto-select if exactly one todolist exists
+	if len(todolists) == 1 {
+		return &ResolvedValue{
+			Value:  fmt.Sprintf("%d", todolists[0].ID),
+			Source: SourceDefault,
 		}, nil
 	}
 
-	// Use paginated picker with loading spinner
-	selected, err := tui.NewPaginatedPicker(ctx, fetcher,
-		tui.WithPaginatedPickerTitle("Select a todolist"),
-		tui.WithLoadingMessage("Loading todolists..."),
+	// No todolists found
+	if len(todolists) == 0 {
+		return nil, output.ErrNotFoundHint("todolists", projectID, "Create a todolist first")
+	}
+
+	// 4. Multiple todolists - need interactive prompt
+	if !r.IsInteractive() {
+		return nil, output.ErrUsageHint("No todolist specified", "Use --list or set todolist_id in .basecamp/config.json")
+	}
+
+	// Convert to picker items for interactive selection
+	items := make([]tui.PickerItem, len(todolists))
+	for i, tl := range todolists {
+		items[i] = todolistToPickerItem(tl)
+	}
+
+	// Show picker
+	selected, err := tui.NewPicker(items,
+		tui.WithPickerTitle("Select a todolist"),
+		tui.WithEmptyMessage("No todolists found"),
 	).Run()
 
 	if err != nil {
@@ -111,16 +85,33 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 		return nil, output.ErrUsage("todolist selection canceled")
 	}
 
-	// If only one todolist was available, note the source as default
-	source := SourcePrompt
-	if len(cachedTodolists) == 1 {
-		source = SourceDefault
-	}
-
 	return &ResolvedValue{
 		Value:  selected.ID,
-		Source: source,
+		Source: SourcePrompt,
 	}, nil
+}
+
+// fetchTodolists retrieves all todolists for a project.
+func (r *Resolver) fetchTodolists(ctx context.Context, projectID string) ([]basecamp.Todolist, error) {
+	// Parse project ID
+	bucketID, err := strconv.ParseInt(projectID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid project ID: %w", err)
+	}
+
+	// Get todoset ID from project dock
+	todosetID, err := r.getTodosetID(ctx, bucketID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch todolists using SDK
+	todolists, err := r.sdk.ForAccount(r.config.AccountID).Todolists().List(ctx, bucketID, todosetID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch todolists: %w", err)
+	}
+
+	return todolists, nil
 }
 
 // TodolistWithPersist resolves the todolist ID and optionally prompts to save it.
