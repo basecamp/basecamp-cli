@@ -128,6 +128,11 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		updateProjectsCache(projects, app.Config.CacheDir)
 	}
 
+	// Show truncation notice when user explicitly limits results
+	if notice := output.TruncationNotice(len(projects), 0, all, limit); notice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), notice)
+	}
+
 	return app.OK(projects,
 		output.WithEntity("project"),
 		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
