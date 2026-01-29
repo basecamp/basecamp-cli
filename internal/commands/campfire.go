@@ -27,7 +27,7 @@ Use 'bcq campfire post "message"' to post a message.`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -80,7 +80,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 		Long:  "List campfires in a project or account-wide with --all.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 			return runCampfireList(cmd, app, *project, all)
@@ -128,10 +128,10 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsageHint(
-			"--project is required",
-			"Use --in <project>, --all for account-wide, or set in .basecamp/config.json",
-		)
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -189,7 +189,7 @@ func newCampfireMessagesCmd(project, campfireID *string) *cobra.Command {
 		Long:  "View recent messages from a Campfire.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 			return runCampfireMessages(cmd, app, *campfireID, *project, limit)
@@ -202,7 +202,7 @@ func newCampfireMessagesCmd(project, campfireID *string) *cobra.Command {
 }
 
 func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, project string, limit int) error {
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -211,7 +211,10 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -281,7 +284,7 @@ func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
 				return output.ErrUsage("Message content required")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -295,7 +298,7 @@ func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
 }
 
 func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, content string) error {
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -304,7 +307,10 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -357,13 +363,13 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			lineID := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -372,7 +378,10 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -433,13 +442,13 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			lineID := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -448,7 +457,10 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

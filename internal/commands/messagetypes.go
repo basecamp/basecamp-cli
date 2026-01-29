@@ -56,11 +56,11 @@ func newMessagetypesListCmd(project *string) *cobra.Command {
 func runMessagetypesList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -69,7 +69,10 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -113,7 +116,7 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -123,7 +126,7 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message type ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -132,7 +135,10 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -186,7 +192,7 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -203,7 +209,7 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--icon is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -212,7 +218,10 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -271,7 +280,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -285,7 +294,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Use --name or --icon to update")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -294,7 +303,10 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -345,7 +357,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -355,7 +367,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message type ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -364,7 +376,10 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

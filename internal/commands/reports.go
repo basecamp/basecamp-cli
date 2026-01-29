@@ -40,7 +40,7 @@ func newReportsAssignableCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -84,7 +84,7 @@ Results can be grouped by bucket (project) or date.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -171,7 +171,7 @@ Todos are grouped into categories:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -246,7 +246,7 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 

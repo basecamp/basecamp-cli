@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -67,11 +68,11 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		return output.ErrUsage("Recording ID required")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -80,7 +81,10 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string) error {
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -128,13 +132,13 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			commentIDStr := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -143,7 +147,10 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -196,7 +203,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -206,7 +213,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--content is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -215,7 +222,10 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -281,15 +291,11 @@ Supports batch commenting on multiple recordings at once.`,
 				return output.ErrUsage("Comment content required")
 			}
 
-			if len(recordingIDs) == 0 {
-				return output.ErrUsage("--on requires a recording ID")
-			}
-
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Resolve project
+			// Resolve project - check local flag, app flag, config, then interactive
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -298,7 +304,10 @@ Supports batch commenting on multiple recordings at once.`,
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -309,6 +318,15 @@ Supports batch commenting on multiple recordings at once.`,
 			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
+			}
+
+			// If no recording specified, try interactive resolution
+			if len(recordingIDs) == 0 {
+				target, err := app.Resolve().Comment(cmd.Context(), "", resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				recordingIDs = []string{fmt.Sprintf("%d", target.RecordingID)}
 			}
 
 			// Expand comma-separated IDs
@@ -331,6 +349,7 @@ Supports batch commenting on multiple recordings at once.`,
 			var commented []string
 			var commentIDs []string
 			var failed []string
+			var firstAPIErr error // Capture first API error for better error reporting
 
 			for _, recordingIDStr := range expandedIDs {
 				recordingID, parseErr := strconv.ParseInt(recordingIDStr, 10, 64)
@@ -342,11 +361,36 @@ Supports batch commenting on multiple recordings at once.`,
 				comment, createErr := app.Account().Comments().Create(cmd.Context(), bucketID, recordingID, req)
 				if createErr != nil {
 					failed = append(failed, recordingIDStr)
+					if firstAPIErr == nil {
+						firstAPIErr = createErr
+					}
 					continue
 				}
 
 				commentIDs = append(commentIDs, fmt.Sprintf("%d", comment.ID))
 				commented = append(commented, recordingIDStr)
+			}
+
+			// If all operations failed, return an error for automation
+			if len(commented) == 0 && len(failed) > 0 {
+				if firstAPIErr != nil {
+					// Convert SDK error to preserve rate-limit hints and exit codes
+					converted := convertSDKError(firstAPIErr)
+					// If it's an output.Error, preserve its fields but add recording IDs to message
+					var outErr *output.Error
+					if errors.As(converted, &outErr) {
+						return &output.Error{
+							Code:       outErr.Code,
+							Message:    fmt.Sprintf("Failed to comment on recordings %s: %s", strings.Join(failed, ", "), outErr.Message),
+							Hint:       outErr.Hint,
+							HTTPStatus: outErr.HTTPStatus,
+							Retryable:  outErr.Retryable,
+							Cause:      outErr,
+						}
+					}
+					return fmt.Errorf("failed to comment on recordings %s: %w", strings.Join(failed, ", "), converted)
+				}
+				return output.ErrUsage(fmt.Sprintf("Failed to comment on all recordings: %s", strings.Join(failed, ", ")))
 			}
 
 			// Build result

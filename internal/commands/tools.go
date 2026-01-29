@@ -55,7 +55,7 @@ func newToolsShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -64,7 +64,7 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -73,7 +73,10 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -134,7 +137,7 @@ For example, clone a Campfire to create a second chat room in the same project.`
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -147,7 +150,7 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				return output.ErrUsage("Invalid source tool ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -156,7 +159,10 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -220,7 +226,7 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -233,7 +239,7 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--title is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -242,7 +248,10 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -296,7 +305,7 @@ WARNING: This permanently removes the tool and all its content.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -305,7 +314,7 @@ WARNING: This permanently removes the tool and all its content.`,
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -314,7 +323,10 @@ WARNING: This permanently removes the tool and all its content.`,
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -357,7 +369,7 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -366,7 +378,7 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -375,7 +387,10 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -418,7 +433,7 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -427,7 +442,7 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -436,7 +451,10 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -480,7 +498,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -493,7 +511,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--position is required (1-based)")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -502,7 +520,10 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

@@ -61,7 +61,7 @@ func newTimesheetReportCmd(startDate, endDate, personID, bucketID *string) *cobr
 func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucketID string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
@@ -159,7 +159,7 @@ func newTimesheetProjectCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -168,7 +168,7 @@ func newTimesheetProjectCmd() *cobra.Command {
 				project = args[0]
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -177,7 +177,10 @@ func newTimesheetProjectCmd() *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("Project ID is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -232,7 +235,7 @@ func newTimesheetRecordingCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -242,7 +245,7 @@ func newTimesheetRecordingCmd() *cobra.Command {
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -251,7 +254,10 @@ func newTimesheetRecordingCmd() *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

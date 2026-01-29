@@ -48,11 +48,11 @@ on a schedule (e.g., "What did you work on today?").`,
 func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -61,7 +61,10 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -118,11 +121,11 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -131,7 +134,10 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -218,11 +224,11 @@ func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
 func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -231,7 +237,10 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -290,7 +299,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -298,7 +307,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				return output.ErrUsage("--title is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -307,7 +316,10 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -422,13 +434,13 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			questionIDStr := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -437,7 +449,10 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -530,13 +545,13 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			questionIDStr := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -545,7 +560,10 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -623,11 +641,11 @@ func newCheckinsAnswerShowCmd(project *string) *cobra.Command {
 func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -636,7 +654,10 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -702,7 +723,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -718,7 +739,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--content is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -727,7 +748,10 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -796,7 +820,7 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -806,7 +830,7 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--content is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -815,7 +839,10 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

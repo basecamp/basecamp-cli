@@ -83,7 +83,7 @@ func executeTodosCommand(cmd *cobra.Command, app *appctx.App, args ...string) er
 	return cmd.Execute()
 }
 
-// TestTodosRequiresProject tests that No project specified for todos.
+// TestTodosRequiresProject tests that Project ID required for todos.
 func TestTodosRequiresProject(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	// No project in config
@@ -95,7 +95,7 @@ func TestTodosRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "No project specified", e.Message)
+	assert.Equal(t, "Project ID required", e.Message)
 }
 
 // TestTodosListRequiresProject tests that todos list requires --project.
@@ -110,7 +110,7 @@ func TestTodosListRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "No project specified", e.Message)
+	assert.Equal(t, "Project ID required", e.Message)
 }
 
 // TestTodosCreateRequiresContent tests that todos create requires content.
@@ -226,7 +226,7 @@ func TestTodoShortcutRequiresProject(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "No project specified", e.Message)
+	assert.Equal(t, "Project ID required", e.Message)
 }
 
 // TestDoneRequiresID tests that done command requires an ID.

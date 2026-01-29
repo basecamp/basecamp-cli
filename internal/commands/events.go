@@ -30,7 +30,7 @@ Events track all changes to a recording. Common event actions:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -40,7 +40,7 @@ Events track all changes to a recording. Common event actions:
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -49,7 +49,10 @@ Events track all changes to a recording. Common event actions:
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

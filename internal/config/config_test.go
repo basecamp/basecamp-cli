@@ -474,3 +474,133 @@ func TestLoadFromFileEmptyValues(t *testing.T) {
 	// project_id should be set
 	assert.Equal(t, "real-value", cfg.ProjectID)
 }
+
+func TestLoadFromFileWithHosts(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	testConfig := map[string]any{
+		"default_host": "production",
+		"hosts": map[string]any{
+			"production": map[string]any{
+				"base_url":  "https://3.basecampapi.com",
+				"client_id": "prod-client-123",
+			},
+			"beta": map[string]any{
+				"base_url":  "https://3.basecamp-beta.com",
+				"client_id": "beta-client-456",
+			},
+			"dev": map[string]any{
+				"base_url": "http://localhost:3000",
+			},
+		},
+	}
+	data, _ := json.Marshal(testConfig)
+	os.WriteFile(configPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	// Verify default_host
+	if cfg.DefaultHost != "production" {
+		t.Errorf("DefaultHost = %q, want %q", cfg.DefaultHost, "production")
+	}
+
+	// Verify hosts map
+	if cfg.Hosts == nil {
+		t.Fatal("Hosts map should not be nil")
+	}
+	if len(cfg.Hosts) != 3 {
+		t.Errorf("len(Hosts) = %d, want 3", len(cfg.Hosts))
+	}
+
+	// Verify production host
+	if prod, ok := cfg.Hosts["production"]; ok {
+		if prod.BaseURL != "https://3.basecampapi.com" {
+			t.Errorf("Hosts[production].BaseURL = %q, want %q", prod.BaseURL, "https://3.basecampapi.com")
+		}
+		if prod.ClientID != "prod-client-123" {
+			t.Errorf("Hosts[production].ClientID = %q, want %q", prod.ClientID, "prod-client-123")
+		}
+	} else {
+		t.Error("Hosts[production] not found")
+	}
+
+	// Verify dev host (no client_id)
+	if dev, ok := cfg.Hosts["dev"]; ok {
+		if dev.BaseURL != "http://localhost:3000" {
+			t.Errorf("Hosts[dev].BaseURL = %q, want %q", dev.BaseURL, "http://localhost:3000")
+		}
+		if dev.ClientID != "" {
+			t.Errorf("Hosts[dev].ClientID = %q, want empty", dev.ClientID)
+		}
+	} else {
+		t.Error("Hosts[dev] not found")
+	}
+
+	// Verify source tracking
+	if cfg.Sources["default_host"] != "global" {
+		t.Errorf("Sources[default_host] = %q, want %q", cfg.Sources["default_host"], "global")
+	}
+	if cfg.Sources["hosts"] != "global" {
+		t.Errorf("Sources[hosts] = %q, want %q", cfg.Sources["hosts"], "global")
+	}
+}
+
+func TestHostsConfigLayering(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	localPath := filepath.Join(tmpDir, "local.json")
+
+	// Global config with production and beta
+	globalConfig := map[string]any{
+		"default_host": "production",
+		"hosts": map[string]any{
+			"production": map[string]any{
+				"base_url": "https://3.basecampapi.com",
+			},
+			"beta": map[string]any{
+				"base_url": "https://3.basecamp-beta.com",
+			},
+		},
+	}
+	data, _ := json.Marshal(globalConfig)
+	os.WriteFile(globalPath, data, 0644)
+
+	// Local config adds dev and overrides default_host
+	localConfig := map[string]any{
+		"default_host": "dev",
+		"hosts": map[string]any{
+			"dev": map[string]any{
+				"base_url": "http://localhost:3000",
+			},
+		},
+	}
+	data, _ = json.Marshal(localConfig)
+	os.WriteFile(localPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, globalPath, SourceGlobal)
+	loadFromFile(cfg, localPath, SourceLocal)
+
+	// default_host should be overridden by local
+	if cfg.DefaultHost != "dev" {
+		t.Errorf("DefaultHost = %q, want %q", cfg.DefaultHost, "dev")
+	}
+
+	// hosts should be merged (global + local)
+	if len(cfg.Hosts) != 3 {
+		t.Errorf("len(Hosts) = %d, want 3 (production + beta + dev)", len(cfg.Hosts))
+	}
+
+	// Verify all hosts are present
+	if _, ok := cfg.Hosts["production"]; !ok {
+		t.Error("Hosts[production] from global should be present")
+	}
+	if _, ok := cfg.Hosts["beta"]; !ok {
+		t.Error("Hosts[beta] from global should be present")
+	}
+	if _, ok := cfg.Hosts["dev"]; !ok {
+		t.Error("Hosts[dev] from local should be present")
+	}
+}

@@ -58,11 +58,12 @@ func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
 func runMessagesList(cmd *cobra.Command, project string, messageBoard string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project from CLI flags and config
+	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -70,8 +71,13 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string) er
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
+
+	// If no project specified, try interactive resolution
 	if projectID == "" {
-		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -127,7 +133,7 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -137,7 +143,7 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -146,7 +152,10 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -196,7 +205,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -204,7 +213,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return output.ErrUsage("--subject is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -213,7 +222,10 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -294,7 +306,7 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -308,7 +320,7 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --subject or --content is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -317,7 +329,10 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -370,7 +385,7 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -380,7 +395,7 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -389,7 +404,10 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -439,7 +457,7 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -449,7 +467,7 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -458,7 +476,10 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -514,7 +535,7 @@ func NewMessageCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -522,7 +543,7 @@ func NewMessageCmd() *cobra.Command {
 				return output.ErrUsage("--subject is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -531,7 +552,10 @@ func NewMessageCmd() *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

@@ -17,6 +17,10 @@ type Config struct {
 	ProjectID  string `json:"project_id"`
 	TodolistID string `json:"todolist_id"`
 
+	// Host settings (multiple environments)
+	Hosts       map[string]*HostConfig `json:"hosts,omitempty"`
+	DefaultHost string                 `json:"default_host,omitempty"`
+
 	// Auth settings
 	Scope string `json:"scope"`
 
@@ -31,6 +35,12 @@ type Config struct {
 	Sources map[string]string `json:"-"`
 }
 
+// HostConfig holds configuration for a specific host/environment.
+type HostConfig struct {
+	BaseURL  string `json:"base_url"`
+	ClientID string `json:"client_id,omitempty"`
+}
+
 // Source indicates where a config value came from.
 type Source string
 
@@ -42,6 +52,7 @@ const (
 	SourceLocal   Source = "local"
 	SourceEnv     Source = "env"
 	SourceFlag    Source = "flag"
+	SourcePrompt  Source = "prompt"
 )
 
 // FlagOverrides holds command-line flag values.
@@ -144,6 +155,31 @@ func loadFromFile(cfg *Config, path string, source Source) {
 	if v, ok := fileCfg["format"].(string); ok && v != "" {
 		cfg.Format = v
 		cfg.Sources["format"] = string(source)
+	}
+	if v, ok := fileCfg["default_host"].(string); ok && v != "" {
+		cfg.DefaultHost = v
+		cfg.Sources["default_host"] = string(source)
+	}
+	if v, ok := fileCfg["hosts"].(map[string]any); ok {
+		if cfg.Hosts == nil {
+			cfg.Hosts = make(map[string]*HostConfig)
+		}
+		for name, hostData := range v {
+			if hostMap, ok := hostData.(map[string]any); ok {
+				hostConfig := &HostConfig{}
+				if baseURL, ok := hostMap["base_url"].(string); ok && baseURL != "" {
+					hostConfig.BaseURL = baseURL
+				} else {
+					// Skip hosts with empty or missing base_url
+					continue
+				}
+				if clientID, ok := hostMap["client_id"].(string); ok {
+					hostConfig.ClientID = clientID
+				}
+				cfg.Hosts[name] = hostConfig
+			}
+		}
+		cfg.Sources["hosts"] = string(source)
 	}
 }
 

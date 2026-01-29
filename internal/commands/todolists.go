@@ -29,7 +29,7 @@ Each project has one todoset containing multiple todolists.`,
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return app.RequireAccount()
+			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
@@ -67,11 +67,11 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	if err := app.RequireAccount(); err != nil {
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -80,7 +80,10 @@ func runTodolistsList(cmd *cobra.Command, project string) error {
 		projectID = app.Config.ProjectID
 	}
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -139,13 +142,13 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
 			todolistIDStr := args[0]
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -154,7 +157,10 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -212,7 +218,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -220,7 +226,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--name is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -229,7 +235,10 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -307,7 +316,7 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -317,7 +326,7 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --name or --description is required")
 			}
 
-			// Resolve project
+			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -326,7 +335,10 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				projectID = app.Config.ProjectID
 			}
 			if projectID == "" {
-				return output.ErrUsage("--project is required")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
 			}
 
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -373,9 +385,4 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "New todolist description")
 
 	return cmd
-}
-
-// getTodosetID retrieves the todoset ID from a project's dock, handling multi-dock projects.
-func getTodosetID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "todoset", "", "todoset")
 }
