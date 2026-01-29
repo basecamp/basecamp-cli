@@ -28,21 +28,7 @@ func TestCompletionCmd(t *testing.T) {
 func TestCompletionValidArgs(t *testing.T) {
 	cmd := NewCompletionCmd()
 
-	validArgs := cmd.ValidArgs
-	expected := []string{"bash", "zsh", "fish", "powershell"}
-
-	assert.Equal(t, len(expected), len(validArgs))
-
-	for _, exp := range expected {
-		found := false
-		for _, arg := range validArgs {
-			if arg == exp {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "expected valid arg %q not found", exp)
-	}
+	assert.ElementsMatch(t, []string{"bash", "zsh", "fish", "powershell"}, cmd.ValidArgs)
 }
 
 // TestCompletionBashOutput tests that bash completion generates valid output.

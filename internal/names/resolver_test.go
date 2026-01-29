@@ -60,7 +60,7 @@ func TestResolve(t *testing.T) {
 				assert.Equal(t, tt.wantID, match.ID)
 			} else {
 				assert.Nil(t, match, "expected no match, got ID %d", match)
-				assert.Equal(t, tt.wantMatches, len(matches), "expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
+				assert.Len(t, matches, tt.wantMatches)
 			}
 		})
 	}
@@ -185,7 +185,7 @@ func TestResolveWithPersons(t *testing.T) {
 				assert.Equal(t, tt.wantID, match.ID)
 			} else {
 				assert.Nil(t, match, "expected no match, got ID %d", match)
-				assert.Equal(t, tt.wantMatches, len(matches), "expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
+				assert.Len(t, matches, tt.wantMatches)
 			}
 		})
 	}
@@ -241,7 +241,7 @@ func TestResolveWithTodolists(t *testing.T) {
 				assert.Equal(t, tt.wantID, match.ID)
 			} else {
 				assert.Nil(t, match, "expected no match, got ID %d", match)
-				assert.Equal(t, tt.wantMatches, len(matches), "expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
+				assert.Len(t, matches, tt.wantMatches)
 			}
 		})
 	}

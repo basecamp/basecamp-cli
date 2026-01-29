@@ -507,7 +507,7 @@ func TestWithBreadcrumbs(t *testing.T) {
 
 	WithBreadcrumbs(bc1, bc2)(resp)
 
-	assert.Len(t, resp.Breadcrumbs, 2)
+	require.Len(t, resp.Breadcrumbs, 2)
 	assert.Equal(t, "list", resp.Breadcrumbs[0].Action)
 }
 
