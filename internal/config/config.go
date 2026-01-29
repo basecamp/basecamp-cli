@@ -52,6 +52,7 @@ const (
 	SourceLocal   Source = "local"
 	SourceEnv     Source = "env"
 	SourceFlag    Source = "flag"
+	SourcePrompt  Source = "prompt"
 )
 
 // FlagOverrides holds command-line flag values.

@@ -60,7 +60,7 @@ func NewRootCmd() *cobra.Command {
 				}
 				if resolvedURL != "" {
 					cfg.BaseURL = resolvedURL
-					cfg.Sources["base_url"] = "prompt"
+					cfg.Sources["base_url"] = string(config.SourcePrompt)
 				}
 			}
 

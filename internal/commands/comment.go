@@ -281,7 +281,7 @@ Supports batch commenting on multiple recordings at once.`,
 				return output.ErrUsage("Comment content required")
 			}
 
-			if err := app.RequireAccount(); err != nil {
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -309,11 +309,7 @@ Supports batch commenting on multiple recordings at once.`,
 
 			// If no recording specified, try interactive resolution
 			if len(recordingIDs) == 0 {
-				onFlag := ""
-				if len(recordingIDs) > 0 {
-					onFlag = recordingIDs[0]
-				}
-				target, err := app.Resolve().Comment(cmd.Context(), onFlag, resolvedProjectID)
+				target, err := app.Resolve().Comment(cmd.Context(), "", resolvedProjectID)
 				if err != nil {
 					return err
 				}

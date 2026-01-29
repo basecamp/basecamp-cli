@@ -71,16 +71,20 @@ func (s *Store) Add(item Item) {
 }
 
 // Get returns recent items of the specified type, optionally filtered by account/project.
+// Returns a copy of the items to prevent callers from mutating internal state.
 func (s *Store) Get(itemType string, accountID, projectID string) []Item {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	items := s.items[itemType]
 	if accountID == "" && projectID == "" {
-		return items
+		// Return a copy to prevent mutation of internal state
+		result := make([]Item, len(items))
+		copy(result, items)
+		return result
 	}
 
-	// Filter by account/project
+	// Filter by account/project (filtering already creates a new slice)
 	var filtered []Item
 	for _, item := range items {
 		if accountID != "" && item.AccountID != accountID {

@@ -12,7 +12,7 @@ import (
 )
 
 // Todolist resolves the todolist ID using the following precedence:
-// 1. CLI flag (--todolist or --list)
+// 1. CLI flag (--todolist)
 // 2. Config file (todolist_id)
 // 3. Auto-select if exactly one todolist exists (non-interactive fallback)
 // 4. Interactive prompt (if terminal is interactive)
@@ -147,9 +147,9 @@ func (r *Resolver) getTodosetID(ctx context.Context, bucketID int64) (int64, err
 		return 0, fmt.Errorf("failed to fetch project: %w", err)
 	}
 
-	// Find todoset in dock
+	// Find enabled todoset in dock
 	for _, tool := range project.Dock {
-		if tool.Name == "todoset" {
+		if tool.Name == "todoset" && tool.Enabled {
 			return tool.ID, nil
 		}
 	}

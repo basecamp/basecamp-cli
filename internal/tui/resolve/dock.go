@@ -67,7 +67,7 @@ func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID
 	}
 }
 
-// fetchDockTools retrieves dock tools of a specific type from a project.
+// fetchDockTools retrieves enabled dock tools of a specific type from a project.
 func (r *Resolver) fetchDockTools(ctx context.Context, projectID, dockName string) ([]DockTool, error) {
 	// Fetch project data
 	path := fmt.Sprintf("/projects/%s.json", projectID)
@@ -83,10 +83,10 @@ func (r *Resolver) fetchDockTools(ctx context.Context, projectID, dockName strin
 		return nil, fmt.Errorf("failed to parse project: %w", err)
 	}
 
-	// Filter to matching tools
+	// Filter to matching enabled tools only
 	var matches []DockTool
 	for _, tool := range project.Dock {
-		if tool.Name == dockName {
+		if tool.Name == dockName && tool.Enabled {
 			matches = append(matches, tool)
 		}
 	}
