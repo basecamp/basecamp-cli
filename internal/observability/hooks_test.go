@@ -14,10 +14,10 @@ import (
 func TestCLIHooks_SetLevel(t *testing.T) {
 	h := NewCLIHooks(0, nil, nil)
 
-	assert.Equal(t, 0, h.Level(), "expected level 0")
+	assert.Equal(t, 0, h.Level())
 
 	h.SetLevel(2)
-	assert.Equal(t, 2, h.Level(), "expected level 2")
+	assert.Equal(t, 2, h.Level())
 }
 
 func TestCLIHooks_Level0_Silent(t *testing.T) {
@@ -41,8 +41,8 @@ func TestCLIHooks_Level0_Silent(t *testing.T) {
 
 	// But metrics should still be collected
 	summary := collector.Summary()
-	assert.Equal(t, 1, summary.TotalOperations, "expected 1 operation recorded")
-	assert.Equal(t, 1, summary.TotalRequests, "expected 1 request recorded")
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 1, summary.TotalRequests)
 }
 
 func TestCLIHooks_Level1_OperationsOnly(t *testing.T) {
@@ -114,8 +114,8 @@ func TestCLIHooks_OperationError(t *testing.T) {
 
 	// Collector should record the error
 	summary := collector.Summary()
-	assert.Equal(t, 1, summary.TotalOperations, "expected 1 operation")
-	assert.Equal(t, 1, summary.FailedOps, "expected 1 failure")
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 1, summary.FailedOps)
 }
 
 func TestCLIHooks_CachedRequest(t *testing.T) {
@@ -136,7 +136,7 @@ func TestCLIHooks_CachedRequest(t *testing.T) {
 
 	// Collector should record cache hit
 	summary := collector.Summary()
-	assert.Equal(t, 1, summary.CacheHits, "expected 1 cache hit")
+	assert.Equal(t, 1, summary.CacheHits)
 }
 
 func TestCLIHooks_Retry(t *testing.T) {
@@ -157,7 +157,7 @@ func TestCLIHooks_Retry(t *testing.T) {
 
 	// Collector should record retry
 	summary := collector.Summary()
-	assert.Equal(t, 1, summary.TotalRetries, "expected 1 retry recorded")
+	assert.Equal(t, 1, summary.TotalRetries)
 }
 
 func TestCLIHooks_ImplementsInterface(t *testing.T) {
@@ -200,6 +200,6 @@ func TestCLIHooks_NilWriter(t *testing.T) {
 
 	// Should not panic and should still collect metrics
 	summary := collector.Summary()
-	assert.Equal(t, 1, summary.TotalOperations, "expected 1 operation collected")
-	assert.Equal(t, 1, summary.TotalRequests, "expected 1 request collected")
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 1, summary.TotalRequests)
 }

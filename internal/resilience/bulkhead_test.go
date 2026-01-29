@@ -23,7 +23,7 @@ func TestBulkheadAcquireAndRelease(t *testing.T) {
 	// Check in use
 	inUse, err := bh.InUse()
 	require.NoError(t, err)
-	assert.Equal(t, 1, inUse, "expected 1 slot in use")
+	assert.Equal(t, 1, inUse)
 
 	// Release the slot
 	require.NoError(t, bh.Release())
@@ -31,7 +31,7 @@ func TestBulkheadAcquireAndRelease(t *testing.T) {
 	// Check in use after release
 	inUse, err = bh.InUse()
 	require.NoError(t, err)
-	assert.Equal(t, 0, inUse, "expected 0 slots in use after release")
+	assert.Equal(t, 0, inUse)
 }
 
 func TestBulkheadRejectsWhenFull(t *testing.T) {
@@ -59,7 +59,7 @@ func TestBulkheadRejectsWhenFull(t *testing.T) {
 	// Check available
 	available, err := bh.Available()
 	require.NoError(t, err)
-	assert.Equal(t, 0, available, "expected 0 available slots")
+	assert.Equal(t, 0, available)
 }
 
 func TestBulkheadPersistence(t *testing.T) {
@@ -83,7 +83,7 @@ func TestBulkheadPersistence(t *testing.T) {
 	// Should see the slot from the first instance
 	inUse, err := bh2.InUse()
 	require.NoError(t, err)
-	assert.Equal(t, 1, inUse, "expected 1 slot in use")
+	assert.Equal(t, 1, inUse)
 }
 
 func TestBulkheadReset(t *testing.T) {
@@ -101,11 +101,11 @@ func TestBulkheadReset(t *testing.T) {
 
 	// Should have no slots in use
 	inUse, _ := bh.InUse()
-	assert.Equal(t, 0, inUse, "expected 0 slots after reset")
+	assert.Equal(t, 0, inUse)
 
 	// Should have full availability
 	available, _ := bh.Available()
-	assert.Equal(t, 5, available, "expected 5 available after reset")
+	assert.Equal(t, 5, available)
 }
 
 func TestBulkheadAppliesDefaults(t *testing.T) {
@@ -130,14 +130,14 @@ func TestBulkheadAvailable(t *testing.T) {
 
 	// Initial available
 	available, _ := bh.Available()
-	assert.Equal(t, 5, available, "expected 5 available initially")
+	assert.Equal(t, 5, available)
 
 	// Acquire a slot
 	bh.Acquire()
 
 	// Should have 4 available
 	available, _ = bh.Available()
-	assert.Equal(t, 4, available, "expected 4 available")
+	assert.Equal(t, 4, available)
 }
 
 func TestBulkheadReleaseNonexistent(t *testing.T) {
@@ -161,7 +161,7 @@ func TestBulkheadCurrentPIDTracking(t *testing.T) {
 
 	// Load state and verify PID
 	state, _ := store.Load()
-	require.Equal(t, 1, len(state.Bulkhead.ActivePIDs), "expected 1 PID")
+	require.Equal(t, 1, len(state.Bulkhead.ActivePIDs))
 
 	assert.Equal(t, os.Getpid(), state.Bulkhead.ActivePIDs[0], "expected current PID")
 }
@@ -186,10 +186,10 @@ func TestBulkheadDeadProcessCleanup(t *testing.T) {
 
 	// Should only have the alive process's PID
 	inUse, _ := bh.InUse()
-	assert.Equal(t, 1, inUse, "expected 1 slot in use after cleanup")
+	assert.Equal(t, 1, inUse)
 
 	state2, _ := store.Load()
-	require.Equal(t, 1, len(state2.Bulkhead.ActivePIDs), "expected 1 PID after cleanup")
+	require.Equal(t, 1, len(state2.Bulkhead.ActivePIDs))
 	assert.Equal(t, os.Getpid(), state2.Bulkhead.ActivePIDs[0], "expected current PID to remain")
 }
 
@@ -211,7 +211,7 @@ func TestBulkheadSamePIDMultipleAcquires(t *testing.T) {
 
 	// Should still only count as 1 slot
 	inUse, _ := bh.InUse()
-	assert.Equal(t, 1, inUse, "expected 1 slot in use (same PID)")
+	assert.Equal(t, 1, inUse)
 }
 
 func TestBulkheadForceCleanup(t *testing.T) {
@@ -229,7 +229,7 @@ func TestBulkheadForceCleanup(t *testing.T) {
 
 	// Should still have our slot
 	inUse, _ := bh.InUse()
-	assert.Equal(t, 1, inUse, "expected 1 slot in use after cleanup")
+	assert.Equal(t, 1, inUse)
 }
 
 func TestBulkheadHasPID(t *testing.T) {
@@ -249,7 +249,7 @@ func TestBulkheadAddPID(t *testing.T) {
 
 	// Add new PID
 	state.AddPID(200)
-	assert.Equal(t, 2, len(state.ActivePIDs), "expected 2 PIDs")
+	assert.Equal(t, 2, len(state.ActivePIDs))
 
 	// Add duplicate PID (should not add)
 	state.AddPID(100)
@@ -263,12 +263,12 @@ func TestBulkheadRemovePID(t *testing.T) {
 
 	// Remove middle PID
 	state.RemovePID(200)
-	assert.Equal(t, 2, len(state.ActivePIDs), "expected 2 PIDs")
+	assert.Equal(t, 2, len(state.ActivePIDs))
 	assert.False(t, state.HasPID(200), "expected PID 200 to be removed")
 
 	// Remove nonexistent PID (should not error)
 	state.RemovePID(999)
-	assert.Equal(t, 2, len(state.ActivePIDs), "expected 2 PIDs")
+	assert.Equal(t, 2, len(state.ActivePIDs))
 }
 
 func TestBulkheadCount(t *testing.T) {
@@ -276,7 +276,7 @@ func TestBulkheadCount(t *testing.T) {
 		ActivePIDs: []int{100, 200, 300},
 	}
 
-	assert.Equal(t, 3, state.Count(), "expected count 3")
+	assert.Equal(t, 3, state.Count())
 
 	state.ActivePIDs = nil
 	assert.Equal(t, 0, state.Count(), "expected count 0 for nil slice")

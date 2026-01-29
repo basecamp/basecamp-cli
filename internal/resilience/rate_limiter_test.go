@@ -19,7 +19,7 @@ func TestRateLimiterStartsWithFullBucket(t *testing.T) {
 
 	tokens, err := rl.Tokens()
 	require.NoError(t, err)
-	assert.Equal(t, float64(5), tokens, "expected 5 tokens")
+	assert.Equal(t, float64(5), tokens)
 }
 
 func TestRateLimiterAllowsRequests(t *testing.T) {
@@ -179,7 +179,7 @@ func TestRateLimiterReset(t *testing.T) {
 
 	// Should have full bucket
 	tokens, _ := rl.Tokens()
-	assert.Equal(t, float64(5), tokens, "expected 5 tokens after reset")
+	assert.Equal(t, float64(5), tokens)
 
 	// Should allow requests (retry-after cleared)
 	allowed, _ := rl.Allow()
@@ -227,7 +227,7 @@ func TestRateLimiterAppliesDefaults(t *testing.T) {
 	// Should work with defaults (50 max tokens)
 	tokens, err := rl.Tokens()
 	require.NoError(t, err)
-	assert.Equal(t, float64(50), tokens, "expected 50 tokens (default)")
+	assert.Equal(t, float64(50), tokens)
 }
 
 func TestRateLimiterRetryAfterRemainingWhenNoBlock(t *testing.T) {
@@ -237,7 +237,7 @@ func TestRateLimiterRetryAfterRemainingWhenNoBlock(t *testing.T) {
 
 	remaining, err := rl.RetryAfterRemaining()
 	require.NoError(t, err)
-	assert.Equal(t, time.Duration(0), remaining, "expected 0 remaining when no block")
+	assert.Equal(t, time.Duration(0), remaining)
 }
 
 func TestRateLimiterTokensPerRequest(t *testing.T) {

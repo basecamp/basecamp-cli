@@ -20,7 +20,7 @@ func TestTraceWriter_WriteOperationStart(t *testing.T) {
 	w.WriteOperationStart(op)
 
 	output := buf.String()
-	assert.Contains(t, output, "Calling Todos.Complete", "expected 'Calling Todos.Complete'")
+	assert.Contains(t, output, "Calling Todos.Complete")
 	assert.True(t, strings.HasPrefix(output, "["), "expected timestamp prefix")
 }
 
@@ -32,7 +32,7 @@ func TestTraceWriter_WriteOperationEnd(t *testing.T) {
 	w.WriteOperationEnd(op, nil, 50*time.Millisecond)
 
 	output := buf.String()
-	assert.Contains(t, output, "Completed Todos.List", "expected 'Completed Todos.List'")
+	assert.Contains(t, output, "Completed Todos.List")
 	assert.Contains(t, output, "(50ms)", "expected duration")
 }
 
@@ -44,7 +44,7 @@ func TestTraceWriter_WriteOperationEnd_Error(t *testing.T) {
 	w.WriteOperationEnd(op, errors.New("forbidden"), 50*time.Millisecond)
 
 	output := buf.String()
-	assert.Contains(t, output, "Failed Projects.Create", "expected 'Failed Projects.Create'")
+	assert.Contains(t, output, "Failed Projects.Create")
 	assert.Contains(t, output, "forbidden", "expected error message")
 }
 
@@ -105,7 +105,7 @@ func TestTraceWriter_WriteRetry(t *testing.T) {
 	w.WriteRetry(info, 2, errors.New("timeout"))
 
 	output := buf.String()
-	assert.Contains(t, output, "RETRY #2", "expected 'RETRY #2'")
+	assert.Contains(t, output, "RETRY #2")
 	assert.Contains(t, output, "timeout", "expected error message")
 }
 

@@ -30,9 +30,9 @@ func TestSessionCollector_RecordRequest(t *testing.T) {
 	})
 
 	summary := c.Summary()
-	assert.Equal(t, 2, summary.TotalRequests, "expected 2 total requests")
-	assert.Equal(t, 1, summary.CacheHits, "expected 1 cache hit")
-	assert.Equal(t, 1, summary.CacheMisses, "expected 1 cache miss")
+	assert.Equal(t, 2, summary.TotalRequests)
+	assert.Equal(t, 1, summary.CacheHits)
+	assert.Equal(t, 1, summary.CacheMisses)
 }
 
 func TestSessionCollector_RecordRequestFromSDK(t *testing.T) {
@@ -52,8 +52,8 @@ func TestSessionCollector_RecordRequestFromSDK(t *testing.T) {
 	c.RecordRequestFromSDK(info, result)
 
 	summary := c.Summary()
-	assert.Equal(t, 1, summary.TotalRequests, "expected 1 request")
-	assert.Equal(t, 45*time.Millisecond, summary.TotalLatency, "expected 45ms latency")
+	assert.Equal(t, 1, summary.TotalRequests)
+	assert.Equal(t, 45*time.Millisecond, summary.TotalLatency)
 }
 
 func TestSessionCollector_RecordOperation(t *testing.T) {
@@ -74,8 +74,8 @@ func TestSessionCollector_RecordOperation(t *testing.T) {
 	})
 
 	summary := c.Summary()
-	assert.Equal(t, 2, summary.TotalOperations, "expected 2 total operations")
-	assert.Equal(t, 1, summary.FailedOps, "expected 1 failed op")
+	assert.Equal(t, 2, summary.TotalOperations)
+	assert.Equal(t, 1, summary.FailedOps)
 }
 
 func TestSessionCollector_RecordOperationFromSDK(t *testing.T) {
@@ -93,8 +93,8 @@ func TestSessionCollector_RecordOperationFromSDK(t *testing.T) {
 	c.RecordOperationFromSDK(op, nil, 50*time.Millisecond)
 
 	summary := c.Summary()
-	assert.Equal(t, 1, summary.TotalOperations, "expected 1 operation")
-	assert.Equal(t, 0, summary.FailedOps, "expected 0 failed ops")
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 0, summary.FailedOps)
 }
 
 func TestSessionCollector_RecordRetry(t *testing.T) {
@@ -108,7 +108,7 @@ func TestSessionCollector_RecordRetry(t *testing.T) {
 	})
 
 	summary := c.Summary()
-	assert.Equal(t, 1, summary.TotalRetries, "expected 1 retry in summary")
+	assert.Equal(t, 1, summary.TotalRetries)
 }
 
 func TestSessionCollector_Reset(t *testing.T) {
@@ -121,9 +121,9 @@ func TestSessionCollector_Reset(t *testing.T) {
 	c.Reset()
 
 	summary := c.Summary()
-	assert.Equal(t, 0, summary.TotalRequests, "expected 0 requests after reset")
-	assert.Equal(t, 0, summary.TotalOperations, "expected 0 operations after reset")
-	assert.Equal(t, 0, summary.TotalRetries, "expected 0 retries after reset")
+	assert.Equal(t, 0, summary.TotalRequests)
+	assert.Equal(t, 0, summary.TotalOperations)
+	assert.Equal(t, 0, summary.TotalRetries)
 }
 
 func TestSessionCollector_Concurrent(t *testing.T) {
@@ -160,9 +160,9 @@ func TestSessionCollector_Concurrent(t *testing.T) {
 	wg.Wait()
 
 	summary := c.Summary()
-	assert.Equal(t, 100, summary.TotalRequests, "expected 100 requests")
-	assert.Equal(t, 100, summary.TotalOperations, "expected 100 operations")
-	assert.Equal(t, 100, summary.TotalRetries, "expected 100 retries")
+	assert.Equal(t, 100, summary.TotalRequests)
+	assert.Equal(t, 100, summary.TotalOperations)
+	assert.Equal(t, 100, summary.TotalRetries)
 }
 
 func TestSessionCollector_Summary_Latency(t *testing.T) {
@@ -173,6 +173,5 @@ func TestSessionCollector_Summary_Latency(t *testing.T) {
 	c.RecordRequest(RequestMetrics{Duration: 150 * time.Millisecond})
 
 	summary := c.Summary()
-	expectedLatency := 300 * time.Millisecond
-	assert.Equal(t, expectedLatency, summary.TotalLatency, "expected total latency %v", expectedLatency)
+	assert.Equal(t, 300*time.Millisecond, summary.TotalLatency)
 }
