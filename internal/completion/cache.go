@@ -291,3 +291,87 @@ func (s *Store) Accounts() []CachedAccount {
 	}
 	return cache.Accounts
 }
+
+// CachedHost holds host data for tab completion.
+// Unlike other cached items, hosts come from config files, not API calls.
+type CachedHost struct {
+	Name    string
+	BaseURL string
+}
+
+// Hosts returns configured hosts for tab completion.
+// Since hosts are defined in config files (not API-fetched), this loads
+// the config directly rather than from the completion cache.
+func (s *Store) Hosts() []CachedHost {
+	// Load config to get hosts map
+	// Note: This is a simplified load that doesn't apply all config layers,
+	// but is sufficient for completion purposes.
+	cfg := loadConfigForCompletion()
+	if cfg == nil {
+		return nil
+	}
+
+	if len(cfg.Hosts) == 0 {
+		return nil
+	}
+
+	hosts := make([]CachedHost, 0, len(cfg.Hosts))
+	for name, hostCfg := range cfg.Hosts {
+		hosts = append(hosts, CachedHost{
+			Name:    name,
+			BaseURL: hostCfg.BaseURL,
+		})
+	}
+	return hosts
+}
+
+// hostConfig is a minimal struct for loading host configuration.
+type hostConfig struct {
+	BaseURL  string `json:"base_url"`
+	ClientID string `json:"client_id,omitempty"`
+}
+
+// configForCompletion is a minimal struct for loading config for completion.
+type configForCompletion struct {
+	Hosts map[string]*hostConfig `json:"hosts,omitempty"`
+}
+
+// loadConfigForCompletion loads config files to get hosts for completion.
+// This is a simplified version that only reads what's needed for host completion.
+func loadConfigForCompletion() *configForCompletion {
+	cfg := &configForCompletion{
+		Hosts: make(map[string]*hostConfig),
+	}
+
+	// Try global config
+	configDir := os.Getenv("XDG_CONFIG_HOME")
+	if configDir == "" {
+		home, _ := os.UserHomeDir()
+		configDir = filepath.Join(home, ".config")
+	}
+	globalPath := filepath.Join(configDir, "basecamp", "config.json")
+	loadHostsFromFile(cfg, globalPath)
+
+	// Try local config
+	localPath := filepath.Join(".basecamp", "config.json")
+	loadHostsFromFile(cfg, localPath)
+
+	return cfg
+}
+
+// loadHostsFromFile loads hosts from a config file into cfg.
+func loadHostsFromFile(cfg *configForCompletion, path string) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: Path is from trusted config locations
+	if err != nil {
+		return
+	}
+
+	var fileCfg configForCompletion
+	if err := json.Unmarshal(data, &fileCfg); err != nil {
+		return
+	}
+
+	for name, hostCfg := range fileCfg.Hosts {
+		cfg.Hosts[name] = hostCfg
+	}
+}

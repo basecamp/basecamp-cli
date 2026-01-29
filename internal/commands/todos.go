@@ -262,7 +262,12 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	// Use project from flag or config
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	// Use project from flag or config, with interactive fallback
 	project := flags.project
 	if project == "" {
 		project = app.Flags.Project
@@ -270,13 +275,13 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	if project == "" {
 		project = app.Config.ProjectID
 	}
-	// Validate project before checking account
-	if project == "" {
-		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
-	}
 
-	if err := app.RequireAccount(); err != nil {
-		return err
+	// If no project specified, try interactive resolution
+	if project == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		project = app.Config.ProjectID
 	}
 
 	// Resolve project name to ID

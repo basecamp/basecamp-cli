@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -37,6 +38,11 @@ type pickerModel struct {
 	title        string
 	maxVisible   int
 	scrollOffset int
+
+	// Loading state
+	loading    bool
+	loadingMsg string
+	spinner    spinner.Model
 }
 
 // PickerOption configures a picker.
@@ -56,19 +62,34 @@ func WithMaxVisible(n int) PickerOption {
 	}
 }
 
+// WithLoading sets the picker to start in loading state.
+func WithLoading(msg string) PickerOption {
+	return func(m *pickerModel) {
+		m.loading = true
+		m.loadingMsg = msg
+	}
+}
+
 func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
 	ti.Width = 40
 	ti.Focus()
 
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	styles := NewStyles()
+	s.Style = lipgloss.NewStyle().Foreground(styles.theme.Primary)
+
 	m := pickerModel{
 		items:      items,
 		filtered:   items,
 		textInput:  ti,
-		styles:     NewStyles(),
+		styles:     styles,
 		title:      "Select an item",
 		maxVisible: 10,
+		spinner:    s,
+		loadingMsg: "Loading...",
 	}
 
 	for _, opt := range opts {
@@ -78,13 +99,48 @@ func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	return m
 }
 
+// PickerItemsLoadedMsg is sent when items are loaded asynchronously.
+type PickerItemsLoadedMsg struct {
+	Items []PickerItem
+	Err   error
+}
+
 func (m pickerModel) Init() tea.Cmd {
+	if m.loading {
+		return m.spinner.Tick
+	}
 	return textinput.Blink
 }
 
 func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case PickerItemsLoadedMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		m.items = msg.Items
+		m.filtered = m.filter(m.textInput.Value())
+		return m, textinput.Blink
+
+	case spinner.TickMsg:
+		if m.loading {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyMsg:
+		// In loading state, only allow cancel
+		if m.loading {
+			if msg.String() == "ctrl+c" || msg.String() == "esc" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.quitting = true
@@ -156,6 +212,12 @@ func (m pickerModel) View() string {
 		MarginBottom(1)
 	b.WriteString(titleStyle.Render(m.title) + "\n\n")
 
+	// Loading state
+	if m.loading {
+		b.WriteString(m.spinner.View() + " " + m.styles.Muted.Render(m.loadingMsg) + "\n")
+		return b.String()
+	}
+
 	// Input
 	b.WriteString(m.textInput.View() + "\n\n")
 
@@ -203,10 +265,14 @@ func (m pickerModel) View() string {
 	return b.String()
 }
 
+// ItemLoader is a function that loads items asynchronously.
+type ItemLoader func() ([]PickerItem, error)
+
 // Picker shows a fuzzy-search picker and returns the selected item.
 type Picker struct {
-	items []PickerItem
-	opts  []PickerOption
+	items  []PickerItem
+	opts   []PickerOption
+	loader ItemLoader
 }
 
 // NewPicker creates a new picker.
@@ -217,11 +283,46 @@ func NewPicker(items []PickerItem, opts ...PickerOption) *Picker {
 	}
 }
 
+// NewPickerWithLoader creates a picker that loads items asynchronously.
+func NewPickerWithLoader(loader ItemLoader, opts ...PickerOption) *Picker {
+	return &Picker{
+		loader: loader,
+		opts:   opts,
+	}
+}
+
 // Run shows the picker and returns the selected item.
 // Returns nil if the user canceled.
 func (p *Picker) Run() (*PickerItem, error) {
+	if p.loader != nil {
+		return p.runWithLoader()
+	}
+
 	m := newPickerModel(p.items, p.opts...)
 	program := tea.NewProgram(m)
+
+	finalModel, err := program.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	final := finalModel.(pickerModel) //nolint:errcheck // type assertion always succeeds here
+	if final.quitting {
+		return nil, nil
+	}
+	return final.selected, nil
+}
+
+func (p *Picker) runWithLoader() (*PickerItem, error) {
+	opts := append(p.opts, WithLoading("Loading..."))
+	m := newPickerModel(nil, opts...)
+	program := tea.NewProgram(m)
+
+	// Load items in background
+	go func() {
+		items, err := p.loader()
+		program.Send(PickerItemsLoadedMsg{Items: items, Err: err})
+	}()
 
 	finalModel, err := program.Run()
 	if err != nil {
@@ -258,4 +359,9 @@ func PickPerson(people []PickerItem) (*PickerItem, error) {
 // PickAccount shows a picker for accounts.
 func PickAccount(accounts []PickerItem) (*PickerItem, error) {
 	return Pick("Select an account", accounts)
+}
+
+// PickHost shows a picker for hosts/environments.
+func PickHost(hosts []PickerItem) (*PickerItem, error) {
+	return Pick("Select a host", hosts)
 }

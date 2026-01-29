@@ -319,20 +319,6 @@ func newProjectsDeleteCmd() *cobra.Command {
 	}
 }
 
-// ensureAccount resolves the account ID if not already configured.
-// This enables interactive prompts when --account flag and config are both missing.
-func ensureAccount(cmd *cobra.Command, app *appctx.App) error {
-	if app.Config.AccountID != "" {
-		return nil
-	}
-	resolved, err := app.Resolve().Account(cmd.Context())
-	if err != nil {
-		return err
-	}
-	app.Config.AccountID = resolved.Value
-	return nil
-}
-
 // convertSDKError converts SDK errors to output errors for consistent CLI error handling.
 func convertSDKError(err error) error {
 	if err == nil {

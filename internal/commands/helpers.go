@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
@@ -121,4 +123,45 @@ func isValidAssignee(s string) bool {
 	}
 	// Simple names without @ are valid (resolved via API)
 	return true
+}
+
+// ensureAccount resolves the account ID if not already configured.
+// This enables interactive prompts when --account flag and config are both missing.
+func ensureAccount(cmd *cobra.Command, app *appctx.App) error {
+	if app.Config.AccountID != "" {
+		return nil
+	}
+	resolved, err := app.Resolve().Account(cmd.Context())
+	if err != nil {
+		return err
+	}
+	app.Config.AccountID = resolved.Value
+	return nil
+}
+
+// ensureProject resolves the project ID if not already configured.
+// This enables interactive prompts when --project flag and config are both missing.
+// The account must be resolved first (call ensureAccount before this).
+func ensureProject(cmd *cobra.Command, app *appctx.App) error {
+	// Check if project is already set via flag or config
+	if app.Flags.Project != "" {
+		app.Config.ProjectID = app.Flags.Project
+		return nil
+	}
+	if app.Config.ProjectID != "" {
+		return nil
+	}
+
+	// Try interactive resolution
+	resolved, err := app.Resolve().Project(cmd.Context())
+	if err != nil {
+		return err
+	}
+	app.Config.ProjectID = resolved.Value
+	return nil
+}
+
+// getTodosetID retrieves the todoset ID from a project's dock.
+func getTodosetID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
+	return getDockToolID(cmd.Context(), app, projectID, "todoset", "", "todoset")
 }

@@ -72,11 +72,12 @@ func newWebhooksListCmd(project *string) *cobra.Command {
 func runWebhooksList(cmd *cobra.Command, project string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project
+	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -84,8 +85,13 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
+
+	// If no project specified, try interactive resolution
 	if projectID == "" {
-		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

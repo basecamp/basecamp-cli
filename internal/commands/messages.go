@@ -58,11 +58,12 @@ func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
 func runMessagesList(cmd *cobra.Command, project string, messageBoard string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project from CLI flags and config
+	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -70,8 +71,13 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string) er
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
+
+	// If no project specified, try interactive resolution
 	if projectID == "" {
-		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

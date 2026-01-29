@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,7 @@ import (
 	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/tui"
 	"github.com/basecamp/bcq/internal/version"
 )
 
@@ -46,6 +48,17 @@ func NewRootCmd() *cobra.Command {
 			})
 			if err != nil {
 				return err
+			}
+
+			// Resolve host if multiple hosts configured and no explicit host set
+			if baseURL == "" {
+				resolvedURL, err := resolveHost(cfg, flags)
+				if err != nil {
+					return err
+				}
+				if resolvedURL != "" {
+					cfg.BaseURL = resolvedURL
+				}
 			}
 
 			// Create app and store in context
@@ -90,6 +103,7 @@ func NewRootCmd() *cobra.Command {
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("host", completer.HostCompletion())
 
 	return cmd
 }
@@ -309,4 +323,91 @@ func transformCobraError(err error) error {
 	}
 
 	return err
+}
+
+// resolveHost determines the base URL to use based on configuration.
+// Resolution order:
+// 1. BCQ_HOST environment variable
+// 2. Config default_host (lookup in hosts map)
+// 3. If multiple hosts configured → show interactive picker (if TTY)
+// 4. If single host configured → use it
+// 5. Fall back to config base_url
+func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
+	// 1. Check BCQ_HOST environment variable
+	if host := os.Getenv("BCQ_HOST"); host != "" {
+		return normalizeHost(host), nil
+	}
+
+	// No hosts configured - use existing base_url
+	if len(cfg.Hosts) == 0 {
+		return "", nil
+	}
+
+	// 2. Check default_host in config
+	if cfg.DefaultHost != "" {
+		if hostConfig, ok := cfg.Hosts[cfg.DefaultHost]; ok {
+			return hostConfig.BaseURL, nil
+		}
+	}
+
+	// 3. If only one host configured, use it
+	if len(cfg.Hosts) == 1 {
+		for _, hostConfig := range cfg.Hosts {
+			return hostConfig.BaseURL, nil
+		}
+	}
+
+	// 4. Multiple hosts - try interactive picker if TTY
+	if !isInteractiveTTY(flags) {
+		return "", output.ErrUsage("Multiple hosts configured. Use --host flag or set default_host in config.")
+	}
+
+	return promptForHost(cfg)
+}
+
+// isInteractiveTTY returns true if stdout is a terminal and no machine-output mode is set.
+func isInteractiveTTY(flags appctx.GlobalFlags) bool {
+	// Not interactive if any machine-output mode is set
+	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count {
+		return false
+	}
+
+	// Check if stdout is a terminal
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// promptForHost shows an interactive picker for host selection.
+func promptForHost(cfg *config.Config) (string, error) {
+	// Build picker items from configured hosts
+	items := make([]tui.PickerItem, 0, len(cfg.Hosts))
+
+	// Sort host names for consistent ordering
+	hostNames := make([]string, 0, len(cfg.Hosts))
+	for name := range cfg.Hosts {
+		hostNames = append(hostNames, name)
+	}
+	sort.Strings(hostNames)
+
+	for _, name := range hostNames {
+		hostConfig := cfg.Hosts[name]
+		items = append(items, tui.PickerItem{
+			ID:          hostConfig.BaseURL,
+			Title:       name,
+			Description: hostConfig.BaseURL,
+		})
+	}
+
+	selected, err := tui.PickHost(items)
+	if err != nil {
+		return "", err
+	}
+	if selected == nil {
+		return "", output.ErrUsage("host selection canceled")
+	}
+
+	return selected.ID, nil
 }

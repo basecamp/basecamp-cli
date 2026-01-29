@@ -336,6 +336,7 @@ func (a *App) Resolve() *resolve.Resolver {
 			Account:  a.Flags.Account,
 			Project:  a.Flags.Project,
 			Todolist: a.Flags.Todolist,
+			Host:     a.Flags.Host,
 		}),
 	)
 }

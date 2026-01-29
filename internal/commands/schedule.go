@@ -65,7 +65,8 @@ func newScheduleShowCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "Display project schedule information.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			// Resolve account (enables interactive prompt if needed)
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 			return runScheduleShow(cmd, app, *project, *scheduleID)
@@ -74,7 +75,7 @@ func newScheduleShowCmd(project, scheduleID *string) *cobra.Command {
 }
 
 func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID string) error {
-	// Resolve project
+	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -82,8 +83,13 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
+
+	// If no project specified, try interactive resolution
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -135,7 +141,8 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 		Long:  "List all entries in a project schedule.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := app.RequireAccount(); err != nil {
+			// Resolve account (enables interactive prompt if needed)
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 			return runScheduleEntries(cmd, app, *project, *scheduleID, status)
@@ -148,7 +155,7 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 }
 
 func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID, status string) error {
-	// Resolve project
+	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -156,8 +163,13 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
+
+	// If no project specified, try interactive resolution
 	if projectID == "" {
-		return output.ErrUsage("--project is required")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)

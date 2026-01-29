@@ -374,8 +374,3 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 
 	return cmd
 }
-
-// getTodosetID retrieves the todoset ID from a project's dock, handling multi-dock projects.
-func getTodosetID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "todoset", "", "todoset")
-}

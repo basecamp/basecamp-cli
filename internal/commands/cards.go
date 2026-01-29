@@ -72,11 +72,12 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if err := app.RequireAccount(); err != nil {
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project first (validate before account check)
+	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
@@ -84,8 +85,13 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
+
+	// If no project specified, try interactive resolution
 	if projectID == "" {
-		return output.ErrUsageHint("No project specified", "Use --project or set in .basecamp/config.json")
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
 	}
 
 	// Column name (non-numeric) requires --card-table for resolution

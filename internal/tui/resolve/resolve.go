@@ -5,6 +5,7 @@ package resolve
 
 import (
 	"context"
+	"os"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -31,6 +32,7 @@ type Flags struct {
 	Account  string
 	Project  string
 	Todolist string
+	Host     string
 }
 
 // Option configures a Resolver.
@@ -93,11 +95,13 @@ func (r *Resolver) Flags() *Flags {
 }
 
 // IsInteractive returns true if interactive prompts can be shown.
-// This checks if stdout is a terminal and no machine-output mode is set.
+// This checks if stdout is a terminal (a character device).
 func (r *Resolver) IsInteractive() bool {
-	// For now, delegate to a simple terminal check
-	// This will be enhanced when integrated with appctx
-	return true
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
 // ResolvedValue represents a value that was resolved, along with metadata
