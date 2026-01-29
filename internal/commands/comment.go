@@ -133,7 +133,8 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		return convertSDKError(err)
 	}
 
-	return app.OK(comments,
+	// Build response options
+	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d comments on recording #%s", len(comments), recordingID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -147,7 +148,14 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 				Description: "Show comment",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(comments), basecamp.DefaultCommentLimit, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(comments, respOpts...)
 }
 
 func newCommentsShowCmd(project *string) *cobra.Command {

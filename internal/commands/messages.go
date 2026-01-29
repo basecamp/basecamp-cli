@@ -138,7 +138,8 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 		return convertSDKError(err)
 	}
 
-	return app.OK(messages,
+	// Build response options
+	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d messages", len(messages))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -152,7 +153,14 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 				Description: "Post new message",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(messages), basecamp.DefaultMessageLimit, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(messages, respOpts...)
 }
 
 func newMessagesShowCmd(project *string) *cobra.Command {

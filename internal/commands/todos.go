@@ -355,7 +355,8 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		return convertSDKError(err)
 	}
 
-	return app.OK(todos,
+	// Build response options
+	respOpts := []output.ResponseOption{
 		output.WithEntity("todo"),
 		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
 		output.WithBreadcrumbs(
@@ -370,7 +371,14 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 				Description: "Complete a todo",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(todos), basecamp.DefaultTodoLimit, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(todos, respOpts...)
 }
 
 func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status string, overdue bool, limit, page int, all bool) error {
@@ -469,7 +477,8 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		result = append(result, todo)
 	}
 
-	return app.OK(result,
+	// Build response options
+	respOpts := []output.ResponseOption{
 		output.WithEntity("todo"),
 		output.WithSummary(fmt.Sprintf("%d todos", len(result))),
 		output.WithBreadcrumbs(
@@ -489,7 +498,15 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 				Description: "Show todo details",
 			},
 		),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	// Note: when aggregating across todolists, limit is applied per-list
+	if notice := output.TruncationNotice(len(result), basecamp.DefaultTodoLimit, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(result, respOpts...)
 }
 
 func newTodosShowCmd() *cobra.Command {
