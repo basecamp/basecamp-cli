@@ -188,7 +188,7 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
-	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt)
+	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}

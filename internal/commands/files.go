@@ -155,19 +155,19 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get folders (subvaults) using SDK
-	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum)
+	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		folders = []basecamp.Vault{} // Best-effort
 	}
 
 	// Get uploads using SDK
-	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum)
+	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		uploads = []basecamp.Upload{} // Best-effort
 	}
 
 	// Get documents using SDK
-	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum)
+	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		documents = []basecamp.Document{} // Best-effort
 	}
@@ -280,7 +280,7 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get folders using SDK
-	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum)
+	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -461,7 +461,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get uploads using SDK
-	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum)
+	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -553,7 +553,7 @@ func runDocsList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get documents using SDK
-	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum)
+	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}

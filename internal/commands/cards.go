@@ -118,7 +118,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID)
+		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, nil)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -168,7 +168,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 				"Use column ID or exact name",
 			)
 		}
-		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID)
+		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, nil)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -176,7 +176,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string) error {
 	} else {
 		// Get cards from all columns
 		for _, col := range cardTableData.Lists {
-			cards, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID)
+			cards, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID, nil)
 			if err != nil {
 				continue // Skip columns with errors
 			}

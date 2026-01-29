@@ -101,7 +101,7 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
 		return output.ErrUsage("Invalid inbox ID")
 	}
 
-	forwards, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt)
+	forwards, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -312,7 +312,7 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			replies, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID)
+			replies, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}

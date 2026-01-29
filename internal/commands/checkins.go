@@ -164,7 +164,7 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				return output.ErrUsage("Invalid questionnaire ID")
 			}
 
-			questions, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID)
+			questions, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -581,7 +581,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid question ID")
 			}
 
-			answers, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID)
+			answers, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}

@@ -65,7 +65,7 @@ Events track all changes to a recording. Common event actions:
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			events, err := app.Account().Events().List(cmd.Context(), bucketID, recordingID)
+			events, err := app.Account().Events().List(cmd.Context(), bucketID, recordingID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
