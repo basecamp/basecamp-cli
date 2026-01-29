@@ -509,11 +509,8 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		),
 	}
 
-	// Add truncation notice if results may be limited
-	// Note: when aggregating across todolists, limit is applied per-list
-	if notice := output.TruncationNotice(len(result), basecamp.DefaultTodoLimit, all, limit); notice != "" {
-		respOpts = append(respOpts, output.WithNotice(notice))
-	}
+	// Note: truncation notice is not shown when aggregating across todolists
+	// because limit is applied per-list, not globally. Use --list for accurate notices.
 
 	return app.OK(result, respOpts...)
 }
