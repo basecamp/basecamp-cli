@@ -184,6 +184,7 @@ func NewTodoCmd() *cobra.Command {
 			}
 
 			return app.OK(todo,
+				output.WithEntity("todo"),
 				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -331,6 +332,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	}
 
 	return app.OK(todos,
+		output.WithEntity("todo"),
 		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -433,6 +435,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 	}
 
 	return app.OK(result,
+		output.WithEntity("todo"),
 		output.WithSummary(fmt.Sprintf("%d todos", len(result))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -508,6 +511,7 @@ func newTodosShowCmd() *cobra.Command {
 			}
 
 			return app.OK(todo,
+				output.WithEntity("todo"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "complete",
@@ -644,6 +648,7 @@ func newTodosCreateCmd() *cobra.Command {
 			}
 
 			return app.OK(todo,
+				output.WithEntity("todo"),
 				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
