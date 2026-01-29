@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -97,21 +99,13 @@ func TestMeRequiresAuth(t *testing.T) {
 	cmd := NewMeCmd()
 
 	err := executePeopleCommand(cmd, app)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	// Should be auth required error
 	var e *output.Error
-	if errors.As(err, &e) {
-		if e.Code != output.CodeAuth {
-			t.Errorf("expected code %q, got %q", output.CodeAuth, e.Code)
-		}
-		if !strings.Contains(e.Message, "Not authenticated") {
-			t.Errorf("expected 'Not authenticated', got %q", e.Message)
-		}
-	} else {
-		t.Errorf("expected *output.Error, got %T: %v", err, err)
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, output.CodeAuth, e.Code)
+		assert.True(t, strings.Contains(e.Message, "Not authenticated"), "expected 'Not authenticated', got %q", e.Message)
 	}
 }
 
@@ -123,8 +117,8 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 	// Start mock Launchpad server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Expect requests to /authorization.json
+		assert.Equal(t, "/authorization.json", r.URL.Path, "unexpected path")
 		if r.URL.Path != "/authorization.json" {
-			t.Errorf("unexpected path: %s, expected /authorization.json", r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
@@ -145,9 +139,7 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 
 	// Create credentials directory and file
 	credsDir := filepath.Join(tmpDir, "basecamp")
-	if err := os.MkdirAll(credsDir, 0700); err != nil {
-		t.Fatalf("failed to create creds dir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(credsDir, 0700), "failed to create creds dir")
 
 	// Write mock credentials to file
 	origin := "https://3.basecampapi.com"
@@ -162,9 +154,7 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 	}
 	credsData, _ := json.Marshal(creds)
 	credsPath := filepath.Join(credsDir, "credentials.json")
-	if err := os.WriteFile(credsPath, credsData, 0600); err != nil {
-		t.Fatalf("failed to write creds: %v", err)
-	}
+	require.NoError(t, os.WriteFile(credsPath, credsData, 0600), "failed to write creds")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{
@@ -217,9 +207,7 @@ func TestMeWithLaunchpadNoAccountConfigured(t *testing.T) {
 
 	cmd := NewMeCmd()
 	err := executePeopleCommand(cmd, app)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Parse JSON output
 	var result struct {
@@ -242,28 +230,18 @@ func TestMeWithLaunchpadNoAccountConfigured(t *testing.T) {
 		} `json:"breadcrumbs"`
 	}
 
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("failed to parse output: %v\nOutput: %s", err, buf.String())
-	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "failed to parse output: %s", buf.String())
 
 	// Verify identity
-	if result.Data.Identity.ID != 12345 {
-		t.Errorf("expected identity ID 12345, got %d", result.Data.Identity.ID)
-	}
-	if result.Data.Identity.EmailAddress != "test@example.com" {
-		t.Errorf("expected email test@example.com, got %s", result.Data.Identity.EmailAddress)
-	}
+	assert.Equal(t, int64(12345), result.Data.Identity.ID)
+	assert.Equal(t, "test@example.com", result.Data.Identity.EmailAddress)
 
 	// Verify only bc3 accounts are shown (filtered out bcx)
-	if len(result.Data.Accounts) != 2 {
-		t.Errorf("expected 2 bc3 accounts, got %d", len(result.Data.Accounts))
-	}
+	assert.Equal(t, 2, len(result.Data.Accounts), "expected 2 bc3 accounts")
 
 	// Verify no account is marked as current
 	for _, acct := range result.Data.Accounts {
-		if acct.Current {
-			t.Errorf("expected no account marked as current, but %d (%s) is marked current", acct.ID, acct.Name)
-		}
+		assert.False(t, acct.Current, "expected no account marked as current, but %d (%s) is marked current", acct.ID, acct.Name)
 	}
 
 	// Verify breadcrumbs suggest account setup
@@ -274,9 +252,7 @@ func TestMeWithLaunchpadNoAccountConfigured(t *testing.T) {
 			break
 		}
 	}
-	if !foundSetup {
-		t.Errorf("expected breadcrumbs to suggest account setup, got: %+v", result.Breadcrumbs)
-	}
+	assert.True(t, foundSetup, "expected breadcrumbs to suggest account setup, got: %+v", result.Breadcrumbs)
 }
 
 // TestMeWithAccountConfigured tests that bcq me shows the current account marker
@@ -300,9 +276,7 @@ func TestMeWithAccountConfigured(t *testing.T) {
 
 	cmd := NewMeCmd()
 	err := executePeopleCommand(cmd, app)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Parse JSON output
 	var result struct {
@@ -319,25 +293,19 @@ func TestMeWithAccountConfigured(t *testing.T) {
 		} `json:"breadcrumbs"`
 	}
 
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("failed to parse output: %v\nOutput: %s", err, buf.String())
-	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "failed to parse output: %s", buf.String())
 
 	// Verify account 222 is marked as current
 	foundCurrent := false
 	for _, acct := range result.Data.Accounts {
 		if acct.ID == 222 {
-			if !acct.Current {
-				t.Errorf("expected account 222 to be marked as current")
-			}
+			assert.True(t, acct.Current, "expected account 222 to be marked as current")
 			foundCurrent = true
-		} else if acct.Current {
-			t.Errorf("expected only account 222 to be marked as current, but %d is also marked", acct.ID)
+		} else {
+			assert.False(t, acct.Current, "expected only account 222 to be marked as current, but %d is also marked", acct.ID)
 		}
 	}
-	if !foundCurrent {
-		t.Errorf("account 222 not found in output")
-	}
+	assert.True(t, foundCurrent, "account 222 not found in output")
 
 	// Verify breadcrumbs show next steps (not setup)
 	foundSetup := false
@@ -350,10 +318,6 @@ func TestMeWithAccountConfigured(t *testing.T) {
 			foundProjects = true
 		}
 	}
-	if foundSetup {
-		t.Errorf("expected no setup breadcrumb when account is configured")
-	}
-	if !foundProjects {
-		t.Errorf("expected projects breadcrumb when account is configured")
-	}
+	assert.False(t, foundSetup, "expected no setup breadcrumb when account is configured")
+	assert.True(t, foundProjects, "expected projects breadcrumb when account is configured")
 }

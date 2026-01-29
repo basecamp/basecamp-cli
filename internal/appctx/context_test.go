@@ -2,33 +2,24 @@ package appctx
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/basecamp/bcq/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewApp(t *testing.T) {
 	cfg := &config.Config{}
 	app := NewApp(cfg)
 
-	if app == nil {
-		t.Fatal("NewApp returned nil")
-	}
-	if app.Config != cfg {
-		t.Error("Config not set correctly")
-	}
-	if app.Auth == nil {
-		t.Error("Auth manager not initialized")
-	}
-	if app.SDK == nil {
-		t.Error("SDK client not initialized")
-	}
-	if app.Names == nil {
-		t.Error("Names resolver not initialized")
-	}
-	if app.Output == nil {
-		t.Error("Output writer not initialized")
-	}
+	require.NotNil(t, app, "NewApp returned nil")
+	assert.Equal(t, cfg, app.Config, "Config not set correctly")
+	assert.NotNil(t, app.Auth, "Auth manager not initialized")
+	assert.NotNil(t, app.SDK, "SDK client not initialized")
+	assert.NotNil(t, app.Names, "Names resolver not initialized")
+	assert.NotNil(t, app.Output, "Output writer not initialized")
 }
 
 func TestWithAppAndFromContext(t *testing.T) {
@@ -39,17 +30,13 @@ func TestWithAppAndFromContext(t *testing.T) {
 	ctxWithApp := WithApp(ctx, app)
 
 	retrieved := FromContext(ctxWithApp)
-	if retrieved != app {
-		t.Error("FromContext did not retrieve the same app")
-	}
+	assert.Equal(t, app, retrieved, "FromContext did not retrieve the same app")
 }
 
 func TestFromContextEmpty(t *testing.T) {
 	ctx := context.Background()
 	app := FromContext(ctx)
-	if app != nil {
-		t.Error("expected nil from empty context")
-	}
+	assert.Nil(t, app, "expected nil from empty context")
 }
 
 func TestApplyFlagsJSON(t *testing.T) {
@@ -59,9 +46,7 @@ func TestApplyFlagsJSON(t *testing.T) {
 
 	app.ApplyFlags()
 	// Can't directly access format, but verify output is set
-	if app.Output == nil {
-		t.Error("Output should be set after ApplyFlags")
-	}
+	assert.NotNil(t, app.Output, "Output should be set after ApplyFlags")
 }
 
 func TestApplyFlagsQuiet(t *testing.T) {
@@ -70,9 +55,7 @@ func TestApplyFlagsQuiet(t *testing.T) {
 	app.Flags.Quiet = true
 
 	app.ApplyFlags()
-	if app.Output == nil {
-		t.Error("Output should be set after ApplyFlags")
-	}
+	assert.NotNil(t, app.Output, "Output should be set after ApplyFlags")
 }
 
 func TestApplyFlagsAgent(t *testing.T) {
@@ -81,9 +64,7 @@ func TestApplyFlagsAgent(t *testing.T) {
 	app.Flags.Agent = true
 
 	app.ApplyFlags()
-	if app.Output == nil {
-		t.Error("Output should be set after ApplyFlags")
-	}
+	assert.NotNil(t, app.Output, "Output should be set after ApplyFlags")
 }
 
 func TestApplyFlagsIDsOnly(t *testing.T) {
@@ -92,9 +73,7 @@ func TestApplyFlagsIDsOnly(t *testing.T) {
 	app.Flags.IDsOnly = true
 
 	app.ApplyFlags()
-	if app.Output == nil {
-		t.Error("Output should be set after ApplyFlags")
-	}
+	assert.NotNil(t, app.Output, "Output should be set after ApplyFlags")
 }
 
 func TestApplyFlagsCount(t *testing.T) {
@@ -103,9 +82,7 @@ func TestApplyFlagsCount(t *testing.T) {
 	app.Flags.Count = true
 
 	app.ApplyFlags()
-	if app.Output == nil {
-		t.Error("Output should be set after ApplyFlags")
-	}
+	assert.NotNil(t, app.Output, "Output should be set after ApplyFlags")
 }
 
 func TestApplyFlagsMD(t *testing.T) {
@@ -114,9 +91,7 @@ func TestApplyFlagsMD(t *testing.T) {
 	app.Flags.MD = true
 
 	app.ApplyFlags()
-	if app.Output == nil {
-		t.Error("Output should be set after ApplyFlags")
-	}
+	assert.NotNil(t, app.Output, "Output should be set after ApplyFlags")
 }
 
 func TestApplyFlagsVerbose(t *testing.T) {
@@ -133,9 +108,7 @@ func TestIsInteractiveWithAgentMode(t *testing.T) {
 	app := NewApp(cfg)
 	app.Flags.Agent = true
 
-	if app.IsInteractive() {
-		t.Error("should not be interactive in agent mode")
-	}
+	assert.False(t, app.IsInteractive(), "should not be interactive in agent mode")
 }
 
 func TestIsInteractiveWithJSONMode(t *testing.T) {
@@ -143,9 +116,7 @@ func TestIsInteractiveWithJSONMode(t *testing.T) {
 	app := NewApp(cfg)
 	app.Flags.JSON = true
 
-	if app.IsInteractive() {
-		t.Error("should not be interactive in JSON mode")
-	}
+	assert.False(t, app.IsInteractive(), "should not be interactive in JSON mode")
 }
 
 func TestIsInteractiveWithQuietMode(t *testing.T) {
@@ -153,9 +124,7 @@ func TestIsInteractiveWithQuietMode(t *testing.T) {
 	app := NewApp(cfg)
 	app.Flags.Quiet = true
 
-	if app.IsInteractive() {
-		t.Error("should not be interactive in quiet mode")
-	}
+	assert.False(t, app.IsInteractive(), "should not be interactive in quiet mode")
 }
 
 func TestIsInteractiveWithIDsOnlyMode(t *testing.T) {
@@ -163,9 +132,7 @@ func TestIsInteractiveWithIDsOnlyMode(t *testing.T) {
 	app := NewApp(cfg)
 	app.Flags.IDsOnly = true
 
-	if app.IsInteractive() {
-		t.Error("should not be interactive in IDs-only mode")
-	}
+	assert.False(t, app.IsInteractive(), "should not be interactive in IDs-only mode")
 }
 
 func TestIsInteractiveWithCountMode(t *testing.T) {
@@ -173,9 +140,7 @@ func TestIsInteractiveWithCountMode(t *testing.T) {
 	app := NewApp(cfg)
 	app.Flags.Count = true
 
-	if app.IsInteractive() {
-		t.Error("should not be interactive in count mode")
-	}
+	assert.False(t, app.IsInteractive(), "should not be interactive in count mode")
 }
 
 func TestNewAppWithFormatConfig(t *testing.T) {
@@ -193,9 +158,7 @@ func TestNewAppWithFormatConfig(t *testing.T) {
 		t.Run(tt.format, func(t *testing.T) {
 			cfg := &config.Config{Format: tt.format}
 			app := NewApp(cfg)
-			if app.Output == nil {
-				t.Error("Output should be set")
-			}
+			assert.NotNil(t, app.Output, "Output should be set")
 		})
 	}
 }
@@ -204,44 +167,20 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 	var flags GlobalFlags
 
 	// All booleans should default to false
-	if flags.JSON {
-		t.Error("JSON should default to false")
-	}
-	if flags.Quiet {
-		t.Error("Quiet should default to false")
-	}
-	if flags.MD {
-		t.Error("MD should default to false")
-	}
-	if flags.Agent {
-		t.Error("Agent should default to false")
-	}
-	if flags.IDsOnly {
-		t.Error("IDsOnly should default to false")
-	}
-	if flags.Count {
-		t.Error("Count should default to false")
-	}
-	if flags.Verbose != 0 {
-		t.Error("Verbose should default to 0")
-	}
+	assert.False(t, flags.JSON, "JSON should default to false")
+	assert.False(t, flags.Quiet, "Quiet should default to false")
+	assert.False(t, flags.MD, "MD should default to false")
+	assert.False(t, flags.Agent, "Agent should default to false")
+	assert.False(t, flags.IDsOnly, "IDsOnly should default to false")
+	assert.False(t, flags.Count, "Count should default to false")
+	assert.Equal(t, 0, flags.Verbose, "Verbose should default to 0")
 
 	// All strings should default to empty
-	if flags.Project != "" {
-		t.Error("Project should default to empty")
-	}
-	if flags.Account != "" {
-		t.Error("Account should default to empty")
-	}
-	if flags.Todolist != "" {
-		t.Error("Todolist should default to empty")
-	}
-	if flags.Host != "" {
-		t.Error("Host should default to empty")
-	}
-	if flags.CacheDir != "" {
-		t.Error("CacheDir should default to empty")
-	}
+	assert.Empty(t, flags.Project, "Project should default to empty")
+	assert.Empty(t, flags.Account, "Account should default to empty")
+	assert.Empty(t, flags.Todolist, "Todolist should default to empty")
+	assert.Empty(t, flags.Host, "Host should default to empty")
+	assert.Empty(t, flags.CacheDir, "CacheDir should default to empty")
 }
 
 func TestApplyFlagsPriority(t *testing.T) {
@@ -254,9 +193,7 @@ func TestApplyFlagsPriority(t *testing.T) {
 
 	app.ApplyFlags()
 	// Agent mode wins - can't directly verify but should not panic
-	if app.Output == nil {
-		t.Error("Output should be set")
-	}
+	assert.NotNil(t, app.Output, "Output should be set")
 }
 
 // Test output formats correspond to correct modes
@@ -283,9 +220,7 @@ func TestOutputFormatApplication(t *testing.T) {
 
 			// Output should not be nil after applying flags
 			_ = originalOutput // Used for potential future comparison
-			if app.Output == nil {
-				t.Error("Output should not be nil")
-			}
+			assert.NotNil(t, app.Output, "Output should not be nil")
 		})
 	}
 }
@@ -311,16 +246,12 @@ func TestAppOKWithStats(t *testing.T) {
 	// Without stats flag - should not panic
 	app.Flags.Stats = false
 	err := app.OK(map[string]string{"test": "data"})
-	if err != nil {
-		t.Errorf("OK without stats failed: %v", err)
-	}
+	assert.NoError(t, err, "OK without stats failed")
 
 	// With stats flag - should not panic and include stats
 	app.Flags.Stats = true
 	err = app.OK(map[string]string{"test": "data"})
-	if err != nil {
-		t.Errorf("OK with stats failed: %v", err)
-	}
+	assert.NoError(t, err, "OK with stats failed")
 }
 
 // Test app.OK with nil collector doesn't panic
@@ -332,9 +263,7 @@ func TestAppOKWithNilCollector(t *testing.T) {
 
 	// Should not panic even with nil collector
 	err := app.OK(map[string]string{"test": "data"})
-	if err != nil {
-		t.Errorf("OK with nil collector failed: %v", err)
-	}
+	assert.NoError(t, err, "OK with nil collector failed")
 }
 
 // Test isMachineOutput detects flag-driven machine output modes
@@ -360,9 +289,7 @@ func TestIsMachineOutputFlags(t *testing.T) {
 			app := NewApp(cfg)
 			tt.setFlag(app)
 
-			if got := app.isMachineOutput(); got != tt.expected {
-				t.Errorf("isMachineOutput() = %v, want %v", got, tt.expected)
-			}
+			assert.Equal(t, tt.expected, app.isMachineOutput())
 		})
 	}
 }
@@ -385,9 +312,7 @@ func TestIsMachineOutputConfigFormat(t *testing.T) {
 			cfg := &config.Config{Format: tt.format}
 			app := NewApp(cfg)
 
-			if got := app.isMachineOutput(); got != tt.expected {
-				t.Errorf("isMachineOutput() with config format %q = %v, want %v", tt.format, got, tt.expected)
-			}
+			assert.Equal(t, tt.expected, app.isMachineOutput(), "isMachineOutput() with config format %q", tt.format)
 		})
 	}
 }
@@ -419,15 +344,11 @@ func TestAppErrMachineOutputNoStats(t *testing.T) {
 			app.ApplyFlags()
 
 			// Verify isMachineOutput returns expected value
-			if got := app.isMachineOutput(); got != tt.machine {
-				t.Errorf("isMachineOutput() = %v, want %v", got, tt.machine)
-			}
+			assert.Equal(t, tt.machine, app.isMachineOutput())
 
 			// app.Err should not panic regardless of mode
 			err := app.Err(testErr)
-			if err != nil {
-				t.Errorf("Err() returned error: %v", err)
-			}
+			assert.NoError(t, err, "Err() returned error")
 		})
 	}
 }
@@ -447,9 +368,7 @@ func TestAppAccount(t *testing.T) {
 	app := NewApp(cfg)
 
 	account := app.Account()
-	if account == nil {
-		t.Fatal("Account() returned nil")
-	}
+	require.NotNil(t, account, "Account() returned nil")
 	// Account() returns *AccountClient (via ForAccount), not *Client
 }
 
@@ -511,25 +430,13 @@ func TestAppRequireAccount(t *testing.T) {
 
 			err := app.RequireAccount()
 			if tt.wantErr {
-				if err == nil {
-					t.Error("RequireAccount() should return error")
-				} else if tt.errMsg != "" {
-					errStr := err.Error()
-					found := false
-					for i := 0; i <= len(errStr)-len(tt.errMsg); i++ {
-						if errStr[i:i+len(tt.errMsg)] == tt.errMsg {
-							found = true
-							break
-						}
-					}
-					if !found {
-						t.Errorf("error should contain %q, got %q", tt.errMsg, errStr)
-					}
+				require.Error(t, err, "RequireAccount() should return error")
+				if tt.errMsg != "" {
+					assert.True(t, strings.Contains(err.Error(), tt.errMsg),
+						"error should contain %q, got %q", tt.errMsg, err.Error())
 				}
 			} else {
-				if err != nil {
-					t.Errorf("RequireAccount() should succeed: %v", err)
-				}
+				assert.NoError(t, err, "RequireAccount() should succeed")
 			}
 		})
 	}

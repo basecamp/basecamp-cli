@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/bcq/internal/config"
 )
@@ -20,9 +22,7 @@ func TestNewStore(t *testing.T) {
 	store := NewStore(tmpDir)
 
 	// Store should be created (may or may not use keyring depending on system)
-	if store == nil {
-		t.Fatal("NewStore returned nil")
-	}
+	require.NotNil(t, store, "NewStore returned nil")
 }
 
 func TestStoreFileBackend(t *testing.T) {
@@ -43,46 +43,26 @@ func TestStoreFileBackend(t *testing.T) {
 
 	// Save credentials
 	err := store.Save(origin, creds)
-	if err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
+	require.NoError(t, err, "Save failed")
 
 	// Verify file was created with correct permissions
 	credFile := filepath.Join(tmpDir, "credentials.json")
 	info, err := os.Stat(credFile)
-	if err != nil {
-		t.Fatalf("Credentials file not created: %v", err)
-	}
+	require.NoError(t, err, "Credentials file not created")
 	perms := info.Mode().Perm()
-	if perms != 0600 {
-		t.Errorf("File permissions = %o, want 0600", perms)
-	}
+	assert.Equal(t, os.FileMode(0600), perms, "File permissions mismatch")
 
 	// Load credentials
 	loaded, err := store.Load(origin)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
+	require.NoError(t, err, "Load failed")
 
 	// Verify values match
-	if loaded.AccessToken != creds.AccessToken {
-		t.Errorf("AccessToken = %q, want %q", loaded.AccessToken, creds.AccessToken)
-	}
-	if loaded.RefreshToken != creds.RefreshToken {
-		t.Errorf("RefreshToken = %q, want %q", loaded.RefreshToken, creds.RefreshToken)
-	}
-	if loaded.ExpiresAt != creds.ExpiresAt {
-		t.Errorf("ExpiresAt = %d, want %d", loaded.ExpiresAt, creds.ExpiresAt)
-	}
-	if loaded.Scope != creds.Scope {
-		t.Errorf("Scope = %q, want %q", loaded.Scope, creds.Scope)
-	}
-	if loaded.OAuthType != creds.OAuthType {
-		t.Errorf("OAuthType = %q, want %q", loaded.OAuthType, creds.OAuthType)
-	}
-	if loaded.UserID != creds.UserID {
-		t.Errorf("UserID = %q, want %q", loaded.UserID, creds.UserID)
-	}
+	assert.Equal(t, creds.AccessToken, loaded.AccessToken)
+	assert.Equal(t, creds.RefreshToken, loaded.RefreshToken)
+	assert.Equal(t, creds.ExpiresAt, loaded.ExpiresAt)
+	assert.Equal(t, creds.Scope, loaded.Scope)
+	assert.Equal(t, creds.OAuthType, loaded.OAuthType)
+	assert.Equal(t, creds.UserID, loaded.UserID)
 }
 
 func TestStoreMultipleOrigins(t *testing.T) {
@@ -96,29 +76,17 @@ func TestStoreMultipleOrigins(t *testing.T) {
 	creds1 := &Credentials{AccessToken: "token1", ExpiresAt: time.Now().Unix() + 3600}
 	creds2 := &Credentials{AccessToken: "token2", ExpiresAt: time.Now().Unix() + 3600}
 
-	if err := store.Save(origin1, creds1); err != nil {
-		t.Fatalf("Save origin1 failed: %v", err)
-	}
-	if err := store.Save(origin2, creds2); err != nil {
-		t.Fatalf("Save origin2 failed: %v", err)
-	}
+	require.NoError(t, store.Save(origin1, creds1), "Save origin1 failed")
+	require.NoError(t, store.Save(origin2, creds2), "Save origin2 failed")
 
 	// Load and verify each origin
 	loaded1, err := store.Load(origin1)
-	if err != nil {
-		t.Fatalf("Load origin1 failed: %v", err)
-	}
-	if loaded1.AccessToken != "token1" {
-		t.Errorf("Origin1 token = %q, want %q", loaded1.AccessToken, "token1")
-	}
+	require.NoError(t, err, "Load origin1 failed")
+	assert.Equal(t, "token1", loaded1.AccessToken)
 
 	loaded2, err := store.Load(origin2)
-	if err != nil {
-		t.Fatalf("Load origin2 failed: %v", err)
-	}
-	if loaded2.AccessToken != "token2" {
-		t.Errorf("Origin2 token = %q, want %q", loaded2.AccessToken, "token2")
-	}
+	require.NoError(t, err, "Load origin2 failed")
+	assert.Equal(t, "token2", loaded2.AccessToken)
 }
 
 func TestStoreDelete(t *testing.T) {
@@ -129,18 +97,12 @@ func TestStoreDelete(t *testing.T) {
 	creds := &Credentials{AccessToken: "to-be-deleted", ExpiresAt: time.Now().Unix() + 3600}
 
 	// Save then delete
-	if err := store.Save(origin, creds); err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
-	if err := store.Delete(origin); err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
+	require.NoError(t, store.Save(origin, creds), "Save failed")
+	require.NoError(t, store.Delete(origin), "Delete failed")
 
 	// Load should fail
 	_, err := store.Load(origin)
-	if err == nil {
-		t.Error("Load should fail after delete")
-	}
+	assert.Error(t, err, "Load should fail after delete")
 }
 
 func TestStoreLoadMissing(t *testing.T) {
@@ -149,9 +111,7 @@ func TestStoreLoadMissing(t *testing.T) {
 
 	// Load non-existent origin should fail
 	_, err := store.Load("https://nonexistent.example.com")
-	if err == nil {
-		t.Error("Load should fail for non-existent origin")
-	}
+	assert.Error(t, err, "Load should fail for non-existent origin")
 }
 
 func TestKeyFunction(t *testing.T) {
@@ -167,9 +127,7 @@ func TestKeyFunction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.origin, func(t *testing.T) {
 			result := key(tt.origin)
-			if result != tt.expected {
-				t.Errorf("key(%q) = %q, want %q", tt.origin, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -181,20 +139,14 @@ func TestGenerateCodeVerifier(t *testing.T) {
 		v := generateCodeVerifier()
 
 		// Should be base64url encoded (no padding)
-		if v == "" {
-			t.Error("generateCodeVerifier returned empty string")
-		}
+		assert.NotEmpty(t, v, "generateCodeVerifier returned empty string")
 
 		// Check uniqueness
-		if verifiers[v] {
-			t.Errorf("generateCodeVerifier produced duplicate: %s", v)
-		}
+		assert.False(t, verifiers[v], "generateCodeVerifier produced duplicate: %s", v)
 		verifiers[v] = true
 
 		// Should be ~43 characters (32 bytes base64url encoded)
-		if len(v) < 40 || len(v) > 50 {
-			t.Errorf("generateCodeVerifier length = %d, expected ~43", len(v))
-		}
+		assert.True(t, len(v) >= 40 && len(v) <= 50, "generateCodeVerifier length = %d, expected ~43", len(v))
 	}
 }
 
@@ -207,9 +159,7 @@ func TestGenerateCodeChallenge(t *testing.T) {
 	h := sha256.Sum256([]byte(verifier))
 	expected := base64.RawURLEncoding.EncodeToString(h[:])
 
-	if challenge != expected {
-		t.Errorf("generateCodeChallenge(%q) = %q, want %q", verifier, challenge, expected)
-	}
+	assert.Equal(t, expected, challenge)
 }
 
 func TestGenerateState(t *testing.T) {
@@ -218,19 +168,13 @@ func TestGenerateState(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		s := generateState()
 
-		if s == "" {
-			t.Error("generateState returned empty string")
-		}
+		assert.NotEmpty(t, s, "generateState returned empty string")
 
-		if states[s] {
-			t.Errorf("generateState produced duplicate: %s", s)
-		}
+		assert.False(t, states[s], "generateState produced duplicate: %s", s)
 		states[s] = true
 
 		// Should be ~22 characters (16 bytes base64url encoded)
-		if len(s) < 20 || len(s) > 25 {
-			t.Errorf("generateState length = %d, expected ~22", len(s))
-		}
+		assert.True(t, len(s) >= 20 && len(s) <= 25, "generateState length = %d, expected ~22", len(s))
 	}
 }
 
@@ -241,18 +185,10 @@ func TestNewManager(t *testing.T) {
 
 	manager := NewManager(cfg, http.DefaultClient)
 
-	if manager == nil {
-		t.Fatal("NewManager returned nil")
-	}
-	if manager.cfg != cfg {
-		t.Error("Manager config not set correctly")
-	}
-	if manager.httpClient != http.DefaultClient {
-		t.Error("Manager httpClient not set correctly")
-	}
-	if manager.store == nil {
-		t.Error("Manager store not initialized")
-	}
+	require.NotNil(t, manager, "NewManager returned nil")
+	assert.Equal(t, cfg, manager.cfg, "Manager config not set correctly")
+	assert.Equal(t, http.DefaultClient, manager.httpClient, "Manager httpClient not set correctly")
+	assert.NotNil(t, manager.store, "Manager store not initialized")
 }
 
 func TestIsAuthenticatedWithEnvToken(t *testing.T) {
@@ -277,15 +213,11 @@ func TestIsAuthenticatedWithEnvToken(t *testing.T) {
 
 	// Without env token
 	os.Unsetenv("BASECAMP_TOKEN")
-	if manager.IsAuthenticated() {
-		t.Error("Should not be authenticated without token")
-	}
+	assert.False(t, manager.IsAuthenticated(), "Should not be authenticated without token")
 
 	// With env token
 	os.Setenv("BASECAMP_TOKEN", "test-env-token")
-	if !manager.IsAuthenticated() {
-		t.Error("Should be authenticated with BASECAMP_TOKEN env var")
-	}
+	assert.True(t, manager.IsAuthenticated(), "Should be authenticated with BASECAMP_TOKEN env var")
 }
 
 func TestIsAuthenticatedWithStoredCreds(t *testing.T) {
@@ -310,9 +242,7 @@ func TestIsAuthenticatedWithStoredCreds(t *testing.T) {
 	manager.store = &Store{useKeyring: false, fallbackDir: tmpDir}
 
 	// Without stored creds
-	if manager.IsAuthenticated() {
-		t.Error("Should not be authenticated without stored credentials")
-	}
+	assert.False(t, manager.IsAuthenticated(), "Should not be authenticated without stored credentials")
 
 	// Save credentials
 	creds := &Credentials{
@@ -323,9 +253,7 @@ func TestIsAuthenticatedWithStoredCreds(t *testing.T) {
 	manager.store.Save("https://3.basecampapi.com", creds)
 
 	// With stored creds
-	if !manager.IsAuthenticated() {
-		t.Error("Should be authenticated with stored credentials")
-	}
+	assert.True(t, manager.IsAuthenticated(), "Should be authenticated with stored credentials")
 }
 
 func TestGetUserID(t *testing.T) {
@@ -346,9 +274,7 @@ func TestGetUserID(t *testing.T) {
 	manager.store.Save("https://3.basecampapi.com", creds)
 
 	userID := manager.GetUserID()
-	if userID != "12345" {
-		t.Errorf("GetUserID() = %q, want %q", userID, "12345")
-	}
+	assert.Equal(t, "12345", userID)
 }
 
 func TestSetUserID(t *testing.T) {
@@ -369,18 +295,12 @@ func TestSetUserID(t *testing.T) {
 
 	// Set user ID
 	err := manager.SetUserID("67890")
-	if err != nil {
-		t.Fatalf("SetUserID failed: %v", err)
-	}
+	require.NoError(t, err, "SetUserID failed")
 
 	// Verify it was saved
 	loaded, err := manager.store.Load("https://3.basecampapi.com")
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if loaded.UserID != "67890" {
-		t.Errorf("UserID = %q, want %q", loaded.UserID, "67890")
-	}
+	require.NoError(t, err, "Load failed")
+	assert.Equal(t, "67890", loaded.UserID)
 }
 
 func TestLogout(t *testing.T) {
@@ -401,14 +321,10 @@ func TestLogout(t *testing.T) {
 
 	// Logout
 	err := manager.Logout()
-	if err != nil {
-		t.Fatalf("Logout failed: %v", err)
-	}
+	require.NoError(t, err, "Logout failed")
 
 	// Should no longer be authenticated
-	if manager.IsAuthenticated() {
-		t.Error("Should not be authenticated after logout")
-	}
+	assert.False(t, manager.IsAuthenticated(), "Should not be authenticated after logout")
 }
 
 func TestCredentialsJSON(t *testing.T) {
@@ -423,36 +339,18 @@ func TestCredentialsJSON(t *testing.T) {
 	}
 
 	data, err := json.Marshal(creds)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var loaded Credentials
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(data, &loaded), "Unmarshal failed")
 
-	if loaded.AccessToken != creds.AccessToken {
-		t.Errorf("AccessToken mismatch")
-	}
-	if loaded.RefreshToken != creds.RefreshToken {
-		t.Errorf("RefreshToken mismatch")
-	}
-	if loaded.ExpiresAt != creds.ExpiresAt {
-		t.Errorf("ExpiresAt mismatch")
-	}
-	if loaded.Scope != creds.Scope {
-		t.Errorf("Scope mismatch")
-	}
-	if loaded.OAuthType != creds.OAuthType {
-		t.Errorf("OAuthType mismatch")
-	}
-	if loaded.TokenEndpoint != creds.TokenEndpoint {
-		t.Errorf("TokenEndpoint mismatch")
-	}
-	if loaded.UserID != creds.UserID {
-		t.Errorf("UserID mismatch")
-	}
+	assert.Equal(t, creds.AccessToken, loaded.AccessToken, "AccessToken mismatch")
+	assert.Equal(t, creds.RefreshToken, loaded.RefreshToken, "RefreshToken mismatch")
+	assert.Equal(t, creds.ExpiresAt, loaded.ExpiresAt, "ExpiresAt mismatch")
+	assert.Equal(t, creds.Scope, loaded.Scope, "Scope mismatch")
+	assert.Equal(t, creds.OAuthType, loaded.OAuthType, "OAuthType mismatch")
+	assert.Equal(t, creds.TokenEndpoint, loaded.TokenEndpoint, "TokenEndpoint mismatch")
+	assert.Equal(t, creds.UserID, loaded.UserID, "UserID mismatch")
 }
 
 func TestOAuthConfigJSON(t *testing.T) {
@@ -465,30 +363,16 @@ func TestOAuthConfigJSON(t *testing.T) {
 	}
 
 	data, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var loaded oauth.Config
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(data, &loaded), "Unmarshal failed")
 
-	if loaded.Issuer != cfg.Issuer {
-		t.Errorf("Issuer mismatch")
-	}
-	if loaded.AuthorizationEndpoint != cfg.AuthorizationEndpoint {
-		t.Errorf("AuthorizationEndpoint mismatch")
-	}
-	if loaded.TokenEndpoint != cfg.TokenEndpoint {
-		t.Errorf("TokenEndpoint mismatch")
-	}
-	if loaded.RegistrationEndpoint != cfg.RegistrationEndpoint {
-		t.Errorf("RegistrationEndpoint mismatch")
-	}
-	if len(loaded.ScopesSupported) != 2 {
-		t.Errorf("ScopesSupported length = %d, want 2", len(loaded.ScopesSupported))
-	}
+	assert.Equal(t, cfg.Issuer, loaded.Issuer, "Issuer mismatch")
+	assert.Equal(t, cfg.AuthorizationEndpoint, loaded.AuthorizationEndpoint, "AuthorizationEndpoint mismatch")
+	assert.Equal(t, cfg.TokenEndpoint, loaded.TokenEndpoint, "TokenEndpoint mismatch")
+	assert.Equal(t, cfg.RegistrationEndpoint, loaded.RegistrationEndpoint, "RegistrationEndpoint mismatch")
+	assert.Len(t, loaded.ScopesSupported, 2, "ScopesSupported length mismatch")
 }
 
 func TestClientCredentialsJSON(t *testing.T) {
@@ -498,31 +382,19 @@ func TestClientCredentialsJSON(t *testing.T) {
 	}
 
 	data, err := json.Marshal(creds)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var loaded ClientCredentials
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(data, &loaded), "Unmarshal failed")
 
-	if loaded.ClientID != creds.ClientID {
-		t.Errorf("ClientID = %q, want %q", loaded.ClientID, creds.ClientID)
-	}
-	if loaded.ClientSecret != creds.ClientSecret {
-		t.Errorf("ClientSecret = %q, want %q", loaded.ClientSecret, creds.ClientSecret)
-	}
+	assert.Equal(t, creds.ClientID, loaded.ClientID)
+	assert.Equal(t, creds.ClientSecret, loaded.ClientSecret)
 }
 
 func TestUsingKeyring(t *testing.T) {
 	store := &Store{useKeyring: true, fallbackDir: "/tmp"}
-	if !store.UsingKeyring() {
-		t.Error("UsingKeyring() = false, want true")
-	}
+	assert.True(t, store.UsingKeyring(), "UsingKeyring() should be true")
 
 	store = &Store{useKeyring: false, fallbackDir: "/tmp"}
-	if store.UsingKeyring() {
-		t.Error("UsingKeyring() = true, want false")
-	}
+	assert.False(t, store.UsingKeyring(), "UsingKeyring() should be false")
 }

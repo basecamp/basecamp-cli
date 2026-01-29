@@ -6,6 +6,7 @@ import (
 
 	"github.com/basecamp/bcq/internal/cli"
 	"github.com/basecamp/bcq/internal/commands"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCatalogMatchesRegisteredCommands(t *testing.T) {
@@ -99,10 +100,6 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 	sort.Strings(missingFromCatalog)
 
 	// Report failures
-	if len(missingFromRegistered) > 0 {
-		t.Errorf("Commands in catalog but not registered: %v", missingFromRegistered)
-	}
-	if len(missingFromCatalog) > 0 {
-		t.Errorf("Commands registered but not in catalog: %v", missingFromCatalog)
-	}
+	assert.Empty(t, missingFromRegistered, "Commands in catalog but not registered: %v", missingFromRegistered)
+	assert.Empty(t, missingFromCatalog, "Commands registered but not in catalog: %v", missingFromCatalog)
 }

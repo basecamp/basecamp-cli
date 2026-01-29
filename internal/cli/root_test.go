@@ -1,6 +1,10 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestNormalizeHost(t *testing.T) {
 	tests := []struct {
@@ -44,9 +48,7 @@ func TestNormalizeHost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := normalizeHost(tt.input)
-			if result != tt.expected {
-				t.Errorf("normalizeHost(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "normalizeHost(%q)", tt.input)
 		})
 	}
 }
@@ -87,9 +89,7 @@ func TestIsLocalhost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := isLocalhost(tt.input)
-			if result != tt.expected {
-				t.Errorf("isLocalhost(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "isLocalhost(%q)", tt.input)
 		})
 	}
 }

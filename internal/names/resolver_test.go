@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolve(t *testing.T) {
@@ -53,18 +55,11 @@ func TestResolve(t *testing.T) {
 			match, matches := resolve(tt.input, projects, extract)
 
 			if tt.wantMatch {
-				if match == nil {
-					t.Errorf("expected match with ID %d, got nil", tt.wantID)
-				} else if match.ID != tt.wantID {
-					t.Errorf("expected ID %d, got %d", tt.wantID, match.ID)
-				}
+				require.NotNil(t, match, "expected match with ID %d, got nil", tt.wantID)
+				assert.Equal(t, tt.wantID, match.ID)
 			} else {
-				if match != nil {
-					t.Errorf("expected no match, got ID %d", match.ID)
-				}
-				if len(matches) != tt.wantMatches {
-					t.Errorf("expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
-				}
+				assert.Nil(t, match, "expected no match, got ID %d", match)
+				assert.Equal(t, tt.wantMatches, len(matches), "expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
 			}
 		})
 	}
@@ -98,14 +93,13 @@ func TestSuggest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			suggestions := suggest(tt.input, projects, getName)
 
-			if tt.wantAny && len(suggestions) == 0 {
-				t.Error("expected suggestions, got none")
+			if tt.wantAny {
+				assert.NotEmpty(t, suggestions, "expected suggestions, got none")
+			} else {
+				assert.Empty(t, suggestions, "expected no suggestions, got %v", suggestions)
 			}
-			if !tt.wantAny && len(suggestions) > 0 {
-				t.Errorf("expected no suggestions, got %v", suggestions)
-			}
-			if len(suggestions) > tt.wantMax && tt.wantMax > 0 {
-				t.Errorf("expected max %d suggestions, got %d", tt.wantMax, len(suggestions))
+			if tt.wantMax > 0 {
+				assert.LessOrEqual(t, len(suggestions), tt.wantMax, "expected max %d suggestions, got %d", tt.wantMax, len(suggestions))
 			}
 		})
 	}
@@ -135,9 +129,7 @@ func TestContainsWord(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.haystack+"_"+tt.needle, func(t *testing.T) {
 			got := containsWord(tt.haystack, tt.needle)
-			if got != tt.want {
-				t.Errorf("containsWord(%q, %q) = %v, want %v", tt.haystack, tt.needle, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "containsWord(%q, %q) = %v, want %v", tt.haystack, tt.needle, got, tt.want)
 		})
 	}
 }
@@ -188,18 +180,11 @@ func TestResolveWithPersons(t *testing.T) {
 			match, matches := resolve(tt.input, people, extract)
 
 			if tt.wantMatch {
-				if match == nil {
-					t.Errorf("expected match with ID %d, got nil", tt.wantID)
-				} else if match.ID != tt.wantID {
-					t.Errorf("expected ID %d, got %d", tt.wantID, match.ID)
-				}
+				require.NotNil(t, match, "expected match with ID %d, got nil", tt.wantID)
+				assert.Equal(t, tt.wantID, match.ID)
 			} else {
-				if match != nil {
-					t.Errorf("expected no match, got ID %d", match.ID)
-				}
-				if len(matches) != tt.wantMatches {
-					t.Errorf("expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
-				}
+				assert.Nil(t, match, "expected no match, got ID %d", match)
+				assert.Equal(t, tt.wantMatches, len(matches), "expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
 			}
 		})
 	}
@@ -251,18 +236,11 @@ func TestResolveWithTodolists(t *testing.T) {
 			match, matches := resolve(tt.input, todolists, extract)
 
 			if tt.wantMatch {
-				if match == nil {
-					t.Errorf("expected match with ID %d, got nil", tt.wantID)
-				} else if match.ID != tt.wantID {
-					t.Errorf("expected ID %d, got %d", tt.wantID, match.ID)
-				}
+				require.NotNil(t, match, "expected match with ID %d, got nil", tt.wantID)
+				assert.Equal(t, tt.wantID, match.ID)
 			} else {
-				if match != nil {
-					t.Errorf("expected no match, got ID %d", match.ID)
-				}
-				if len(matches) != tt.wantMatches {
-					t.Errorf("expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
-				}
+				assert.Nil(t, match, "expected no match, got ID %d", match)
+				assert.Equal(t, tt.wantMatches, len(matches), "expected %d ambiguous matches, got %d", tt.wantMatches, len(matches))
 			}
 		})
 	}
@@ -285,9 +263,7 @@ func TestSuggestLimit(t *testing.T) {
 	getName := func(p Project) string { return p.Name }
 
 	suggestions := suggest("Alp", projects, getName)
-	if len(suggestions) > 3 {
-		t.Errorf("suggest should return max 3 suggestions, got %d", len(suggestions))
-	}
+	assert.LessOrEqual(t, len(suggestions), 3, "suggest should return max 3 suggestions, got %d", len(suggestions))
 }
 
 func TestSuggestPeople(t *testing.T) {
@@ -312,11 +288,10 @@ func TestSuggestPeople(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			suggestions := suggest(tt.input, people, getName)
-			if tt.wantAny && len(suggestions) == 0 {
-				t.Error("expected suggestions, got none")
-			}
-			if !tt.wantAny && len(suggestions) > 0 {
-				t.Errorf("expected no suggestions, got %v", suggestions)
+			if tt.wantAny {
+				assert.NotEmpty(t, suggestions, "expected suggestions, got none")
+			} else {
+				assert.Empty(t, suggestions, "expected no suggestions, got %v", suggestions)
 			}
 		})
 	}
@@ -341,15 +316,13 @@ func TestResolutionPriority(t *testing.T) {
 
 	// Exact match should win
 	match, _ := resolve("test", projects, extract)
-	if match == nil || match.ID != 1 {
-		t.Errorf("exact match 'test' should return ID 1, got %v", match)
-	}
+	require.NotNil(t, match, "exact match 'test' should return ID 1, got nil")
+	assert.Equal(t, int64(1), match.ID, "exact match 'test' should return ID 1")
 
 	// Exact match with different case
 	match, _ = resolve("Test", projects, extract)
-	if match == nil || match.ID != 2 {
-		t.Errorf("exact match 'Test' should return ID 2, got %v", match)
-	}
+	require.NotNil(t, match, "exact match 'Test' should return ID 2, got nil")
+	assert.Equal(t, int64(2), match.ID, "exact match 'Test' should return ID 2")
 }
 
 func TestCaseInsensitiveAmbiguity(t *testing.T) {
@@ -366,12 +339,8 @@ func TestCaseInsensitiveAmbiguity(t *testing.T) {
 
 	// Searching for "TeSt" should be ambiguous (3 case-insensitive matches)
 	match, matches := resolve("TeSt", projects, extract)
-	if match != nil {
-		t.Errorf("should be ambiguous, got match ID %d", match.ID)
-	}
-	if len(matches) != 3 {
-		t.Errorf("expected 3 ambiguous matches, got %d", len(matches))
-	}
+	assert.Nil(t, match, "should be ambiguous, got match ID %d", match)
+	assert.Equal(t, 3, len(matches), "expected 3 ambiguous matches, got %d", len(matches))
 }
 
 // =============================================================================
@@ -387,15 +356,9 @@ func TestResolverClearCache(t *testing.T) {
 
 	r.ClearCache()
 
-	if r.projects != nil {
-		t.Error("projects should be nil after ClearCache")
-	}
-	if r.people != nil {
-		t.Error("people should be nil after ClearCache")
-	}
-	if len(r.todolists) != 0 {
-		t.Error("todolists should be empty after ClearCache")
-	}
+	assert.Nil(t, r.projects, "projects should be nil after ClearCache")
+	assert.Nil(t, r.people, "people should be nil after ClearCache")
+	assert.Empty(t, r.todolists, "todolists should be empty after ClearCache")
 }
 
 // =============================================================================
@@ -443,15 +406,9 @@ func TestResolverResolveProjectNumericID(t *testing.T) {
 
 	ctx := context.Background()
 	id, name, err := r.ResolveProject(ctx, "12345")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "12345" {
-		t.Errorf("ID = %q, want %q", id, "12345")
-	}
-	if name != "Project Alpha" {
-		t.Errorf("Name = %q, want %q", name, "Project Alpha")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "12345", id)
+	assert.Equal(t, "Project Alpha", name)
 }
 
 func TestResolverResolveProjectByName(t *testing.T) {
@@ -463,15 +420,9 @@ func TestResolverResolveProjectByName(t *testing.T) {
 
 	ctx := context.Background()
 	id, name, err := r.ResolveProject(ctx, "Beta")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "222" {
-		t.Errorf("ID = %q, want %q", id, "222")
-	}
-	if name != "Project Beta" {
-		t.Errorf("Name = %q, want %q", name, "Project Beta")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "222", id)
+	assert.Equal(t, "Project Beta", name)
 }
 
 func TestResolverResolveProjectAmbiguous(t *testing.T) {
@@ -483,18 +434,12 @@ func TestResolverResolveProjectAmbiguous(t *testing.T) {
 
 	ctx := context.Background()
 	_, _, err := r.ResolveProject(ctx, "Acme")
-	if err == nil {
-		t.Fatal("expected error for ambiguous match")
-	}
+	require.Error(t, err, "expected error for ambiguous match")
 
 	// Verify it's an ambiguous error
 	var outErr *output.Error
-	if !errors.As(err, &outErr) {
-		t.Fatalf("expected *output.Error, got %T", err)
-	}
-	if outErr.Code != output.CodeAmbiguous {
-		t.Errorf("Code = %q, want %q", outErr.Code, output.CodeAmbiguous)
-	}
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
+	assert.Equal(t, output.CodeAmbiguous, outErr.Code)
 }
 
 func TestResolverResolveProjectNotFound(t *testing.T) {
@@ -505,18 +450,12 @@ func TestResolverResolveProjectNotFound(t *testing.T) {
 
 	ctx := context.Background()
 	_, _, err := r.ResolveProject(ctx, "Nonexistent")
-	if err == nil {
-		t.Fatal("expected error for not found")
-	}
+	require.Error(t, err, "expected error for not found")
 
 	// Verify it's a not found error
 	var outErr *output.Error
-	if !errors.As(err, &outErr) {
-		t.Fatalf("expected *output.Error, got %T", err)
-	}
-	if outErr.Code != output.CodeNotFound {
-		t.Errorf("Code = %q, want %q", outErr.Code, output.CodeNotFound)
-	}
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
+	assert.Equal(t, output.CodeNotFound, outErr.Code)
 }
 
 func TestResolverResolvePersonNumericID(t *testing.T) {
@@ -527,15 +466,9 @@ func TestResolverResolvePersonNumericID(t *testing.T) {
 
 	ctx := context.Background()
 	id, name, err := r.ResolvePerson(ctx, "111")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "111" {
-		t.Errorf("ID = %q, want %q", id, "111")
-	}
-	if name != "Alice Smith" {
-		t.Errorf("Name = %q, want %q", name, "Alice Smith")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "111", id)
+	assert.Equal(t, "Alice Smith", name)
 }
 
 func TestResolverResolvePersonByEmail(t *testing.T) {
@@ -547,15 +480,9 @@ func TestResolverResolvePersonByEmail(t *testing.T) {
 
 	ctx := context.Background()
 	id, name, err := r.ResolvePerson(ctx, "bob@example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "222" {
-		t.Errorf("ID = %q, want %q", id, "222")
-	}
-	if name != "Bob Jones" {
-		t.Errorf("Name = %q, want %q", name, "Bob Jones")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "222", id)
+	assert.Equal(t, "Bob Jones", name)
 }
 
 func TestResolverResolvePersonByEmailCaseInsensitive(t *testing.T) {
@@ -566,12 +493,8 @@ func TestResolverResolvePersonByEmailCaseInsensitive(t *testing.T) {
 
 	ctx := context.Background()
 	id, _, err := r.ResolvePerson(ctx, "alice@example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "111" {
-		t.Errorf("ID = %q, want %q", id, "111")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "111", id)
 }
 
 func TestResolverResolvePersonByName(t *testing.T) {
@@ -582,12 +505,8 @@ func TestResolverResolvePersonByName(t *testing.T) {
 
 	ctx := context.Background()
 	id, _, err := r.ResolvePerson(ctx, "Alice Smith")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "111" {
-		t.Errorf("ID = %q, want %q", id, "111")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "111", id)
 }
 
 func TestResolverResolvePersonAmbiguous(t *testing.T) {
@@ -599,17 +518,11 @@ func TestResolverResolvePersonAmbiguous(t *testing.T) {
 
 	ctx := context.Background()
 	_, _, err := r.ResolvePerson(ctx, "Alice")
-	if err == nil {
-		t.Fatal("expected error for ambiguous match")
-	}
+	require.Error(t, err, "expected error for ambiguous match")
 
 	var outErr *output.Error
-	if !errors.As(err, &outErr) {
-		t.Fatalf("expected *output.Error, got %T", err)
-	}
-	if outErr.Code != output.CodeAmbiguous {
-		t.Errorf("Code = %q, want %q", outErr.Code, output.CodeAmbiguous)
-	}
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
+	assert.Equal(t, output.CodeAmbiguous, outErr.Code)
 }
 
 func TestResolverResolveTodolistNumericID(t *testing.T) {
@@ -621,15 +534,9 @@ func TestResolverResolveTodolistNumericID(t *testing.T) {
 
 	ctx := context.Background()
 	id, name, err := r.ResolveTodolist(ctx, "111", "12345")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "111" {
-		t.Errorf("ID = %q, want %q", id, "111")
-	}
-	if name != "Sprint Tasks" {
-		t.Errorf("Name = %q, want %q", name, "Sprint Tasks")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "111", id)
+	assert.Equal(t, "Sprint Tasks", name)
 }
 
 func TestResolverResolveTodolistByName(t *testing.T) {
@@ -641,15 +548,9 @@ func TestResolverResolveTodolistByName(t *testing.T) {
 
 	ctx := context.Background()
 	id, name, err := r.ResolveTodolist(ctx, "Bug Fixes", "12345")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "222" {
-		t.Errorf("ID = %q, want %q", id, "222")
-	}
-	if name != "Bug Fixes" {
-		t.Errorf("Name = %q, want %q", name, "Bug Fixes")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "222", id)
+	assert.Equal(t, "Bug Fixes", name)
 }
 
 func TestResolverResolveTodolistNotFound(t *testing.T) {
@@ -660,17 +561,11 @@ func TestResolverResolveTodolistNotFound(t *testing.T) {
 
 	ctx := context.Background()
 	_, _, err := r.ResolveTodolist(ctx, "Nonexistent", "12345")
-	if err == nil {
-		t.Fatal("expected error for not found")
-	}
+	require.Error(t, err, "expected error for not found")
 
 	var outErr *output.Error
-	if !errors.As(err, &outErr) {
-		t.Fatalf("expected *output.Error, got %T", err)
-	}
-	if outErr.Code != output.CodeNotFound {
-		t.Errorf("Code = %q, want %q", outErr.Code, output.CodeNotFound)
-	}
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
+	assert.Equal(t, output.CodeNotFound, outErr.Code)
 }
 
 // =============================================================================
@@ -689,27 +584,17 @@ func TestResolverSetAccountID(t *testing.T) {
 	r.SetAccountID("12345")
 
 	r.mu.RLock()
-	if r.projects == nil {
-		t.Error("projects should not be cleared when setting same account ID")
-	}
+	assert.NotNil(t, r.projects, "projects should not be cleared when setting same account ID")
 	r.mu.RUnlock()
 
 	// Set different account ID - should clear cache
 	r.SetAccountID("67890")
 
 	r.mu.RLock()
-	if r.projects != nil {
-		t.Error("projects should be nil after changing account ID")
-	}
-	if r.people != nil {
-		t.Error("people should be nil after changing account ID")
-	}
-	if len(r.todolists) != 0 {
-		t.Error("todolists should be empty after changing account ID")
-	}
-	if r.accountID != "67890" {
-		t.Errorf("accountID should be 67890, got %s", r.accountID)
-	}
+	assert.Nil(t, r.projects, "projects should be nil after changing account ID")
+	assert.Nil(t, r.people, "people should be nil after changing account ID")
+	assert.Empty(t, r.todolists, "todolists should be empty after changing account ID")
+	assert.Equal(t, "67890", r.accountID)
 	r.mu.RUnlock()
 }
 
@@ -726,12 +611,8 @@ func TestResolveEmptyInput(t *testing.T) {
 	// Empty string matches everything via Contains (strings.Contains(s, "") is always true)
 	// So we should get all items as ambiguous matches
 	match, matches := resolve("", projects, extract)
-	if match != nil {
-		t.Error("empty input should be ambiguous, not single match")
-	}
-	if len(matches) != 2 {
-		t.Errorf("empty input should match all items, got %d matches", len(matches))
-	}
+	assert.Nil(t, match, "empty input should be ambiguous, not single match")
+	assert.Equal(t, 2, len(matches), "empty input should match all items, got %d matches", len(matches))
 }
 
 func TestResolveEmptyList(t *testing.T) {
@@ -742,12 +623,8 @@ func TestResolveEmptyList(t *testing.T) {
 	}
 
 	match, matches := resolve("anything", projects, extract)
-	if match != nil {
-		t.Error("empty list should not match")
-	}
-	if len(matches) != 0 {
-		t.Errorf("empty list should have no matches, got %d", len(matches))
-	}
+	assert.Nil(t, match, "empty list should not match")
+	assert.Empty(t, matches, "empty list should have no matches, got %d", len(matches))
 }
 
 func TestSuggestEmptyList(t *testing.T) {
@@ -756,9 +633,7 @@ func TestSuggestEmptyList(t *testing.T) {
 	getName := func(p Project) string { return p.Name }
 
 	suggestions := suggest("test", projects, getName)
-	if len(suggestions) != 0 {
-		t.Errorf("empty list should have no suggestions, got %d", len(suggestions))
-	}
+	assert.Empty(t, suggestions, "empty list should have no suggestions, got %d", len(suggestions))
 }
 
 func TestResolveSpecialCharacters(t *testing.T) {
@@ -787,12 +662,8 @@ func TestResolveSpecialCharacters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			match, _ := resolve(tt.input, projects, extract)
-			if match == nil {
-				t.Fatalf("expected match for %q", tt.input)
-			}
-			if match.ID != tt.wantID {
-				t.Errorf("ID = %d, want %d", match.ID, tt.wantID)
-			}
+			require.NotNil(t, match, "expected match for %q", tt.input)
+			assert.Equal(t, tt.wantID, match.ID)
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -84,9 +85,7 @@ func TestQuickstartWithProjectButNoAccount(t *testing.T) {
 
 	cmd := NewQuickStartCmd()
 	err := executeQuickstartCommand(cmd, app)
-	if err != nil {
-		t.Fatalf("quickstart should not error when account is missing: %v", err)
-	}
+	require.NoError(t, err, "quickstart should not error when account is missing")
 }
 
 // TestQuickstartWithProjectAndInvalidAccount verifies quickstart doesn't panic
@@ -97,9 +96,7 @@ func TestQuickstartWithProjectAndInvalidAccount(t *testing.T) {
 
 	cmd := NewQuickStartCmd()
 	err := executeQuickstartCommand(cmd, app)
-	if err != nil {
-		t.Fatalf("quickstart should not error when account is invalid: %v", err)
-	}
+	require.NoError(t, err, "quickstart should not error when account is invalid")
 }
 
 // TestQuickstartWithNoConfig verifies quickstart works with minimal config.
@@ -109,7 +106,5 @@ func TestQuickstartWithNoConfig(t *testing.T) {
 
 	cmd := NewQuickStartCmd()
 	err := executeQuickstartCommand(cmd, app)
-	if err != nil {
-		t.Fatalf("quickstart should not error with empty config: %v", err)
-	}
+	require.NoError(t, err, "quickstart should not error with empty config")
 }
