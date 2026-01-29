@@ -72,7 +72,13 @@ func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
 func runMessagesList(cmd *cobra.Command, project string, messageBoard string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+
 	// Resolve account (enables interactive prompt if needed)
+
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}

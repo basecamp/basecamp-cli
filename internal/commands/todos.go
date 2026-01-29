@@ -267,6 +267,11 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	// Validate flag combinations
+	if flags.all && flags.limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err

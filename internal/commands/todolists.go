@@ -81,6 +81,11 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 		return fmt.Errorf("app not initialized")
 	}
 
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}

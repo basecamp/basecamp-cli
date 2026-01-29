@@ -73,6 +73,11 @@ func newCommentsListCmd(project *string) *cobra.Command {
 func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+
 	// Validate user input first, before checking account
 	if recordingID == "" {
 		return output.ErrUsage("Recording ID required")

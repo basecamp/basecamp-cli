@@ -83,7 +83,13 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		return fmt.Errorf("app not initialized")
 	}
 
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+
 	// Resolve account if not configured (enables interactive prompt)
+
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -112,7 +118,7 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 	// Only cache when listing all active projects (no filter/pagination), as filtered
 	// results wouldn't be suitable for general-purpose completion.
 	// Done synchronously to ensure write completes before process exits.
-	if status == "" && limit == 0 && page == 0 {
+	if status == "" && page == 0 && (limit == 0 || all) {
 		updateProjectsCache(projects, app.Config.CacheDir)
 	}
 

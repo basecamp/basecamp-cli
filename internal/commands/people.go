@@ -201,6 +201,11 @@ func newPeopleListCmd() *cobra.Command {
 func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -241,7 +246,7 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 	// Opportunistic cache refresh: update completion cache as a side-effect.
 	// Only cache account-wide people list without pagination, not project-specific lists.
 	// Done synchronously to ensure write completes before process exits.
-	if projectID == "" && limit == 0 && page == 0 {
+	if projectID == "" && page == 0 && (limit == 0 || all) {
 		updatePeopleCache(people, app.Config.CacheDir)
 	}
 
