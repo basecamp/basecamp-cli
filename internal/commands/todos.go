@@ -97,14 +97,6 @@ func NewTodoCmd() *cobra.Command {
 				return output.ErrUsage("Todo content required")
 			}
 
-			// Validate assignee format early (before API calls)
-			if assignee != "" && !isValidAssignee(assignee) {
-				return output.ErrUsageHint(
-					"Invalid assignee format",
-					"Use a numeric person ID (run 'bcq people' to list)",
-				)
-			}
-
 			if err := app.RequireAccount(); err != nil {
 				return err
 			}
@@ -557,14 +549,6 @@ func newTodosCreateCmd() *cobra.Command {
 			// Validate user input first, before checking account
 			if content == "" {
 				return output.ErrUsage("Todo content required")
-			}
-
-			// Validate assignee format early (before API calls)
-			if assignee != "" && !isValidAssignee(assignee) {
-				return output.ErrUsageHint(
-					"Invalid assignee format",
-					"Use a numeric person ID (run 'bcq people' to list)",
-				)
 			}
 
 			if err := app.RequireAccount(); err != nil {

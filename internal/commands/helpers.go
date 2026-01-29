@@ -100,31 +100,6 @@ func isNumeric(s string) bool {
 	return true
 }
 
-// isValidAssignee checks if an assignee value is valid.
-// Valid formats: numeric person ID, "me" keyword, or simple name (no @ symbol).
-// Email addresses are not valid assignee formats.
-func isValidAssignee(s string) bool {
-	if s == "" {
-		return false
-	}
-	// "me" is a special keyword
-	if s == "me" {
-		return true
-	}
-	// Numeric IDs are valid
-	if isNumeric(s) {
-		return true
-	}
-	// Email addresses (containing @) are not valid
-	for _, c := range s {
-		if c == '@' {
-			return false
-		}
-	}
-	// Simple names without @ are valid (resolved via API)
-	return true
-}
-
 // ensureAccount resolves the account ID if not already configured.
 // This enables interactive prompts when --account flag and config are both missing.
 // After resolution, validates the account ID is numeric and updates the name resolver.
