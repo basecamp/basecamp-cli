@@ -361,7 +361,9 @@ Supports batch commenting on multiple recordings at once.`,
 			// If all operations failed, return an error for automation
 			if len(commented) == 0 && len(failed) > 0 {
 				if firstAPIErr != nil {
-					return fmt.Errorf("failed to comment on recordings %s: %w", strings.Join(failed, ", "), firstAPIErr)
+					// Convert SDK error to preserve rate-limit hints and exit codes
+					converted := convertSDKError(firstAPIErr)
+					return fmt.Errorf("failed to comment on recordings %s: %w", strings.Join(failed, ", "), converted)
 				}
 				return output.ErrUsage(fmt.Sprintf("Failed to comment on all recordings: %s", strings.Join(failed, ", ")))
 			}

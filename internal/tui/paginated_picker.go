@@ -307,7 +307,12 @@ func (m paginatedPickerModel) View() string {
 
 	// Items
 	if len(m.filtered) == 0 {
-		b.WriteString(m.styles.Muted.Render("No matches found"))
+		// Show loading indicator during auto-drain, otherwise "No matches found"
+		if m.loadingMore {
+			b.WriteString(m.spinner.View() + " " + m.styles.Muted.Render("Searching..."))
+		} else {
+			b.WriteString(m.styles.Muted.Render("No matches found"))
+		}
 	} else {
 		// Calculate visible range
 		start := m.scrollOffset
