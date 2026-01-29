@@ -246,7 +246,6 @@ func (w *Writer) writeCount(v any) error {
 	return nil
 }
 
-// normalizeData converts json.RawMessage and other types to standard Go types.
 // NormalizeData converts json.RawMessage and other types to standard Go types.
 func NormalizeData(data any) any {
 	// Handle json.RawMessage by unmarshaling it
