@@ -271,16 +271,20 @@ func (a *App) shouldPrintStatsToStderr() bool {
 	return true
 }
 
-// isMachineOutput returns true if the output mode is intended for programmatic consumption.
+// IsMachineOutput returns true if the output mode is intended for programmatic consumption.
 // Checks both flags and config-driven format settings.
-func (a *App) isMachineOutput() bool {
+// Use this to suppress human-friendly notices (like truncation warnings) in machine output.
+func (a *App) IsMachineOutput() bool {
 	// Flag-driven machine output modes
-	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count {
+	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count || a.Flags.JSON {
 		return true
 	}
-	// Config-driven quiet mode (format: "quiet" in config file)
-	if a.Config != nil && a.Config.Format == "quiet" {
-		return true
+	// Config-driven machine output formats
+	if a.Config != nil {
+		switch a.Config.Format {
+		case "quiet", "json":
+			return true
+		}
 	}
 	return false
 }

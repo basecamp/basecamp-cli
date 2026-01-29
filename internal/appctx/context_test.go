@@ -476,7 +476,7 @@ func TestAppOKWithNilCollector(t *testing.T) {
 	assert.NoError(t, err, "OK with nil collector failed")
 }
 
-// Test isMachineOutput detects flag-driven machine output modes
+// Test IsMachineOutput detects flag-driven machine output modes
 func TestIsMachineOutputFlags(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -488,7 +488,7 @@ func TestIsMachineOutputFlags(t *testing.T) {
 		{"quiet flag", func(a *App) { a.Flags.Quiet = true }, true},
 		{"ids-only flag", func(a *App) { a.Flags.IDsOnly = true }, true},
 		{"count flag", func(a *App) { a.Flags.Count = true }, true},
-		{"json flag", func(a *App) { a.Flags.JSON = true }, false},
+		{"json flag", func(a *App) { a.Flags.JSON = true }, true},
 		{"md flag", func(a *App) { a.Flags.MD = true }, false},
 		{"styled flag", func(a *App) { a.Flags.Styled = true }, false},
 	}
@@ -504,14 +504,14 @@ func TestIsMachineOutputFlags(t *testing.T) {
 	}
 }
 
-// Test isMachineOutput detects config-driven quiet mode
+// Test IsMachineOutput detects config-driven quiet mode
 func TestIsMachineOutputConfigFormat(t *testing.T) {
 	tests := []struct {
 		format   string
 		expected bool
 	}{
 		{"", false},
-		{"json", false},
+		{"json", true},
 		{"markdown", false},
 		{"md", false},
 		{"quiet", true},
@@ -539,7 +539,8 @@ func TestAppErrMachineOutputNoStats(t *testing.T) {
 		{"flag ids-only", func(a *App) { a.Flags.IDsOnly = true }, true},
 		{"flag count", func(a *App) { a.Flags.Count = true }, true},
 		{"config quiet", func(a *App) { a.Config.Format = "quiet" }, true},
-		{"flag json", func(a *App) { a.Flags.JSON = true }, false},
+		{"flag json", func(a *App) { a.Flags.JSON = true }, true},
+		{"config json", func(a *App) { a.Config.Format = "json" }, true},
 		{"default", func(a *App) {}, false},
 	}
 

@@ -149,9 +149,11 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 		return convertSDKError(err)
 	}
 
-	// Show truncation notice when user explicitly limits results
-	if notice := output.TruncationNotice(len(todolists), 0, all, limit); notice != "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), notice)
+	// Show truncation notice when user explicitly limits results (human output only)
+	if !app.IsMachineOutput() {
+		if notice := output.TruncationNotice(len(todolists), 0, all, limit); notice != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), notice)
+		}
 	}
 
 	return app.OK(todolists,
