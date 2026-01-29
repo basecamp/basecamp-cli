@@ -39,7 +39,7 @@ func NewCardsCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = SDK default)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
@@ -74,7 +74,7 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = SDK default)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
