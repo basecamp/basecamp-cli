@@ -43,6 +43,12 @@ type pickerModel struct {
 	loading    bool
 	loadingMsg string
 	spinner    spinner.Model
+
+	// Enhanced features
+	recentItems      []PickerItem // Recently used items shown at top
+	emptyMessage     string       // Custom message when no items
+	autoSelectSingle bool         // Auto-select if only one item
+	showHelp         bool         // Show keyboard shortcuts help
 }
 
 // PickerOption configures a picker.
@@ -70,6 +76,34 @@ func WithLoading(msg string) PickerOption {
 	}
 }
 
+// WithRecentItems prepends recently used items to the list with a separator.
+func WithRecentItems(items []PickerItem) PickerOption {
+	return func(m *pickerModel) {
+		m.recentItems = items
+	}
+}
+
+// WithEmptyMessage sets a custom message shown when no items are available.
+func WithEmptyMessage(msg string) PickerOption {
+	return func(m *pickerModel) {
+		m.emptyMessage = msg
+	}
+}
+
+// WithAutoSelectSingle automatically selects and returns if only one item exists.
+func WithAutoSelectSingle() PickerOption {
+	return func(m *pickerModel) {
+		m.autoSelectSingle = true
+	}
+}
+
+// WithHelp shows keyboard shortcuts in the picker.
+func WithHelp(show bool) PickerOption {
+	return func(m *pickerModel) {
+		m.showHelp = show
+	}
+}
+
 func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
@@ -82,21 +116,63 @@ func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	s.Style = lipgloss.NewStyle().Foreground(styles.theme.Primary)
 
 	m := pickerModel{
-		items:      items,
-		filtered:   items,
-		textInput:  ti,
-		styles:     styles,
-		title:      "Select an item",
-		maxVisible: 10,
-		spinner:    s,
-		loadingMsg: "Loading...",
+		items:        items,
+		filtered:     items,
+		textInput:    ti,
+		styles:       styles,
+		title:        "Select an item",
+		maxVisible:   10,
+		spinner:      s,
+		loadingMsg:   "Loading...",
+		emptyMessage: "No items found",
+		showHelp:     true,
 	}
 
 	for _, opt := range opts {
 		opt(&m)
 	}
 
+	// Prepend recent items if provided
+	if len(m.recentItems) > 0 {
+		m.items = m.mergeWithRecents(m.items)
+		m.filtered = m.items
+	}
+
 	return m
+}
+
+// mergeWithRecents combines recent items with regular items, avoiding duplicates.
+func (m pickerModel) mergeWithRecents(items []PickerItem) []PickerItem {
+	if len(m.recentItems) == 0 {
+		return items
+	}
+
+	// Create a set of recent item IDs
+	recentIDs := make(map[string]bool)
+	for _, item := range m.recentItems {
+		recentIDs[item.ID] = true
+	}
+
+	// Mark recent items with a prefix for visual distinction
+	markedRecents := make([]PickerItem, len(m.recentItems))
+	for i, item := range m.recentItems {
+		markedRecents[i] = PickerItem{
+			ID:          item.ID,
+			Title:       "* " + item.Title,
+			Description: "(recent) " + item.Description,
+		}
+	}
+
+	// Filter out duplicates from regular items
+	var filteredItems []PickerItem
+	for _, item := range items {
+		if !recentIDs[item.ID] {
+			filteredItems = append(filteredItems, item)
+		}
+	}
+
+	// Combine: recent items first, then regular items
+	return append(markedRecents, filteredItems...)
 }
 
 // PickerItemsLoadedMsg is sent when items are loaded asynchronously.
@@ -150,19 +226,47 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected = &m.filtered[m.cursor]
 			}
 			return m, tea.Quit
-		case "up", "ctrl+p":
+		case "up", "ctrl+p", "k":
 			if m.cursor > 0 {
 				m.cursor--
 				if m.cursor < m.scrollOffset {
 					m.scrollOffset = m.cursor
 				}
 			}
-		case "down", "ctrl+n":
+		case "down", "ctrl+n", "j":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 				if m.cursor >= m.scrollOffset+m.maxVisible {
 					m.scrollOffset = m.cursor - m.maxVisible + 1
 				}
+			}
+		case "ctrl+d":
+			// Page down
+			m.cursor += m.maxVisible / 2
+			if m.cursor >= len(m.filtered) {
+				m.cursor = len(m.filtered) - 1
+			}
+			if m.cursor >= m.scrollOffset+m.maxVisible {
+				m.scrollOffset = m.cursor - m.maxVisible + 1
+			}
+		case "ctrl+u":
+			// Page up
+			m.cursor -= m.maxVisible / 2
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			if m.cursor < m.scrollOffset {
+				m.scrollOffset = m.cursor
+			}
+		case "g":
+			// Go to first item
+			m.cursor = 0
+			m.scrollOffset = 0
+		case "G":
+			// Go to last item
+			m.cursor = len(m.filtered) - 1
+			if m.cursor >= m.maxVisible {
+				m.scrollOffset = m.cursor - m.maxVisible + 1
 			}
 		case "tab":
 			// Tab to select first match
@@ -223,7 +327,7 @@ func (m pickerModel) View() string {
 
 	// Items
 	if len(m.filtered) == 0 {
-		b.WriteString(m.styles.Muted.Render("No matches found"))
+		b.WriteString(m.styles.Muted.Render(m.emptyMessage))
 	} else {
 		// Calculate visible range
 		start := m.scrollOffset
@@ -259,8 +363,10 @@ func (m pickerModel) View() string {
 	}
 
 	// Help
-	helpStyle := m.styles.Muted.Padding(1, 0, 0, 0)
-	b.WriteString("\n" + helpStyle.Render("↑↓ navigate • enter select • esc cancel"))
+	if m.showHelp {
+		helpStyle := m.styles.Muted.Padding(1, 0, 0, 0)
+		b.WriteString("\n" + helpStyle.Render("↑↓/jk navigate • enter select • tab first • esc cancel"))
+	}
 
 	return b.String()
 }
@@ -299,6 +405,12 @@ func (p *Picker) Run() (*PickerItem, error) {
 	}
 
 	m := newPickerModel(p.items, p.opts...)
+
+	// Auto-select if only one item and option is set
+	if m.autoSelectSingle && len(m.items) == 1 {
+		return &m.items[0], nil
+	}
+
 	program := tea.NewProgram(m)
 
 	finalModel, err := program.Run()

@@ -127,27 +127,27 @@ func NewTodoCmd() *cobra.Command {
 			}
 			project = resolvedProject
 
-			// Use todolist from flag or config
+			// Use todolist from flag, config, or interactive prompt
 			if todolist == "" {
 				todolist = app.Flags.Todolist
 			}
 			if todolist == "" {
 				todolist = app.Config.TodolistID
 			}
-			// If still no todolist, get first one from project
+			// If still no todolist, try interactive selection
 			if todolist == "" {
-				tlID, err := getFirstTodolistID(cmd, app, project)
+				selectedTodolist, err := ensureTodolist(cmd, app, project)
 				if err != nil {
 					return err
 				}
-				todolist = fmt.Sprintf("%d", tlID)
+				todolist = selectedTodolist
 			}
 
 			if todolist == "" {
 				return output.ErrUsage("--list is required (no default todolist found)")
 			}
 
-			// Resolve todolist name to ID (if it's not already numeric from getFirstTodolistID)
+			// Resolve todolist name to ID
 			resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 			if err != nil {
 				return err
@@ -589,27 +589,27 @@ func newTodosCreateCmd() *cobra.Command {
 			}
 			project = resolvedProject
 
-			// Use todolist from flag or config
+			// Use todolist from flag, config, or interactive prompt
 			if todolist == "" {
 				todolist = app.Flags.Todolist
 			}
 			if todolist == "" {
 				todolist = app.Config.TodolistID
 			}
-			// If still no todolist, get first one from project
+			// If still no todolist, try interactive selection
 			if todolist == "" {
-				tlID, err := getFirstTodolistID(cmd, app, project)
+				selectedTodolist, err := ensureTodolist(cmd, app, project)
 				if err != nil {
 					return err
 				}
-				todolist = fmt.Sprintf("%d", tlID)
+				todolist = selectedTodolist
 			}
 
 			if todolist == "" {
 				return output.ErrUsage("--list is required (no default todolist found)")
 			}
 
-			// Resolve todolist name to ID (if it's not already numeric from getFirstTodolistID)
+			// Resolve todolist name to ID
 			resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 			if err != nil {
 				return err
@@ -689,36 +689,6 @@ func newTodosCreateCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 
 	return cmd
-}
-
-func getFirstTodolistID(cmd *cobra.Command, app *appctx.App, project string) (int64, error) {
-	// Parse project ID
-	bucketID, err := strconv.ParseInt(project, 10, 64)
-	if err != nil {
-		return 0, output.ErrUsage("Invalid project ID")
-	}
-
-	// Get todoset ID from project dock
-	todosetIDStr, err := getTodosetID(cmd, app, project)
-	if err != nil {
-		return 0, err
-	}
-	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
-	if err != nil {
-		return 0, output.ErrUsage("Invalid todoset ID")
-	}
-
-	// Get first todolist via SDK
-	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
-	if err != nil {
-		return 0, convertSDKError(err)
-	}
-
-	if len(todolists) == 0 {
-		return 0, output.ErrNotFound("todolists", project)
-	}
-
-	return todolists[0].ID, nil
 }
 
 func newTodosCompleteCmd() *cobra.Command {

@@ -34,11 +34,7 @@ Person can be:
 
 			todoID := args[0]
 
-			if assignee == "" {
-				return output.ErrUsage("--to is required")
-			}
-
-			// Resolve project
+			// Resolve project first (needed for person selection)
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -53,6 +49,15 @@ Person can be:
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 			if err != nil {
 				return err
+			}
+
+			// If no assignee specified, try interactive selection
+			if assignee == "" {
+				selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				assignee = selectedPerson
 			}
 
 			// Resolve assignee to ID
@@ -143,10 +148,9 @@ Person can be:
 		},
 	}
 
-	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (ID, email, or 'me')")
+	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (ID, email, or 'me'); prompts interactively if omitted")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	_ = cmd.MarkFlagRequired("to")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -180,11 +184,7 @@ Person can be:
 
 			todoID := args[0]
 
-			if assignee == "" {
-				return output.ErrUsage("--from is required")
-			}
-
-			// Resolve project
+			// Resolve project first (needed for person selection)
 			projectID := project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -199,6 +199,15 @@ Person can be:
 			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
 			if err != nil {
 				return err
+			}
+
+			// If no assignee specified, try interactive selection
+			if assignee == "" {
+				selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				assignee = selectedPerson
 			}
 
 			// Resolve assignee to ID
@@ -263,10 +272,9 @@ Person can be:
 		},
 	}
 
-	cmd.Flags().StringVar(&assignee, "from", "", "Person to remove (ID, email, or 'me')")
+	cmd.Flags().StringVar(&assignee, "from", "", "Person to remove (ID, email, or 'me'); prompts interactively if omitted")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	_ = cmd.MarkFlagRequired("from")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)

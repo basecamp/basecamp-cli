@@ -165,3 +165,35 @@ func ensureProject(cmd *cobra.Command, app *appctx.App) error {
 func getTodosetID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "todoset", "", "todoset")
 }
+
+// ensureTodolist resolves the todolist ID if not already configured.
+// This enables interactive prompts when --list flag and config are both missing.
+// The project must be resolved first (call ensureProject before this).
+func ensureTodolist(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
+	// Check if todolist is already set via flag or config
+	if app.Flags.Todolist != "" {
+		return app.Flags.Todolist, nil
+	}
+	if app.Config.TodolistID != "" {
+		return app.Config.TodolistID, nil
+	}
+
+	// Try interactive resolution
+	resolved, err := app.Resolve().Todolist(cmd.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	return resolved.Value, nil
+}
+
+// ensurePersonInProject resolves a person ID interactively from project members.
+// This is useful when you want to limit the selection to people who have
+// access to a specific project.
+func ensurePersonInProject(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
+	// Try interactive resolution
+	resolved, err := app.Resolve().PersonInProject(cmd.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	return resolved.Value, nil
+}
