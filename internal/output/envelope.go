@@ -28,10 +28,11 @@ type Breadcrumb struct {
 
 // ErrorResponse is the error envelope for JSON output.
 type ErrorResponse struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error"`
-	Code  string `json:"code"`
-	Hint  string `json:"hint,omitempty"`
+	OK    bool           `json:"ok"`
+	Error string         `json:"error"`
+	Code  string         `json:"code"`
+	Hint  string         `json:"hint,omitempty"`
+	Meta  map[string]any `json:"meta,omitempty"`
 }
 
 // Format specifies the output format.
@@ -75,6 +76,18 @@ func New(opts Options) *Writer {
 	return &Writer{opts: opts}
 }
 
+// EffectiveFormat resolves FormatAuto based on TTY detection.
+func (w *Writer) EffectiveFormat() Format {
+	format := w.opts.Format
+	if format == FormatAuto {
+		if isTTY(w.opts.Writer) {
+			return FormatStyled
+		}
+		return FormatJSON
+	}
+	return format
+}
+
 // OK outputs a success response.
 func (w *Writer) OK(data any, opts ...ResponseOption) error {
 	resp := &Response{OK: true, Data: data}
@@ -85,7 +98,7 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 }
 
 // Err outputs an error response.
-func (w *Writer) Err(err error) error {
+func (w *Writer) Err(err error, opts ...ErrorResponseOption) error {
 	e := AsError(err)
 	resp := &ErrorResponse{
 		OK:    false,
@@ -93,7 +106,35 @@ func (w *Writer) Err(err error) error {
 		Code:  e.Code,
 		Hint:  e.Hint,
 	}
+	for _, opt := range opts {
+		opt(resp)
+	}
 	return w.write(resp)
+}
+
+// ErrorResponseOption modifies an ErrorResponse.
+type ErrorResponseOption func(*ErrorResponse)
+
+// WithErrorStats adds session metrics to the error response metadata.
+func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
+	return func(r *ErrorResponse) {
+		if metrics == nil {
+			return
+		}
+		if r.Meta == nil {
+			r.Meta = make(map[string]any)
+		}
+		r.Meta["stats"] = map[string]any{
+			"requests":    metrics.TotalRequests,
+			"cache_hits":  metrics.CacheHits,
+			"cache_rate":  cacheRate(metrics),
+			"operations":  metrics.TotalOperations,
+			"failed":      metrics.FailedOps,
+			"retries":     metrics.TotalRetries,
+			"latency_ms":  metrics.TotalLatency.Milliseconds(),
+			"duration_ms": metrics.EndTime.Sub(metrics.StartTime).Milliseconds(),
+		}
+	}
 }
 
 func (w *Writer) write(v any) error {

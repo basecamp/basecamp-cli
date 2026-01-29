@@ -1,13 +1,16 @@
 package appctx
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/bcq/internal/config"
+	"github.com/basecamp/bcq/internal/output"
 )
 
 func TestNewApp(t *testing.T) {
@@ -252,6 +255,213 @@ func TestAppOKWithStats(t *testing.T) {
 	app.Flags.Stats = true
 	err = app.OK(map[string]string{"test": "data"})
 	assert.NoError(t, err, "OK with stats failed")
+}
+
+// Test NoStats flag overrides Stats flag
+func TestAppOKNoStatsOverridesStats(t *testing.T) {
+	tests := []struct {
+		name        string
+		stats       bool
+		noStats     bool
+		expectStats bool
+	}{
+		{"Stats=true, NoStats=true -> no stats", true, true, false},
+		{"Stats=true, NoStats=false -> stats included", true, false, true},
+		{"Stats=false, NoStats=false -> no stats", false, false, false},
+		{"Stats=false, NoStats=true -> no stats", false, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+
+			// Use a buffer to capture output
+			var buf bytes.Buffer
+			app.Output = output.New(output.Options{
+				Format: output.FormatJSON,
+				Writer: &buf,
+			})
+
+			app.Flags.Stats = tt.stats
+			app.Flags.NoStats = tt.noStats
+
+			err := app.OK(map[string]string{"test": "data"})
+			if err != nil {
+				t.Fatalf("OK() failed: %v", err)
+			}
+
+			// Parse output and check for stats
+			var resp map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+				t.Fatalf("Failed to parse JSON output: %v", err)
+			}
+
+			meta, hasMeta := resp["meta"].(map[string]any)
+			hasStats := hasMeta && meta["stats"] != nil
+
+			if hasStats != tt.expectStats {
+				t.Errorf("stats presence = %v, want %v", hasStats, tt.expectStats)
+			}
+		})
+	}
+}
+
+// Test Err includes stats in JSON envelope when --stats is set
+func TestAppErrIncludesStatsInJSON(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      output.Format
+		stats       bool
+		noStats     bool
+		expectStats bool
+	}{
+		{"JSON with stats", output.FormatJSON, true, false, true},
+		{"JSON without stats", output.FormatJSON, false, false, false},
+		{"JSON with NoStats override", output.FormatJSON, true, true, false},
+		{"Markdown with stats", output.FormatMarkdown, true, false, true},
+		{"Quiet suppresses stats", output.FormatQuiet, true, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+
+			var buf bytes.Buffer
+			app.Output = output.New(output.Options{
+				Format: tt.format,
+				Writer: &buf,
+			})
+			app.Flags.Stats = tt.stats
+			app.Flags.NoStats = tt.noStats
+
+			testErr := output.ErrAPI(500, "test error")
+			err := app.Err(testErr)
+			if err != nil {
+				t.Fatalf("Err() failed: %v", err)
+			}
+
+			// Only check JSON-parseable formats
+			if tt.format == output.FormatJSON {
+				var resp map[string]any
+				if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+					t.Fatalf("Failed to parse JSON: %v", err)
+				}
+
+				meta, hasMeta := resp["meta"].(map[string]any)
+				hasStats := hasMeta && meta["stats"] != nil
+
+				if hasStats != tt.expectStats {
+					t.Errorf("stats presence = %v, want %v", hasStats, tt.expectStats)
+				}
+			}
+		})
+	}
+}
+
+// Test shouldPrintStatsToStderr respects NoStats flag
+func TestShouldPrintStatsToStderr(t *testing.T) {
+	tests := []struct {
+		name     string
+		stats    bool
+		noStats  bool
+		expected bool
+	}{
+		{"stats off, no-stats off", false, false, false},
+		{"stats on, no-stats off", true, false, true},
+		{"stats off, no-stats on", false, true, false},
+		{"stats on, no-stats on (override)", true, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+			// Use styled format to avoid machine output check
+			app.Flags.Styled = true
+			app.ApplyFlags()
+			app.Flags.Stats = tt.stats
+			app.Flags.NoStats = tt.noStats
+
+			got := app.shouldPrintStatsToStderr()
+			if got != tt.expected {
+				t.Errorf("shouldPrintStatsToStderr() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// Test shouldPrintStatsToStderr respects EffectiveFormat for non-TTY outputs
+func TestShouldPrintStatsToStderrEffectiveFormat(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(*App)
+		expected bool
+	}{
+		{
+			name: "FormatJSON suppresses stderr stats",
+			setup: func(a *App) {
+				a.Flags.JSON = true
+				a.ApplyFlags()
+			},
+			expected: false,
+		},
+		{
+			name: "FormatMarkdown suppresses stderr stats",
+			setup: func(a *App) {
+				a.Flags.MD = true
+				a.ApplyFlags()
+			},
+			expected: false,
+		},
+		{
+			name: "FormatQuiet suppresses stderr stats",
+			setup: func(a *App) {
+				a.Flags.Quiet = true
+				a.ApplyFlags()
+			},
+			expected: false,
+		},
+		{
+			name: "FormatIDs suppresses stderr stats",
+			setup: func(a *App) {
+				a.Flags.IDsOnly = true
+				a.ApplyFlags()
+			},
+			expected: false,
+		},
+		{
+			name: "FormatCount suppresses stderr stats",
+			setup: func(a *App) {
+				a.Flags.Count = true
+				a.ApplyFlags()
+			},
+			expected: false,
+		},
+		{
+			name: "FormatStyled allows stderr stats",
+			setup: func(a *App) {
+				a.Flags.Styled = true
+				a.ApplyFlags()
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			app := NewApp(cfg)
+			app.Flags.Stats = true // Enable stats
+			tt.setup(app)
+
+			got := app.shouldPrintStatsToStderr()
+			if got != tt.expected {
+				t.Errorf("shouldPrintStatsToStderr() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
 }
 
 // Test app.OK with nil collector doesn't panic

@@ -63,6 +63,7 @@ type GlobalFlags struct {
 	// Behavior flags
 	Verbose  int // 0=off, 1=operations, 2=operations+requests (stacks with -v -v or -vv)
 	Stats    bool
+	NoStats  bool // Explicit disable (overrides --stats and dev default)
 	CacheDir string
 }
 
@@ -206,27 +207,68 @@ func (a *App) ApplyFlags() {
 
 // OK outputs a success response, automatically including stats if --stats flag is set.
 func (a *App) OK(data any, opts ...output.ResponseOption) error {
-	if a.Flags.Stats && a.Collector != nil {
+	if a.Flags.Stats && !a.Flags.NoStats && a.Collector != nil {
 		stats := a.Collector.Summary()
 		opts = append(opts, output.WithStats(&stats))
 	}
 	return a.Output.OK(data, opts...)
 }
 
-// Err outputs an error response, printing stats to stderr if --stats flag is set.
+// Err outputs an error response, including stats in the envelope for JSON/Markdown
+// or printing to stderr for styled output.
 func (a *App) Err(err error) error {
-	// Print the error response first
-	if outputErr := a.Output.Err(err); outputErr != nil {
+	// Determine if we should include stats
+	var opts []output.ErrorResponseOption
+	if a.shouldIncludeStatsInError() {
+		stats := a.Collector.Summary()
+		opts = append(opts, output.WithErrorStats(&stats))
+	}
+
+	// Print the error response
+	if outputErr := a.Output.Err(err, opts...); outputErr != nil {
 		return outputErr
 	}
 
-	// Print stats to stderr if enabled, but not in machine-consumable modes
-	// (agent, quiet, ids-only, count are meant for programmatic consumption)
-	if a.Flags.Stats && a.Collector != nil && !a.isMachineOutput() {
+	// Print stats to stderr for styled output only
+	if a.shouldPrintStatsToStderr() {
 		stats := a.Collector.Summary()
 		a.printStatsToStderr(&stats)
 	}
 	return nil
+}
+
+// shouldIncludeStatsInError returns true if stats should be included in the error envelope.
+func (a *App) shouldIncludeStatsInError() bool {
+	if !a.Flags.Stats || a.Flags.NoStats || a.Collector == nil {
+		return false
+	}
+	// Include stats in JSON/Markdown error envelopes (not for machine output modes)
+	if a.isMachineOutput() {
+		return false
+	}
+	if a.Output != nil {
+		switch a.Output.EffectiveFormat() {
+		case output.FormatJSON, output.FormatMarkdown:
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) shouldPrintStatsToStderr() bool {
+	if !a.Flags.Stats || a.Flags.NoStats || a.Collector == nil {
+		return false
+	}
+	if a.isMachineOutput() {
+		return false
+	}
+	if a.Output != nil {
+		switch a.Output.EffectiveFormat() {
+		case output.FormatJSON, output.FormatMarkdown, output.FormatQuiet, output.FormatIDs, output.FormatCount:
+			return false
+		}
+	}
+	return true
 }
 
 // isMachineOutput returns true if the output mode is intended for programmatic consumption.

@@ -29,3 +29,8 @@ func UserAgent() string {
 	}
 	return "bcq/" + v + " (https://github.com/basecamp/bcq)"
 }
+
+// IsDev returns true if this is a development build.
+func IsDev() bool {
+	return Version == "dev"
+}
