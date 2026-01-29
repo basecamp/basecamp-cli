@@ -8,6 +8,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/basecamp/bcq/internal/output"
 	"github.com/basecamp/bcq/internal/tui"
 	"github.com/basecamp/bcq/internal/tui/format"
 )
@@ -131,7 +132,7 @@ func stripCommentHTML(s string) string {
 // FetchCommentThread fetches and returns a comment thread for a recording.
 func FetchCommentThread(ctx context.Context, r *Resolver, projectID, recordingID int64) (*CommentThread, error) {
 	if r.config.AccountID == "" {
-		return nil, fmt.Errorf("account not configured")
+		return nil, output.ErrUsage("Account must be resolved before fetching comments")
 	}
 
 	accountClient := r.sdk.ForAccount(r.config.AccountID)

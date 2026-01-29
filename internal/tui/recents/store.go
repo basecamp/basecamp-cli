@@ -43,31 +43,40 @@ func NewStore(cacheDir string) *Store {
 
 // Add adds or updates an item in the recent items list.
 func (s *Store) Add(item Item) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	item.UsedAt = time.Now()
 
-	items := s.items[item.Type]
+	// Copy state while holding the lock, then release before I/O
+	var snapshot map[string][]Item
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	// Remove existing item with same ID
-	filtered := make([]Item, 0, len(items))
-	for _, existing := range items {
-		if existing.ID != item.ID {
-			filtered = append(filtered, existing)
+		items := s.items[item.Type]
+
+		// Remove existing item with same ID
+		filtered := make([]Item, 0, len(items))
+		for _, existing := range items {
+			if existing.ID != item.ID {
+				filtered = append(filtered, existing)
+			}
 		}
-	}
 
-	// Add new item at the front
-	items = append([]Item{item}, filtered...)
+		// Add new item at the front
+		items = append([]Item{item}, filtered...)
 
-	// Trim to max size
-	if len(items) > s.maxItems {
-		items = items[:s.maxItems]
-	}
+		// Trim to max size
+		if len(items) > s.maxItems {
+			items = items[:s.maxItems]
+		}
 
-	s.items[item.Type] = items
-	s.save()
+		s.items[item.Type] = items
+
+		// Copy state for saving outside lock
+		snapshot = s.copyItems()
+	}()
+
+	// Save outside the lock to avoid blocking readers during I/O
+	s.saveSnapshot(snapshot)
 }
 
 // Get returns recent items of the specified type, optionally filtered by account/project.
@@ -100,20 +109,37 @@ func (s *Store) Get(itemType string, accountID, projectID string) []Item {
 
 // Clear removes all items of the specified type.
 func (s *Store) Clear(itemType string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.items, itemType)
-	s.save()
+	var snapshot map[string][]Item
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.items, itemType)
+		snapshot = s.copyItems()
+	}()
+	s.saveSnapshot(snapshot)
 }
 
 // ClearAll removes all recent items.
 func (s *Store) ClearAll() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var snapshot map[string][]Item
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.items = make(map[string][]Item)
+		snapshot = s.copyItems()
+	}()
+	s.saveSnapshot(snapshot)
+}
 
-	s.items = make(map[string][]Item)
-	s.save()
+// copyItems returns a deep copy of the items map (must be called with lock held).
+func (s *Store) copyItems() map[string][]Item {
+	result := make(map[string][]Item, len(s.items))
+	for k, v := range s.items {
+		copied := make([]Item, len(v))
+		copy(copied, v)
+		result[k] = copied
+	}
+	return result
 }
 
 // load reads the store from disk.
@@ -131,27 +157,37 @@ func (s *Store) load() {
 	s.items = items
 }
 
-// save writes the store to disk.
+// saveSnapshot writes the given items snapshot to disk.
 // Errors are stored in lastError for debugging (recents are non-critical).
-func (s *Store) save() {
+// This method is safe to call without holding the lock.
+func (s *Store) saveSnapshot(items map[string][]Item) {
 	// Ensure directory exists
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0750); err != nil {
+		s.mu.Lock()
 		s.lastError = err
+		s.mu.Unlock()
 		return
 	}
 
-	data, err := json.MarshalIndent(s.items, "", "  ")
+	data, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
+		s.mu.Lock()
 		s.lastError = err
+		s.mu.Unlock()
 		return
 	}
 
 	if err := os.WriteFile(s.path, data, 0600); err != nil {
+		s.mu.Lock()
 		s.lastError = err
+		s.mu.Unlock()
 		return
 	}
+
+	s.mu.Lock()
 	s.lastError = nil
+	s.mu.Unlock()
 }
 
 // LastError returns the last error from a save operation, if any.

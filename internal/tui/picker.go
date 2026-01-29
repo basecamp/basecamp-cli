@@ -167,10 +167,16 @@ func (m pickerModel) mergeWithRecents(items []PickerItem) []PickerItem {
 	// Mark recent items with a prefix for visual distinction
 	markedRecents := make([]PickerItem, len(m.recentItems))
 	for i, item := range m.recentItems {
+		desc := item.Description
+		if desc != "" {
+			desc = "(recent) " + desc
+		} else {
+			desc = "(recent)"
+		}
 		markedRecents[i] = PickerItem{
 			ID:          item.ID,
 			Title:       "* " + item.Title,
-			Description: "(recent) " + item.Description,
+			Description: desc,
 		}
 	}
 

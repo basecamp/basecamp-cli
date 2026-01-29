@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/basecamp/bcq/internal/hostutil"
 )
 
 func TestNormalizeHost(t *testing.T) {
@@ -47,8 +49,8 @@ func TestNormalizeHost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := normalizeHost(tt.input)
-			assert.Equal(t, tt.expected, result, "normalizeHost(%q)", tt.input)
+			result := hostutil.Normalize(tt.input)
+			assert.Equal(t, tt.expected, result, "hostutil.Normalize(%q)", tt.input)
 		})
 	}
 }
@@ -88,8 +90,8 @@ func TestIsLocalhost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := isLocalhost(tt.input)
-			assert.Equal(t, tt.expected, result, "isLocalhost(%q)", tt.input)
+			result := hostutil.IsLocalhost(tt.input)
+			assert.Equal(t, tt.expected, result, "hostutil.IsLocalhost(%q)", tt.input)
 		})
 	}
 }

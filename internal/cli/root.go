@@ -12,6 +12,7 @@ import (
 	"github.com/basecamp/bcq/internal/commands"
 	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/config"
+	"github.com/basecamp/bcq/internal/hostutil"
 	"github.com/basecamp/bcq/internal/output"
 	"github.com/basecamp/bcq/internal/tui"
 	"github.com/basecamp/bcq/internal/version"
@@ -234,52 +235,7 @@ func resolveHostFlag(host string, cfg *config.Config) string {
 	}
 
 	// Not a configured host name - treat as hostname/URL
-	return normalizeHost(host)
-}
-
-// normalizeHost converts a host string to a full URL.
-// - Empty string returns empty (use default)
-// - localhost/127.0.0.1 defaults to http://
-// - Other bare hostnames default to https://
-// - Full URLs are used as-is
-func normalizeHost(host string) string {
-	if host == "" {
-		return ""
-	}
-	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-		return host
-	}
-	if isLocalhost(host) {
-		return "http://" + host
-	}
-	return "https://" + host
-}
-
-// isLocalhost returns true if host is localhost, a .localhost subdomain,
-// 127.0.0.1, or [::1] (with optional port).
-// Matches localhost and *.localhost per RFC 6761, but not localhost.example.com.
-func isLocalhost(host string) bool {
-	// Strip port if present for easier matching
-	hostWithoutPort := host
-	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		// Check if this is IPv6 bracketed address
-		if !strings.HasPrefix(host, "[") || strings.HasPrefix(host, "[::1]:") {
-			hostWithoutPort = host[:idx]
-		}
-	}
-
-	// Check for localhost or .localhost subdomain
-	if hostWithoutPort == "localhost" || strings.HasSuffix(hostWithoutPort, ".localhost") {
-		return true
-	}
-	if hostWithoutPort == "127.0.0.1" {
-		return true
-	}
-	// IPv6 loopback (must be bracketed for valid URL)
-	if hostWithoutPort == "[::1]" {
-		return true
-	}
-	return false
+	return hostutil.Normalize(host)
 }
 
 // transformCobraError transforms Cobra's default error messages to match the
@@ -360,7 +316,7 @@ func transformCobraError(err error) error {
 func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
 	// 1. Check BCQ_HOST environment variable
 	if host := os.Getenv("BCQ_HOST"); host != "" {
-		return normalizeHost(host), nil
+		return hostutil.Normalize(host), nil
 	}
 
 	// No hosts configured - use existing base_url
