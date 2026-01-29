@@ -611,7 +611,7 @@ func TestNormalizeDataWithSlice(t *testing.T) {
 		{"id": 2, "name": "B"},
 	}
 
-	result := normalizeData(data)
+	result := NormalizeData(data)
 	slice, ok := result.([]map[string]any)
 	require.True(t, ok, "Expected []map[string]any, got %T", result)
 	assert.Len(t, slice, 2)
@@ -620,7 +620,7 @@ func TestNormalizeDataWithSlice(t *testing.T) {
 func TestNormalizeDataWithMap(t *testing.T) {
 	data := map[string]any{"id": 1, "name": "A"}
 
-	result := normalizeData(data)
+	result := NormalizeData(data)
 	m, ok := result.(map[string]any)
 	require.True(t, ok, "Expected map[string]any, got %T", result)
 	assert.Equal(t, 1, m["id"])
@@ -629,7 +629,7 @@ func TestNormalizeDataWithMap(t *testing.T) {
 func TestNormalizeDataWithJSONRawMessage(t *testing.T) {
 	raw := json.RawMessage(`[{"id": 1}, {"id": 2}]`)
 
-	result := normalizeData(raw)
+	result := NormalizeData(raw)
 	slice, ok := result.([]map[string]any)
 	require.True(t, ok, "Expected []map[string]any, got %T", result)
 	assert.Len(t, slice, 2)
@@ -642,14 +642,14 @@ func TestNormalizeDataWithStruct(t *testing.T) {
 	}
 	data := Item{ID: 1, Name: "Test"}
 
-	result := normalizeData(data)
+	result := NormalizeData(data)
 	m, ok := result.(map[string]any)
 	require.True(t, ok, "Expected map[string]any, got %T", result)
 	assert.Equal(t, float64(1), m["id"]) // JSON unmarshals numbers as float64
 }
 
 func TestNormalizeDataWithNil(t *testing.T) {
-	result := normalizeData(nil)
+	result := NormalizeData(nil)
 	assert.Nil(t, result)
 }
 
@@ -1216,7 +1216,7 @@ func TestSkipObjectColumns(t *testing.T) {
 		"creator":          map[string]any{"id": 2},    // should skip (nested + in skipObjectColumns)
 		"url":              "https://example.com",      // should skip (in skipObjectColumns)
 		"app_url":          "https://app.example.com",  // should skip (in skipObjectColumns)
-		"type":             "Todo",                     // visible (not skipped)
+		"type":             "Widget",                   // visible (not skipped; no schema match)
 		"bookmark_url":     "https://bookmark.example", // should skip (in skipObjectColumns)
 		"subscription_url": "https://sub.example",      // should skip (in skipObjectColumns)
 		"comments_count":   float64(5),                 // should skip (in skipObjectColumns)
@@ -1365,4 +1365,165 @@ func TestStatsRenderingSingleRequest(t *testing.T) {
 	// Should use singular "request" not "requests"
 	assert.Contains(t, output, "1 request")
 	assert.NotContains(t, output, "1 requests")
+}
+
+// =============================================================================
+// WithEntity Integration Tests
+// =============================================================================
+
+func TestWithEntity(t *testing.T) {
+	resp := &Response{}
+	WithEntity("todo")(resp)
+
+	if resp.Entity != "todo" {
+		t.Errorf("Entity = %q, want %q", resp.Entity, "todo")
+	}
+}
+
+func TestWithEntityNotInJSON(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{"id": 123, "content": "Test todo"}
+	err := w.OK(data, WithEntity("todo"))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Entity should not appear in JSON output (json:"-" tag)
+	if strings.Contains(output, `"entity"`) {
+		t.Errorf("JSON output should not contain entity field, got: %s", output)
+	}
+}
+
+func TestWithEntityStyledOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":        float64(12345),
+		"content":   "Fix the login bug",
+		"completed": false,
+		"due_on":    "2026-01-15",
+	}
+	err := w.OK(data,
+		WithEntity("todo"),
+		WithSummary("Todo details"),
+	)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should contain the headline (from presenter)
+	if !strings.Contains(output, "Fix the login bug") {
+		t.Errorf("Styled output with entity should contain headline, got:\n%s", output)
+	}
+	// Should contain the summary
+	if !strings.Contains(output, "Todo details") {
+		t.Errorf("Styled output should contain summary, got:\n%s", output)
+	}
+}
+
+func TestWithEntityFallbackForUnknown(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := map[string]any{"id": 123, "name": "Test"}
+	err := w.OK(data, WithEntity("nonexistent"))
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should fall back to generic rendering (key-value pairs)
+	if !strings.Contains(output, "123") {
+		t.Errorf("Fallback output should contain data, got:\n%s", output)
+	}
+}
+
+func TestWithEntityMarkdownOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":        float64(12345),
+		"content":   "Fix the login bug",
+		"completed": false,
+	}
+	err := w.OK(data,
+		WithEntity("todo"),
+		WithSummary("Todo details"),
+		WithBreadcrumbs(
+			Breadcrumb{Action: "done", Cmd: "bcq done 12345", Description: "Mark done"},
+		),
+	)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should NOT contain ANSI escape codes (it's Markdown, not styled)
+	if strings.Contains(output, "\x1b[") {
+		t.Errorf("Markdown entity output should NOT contain ANSI codes, got:\n%q", output)
+	}
+
+	// Should contain Markdown summary heading
+	if !strings.Contains(output, "## Todo details") {
+		t.Errorf("Markdown entity output should contain '## Todo details', got:\n%s", output)
+	}
+
+	// Should contain Markdown breadcrumbs with "### Next"
+	if !strings.Contains(output, "### Next") {
+		t.Errorf("Markdown entity output should contain '### Next', got:\n%s", output)
+	}
+
+	// Breadcrumb should be a Markdown list item with backtick-quoted command
+	if !strings.Contains(output, "- `bcq done 12345`") {
+		t.Errorf("Markdown breadcrumb should use code formatting, got:\n%s", output)
+	}
+}
+
+func TestTypeFieldDoesNotAutoTriggerPresenter(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	// Data has a "type" field matching a known schema, but no WithEntity.
+	// The presenter should NOT activate — opt-in only.
+	data := map[string]any{
+		"type":      "Todo",
+		"id":        float64(999),
+		"content":   "Should use generic renderer",
+		"completed": false,
+	}
+	err := w.OK(data)
+	if err != nil {
+		t.Fatalf("OK() failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Without WithEntity, generic renderer should produce key-value pairs
+	// with the "Id" label (title-cased column header from formatHeader).
+	if !strings.Contains(output, "Id") {
+		t.Errorf("Without WithEntity, generic renderer should produce 'Id' label, got:\n%s", output)
+	}
 }

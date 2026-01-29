@@ -12,7 +12,7 @@ func BenchmarkNormalizeData(b *testing.B) {
 		raw := json.RawMessage(`[{"id":1,"name":"A"},{"id":2,"name":"B"},{"id":3,"name":"C"}]`)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			normalizeData(raw)
+			NormalizeData(raw)
 		}
 	})
 
@@ -20,7 +20,7 @@ func BenchmarkNormalizeData(b *testing.B) {
 		raw := json.RawMessage(`{"id":123,"name":"Test Project","status":"active"}`)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			normalizeData(raw)
+			NormalizeData(raw)
 		}
 	})
 
@@ -31,7 +31,7 @@ func BenchmarkNormalizeData(b *testing.B) {
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			normalizeData(data)
+			NormalizeData(data)
 		}
 	})
 
@@ -39,7 +39,7 @@ func BenchmarkNormalizeData(b *testing.B) {
 		data := map[string]any{"id": 123, "name": "Test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			normalizeData(data)
+			NormalizeData(data)
 		}
 	})
 
@@ -51,7 +51,7 @@ func BenchmarkNormalizeData(b *testing.B) {
 		data := Project{ID: 123, Name: "Test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			normalizeData(data)
+			NormalizeData(data)
 		}
 	})
 
@@ -64,13 +64,13 @@ func BenchmarkNormalizeData(b *testing.B) {
 		raw := json.RawMessage(data)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			normalizeData(raw)
+			NormalizeData(raw)
 		}
 	})
 
 	b.Run("nil", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			normalizeData(nil)
+			NormalizeData(nil)
 		}
 	})
 }

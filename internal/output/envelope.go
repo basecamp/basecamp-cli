@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/basecamp/bcq/internal/observability"
+	"github.com/basecamp/bcq/internal/presenter"
 )
 
 // Response is the success envelope for JSON output.
@@ -17,6 +19,7 @@ type Response struct {
 	Breadcrumbs []Breadcrumb   `json:"breadcrumbs,omitempty"`
 	Context     map[string]any `json:"context,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
+	Entity      string         `json:"-"` // Schema hint for presenter (not serialized)
 }
 
 // Breadcrumb is a suggested follow-up action.
@@ -200,7 +203,7 @@ func (w *Writer) writeIDs(v any) error {
 	}
 
 	// Normalize data to []map[string]any or map[string]any
-	data := normalizeData(resp.Data)
+	data := NormalizeData(resp.Data)
 
 	// Handle slice of objects with ID field
 	switch d := data.(type) {
@@ -225,7 +228,7 @@ func (w *Writer) writeCount(v any) error {
 	}
 
 	// Normalize data to a standard type
-	data := normalizeData(resp.Data)
+	data := NormalizeData(resp.Data)
 
 	switch d := data.(type) {
 	case []any:
@@ -239,7 +242,8 @@ func (w *Writer) writeCount(v any) error {
 }
 
 // normalizeData converts json.RawMessage and other types to standard Go types.
-func normalizeData(data any) any {
+// NormalizeData converts json.RawMessage and other types to standard Go types.
+func NormalizeData(data any) any {
 	// Handle json.RawMessage by unmarshaling it
 	if raw, ok := data.(json.RawMessage); ok {
 		var unmarshaled any
@@ -294,6 +298,15 @@ func normalizeUnmarshaled(v any) any {
 
 // writeStyled outputs ANSI styled terminal output.
 func (w *Writer) writeStyled(v any) error {
+	// Schema-aware presenter is opt-in: only activates when a command
+	// explicitly sets WithEntity. This preserves the generic renderer as
+	// default and avoids surprising users when new schemas are added.
+	if resp, ok := v.(*Response); ok && resp.Entity != "" {
+		if w.presentStyledEntity(resp) {
+			return nil
+		}
+	}
+
 	r := NewRenderer(w.opts.Writer, true) // Force styled
 	switch resp := v.(type) {
 	case *Response:
@@ -307,6 +320,13 @@ func (w *Writer) writeStyled(v any) error {
 
 // writeLiteralMarkdown outputs literal Markdown syntax (portable, pipeable).
 func (w *Writer) writeLiteralMarkdown(v any) error {
+	// Schema-aware presenter is opt-in (see writeStyled comment).
+	if resp, ok := v.(*Response); ok && resp.Entity != "" {
+		if w.presentMarkdownEntity(resp) {
+			return nil
+		}
+	}
+
 	r := NewMarkdownRenderer(w.opts.Writer)
 	switch resp := v.(type) {
 	case *Response:
@@ -371,6 +391,84 @@ func WithStats(metrics *observability.SessionMetrics) ResponseOption {
 			"duration_ms": metrics.EndTime.Sub(metrics.StartTime).Milliseconds(),
 		}
 	}
+}
+
+// WithEntity hints which schema to use for entity-aware presentation.
+func WithEntity(name string) ResponseOption {
+	return func(r *Response) { r.Entity = name }
+}
+
+// presentStyledEntity attempts schema-aware rendering for styled output.
+// Returns true if the presenter handled it, false to fall back to generic.
+func (w *Writer) presentStyledEntity(resp *Response) bool {
+	data := NormalizeData(resp.Data)
+	var buf strings.Builder
+
+	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeStyled) {
+		return false
+	}
+
+	var out strings.Builder
+	r := NewRenderer(w.opts.Writer, true)
+
+	if resp.Summary != "" {
+		out.WriteString(r.Summary.Render(resp.Summary))
+		out.WriteString("\n\n")
+	}
+
+	out.WriteString(buf.String())
+
+	if len(resp.Breadcrumbs) > 0 {
+		out.WriteString("\n")
+		r.renderBreadcrumbs(&out, resp.Breadcrumbs)
+	}
+
+	if stats := extractStats(resp.Meta); stats != nil {
+		out.WriteString("\n")
+		r.renderStats(&out, stats)
+	}
+
+	_, _ = io.WriteString(w.opts.Writer, out.String())
+	return true
+}
+
+// presentMarkdownEntity attempts schema-aware rendering for Markdown output.
+// Returns true if the presenter handled it, false to fall back to generic.
+func (w *Writer) presentMarkdownEntity(resp *Response) bool {
+	data := NormalizeData(resp.Data)
+	var buf strings.Builder
+
+	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeMarkdown) {
+		return false
+	}
+
+	var out strings.Builder
+	mr := NewMarkdownRenderer(w.opts.Writer)
+
+	if resp.Summary != "" {
+		out.WriteString("## " + resp.Summary + "\n\n")
+	}
+
+	out.WriteString(buf.String())
+
+	if len(resp.Breadcrumbs) > 0 {
+		out.WriteString("\n### Next\n\n")
+		for _, bc := range resp.Breadcrumbs {
+			line := "- `" + bc.Cmd + "`"
+			if bc.Description != "" {
+				line += " — " + bc.Description
+			}
+			out.WriteString(line + "\n")
+		}
+	}
+
+	if stats := extractStats(resp.Meta); stats != nil {
+		out.WriteString("\n")
+		mr.renderStats(&out, stats)
+	}
+
+	_, _ = io.WriteString(w.opts.Writer, out.String())
+	return true
 }
 
 // cacheRate calculates the cache hit rate as a percentage.
