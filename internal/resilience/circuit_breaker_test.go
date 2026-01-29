@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCircuitBreakerDefaultsClosed(t *testing.T) {
@@ -13,12 +16,8 @@ func TestCircuitBreakerDefaultsClosed(t *testing.T) {
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{})
 
 	state, err := cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitClosed {
-		t.Errorf("expected closed state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitClosed, state)
 }
 
 func TestCircuitBreakerAllowsWhenClosed(t *testing.T) {
@@ -27,12 +26,8 @@ func TestCircuitBreakerAllowsWhenClosed(t *testing.T) {
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{})
 
 	allowed, err := cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected request to be allowed when circuit is closed")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected request to be allowed when circuit is closed")
 }
 
 func TestCircuitBreakerOpensAfterFailures(t *testing.T) {
@@ -47,28 +42,19 @@ func TestCircuitBreakerOpensAfterFailures(t *testing.T) {
 
 	// Record failures up to threshold
 	for i := 0; i < 3; i++ {
-		if err := cb.RecordFailure(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		err := cb.RecordFailure()
+		require.NoError(t, err)
 	}
 
 	// Should be open now
 	state, err := cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitOpen {
-		t.Errorf("expected open state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitOpen, state)
 
 	// Should reject requests
 	allowed, err := cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if allowed {
-		t.Error("expected request to be rejected when circuit is open")
-	}
+	require.NoError(t, err)
+	assert.False(t, allowed, "expected request to be rejected when circuit is open")
 }
 
 func TestCircuitBreakerClosesAfterSuccesses(t *testing.T) {
@@ -91,25 +77,18 @@ func TestCircuitBreakerClosesAfterSuccesses(t *testing.T) {
 
 	// This Allow() should trigger transition to half-open
 	allowed, _ := cb.Allow()
-	if !allowed {
-		t.Error("expected request to be allowed in half-open state")
-	}
+	assert.True(t, allowed, "expected request to be allowed in half-open state")
 
 	// Record successes to close the circuit
 	for i := 0; i < 2; i++ {
-		if err := cb.RecordSuccess(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		err := cb.RecordSuccess()
+		require.NoError(t, err)
 	}
 
 	// Should be closed now
 	state, err := cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitClosed {
-		t.Errorf("expected closed state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitClosed, state)
 }
 
 func TestCircuitBreakerFailureInHalfOpenOpens(t *testing.T) {
@@ -137,12 +116,8 @@ func TestCircuitBreakerFailureInHalfOpenOpens(t *testing.T) {
 
 	// Should be open again
 	state, err := cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitOpen {
-		t.Errorf("expected open state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitOpen, state)
 }
 
 func TestCircuitBreakerSuccessResetsFailureCount(t *testing.T) {
@@ -168,22 +143,14 @@ func TestCircuitBreakerSuccessResetsFailureCount(t *testing.T) {
 
 	// Should still be closed
 	state, err := cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitClosed {
-		t.Errorf("expected closed state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitClosed, state)
 
 	// One more failure should open
 	cb.RecordFailure()
 	state, err = cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitOpen {
-		t.Errorf("expected open state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitOpen, state)
 }
 
 func TestCircuitBreakerReset(t *testing.T) {
@@ -202,23 +169,16 @@ func TestCircuitBreakerReset(t *testing.T) {
 	}
 
 	state, _ := cb.State()
-	if state != CircuitOpen {
-		t.Errorf("expected open state, got %s", state)
-	}
+	assert.Equal(t, CircuitOpen, state)
 
 	// Reset
-	if err := cb.Reset(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := cb.Reset()
+	require.NoError(t, err)
 
 	// Should be closed
-	state, err := cb.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitClosed {
-		t.Errorf("expected closed state after reset, got %s", state)
-	}
+	state, err = cb.State()
+	require.NoError(t, err)
+	assert.Equal(t, CircuitClosed, state)
 }
 
 func TestCircuitBreakerPersistence(t *testing.T) {
@@ -248,12 +208,8 @@ func TestCircuitBreakerPersistence(t *testing.T) {
 	cb2.RecordFailure()
 
 	state, err := cb2.State()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state != CircuitOpen {
-		t.Errorf("expected open state, got %s", state)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, CircuitOpen, state)
 }
 
 func TestCircuitBreakerAppliesDefaults(t *testing.T) {
@@ -265,12 +221,8 @@ func TestCircuitBreakerAppliesDefaults(t *testing.T) {
 
 	// Should work with defaults
 	allowed, err := cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected request to be allowed")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected request to be allowed")
 }
 
 func TestCircuitBreakerStateFilePath(t *testing.T) {
@@ -283,9 +235,8 @@ func TestCircuitBreakerStateFilePath(t *testing.T) {
 
 	// Verify the state file exists
 	stateFile := filepath.Join(dir, StateFileName)
-	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
-		t.Error("expected state file to exist")
-	}
+	_, err := os.Stat(stateFile)
+	assert.False(t, os.IsNotExist(err), "expected state file to exist")
 }
 
 func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
@@ -300,32 +251,24 @@ func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
 
 	// Start closed
 	state, _ := cb.State()
-	if state != CircuitClosed {
-		t.Errorf("expected closed, got %s", state)
-	}
+	assert.Equal(t, CircuitClosed, state)
 
 	// Failures -> open
 	cb.RecordFailure()
 	cb.RecordFailure()
 	state, _ = cb.State()
-	if state != CircuitOpen {
-		t.Errorf("expected open, got %s", state)
-	}
+	assert.Equal(t, CircuitOpen, state)
 
 	// Wait -> half-open
 	time.Sleep(10 * time.Millisecond)
 	state, _ = cb.State()
-	if state != CircuitHalfOpen {
-		t.Errorf("expected half-open, got %s", state)
-	}
+	assert.Equal(t, CircuitHalfOpen, state)
 
 	// Success -> closed
 	cb.Allow() // Transition to half-open first
 	cb.RecordSuccess()
 	state, _ = cb.State()
-	if state != CircuitClosed {
-		t.Errorf("expected closed, got %s", state)
-	}
+	assert.Equal(t, CircuitClosed, state)
 }
 
 func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
@@ -353,36 +296,24 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 
 	// First Allow() transitions to half-open and reserves a slot
 	allowed, err := cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected first request to be allowed in half-open state")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected first request to be allowed in half-open state")
 
 	// Simulate a crash: don't call RecordSuccess/RecordFailure
 	// The HalfOpenAttempts is now at max (1)
 
 	// Second Allow() should be rejected (max reached, not yet stale)
 	allowed, err = cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if allowed {
-		t.Error("expected second request to be rejected when half-open slots exhausted")
-	}
+	require.NoError(t, err)
+	assert.False(t, allowed, "expected second request to be rejected when half-open slots exhausted")
 
 	// Wait for stale timeout period
 	time.Sleep(staleTimeout + 50*time.Millisecond)
 
 	// Now Allow() should reset stale attempts and allow
 	allowed, err = cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected request to be allowed after stale attempts are reset")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected request to be allowed after stale attempts are reset")
 }
 
 func TestCircuitBreakerSetsHalfOpenLastAttemptAt(t *testing.T) {
@@ -408,29 +339,19 @@ func TestCircuitBreakerSetsHalfOpenLastAttemptAt(t *testing.T) {
 
 	// Check that HalfOpenLastAttemptAt is zero before Allow()
 	state, _ := store.Load()
-	if !state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero() {
-		t.Error("expected HalfOpenLastAttemptAt to be zero before Allow()")
-	}
+	assert.True(t, state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero(), "expected HalfOpenLastAttemptAt to be zero before Allow()")
 
 	// First Allow() transitions to half-open and reserves a slot
 	before := time.Now()
 	allowed, err := cb.Allow()
 	after := time.Now()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected first request to be allowed")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected first request to be allowed")
 
 	// HalfOpenLastAttemptAt should be set
 	state, _ = store.Load()
-	if state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero() {
-		t.Error("expected HalfOpenLastAttemptAt to be set after Allow()")
-	}
-	if state.CircuitBreaker.HalfOpenLastAttemptAt.Before(before) || state.CircuitBreaker.HalfOpenLastAttemptAt.After(after) {
-		t.Error("HalfOpenLastAttemptAt should be between before and after Allow()")
-	}
+	assert.False(t, state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero(), "expected HalfOpenLastAttemptAt to be set after Allow()")
+	assert.False(t, state.CircuitBreaker.HalfOpenLastAttemptAt.Before(before) || state.CircuitBreaker.HalfOpenLastAttemptAt.After(after), "HalfOpenLastAttemptAt should be between before and after Allow()")
 }
 
 func TestCircuitBreakerResetsStaleAttemptsWithZeroTimestamp(t *testing.T) {
@@ -455,10 +376,6 @@ func TestCircuitBreakerResetsStaleAttemptsWithZeroTimestamp(t *testing.T) {
 
 	// Should detect the zero timestamp as stale and allow
 	allowed, err := cb.Allow()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !allowed {
-		t.Error("expected request to be allowed when timestamp is zero (legacy state)")
-	}
+	require.NoError(t, err)
+	assert.True(t, allowed, "expected request to be allowed when timestamp is zero (legacy state)")
 }

@@ -4,24 +4,20 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCLIHooks_SetLevel(t *testing.T) {
 	h := NewCLIHooks(0, nil, nil)
 
-	if h.Level() != 0 {
-		t.Errorf("expected level 0, got %d", h.Level())
-	}
+	assert.Equal(t, 0, h.Level())
 
 	h.SetLevel(2)
-	if h.Level() != 2 {
-		t.Errorf("expected level 2, got %d", h.Level())
-	}
+	assert.Equal(t, 2, h.Level())
 }
 
 func TestCLIHooks_Level0_Silent(t *testing.T) {
@@ -41,18 +37,12 @@ func TestCLIHooks_Level0_Silent(t *testing.T) {
 	h.OnRequestEnd(ctx, info, result)
 
 	// Level 0 should produce no output
-	if buf.Len() != 0 {
-		t.Errorf("expected no output at level 0, got: %s", buf.String())
-	}
+	assert.Equal(t, 0, buf.Len(), "expected no output at level 0")
 
 	// But metrics should still be collected
 	summary := collector.Summary()
-	if summary.TotalOperations != 1 {
-		t.Errorf("expected 1 operation recorded, got %d", summary.TotalOperations)
-	}
-	if summary.TotalRequests != 1 {
-		t.Errorf("expected 1 request recorded, got %d", summary.TotalRequests)
-	}
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 1, summary.TotalRequests)
 }
 
 func TestCLIHooks_Level1_OperationsOnly(t *testing.T) {
@@ -73,17 +63,11 @@ func TestCLIHooks_Level1_OperationsOnly(t *testing.T) {
 	output := buf.String()
 
 	// Should show operation start/end
-	if !strings.Contains(output, "Calling Todos.Complete") {
-		t.Errorf("expected operation start, got: %s", output)
-	}
-	if !strings.Contains(output, "Completed Todos.Complete") {
-		t.Errorf("expected operation end, got: %s", output)
-	}
+	assert.Contains(t, output, "Calling Todos.Complete", "expected operation start")
+	assert.Contains(t, output, "Completed Todos.Complete", "expected operation end")
 
 	// Should NOT show request details at level 1
-	if strings.Contains(output, "POST") {
-		t.Errorf("unexpected request output at level 1: %s", output)
-	}
+	assert.NotContains(t, output, "POST", "unexpected request output at level 1")
 }
 
 func TestCLIHooks_Level2_OperationsAndRequests(t *testing.T) {
@@ -105,15 +89,9 @@ func TestCLIHooks_Level2_OperationsAndRequests(t *testing.T) {
 	output := buf.String()
 
 	// Should show both operation and request details
-	if !strings.Contains(output, "Calling Todos.Complete") {
-		t.Errorf("expected operation start, got: %s", output)
-	}
-	if !strings.Contains(output, "-> POST /todos/123/complete") {
-		t.Errorf("expected request start, got: %s", output)
-	}
-	if !strings.Contains(output, "<- 204") {
-		t.Errorf("expected request complete, got: %s", output)
-	}
+	assert.Contains(t, output, "Calling Todos.Complete", "expected operation start")
+	assert.Contains(t, output, "-> POST /todos/123/complete", "expected request start")
+	assert.Contains(t, output, "<- 204", "expected request complete")
 }
 
 func TestCLIHooks_OperationError(t *testing.T) {
@@ -131,19 +109,13 @@ func TestCLIHooks_OperationError(t *testing.T) {
 	output := buf.String()
 
 	// Should show failed with error
-	if !strings.Contains(output, "Failed Todos.Complete") {
-		t.Errorf("expected failure message, got: %s", output)
-	}
-	if !strings.Contains(output, "permission denied") {
-		t.Errorf("expected error message, got: %s", output)
-	}
+	assert.Contains(t, output, "Failed Todos.Complete", "expected failure message")
+	assert.Contains(t, output, "permission denied", "expected error message")
 
 	// Collector should record the error
 	summary := collector.Summary()
-	if summary.TotalOperations != 1 || summary.FailedOps != 1 {
-		t.Errorf("expected 1 operation with 1 failure, got %d ops with %d failures",
-			summary.TotalOperations, summary.FailedOps)
-	}
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 1, summary.FailedOps)
 }
 
 func TestCLIHooks_CachedRequest(t *testing.T) {
@@ -160,15 +132,11 @@ func TestCLIHooks_CachedRequest(t *testing.T) {
 
 	output := buf.String()
 
-	if !strings.Contains(output, "(cached)") {
-		t.Errorf("expected cached indicator, got: %s", output)
-	}
+	assert.Contains(t, output, "(cached)", "expected cached indicator")
 
 	// Collector should record cache hit
 	summary := collector.Summary()
-	if summary.CacheHits != 1 {
-		t.Errorf("expected 1 cache hit, got %d", summary.CacheHits)
-	}
+	assert.Equal(t, 1, summary.CacheHits)
 }
 
 func TestCLIHooks_Retry(t *testing.T) {
@@ -184,18 +152,12 @@ func TestCLIHooks_Retry(t *testing.T) {
 
 	output := buf.String()
 
-	if !strings.Contains(output, "RETRY #2") {
-		t.Errorf("expected retry message, got: %s", output)
-	}
-	if !strings.Contains(output, "connection reset") {
-		t.Errorf("expected error message, got: %s", output)
-	}
+	assert.Contains(t, output, "RETRY #2", "expected retry message")
+	assert.Contains(t, output, "connection reset", "expected error message")
 
 	// Collector should record retry
 	summary := collector.Summary()
-	if summary.TotalRetries != 1 {
-		t.Errorf("expected 1 retry recorded, got %d", summary.TotalRetries)
-	}
+	assert.Equal(t, 1, summary.TotalRetries)
 }
 
 func TestCLIHooks_ImplementsInterface(t *testing.T) {
@@ -219,9 +181,7 @@ func TestCLIHooks_NilCollector(t *testing.T) {
 	h.OnRequestEnd(ctx, info, result)
 
 	// Should not panic and should still produce output
-	if buf.Len() == 0 {
-		t.Error("expected output even with nil collector")
-	}
+	assert.True(t, buf.Len() > 0, "expected output even with nil collector")
 }
 
 func TestCLIHooks_NilWriter(t *testing.T) {
@@ -240,10 +200,6 @@ func TestCLIHooks_NilWriter(t *testing.T) {
 
 	// Should not panic and should still collect metrics
 	summary := collector.Summary()
-	if summary.TotalOperations != 1 {
-		t.Errorf("expected 1 operation collected, got %d", summary.TotalOperations)
-	}
-	if summary.TotalRequests != 1 {
-		t.Errorf("expected 1 request collected, got %d", summary.TotalRequests)
-	}
+	assert.Equal(t, 1, summary.TotalOperations)
+	assert.Equal(t, 1, summary.TotalRequests)
 }
