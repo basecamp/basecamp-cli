@@ -92,10 +92,11 @@ Events track all changes to a recording. Common event actions:
 				opts.Page = page
 			}
 
-			events, err := app.Account().Events().List(cmd.Context(), bucketID, recordingID, opts)
+			eventsResult, err := app.Account().Events().List(cmd.Context(), bucketID, recordingID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			events := eventsResult.Events
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d events for recording #%s", len(events), recordingIDStr)),
@@ -109,7 +110,7 @@ Events track all changes to a recording. Common event actions:
 			}
 
 			// Add truncation notice if results may be limited
-			if notice := output.TruncationNotice(len(events), basecamp.DefaultEventLimit, all, limit); notice != "" {
+			if notice := output.TruncationNoticeWithTotal(len(events), eventsResult.Meta.TotalCount); notice != "" {
 				respOpts = append(respOpts, output.WithNotice(notice))
 			}
 

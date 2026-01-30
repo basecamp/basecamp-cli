@@ -62,15 +62,15 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 	}
 
 	var templates []basecamp.Template
-	var err error
 
 	// SDK List() defaults to active status (API default)
 	// For archived/trashed, use raw API with status parameter
 	if status == "active" || status == "" {
-		templates, err = app.Account().Templates().List(cmd.Context())
+		templatesResult, err := app.Account().Templates().List(cmd.Context())
 		if err != nil {
 			return convertSDKError(err)
 		}
+		templates = templatesResult.Templates
 	} else {
 		// Fall back to raw API for non-active statuses
 		path := fmt.Sprintf("/templates.json?status=%s", status)

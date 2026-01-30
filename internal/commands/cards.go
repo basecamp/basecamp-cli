@@ -161,13 +161,13 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
 
-		return app.OK(cards,
-			output.WithSummary(fmt.Sprintf("%d cards", len(cards))),
+		return app.OK(cardsResult.Cards,
+			output.WithSummary(fmt.Sprintf("%d cards", len(cardsResult.Cards))),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
@@ -211,19 +211,19 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 				"Use column ID or exact name",
 			)
 		}
-		cards, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
-		allCards = cards
+		allCards = cardsResult.Cards
 	} else {
 		// Get cards from all columns (no pagination - already validated above)
 		for _, col := range cardTableData.Lists {
-			cards, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID, nil)
+			cardsResult, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID, nil)
 			if err != nil {
 				continue // Skip columns with errors
 			}
-			allCards = append(allCards, cards...)
+			allCards = append(allCards, cardsResult.Cards...)
 		}
 	}
 

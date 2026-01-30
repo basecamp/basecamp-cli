@@ -219,10 +219,11 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 		opts.Status = status
 	}
 
-	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, opts)
+	entriesResult, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	entries := entriesResult.Entries
 
 	summary := fmt.Sprintf("%d schedule entries", len(entries))
 

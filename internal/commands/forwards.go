@@ -141,17 +141,18 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 		opts.Page = page
 	}
 
-	forwards, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt, opts)
+	forwardsResult, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	forwards := forwardsResult.Forwards
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d forwards", len(forwards))),
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(forwards), 0, all, limit); notice != "" {
+	if notice := output.TruncationNoticeWithTotal(len(forwards), forwardsResult.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 
@@ -388,17 +389,18 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				opts.Page = page
 			}
 
-			replies, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID, opts)
+			repliesResult, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			replies := repliesResult.Replies
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d replies to forward #%s", len(replies), forwardIDStr)),
 			}
 
 			// Add truncation notice if results may be limited
-			if notice := output.TruncationNotice(len(replies), 0, all, limit); notice != "" {
+			if notice := output.TruncationNoticeWithTotal(len(replies), repliesResult.Meta.TotalCount); notice != "" {
 				respOpts = append(respOpts, output.WithNotice(notice))
 			}
 

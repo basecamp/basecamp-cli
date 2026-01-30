@@ -85,10 +85,11 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	types, err := app.Account().MessageTypes().List(cmd.Context(), bucketID)
+	typesResult, err := app.Account().MessageTypes().List(cmd.Context(), bucketID)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	types := typesResult.MessageTypes
 
 	return app.OK(types,
 		output.WithSummary(fmt.Sprintf("%d message types", len(types))),

@@ -144,10 +144,11 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 	}
 
 	// Get todolists via SDK
-	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, opts)
+	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	todolists := todolistsResult.Todolists
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d todolists", len(todolists))),
@@ -166,7 +167,7 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(todolists), 0, all, limit); notice != "" {
+	if notice := output.TruncationNoticeWithTotal(len(todolists), todolistsResult.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 
