@@ -242,7 +242,7 @@ jobs:
 
       - name: Install benchstat
         if: steps.filter.outputs.bench == 'true'
-        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20250106192532-ecc6f4f50f75
+        run: go install golang.org/x/perf/cmd/benchstat@latest
 
       - name: Compare benchmarks
         if: steps.filter.outputs.bench == 'true' && hashFiles('benchmarks-baseline.txt') != ''
