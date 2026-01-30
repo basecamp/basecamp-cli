@@ -118,7 +118,17 @@ func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	// Summary line
 	if resp.Summary != "" {
 		b.WriteString(r.Summary.Render(resp.Summary))
-		b.WriteString("\n\n")
+		b.WriteString("\n")
+	}
+
+	// Notice (e.g., truncation warning)
+	if resp.Notice != "" {
+		b.WriteString(r.Hint.Render(resp.Notice))
+		b.WriteString("\n")
+	}
+
+	if resp.Summary != "" || resp.Notice != "" {
+		b.WriteString("\n")
 	}
 
 	// Main data
@@ -653,7 +663,16 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 
 	// Summary as heading
 	if resp.Summary != "" {
-		b.WriteString("## " + resp.Summary + "\n\n")
+		b.WriteString("## " + resp.Summary + "\n")
+	}
+
+	// Notice (e.g., truncation warning)
+	if resp.Notice != "" {
+		b.WriteString("*" + resp.Notice + "*\n")
+	}
+
+	if resp.Summary != "" || resp.Notice != "" {
+		b.WriteString("\n")
 	}
 
 	// Main data

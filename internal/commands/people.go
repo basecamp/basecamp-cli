@@ -178,26 +178,53 @@ func NewPeopleCmd() *cobra.Command {
 
 func newPeopleListCmd() *cobra.Command {
 	var projectID string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List people",
 		Long:  "List all people in your Basecamp account, or in a specific project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPeopleList(cmd, projectID)
+			return runPeopleList(cmd, projectID, limit, page, all)
 		},
 	}
 
 	cmd.Flags().StringVarP(&projectID, "project", "p", "", "List people in a specific project")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of people to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all people (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
 
-func runPeopleList(cmd *cobra.Command, projectID string) error {
+func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
+	}
+
+	// Build pagination options
+	opts := &basecamp.PeopleListOptions{}
+	if all {
+		opts.Limit = 0 // SDK treats 0 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
 	}
 
 	var people []basecamp.Person
@@ -213,9 +240,9 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 		if parseErr != nil {
 			return output.ErrUsage("Invalid project ID")
 		}
-		people, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID)
+		people, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID, opts)
 	} else {
-		people, err = app.Account().People().List(cmd.Context())
+		people, err = app.Account().People().List(cmd.Context(), opts)
 	}
 
 	if err != nil {
@@ -223,9 +250,9 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 	}
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.
-	// Only cache account-wide people list, not project-specific lists.
+	// Only cache account-wide people list without pagination, not project-specific lists.
 	// Done synchronously to ensure write completes before process exits.
-	if projectID == "" {
+	if projectID == "" && page == 0 && (limit == 0 || all) {
 		updatePeopleCache(people, app.Config.CacheDir)
 	}
 
@@ -234,10 +261,17 @@ func runPeopleList(cmd *cobra.Command, projectID string) error {
 		{Action: "show", Cmd: "bcq people show <id>", Description: "Show person details"},
 	}
 
-	return app.OK(people,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
-	)
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(people), 0, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(people, respOpts...)
 }
 
 // updatePeopleCache updates the completion cache with fresh people data.

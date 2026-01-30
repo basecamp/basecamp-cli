@@ -6,6 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
 )
@@ -14,6 +16,9 @@ import (
 func NewForwardsCmd() *cobra.Command {
 	var project string
 	var inboxID string
+	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "forwards",
@@ -23,13 +28,16 @@ func NewForwardsCmd() *cobra.Command {
 Forwards are emails forwarded into Basecamp. Each project has an inbox
 that can receive forwarded emails.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runForwardsList(cmd, project, inboxID)
+			return runForwardsList(cmd, project, inboxID, limit, page, all)
 		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&inboxID, "inbox", "", "Inbox ID (auto-detected from project)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	cmd.AddCommand(
 		newForwardsListCmd(&project, &inboxID),
@@ -48,18 +56,39 @@ func getInboxID(cmd *cobra.Command, app *appctx.App, projectID, inboxID string) 
 }
 
 func newForwardsListCmd(project, inboxID *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List forwards in project inbox",
 		Long:  "List all email forwards in the project inbox.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runForwardsList(cmd, *project, *inboxID)
+			return runForwardsList(cmd, *project, *inboxID, limit, page, all)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
-func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
+func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -101,13 +130,32 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
 		return output.ErrUsage("Invalid inbox ID")
 	}
 
-	forwards, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt)
+	// Build pagination options
+	opts := &basecamp.ForwardListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
+	forwards, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
-	return app.OK(forwards,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d forwards", len(forwards))),
+	}
+
+	// Add truncation notice if results may be limited
+	if notice := output.TruncationNotice(len(forwards), 0, all, limit); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	respOpts = append(respOpts,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
@@ -121,6 +169,8 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string) error {
 			},
 		),
 	)
+
+	return app.OK(forwards, respOpts...)
 }
 
 func newForwardsShowCmd(project *string) *cobra.Command {
@@ -269,13 +319,28 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 }
 
 func newForwardsRepliesCmd(project *string) *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "replies <forward_id>",
 		Short: "List replies to a forward",
 		Long:  "List all replies to an email forward.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Validate flag combinations
+			if all && limit > 0 {
+				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+			if page > 0 && (all || limit > 0) {
+				return output.ErrUsage("--page cannot be combined with --all or --limit")
+			}
+			if page > 1 {
+				return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -312,13 +377,32 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			replies, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID)
+			// Build pagination options
+			opts := &basecamp.ForwardReplyListOptions{}
+			if all {
+				opts.Limit = -1 // SDK treats -1 as "fetch all"
+			} else if limit > 0 {
+				opts.Limit = limit
+			}
+			if page > 0 {
+				opts.Page = page
+			}
+
+			replies, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(replies,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d replies to forward #%s", len(replies), forwardIDStr)),
+			}
+
+			// Add truncation notice if results may be limited
+			if notice := output.TruncationNotice(len(replies), 0, all, limit); notice != "" {
+				respOpts = append(respOpts, output.WithNotice(notice))
+			}
+
+			respOpts = append(respOpts,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forward",
@@ -332,8 +416,16 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 					},
 				),
 			)
+
+			return app.OK(replies, respOpts...)
 		},
 	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of replies to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all replies (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+
+	return cmd
 }
 
 func newForwardsReplyCmd(project *string) *cobra.Command {

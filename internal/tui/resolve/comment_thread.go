@@ -144,7 +144,7 @@ func FetchCommentThread(ctx context.Context, r *Resolver, projectID, recordingID
 	}
 
 	// Fetch comments
-	comments, err := accountClient.Comments().List(ctx, projectID, recordingID)
+	comments, err := accountClient.Comments().List(ctx, projectID, recordingID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch comments: %w", err)
 	}
