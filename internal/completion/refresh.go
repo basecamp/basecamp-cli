@@ -110,7 +110,7 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 
 	go func() {
 		defer wg.Done()
-		people, result.PeopleErr = r.sdk.People().List(ctx)
+		people, result.PeopleErr = r.sdk.People().List(ctx, nil)
 	}()
 
 	wg.Wait()
@@ -149,7 +149,7 @@ func (r *Refresher) RefreshProjects(ctx context.Context) error {
 
 // RefreshPeople fetches fresh people data and updates the cache.
 func (r *Refresher) RefreshPeople(ctx context.Context) error {
-	people, err := r.sdk.People().List(ctx)
+	people, err := r.sdk.People().List(ctx, nil)
 	if err != nil {
 		return err
 	}

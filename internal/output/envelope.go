@@ -16,6 +16,7 @@ type Response struct {
 	OK          bool           `json:"ok"`
 	Data        any            `json:"data,omitempty"`
 	Summary     string         `json:"summary,omitempty"`
+	Notice      string         `json:"notice,omitempty"` // Informational message (e.g., truncation warning)
 	Breadcrumbs []Breadcrumb   `json:"breadcrumbs,omitempty"`
 	Context     map[string]any `json:"context,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
@@ -348,6 +349,44 @@ type ResponseOption func(*Response)
 // WithSummary adds a summary to the response.
 func WithSummary(s string) ResponseOption {
 	return func(r *Response) { r.Summary = s }
+}
+
+// WithNotice adds an informational notice to the response.
+// Use this for non-error messages like truncation warnings.
+func WithNotice(s string) ResponseOption {
+	return func(r *Response) { r.Notice = s }
+}
+
+// TruncationNotice returns a notice string if results may be truncated.
+// Returns empty string if no truncation warning is needed.
+// Parameters:
+//   - count: number of results returned
+//   - defaultLimit: the default limit for this resource type (e.g., 100)
+//   - all: whether --all flag was used
+//   - explicitLimit: limit set via --limit flag (0 if not set)
+func TruncationNotice(count, defaultLimit int, all bool, explicitLimit int) string {
+	// No notice if --all was used (user explicitly requested everything)
+	if all {
+		return ""
+	}
+
+	// Determine the effective limit
+	limit := defaultLimit
+	if explicitLimit > 0 {
+		limit = explicitLimit
+	}
+
+	// No notice if no limit was applied (defaultLimit=0 and no explicit limit)
+	if limit == 0 {
+		return ""
+	}
+
+	// If count equals the limit, results are likely truncated
+	if count > 0 && count >= limit {
+		return fmt.Sprintf("Showing %d results (use --all for complete list)", count)
+	}
+
+	return ""
 }
 
 // WithBreadcrumbs adds breadcrumbs to the response.

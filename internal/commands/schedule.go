@@ -134,6 +134,9 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 
 func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 	var status string
+	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "entries",
@@ -145,16 +148,30 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			return runScheduleEntries(cmd, app, *project, *scheduleID, status)
+			return runScheduleEntries(cmd, app, *project, *scheduleID, status, limit, page, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&status, "status", "active", "Filter by status (active, archived, trashed)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of entries to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all entries (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
 
 	return cmd
 }
 
-func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID, status string) error {
+func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID, status string, limit, page int, all bool) error {
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
+
 	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
 	if projectID == "" {
@@ -188,23 +205,28 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
-	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt)
+	// Build pagination options
+	opts := &basecamp.ScheduleEntryListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+	if status != "" {
+		opts.Status = status
+	}
+
+	entries, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
-	// Filter by status if not "active" (default)
-	// Note: The SDK returns all entries, so we filter client-side
-	var filteredEntries []basecamp.ScheduleEntry
-	for _, e := range entries {
-		if status == "" || e.Status == status {
-			filteredEntries = append(filteredEntries, e)
-		}
-	}
+	summary := fmt.Sprintf("%d schedule entries", len(entries))
 
-	summary := fmt.Sprintf("%d schedule entries", len(filteredEntries))
-
-	return app.OK(filteredEntries,
+	return app.OK(entries,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
