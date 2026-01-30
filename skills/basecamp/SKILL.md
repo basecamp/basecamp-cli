@@ -1,15 +1,48 @@
 ---
 name: basecamp
 description: |
-  Primary Basecamp workflow command. Create todos, check status, link code to tasks,
-  and coordinate with your team. Works with bcq.
+  Interact with Basecamp via the bcq CLI. Search projects, list todos, create tasks,
+  post to campfire, manage cards, and link code to Basecamp items. Use this skill
+  for ANY Basecamp-related question or action.
 triggers:
+  # Direct invocations
   - basecamp
   - /basecamp
+  - bcq
+  # Actions
   - basecamp todo
   - basecamp project
+  - basecamp card
+  - basecamp campfire
   - link to basecamp
   - track in basecamp
+  - post to basecamp
+  - comment on basecamp
+  - complete todo
+  - mark done
+  # Search and discovery
+  - search basecamp
+  - find in basecamp
+  - look up basecamp
+  - check basecamp
+  - list basecamp
+  - show basecamp
+  - get from basecamp
+  - fetch from basecamp
+  # Questions and capability discovery
+  - can I basecamp
+  - can we basecamp
+  - how do I basecamp
+  - what's in basecamp
+  - what basecamp
+  - does basecamp
+  - is there a basecamp
+  # My work
+  - my todos
+  - my tasks
+  - my basecamp
+  - assigned to me
+  # URLs
   - 3.basecamp.com
   - basecampapi.com
   - https://3.basecamp.com/
