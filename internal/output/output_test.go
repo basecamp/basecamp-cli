@@ -1649,3 +1649,54 @@ func TestWriterOK_AllowsZeroDataWithoutEntity(t *testing.T) {
 	err := w.OK(data)
 	assert.NoError(t, err, "OK without entity should allow zero data")
 }
+
+// =============================================================================
+// Truncation Notice Tests
+// =============================================================================
+
+func TestTruncationNoticeWithTotal(t *testing.T) {
+	tests := []struct {
+		name       string
+		count      int
+		totalCount int
+		expected   string
+	}{
+		{
+			name:       "no truncation when count equals total",
+			count:      100,
+			totalCount: 100,
+			expected:   "",
+		},
+		{
+			name:       "no truncation when count exceeds total",
+			count:      150,
+			totalCount: 100,
+			expected:   "",
+		},
+		{
+			name:       "no notice when totalCount is zero (unavailable)",
+			count:      100,
+			totalCount: 0,
+			expected:   "",
+		},
+		{
+			name:       "truncation notice when count less than total",
+			count:      100,
+			totalCount: 500,
+			expected:   "Showing 100 of 500 results (use --all for complete list)",
+		},
+		{
+			name:       "truncation notice with small counts",
+			count:      10,
+			totalCount: 25,
+			expected:   "Showing 10 of 25 results (use --all for complete list)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := TruncationNoticeWithTotal(tt.count, tt.totalCount)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

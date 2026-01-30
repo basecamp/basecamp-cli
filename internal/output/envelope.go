@@ -389,6 +389,18 @@ func TruncationNotice(count, defaultLimit int, all bool, explicitLimit int) stri
 	return ""
 }
 
+// TruncationNoticeWithTotal returns a truncation notice when results are truncated.
+// Uses totalCount from API's X-Total-Count header to show accurate counts.
+// Returns empty string if no truncation or totalCount is 0 (unavailable).
+func TruncationNoticeWithTotal(count, totalCount int) string {
+	// No notice if total count unavailable or all results returned
+	if totalCount == 0 || count >= totalCount {
+		return ""
+	}
+
+	return fmt.Sprintf("Showing %d of %d results (use --all for complete list)", count, totalCount)
+}
+
 // WithBreadcrumbs adds breadcrumbs to the response.
 func WithBreadcrumbs(b ...Breadcrumb) ResponseOption {
 	return func(r *Response) { r.Breadcrumbs = append(r.Breadcrumbs, b...) }
@@ -456,7 +468,16 @@ func (w *Writer) presentStyledEntity(resp *Response) bool {
 
 	if resp.Summary != "" {
 		out.WriteString(r.Summary.Render(resp.Summary))
-		out.WriteString("\n\n")
+		out.WriteString("\n")
+	}
+
+	if resp.Notice != "" {
+		out.WriteString(r.Hint.Render(resp.Notice))
+		out.WriteString("\n")
+	}
+
+	if resp.Summary != "" || resp.Notice != "" {
+		out.WriteString("\n")
 	}
 
 	out.WriteString(buf.String())
@@ -489,7 +510,15 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 	mr := NewMarkdownRenderer(w.opts.Writer)
 
 	if resp.Summary != "" {
-		out.WriteString("## " + resp.Summary + "\n\n")
+		out.WriteString("## " + resp.Summary + "\n")
+	}
+
+	if resp.Notice != "" {
+		out.WriteString("*" + resp.Notice + "*\n")
+	}
+
+	if resp.Summary != "" || resp.Notice != "" {
+		out.WriteString("\n")
 	}
 
 	out.WriteString(buf.String())

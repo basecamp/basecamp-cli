@@ -97,7 +97,7 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 	var result RefreshResult
 
 	// Fetch projects and people in parallel
-	var projects []basecamp.Project
+	var projectResult *basecamp.ProjectListResult
 	var people []basecamp.Person
 
 	var wg sync.WaitGroup
@@ -105,7 +105,7 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 
 	go func() {
 		defer wg.Done()
-		projects, result.ProjectsErr = r.sdk.Projects().List(ctx, nil)
+		projectResult, result.ProjectsErr = r.sdk.Projects().List(ctx, nil)
 	}()
 
 	go func() {
@@ -116,8 +116,8 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 	wg.Wait()
 
 	// Update each portion independently to preserve existing data on partial failure
-	if result.ProjectsErr == nil && projects != nil {
-		converted := convertProjects(projects)
+	if result.ProjectsErr == nil && projectResult != nil {
+		converted := convertProjects(projectResult.Projects)
 		if err := r.store.UpdateProjects(converted); err != nil {
 			result.ProjectsErr = err
 		} else {
@@ -139,12 +139,12 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 
 // RefreshProjects fetches fresh project data and updates the cache.
 func (r *Refresher) RefreshProjects(ctx context.Context) error {
-	projects, err := r.sdk.Projects().List(ctx, nil)
+	result, err := r.sdk.Projects().List(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	return r.store.UpdateProjects(convertProjects(projects))
+	return r.store.UpdateProjects(convertProjects(result.Projects))
 }
 
 // RefreshPeople fetches fresh people data and updates the cache.
