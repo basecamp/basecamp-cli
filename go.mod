@@ -2,9 +2,8 @@ module github.com/basecamp/bcq
 
 go 1.25.6
 
-// Using SDK paged branch commit for CI - update to released version after SDK PR merges
 require (
-	github.com/basecamp/basecamp-sdk/go v0.0.0-20260130001545-019aecc85a41
+	github.com/basecamp/basecamp-sdk/go v0.0.0-20260130003003-eaee310d53e5
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v0.8.0
