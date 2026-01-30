@@ -98,7 +98,7 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 
 	// Fetch projects and people in parallel
 	var projectResult *basecamp.ProjectListResult
-	var people []basecamp.Person
+	var peopleResult *basecamp.PeopleListResult
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -110,7 +110,7 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 
 	go func() {
 		defer wg.Done()
-		people, result.PeopleErr = r.sdk.People().List(ctx, nil)
+		peopleResult, result.PeopleErr = r.sdk.People().List(ctx, nil)
 	}()
 
 	wg.Wait()
@@ -125,8 +125,8 @@ func (r *Refresher) RefreshAll(ctx context.Context) RefreshResult {
 		}
 	}
 
-	if result.PeopleErr == nil && people != nil {
-		converted := convertPeople(people)
+	if result.PeopleErr == nil && peopleResult != nil {
+		converted := convertPeople(peopleResult.People)
 		if err := r.store.UpdatePeople(converted); err != nil {
 			result.PeopleErr = err
 		} else {
@@ -149,12 +149,12 @@ func (r *Refresher) RefreshProjects(ctx context.Context) error {
 
 // RefreshPeople fetches fresh people data and updates the cache.
 func (r *Refresher) RefreshPeople(ctx context.Context) error {
-	people, err := r.sdk.People().List(ctx, nil)
+	result, err := r.sdk.People().List(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	return r.store.UpdatePeople(convertPeople(people))
+	return r.store.UpdatePeople(convertPeople(result.People))
 }
 
 // convertProjects converts SDK projects to cached projects.

@@ -111,12 +111,12 @@ func (r *Resolver) fetchTodolists(ctx context.Context, projectID string) ([]base
 	}
 
 	// Fetch todolists using SDK
-	todolists, err := r.sdk.ForAccount(r.config.AccountID).Todolists().List(ctx, bucketID, todosetID, nil)
+	result, err := r.sdk.ForAccount(r.config.AccountID).Todolists().List(ctx, bucketID, todosetID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch todolists: %w", err)
 	}
 
-	return todolists, nil
+	return result.Todolists, nil
 }
 
 // TodolistWithPersist resolves the todolist ID and optionally prompts to save it.

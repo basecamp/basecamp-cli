@@ -194,10 +194,11 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 		opts.Bucket = []int64{projectID}
 	}
 
-	recordings, err := app.Account().Recordings().List(cmd.Context(), basecamp.RecordingType(recordingType), opts)
+	recordingsResult, err := app.Account().Recordings().List(cmd.Context(), basecamp.RecordingType(recordingType), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	recordings := recordingsResult.Recordings
 
 	summary := fmt.Sprintf("%d %ss", len(recordings), recordingType)
 
@@ -213,7 +214,7 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(recordings), basecamp.DefaultRecordingLimit, all, limit); notice != "" {
+	if notice := output.TruncationNoticeWithTotal(len(recordings), recordingsResult.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 

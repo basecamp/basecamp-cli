@@ -119,10 +119,11 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	}
 
 	// Get groups via SDK
-	groups, err := app.Account().TodolistGroups().List(cmd.Context(), bucketID, todolistID)
+	groupsResult, err := app.Account().TodolistGroups().List(cmd.Context(), bucketID, todolistID)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	groups := groupsResult.Groups
 
 	return app.OK(groups,
 		output.WithSummary(fmt.Sprintf("%d groups in todolist #%s", len(groups), todolist)),

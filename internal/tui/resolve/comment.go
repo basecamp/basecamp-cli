@@ -126,7 +126,7 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 	var errs []error
 
 	// Fetch todos
-	todos, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
+	todosResult, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
 		Bucket:    []int64{bucketID},
 		Status:    "active",
 		Sort:      "updated_at",
@@ -135,11 +135,11 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 	if err != nil {
 		errs = append(errs, fmt.Errorf("todos: %w", err))
 	} else {
-		allRecordings = append(allRecordings, todos...)
+		allRecordings = append(allRecordings, todosResult.Recordings...)
 	}
 
 	// Fetch messages
-	messages, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeMessage, &basecamp.RecordingsListOptions{
+	messagesResult, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeMessage, &basecamp.RecordingsListOptions{
 		Bucket:    []int64{bucketID},
 		Status:    "active",
 		Sort:      "updated_at",
@@ -148,11 +148,11 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 	if err != nil {
 		errs = append(errs, fmt.Errorf("messages: %w", err))
 	} else {
-		allRecordings = append(allRecordings, messages...)
+		allRecordings = append(allRecordings, messagesResult.Recordings...)
 	}
 
 	// Fetch documents
-	docs, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeDocument, &basecamp.RecordingsListOptions{
+	docsResult, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeDocument, &basecamp.RecordingsListOptions{
 		Bucket:    []int64{bucketID},
 		Status:    "active",
 		Sort:      "updated_at",
@@ -161,7 +161,7 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 	if err != nil {
 		errs = append(errs, fmt.Errorf("documents: %w", err))
 	} else {
-		allRecordings = append(allRecordings, docs...)
+		allRecordings = append(allRecordings, docsResult.Recordings...)
 	}
 
 	// If all fetches failed, return the combined error

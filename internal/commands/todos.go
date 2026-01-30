@@ -362,10 +362,11 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		opts.Page = page
 	}
 
-	todos, err := app.Account().Todos().List(cmd.Context(), projectID, todolistID, opts)
+	todosResult, err := app.Account().Todos().List(cmd.Context(), projectID, todolistID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	todos := todosResult.Todos
 
 	// Build response options
 	respOpts := []output.ResponseOption{
@@ -386,7 +387,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(todos), basecamp.DefaultTodoLimit, all, limit); notice != "" {
+	if notice := output.TruncationNoticeWithTotal(len(todos), todosResult.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 
@@ -421,7 +422,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 	}
 
 	// Get todolists via SDK
-	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -436,12 +437,12 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 
 	// Aggregate todos from all todolists
 	var allTodos []basecamp.Todo
-	for _, tl := range todolists {
-		todos, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, todoOpts)
+	for _, tl := range todolistsResult.Todolists {
+		todosResult, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, todoOpts)
 		if err != nil {
 			continue // Skip failed todolists
 		}
-		allTodos = append(allTodos, todos...)
+		allTodos = append(allTodos, todosResult.Todos...)
 	}
 
 	// Apply filters
@@ -1117,19 +1118,19 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 	}
 
 	// Get todolists via SDK
-	todolists, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
 
 	// Aggregate todos from all todolists
 	var allTodos []basecamp.Todo
-	for _, tl := range todolists {
-		todos, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, nil)
+	for _, tl := range todolistsResult.Todolists {
+		todosResult, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, nil)
 		if err != nil {
 			continue // Skip failed todolists
 		}
-		allTodos = append(allTodos, todos...)
+		allTodos = append(allTodos, todosResult.Todos...)
 	}
 
 	// Apply filters

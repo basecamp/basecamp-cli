@@ -155,21 +155,30 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get folders (subvaults) using SDK
-	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	var folders []basecamp.Vault
+	foldersResult, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		folders = []basecamp.Vault{} // Best-effort
+	} else {
+		folders = foldersResult.Vaults
 	}
 
 	// Get uploads using SDK
-	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	var uploads []basecamp.Upload
+	uploadsResult, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		uploads = []basecamp.Upload{} // Best-effort
+	} else {
+		uploads = uploadsResult.Uploads
 	}
 
 	// Get documents using SDK
-	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	var documents []basecamp.Document
+	documentsResult, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, nil)
 	if err != nil {
 		documents = []basecamp.Document{} // Best-effort
+	} else {
+		documents = documentsResult.Documents
 	}
 
 	// Build result
@@ -330,10 +339,11 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int
 	}
 
 	// Get folders using SDK
-	folders, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, opts)
+	foldersResult, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	folders := foldersResult.Vaults
 
 	return app.OK(folders,
 		output.WithSummary(fmt.Sprintf("%d folders", len(folders))),
@@ -551,10 +561,11 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 	}
 
 	// Get uploads using SDK
-	uploads, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, opts)
+	uploadsResult, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	uploads := uploadsResult.Uploads
 
 	return app.OK(uploads,
 		output.WithSummary(fmt.Sprintf("%d files", len(uploads))),
@@ -683,10 +694,11 @@ func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, a
 	}
 
 	// Get documents using SDK
-	documents, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, opts)
+	documentsResult, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	documents := documentsResult.Documents
 
 	return app.OK(documents,
 		output.WithSummary(fmt.Sprintf("%d documents", len(documents))),

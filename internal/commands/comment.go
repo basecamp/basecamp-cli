@@ -134,10 +134,11 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		opts.Page = page
 	}
 
-	comments, err := app.Account().Comments().List(cmd.Context(), bucketID, recID, opts)
+	commentsResult, err := app.Account().Comments().List(cmd.Context(), bucketID, recID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	comments := commentsResult.Comments
 
 	// Build response options
 	respOpts := []output.ResponseOption{
@@ -157,7 +158,7 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(comments), basecamp.DefaultCommentLimit, all, limit); notice != "" {
+	if notice := output.TruncationNoticeWithTotal(len(comments), commentsResult.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 
