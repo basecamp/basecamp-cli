@@ -29,6 +29,7 @@ type Renderer struct {
 	Hint    lipgloss.Style
 	Warning lipgloss.Style
 	Success lipgloss.Style
+	Subtle  lipgloss.Style // for footer elements (most understated)
 
 	// Table styles
 	Header    lipgloss.Style
@@ -73,6 +74,7 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 		r.Hint = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)).Italic(true)
 		r.Warning = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Warning.Dark))
 		r.Success = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Success.Dark))
+		r.Subtle = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Border.Dark))
 		r.Header = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)).Bold(true)
 		r.Cell = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
 		r.CellMuted = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark))
@@ -85,6 +87,7 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 		r.Hint = lipgloss.NewStyle()
 		r.Warning = lipgloss.NewStyle()
 		r.Success = lipgloss.NewStyle()
+		r.Subtle = lipgloss.NewStyle()
 		r.Header = lipgloss.NewStyle()
 		r.Cell = lipgloss.NewStyle()
 		r.CellMuted = lipgloss.NewStyle()
@@ -135,15 +138,21 @@ func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	data := NormalizeData(resp.Data)
 	r.renderData(&b, data)
 
+	// Footer separator (divider before breadcrumbs/stats)
+	hasFooter := len(resp.Breadcrumbs) > 0 || extractStats(resp.Meta) != nil
+	if hasFooter {
+		b.WriteString("\n")
+		b.WriteString(r.Muted.Render("─────"))
+		b.WriteString("\n")
+	}
+
 	// Breadcrumbs
 	if len(resp.Breadcrumbs) > 0 {
-		b.WriteString("\n")
 		r.renderBreadcrumbs(&b, resp.Breadcrumbs)
 	}
 
 	// Stats (from --stats flag)
 	if stats := extractStats(resp.Meta); stats != nil {
-		b.WriteString("\n")
 		r.renderStats(&b, stats)
 	}
 
@@ -489,12 +498,12 @@ func (r *Renderer) renderList(b *strings.Builder, data []any) {
 }
 
 func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
-	b.WriteString(r.Muted.Render("Next:"))
+	b.WriteString(r.Subtle.Render("Next:"))
 	b.WriteString("\n")
 	for _, bc := range crumbs {
-		cmd := r.Muted.Render("  " + bc.Cmd)
+		cmd := r.Subtle.Render("  " + bc.Cmd)
 		if bc.Description != "" {
-			cmd += r.Muted.Render("  # " + bc.Description)
+			cmd += r.Subtle.Render("  # " + bc.Description)
 		}
 		b.WriteString(cmd + "\n")
 	}
@@ -505,7 +514,7 @@ func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
 	metrics := observability.SessionMetricsFromMap(stats)
 	parts := metrics.FormatParts()
 	if len(parts) > 0 {
-		line := r.Muted.Render("Stats: " + strings.Join(parts, " | "))
+		line := r.Subtle.Render("Stats: " + strings.Join(parts, " | "))
 		b.WriteString(line + "\n")
 	}
 }

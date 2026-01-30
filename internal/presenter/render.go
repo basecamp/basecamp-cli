@@ -16,6 +16,7 @@ type Styles struct {
 	Primary lipgloss.Style
 	Normal  lipgloss.Style
 	Muted   lipgloss.Style
+	Subtle  lipgloss.Style // for footer elements (most understated)
 	Success lipgloss.Style
 	Warning lipgloss.Style
 	Error   lipgloss.Style
@@ -31,6 +32,7 @@ func NewStyles(theme tui.Theme, styled bool) Styles {
 			Primary: lipgloss.NewStyle(),
 			Normal:  lipgloss.NewStyle(),
 			Muted:   lipgloss.NewStyle(),
+			Subtle:  lipgloss.NewStyle(),
 			Success: lipgloss.NewStyle(),
 			Warning: lipgloss.NewStyle(),
 			Error:   lipgloss.NewStyle(),
@@ -44,10 +46,11 @@ func NewStyles(theme tui.Theme, styled bool) Styles {
 		Primary: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Primary.Dark)).Bold(true),
 		Normal:  lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)),
 		Muted:   lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)),
+		Subtle:  lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Border.Dark)),
 		Success: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Success.Dark)),
 		Warning: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Warning.Dark)),
 		Error:   lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Error.Dark)),
-		Heading: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)).Bold(true),
+		Heading: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)).Bold(true),
 		Label:   lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)),
 		Body:    lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)),
 	}
@@ -261,8 +264,11 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 		return
 	}
 
+	// Footer separator
 	b.WriteString("\n")
-	b.WriteString(styles.Muted.Render("Next:"))
+	b.WriteString(styles.Muted.Render("─────"))
+	b.WriteString("\n")
+	b.WriteString(styles.Subtle.Render("Next:"))
 	b.WriteString("\n")
 
 	// Find max command width for alignment
@@ -278,7 +284,7 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 	for i, a := range visible {
 		cmd := renderedCmds[i]
 		line := fmt.Sprintf("  %-*s  %s", maxCmd, cmd, a.Label)
-		b.WriteString(styles.Muted.Render(line))
+		b.WriteString(styles.Subtle.Render(line))
 		b.WriteString("\n")
 	}
 }
