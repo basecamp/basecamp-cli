@@ -479,7 +479,8 @@ func (p *Picker) Run() (*PickerItem, error) {
 		return m.getOriginalItem(m.items[0].ID), nil
 	}
 
-	program := tea.NewProgram(m)
+	// Use alternate screen so picker disappears after selection
+	program := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := program.Run()
 	if err != nil {
@@ -500,7 +501,8 @@ func (p *Picker) runWithLoader() (*PickerItem, error) {
 		m.loading = true
 		m.loadingMsg = "Loading..."
 	}
-	program := tea.NewProgram(m)
+	// Use alternate screen so picker disappears after selection
+	program := tea.NewProgram(m, tea.WithAltScreen())
 
 	// Load items in background
 	go func() {
