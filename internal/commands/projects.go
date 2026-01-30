@@ -114,10 +114,12 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		opts.Page = page
 	}
 
-	projects, err := app.Account().Projects().List(cmd.Context(), opts)
+	result, err := app.Account().Projects().List(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+
+	projects := result.Projects
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.
 	// Only cache when listing all active projects (no filter/pagination), as filtered
@@ -127,9 +129,15 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		updateProjectsCache(projects, app.Config.CacheDir)
 	}
 
+	// Build summary with total count if available
+	summary := fmt.Sprintf("%d projects", len(projects))
+	if result.Meta.TotalCount > 0 && result.Meta.TotalCount != len(projects) {
+		summary = fmt.Sprintf("%d of %d projects", len(projects), result.Meta.TotalCount)
+	}
+
 	respOpts := []output.ResponseOption{
 		output.WithEntity("project"),
-		output.WithSummary(fmt.Sprintf("%d projects", len(projects))),
+		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
@@ -144,8 +152,8 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		),
 	}
 
-	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(projects), 0, all, limit); notice != "" {
+	// Add truncation notice if results were truncated (using API's total count)
+	if notice := output.TruncationNoticeWithTotal(len(projects), result.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 

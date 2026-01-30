@@ -50,11 +50,12 @@ func (r *Resolver) Project(ctx context.Context) (*ResolvedValue, error) {
 	// Capture accountID for the loader closure
 	accountID := r.config.AccountID
 	loader := func() ([]tui.PickerItem, error) {
-		projects, err := r.sdk.ForAccount(accountID).Projects().List(ctx, nil)
+		result, err := r.sdk.ForAccount(accountID).Projects().List(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch projects: %w", err)
 		}
 
+		projects := result.Projects
 		if len(projects) == 0 {
 			return nil, output.ErrNotFoundHint("projects", "", "No projects found in this account")
 		}
