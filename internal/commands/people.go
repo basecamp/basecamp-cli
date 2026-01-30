@@ -227,9 +227,8 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 		opts.Page = page
 	}
 
-	var people []basecamp.Person
+	var peopleResult *basecamp.PeopleListResult
 	var err error
-
 	if projectID != "" {
 		// Resolve project name to ID if needed
 		resolvedID, _, resolveErr := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -240,14 +239,15 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 		if parseErr != nil {
 			return output.ErrUsage("Invalid project ID")
 		}
-		people, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID, opts)
+		peopleResult, err = app.Account().People().ListProjectPeople(cmd.Context(), bucketID, opts)
 	} else {
-		people, err = app.Account().People().List(cmd.Context(), opts)
+		peopleResult, err = app.Account().People().List(cmd.Context(), opts)
 	}
 
 	if err != nil {
 		return convertSDKError(err)
 	}
+	people := peopleResult.People
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.
 	// Only cache account-wide people list without pagination, not project-specific lists.

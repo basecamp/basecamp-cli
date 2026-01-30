@@ -138,10 +138,11 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	}
 
 	// Get messages using SDK
-	messages, err := app.Account().Messages().List(cmd.Context(), bucketID, boardID, opts)
+	messagesResult, err := app.Account().Messages().List(cmd.Context(), bucketID, boardID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	messages := messagesResult.Messages
 
 	// Build response options
 	respOpts := []output.ResponseOption{
@@ -161,7 +162,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(messages), basecamp.DefaultMessageLimit, all, limit); notice != "" {
+	if notice := output.TruncationNoticeWithTotal(len(messages), messagesResult.Meta.TotalCount); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 

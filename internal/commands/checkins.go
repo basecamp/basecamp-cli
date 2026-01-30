@@ -190,10 +190,11 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				opts.Page = page
 			}
 
-			questions, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID, opts)
+			questionsResult, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			questions := questionsResult.Questions
 
 			return app.OK(questions,
 				output.WithSummary(fmt.Sprintf("%d check-in questions", len(questions))),
@@ -639,10 +640,11 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				opts.Page = page
 			}
 
-			answers, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID, opts)
+			answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			answers := answersResult.Answers
 
 			return app.OK(answers,
 				output.WithSummary(fmt.Sprintf("%d answers", len(answers))),
