@@ -97,18 +97,5 @@ jobs:
 
   # NOTE: govulncheck runs in test.yml (pinned to v1.1.4) - not duplicated here
 
-  dependency-review:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    # Requires GitHub Advanced Security - will fail gracefully if not enabled
-    continue-on-error: true
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: high
-          deny-licenses: GPL-3.0, AGPL-3.0
+  # TODO: Restore dependency-review job when repo goes public
+  # Requires GitHub Advanced Security, noisy during private dev
