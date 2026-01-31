@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/urlarg"
 )
 
 // DockTool represents a tool in a project's dock.
@@ -186,4 +187,50 @@ func ensurePersonInProject(cmd *cobra.Command, app *appctx.App, projectID string
 		return "", err
 	}
 	return resolved.Value, nil
+}
+
+// extractID extracts the primary ID from an argument.
+// If the argument is a Basecamp URL (copy/pasted from browser), extracts the recording ID.
+// Otherwise, returns the argument as-is (assumed to be an ID).
+//
+// This allows users to paste URLs directly:
+//
+//	bcq todos show https://3.basecamp.com/123/buckets/456/todos/789
+//
+// Instead of having to manually extract the ID:
+//
+//	bcq todos show 789 --in 456
+func extractID(arg string) string {
+	return urlarg.ExtractID(arg)
+}
+
+// extractProjectID extracts the project (bucket) ID from an argument.
+// If the argument is a Basecamp URL, extracts the bucket ID.
+// Otherwise, returns the argument as-is.
+func extractProjectID(arg string) string {
+	return urlarg.ExtractProjectID(arg)
+}
+
+// extractWithProject extracts both recording ID and project ID from an argument.
+// If the argument is a Basecamp URL, extracts both; if the URL contains a project,
+// it can be used to auto-populate the --in flag.
+// Returns (recordingID, projectID). If projectID is empty, it wasn't in the URL.
+func extractWithProject(arg string) (recordingID, projectID string) {
+	return urlarg.ExtractWithProject(arg)
+}
+
+// extractCommentWithProject extracts a comment ID and project ID from an argument.
+// For URLs with a fragment (#__recording_N), returns the comment ID instead of the recording ID.
+func extractCommentWithProject(arg string) (id, projectID string) {
+	return urlarg.ExtractCommentWithProject(arg)
+}
+
+// extractIDs extracts IDs from multiple arguments, handling URLs.
+func extractIDs(args []string) []string {
+	return urlarg.ExtractIDs(args)
+}
+
+// isURL checks if the input looks like a Basecamp URL.
+func isURL(input string) bool {
+	return urlarg.IsURL(input)
 }

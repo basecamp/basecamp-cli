@@ -358,21 +358,29 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 
 func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "line <id>",
+		Use:     "line <id|url>",
 		Aliases: []string{"show"},
 		Short:   "Show a specific message",
-		Long:    "Show details of a specific message line.",
-		Args:    cobra.ExactArgs(1),
+		Long: `Show details of a specific message line.
+
+You can pass either a line ID or a Basecamp URL:
+  bcq campfire line 789 --in my-project
+  bcq campfire line https://3.basecamp.com/123/buckets/456/chats/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			lineID := args[0]
+			// Extract ID and project from URL if provided
+			lineID, urlProjectID := extractWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -438,20 +446,28 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 
 func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "delete <id>",
+		Use:   "delete <id|url>",
 		Short: "Delete a message",
-		Long:  "Delete a message line from a Campfire.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete a message line from a Campfire.
+
+You can pass either a line ID or a Basecamp URL:
+  bcq campfire delete 789 --in my-project
+  bcq campfire delete https://3.basecamp.com/123/buckets/456/chats/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			lineID := args[0]
+			// Extract ID and project from URL if provided
+			lineID, urlProjectID := extractWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

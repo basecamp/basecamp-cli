@@ -17,7 +17,7 @@ func NewSubscriptionsCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "subscriptions <recording_id>",
+		Use:   "subscriptions <recording_id|url>",
 		Short: "Manage recording subscriptions",
 		Long: `Manage recording subscriptions (who gets notified on changes).
 
@@ -52,10 +52,14 @@ commented on, or otherwise changed.`,
 
 func newSubscriptionsShowCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <recording_id>",
+		Use:   "show <recording_id|url>",
 		Short: "Show current subscribers",
-		Long:  "Display all current subscribers for a recording.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display all current subscribers for a recording.
+
+You can pass either a recording ID or a Basecamp URL:
+  bcq subscriptions show 789 --in my-project
+  bcq subscriptions show https://3.basecamp.com/123/buckets/456/recordings/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsShow(cmd, *project, args[0])
 		},
@@ -69,13 +73,19 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 		return err
 	}
 
+	// Extract ID and project from URL if provided
+	recordingIDStr, urlProjectID := extractWithProject(recordingIDStr)
+
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid recording ID")
 	}
 
-	// Resolve project, with interactive fallback
+	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -128,10 +138,14 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 
 func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "subscribe <recording_id>",
+		Use:   "subscribe <recording_id|url>",
 		Short: "Subscribe yourself to a recording",
-		Long:  "Subscribe yourself to receive notifications for a recording.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Subscribe yourself to receive notifications for a recording.
+
+You can pass either a recording ID or a Basecamp URL:
+  bcq subscriptions subscribe 789 --in my-project
+  bcq subscriptions subscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -139,14 +153,19 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			recordingIDStr := args[0]
+			// Extract ID and project from URL if provided
+			recordingIDStr, urlProjectID := extractWithProject(args[0])
+
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -196,10 +215,14 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 
 func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "unsubscribe <recording_id>",
+		Use:   "unsubscribe <recording_id|url>",
 		Short: "Unsubscribe yourself from a recording",
-		Long:  "Unsubscribe yourself from notifications for a recording.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Unsubscribe yourself from notifications for a recording.
+
+You can pass either a recording ID or a Basecamp URL:
+  bcq subscriptions unsubscribe 789 --in my-project
+  bcq subscriptions unsubscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -207,14 +230,19 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			recordingIDStr := args[0]
+			// Extract ID and project from URL if provided
+			recordingIDStr, urlProjectID := extractWithProject(args[0])
+
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -264,10 +292,14 @@ func newSubscriptionsAddCmd(project *string) *cobra.Command {
 	var peopleIDs string
 
 	cmd := &cobra.Command{
-		Use:   "add <recording_id> [person_ids]",
+		Use:   "add <recording_id|url> [person_ids]",
 		Short: "Add people to subscribers",
-		Long:  "Add people to the subscribers list for a recording.",
-		Args:  cobra.RangeArgs(1, 2),
+		Long: `Add people to the subscribers list for a recording.
+
+You can pass either a recording ID or a Basecamp URL:
+  bcq subscriptions add 789 --people 1,2,3 --in my-project
+  bcq subscriptions add https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsUpdate(cmd, *project, args, peopleIDs, "add")
 		},
@@ -282,10 +314,14 @@ func newSubscriptionsRemoveCmd(project *string) *cobra.Command {
 	var peopleIDs string
 
 	cmd := &cobra.Command{
-		Use:   "remove <recording_id> [person_ids]",
+		Use:   "remove <recording_id|url> [person_ids]",
 		Short: "Remove people from subscribers",
-		Long:  "Remove people from the subscribers list for a recording.",
-		Args:  cobra.RangeArgs(1, 2),
+		Long: `Remove people from the subscribers list for a recording.
+
+You can pass either a recording ID or a Basecamp URL:
+  bcq subscriptions remove 789 --people 1,2,3 --in my-project
+  bcq subscriptions remove https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsUpdate(cmd, *project, args, peopleIDs, "remove")
 		},
@@ -303,7 +339,9 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		return err
 	}
 
-	recordingIDStr := args[0]
+	// Extract ID and project from URL if provided
+	recordingIDStr, urlProjectID := extractWithProject(args[0])
+
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid recording ID")
@@ -318,8 +356,11 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		return output.ErrUsage("Person ID(s) required. Provide comma-separated person IDs")
 	}
 
-	// Resolve project, with interactive fallback
+	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
