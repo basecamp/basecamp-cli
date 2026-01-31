@@ -13,6 +13,7 @@ import (
 	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/dateparse"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/richtext"
 )
 
 // todosListFlags holds the flags for the todos list command.
@@ -155,8 +156,9 @@ func NewTodoCmd() *cobra.Command {
 			}
 
 			// Build SDK request
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateTodoRequest{
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 			if due != "" {
 				// Parse natural language date
@@ -682,8 +684,9 @@ func newTodosCreateCmd() *cobra.Command {
 			}
 
 			// Build SDK request
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateTodoRequest{
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 			if due != "" {
 				// Parse natural language date

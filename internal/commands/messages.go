@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/richtext"
 )
 
 // NewMessagesCmd creates the messages command group.
@@ -304,9 +305,10 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 			}
 
 			// Build SDK request
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateMessageRequest{
 				Subject: subject,
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 
 			// Default to active (published) status unless --draft is specified
@@ -409,9 +411,10 @@ You can pass either a message ID or a Basecamp URL:
 			}
 
 			// Build SDK request
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.UpdateMessageRequest{
 				Subject: subject,
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 
 			message, err := app.Account().Messages().Update(cmd.Context(), bucketID, messageID, req)
@@ -661,9 +664,10 @@ func NewMessageCmd() *cobra.Command {
 			}
 
 			// Build SDK request
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateMessageRequest{
 				Subject: subject,
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 			if draft {
 				req.Status = "drafted"
