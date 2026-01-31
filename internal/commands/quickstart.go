@@ -51,7 +51,13 @@ func NewQuickStartCmd() *cobra.Command {
 }
 
 // RunQuickStartDefault is called when bcq is run with no args.
+// If this is a first run (unauthenticated, interactive TTY, no BASECAMP_TOKEN),
+// it runs the setup wizard. Otherwise, it falls through to the quick-start output.
 func RunQuickStartDefault(cmd *cobra.Command, args []string) error {
+	app := appctx.FromContext(cmd.Context())
+	if app != nil && isFirstRun(app) {
+		return runWizard(cmd, app)
+	}
 	return runQuickStart(cmd, args)
 }
 

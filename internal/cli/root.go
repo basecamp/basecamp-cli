@@ -168,6 +168,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewTimelineCmd())
 	cmd.AddCommand(commands.NewReportsCmd())
 	cmd.AddCommand(commands.NewCompletionCmd())
+	cmd.AddCommand(commands.NewSetupCmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
