@@ -16,7 +16,7 @@ bcq/
 │   ├── hostutil/     # Host utilities
 │   ├── models/       # Data models
 │   ├── names/        # Name resolution
-│   ├── observability/# Tracing and metrics
+│   ├── observability/ # Tracing and metrics
 │   ├── output/       # Output formatting
 │   ├── presenter/    # Output presentation
 │   ├── resilience/   # Retry and backoff

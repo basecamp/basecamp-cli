@@ -154,9 +154,9 @@ Copy the appropriate template from `templates/` or point your agent at:
 ```bash
 make build            # Build binary
 make test             # Run Go tests
-make test-bats        # Run integration tests
+make test-e2e         # Run e2e tests
 make lint             # Run linter
-make check            # All checks (fmt, vet, test)
+make check            # All checks (fmt-check, vet, lint, test, test-e2e)
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
