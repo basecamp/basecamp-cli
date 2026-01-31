@@ -2,6 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -51,6 +54,7 @@ Each project has one root vault in its dock.`,
 		newDocsCmd(&project, &vaultID),
 		newFilesShowCmd(&project),
 		newFilesUpdateCmd(&project),
+		newFilesDownloadCmd(&project),
 	)
 
 	return cmd
@@ -1164,6 +1168,145 @@ You can pass either an item ID or a Basecamp URL:
 	cmd.Flags().StringVar(&itemType, "type", "", "Item type (vault, document, upload)")
 
 	return cmd
+}
+
+func newFilesDownloadCmd(project *string) *cobra.Command {
+	var outDir string
+
+	cmd := &cobra.Command{
+		Use:   "download <upload-id|url>",
+		Short: "Download an uploaded file",
+		Long: `Download an uploaded file to the local filesystem.
+
+You can pass either an upload ID or a Basecamp URL:
+  bcq files download 789 --in my-project
+  bcq files download https://3.basecamp.com/123/buckets/456/uploads/789
+  bcq files download 789 --out ./downloads --in my-project`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Extract ID and project from URL if provided
+			uploadIDStr, urlProjectID := extractWithProject(args[0])
+
+			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid upload ID")
+			}
+
+			// Resolve project - use URL > flag > config, with interactive fallback
+			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID == "" {
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
+			}
+
+			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Download the file
+			result, err := app.Account().Uploads().Download(cmd.Context(), bucketID, uploadID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+			defer result.Body.Close()
+
+			// Determine output directory
+			outputDir := outDir
+			if outputDir == "" {
+				outputDir = "."
+			}
+
+			// Create output file path
+			filename := result.Filename
+			if filename == "" {
+				filename = fmt.Sprintf("upload-%d", uploadID)
+			}
+			outputPath := fmt.Sprintf("%s/%s", outputDir, filename)
+
+			// Create output file
+			outFile, err := createFile(outputPath)
+			if err != nil {
+				return fmt.Errorf("failed to create output file: %w", err)
+			}
+			defer outFile.Close()
+
+			// Copy content to file
+			bytesWritten, err := copyFileContent(outFile, result.Body)
+			if err != nil {
+				return fmt.Errorf("failed to write file: %w", err)
+			}
+
+			// Build result for output
+			downloadResult := struct {
+				UploadID  int64  `json:"upload_id"`
+				Filename  string `json:"filename"`
+				Path      string `json:"path"`
+				ByteSize  int64  `json:"byte_size"`
+				ProjectID string `json:"project_id"`
+			}{
+				UploadID:  uploadID,
+				Filename:  filename,
+				Path:      outputPath,
+				ByteSize:  bytesWritten,
+				ProjectID: resolvedProjectID,
+			}
+
+			return app.OK(downloadResult,
+				output.WithSummary(fmt.Sprintf("Downloaded %s (%d bytes)", filename, bytesWritten)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("bcq files show %d --in %s", uploadID, resolvedProjectID),
+						Description: "View upload details",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVarP(&outDir, "out", "o", "", "Output directory (default: current directory)")
+
+	return cmd
+}
+
+// createFile creates a file for writing, creating parent directories if needed.
+func createFile(path string) (*os.File, error) {
+	// Create parent directories if they don't exist
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			return nil, err
+		}
+	}
+	return os.Create(path)
+}
+
+// copyFileContent copies from reader to writer and returns bytes written.
+func copyFileContent(dst *os.File, src io.Reader) (int64, error) {
+	return io.Copy(dst, src)
 }
 
 // getVaultID retrieves the root vault ID from a project's dock, handling multi-dock projects.
