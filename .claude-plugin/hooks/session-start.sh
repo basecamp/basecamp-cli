@@ -16,7 +16,7 @@ else
     cat << 'EOF'
 <hook-output>
 Basecamp plugin: bcq CLI not found.
-Install: https://github.com/basecamp/bcq#installation
+Install: https://github.com/basecamp/basecamp-cli#installation
 </hook-output>
 EOF
     exit 0

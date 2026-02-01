@@ -4,7 +4,7 @@
 
 ```bash
 # Clone
-git clone https://github.com/basecamp/bcq
+git clone https://github.com/basecamp/basecamp-cli
 cd bcq
 
 # Install dev tools (golangci-lint, govulncheck, etc.)

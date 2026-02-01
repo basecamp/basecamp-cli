@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/basecamp/bcq"
+REPO_URL="https://github.com/basecamp/basecamp-cli"
 DEFAULT_DIR="${BCQ_DIR:-$HOME/.local/share/bcq}"
 
 info() { echo "==> $1"; }
@@ -107,7 +107,7 @@ print_usage_instructions() {
   echo "   $install_dir/skills/<skill-name>/SKILL.md"
   echo ""
   echo "2. Ensure bcq CLI is installed and authenticated:"
-  echo "   curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash"
+  echo "   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash"
   echo "   bcq auth login"
   echo ""
   echo "3. To update skills:"

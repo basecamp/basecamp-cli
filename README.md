@@ -1,11 +1,11 @@
-# Basecamp CLI
+# Basecamp CLI - bcq
 
-[![CI](https://github.com/basecamp/bcq/actions/workflows/test.yml/badge.svg)](https://github.com/basecamp/bcq/actions/workflows/test.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/basecamp/bcq)](https://goreportcard.com/report/github.com/basecamp/bcq)
-[![Release](https://img.shields.io/github/v/release/basecamp/bcq)](https://github.com/basecamp/bcq/releases)
+[![CI](https://github.com/basecamp/basecamp-cli/actions/workflows/test.yml/badge.svg)](https://github.com/basecamp/basecamp-cli/actions/workflows/test.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/basecamp/basecamp-cli)](https://goreportcard.com/report/github.com/basecamp/basecamp-cli)
+[![Release](https://img.shields.io/github/v/release/basecamp/basecamp-cli)](https://github.com/basecamp/basecamp-cli/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
-**The official command-line interface for Basecamp.** Manage projects, todos, messages, and more from your terminal or through AI agents.
+`bcq` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
 - JSON output with breadcrumbs for easy navigation
@@ -31,7 +31,7 @@ scoop install bcq
 
 **Go install:**
 ```bash
-go install github.com/basecamp/bcq/cmd/bcq@latest
+go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
 ```
 
 **Shell script:**

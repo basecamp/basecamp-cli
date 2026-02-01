@@ -10,7 +10,7 @@
 set -euo pipefail
 
 MIN_VERSION="${BCQ_MIN_VERSION:-0.1.0}"
-INSTALL_URL="https://github.com/basecamp/bcq"
+INSTALL_URL="https://github.com/basecamp/basecamp-cli"
 BIN_DIR="${BCQ_BIN_DIR:-$HOME/.local/bin}"
 
 # Parse semver: returns 0 if $1 >= $2
@@ -69,7 +69,7 @@ install_bcq() {
   platform=$(detect_platform) || return 1
 
   # Get latest version
-  version=$(curl -fsSL "https://api.github.com/repos/basecamp/bcq/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+  version=$(curl -fsSL "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
   if [[ -z "$version" ]]; then
     echo "Could not determine latest version" >&2
     return 1
@@ -83,7 +83,7 @@ install_bcq() {
   fi
 
   archive_name="bcq_${version}_${platform}.${ext}"
-  url="https://github.com/basecamp/bcq/releases/download/v${version}/${archive_name}"
+  url="https://github.com/basecamp/basecamp-cli/releases/download/v${version}/${archive_name}"
 
   echo "Downloading bcq v${version} for ${platform}..."
 
