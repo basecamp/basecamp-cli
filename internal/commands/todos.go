@@ -496,7 +496,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq todos create --content <text> --in %s", project),
+				Cmd:         fmt.Sprintf("bcq todos create --content <text> --in %s --list <list>", project),
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
