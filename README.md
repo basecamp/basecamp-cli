@@ -1,26 +1,29 @@
-# bcq
+# Basecamp CLI
 
 [![CI](https://github.com/basecamp/bcq/actions/workflows/test.yml/badge.svg)](https://github.com/basecamp/bcq/actions/workflows/test.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/basecamp/bcq)](https://goreportcard.com/report/github.com/basecamp/bcq)
 [![Release](https://img.shields.io/github/v/release/basecamp/bcq)](https://github.com/basecamp/bcq/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
-**Basecamp automation for agents, skills, MCPs, and plugins.**
+**The official command-line interface for Basecamp.** Manage projects, todos, messages, and more from your terminal or through AI agents.
 
-- Stable command grammar for agent workflows
-- JSON envelope with breadcrumbs for navigation
-- Pagination, backoff, and auth handled automatically
+- Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
+- JSON output with breadcrumbs for easy navigation
+- OAuth authentication with automatic token refresh
 
 ## Quick Start
 
-### 1. Install bcq CLI
-
-**Homebrew (macOS/Linux):**
 ```bash
 brew install basecamp/tap/bcq
+bcq auth login
 ```
 
-**Scoop (Windows):**
+That's it. You now have full access to Basecamp from your terminal.
+
+<details>
+<summary>Other installation methods</summary>
+
+**Windows (Scoop):**
 ```bash
 scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
 scoop install bcq
@@ -35,164 +38,104 @@ go install github.com/basecamp/bcq/cmd/bcq@latest
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
 ```
+</details>
 
-Then authenticate:
-```bash
-bcq auth login
-```
-
-### 2. Install Skills
+## Usage
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
-```
-
-Skills install to `$BCQ_DIR` (default: `~/.local/share/bcq`).
-
-### 3. Connect Your Agent
-
-Skills work with any agent that can execute shell commands. Platform-specific setup below.
-
----
-
-## Platform Setup
-
-### Claude Code
-
-```bash
-claude plugin marketplace add basecamp/bcq
-claude plugin install basecamp
-```
-
-This adds `/basecamp` slash command, hooks, and agents. Skills are bundled.
-
-### Codex (OpenAI)
-
-```bash
-./scripts/install-codex.sh
-```
-
-Or manually:
-1. Link skills: `ln -s ~/.local/share/bcq/skills ~/.codex/skills/bcq`
-2. Reference in `~/.codex/AGENTS.md`:
-   ```markdown
-   @~/.codex/skills/bcq/basecamp/SKILL.md
-   ```
-
-### OpenCode
-
-```bash
-./scripts/install-opencode.sh
-```
-
-Or manually:
-1. Link skills: `ln -s ~/.local/share/bcq/skills ~/.config/opencode/skill/bcq`
-2. Copy agent: `cp templates/opencode/basecamp.md ~/.config/opencode/agent/`
-
-### Gemini
-
-Copy the template and customize:
-```bash
-cp templates/gemini/GEMINI.md ~/GEMINI.md
-```
-
-The template includes skill references and common bcq commands.
-
-### GitHub Copilot
-
-Copy the template to your repo:
-```bash
-cp templates/copilot/copilot-instructions.md .github/
-```
-
-The template includes skill references and code-to-Basecamp linking patterns.
-
-### Any Other Agent
-
-Skills are plain Markdown with bash commands. Point your agent at:
-- `~/.local/share/bcq/skills/basecamp/SKILL.md` - Workflow commands
-- `~/.local/share/bcq/skills/basecamp-api-reference/SKILL.md` - API reference
-
----
-
-## Skills
-
-| Skill | Purpose |
-|-------|---------|
-| `basecamp` | Todos, projects, team coordination |
-| `basecamp-api-reference` | API endpoint lookup |
-
-Skills use standard `Bash` tool calls — compatible with any agent.
-
-## Update Skills
-
-```bash
-cd ~/.local/share/bcq && git pull
-```
-
----
-
-## Human CLI Usage
-
-The CLI is what agents use. Humans can use it directly too.
-
-```bash
-bcq                              # Orient: context, recent activity
 bcq projects                     # List projects
-bcq todos                        # Your assigned todos
 bcq todos --project 12345        # Todos in a project
-bcq todo "Fix the bug" --project 12345  # Create todo
+bcq todo --content "Fix bug" --in 12345  # Create todo
 bcq done 67890                   # Complete todo
 bcq search "authentication"      # Search across projects
+bcq cards --in 12345             # List cards (Kanban)
+bcq campfire post "Hello" --in 12345  # Post to chat
 ```
 
-### Output Modes
+### Output Formats
 
 ```bash
-bcq projects              # Markdown when TTY, JSON when piped
-bcq projects --json       # Force JSON envelope
+bcq projects              # Styled output in terminal, JSON when piped
+bcq projects --json       # JSON with envelope and breadcrumbs
 bcq projects --quiet      # Raw JSON data only
-bcq projects --stats      # Show session stats (styled/Markdown + JSON meta)
-bcq projects -v           # Trace SDK operations
-bcq projects -vv          # Trace operations + HTTP requests
 ```
 
-Notes:
-- `--stats` adds `meta.stats` to JSON output and renders a one-line summary in styled/Markdown output.
-- Stats are not shown in machine modes (`--quiet`, `--agent`, `--ids-only`, `--count`).
-
 ### JSON Envelope
+
+Every command supports `--json` for structured output:
 
 ```json
 {
   "ok": true,
   "data": [...],
   "summary": "5 projects",
-  "breadcrumbs": [{"action": "show", "cmd": "bcq show project <id>"}],
-  "context": {...}
+  "breadcrumbs": [{"action": "show", "cmd": "bcq show project <id>"}]
 }
 ```
 
+Breadcrumbs suggest next commands, making it easy for humans and agents to navigate.
+
 ## Authentication
 
-OAuth 2.1 with Dynamic Client Registration. First login opens browser.
+OAuth 2.1 with automatic token refresh. First login opens your browser:
 
 ```bash
 bcq auth login              # Full read/write access
 bcq auth login --scope read # Read-only access
-bcq auth login --no-browser # Headless mode
-bcq auth token              # Print token for use with other tools
+bcq auth token              # Print token for scripts
 ```
 
-Export the token for use with curl or other tools:
+## AI Agent Integration
+
+bcq works with any AI agent that can run shell commands. Install skills for enhanced workflows:
 
 ```bash
-export BASECAMP_TOKEN=$(bcq auth token)
-
-# Different environments (--host is a global flag)
-bcq --host localhost:3000 auth login
-export LOCAL_TOKEN=$(bcq --host localhost:3000 auth token)
+curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
 ```
+
+Skills install to `~/.local/share/bcq/skills/`.
+
+### Platform Setup
+
+<details>
+<summary><strong>Claude Code</strong></summary>
+
+```bash
+claude plugin marketplace add basecamp/bcq
+claude plugin install basecamp
+```
+
+Adds `/basecamp` slash command, hooks, and agents with skills bundled.
+</details>
+
+<details>
+<summary><strong>Codex (OpenAI)</strong></summary>
+
+```bash
+./scripts/install-codex.sh
+```
+
+Or manually link skills and reference in `~/.codex/AGENTS.md`:
+```markdown
+@~/.codex/skills/bcq/basecamp/SKILL.md
+```
+</details>
+
+<details>
+<summary><strong>OpenCode</strong></summary>
+
+```bash
+./scripts/install-opencode.sh
+```
+</details>
+
+<details>
+<summary><strong>Gemini / Copilot / Other</strong></summary>
+
+Copy the appropriate template from `templates/` or point your agent at:
+- `~/.local/share/bcq/skills/basecamp/SKILL.md`
+- `~/.local/share/bcq/skills/basecamp-api-reference/SKILL.md`
+</details>
 
 ## Configuration
 
@@ -206,23 +149,14 @@ export LOCAL_TOKEN=$(bcq --host localhost:3000 auth token)
 └── config.json        # Per-repo overrides
 ```
 
-## Install Paths
-
-| Component | Default Location | Override |
-|-----------|------------------|----------|
-| Repository | `~/.local/share/bcq` | `BCQ_DIR` |
-| Binary | `~/.local/bin/bcq` | `BCQ_BIN_DIR` |
-
-Skills are at `~/.local/share/bcq/skills/`. Update with `cd ~/.local/share/bcq && git pull`.
-
 ## Development
 
 ```bash
 make build            # Build binary
 make test             # Run Go tests
-make test-bats        # Run integration tests
+make test-e2e         # Run e2e tests
 make lint             # Run linter
-make check            # All checks (fmt, vet, test)
+make check            # All checks (fmt-check, vet, lint, test, test-e2e)
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.

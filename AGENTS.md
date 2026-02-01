@@ -6,18 +6,25 @@
 bcq/
 ├── cmd/bcq/          # Main entrypoint
 ├── internal/
-│   ├── api/          # Basecamp API client
 │   ├── appctx/       # Application context
 │   ├── auth/         # OAuth authentication
 │   ├── cli/          # CLI framework
 │   ├── commands/     # Command implementations
+│   ├── completion/   # Shell completion
 │   ├── config/       # Configuration management
 │   ├── dateparse/    # Date parsing
+│   ├── hostutil/     # Host utilities
+│   ├── models/       # Data models
 │   ├── names/        # Name resolution
+│   ├── observability/ # Tracing and metrics
 │   ├── output/       # Output formatting
+│   ├── presenter/    # Output presentation
+│   ├── resilience/   # Retry and backoff
+│   ├── sdk/          # Basecamp SDK wrapper
 │   ├── tui/          # Terminal UI
 │   └── version/      # Version info
-├── test/             # BATS integration tests
+├── e2e/              # BATS integration tests
+├── skills/           # Agent skills
 └── .claude-plugin/   # Claude Code integration
 ```
 
@@ -39,11 +46,11 @@ Key endpoints used by bcq:
 ```bash
 make build            # Build binary to ./bin/bcq
 make test             # Run Go unit tests
-make test-bats        # Run BATS integration tests
-make check            # All checks (fmt-check, vet, test)
+make test-e2e         # Run BATS end-to-end tests
+make check            # All checks (fmt-check, vet, lint, test, test-e2e)
 ```
 
-Requirements: Go 1.25+, [bats-core](https://github.com/bats-core/bats-core) for integration tests.
+Requirements: Go 1.25.6+, [bats-core](https://github.com/bats-core/bats-core) for e2e tests.
 
 ## OAuth Development
 
@@ -56,18 +63,13 @@ OAuth endpoints are discovered via `.well-known/oauth-authorization-server`.
 
 ## Benchmarks
 
-**Credentials:** Before running benchmarks, source the env file:
+**Go benchmarks:**
 ```bash
-source benchmarks/.env   # Loads ANTHROPIC_API_KEY, OPENAI_API_KEY from 1Password
+make bench            # Run all benchmarks
+make bench-cpu        # Run with CPU profiling
+make bench-mem        # Run with memory profiling
+make bench-save       # Save baseline for comparison
+make bench-compare    # Compare against baseline
 ```
 
-**Run benchmarks:**
-```bash
-./benchmarks/reset.sh                                          # Reset fixtures
-./benchmarks/harness/run.sh --strategy <name> --task 12 --model claude-sonnet
-./benchmarks/harness/matrix.sh                                 # Full matrix run
-./benchmarks/harness/triage.sh --update benchmarks/results/    # Classify results
-./benchmarks/harness/report.sh benchmarks/results/             # Generate report
-```
-
-**Strategies:** See `benchmarks/strategies.json` for available strategies (bcq-full, bcq-minimal, api-docs-with-agent-invariants, etc.)
+**Skills benchmarking:** See `skills-benchmarking/` for agent task evaluation harness.
