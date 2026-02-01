@@ -92,7 +92,7 @@ The --date flag accepts natural language dates:
 				return convertSDKError(err)
 			}
 
-			return app.OK(map[string]any{"title": name, "date": parsedDate},
+			return app.OK(map[string]any{"title": name, "starts_on": parsedDate, "ends_on": parsedDate},
 				output.WithSummary(fmt.Sprintf("Created lineup marker: %s on %s", name, parsedDate)),
 			)
 		},
@@ -148,12 +148,21 @@ func newLineupUpdateCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
+			result := map[string]any{"id": markerID, "updated": true}
+			if req.Title != "" {
+				result["title"] = req.Title
+			}
+			if req.StartsOn != "" {
+				result["starts_on"] = req.StartsOn
+				result["ends_on"] = req.EndsOn
+			}
+
 			summary := fmt.Sprintf("Updated lineup marker #%d", markerID)
 			if name != "" {
 				summary = fmt.Sprintf("Updated lineup marker #%d: %s", markerID, name)
 			}
 
-			return app.OK(map[string]any{"id": markerID, "updated": true},
+			return app.OK(result,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
