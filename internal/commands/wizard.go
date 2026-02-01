@@ -279,7 +279,7 @@ func showSuccess(styles *tui.Styles, result WizardResult) {
 	examples := []struct{ cmd, desc string }{
 		{"bcq projects", "List your projects"},
 		{"bcq todos", "List to-dos"},
-		{"bcq todo \"Buy milk\"", "Create a to-do"},
+		{"bcq todo -c \"Buy milk\"", "Create a to-do"},
 		{"bcq search \"quarterly\"", "Search across Basecamp"},
 	}
 	for _, ex := range examples {
