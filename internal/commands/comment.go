@@ -12,6 +12,7 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/richtext"
 )
 
 // NewCommentsCmd creates the comments command group (list/show/update).
@@ -309,8 +310,9 @@ You can pass either a comment ID or a Basecamp URL:
 				return output.ErrUsage("Invalid comment ID")
 			}
 
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.UpdateCommentRequest{
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 
 			comment, err := app.Account().Comments().Update(cmd.Context(), bucketID, commentID, req)
@@ -418,8 +420,9 @@ Supports batch commenting on multiple recordings at once.`,
 			}
 
 			// Create comments on all recordings
+			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateCommentRequest{
-				Content: content,
+				Content: richtext.MarkdownToHTML(content),
 			}
 
 			var commented []string
