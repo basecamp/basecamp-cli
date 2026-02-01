@@ -1,4 +1,4 @@
-# <img src=".github/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI – bcq
+# <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI – bcq
 
 `bcq` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
