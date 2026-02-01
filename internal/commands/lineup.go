@@ -88,25 +88,12 @@ The --date flag accepts natural language dates:
 				EndsOn:   parsedDate,
 			}
 
-			marker, err := app.Account().Lineup().CreateMarker(cmd.Context(), req)
-			if err != nil {
+			if err := app.Account().Lineup().CreateMarker(cmd.Context(), req); err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(marker,
-				output.WithSummary(fmt.Sprintf("Created lineup marker #%d: %s on %s", marker.ID, name, parsedDate)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq lineup update %d --name \"...\" --date \"...\"", marker.ID),
-						Description: "Update marker",
-					},
-					output.Breadcrumb{
-						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq lineup delete %d", marker.ID),
-						Description: "Delete marker",
-					},
-				),
+			return app.OK(map[string]any{"title": name, "date": parsedDate},
+				output.WithSummary(fmt.Sprintf("Created lineup marker: %s on %s", name, parsedDate)),
 			)
 		},
 	}
@@ -157,17 +144,21 @@ func newLineupUpdateCmd() *cobra.Command {
 				req.EndsOn = parsedDate
 			}
 
-			marker, err := app.Account().Lineup().UpdateMarker(cmd.Context(), markerID, req)
-			if err != nil {
+			if err := app.Account().Lineup().UpdateMarker(cmd.Context(), markerID, req); err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(marker,
-				output.WithSummary(fmt.Sprintf("Updated lineup marker #%d: %s", marker.ID, marker.Title)),
+			summary := fmt.Sprintf("Updated lineup marker #%d", markerID)
+			if name != "" {
+				summary = fmt.Sprintf("Updated lineup marker #%d: %s", markerID, name)
+			}
+
+			return app.OK(map[string]any{"id": markerID, "updated": true},
+				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq lineup delete %d", marker.ID),
+						Cmd:         fmt.Sprintf("bcq lineup delete %d", markerID),
 						Description: "Delete marker",
 					},
 				),
