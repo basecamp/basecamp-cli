@@ -32,7 +32,7 @@ scoop install bcq
 
 ### Option C: Go install
 ```bash
-go install github.com/basecamp/bcq/cmd/bcq@latest
+go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
 ```
 
 ### Option D: Shell script

@@ -20,7 +20,7 @@ check_prereqs() {
   fi
 
   if ! command -v bcq &>/dev/null; then
-    error "bcq CLI not found. Run: curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash"
+    error "bcq CLI not found. Run: curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash"
   fi
 }
 
@@ -28,7 +28,7 @@ install_plugin() {
   info "Installing bcq plugin for Claude Code..."
 
   # Add from marketplace
-  if ! claude plugin marketplace add basecamp/bcq 2>/dev/null; then
+  if ! claude plugin marketplace add basecamp/basecamp-cli 2>/dev/null; then
     info "Plugin may already be in marketplace, continuing..."
   fi
 

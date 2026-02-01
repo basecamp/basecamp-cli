@@ -2,7 +2,7 @@
 # install.sh - Install bcq CLI
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 #
 # Options (via environment):
 #   BCQ_BIN_DIR       Where to install binary (default: ~/.local/bin)
@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO="basecamp/bcq"
+REPO="basecamp/basecamp-cli"
 BIN_DIR="${BCQ_BIN_DIR:-$HOME/.local/bin}"
 VERSION="${BCQ_VERSION:-}"
 

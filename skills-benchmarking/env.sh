@@ -148,7 +148,7 @@ _get_api_base() {
 export BCQ_API_BASE="$(_get_api_base)/${BCQ_ACCOUNT_ID}"
 
 # User-Agent for raw API calls
-export BCQ_USER_AGENT="bcq-benchmark/1.0 (https://github.com/basecamp/bcq)"
+export BCQ_USER_AGENT="bcq-benchmark/1.0 (https://github.com/basecamp/basecamp-cli)"
 
 # Today's date for overdue comparisons (YYYY-MM-DD format)
 export TODAY
