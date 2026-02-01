@@ -6,15 +6,28 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/glamour"
 )
 
+// Precompiled regexes for performance
+var (
+	ulPattern = regexp.MustCompile(`^(\s*)[-*+]\s+(.*)$`)
+	olPattern = regexp.MustCompile(`^(\s*)\d+\.\s+(.*)$`)
+)
+
 // MarkdownToHTML converts Markdown text to HTML suitable for Basecamp's rich text fields.
 // It handles common Markdown syntax: headings, bold, italic, links, lists, code blocks, and blockquotes.
+// If the input already appears to be HTML, it is returned unchanged to preserve existing formatting.
 func MarkdownToHTML(md string) string {
 	if md == "" {
 		return ""
+	}
+
+	// If input is already HTML, return unchanged to preserve existing content
+	if IsHTML(md) {
+		return md
 	}
 
 	// Normalize line endings
@@ -53,7 +66,9 @@ func MarkdownToHTML(md string) string {
 				code := strings.Join(codeLines, "\n")
 				code = escapeHTML(code)
 				if codeBlockLang != "" {
-					result.WriteString("<pre><code class=\"language-" + codeBlockLang + "\">" + code + "</code></pre>\n")
+					// Sanitize language to prevent attribute injection
+					safeLang := sanitizeLanguage(codeBlockLang)
+					result.WriteString("<pre><code class=\"language-" + safeLang + "\">" + code + "</code></pre>\n")
 				} else {
 					result.WriteString("<pre><code>" + code + "</code></pre>\n")
 				}
@@ -74,9 +89,9 @@ func MarkdownToHTML(md string) string {
 			continue
 		}
 
-		// Check for list items
-		ulMatch := regexp.MustCompile(`^(\s*)[-*+]\s+(.*)$`).FindStringSubmatch(line)
-		olMatch := regexp.MustCompile(`^(\s*)\d+\.\s+(.*)$`).FindStringSubmatch(line)
+		// Check for list items (using precompiled regexes)
+		ulMatch := ulPattern.FindStringSubmatch(line)
+		olMatch := olPattern.FindStringSubmatch(line)
 
 		if ulMatch != nil {
 			if !inList || listType != "ul" {
@@ -164,12 +179,23 @@ func MarkdownToHTML(md string) string {
 }
 
 // convertInline converts inline Markdown elements (bold, italic, links, code) to HTML.
+// Code spans are protected from further processing to preserve their literal content.
 func convertInline(text string) string {
-	// Escape HTML entities first (but preserve our conversions)
+	// Escape HTML entities first
 	text = escapeHTML(text)
 
-	// Code (backticks) - must be done before other inline elements
-	text = regexp.MustCompile("`([^`]+)`").ReplaceAllString(text, "<code>$1</code>")
+	// Extract code spans and replace with placeholders to protect them
+	var codeSpans []string
+	codePattern := regexp.MustCompile("`([^`]+)`")
+	text = codePattern.ReplaceAllStringFunc(text, func(match string) string {
+		inner := codePattern.FindStringSubmatch(match)
+		if len(inner) >= 2 {
+			idx := len(codeSpans)
+			codeSpans = append(codeSpans, inner[1])
+			return "\x00CODE" + strconv.Itoa(idx) + "\x00"
+		}
+		return match
+	})
 
 	// Bold with ** or __
 	text = regexp.MustCompile(`\*\*([^*]+)\*\*`).ReplaceAllString(text, "<strong>$1</strong>")
@@ -178,7 +204,6 @@ func convertInline(text string) string {
 	// Italic with * or _ (but not inside words for _)
 	text = regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllString(text, "<em>$1</em>")
 	text = regexp.MustCompile(`(?:^|[^a-zA-Z0-9])_([^_]+)_(?:[^a-zA-Z0-9]|$)`).ReplaceAllStringFunc(text, func(s string) string {
-		// Extract the content and convert
 		inner := regexp.MustCompile(`_([^_]+)_`).FindStringSubmatch(s)
 		if len(inner) >= 2 {
 			prefix := ""
@@ -194,14 +219,38 @@ func convertInline(text string) string {
 		return s
 	})
 
-	// Links [text](url)
-	text = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`).ReplaceAllString(text, `<a href="$2">$1</a>`)
+	// Images ![alt](url) - MUST come before links since image syntax contains link syntax
+	text = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`).ReplaceAllStringFunc(text, func(match string) string {
+		re := regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+		parts := re.FindStringSubmatch(match)
+		if len(parts) >= 3 {
+			alt := escapeAttr(parts[1])
+			src := escapeAttr(parts[2])
+			return `<img src="` + src + `" alt="` + alt + `">`
+		}
+		return match
+	})
 
-	// Images ![alt](url)
-	text = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`).ReplaceAllString(text, `<img src="$2" alt="$1">`)
+	// Links [text](url)
+	text = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`).ReplaceAllStringFunc(text, func(match string) string {
+		re := regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+		parts := re.FindStringSubmatch(match)
+		if len(parts) >= 3 {
+			linkText := parts[1]
+			href := escapeAttr(parts[2])
+			return `<a href="` + href + `">` + linkText + `</a>`
+		}
+		return match
+	})
 
 	// Strikethrough ~~text~~
 	text = regexp.MustCompile(`~~([^~]+)~~`).ReplaceAllString(text, "<del>$1</del>")
+
+	// Restore code spans
+	for i, code := range codeSpans {
+		placeholder := "\x00CODE" + strconv.Itoa(i) + "\x00"
+		text = strings.Replace(text, placeholder, "<code>"+code+"</code>", 1)
+	}
 
 	return text
 }
@@ -212,6 +261,26 @@ func escapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
+}
+
+// escapeAttr escapes characters for use in HTML attributes, including quotes.
+func escapeAttr(s string) string {
+	s = escapeHTML(s)
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#39;")
+	return s
+}
+
+// sanitizeLanguage sanitizes a code block language identifier to prevent attribute injection.
+// Only allows alphanumeric characters, hyphens, and underscores.
+func sanitizeLanguage(lang string) string {
+	var result strings.Builder
+	for _, r := range lang {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }
 
 // allChars returns true if the string consists entirely of the given character.
@@ -302,14 +371,14 @@ func HTMLToMarkdown(html string) string {
 		return s
 	})
 
-	// Code blocks
-	html = regexp.MustCompile(`(?i)<pre[^>]*><code[^>]*(?:class="language-([^"]*)")?[^>]*>(.*?)</code></pre>`).ReplaceAllStringFunc(html, func(s string) string {
+	// Code blocks (use (?is) for case-insensitive and dotall mode to match multi-line content)
+	html = regexp.MustCompile(`(?is)<pre[^>]*><code[^>]*(?:class="language-([^"]*)")?[^>]*>(.*?)</code></pre>`).ReplaceAllStringFunc(html, func(s string) string {
 		langMatch := regexp.MustCompile(`class="language-([^"]*)"`).FindStringSubmatch(s)
 		lang := ""
 		if len(langMatch) >= 2 {
 			lang = langMatch[1]
 		}
-		codeMatch := regexp.MustCompile(`(?i)<code[^>]*>(.*?)</code>`).FindStringSubmatch(s)
+		codeMatch := regexp.MustCompile(`(?is)<code[^>]*>([\s\S]*?)</code>`).FindStringSubmatch(s)
 		if len(codeMatch) >= 2 {
 			code := unescapeHTML(codeMatch[1])
 			return "```" + lang + "\n" + code + "\n```\n\n"
@@ -436,11 +505,15 @@ func IsMarkdown(s string) bool {
 }
 
 // IsHTML attempts to detect if the input string contains HTML.
+// Only returns true for well-formed HTML with common content tags.
+// Does not detect arbitrary tags like <script> to prevent XSS passthrough.
 func IsHTML(s string) bool {
 	if s == "" {
 		return false
 	}
 
-	// Check for common HTML tags
-	return regexp.MustCompile(`<[a-zA-Z][^>]*>`).MatchString(s)
+	// Check for common safe HTML content tags (opening and closing)
+	// This list intentionally excludes script, style, and other potentially dangerous tags
+	safeTagPattern := regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img)\b[^>]*>`)
+	return safeTagPattern.MatchString(s)
 }

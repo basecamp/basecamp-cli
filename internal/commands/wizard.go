@@ -19,7 +19,7 @@ import (
 // WizardResult holds the outcome of the first-run wizard.
 type WizardResult struct {
 	Version     string `json:"version"`
-	Status      string `json:"status"` // "complete" or "partial"
+	Status      string `json:"status"` // "complete"
 	AccountID   string `json:"account_id,omitempty"`
 	AccountName string `json:"account_name,omitempty"`
 	ProjectID   string `json:"project_id,omitempty"`
@@ -43,6 +43,10 @@ func NewSetupCmd() *cobra.Command {
 // runWizard runs the interactive first-run setup wizard.
 // It walks the user through authentication, account selection, and project selection.
 func runWizard(cmd *cobra.Command, app *appctx.App) error {
+	if app == nil {
+		return fmt.Errorf("app not initialized")
+	}
+
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme())
 
 	// Step 1: Welcome
@@ -111,10 +115,10 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 	fmt.Println(styles.Heading.Render("  Step 1: Authentication"))
 	fmt.Println()
 
-	// Let user choose scope
+	// Let user choose scope (map to OAuth scopes: "read" or "write")
 	scope, err := tui.Select("  What access level do you need?", []tui.SelectOption{
 		{Value: "read", Label: "Read-only (recommended for browsing)"},
-		{Value: "full", Label: "Full access (read + write)"},
+		{Value: "write", Label: "Full access (read + write)"},
 	})
 	if err != nil {
 		return fmt.Errorf("scope selection canceled: %w", err)

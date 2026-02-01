@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -1198,10 +1199,10 @@ You can pass either an upload ID or a Basecamp URL:
 				return output.ErrUsage("Invalid upload ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
+			// Resolve project - URL > flag > config, with interactive fallback
+			projectID := urlProjectID
+			if projectID == "" {
+				projectID = *project
 			}
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -1239,12 +1240,21 @@ You can pass either an upload ID or a Basecamp URL:
 				outputDir = "."
 			}
 
-			// Create output file path
+			// Create output file path with sanitized filename to prevent path traversal
 			filename := result.Filename
 			if filename == "" {
 				filename = fmt.Sprintf("upload-%d", uploadID)
 			}
-			outputPath := fmt.Sprintf("%s/%s", outputDir, filename)
+			// Sanitize filename: use only the base name to prevent path traversal
+			filename = filepath.Base(filename)
+			outputPath := filepath.Join(outputDir, filename)
+
+			// Verify the resolved path is within outputDir to prevent traversal attacks
+			absOutputDir, _ := filepath.Abs(outputDir)
+			absOutputPath, _ := filepath.Abs(outputPath)
+			if !strings.HasPrefix(absOutputPath, absOutputDir+string(filepath.Separator)) && absOutputPath != absOutputDir {
+				return output.ErrUsage("Invalid filename: path traversal detected")
+			}
 
 			// Create output file
 			outFile, err := createFile(outputPath)
