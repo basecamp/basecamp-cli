@@ -1,4 +1,4 @@
-# <img src="assets/basecamp-logo.png" height="28" alt="Basecamp"> Basecamp CLI – bcq
+# <img src="assets/basecamp-logo.png" height="28" alt="Basecamp">&nbsp;&nbsp;Basecamp CLI – bcq
 
 [![CI](https://github.com/basecamp/basecamp-cli/actions/workflows/test.yml/badge.svg)](https://github.com/basecamp/basecamp-cli/actions/workflows/test.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/basecamp/basecamp-cli)](https://goreportcard.com/report/github.com/basecamp/basecamp-cli)
