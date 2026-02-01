@@ -111,6 +111,7 @@ bcq <cmd> --page 1     # First page only, no auto-pagination
 | My todos | `bcq todos --assignee me --json` |
 | Overdue todos | `bcq todos --overdue --in <project> --json` |
 | Create todo | `bcq todo --content "Task" --in <project> --list <list> --json` |
+| Create todolist | `bcq todolists create --name "Name" --in <project> --json` |
 | Complete todo | `bcq done <id> --json` |
 | List cards | `bcq cards --in <project> --json` |
 | Create card | `bcq card --title "Title" --in <project> --json` |
@@ -252,6 +253,18 @@ bcq todos sweep --overdue --complete --comment "Done" --in <project>
 ```
 
 **Flags:** `--assignee`, `--status` (completed/pending), `--overdue`, `--list`, `--due`, `--limit`, `--all`
+
+### Todolists
+
+Todolists are containers for todos. Create a todolist before adding todos.
+
+```bash
+bcq todolists --in <project> --json                          # List todolists
+bcq todolists show <id> --in <project>                       # Show details
+bcq todolists create --name "Name" --in <project> --json     # Create
+bcq todolists create --name "Name" --description "Desc" --in <project>
+bcq todolists update <id> --name "New" --in <project>        # Update
+```
 
 ### Cards (Kanban)
 
