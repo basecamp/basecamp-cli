@@ -8,6 +8,7 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/urlarg"
 )
 
 // NewShowCmd creates the show command for viewing any recording.
@@ -16,18 +17,22 @@ func NewShowCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "show [type] <id>",
+		Use:   "show [type] <id|url>",
 		Short: "Show any recording by ID",
-		Long: `Show details of any Basecamp recording by ID.
+		Long: `Show details of any Basecamp recording by ID or URL.
 
 Types: todo, todolist, message, comment, card, card-table, document
 
-If no type specified, uses generic recording lookup.`,
+If no type specified, uses generic recording lookup.
+
+You can also pass a Basecamp URL directly:
+  bcq show https://3.basecamp.com/123/buckets/456/todos/789
+  bcq show todo 789 --in my-project`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Parse positional args: [type] <id>
+			// Parse positional args: [type] <id|url>
 			var id string
 			if len(args) == 1 {
 				id = args[0]
@@ -37,6 +42,18 @@ If no type specified, uses generic recording lookup.`,
 					recordType = args[0]
 				}
 				id = args[1]
+			}
+
+			// Check if the id is a URL and extract components
+			if parsed := urlarg.Parse(id); parsed != nil {
+				id = parsed.RecordingID
+				if project == "" && parsed.ProjectID != "" {
+					project = parsed.ProjectID
+				}
+				// Auto-detect type from URL if not specified
+				if recordType == "" && parsed.Type != "" {
+					recordType = parsed.Type
+				}
 			}
 
 			// Validate type early (before account check) for better error messages

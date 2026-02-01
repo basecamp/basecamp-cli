@@ -821,10 +821,14 @@ func newFilesShowCmd(project *string) *cobra.Command {
 	var itemType string
 
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show item details",
-		Long:  "Show details for a vault, document, or upload.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show details for a vault, document, or upload.
+
+You can pass either an item ID or a Basecamp URL:
+  bcq files show 789 --in my-project
+  bcq files show https://3.basecamp.com/123/buckets/456/documents/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -832,14 +836,19 @@ func newFilesShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			itemIDStr := args[0]
+			// Extract ID and project from URL if provided
+			itemIDStr, urlProjectID := extractWithProject(args[0])
+
 			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid item ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -986,9 +995,14 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 	var itemType string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a document, vault, or upload",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update a document, vault, or upload.
+
+You can pass either an item ID or a Basecamp URL:
+  bcq files update 789 --title "new title" --in my-project
+  bcq files update https://3.basecamp.com/123/buckets/456/documents/789 --title "new title"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -996,7 +1010,9 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			itemIDStr := args[0]
+			// Extract ID and project from URL if provided
+			itemIDStr, urlProjectID := extractWithProject(args[0])
+
 			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid item ID")
@@ -1006,8 +1022,11 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --title or --content is required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

@@ -176,10 +176,14 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 
 func newForwardsShowCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show a forward",
-		Long:  "Display detailed information about an email forward.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about an email forward.
+
+You can pass either a forward ID or a Basecamp URL:
+  bcq forwards show 789 --in my-project
+  bcq forwards show https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -187,14 +191,19 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			forwardIDStr := args[0]
+			// Extract ID and project from URL if provided
+			forwardIDStr, urlProjectID := extractWithProject(args[0])
+
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid forward ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -325,10 +334,14 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "replies <forward_id>",
+		Use:   "replies <forward_id|url>",
 		Short: "List replies to a forward",
-		Long:  "List all replies to an email forward.",
-		Args:  cobra.ExactArgs(1),
+		Long: `List all replies to an email forward.
+
+You can pass either a forward ID or a Basecamp URL:
+  bcq forwards replies 789 --in my-project
+  bcq forwards replies https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -347,14 +360,19 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			forwardIDStr := args[0]
+			// Extract ID and project from URL if provided
+			forwardIDStr, urlProjectID := extractWithProject(args[0])
+
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid forward ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -432,10 +450,14 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 
 func newForwardsReplyCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "reply <forward_id> <reply_id>",
+		Use:   "reply <forward_id|url> <reply_id|url>",
 		Short: "Show a specific reply",
-		Long:  "Display detailed information about a reply to an email forward.",
-		Args:  cobra.ExactArgs(2),
+		Long: `Display detailed information about a reply to an email forward.
+
+You can pass either IDs or Basecamp URLs:
+  bcq forwards reply 789 456 --in my-project
+  bcq forwards reply https://3.basecamp.com/123/buckets/456/inbox_forwards/789 456`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -443,20 +465,25 @@ func newForwardsReplyCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			forwardIDStr := args[0]
+			// Extract IDs and project from URLs if provided
+			forwardIDStr, urlProjectID := extractWithProject(args[0])
+			replyIDStr := extractID(args[1])
+
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid forward ID")
 			}
 
-			replyIDStr := args[1]
 			replyID, err := strconv.ParseInt(replyIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid reply ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

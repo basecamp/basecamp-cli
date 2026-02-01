@@ -176,10 +176,14 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 
 func newTodolistsShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show todolist details",
-		Long:  "Display detailed information about a todolist.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a todolist.
+
+You can pass either a todolist ID or a Basecamp URL:
+  bcq todolists show 789 --in my-project
+  bcq todolists show https://3.basecamp.com/123/buckets/456/todolists/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -190,10 +194,14 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			todolistIDStr := args[0]
+			// Extract ID and project from URL if provided
+			todolistIDStr, urlProjectID := extractWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -350,10 +358,14 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 	var description string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a todolist",
-		Long:  "Update an existing todolist's name or description.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing todolist's name or description.
+
+You can pass either a todolist ID or a Basecamp URL:
+  bcq todolists update 789 --name "new name" --in my-project
+  bcq todolists update https://3.basecamp.com/123/buckets/456/todolists/789 --name "new name"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -364,14 +376,18 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			todolistIDStr := args[0]
+			// Extract ID and project from URL if provided
+			todolistIDStr, urlProjectID := extractWithProject(args[0])
 
 			if name == "" && description == "" {
 				return output.ErrUsage("at least one of --name or --description is required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

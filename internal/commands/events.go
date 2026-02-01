@@ -20,9 +20,13 @@ func NewEventsCmd() *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "events <recording_id>",
+		Use:   "events <recording_id|url>",
 		Short: "View recording event history",
 		Long: `View the event history (audit trail) for any recording.
+
+You can pass either a recording ID or a Basecamp URL:
+  bcq events 789 --in my-project
+  bcq events https://3.basecamp.com/123/buckets/456/todos/789
 
 Events track all changes to a recording. Common event actions:
 - created - Recording was created
@@ -50,14 +54,19 @@ Events track all changes to a recording. Common event actions:
 				return err
 			}
 
-			recordingIDStr := args[0]
+			// Extract ID and project from URL if provided
+			recordingIDStr, urlProjectID := extractWithProject(args[0])
+
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid recording ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

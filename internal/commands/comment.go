@@ -89,12 +89,19 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		return output.ErrUsage("Recording ID required")
 	}
 
+	// Extract recording ID and project from URL if --on is a URL
+	var urlProjectID string
+	recordingID, urlProjectID = extractWithProject(recordingID)
+
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project, with interactive fallback
+	// Resolve project - URL > flag > config, with interactive fallback
 	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -167,20 +174,29 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 
 func newCommentsShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show comment details",
-		Long:  "Display detailed information about a comment.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a comment.
+
+You can pass either a comment ID or a Basecamp URL:
+  bcq comments show 789 --in my-project
+  bcq comments show https://3.basecamp.com/123/buckets/456/todos/111#__recording_789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			commentIDStr := args[0]
+			// Extract comment ID and project from URL if provided
+			// Uses extractCommentWithProject to prefer CommentID from URL fragments
+			commentIDStr, urlProjectID := extractCommentWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -238,24 +254,33 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 	var content string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a comment",
-		Long:  "Update an existing comment's content.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing comment's content.
+
+You can pass either a comment ID or a Basecamp URL:
+  bcq comments update 789 --content "new text" --in my-project
+  bcq comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 --content "new text"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			commentIDStr := args[0]
+			// Extract comment ID and project from URL if provided
+			// Uses extractCommentWithProject to prefer CommentID from URL fragments
+			commentIDStr, urlProjectID := extractCommentWithProject(args[0])
 
 			if content == "" {
 				return output.ErrUsage("--content is required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -336,8 +361,18 @@ Supports batch commenting on multiple recordings at once.`,
 				return err
 			}
 
-			// Resolve project - check local flag, app flag, config, then interactive
+			// Extract URLs from --on flags before project resolution
+			var urlProjectID string
+			if len(recordingIDs) > 0 {
+				// Check first recording for URL project
+				_, urlProjectID = extractWithProject(recordingIDs[0])
+			}
+
+			// Resolve project - URL > flag > config, with interactive fallback
 			projectID := project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -370,14 +405,14 @@ Supports batch commenting on multiple recordings at once.`,
 				recordingIDs = []string{fmt.Sprintf("%d", target.RecordingID)}
 			}
 
-			// Expand comma-separated IDs
+			// Expand comma-separated IDs and extract from URLs
 			var expandedIDs []string
 			for _, id := range recordingIDs {
 				parts := strings.Split(id, ",")
 				for _, p := range parts {
 					p = strings.TrimSpace(p)
 					if p != "" {
-						expandedIDs = append(expandedIDs, p)
+						expandedIDs = append(expandedIDs, extractID(p))
 					}
 				}
 			}
