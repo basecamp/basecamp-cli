@@ -92,8 +92,21 @@ The --date flag accepts natural language dates:
 				return convertSDKError(err)
 			}
 
-			return app.OK(map[string]any{"title": name, "starts_on": parsedDate, "ends_on": parsedDate},
+			result := map[string]any{
+				"title":     name,
+				"starts_on": parsedDate,
+				"ends_on":   parsedDate,
+			}
+
+			return app.OK(result,
 				output.WithSummary(fmt.Sprintf("Created lineup marker: %s on %s", name, parsedDate)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "list",
+						Cmd:         "bcq lineup",
+						Description: "View all markers",
+					},
+				),
 			)
 		},
 	}

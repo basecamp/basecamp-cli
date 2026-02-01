@@ -204,13 +204,6 @@ func extractID(arg string) string {
 	return urlarg.ExtractID(arg)
 }
 
-// extractProjectID extracts the project (bucket) ID from an argument.
-// If the argument is a Basecamp URL, extracts the bucket ID.
-// Otherwise, returns the argument as-is.
-func extractProjectID(arg string) string {
-	return urlarg.ExtractProjectID(arg)
-}
-
 // extractWithProject extracts both recording ID and project ID from an argument.
 // If the argument is a Basecamp URL, extracts both; if the URL contains a project,
 // it can be used to auto-populate the --in flag.
@@ -228,9 +221,4 @@ func extractCommentWithProject(arg string) (id, projectID string) {
 // extractIDs extracts IDs from multiple arguments, handling URLs.
 func extractIDs(args []string) []string {
 	return urlarg.ExtractIDs(args)
-}
-
-// isURL checks if the input looks like a Basecamp URL.
-func isURL(input string) bool {
-	return urlarg.IsURL(input)
 }
