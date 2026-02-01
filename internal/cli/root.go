@@ -23,13 +23,14 @@ func NewRootCmd() *cobra.Command {
 	var flags appctx.GlobalFlags
 
 	cmd := &cobra.Command{
-		Use:           "bcq",
-		Short:         "Command-line interface for Basecamp",
-		Long:          "bcq is a CLI tool for interacting with Basecamp projects, todos, messages, and more.",
-		Version:       version.Version,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		RunE:          commands.RunQuickStartDefault, // Run quick-start when no args
+		Use:                        "bcq",
+		Short:                      "Command-line interface for Basecamp",
+		Long:                       "bcq is a CLI tool for interacting with Basecamp projects, todos, messages, and more.",
+		Version:                    version.Version,
+		SilenceUsage:               true,
+		SilenceErrors:              true,
+		SuggestionsMinimumDistance: 2,                             // Enable typo suggestions
+		RunE:                       commands.RunQuickStartDefault, // Run quick-start when no args
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip setup for help and version commands
 			if cmd.Name() == "help" || cmd.Name() == "version" {
