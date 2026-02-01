@@ -1702,3 +1702,92 @@ func TestTruncationNoticeWithTotal(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// wrapText Tests
+// =============================================================================
+
+func TestWrapText(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		maxWidth int
+		expected string
+	}{
+		{
+			name:     "empty string",
+			text:     "",
+			maxWidth: 40,
+			expected: "",
+		},
+		{
+			name:     "single word under width",
+			text:     "hello",
+			maxWidth: 40,
+			expected: "hello",
+		},
+		{
+			name:     "multiple words fitting on one line",
+			text:     "hello world",
+			maxWidth: 40,
+			expected: "hello world",
+		},
+		{
+			name:     "words that need wrapping",
+			text:     "the quick brown fox jumps over the lazy dog",
+			maxWidth: 20,
+			expected: "the quick brown fox\njumps over the lazy\ndog",
+		},
+		{
+			name:     "preserves existing newlines",
+			text:     "line one\nline two\nline three",
+			maxWidth: 40,
+			expected: "line one\nline two\nline three",
+		},
+		{
+			name:     "handles long words",
+			text:     "short verylongwordthatexceedswidth short",
+			maxWidth: 10,
+			expected: "short\nverylongwordthatexceedswidth\nshort",
+		},
+		{
+			name:     "unicode characters",
+			text:     "hello 世界 emoji 🎉 test",
+			maxWidth: 15,
+			expected: "hello 世界 emoji\n🎉 test",
+		},
+		{
+			name:     "zero width defaults to 80",
+			text:     "hello world",
+			maxWidth: 0,
+			expected: "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := wrapText(tt.text, tt.maxWidth)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestWriterStyledErrorWithHint(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	err := ErrNotFoundHint("Project", "my-project", "Use 'bcq projects' to list available projects")
+	writeErr := w.Err(err)
+	require.NoError(t, writeErr, "Err() failed")
+
+	output := buf.String()
+	// Should contain the error message
+	assert.Contains(t, output, "Project not found")
+	// Should contain the hint
+	assert.Contains(t, output, "bcq projects")
+	// Should have ANSI codes (styled output)
+	assert.Contains(t, output, "\x1b[", "Expected ANSI escape codes in styled output")
+}

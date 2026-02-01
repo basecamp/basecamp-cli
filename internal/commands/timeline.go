@@ -232,6 +232,10 @@ func (m watchModel) Init() tea.Cmd {
 }
 
 func (m watchModel) fetchEvents() tea.Msg {
+	// Check if context is already canceled before making API call
+	if err := m.ctx.Err(); err != nil {
+		return watchEventsMsg{events: nil, err: err}
+	}
 	events, err := m.fetchFn(m.ctx)
 	return watchEventsMsg{events: events, err: err}
 }
@@ -330,6 +334,8 @@ func formatEvent(e basecamp.TimelineEvent) string {
 	var timeStr string
 	if !e.CreatedAt.IsZero() {
 		timeStr = e.CreatedAt.Local().Format("15:04")
+	} else {
+		timeStr = "--:--"
 	}
 
 	creatorName := "Someone"
@@ -346,8 +352,9 @@ func formatEvent(e basecamp.TimelineEvent) string {
 	if title == "" {
 		title = e.SummaryExcerpt
 	}
-	if len(title) > 40 {
-		title = title[:37] + "..."
+	// Truncate at rune boundary for proper Unicode handling
+	if len([]rune(title)) > 40 {
+		title = string([]rune(title)[:37]) + "..."
 	}
 
 	return fmt.Sprintf("%s %s %s %s",
@@ -386,12 +393,17 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
-	// Handle signals
+	// Handle signals - stop notification when done and exit cleanly
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 	go func() {
-		<-sigChan
-		cancel()
+		select {
+		case <-sigChan:
+			cancel()
+		case <-ctx.Done():
+			// Context canceled elsewhere; exit goroutine
+		}
 	}()
 
 	// Determine fetch function and description based on flags
@@ -404,7 +416,10 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if userID == "" {
 			return output.ErrAuth("User ID not available")
 		}
-		personID, _ := strconv.ParseInt(userID, 10, 64)
+		personID, err := strconv.ParseInt(userID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid user ID")
+		}
 		description = "your activity"
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			result, err := app.Account().Timeline().PersonProgress(ctx, personID)
@@ -419,7 +434,10 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if err != nil {
 			return err
 		}
-		personID, _ := strconv.ParseInt(resolvedPersonID, 10, 64)
+		personID, err := strconv.ParseInt(resolvedPersonID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid person ID")
+		}
 		description = fmt.Sprintf("activity for %s", personName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			result, err := app.Account().Timeline().PersonProgress(ctx, personID)
@@ -434,7 +452,10 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if err != nil {
 			return err
 		}
-		projectID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+		projectID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid project ID")
+		}
 		description = fmt.Sprintf("activity in %s", projectName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			return app.Account().Timeline().ProjectTimeline(ctx, projectID)

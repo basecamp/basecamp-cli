@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -169,8 +170,8 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 		errorIcon := "✗"
 		errorTitle := errorIcon + " Error"
 
-		// Wrap error message to fit in box (accounting for padding)
-		maxWidth := r.width - 6 // border (2) + padding (4)
+		// Wrap error message to fit in box (accounting for border and padding)
+		maxWidth := r.width - 4 // border (2) + padding (2)
 		if maxWidth < 40 {
 			maxWidth = 40
 		}
@@ -221,42 +222,74 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 	return err
 }
 
-// wrapText wraps text to fit within maxWidth, preserving words.
+// wrapText wraps text to fit within maxWidth, preserving words and newlines.
+// Uses rune counting for proper Unicode support.
 func wrapText(text string, maxWidth int) string {
 	if maxWidth <= 0 {
 		maxWidth = 80
 	}
 
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return text
-	}
+	// Split on existing newlines first to preserve structure
+	paragraphs := strings.Split(text, "\n")
+	var result []string
 
-	var lines []string
-	var currentLine strings.Builder
-
-	for _, word := range words {
-		wordLen := len(word)
-
-		// If adding this word would exceed width, start new line
-		if currentLine.Len()+1+wordLen > maxWidth && currentLine.Len() > 0 {
-			lines = append(lines, currentLine.String())
-			currentLine.Reset()
+	for _, para := range paragraphs {
+		if para == "" {
+			result = append(result, "")
+			continue
 		}
 
-		// Add word to current line
+		words := strings.Fields(para)
+		if len(words) == 0 {
+			result = append(result, "")
+			continue
+		}
+
+		var currentLine strings.Builder
+		currentWidth := 0
+
+		for _, word := range words {
+			wordWidth := runeWidth(word)
+
+			// Handle words longer than maxWidth by adding them on their own line
+			if wordWidth > maxWidth {
+				if currentLine.Len() > 0 {
+					result = append(result, currentLine.String())
+					currentLine.Reset()
+					currentWidth = 0
+				}
+				result = append(result, word)
+				continue
+			}
+
+			// If adding this word would exceed width, start new line
+			if currentWidth+1+wordWidth > maxWidth && currentLine.Len() > 0 {
+				result = append(result, currentLine.String())
+				currentLine.Reset()
+				currentWidth = 0
+			}
+
+			// Add word to current line
+			if currentLine.Len() > 0 {
+				currentLine.WriteString(" ")
+				currentWidth++
+			}
+			currentLine.WriteString(word)
+			currentWidth += wordWidth
+		}
+
+		// Don't forget the last line
 		if currentLine.Len() > 0 {
-			currentLine.WriteString(" ")
+			result = append(result, currentLine.String())
 		}
-		currentLine.WriteString(word)
 	}
 
-	// Don't forget the last line
-	if currentLine.Len() > 0 {
-		lines = append(lines, currentLine.String())
-	}
+	return strings.Join(result, "\n")
+}
 
-	return strings.Join(lines, "\n")
+// runeWidth returns the display width of a string, counting runes.
+func runeWidth(s string) int {
+	return utf8.RuneCountInString(s)
 }
 
 func (r *Renderer) renderData(b *strings.Builder, data any) {

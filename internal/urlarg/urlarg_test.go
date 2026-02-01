@@ -199,6 +199,7 @@ func TestExtractWithProject(t *testing.T) {
 		wantProjectID   string
 	}{
 		{"https://3.basecamp.com/123/buckets/456/todos/789", "789", "456"},
+		{"https://3.basecamp.com/123/projects/456", "", "456"}, // project URL returns empty recordingID
 		{"789", "789", ""},
 	}
 
