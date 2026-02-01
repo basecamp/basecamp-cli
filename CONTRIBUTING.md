@@ -15,10 +15,10 @@ make build
 
 # Run tests
 make test        # Go unit tests
-make test-bats   # Integration tests (requires bats-core)
+make test-e2e    # End-to-end tests (requires bats-core)
 
 # Run all checks
-make check       # fmt-check, vet, test
+make check       # fmt-check, vet, lint, test, test-e2e
 ```
 
 ## SDK Development
@@ -68,12 +68,12 @@ The `go.work` file is gitignored - your local setup won't affect the repo.
 bcq/
 ├── cmd/bcq/          # Main entrypoint
 ├── internal/
-│   ├── api/          # Basecamp API client
 │   ├── auth/         # OAuth authentication
 │   ├── commands/     # CLI command implementations
 │   ├── config/       # Configuration management
-│   └── output/       # Output formatting (JSON, tables)
-└── test/             # BATS integration tests
+│   ├── output/       # Output formatting
+│   └── sdk/          # Basecamp SDK wrapper
+└── e2e/              # BATS end-to-end tests
 ```
 
 ## Testing
@@ -84,19 +84,19 @@ bcq/
 make test
 ```
 
-### Integration Tests (BATS)
+### End-to-End Tests (BATS)
 
 Requires [bats-core](https://github.com/bats-core/bats-core):
 
 ```bash
 brew install bats-core  # macOS
-make test-bats
+make test-e2e
 ```
 
 ### Running Against Go Binary
 
 ```bash
-BCQ_BIN=./bin/bcq bats test/
+BCQ_BIN=./bin/bcq bats e2e/
 ```
 
 ## Questions?
