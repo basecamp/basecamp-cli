@@ -3,8 +3,11 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -304,3 +307,105 @@ func TestTodosHasAssigneeFlag(t *testing.T) {
 // Note: Invalid assignee format testing requires API mocking because
 // assignee validation happens after authentication checks.
 // This is tested in the Bash integration tests (test/errors.bats).
+
+// mockTodoCreateTransport handles resolver API calls and captures the create request.
+type mockTodoCreateTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockTodoCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	// Handle resolver calls with mock responses
+	if req.Method == "GET" {
+		var body string
+		if strings.Contains(req.URL.Path, "/projects.json") {
+			// Projects list - return array
+			body = `[{"id": 123, "name": "Test Project"}]`
+		} else if strings.Contains(req.URL.Path, "/projects/") {
+			// Single project lookup - return project with todoset in dock
+			body = `{"id": 123, "dock": [{"name": "todoset", "id": 789}]}`
+		} else if strings.Contains(req.URL.Path, "/todolists.json") {
+			// Todolists lookup - return list containing our todolist
+			body = `[{"id": 456, "name": "Test List"}]`
+		} else {
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	// Capture POST request body (the create call)
+	if req.Method == "POST" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		// Return a mock todo response
+		mockResp := `{"id": 999, "title": "Test", "status": "active"}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+// TestTodosCreateContentIsPlainText verifies that todo content is sent as plain text,
+// not wrapped in HTML tags. The Basecamp API expects plain text for the todo "content"
+// field (which is the todo title), not HTML.
+func TestTodosCreateContentIsPlainText(t *testing.T) {
+	t.Setenv("BCQ_NO_KEYRING", "1")
+
+	transport := &mockTodoCreateTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID:  "99999",
+		ProjectID:  "123",
+		TodolistID: "456",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewTodosCmd()
+	plainTextContent := "Fix the authentication bug"
+
+	err := executeTodosCommand(cmd, app, "create", "--content", plainTextContent)
+	require.NoError(t, err, "command should succeed with mock transport")
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var requestBody map[string]interface{}
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err, "expected valid JSON in request body")
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok, "expected 'content' field in request body")
+
+	// The content should be exactly what was passed in - plain text, no HTML wrapping
+	assert.Equal(t, plainTextContent, content,
+		"Todo content should be plain text, not HTML-wrapped")
+}
