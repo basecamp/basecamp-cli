@@ -160,20 +160,103 @@ func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	return err
 }
 
-// RenderError renders an error response to the writer.
+// RenderError renders an error response to the writer with a styled error box.
 func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 	var b strings.Builder
 
-	b.WriteString(r.Error.Render("Error: " + resp.Error))
-	b.WriteString("\n")
+	if r.styled {
+		// Create a styled error box with border
+		errorIcon := "✗"
+		errorTitle := errorIcon + " Error"
 
-	if resp.Hint != "" {
-		b.WriteString(r.Hint.Render("Hint: " + resp.Hint))
+		// Wrap error message to fit in box (accounting for padding)
+		maxWidth := r.width - 6 // border (2) + padding (4)
+		if maxWidth < 40 {
+			maxWidth = 40
+		}
+
+		errorMsg := wrapText(resp.Error, maxWidth)
+
+		// Build content lines
+		var contentLines []string
+		contentLines = append(contentLines, r.Error.Bold(true).Render(errorTitle))
+		contentLines = append(contentLines, "")
+		for _, line := range strings.Split(errorMsg, "\n") {
+			contentLines = append(contentLines, r.Data.Render(line))
+		}
+
+		if resp.Hint != "" {
+			contentLines = append(contentLines, "")
+			hintMsg := wrapText(resp.Hint, maxWidth)
+			for i, line := range strings.Split(hintMsg, "\n") {
+				if i == 0 {
+					contentLines = append(contentLines, r.Hint.Render("→ "+line))
+				} else {
+					contentLines = append(contentLines, r.Hint.Render("  "+line))
+				}
+			}
+		}
+
+		// Create bordered box with error color border
+		boxStyle := lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(r.Error.GetForeground()).
+			Padding(0, 1)
+
+		content := strings.Join(contentLines, "\n")
+		b.WriteString(boxStyle.Render(content))
 		b.WriteString("\n")
+	} else {
+		// Plain text output (no styling)
+		b.WriteString("Error: " + resp.Error)
+		b.WriteString("\n")
+
+		if resp.Hint != "" {
+			b.WriteString("Hint: " + resp.Hint)
+			b.WriteString("\n")
+		}
 	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// wrapText wraps text to fit within maxWidth, preserving words.
+func wrapText(text string, maxWidth int) string {
+	if maxWidth <= 0 {
+		maxWidth = 80
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return text
+	}
+
+	var lines []string
+	var currentLine strings.Builder
+
+	for _, word := range words {
+		wordLen := len(word)
+
+		// If adding this word would exceed width, start new line
+		if currentLine.Len()+1+wordLen > maxWidth && currentLine.Len() > 0 {
+			lines = append(lines, currentLine.String())
+			currentLine.Reset()
+		}
+
+		// Add word to current line
+		if currentLine.Len() > 0 {
+			currentLine.WriteString(" ")
+		}
+		currentLine.WriteString(word)
+	}
+
+	// Don't forget the last line
+	if currentLine.Len() > 0 {
+		lines = append(lines, currentLine.String())
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (r *Renderer) renderData(b *strings.Builder, data any) {
