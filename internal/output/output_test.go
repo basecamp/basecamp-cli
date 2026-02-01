@@ -824,8 +824,10 @@ func TestWriterStyledEmitsANSI(t *testing.T) {
 	output := buf.String()
 	// SHOULD contain ANSI escape codes when FormatStyled is used
 	assert.Contains(t, output, "\x1b[")
-	// Should still contain the error message
-	assert.Contains(t, output, "Error:")
+	// Should still contain the error message (in styled box format)
+	assert.Contains(t, output, "Error")
+	// Should contain the actual error message
+	assert.Contains(t, output, "project not found: 123")
 }
 
 func TestWriterMarkdownOutputsLiteralMarkdown(t *testing.T) {
