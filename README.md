@@ -1,9 +1,4 @@
-# <img src="assets/basecamp-logo.png" height="28" alt="Basecamp">&nbsp;&nbsp;Basecamp CLI – bcq
-
-[![CI](https://github.com/basecamp/basecamp-cli/actions/workflows/test.yml/badge.svg)](https://github.com/basecamp/basecamp-cli/actions/workflows/test.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/basecamp/basecamp-cli)](https://goreportcard.com/report/github.com/basecamp/basecamp-cli)
-[![Release](https://img.shields.io/github/v/release/basecamp/basecamp-cli)](https://github.com/basecamp/basecamp-cli/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+# <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI – bcq
 
 `bcq` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
