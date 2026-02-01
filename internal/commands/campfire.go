@@ -365,9 +365,9 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 		Short:   "Show a specific message",
 		Long: `Show details of a specific message line.
 
-You can pass either a line ID or a Basecamp URL:
+You can pass either a line ID or a Basecamp line URL:
   bcq campfire line 789 --in my-project
-  bcq campfire line https://3.basecamp.com/123/buckets/456/chats/789`,
+  bcq campfire line https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -452,9 +452,9 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 		Short: "Delete a message",
 		Long: `Delete a message line from a Campfire.
 
-You can pass either a line ID or a Basecamp URL:
+You can pass either a line ID or a Basecamp line URL:
   bcq campfire delete 789 --in my-project
-  bcq campfire delete https://3.basecamp.com/123/buckets/456/chats/789`,
+  bcq campfire delete https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
