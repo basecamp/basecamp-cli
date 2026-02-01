@@ -8,7 +8,6 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/richtext"
 )
 
 // NewCampfireCmd creates the campfire command for real-time chat.
@@ -333,8 +332,8 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
 
 	// Post message using SDK
-	// Convert Markdown content to HTML for Basecamp's rich text fields
-	line, err := app.Account().Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, richtext.MarkdownToHTML(content))
+	// Campfire content is plain text - do not wrap in HTML
+	line, err := app.Account().Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content)
 	if err != nil {
 		return err
 	}
