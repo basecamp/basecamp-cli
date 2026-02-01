@@ -2,13 +2,13 @@ package commands
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/urlarg"
 )
 
 // ParsedURL represents components extracted from a Basecamp URL.
@@ -76,96 +76,26 @@ Supported URL patterns:
 
 func runURLParse(app *appctx.App, url string) error {
 	// Validate it's a Basecamp URL
-	if !strings.Contains(url, "basecamp.com") {
+	if !urlarg.IsURL(url) {
 		return output.ErrUsageHint(
 			fmt.Sprintf("Not a Basecamp URL: %s", url),
 			"Expected URL like: https://3.basecamp.com/...",
 		)
 	}
 
-	// Extract fragment if present
-	var fragment string
-	urlPath := url
-	if idx := strings.Index(url, "#"); idx != -1 {
-		fragment = url[idx+1:]
-		urlPath = url[:idx]
-	}
-
-	// Remove protocol and domain
-	pathOnly := urlPath
-	if idx := strings.Index(urlPath, "://"); idx != -1 {
-		pathOnly = urlPath[idx+3:]
-		// Remove domain
-		if slashIdx := strings.Index(pathOnly, "/"); slashIdx != -1 {
-			pathOnly = pathOnly[slashIdx:]
-		}
-	}
-
-	var accountID, bucketID, recordingType, recordingID, commentID string
-
-	// Regex patterns for different URL formats
-	cardPattern := regexp.MustCompile(`^/(\d+)/buckets/(\d+)/card_tables/cards/(\d+)`)
-	columnPattern := regexp.MustCompile(`^/(\d+)/buckets/(\d+)/card_tables/(?:columns|lists)/(\d+)`)
-	stepPattern := regexp.MustCompile(`^/(\d+)/buckets/(\d+)/card_tables/steps/(\d+)`)
-	fullRecordingPattern := regexp.MustCompile(`^/(\d+)/buckets/(\d+)/([^/]+)/(\d+)`)
-	typeListPattern := regexp.MustCompile(`^/(\d+)/buckets/(\d+)/([^/]+)/?$`)
-	projectPattern := regexp.MustCompile(`^/(\d+)/projects/(\d+)`)
-	accountOnlyPattern := regexp.MustCompile(`^/(\d+)`)
-
-	if matches := cardPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Card URL: /{account}/buckets/{bucket}/card_tables/cards/{id}
-		accountID = matches[1]
-		bucketID = matches[2]
-		recordingType = "cards"
-		recordingID = matches[3]
-	} else if matches := columnPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Column URL: /{account}/buckets/{bucket}/card_tables/columns/{id} or lists/{id}
-		accountID = matches[1]
-		bucketID = matches[2]
-		recordingType = "columns"
-		recordingID = matches[3]
-	} else if matches := stepPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Step URL: /{account}/buckets/{bucket}/card_tables/steps/{id}
-		accountID = matches[1]
-		bucketID = matches[2]
-		recordingType = "steps"
-		recordingID = matches[3]
-	} else if matches := fullRecordingPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Full recording URL: /{account}/buckets/{bucket}/{type}/{id}
-		accountID = matches[1]
-		bucketID = matches[2]
-		recordingType = matches[3]
-		recordingID = matches[4]
-	} else if matches := typeListPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Type list URL: /{account}/buckets/{bucket}/{type}
-		accountID = matches[1]
-		bucketID = matches[2]
-		recordingType = matches[3]
-	} else if matches := projectPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Project URL: /{account}/projects/{project}
-		accountID = matches[1]
-		bucketID = matches[2]
-		recordingType = "project"
-	} else if matches := accountOnlyPattern.FindStringSubmatch(pathOnly); matches != nil {
-		// Account-only URL
-		accountID = matches[1]
-	} else {
+	parsed := urlarg.Parse(url)
+	if parsed == nil {
 		return output.ErrUsageHint(
-			fmt.Sprintf("Could not parse URL path: %s", pathOnly),
+			fmt.Sprintf("Could not parse URL: %s", url),
 			"Expected Basecamp URL format",
 		)
 	}
 
-	// Parse fragment for comment ID
-	// Fragment format: __recording_{id} or just {id}
-	if fragment != "" {
-		commentPattern := regexp.MustCompile(`__recording_(\d+)`)
-		if matches := commentPattern.FindStringSubmatch(fragment); matches != nil {
-			commentID = matches[1]
-		} else if regexp.MustCompile(`^\d+$`).MatchString(fragment) {
-			commentID = fragment
-		}
-	}
+	accountID := parsed.AccountID
+	bucketID := parsed.ProjectID
+	recordingType := parsed.Type
+	recordingID := parsed.RecordingID
+	commentID := parsed.CommentID
 
 	// Normalize recording type (singular form)
 	typeSingular := recordingType

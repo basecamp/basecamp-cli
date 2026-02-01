@@ -109,10 +109,14 @@ func newLineupUpdateCmd() *cobra.Command {
 	var date string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a lineup marker",
-		Long:  "Update an existing lineup marker's name or date.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing lineup marker's name or date.
+
+You can pass either a marker ID or a Basecamp URL:
+  bcq lineup update 789 --name "new name"
+  bcq lineup update https://3.basecamp.com/123/my/lineup/markers/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -120,7 +124,7 @@ func newLineupUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			markerIDStr := args[0]
+			markerIDStr := extractID(args[0])
 			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid marker ID")
@@ -183,10 +187,14 @@ func newLineupUpdateCmd() *cobra.Command {
 
 func newLineupDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <id>",
+		Use:   "delete <id|url>",
 		Short: "Delete a lineup marker",
-		Long:  "Delete an existing lineup marker.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete an existing lineup marker.
+
+You can pass either a marker ID or a Basecamp URL:
+  bcq lineup delete 789
+  bcq lineup delete https://3.basecamp.com/123/my/lineup/markers/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -194,7 +202,7 @@ func newLineupDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			markerIDStr := args[0]
+			markerIDStr := extractID(args[0])
 			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid marker ID")

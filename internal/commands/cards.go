@@ -251,10 +251,14 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 func newCardsShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show card details",
-		Long:  "Display detailed information about a card.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a card.
+
+You can pass either a card ID or a Basecamp URL:
+  bcq cards show 789 --in my-project
+  bcq cards show https://3.basecamp.com/123/buckets/456/card_tables/cards/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -262,14 +266,19 @@ func newCardsShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			cardIDStr := args[0]
+			// Extract ID and project from URL if provided
+			cardIDStr, urlProjectID := extractWithProject(args[0])
+
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -476,10 +485,14 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 	var assignee string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a card",
-		Long:  "Update an existing card.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing card.
+
+You can pass either a card ID or a Basecamp URL:
+  bcq cards update 789 --title "new title" --in my-project
+  bcq cards update https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --title "new title"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -487,7 +500,9 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			cardIDStr := args[0]
+			// Extract ID and project from URL if provided
+			cardIDStr, urlProjectID := extractWithProject(args[0])
+
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
@@ -497,8 +512,11 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("At least one field required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -581,10 +599,14 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	var targetColumn string
 
 	cmd := &cobra.Command{
-		Use:   "move <id>",
+		Use:   "move <id|url>",
 		Short: "Move a card to another column",
-		Long:  "Move a card to a different column in the card table.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Move a card to a different column in the card table.
+
+You can pass either a card ID or a Basecamp URL:
+  bcq cards move 789 --to "Done" --in my-project
+  bcq cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -592,7 +614,9 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
-			cardIDStr := args[0]
+			// Extract ID and project from URL if provided
+			cardIDStr, urlProjectID := extractWithProject(args[0])
+
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
@@ -609,8 +633,11 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 				return output.ErrUsage("--card-table is required when --to is a column name")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -972,10 +999,14 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 
 func newCardsColumnShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show column details",
-		Long:  "Display detailed information about a column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column show 789 --in my-project
+  bcq cards column show https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -983,14 +1014,18 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1134,10 +1169,14 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 	var description string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a column",
-		Long:  "Update an existing card table column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing card table column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column update 789 --title "new name" --in my-project
+  bcq cards column update https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --title "new name"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1145,7 +1184,8 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1155,8 +1195,11 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("No update fields provided")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1206,10 +1249,14 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 	var position int
 
 	cmd := &cobra.Command{
-		Use:   "move <id>",
+		Use:   "move <id|url>",
 		Short: "Move a column",
-		Long:  "Reposition a column within the card table.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Reposition a column within the card table.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column move 789 --position 2 --in my-project
+  bcq cards column move https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --position 2`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1217,7 +1264,8 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Column ID must be numeric")
@@ -1227,8 +1275,11 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 				return output.ErrUsage("--position required (1-indexed)")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1290,10 +1341,14 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 
 func newCardsColumnWatchCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "watch <id>",
+		Use:   "watch <id|url>",
 		Short: "Watch a column",
-		Long:  "Subscribe to updates for a column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Subscribe to updates for a column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column watch 789 --in my-project
+  bcq cards column watch https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1301,14 +1356,18 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1348,10 +1407,14 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 
 func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "unwatch <id>",
+		Use:   "unwatch <id|url>",
 		Short: "Unwatch a column",
-		Long:  "Unsubscribe from updates for a column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Unsubscribe from updates for a column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column unwatch 789 --in my-project
+  bcq cards column unwatch https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1359,14 +1422,18 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1406,10 +1473,14 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 
 func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "on-hold <id>",
+		Use:   "on-hold <id|url>",
 		Short: "Enable on-hold section",
-		Long:  "Enable on-hold section for a column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Enable on-hold section for a column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column on-hold 789 --in my-project
+  bcq cards column on-hold https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1417,14 +1488,18 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1463,10 +1538,14 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 
 func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "no-on-hold <id>",
+		Use:   "no-on-hold <id|url>",
 		Short: "Disable on-hold section",
-		Long:  "Disable on-hold section for a column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Disable on-hold section for a column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column no-on-hold 789 --in my-project
+  bcq cards column no-on-hold https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1474,14 +1553,18 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1522,10 +1605,14 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 	var color string
 
 	cmd := &cobra.Command{
-		Use:   "color <id>",
+		Use:   "color <id|url>",
 		Short: "Set column color",
-		Long:  "Set the color for a column.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Set the color for a column.
+
+You can pass either a column ID or a Basecamp URL:
+  bcq cards column color 789 --color blue --in my-project
+  bcq cards column color https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --color blue`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1533,7 +1620,8 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			columnIDStr := args[0]
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1543,8 +1631,11 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--color is required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1793,10 +1884,14 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 	var assignees string
 
 	cmd := &cobra.Command{
-		Use:   "update <step_id>",
+		Use:   "update <step_id|url>",
 		Short: "Update a step",
-		Long:  "Update an existing step on a card.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing step on a card.
+
+You can pass either a step ID or a Basecamp URL:
+  bcq cards step update 789 --title "new title" --in my-project
+  bcq cards step update https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --title "new title"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1804,7 +1899,8 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			stepIDStr := args[0]
+			// Extract ID and project from URL if provided
+			stepIDStr, urlProjectID := extractWithProject(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -1814,8 +1910,11 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("No update fields provided")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1874,10 +1973,14 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 
 func newCardsStepCompleteCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "complete <step_id>",
+		Use:   "complete <step_id|url>",
 		Short: "Complete a step",
-		Long:  "Mark a step as completed.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Mark a step as completed.
+
+You can pass either a step ID or a Basecamp URL:
+  bcq cards step complete 789 --in my-project
+  bcq cards step complete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1885,14 +1988,18 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			stepIDStr := args[0]
+			// Extract ID and project from URL if provided
+			stepIDStr, urlProjectID := extractWithProject(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1931,10 +2038,14 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 
 func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "uncomplete <step_id>",
+		Use:   "uncomplete <step_id|url>",
 		Short: "Uncomplete a step",
-		Long:  "Mark a step as not completed.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Mark a step as not completed.
+
+You can pass either a step ID or a Basecamp URL:
+  bcq cards step uncomplete 789 --in my-project
+  bcq cards step uncomplete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -1942,14 +2053,18 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			stepIDStr := args[0]
+			// Extract ID and project from URL if provided
+			stepIDStr, urlProjectID := extractWithProject(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -1991,10 +2106,14 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 	var position int
 
 	cmd := &cobra.Command{
-		Use:   "move <step_id>",
+		Use:   "move <step_id|url>",
 		Short: "Move a step",
-		Long:  "Reposition a step within a card (0-indexed).",
-		Args:  cobra.ExactArgs(1),
+		Long: `Reposition a step within a card (0-indexed).
+
+You can pass either a step ID or a Basecamp URL:
+  bcq cards step move 789 --card 456 --position 0 --in my-project
+  bcq cards step move https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --card 456 --position 0`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -2002,7 +2121,8 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			stepIDStr := args[0]
+			// Extract ID and project from URL if provided
+			stepIDStr, urlProjectID := extractWithProject(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Step ID must be numeric")
@@ -2020,8 +2140,11 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid card ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -2067,10 +2190,14 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 
 func newCardsStepDeleteCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "delete <step_id>",
+		Use:   "delete <step_id|url>",
 		Short: "Delete a step",
-		Long:  "Permanently delete a step from a card.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Permanently delete a step from a card.
+
+You can pass either a step ID or a Basecamp URL:
+  bcq cards step delete 789 --in my-project
+  bcq cards step delete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -2078,14 +2205,18 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			stepIDStr := args[0]
+			// Extract ID and project from URL if provided
+			stepIDStr, urlProjectID := extractWithProject(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

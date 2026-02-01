@@ -223,7 +223,7 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 
 func newCheckinsQuestionCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "question [id]",
+		Use:   "question [id|url]",
 		Short: "Show or manage a question",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -245,9 +245,14 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 
 func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show question details",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display details of a check-in question.
+
+You can pass either a question ID or a Basecamp URL:
+  bcq checkins question show 789 --in my-project
+  bcq checkins question show https://3.basecamp.com/123/buckets/456/questionnaires/questions/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCheckinsQuestionShow(cmd, *project, args[0])
 		},
@@ -261,8 +266,14 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 		return err
 	}
 
-	// Resolve project, with interactive fallback
+	// Extract ID and project from URL if provided
+	questionIDStr, urlProjectID := extractWithProject(questionIDStr)
+
+	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -461,9 +472,14 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 	var days string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a check-in question",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update a check-in question's title or schedule.
+
+You can pass either a question ID or a Basecamp URL:
+  bcq checkins question update 789 --title "new question" --in my-project
+  bcq checkins question update https://3.basecamp.com/123/buckets/456/questionnaires/questions/789 --title "new question"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -471,10 +487,14 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			questionIDStr := args[0]
+			// Extract ID and project from URL if provided
+			questionIDStr, urlProjectID := extractWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -576,9 +596,14 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "answers <question_id>",
+		Use:   "answers <question_id|url>",
 		Short: "List answers for a question",
-		Args:  cobra.ExactArgs(1),
+		Long: `List answers for a check-in question.
+
+You can pass either a question ID or a Basecamp URL:
+  bcq checkins answers 789 --in my-project
+  bcq checkins answers https://3.basecamp.com/123/buckets/456/questions/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -597,10 +622,14 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			questionIDStr := args[0]
+			// Extract ID and project from URL if provided
+			questionIDStr, urlProjectID := extractWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -673,7 +702,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 
 func newCheckinsAnswerCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "answer [id]",
+		Use:   "answer [id|url]",
 		Short: "Show or manage an answer",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -695,9 +724,14 @@ func newCheckinsAnswerCmd(project *string) *cobra.Command {
 
 func newCheckinsAnswerShowCmd(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show answer details",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display details of a check-in answer.
+
+You can pass either an answer ID or a Basecamp URL:
+  bcq checkins answer show 789 --in my-project
+  bcq checkins answer show https://3.basecamp.com/123/buckets/456/question_answers/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCheckinsAnswerShow(cmd, *project, args[0])
 		},
@@ -711,8 +745,14 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		return err
 	}
 
-	// Resolve project, with interactive fallback
+	// Extract ID and project from URL if provided
+	answerIDStr, urlProjectID := extractWithProject(answerIDStr)
+
+	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -880,9 +920,14 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 	var content string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update an answer",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing check-in answer.
+
+You can pass either an answer ID or a Basecamp URL:
+  bcq checkins answer update 789 --content "updated answer" --in my-project
+  bcq checkins answer update https://3.basecamp.com/123/buckets/456/question_answers/789 --content "updated answer"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -890,14 +935,18 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			answerIDStr := args[0]
+			// Extract ID and project from URL if provided
+			answerIDStr, urlProjectID := extractWithProject(args[0])
 
 			if content == "" {
 				return output.ErrUsage("--content is required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

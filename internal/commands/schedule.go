@@ -248,10 +248,14 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 	var occurrenceDate string
 
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show schedule entry",
-		Long:  "Display details of a schedule entry.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display details of a schedule entry.
+
+You can pass either an entry ID or a Basecamp URL:
+  bcq schedule show 789 --in my-project
+  bcq schedule show https://3.basecamp.com/123/buckets/456/schedule_entries/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -268,8 +272,15 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 }
 
 func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project, occurrenceDate string) error {
-	// Resolve project, with interactive fallback
+	// Extract ID and project from URL if provided
+	extractedID, urlProjectID := extractWithProject(entryID)
+	entryID = extractedID
+
+	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -501,20 +512,28 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 	var participants string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a schedule entry",
-		Long:  "Update an existing schedule entry.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing schedule entry.
+
+You can pass either an entry ID or a Basecamp URL:
+  bcq schedule update 789 --summary "new title" --in my-project
+  bcq schedule update https://3.basecamp.com/123/buckets/456/schedule_entries/789 --summary "new title"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			entryID := args[0]
+			// Extract ID and project from URL if provided
+			entryID, urlProjectID := extractWithProject(args[0])
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}

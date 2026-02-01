@@ -520,10 +520,14 @@ func newTodosShowCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show todo details",
-		Long:  "Display detailed information about a todo.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a todo.
+
+You can pass either a todo ID or a Basecamp URL:
+  bcq todos show 789 --in my-project
+  bcq todos show https://3.basecamp.com/123/buckets/456/todos/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -534,7 +538,13 @@ func newTodosShowCmd() *cobra.Command {
 				return err
 			}
 
-			// Use project from flag or config, with interactive fallback
+			// Extract ID and project from URL if provided
+			todoIDStr, urlProjectID := extractWithProject(args[0])
+
+			// Use project from: URL > flag > config, with interactive fallback
+			if project == "" && urlProjectID != "" {
+				project = urlProjectID
+			}
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -559,7 +569,7 @@ func newTodosShowCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			todoID, err := strconv.ParseInt(args[0], 10, 64)
+			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
 			}
@@ -752,10 +762,14 @@ func newTodosCompleteCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "complete <id> [id...]",
+		Use:   "complete <id|url> [id|url...]",
 		Short: "Complete todo(s)",
-		Long:  "Mark one or more todos as completed.",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Mark one or more todos as completed.
+
+You can pass either todo IDs or Basecamp URLs:
+  bcq todos complete 789 --in my-project
+  bcq todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return completeTodos(cmd, args, project)
 		},
@@ -776,10 +790,14 @@ func newDoneCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "done <id> [id...]",
+		Use:   "done <id|url> [id|url...]",
 		Short: "Complete todo(s)",
-		Long:  "Mark one or more todos as completed.",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Mark one or more todos as completed.
+
+You can pass either todo IDs or Basecamp URLs:
+  bcq done 789 --in my-project
+  bcq done https://3.basecamp.com/123/buckets/456/todos/789`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return completeTodos(cmd, args, project)
 		},
@@ -804,6 +822,17 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
+	}
+
+	// Extract IDs from URLs (handles both plain IDs and URLs)
+	extractedIDs := extractIDs(todoIDs)
+
+	// Try to get project from first URL argument if not specified
+	if project == "" && len(todoIDs) > 0 {
+		_, urlProjectID := extractWithProject(todoIDs[0])
+		if urlProjectID != "" {
+			project = urlProjectID
+		}
 	}
 
 	// Use project from flag or config, with interactive fallback
@@ -834,7 +863,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	var completed []string
 	var failed []string
 
-	for _, todoIDStr := range todoIDs {
+	for _, todoIDStr := range extractedIDs {
 		todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 		if err != nil {
 			failed = append(failed, todoIDStr)
@@ -879,11 +908,15 @@ func newTodosUncompleteCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:     "uncomplete <id> [id...]",
+		Use:     "uncomplete <id|url> [id|url...]",
 		Aliases: []string{"reopen"},
 		Short:   "Reopen todo(s)",
-		Long:    "Reopen one or more completed todos.",
-		Args:    cobra.MinimumNArgs(1),
+		Long: `Reopen one or more completed todos.
+
+You can pass either todo IDs or Basecamp URLs:
+  bcq todos uncomplete 789 --in my-project
+  bcq todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return reopenTodos(cmd, args, project)
 		},
@@ -1177,10 +1210,14 @@ func newReopenCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "reopen <id> [id...]",
+		Use:   "reopen <id|url> [id|url...]",
 		Short: "Reopen todo(s)",
-		Long:  "Reopen one or more completed todos.",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Reopen one or more completed todos.
+
+You can pass either todo IDs or Basecamp URLs:
+  bcq reopen 789 --in my-project
+  bcq reopen https://3.basecamp.com/123/buckets/456/todos/789`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return reopenTodos(cmd, args, project)
 		},
@@ -1205,6 +1242,17 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
+	}
+
+	// Extract IDs from URLs (handles both plain IDs and URLs)
+	extractedIDs := extractIDs(todoIDs)
+
+	// Try to get project from first URL argument if not specified
+	if project == "" && len(todoIDs) > 0 {
+		_, urlProjectID := extractWithProject(todoIDs[0])
+		if urlProjectID != "" {
+			project = urlProjectID
+		}
 	}
 
 	// Use project from flag or config, with interactive fallback
@@ -1235,7 +1283,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	var reopened []string
 	var failed []string
 
-	for _, todoIDStr := range todoIDs {
+	for _, todoIDStr := range extractedIDs {
 		todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 		if err != nil {
 			failed = append(failed, todoIDStr)
@@ -1281,11 +1329,15 @@ func newTodosPositionCmd() *cobra.Command {
 	var position int
 
 	cmd := &cobra.Command{
-		Use:     "position <id>",
+		Use:     "position <id|url>",
 		Aliases: []string{"move", "reorder"},
 		Short:   "Change todo position",
-		Long:    "Reorder a todo within its todolist. Position is 1-based (1 = top).",
-		Args:    cobra.ExactArgs(1),
+		Long: `Reorder a todo within its todolist. Position is 1-based (1 = top).
+
+You can pass either a todo ID or a Basecamp URL:
+  bcq todos position 789 --to 1 --in my-project
+  bcq todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -1300,7 +1352,13 @@ func newTodosPositionCmd() *cobra.Command {
 				return output.ErrUsage("--to is required (1 = top)")
 			}
 
-			// Use project from flag or config, with interactive fallback
+			// Extract ID and project from URL if provided
+			todoIDStr, urlProjectID := extractWithProject(args[0])
+
+			// Use project from: URL > flag > config, with interactive fallback
+			if project == "" && urlProjectID != "" {
+				project = urlProjectID
+			}
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -1325,7 +1383,7 @@ func newTodosPositionCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			todoID, err := strconv.ParseInt(args[0], 10, 64)
+			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
 			}

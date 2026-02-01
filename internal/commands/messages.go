@@ -171,10 +171,14 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 
 func newMessagesShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <id>",
+		Use:   "show <id|url>",
 		Short: "Show message details",
-		Long:  "Display detailed information about a message.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a message.
+
+You can pass either a message ID or a Basecamp URL:
+  bcq messages show 789 --in my-project
+  bcq messages show https://3.basecamp.com/123/buckets/456/messages/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -182,14 +186,19 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			messageIDStr := args[0]
+			// Extract ID and project from URL if provided
+			messageIDStr, urlProjectID := extractWithProject(args[0])
+
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -344,10 +353,14 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 	var content string
 
 	cmd := &cobra.Command{
-		Use:   "update <id>",
+		Use:   "update <id|url>",
 		Short: "Update a message",
-		Long:  "Update an existing message's subject or content.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update an existing message's subject or content.
+
+You can pass either a message ID or a Basecamp URL:
+  bcq messages update 789 --subject "new title" --in my-project
+  bcq messages update https://3.basecamp.com/123/buckets/456/messages/789 --subject "new title"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -355,7 +368,9 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			messageIDStr := args[0]
+			// Extract ID and project from URL if provided
+			messageIDStr, urlProjectID := extractWithProject(args[0])
+
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
@@ -365,8 +380,11 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --subject or --content is required")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -423,10 +441,14 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 
 func newMessagesPinCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "pin <id>",
+		Use:   "pin <id|url>",
 		Short: "Pin a message",
-		Long:  "Pin a message to the top of the message board.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Pin a message to the top of the message board.
+
+You can pass either a message ID or a Basecamp URL:
+  bcq messages pin 789 --in my-project
+  bcq messages pin https://3.basecamp.com/123/buckets/456/messages/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -434,14 +456,19 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			messageIDStr := args[0]
+			// Extract ID and project from URL if provided
+			messageIDStr, urlProjectID := extractWithProject(args[0])
+
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
@@ -495,10 +522,14 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 
 func newMessagesUnpinCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "unpin <id>",
+		Use:   "unpin <id|url>",
 		Short: "Unpin a message",
-		Long:  "Remove a message from the pinned position.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Remove a message from the pinned position.
+
+You can pass either a message ID or a Basecamp URL:
+  bcq messages unpin 789 --in my-project
+  bcq messages unpin https://3.basecamp.com/123/buckets/456/messages/789`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -506,14 +537,19 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			messageIDStr := args[0]
+			// Extract ID and project from URL if provided
+			messageIDStr, urlProjectID := extractWithProject(args[0])
+
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
 			if projectID == "" {
 				projectID = app.Flags.Project
 			}
