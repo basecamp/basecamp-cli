@@ -24,9 +24,12 @@ To load completions:
 Bash:
   $ source <(bcq completion bash)
 
-  # To load completions for each session, execute once:
+  # To load completions for every new session, add to ~/.bashrc:
+  eval "$(bcq completion bash)"
+
+  # Or install system-wide (requires root):
   # Linux:
-  $ bcq completion bash > /etc/bash_completion.d/bcq
+  $ bcq completion bash | sudo tee /etc/bash_completion.d/bcq > /dev/null
   # macOS:
   $ bcq completion bash > $(brew --prefix)/etc/bash_completion.d/bcq
 
@@ -35,10 +38,13 @@ Zsh:
   # you will need to enable it. You can execute the following once:
   $ echo "autoload -U compinit; compinit" >> ~/.zshrc
 
-  # To load completions for each session, execute once:
-  $ bcq completion zsh > "${fpath[1]}/_bcq"
+  # To load completions for every new session, add to ~/.zshrc:
+  eval "$(bcq completion zsh)"
 
-  # You will need to start a new shell for this setup to take effect.
+  # Or install to a directory in your fpath:
+  $ mkdir -p ~/.zsh/completions
+  $ bcq completion zsh > ~/.zsh/completions/_bcq
+  # Then add to ~/.zshrc: fpath=(~/.zsh/completions $fpath)
 
 Fish:
   $ bcq completion fish | source
@@ -101,10 +107,13 @@ If it is not installed already, you can install it via your OS's package manager
 To load completions in your current shell session:
   $ source <(bcq completion bash)
 
-To load completions for every new session, execute once:
+To load completions for every new session, add to ~/.bashrc:
+  eval "$(bcq completion bash)"
+
+Or install system-wide (requires root):
 
 Linux:
-  $ bcq completion bash > /etc/bash_completion.d/bcq
+  $ bcq completion bash | sudo tee /etc/bash_completion.d/bcq > /dev/null
 
 macOS:
   $ bcq completion bash > $(brew --prefix)/etc/bash_completion.d/bcq
@@ -129,10 +138,13 @@ to enable it. You can execute the following once:
 To load completions in your current shell session:
   $ source <(bcq completion zsh)
 
-To load completions for every new session, execute once:
-  $ bcq completion zsh > "${fpath[1]}/_bcq"
+To load completions for every new session, add to ~/.zshrc:
+  eval "$(bcq completion zsh)"
 
-You will need to start a new shell for this setup to take effect.
+Or install to a directory in your fpath:
+  $ mkdir -p ~/.zsh/completions
+  $ bcq completion zsh > ~/.zsh/completions/_bcq
+  # Then add to ~/.zshrc: fpath=(~/.zsh/completions $fpath)
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
