@@ -256,7 +256,7 @@ bcq todos position <id> --to 1               # Move to top
 bcq todos sweep --overdue --complete --comment "Done" --in <project>
 ```
 
-**Flags:** `--assignee`, `--status` (completed/pending), `--overdue`, `--list`, `--due`, `--limit`, `--all`
+**Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/pending), `--overdue`, `--list`, `--due`, `--limit`, `--all`
 
 ### Todolists
 
@@ -272,10 +272,13 @@ bcq todolists update <id> --name "New" --in <project>        # Update
 
 ### Cards (Kanban)
 
+**Note:** Cards do NOT support `--assignee` filtering like todos. Fetch all cards and filter client-side if needed. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
+
 ```bash
 bcq cards --in <project> --json              # All cards
+bcq cards --card-table <id> --in <project>   # Cards from specific table (required if multiple)
 bcq cards --column <id> --in <project>       # Cards in column
-bcq cards columns --in <project> --json      # List columns with IDs
+bcq cards columns --in <project> --json      # List columns (needs --card-table if multiple)
 bcq cards show <id> --in <project>           # Card details
 bcq card --title "Title" --content "<p>Body</p>" --in <project> --column <id>
 bcq cards update <id> --title "New" --due tomorrow --assignee me
