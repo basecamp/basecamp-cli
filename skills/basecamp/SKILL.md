@@ -165,6 +165,7 @@ Need to find something?
 ├── Know the type + project? → bcq <type> --in <project> --json
 ├── Need cross-project data? → bcq recordings <type> --json (ONLY cross-project option)
 │   (types: todos, messages, documents, comments, cards, uploads)
+│   Note: Defaults to active status; use --status archived for archived items
 ├── Full-text search? → bcq search "query" --json
 └── Have a URL? → bcq url parse "<url>" --json
 ```
@@ -286,6 +287,10 @@ bcq cards move <id> --to <column_id>         # Move to column (numeric ID)
 bcq cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
 ```
 
+**Identifying completed cards:** Cards in Done columns have `parent.type: "Kanban::DoneColumn"` and `completed: true`. Use this to identify completed cards that haven't been archived.
+
+**Limitation:** Basecamp does not track when cards are moved between columns. The `updated_at` field updates on any modification and cannot reliably indicate when a card was completed.
+
 **Card Steps (checklists):**
 ```bash
 bcq cards steps <card_id> --in <project>     # List steps
@@ -384,16 +389,24 @@ bcq timeline --watch                         # Live monitoring (TUI)
 bcq timeline --watch --interval 60           # Poll every 60 seconds
 ```
 
+**Note:** `bcq timeline` (account-wide) works reliably. The `--limit` flag is not supported on timeline commands.
+
 ### Recordings (Cross-project)
+
+Use `bcq recordings <type>` for cross-project queries - this is the only way to query across all projects in one call.
 
 ```bash
 bcq recordings todos --json                  # All todos across projects
+bcq recordings todos --all --json            # All todos (paginate through all)
 bcq recordings messages --in <project>       # Messages in project
 bcq recordings documents --status archived   # Archived docs
 bcq recordings cards --sort created_at --direction asc
+bcq recordings cards --status archived --all --json  # Include archived cards
 ```
 
 **Types:** `todos`, `messages`, `documents`, `comments`, `cards`, `uploads`
+
+**Status filtering:** By default, only `active` recordings are returned. Use `--status archived` or `--status trashed` to query other statuses. You may need separate queries to get complete data (e.g., active + archived).
 
 **Status management:**
 ```bash
