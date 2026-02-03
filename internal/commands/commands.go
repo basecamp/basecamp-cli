@@ -106,6 +106,7 @@ func commandCategories() []CommandCategory {
 				{Name: "me", Category: "auth", Description: "Show current user profile"},
 				{Name: "setup", Category: "auth", Description: "Interactive first-time setup"},
 				{Name: "quick-start", Category: "auth", Description: "Show getting started guide"},
+				{Name: "doctor", Category: "auth", Description: "Check CLI health and diagnose issues"},
 			},
 		},
 		{
