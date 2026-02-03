@@ -144,6 +144,13 @@ Copy the appropriate template from `templates/` or point your agent at:
 └── config.json        # Per-repo overrides
 ```
 
+## Troubleshooting
+
+```bash
+bcq doctor              # Check CLI health and diagnose issues
+bcq doctor -V           # Verbose output with details
+```
+
 ## Development
 
 ```bash
