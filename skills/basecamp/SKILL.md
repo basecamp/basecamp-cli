@@ -75,6 +75,7 @@ Full bcq CLI coverage: 130 endpoints across todos, cards, messages, files, sched
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
 5. **Rich text fields accept Markdown** - bcq converts to HTML automatically
+6. **Project scope is mandatory** - `--in <project>` is required for resource queries (todos, cards, messages, etc.). There is no cross-project query mode. For cross-project data, use `bcq recordings <type>` or loop through projects individually.
 
 ### Output Modes
 
@@ -105,10 +106,13 @@ bcq <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
+> **Note:** Most queries require `--in <project>`. For cross-project data, use `bcq recordings <type>` or loop through projects individually.
+
 | Task | Command |
 |------|---------|
 | List projects | `bcq projects --json` |
-| My todos | `bcq todos --assignee me --json` |
+| My todos (in project) | `bcq todos --assignee me --in <project> --json` |
+| All todos (cross-project) | `bcq recordings todos --json` (filter client-side) |
 | Overdue todos | `bcq todos --overdue --in <project> --json` |
 | Create todo | `bcq todo --content "Task" --in <project> --list <list> --json` |
 | Create todolist | `bcq todolists create --name "Name" --in <project> --json` |
@@ -158,10 +162,10 @@ bcq comment --content "Reply" --on 123 --in <project>
 
 ```
 Need to find something?
-├── Know the type? → bcq <type> --in <project> --json
-├── Full-text search? → bcq search "query" --json
-├── Browse by type across projects? → bcq recordings <type> --json
+├── Know the type + project? → bcq <type> --in <project> --json
+├── Need cross-project data? → bcq recordings <type> --json (ONLY cross-project option)
 │   (types: todos, messages, documents, comments, cards, uploads)
+├── Full-text search? → bcq search "query" --json
 └── Have a URL? → bcq url parse "<url>" --json
 ```
 
