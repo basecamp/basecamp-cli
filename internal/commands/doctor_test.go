@@ -141,7 +141,8 @@ func TestDetectShell(t *testing.T) {
 
 func TestFindRepoConfig(t *testing.T) {
 	// Create a temp directory structure with git repo
-	tmpDir := t.TempDir()
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	gitDir := filepath.Join(tmpDir, ".git")
 	require.NoError(t, os.Mkdir(gitDir, 0755))
 
