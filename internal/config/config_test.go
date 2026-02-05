@@ -120,7 +120,7 @@ func TestLoadFromEnv(t *testing.T) {
 	os.Setenv("BCQ_CACHE_ENABLED", "false")
 
 	cfg := Default()
-	loadFromEnv(cfg)
+	LoadFromEnv(cfg)
 
 	// Verify values loaded
 	assert.Equal(t, "http://env.example.com", cfg.BaseURL)
@@ -154,7 +154,7 @@ func TestLoadFromEnvPrecedence(t *testing.T) {
 	os.Setenv("BCQ_BASE_URL", "http://bcq.example.com")
 
 	cfg := Default()
-	loadFromEnv(cfg)
+	LoadFromEnv(cfg)
 
 	// BCQ_BASE_URL should win (it's loaded last)
 	assert.Equal(t, "http://bcq.example.com", cfg.BaseURL)
@@ -170,16 +170,14 @@ func TestApplyOverrides(t *testing.T) {
 	overrides := FlagOverrides{
 		Account:  "from-flag",
 		Project:  "from-flag",
-		BaseURL:  "http://flag.example.com",
 		CacheDir: "/flag/cache",
 		Format:   "json",
 	}
 
-	applyOverrides(cfg, overrides)
+	ApplyOverrides(cfg, overrides)
 
 	assert.Equal(t, "from-flag", cfg.AccountID)
 	assert.Equal(t, "from-flag", cfg.ProjectID)
-	assert.Equal(t, "http://flag.example.com", cfg.BaseURL)
 	assert.Equal(t, "/flag/cache", cfg.CacheDir)
 	assert.Equal(t, "json", cfg.Format)
 
@@ -196,7 +194,7 @@ func TestApplyOverridesSkipsEmpty(t *testing.T) {
 		Account: "", // empty should not override
 	}
 
-	applyOverrides(cfg, overrides)
+	ApplyOverrides(cfg, overrides)
 
 	assert.Equal(t, "original", cfg.AccountID)
 	assert.Equal(t, "global", cfg.Sources["account_id"])
@@ -294,8 +292,8 @@ func TestFullLayeringPrecedence(t *testing.T) {
 	// Apply layers in order
 	loadFromFile(cfg, globalConfig, SourceGlobal)
 	loadFromFile(cfg, localConfig, SourceLocal)
-	loadFromEnv(cfg)
-	applyOverrides(cfg, FlagOverrides{
+	LoadFromEnv(cfg)
+	ApplyOverrides(cfg, FlagOverrides{
 		// No flag overrides
 	})
 
@@ -390,7 +388,7 @@ func TestCacheEnabledEnvParsing(t *testing.T) {
 
 			cfg := Default()
 			cfg.CacheEnabled = tt.startValue
-			loadFromEnv(cfg)
+			LoadFromEnv(cfg)
 
 			assert.Equal(t, tt.expected, cfg.CacheEnabled)
 		})
@@ -412,7 +410,7 @@ func TestCacheEnabledEnvEmpty(t *testing.T) {
 
 	cfg := Default()
 	cfg.CacheEnabled = true
-	loadFromEnv(cfg)
+	LoadFromEnv(cfg)
 
 	// Should remain true (env var not set, so doesn't change)
 	assert.True(t, cfg.CacheEnabled)
@@ -475,20 +473,22 @@ func TestLoadFromFileEmptyValues(t *testing.T) {
 	assert.Equal(t, "real-value", cfg.ProjectID)
 }
 
-func TestLoadFromFileWithHosts(t *testing.T) {
+func TestLoadFromFileWithProfiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")
 
 	testConfig := map[string]any{
-		"default_host": "production",
-		"hosts": map[string]any{
+		"default_profile": "production",
+		"profiles": map[string]any{
 			"production": map[string]any{
-				"base_url":  "https://3.basecampapi.com",
-				"client_id": "prod-client-123",
+				"base_url":   "https://3.basecampapi.com",
+				"client_id":  "prod-client-123",
+				"account_id": "12345",
 			},
 			"beta": map[string]any{
-				"base_url":  "https://3.basecamp-beta.com",
-				"client_id": "beta-client-456",
+				"base_url":   "https://3.basecamp-beta.com",
+				"client_id":  "beta-client-456",
+				"account_id": 67890,
 			},
 			"dev": map[string]any{
 				"base_url": "http://localhost:3000",
@@ -501,61 +501,73 @@ func TestLoadFromFileWithHosts(t *testing.T) {
 	cfg := Default()
 	loadFromFile(cfg, configPath, SourceGlobal)
 
-	// Verify default_host
-	if cfg.DefaultHost != "production" {
-		t.Errorf("DefaultHost = %q, want %q", cfg.DefaultHost, "production")
+	// Verify default_profile
+	if cfg.DefaultProfile != "production" {
+		t.Errorf("DefaultProfile = %q, want %q", cfg.DefaultProfile, "production")
 	}
 
-	// Verify hosts map
-	if cfg.Hosts == nil {
-		t.Fatal("Hosts map should not be nil")
+	// Verify profiles map
+	if cfg.Profiles == nil {
+		t.Fatal("Profiles map should not be nil")
 	}
-	if len(cfg.Hosts) != 3 {
-		t.Errorf("len(Hosts) = %d, want 3", len(cfg.Hosts))
+	if len(cfg.Profiles) != 3 {
+		t.Errorf("len(Profiles) = %d, want 3", len(cfg.Profiles))
 	}
 
-	// Verify production host
-	if prod, ok := cfg.Hosts["production"]; ok {
+	// Verify production profile
+	if prod, ok := cfg.Profiles["production"]; ok {
 		if prod.BaseURL != "https://3.basecampapi.com" {
-			t.Errorf("Hosts[production].BaseURL = %q, want %q", prod.BaseURL, "https://3.basecampapi.com")
+			t.Errorf("Profiles[production].BaseURL = %q, want %q", prod.BaseURL, "https://3.basecampapi.com")
 		}
 		if prod.ClientID != "prod-client-123" {
-			t.Errorf("Hosts[production].ClientID = %q, want %q", prod.ClientID, "prod-client-123")
+			t.Errorf("Profiles[production].ClientID = %q, want %q", prod.ClientID, "prod-client-123")
+		}
+		if prod.AccountID != "12345" {
+			t.Errorf("Profiles[production].AccountID = %q, want %q", prod.AccountID, "12345")
 		}
 	} else {
-		t.Error("Hosts[production] not found")
+		t.Error("Profiles[production] not found")
 	}
 
-	// Verify dev host (no client_id)
-	if dev, ok := cfg.Hosts["dev"]; ok {
-		if dev.BaseURL != "http://localhost:3000" {
-			t.Errorf("Hosts[dev].BaseURL = %q, want %q", dev.BaseURL, "http://localhost:3000")
-		}
-		if dev.ClientID != "" {
-			t.Errorf("Hosts[dev].ClientID = %q, want empty", dev.ClientID)
+	// Verify beta profile (with numeric account_id)
+	if beta, ok := cfg.Profiles["beta"]; ok {
+		if beta.AccountID != "67890" {
+			t.Errorf("Profiles[beta].AccountID = %q, want %q", beta.AccountID, "67890")
 		}
 	} else {
-		t.Error("Hosts[dev] not found")
+		t.Error("Profiles[beta] not found")
+	}
+
+	// Verify dev profile (no client_id)
+	if dev, ok := cfg.Profiles["dev"]; ok {
+		if dev.BaseURL != "http://localhost:3000" {
+			t.Errorf("Profiles[dev].BaseURL = %q, want %q", dev.BaseURL, "http://localhost:3000")
+		}
+		if dev.ClientID != "" {
+			t.Errorf("Profiles[dev].ClientID = %q, want empty", dev.ClientID)
+		}
+	} else {
+		t.Error("Profiles[dev] not found")
 	}
 
 	// Verify source tracking
-	if cfg.Sources["default_host"] != "global" {
-		t.Errorf("Sources[default_host] = %q, want %q", cfg.Sources["default_host"], "global")
+	if cfg.Sources["default_profile"] != "global" {
+		t.Errorf("Sources[default_profile] = %q, want %q", cfg.Sources["default_profile"], "global")
 	}
-	if cfg.Sources["hosts"] != "global" {
-		t.Errorf("Sources[hosts] = %q, want %q", cfg.Sources["hosts"], "global")
+	if cfg.Sources["profiles"] != "global" {
+		t.Errorf("Sources[profiles] = %q, want %q", cfg.Sources["profiles"], "global")
 	}
 }
 
-func TestHostsConfigLayering(t *testing.T) {
+func TestProfilesConfigLayering(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalPath := filepath.Join(tmpDir, "global.json")
 	localPath := filepath.Join(tmpDir, "local.json")
 
 	// Global config with production and beta
 	globalConfig := map[string]any{
-		"default_host": "production",
-		"hosts": map[string]any{
+		"default_profile": "production",
+		"profiles": map[string]any{
 			"production": map[string]any{
 				"base_url": "https://3.basecampapi.com",
 			},
@@ -567,10 +579,10 @@ func TestHostsConfigLayering(t *testing.T) {
 	data, _ := json.Marshal(globalConfig)
 	os.WriteFile(globalPath, data, 0644)
 
-	// Local config adds dev and overrides default_host
+	// Local config adds dev and overrides default_profile
 	localConfig := map[string]any{
-		"default_host": "dev",
-		"hosts": map[string]any{
+		"default_profile": "dev",
+		"profiles": map[string]any{
 			"dev": map[string]any{
 				"base_url": "http://localhost:3000",
 			},
@@ -583,24 +595,56 @@ func TestHostsConfigLayering(t *testing.T) {
 	loadFromFile(cfg, globalPath, SourceGlobal)
 	loadFromFile(cfg, localPath, SourceLocal)
 
-	// default_host should be overridden by local
-	if cfg.DefaultHost != "dev" {
-		t.Errorf("DefaultHost = %q, want %q", cfg.DefaultHost, "dev")
+	// default_profile should be overridden by local
+	if cfg.DefaultProfile != "dev" {
+		t.Errorf("DefaultProfile = %q, want %q", cfg.DefaultProfile, "dev")
 	}
 
-	// hosts should be merged (global + local)
-	if len(cfg.Hosts) != 3 {
-		t.Errorf("len(Hosts) = %d, want 3 (production + beta + dev)", len(cfg.Hosts))
+	// profiles should be merged (global + local)
+	if len(cfg.Profiles) != 3 {
+		t.Errorf("len(Profiles) = %d, want 3 (production + beta + dev)", len(cfg.Profiles))
 	}
 
-	// Verify all hosts are present
-	if _, ok := cfg.Hosts["production"]; !ok {
-		t.Error("Hosts[production] from global should be present")
+	// Verify all profiles are present
+	if _, ok := cfg.Profiles["production"]; !ok {
+		t.Error("Profiles[production] from global should be present")
 	}
-	if _, ok := cfg.Hosts["beta"]; !ok {
-		t.Error("Hosts[beta] from global should be present")
+	if _, ok := cfg.Profiles["beta"]; !ok {
+		t.Error("Profiles[beta] from global should be present")
 	}
-	if _, ok := cfg.Hosts["dev"]; !ok {
-		t.Error("Hosts[dev] from local should be present")
+	if _, ok := cfg.Profiles["dev"]; !ok {
+		t.Error("Profiles[dev] from local should be present")
 	}
+}
+
+func TestApplyProfile(t *testing.T) {
+	cfg := Default()
+	cfg.Profiles = map[string]*ProfileConfig{
+		"personal": {
+			BaseURL:   "https://3.basecampapi.com",
+			AccountID: "12345",
+			Scope:     "full",
+		},
+	}
+
+	err := cfg.ApplyProfile("personal")
+	assert.NoError(t, err)
+	assert.Equal(t, "personal", cfg.ActiveProfile)
+	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
+	assert.Equal(t, "12345", cfg.AccountID)
+	assert.Equal(t, "full", cfg.Scope)
+	assert.Equal(t, "profile", cfg.Sources["base_url"])
+	assert.Equal(t, "profile", cfg.Sources["account_id"])
+	assert.Equal(t, "profile", cfg.Sources["scope"])
+}
+
+func TestApplyProfileNotFound(t *testing.T) {
+	cfg := Default()
+	cfg.Profiles = map[string]*ProfileConfig{
+		"personal": {BaseURL: "https://3.basecampapi.com"},
+	}
+
+	err := cfg.ApplyProfile("nonexistent")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }

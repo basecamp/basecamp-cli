@@ -58,7 +58,7 @@ type GlobalFlags struct {
 	Project  string
 	Account  string
 	Todolist string
-	Host     string // Basecamp host with smart protocol detection
+	Profile  string // Named profile
 
 	// Behavior flags
 	Verbose  int // 0=off, 1=operations, 2=operations+requests (stacks with -v -v or -vv)
@@ -382,7 +382,6 @@ func (a *App) Resolve() *resolve.Resolver {
 			Account:  a.Flags.Account,
 			Project:  a.Flags.Project,
 			Todolist: a.Flags.Todolist,
-			Host:     a.Flags.Host,
 			// Machine output flags - disable interactive prompts
 			Agent:   a.Flags.Agent,
 			JSON:    a.Flags.JSON,

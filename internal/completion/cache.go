@@ -292,18 +292,18 @@ func (s *Store) Accounts() []CachedAccount {
 	return cache.Accounts
 }
 
-// CachedHost holds host data for tab completion.
-// Unlike other cached items, hosts come from config files, not API calls.
-type CachedHost struct {
+// CachedProfile holds profile data for tab completion.
+// Unlike other cached items, profiles come from config files, not API calls.
+type CachedProfile struct {
 	Name    string
 	BaseURL string
 }
 
-// Hosts returns configured hosts for tab completion.
-// Since hosts are defined in config files (not API-fetched), this loads
+// Profiles returns configured profiles for tab completion.
+// Since profiles are defined in config files (not API-fetched), this loads
 // the config directly rather than from the completion cache.
-func (s *Store) Hosts() []CachedHost {
-	// Load config to get hosts map
+func (s *Store) Profiles() []CachedProfile {
+	// Load config to get profiles map
 	// Note: This is a simplified load that doesn't apply all config layers,
 	// but is sufficient for completion purposes.
 	cfg := loadConfigForCompletion()
@@ -311,39 +311,42 @@ func (s *Store) Hosts() []CachedHost {
 		return nil
 	}
 
-	if len(cfg.Hosts) == 0 {
+	if len(cfg.Profiles) == 0 {
 		return nil
 	}
 
-	hosts := make([]CachedHost, 0, len(cfg.Hosts))
-	for name, hostCfg := range cfg.Hosts {
-		hosts = append(hosts, CachedHost{
+	profiles := make([]CachedProfile, 0, len(cfg.Profiles))
+	for name, profileCfg := range cfg.Profiles {
+		profiles = append(profiles, CachedProfile{
 			Name:    name,
-			BaseURL: hostCfg.BaseURL,
+			BaseURL: profileCfg.BaseURL,
 		})
 	}
-	return hosts
+	return profiles
 }
 
-// hostConfig is a minimal struct for loading host configuration.
-type hostConfig struct {
-	BaseURL  string `json:"base_url"`
-	ClientID string `json:"client_id,omitempty"`
+// profileConfig is a minimal struct for loading profile configuration.
+type profileConfig struct {
+	BaseURL string `json:"base_url"`
 }
 
 // configForCompletion is a minimal struct for loading config for completion.
 type configForCompletion struct {
-	Hosts map[string]*hostConfig `json:"hosts,omitempty"`
+	Profiles map[string]*profileConfig `json:"profiles,omitempty"`
 }
 
-// loadConfigForCompletion loads config files to get hosts for completion.
-// This is a simplified version that only reads what's needed for host completion.
+// loadConfigForCompletion loads config files from all layers to get profiles
+// for completion. Layers are loaded in precedence order (system → global →
+// repo → local) so that higher-precedence layers override lower ones.
 func loadConfigForCompletion() *configForCompletion {
 	cfg := &configForCompletion{
-		Hosts: make(map[string]*hostConfig),
+		Profiles: make(map[string]*profileConfig),
 	}
 
-	// Try global config
+	// System config
+	loadProfilesFromFile(cfg, "/etc/basecamp/config.json")
+
+	// Global config
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
 		if home, err := os.UserHomeDir(); err == nil && home != "" {
@@ -352,18 +355,35 @@ func loadConfigForCompletion() *configForCompletion {
 	}
 	if configDir != "" {
 		globalPath := filepath.Join(configDir, "basecamp", "config.json")
-		loadHostsFromFile(cfg, globalPath)
+		loadProfilesFromFile(cfg, globalPath)
 	}
 
-	// Try local config
+	// Repo config (walk up to find .git, then .basecamp/config.json)
+	if dir, err := os.Getwd(); err == nil {
+		for {
+			gitPath := filepath.Join(dir, ".git")
+			if fi, err := os.Stat(gitPath); err == nil && fi.IsDir() {
+				repoConfig := filepath.Join(dir, ".basecamp", "config.json")
+				loadProfilesFromFile(cfg, repoConfig)
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// Local config
 	localPath := filepath.Join(".basecamp", "config.json")
-	loadHostsFromFile(cfg, localPath)
+	loadProfilesFromFile(cfg, localPath)
 
 	return cfg
 }
 
-// loadHostsFromFile loads hosts from a config file into cfg.
-func loadHostsFromFile(cfg *configForCompletion, path string) {
+// loadProfilesFromFile loads profiles from a config file into cfg.
+func loadProfilesFromFile(cfg *configForCompletion, path string) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: Path is from trusted config locations
 	if err != nil {
 		return
@@ -374,7 +394,7 @@ func loadHostsFromFile(cfg *configForCompletion, path string) {
 		return
 	}
 
-	for name, hostCfg := range fileCfg.Hosts {
-		cfg.Hosts[name] = hostCfg
+	for name, profileCfg := range fileCfg.Profiles {
+		cfg.Profiles[name] = profileCfg
 	}
 }

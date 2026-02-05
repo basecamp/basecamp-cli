@@ -182,7 +182,7 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 	assert.Empty(t, flags.Project, "Project should default to empty")
 	assert.Empty(t, flags.Account, "Account should default to empty")
 	assert.Empty(t, flags.Todolist, "Todolist should default to empty")
-	assert.Empty(t, flags.Host, "Host should default to empty")
+	assert.Empty(t, flags.Profile, "Profile should default to empty")
 	assert.Empty(t, flags.CacheDir, "CacheDir should default to empty")
 }
 

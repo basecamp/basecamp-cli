@@ -126,15 +126,15 @@ func PromptAndPersistTodolistID(todolistID string) (bool, error) {
 	})
 }
 
-// PersistDefaultHost is a convenience function for persisting a default host.
-func PersistDefaultHost(hostName, scope string) error {
-	return PersistValue("default_host", hostName, scope)
+// PersistDefaultProfile is a convenience function for persisting a default profile.
+func PersistDefaultProfile(profileName, scope string) error {
+	return PersistValue("default_profile", profileName, scope)
 }
 
-// PromptAndPersistDefaultHost prompts the user to save a default host.
-func PromptAndPersistDefaultHost(hostName string) (bool, error) {
+// PromptAndPersistDefaultProfile prompts the user to save a default profile.
+func PromptAndPersistDefaultProfile(profileName string) (bool, error) {
 	return PromptAndPersist(PersistOption{
-		Key:   "default_host",
-		Value: hostName,
+		Key:   "default_profile",
+		Value: profileName,
 	})
 }

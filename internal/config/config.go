@@ -17,9 +17,10 @@ type Config struct {
 	ProjectID  string `json:"project_id"`
 	TodolistID string `json:"todolist_id"`
 
-	// Host settings (multiple environments)
-	Hosts       map[string]*HostConfig `json:"hosts,omitempty"`
-	DefaultHost string                 `json:"default_host,omitempty"`
+	// Profile settings (named identity+environment bundles)
+	Profiles       map[string]*ProfileConfig `json:"profiles,omitempty"`
+	DefaultProfile string                    `json:"default_profile,omitempty"`
+	ActiveProfile  string                    `json:"-"` // Set at runtime, not persisted
 
 	// Auth settings
 	Scope string `json:"scope"`
@@ -35,10 +36,14 @@ type Config struct {
 	Sources map[string]string `json:"-"`
 }
 
-// HostConfig holds configuration for a specific host/environment.
-type HostConfig struct {
-	BaseURL  string `json:"base_url"`
-	ClientID string `json:"client_id,omitempty"`
+// ProfileConfig holds configuration for a named profile.
+type ProfileConfig struct {
+	BaseURL    string `json:"base_url"`
+	AccountID  string `json:"account_id,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+	TodolistID string `json:"todolist_id,omitempty"`
+	Scope      string `json:"scope,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
 }
 
 // Source indicates where a config value came from.
@@ -60,7 +65,7 @@ type FlagOverrides struct {
 	Account  string
 	Project  string
 	Todolist string
-	BaseURL  string
+	Profile  string
 	CacheDir string
 	Format   string
 }
@@ -105,10 +110,10 @@ func Load(overrides FlagOverrides) (*Config, error) {
 	}
 
 	// Load from environment
-	loadFromEnv(cfg)
+	LoadFromEnv(cfg)
 
 	// Apply flag overrides
-	applyOverrides(cfg, overrides)
+	ApplyOverrides(cfg, overrides)
 
 	return cfg, nil
 }
@@ -156,34 +161,48 @@ func loadFromFile(cfg *Config, path string, source Source) {
 		cfg.Format = v
 		cfg.Sources["format"] = string(source)
 	}
-	if v, ok := fileCfg["default_host"].(string); ok && v != "" {
-		cfg.DefaultHost = v
-		cfg.Sources["default_host"] = string(source)
+	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
+		cfg.DefaultProfile = v
+		cfg.Sources["default_profile"] = string(source)
 	}
-	if v, ok := fileCfg["hosts"].(map[string]any); ok {
-		if cfg.Hosts == nil {
-			cfg.Hosts = make(map[string]*HostConfig)
+	if v, ok := fileCfg["profiles"].(map[string]any); ok {
+		if cfg.Profiles == nil {
+			cfg.Profiles = make(map[string]*ProfileConfig)
 		}
-		for name, hostData := range v {
-			if hostMap, ok := hostData.(map[string]any); ok {
-				hostConfig := &HostConfig{}
-				if baseURL, ok := hostMap["base_url"].(string); ok && baseURL != "" {
-					hostConfig.BaseURL = baseURL
+		for name, profileData := range v {
+			if profileMap, ok := profileData.(map[string]any); ok {
+				profileCfg := &ProfileConfig{}
+				if baseURL, ok := profileMap["base_url"].(string); ok && baseURL != "" {
+					profileCfg.BaseURL = baseURL
 				} else {
-					// Skip hosts with empty or missing base_url
+					// Skip profiles with empty or missing base_url
 					continue
 				}
-				if clientID, ok := hostMap["client_id"].(string); ok {
-					hostConfig.ClientID = clientID
+				if accountID := getStringOrNumber(profileMap, "account_id"); accountID != "" {
+					profileCfg.AccountID = accountID
 				}
-				cfg.Hosts[name] = hostConfig
+				if projectID := getStringOrNumber(profileMap, "project_id"); projectID != "" {
+					profileCfg.ProjectID = projectID
+				}
+				if todolistID := getStringOrNumber(profileMap, "todolist_id"); todolistID != "" {
+					profileCfg.TodolistID = todolistID
+				}
+				if scope, ok := profileMap["scope"].(string); ok {
+					profileCfg.Scope = scope
+				}
+				if clientID, ok := profileMap["client_id"].(string); ok {
+					profileCfg.ClientID = clientID
+				}
+				cfg.Profiles[name] = profileCfg
 			}
 		}
-		cfg.Sources["hosts"] = string(source)
+		cfg.Sources["profiles"] = string(source)
 	}
 }
 
-func loadFromEnv(cfg *Config) {
+// LoadFromEnv loads configuration from environment variables.
+// Exported so root.go can re-apply after profile overlay.
+func LoadFromEnv(cfg *Config) {
 	if v := os.Getenv("BASECAMP_BASE_URL"); v != "" {
 		cfg.BaseURL = v
 		cfg.Sources["base_url"] = string(SourceEnv)
@@ -250,7 +269,9 @@ func getStringOrNumber(m map[string]any, key string) string {
 	}
 }
 
-func applyOverrides(cfg *Config, o FlagOverrides) {
+// ApplyOverrides applies non-empty flag overrides to cfg.
+// Exported so root.go can re-apply after profile overlay.
+func ApplyOverrides(cfg *Config, o FlagOverrides) {
 	if o.Account != "" {
 		cfg.AccountID = o.Account
 		cfg.Sources["account_id"] = string(SourceFlag)
@@ -263,10 +284,6 @@ func applyOverrides(cfg *Config, o FlagOverrides) {
 		cfg.TodolistID = o.Todolist
 		cfg.Sources["todolist_id"] = string(SourceFlag)
 	}
-	if o.BaseURL != "" {
-		cfg.BaseURL = o.BaseURL
-		cfg.Sources["base_url"] = string(SourceFlag)
-	}
 	if o.CacheDir != "" {
 		cfg.CacheDir = o.CacheDir
 		cfg.Sources["cache_dir"] = string(SourceFlag)
@@ -275,6 +292,53 @@ func applyOverrides(cfg *Config, o FlagOverrides) {
 		cfg.Format = o.Format
 		cfg.Sources["format"] = string(SourceFlag)
 	}
+}
+
+// ApplyProfile overlays profile values onto the config.
+//
+// This is the first pass of a two-pass precedence system:
+//
+//	Pass 1 (this method): Profile values unconditionally overwrite config fields.
+//	Pass 2 (caller):      LoadFromEnv + ApplyOverrides re-apply env vars and CLI
+//	                       flags, which take final precedence over profile values.
+//
+// The caller in root.go MUST call LoadFromEnv and ApplyOverrides after this
+// method to maintain the precedence chain: flags > env > profile > file > defaults.
+func (cfg *Config) ApplyProfile(name string) error {
+	if cfg.Profiles == nil {
+		return fmt.Errorf("no profiles configured")
+	}
+	p, ok := cfg.Profiles[name]
+	if !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+
+	cfg.ActiveProfile = name
+
+	// Unconditionally set profile values. Env/flag overrides are re-applied
+	// by the caller afterward to restore correct precedence.
+	if p.BaseURL != "" {
+		cfg.BaseURL = p.BaseURL
+		cfg.Sources["base_url"] = "profile"
+	}
+	if p.AccountID != "" {
+		cfg.AccountID = p.AccountID
+		cfg.Sources["account_id"] = "profile"
+	}
+	if p.ProjectID != "" {
+		cfg.ProjectID = p.ProjectID
+		cfg.Sources["project_id"] = "profile"
+	}
+	if p.TodolistID != "" {
+		cfg.TodolistID = p.TodolistID
+		cfg.Sources["todolist_id"] = "profile"
+	}
+	if p.Scope != "" {
+		cfg.Scope = p.Scope
+		cfg.Sources["scope"] = "profile"
+	}
+
+	return nil
 }
 
 // Path helpers
