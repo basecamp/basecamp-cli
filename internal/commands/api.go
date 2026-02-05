@@ -173,15 +173,9 @@ func newAPIDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			// Handle empty response (204 No Content)
-			data := resp.Data
-			if len(data) == 0 {
-				data = []byte("{}")
-			}
-
 			summary := fmt.Sprintf("DELETE %s", path)
 
-			return app.OK(data,
+			return app.OK(resp.Data,
 				output.WithSummary(summary),
 			)
 		},
