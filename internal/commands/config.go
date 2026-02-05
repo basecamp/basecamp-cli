@@ -208,6 +208,20 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
 			}
 
+			// Validate default_profile against configured profiles
+			if key == "default_profile" {
+				profiles, _ := configData["profiles"].(map[string]any)
+				if len(profiles) > 0 {
+					if _, ok := profiles[value]; !ok {
+						names := make([]string, 0, len(profiles))
+						for name := range profiles {
+							names = append(names, name)
+						}
+						return output.ErrUsage(fmt.Sprintf("profile %q not found (available: %s)", value, strings.Join(names, ", ")))
+					}
+				}
+			}
+
 			// Set value
 			valueOut := value
 			if key == "cache_enabled" {
