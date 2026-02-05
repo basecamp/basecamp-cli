@@ -14,8 +14,6 @@ import (
 
 // NewMessagetypesCmd creates the messagetypes command for managing message types.
 func NewMessagetypesCmd() *cobra.Command {
-	var project string
-
 	cmd := &cobra.Command{
 		Use:   "messagetypes",
 		Short: "Manage message types (categories)",
@@ -24,68 +22,40 @@ func NewMessagetypesCmd() *cobra.Command {
 Message types categorize messages on the message board. Each type has a name
 and an emoji icon that appears alongside messages of that type.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMessagetypesList(cmd, project)
+			return runMessagetypesList(cmd)
 		},
 	}
 
-	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
 	cmd.AddCommand(
-		newMessagetypesListCmd(&project),
-		newMessagetypesShowCmd(&project),
-		newMessagetypesCreateCmd(&project),
-		newMessagetypesUpdateCmd(&project),
-		newMessagetypesDeleteCmd(&project),
+		newMessagetypesListCmd(),
+		newMessagetypesShowCmd(),
+		newMessagetypesCreateCmd(),
+		newMessagetypesUpdateCmd(),
+		newMessagetypesDeleteCmd(),
 	)
 
 	return cmd
 }
 
-func newMessagetypesListCmd(project *string) *cobra.Command {
+func newMessagetypesListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List message types",
-		Long:  "List all message types in a project.",
+		Long:  "List all message types.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMessagetypesList(cmd, *project)
+			return runMessagetypesList(cmd)
 		},
 	}
 }
 
-func runMessagetypesList(cmd *cobra.Command, project string) error {
+func runMessagetypesList(cmd *cobra.Command) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project, with interactive fallback
-	projectID := project
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-	if err != nil {
-		return err
-	}
-
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
-	typesResult, err := app.Account().MessageTypes().List(cmd.Context(), bucketID)
+	typesResult, err := app.Account().MessageTypes().List(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -96,19 +66,19 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp messagetypes show <id> --in %s", resolvedProjectID),
+				Cmd:         "basecamp messagetypes show <id>",
 				Description: "View message type",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp messagetypes create \"Name\" --icon \"emoji\" --in %s", resolvedProjectID),
+				Cmd:         "basecamp messagetypes create \"Name\" --icon \"emoji\"",
 				Description: "Create message type",
 			},
 		),
 	)
 }
 
-func newMessagetypesShowCmd(project *string) *cobra.Command {
+func newMessagetypesShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show message type details",
@@ -127,32 +97,7 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message type ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			msgType, err := app.Account().MessageTypes().Get(cmd.Context(), bucketID, typeID)
+			msgType, err := app.Account().MessageTypes().Get(cmd.Context(), typeID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -162,17 +107,17 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp messagetypes update %s --name \"New Name\" --in %s", typeIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes update %s --name \"New Name\"", typeIDStr),
 						Description: "Update message type",
 					},
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("basecamp messagetypes delete %s --in %s", typeIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes delete %s", typeIDStr),
 						Description: "Delete message type",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp messagetypes --in %s", resolvedProjectID),
+						Cmd:         "basecamp messagetypes",
 						Description: "List message types",
 					},
 				),
@@ -181,7 +126,7 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 	}
 }
 
-func newMessagetypesCreateCmd(project *string) *cobra.Command {
+func newMessagetypesCreateCmd() *cobra.Command {
 	var name string
 	var icon string
 
@@ -210,37 +155,12 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--icon is required")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			req := &basecamp.CreateMessageTypeRequest{
 				Name: name,
 				Icon: icon,
 			}
 
-			msgType, err := app.Account().MessageTypes().Create(cmd.Context(), bucketID, req)
+			msgType, err := app.Account().MessageTypes().Create(cmd.Context(), req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -250,12 +170,12 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp messagetypes show %d --in %s", msgType.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes show %d", msgType.ID),
 						Description: "View message type",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp messagetypes --in %s", resolvedProjectID),
+						Cmd:         "basecamp messagetypes",
 						Description: "List message types",
 					},
 				),
@@ -269,7 +189,7 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func newMessagetypesUpdateCmd(project *string) *cobra.Command {
+func newMessagetypesUpdateCmd() *cobra.Command {
 	var name string
 	var icon string
 
@@ -295,37 +215,12 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Use --name or --icon to update")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			req := &basecamp.UpdateMessageTypeRequest{
 				Name: name,
 				Icon: icon,
 			}
 
-			msgType, err := app.Account().MessageTypes().Update(cmd.Context(), bucketID, typeID, req)
+			msgType, err := app.Account().MessageTypes().Update(cmd.Context(), typeID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -335,7 +230,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp messagetypes show %s --in %s", typeIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes show %s", typeIDStr),
 						Description: "View message type",
 					},
 				),
@@ -349,7 +244,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func newMessagetypesDeleteCmd(project *string) *cobra.Command {
+func newMessagetypesDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a message type",
@@ -368,32 +263,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid message type ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().MessageTypes().Delete(cmd.Context(), bucketID, typeID)
+			err = app.Account().MessageTypes().Delete(cmd.Context(), typeID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -403,7 +273,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp messagetypes --in %s", resolvedProjectID),
+						Cmd:         "basecamp messagetypes",
 						Description: "List message types",
 					},
 				),

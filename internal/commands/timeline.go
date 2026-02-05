@@ -125,12 +125,7 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		return err
 	}
 
-	projectID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
-	events, err := app.Account().Timeline().ProjectTimeline(cmd.Context(), projectID)
+	events, err := app.Account().Timeline().ProjectTimeline(cmd.Context())
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -446,17 +441,13 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 	} else if project != "" {
 		// Project timeline
-		resolvedProjectID, projectName, err := app.Names.ResolveProject(ctx, project)
+		_, projectName, err := app.Names.ResolveProject(ctx, project)
 		if err != nil {
 			return err
 		}
-		projectID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-		if err != nil {
-			return output.ErrUsage("Invalid project ID")
-		}
 		description = fmt.Sprintf("activity in %s", projectName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			return app.Account().Timeline().ProjectTimeline(ctx, projectID)
+			return app.Account().Timeline().ProjectTimeline(ctx)
 		}
 	} else {
 		// Account-wide timeline

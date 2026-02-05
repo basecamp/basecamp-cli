@@ -111,7 +111,7 @@ func (r *Resolver) fetchTodolists(ctx context.Context, projectID string) ([]base
 	}
 
 	// Fetch todolists using SDK
-	result, err := r.sdk.ForAccount(r.config.AccountID).Todolists().List(ctx, bucketID, todosetID, nil)
+	result, err := r.sdk.ForAccount(r.config.AccountID).Todolists().List(ctx, todosetID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch todolists: %w", err)
 	}

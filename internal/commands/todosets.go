@@ -91,18 +91,14 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		}
 	}
 
-	// Parse IDs as int64
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
+	// Parse todoset ID as int64
 	tsID, err := strconv.ParseInt(resolvedTodosetID, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid todoset ID")
 	}
 
 	// Use SDK to get todoset
-	todoset, err := app.Account().Todosets().Get(cmd.Context(), bucketID, tsID)
+	todoset, err := app.Account().Todosets().Get(cmd.Context(), tsID)
 	if err != nil {
 		return convertSDKError(err)
 	}

@@ -84,11 +84,6 @@ func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get message board ID
 	resolvedBoardIDStr, err := getMessageboardID(cmd, app, resolvedProjectID, boardIDStr)
 	if err != nil {
@@ -100,7 +95,7 @@ func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 		return output.ErrUsage("Invalid message board ID")
 	}
 
-	board, err := app.Account().MessageBoards().Get(cmd.Context(), bucketID, boardID)
+	board, err := app.Account().MessageBoards().Get(cmd.Context(), boardID)
 	if err != nil {
 		return convertSDKError(err)
 	}

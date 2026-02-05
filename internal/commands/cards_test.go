@@ -123,8 +123,7 @@ func TestCardsColumnColorRequiresColor(t *testing.T) {
 	// Configure app with project
 	app.Config.ProjectID = "123"
 
-	project := ""
-	cmd := newCardsColumnColorCmd(&project)
+	cmd := newCardsColumnColorCmd()
 
 	err := executeCommand(cmd, app, "456") // column ID but no --color
 	require.NotNil(t, err, "expected error, got nil")
@@ -193,8 +192,7 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	project := ""
-	cmd := newCardsStepUpdateCmd(&project)
+	cmd := newCardsStepUpdateCmd()
 
 	err := executeCommand(cmd, app, "456") // step ID but no update fields
 	require.NotNil(t, err, "expected error, got nil")
@@ -210,8 +208,7 @@ func TestCardsStepMoveRequiresCard(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	project := ""
-	cmd := newCardsStepMoveCmd(&project)
+	cmd := newCardsStepMoveCmd()
 
 	// Step ID and position but no card
 	err := executeCommand(cmd, app, "456", "--position", "1")
@@ -228,8 +225,7 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	project := ""
-	cmd := newCardsStepMoveCmd(&project)
+	cmd := newCardsStepMoveCmd()
 
 	// Step ID and card but no position
 	err := executeCommand(cmd, app, "456", "--card", "789")
@@ -301,8 +297,7 @@ func TestCardsColumnUpdateRequiresFields(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	project := ""
-	cmd := newCardsColumnUpdateCmd(&project)
+	cmd := newCardsColumnUpdateCmd()
 
 	err := executeCommand(cmd, app, "456") // column ID but no update fields
 	require.NotNil(t, err, "expected error, got nil")
@@ -408,40 +403,6 @@ func TestCardsColumnShowRequiresProject(t *testing.T) {
 
 	project := ""
 	cmd := newCardsColumnShowCmd(&project)
-
-	err := executeCommand(cmd, app, "456")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
-}
-
-// TestCardsStepCompleteRequiresProject tests that Project ID required for step complete.
-func TestCardsStepCompleteRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
-	// No project in config
-
-	project := ""
-	cmd := newCardsStepCompleteCmd(&project)
-
-	err := executeCommand(cmd, app, "456")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
-}
-
-// TestCardsStepUncompleteRequiresProject tests that Project ID required for step uncomplete.
-func TestCardsStepUncompleteRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
-	// No project in config
-
-	project := ""
-	cmd := newCardsStepUncompleteCmd(&project)
 
 	err := executeCommand(cmd, app, "456")
 	require.NotNil(t, err, "expected error, got nil")
@@ -818,31 +779,12 @@ func TestCardShortcutRequiresProject(t *testing.T) {
 	}
 }
 
-// TestCardsStepDeleteRequiresProject tests that project is required for step delete.
-func TestCardsStepDeleteRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
-	// No project in config
-	app.Config.ProjectID = ""
-
-	project := ""
-	cmd := newCardsStepDeleteCmd(&project)
-
-	err := executeCommand(cmd, app, "456") // step ID but no project
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
-}
-
 // TestCardsStepDeleteRequiresStepID tests that step ID is required for step delete.
 func TestCardsStepDeleteRequiresStepID(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	project := ""
-	cmd := newCardsStepDeleteCmd(&project)
+	cmd := newCardsStepDeleteCmd()
 
 	err := executeCommand(cmd, app) // no step ID
 	require.NotNil(t, err, "expected error, got nil")

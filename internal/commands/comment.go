@@ -17,7 +17,6 @@ import (
 
 // NewCommentsCmd creates the comments command group (list/show/update).
 func NewCommentsCmd() *cobra.Command {
-	var project string
 	var recordingID string
 	var limit, page int
 	var all bool
@@ -28,27 +27,25 @@ func NewCommentsCmd() *cobra.Command {
 		Long:  "List, show, and update comments on recordings.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runCommentsList(cmd, project, recordingID, limit, page, all)
+			return runCommentsList(cmd, recordingID, limit, page, all)
 		},
 	}
 
-	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
-		newCommentsListCmd(&project),
-		newCommentsShowCmd(&project),
-		newCommentsUpdateCmd(&project),
+		newCommentsListCmd(),
+		newCommentsShowCmd(),
+		newCommentsUpdateCmd(),
 	)
 
 	return cmd
 }
 
-func newCommentsListCmd(project *string) *cobra.Command {
+func newCommentsListCmd() *cobra.Command {
 	var recordingID string
 	var limit, page int
 	var all bool
@@ -58,7 +55,7 @@ func newCommentsListCmd(project *string) *cobra.Command {
 		Short: "List comments on a recording",
 		Long:  "List all comments on a recording.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCommentsList(cmd, *project, recordingID, limit, page, all)
+			return runCommentsList(cmd, recordingID, limit, page, all)
 		},
 	}
 
@@ -71,7 +68,7 @@ func newCommentsListCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, page int, all bool) error {
+func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Validate flag combinations
@@ -90,40 +87,11 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		return output.ErrUsage("Recording ID required")
 	}
 
-	// Extract recording ID and project from URL if --on is a URL
-	var urlProjectID string
-	recordingID, urlProjectID = extractWithProject(recordingID)
+	// Extract recording ID from URL if --on is a URL
+	recordingID = extractID(recordingID)
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
-	}
-
-	// Resolve project - URL > flag > config, with interactive fallback
-	projectID := project
-	if projectID == "" && urlProjectID != "" {
-		projectID = urlProjectID
-	}
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-	if err != nil {
-		return err
-	}
-
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
 	}
 
 	recID, err := strconv.ParseInt(recordingID, 10, 64)
@@ -142,7 +110,7 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		opts.Page = page
 	}
 
-	commentsResult, err := app.Account().Comments().List(cmd.Context(), bucketID, recID, opts)
+	commentsResult, err := app.Account().Comments().List(cmd.Context(), recID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -154,12 +122,12 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
-				Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s --in %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s", recordingID),
 				Description: "Add comment",
 			},
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp comments show <id> --in %s", resolvedProjectID),
+				Cmd:         "basecamp comments show <id>",
 				Description: "Show comment",
 			},
 		),
@@ -173,14 +141,14 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 	return app.OK(comments, respOpts...)
 }
 
-func newCommentsShowCmd(project *string) *cobra.Command {
+func newCommentsShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show comment details",
 		Long: `Display detailed information about a comment.
 
 You can pass either a comment ID or a Basecamp URL:
-  basecamp comments show 789 --in my-project
+  basecamp comments show 789
   basecamp comments show https://3.basecamp.com/123/buckets/456/todos/111#__recording_789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -189,44 +157,16 @@ You can pass either a comment ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract comment ID and project from URL if provided
+			// Extract comment ID from URL if provided
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
-			commentIDStr, urlProjectID := extractCommentWithProject(args[0])
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+			commentIDStr, _ := extractCommentWithProject(args[0])
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid comment ID")
 			}
 
-			comment, err := app.Account().Comments().Get(cmd.Context(), bucketID, commentID)
+			comment, err := app.Account().Comments().Get(cmd.Context(), commentID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -241,7 +181,7 @@ You can pass either a comment ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp comments update %s --content <text> --in %s", commentIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp comments update %s --content <text>", commentIDStr),
 						Description: "Update comment",
 					},
 				),
@@ -251,7 +191,7 @@ You can pass either a comment ID or a Basecamp URL:
 	return cmd
 }
 
-func newCommentsUpdateCmd(project *string) *cobra.Command {
+func newCommentsUpdateCmd() *cobra.Command {
 	var content string
 
 	cmd := &cobra.Command{
@@ -260,7 +200,7 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing comment's content.
 
 You can pass either a comment ID or a Basecamp URL:
-  basecamp comments update 789 --content "new text" --in my-project
+  basecamp comments update 789 --content "new text"
   basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 --content "new text"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -269,40 +209,12 @@ You can pass either a comment ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract comment ID and project from URL if provided
+			// Extract comment ID from URL if provided
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
-			commentIDStr, urlProjectID := extractCommentWithProject(args[0])
+			commentIDStr, _ := extractCommentWithProject(args[0])
 
 			if content == "" {
 				return output.ErrUsage("--content is required")
-			}
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
 			}
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
@@ -315,7 +227,7 @@ You can pass either a comment ID or a Basecamp URL:
 				Content: richtext.MarkdownToHTML(content),
 			}
 
-			comment, err := app.Account().Comments().Update(cmd.Context(), bucketID, commentID, req)
+			comment, err := app.Account().Comments().Update(cmd.Context(), commentID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -325,7 +237,7 @@ You can pass either a comment ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp comments show %s --in %s", commentIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp comments show %s", commentIDStr),
 						Description: "View comment",
 					},
 				),
@@ -343,7 +255,6 @@ You can pass either a comment ID or a Basecamp URL:
 func NewCommentCmd() *cobra.Command {
 	var content string
 	var recordingIDs []string
-	var project string
 
 	cmd := &cobra.Command{
 		Use:   "comment",
@@ -363,44 +274,9 @@ Supports batch commenting on multiple recordings at once.`,
 				return err
 			}
 
-			// Extract URLs from --on flags before project resolution
-			var urlProjectID string
-			if len(recordingIDs) > 0 {
-				// Check first recording for URL project
-				_, urlProjectID = extractWithProject(recordingIDs[0])
-			}
-
-			// Resolve project - URL > flag > config, with interactive fallback
-			projectID := project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// If no recording specified, try interactive resolution
 			if len(recordingIDs) == 0 {
-				target, err := app.Resolve().Comment(cmd.Context(), "", resolvedProjectID)
+				target, err := app.Resolve().Comment(cmd.Context(), "", "")
 				if err != nil {
 					return err
 				}
@@ -437,7 +313,7 @@ Supports batch commenting on multiple recordings at once.`,
 					continue
 				}
 
-				comment, createErr := app.Account().Comments().Create(cmd.Context(), bucketID, recordingID, req)
+				comment, createErr := app.Account().Comments().Create(cmd.Context(), recordingID, req)
 				if createErr != nil {
 					failed = append(failed, recordingIDStr)
 					if firstAPIErr == nil {
@@ -488,21 +364,12 @@ Supports batch commenting on multiple recordings at once.`,
 
 			return app.OK(result,
 				output.WithSummary(summary),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProjectID),
-						Description: "List todos",
-					},
-				),
 			)
 		},
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Comment content (required)")
 	cmd.Flags().StringSliceVarP(&recordingIDs, "on", "r", nil, "Recording ID(s) to comment on (required)")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	// Note: Required flags are validated manually in RunE for better error messages
 
 	return cmd

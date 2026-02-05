@@ -176,16 +176,12 @@ func NewTodoCmd() *cobra.Command {
 				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			projectID, err := strconv.ParseInt(project, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
 			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			todo, err := app.Account().Todos().Create(cmd.Context(), projectID, todolistID, req)
+			todo, err := app.Account().Todos().Create(cmd.Context(), todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -196,7 +192,7 @@ func NewTodoCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("basecamp todos show %d --project %s", todo.ID, project),
+						Cmd:         fmt.Sprintf("basecamp todos show %d", todo.ID),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
@@ -339,10 +335,6 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		return err
 	}
 
-	projectID, err := strconv.ParseInt(project, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
 	todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid todolist ID")
@@ -363,7 +355,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		opts.Page = page
 	}
 
-	todosResult, err := app.Account().Todos().List(cmd.Context(), projectID, todolistID, opts)
+	todosResult, err := app.Account().Todos().List(cmd.Context(), todolistID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -406,12 +398,6 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
-	// Parse project ID
-	bucketID, err := strconv.ParseInt(project, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get todoset ID from project dock
 	todosetIDStr, err := getTodosetID(cmd, app, project)
 	if err != nil {
@@ -423,7 +409,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 	}
 
 	// Get todolists via SDK
-	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), todosetID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -439,7 +425,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 	// Aggregate todos from all todolists
 	var allTodos []basecamp.Todo
 	for _, tl := range todolistsResult.Todolists {
-		todosResult, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, todoOpts)
+		todosResult, err := app.Account().Todos().List(cmd.Context(), tl.ID, todoOpts)
 		if err != nil {
 			continue // Skip failed todolists
 		}
@@ -518,16 +504,14 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 }
 
 func newTodosShowCmd() *cobra.Command {
-	var project string
-
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show todo details",
 		Long: `Display detailed information about a todo.
 
-You can pass either a todo ID or a Basecamp URL:
-  basecamp todos show 789 --in my-project
-  basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
+	You can pass either a todo ID or a Basecamp URL:
+	  basecamp todos show 789
+	  basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -539,43 +523,15 @@ You can pass either a todo ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			todoIDStr, urlProjectID := extractWithProject(args[0])
-
-			// Use project from: URL > flag > config, with interactive fallback
-			if project == "" && urlProjectID != "" {
-				project = urlProjectID
-			}
-			if project == "" {
-				project = app.Flags.Project
-			}
-			if project == "" {
-				project = app.Config.ProjectID
-			}
-			if project == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				project = app.Config.ProjectID
-			}
-
-			// Resolve project name to ID
-			resolvedProject, _, err := app.Names.ResolveProject(cmd.Context(), project)
-			if err != nil {
-				return err
-			}
-
-			projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+			// Extract ID from URL if provided
+			todoIDStr := extractID(args[0])
 
 			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			todo, err := app.Account().Todos().Get(cmd.Context(), projectID, todoID)
+			todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -597,14 +553,6 @@ You can pass either a todo ID or a Basecamp URL:
 			)
 		},
 	}
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
@@ -704,16 +652,12 @@ func newTodosCreateCmd() *cobra.Command {
 				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			projectID, err := strconv.ParseInt(project, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
 			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todolist ID")
 			}
 
-			todo, err := app.Account().Todos().Create(cmd.Context(), projectID, todolistID, req)
+			todo, err := app.Account().Todos().Create(cmd.Context(), todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -724,7 +668,7 @@ func newTodosCreateCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("basecamp todos show %d --project %s", todo.ID, project),
+						Cmd:         fmt.Sprintf("basecamp todos show %d", todo.ID),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
@@ -761,62 +705,42 @@ func newTodosCreateCmd() *cobra.Command {
 }
 
 func newTodosCompleteCmd() *cobra.Command {
-	var project string
-
 	cmd := &cobra.Command{
 		Use:   "complete <id|url> [id|url...]",
 		Short: "Complete todo(s)",
 		Long: `Mark one or more todos as completed.
 
-You can pass either todo IDs or Basecamp URLs:
-  basecamp todos complete 789 --in my-project
-  basecamp todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
+	You can pass either todo IDs or Basecamp URLs:
+	  basecamp todos complete 789
+	  basecamp todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return completeTodos(cmd, args, project)
+			return completeTodos(cmd, args)
 		},
 	}
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
 
 func newDoneCmd() *cobra.Command {
-	var project string
-
 	cmd := &cobra.Command{
 		Use:   "done <id|url> [id|url...]",
 		Short: "Complete todo(s)",
 		Long: `Mark one or more todos as completed.
 
-You can pass either todo IDs or Basecamp URLs:
-  basecamp done 789 --in my-project
-  basecamp done https://3.basecamp.com/123/buckets/456/todos/789`,
+	You can pass either todo IDs or Basecamp URLs:
+	  basecamp done 789
+	  basecamp done https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return completeTodos(cmd, args, project)
+			return completeTodos(cmd, args)
 		},
 	}
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
 
-func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
+func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -829,39 +753,6 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	// Extract IDs from URLs (handles both plain IDs and URLs)
 	extractedIDs := extractIDs(todoIDs)
 
-	// Try to get project from first URL argument if not specified
-	if project == "" && len(todoIDs) > 0 {
-		_, urlProjectID := extractWithProject(todoIDs[0])
-		if urlProjectID != "" {
-			project = urlProjectID
-		}
-	}
-
-	// Use project from flag or config, with interactive fallback
-	if project == "" {
-		project = app.Flags.Project
-	}
-	if project == "" {
-		project = app.Config.ProjectID
-	}
-	if project == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		project = app.Config.ProjectID
-	}
-
-	// Resolve project name to ID
-	resolvedProject, _, err := app.Names.ResolveProject(cmd.Context(), project)
-	if err != nil {
-		return err
-	}
-
-	projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	var completed []string
 	var failed []string
 
@@ -871,7 +762,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 			failed = append(failed, todoIDStr)
 			continue
 		}
-		err = app.Account().Todos().Complete(cmd.Context(), projectID, todoID)
+		err = app.Account().Todos().Complete(cmd.Context(), todoID)
 		if err != nil {
 			failed = append(failed, todoIDStr)
 		} else {
@@ -893,11 +784,6 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
-				Action:      "list",
-				Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProject),
-				Description: "List remaining todos",
-			},
-			output.Breadcrumb{
 				Action:      "reopen",
 				Cmd:         fmt.Sprintf("basecamp reopen %s", todoIDs[0]),
 				Description: "Reopen a todo",
@@ -907,30 +793,20 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 }
 
 func newTodosUncompleteCmd() *cobra.Command {
-	var project string
-
 	cmd := &cobra.Command{
 		Use:     "uncomplete <id|url> [id|url...]",
 		Aliases: []string{"reopen"},
 		Short:   "Reopen todo(s)",
 		Long: `Reopen one or more completed todos.
 
-You can pass either todo IDs or Basecamp URLs:
-  basecamp todos uncomplete 789 --in my-project
-  basecamp todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
+	You can pass either todo IDs or Basecamp URLs:
+	  basecamp todos uncomplete 789
+	  basecamp todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return reopenTodos(cmd, args, project)
+			return reopenTodos(cmd, args)
 		},
 	}
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
@@ -1047,12 +923,6 @@ Examples:
 				)
 			}
 
-			// Parse project ID for SDK calls
-			bucketID, err := strconv.ParseInt(project, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Execute actions
 			result := SweepResult{
 				Count:          len(todoIDs),
@@ -1066,7 +936,7 @@ Examples:
 				// Add comment if specified
 				if comment != "" {
 					req := &basecamp.CreateCommentRequest{Content: comment}
-					_, commentErr := app.Account().Comments().Create(cmd.Context(), bucketID, todoID, req)
+					_, commentErr := app.Account().Comments().Create(cmd.Context(), todoID, req)
 					if commentErr != nil {
 						result.CommentFailed = append(result.CommentFailed, todoID)
 					} else {
@@ -1076,7 +946,7 @@ Examples:
 
 				// Complete if specified
 				if complete {
-					completeErr := app.Account().Todos().Complete(cmd.Context(), bucketID, todoID)
+					completeErr := app.Account().Todos().Complete(cmd.Context(), todoID)
 					if completeErr != nil {
 						result.CompleteFailed = append(result.CompleteFailed, todoID)
 					} else {
@@ -1136,12 +1006,6 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
-	// Parse project ID
-	bucketID, err := strconv.ParseInt(project, 10, 64)
-	if err != nil {
-		return nil, output.ErrUsage("Invalid project ID")
-	}
-
 	// Get todoset ID from project dock
 	todosetIDStr, err := getTodosetID(cmd, app, project)
 	if err != nil {
@@ -1153,7 +1017,7 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 	}
 
 	// Get todolists via SDK
-	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, nil)
+	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), todosetID, nil)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -1161,7 +1025,7 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 	// Aggregate todos from all todolists
 	var allTodos []basecamp.Todo
 	for _, tl := range todolistsResult.Todolists {
-		todosResult, err := app.Account().Todos().List(cmd.Context(), bucketID, tl.ID, nil)
+		todosResult, err := app.Account().Todos().List(cmd.Context(), tl.ID, nil)
 		if err != nil {
 			continue // Skip failed todolists
 		}
@@ -1209,34 +1073,24 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 }
 
 func newReopenCmd() *cobra.Command {
-	var project string
-
 	cmd := &cobra.Command{
 		Use:   "reopen <id|url> [id|url...]",
 		Short: "Reopen todo(s)",
 		Long: `Reopen one or more completed todos.
 
-You can pass either todo IDs or Basecamp URLs:
-  basecamp reopen 789 --in my-project
-  basecamp reopen https://3.basecamp.com/123/buckets/456/todos/789`,
+	You can pass either todo IDs or Basecamp URLs:
+	  basecamp reopen 789
+	  basecamp reopen https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return reopenTodos(cmd, args, project)
+			return reopenTodos(cmd, args)
 		},
 	}
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }
 
-func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
+func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -1249,39 +1103,6 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 	// Extract IDs from URLs (handles both plain IDs and URLs)
 	extractedIDs := extractIDs(todoIDs)
 
-	// Try to get project from first URL argument if not specified
-	if project == "" && len(todoIDs) > 0 {
-		_, urlProjectID := extractWithProject(todoIDs[0])
-		if urlProjectID != "" {
-			project = urlProjectID
-		}
-	}
-
-	// Use project from flag or config, with interactive fallback
-	if project == "" {
-		project = app.Flags.Project
-	}
-	if project == "" {
-		project = app.Config.ProjectID
-	}
-	if project == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		project = app.Config.ProjectID
-	}
-
-	// Resolve project name to ID
-	resolvedProject, _, err := app.Names.ResolveProject(cmd.Context(), project)
-	if err != nil {
-		return err
-	}
-
-	projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	var reopened []string
 	var failed []string
 
@@ -1291,7 +1112,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 			failed = append(failed, todoIDStr)
 			continue
 		}
-		err = app.Account().Todos().Uncomplete(cmd.Context(), projectID, todoID)
+		err = app.Account().Todos().Uncomplete(cmd.Context(), todoID)
 		if err != nil {
 			failed = append(failed, todoIDStr)
 		} else {
@@ -1313,11 +1134,6 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
-				Action:      "list",
-				Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProject),
-				Description: "List todos",
-			},
-			output.Breadcrumb{
 				Action:      "complete",
 				Cmd:         fmt.Sprintf("basecamp done %s", todoIDs[0]),
 				Description: "Complete again",
@@ -1327,7 +1143,6 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 }
 
 func newTodosPositionCmd() *cobra.Command {
-	var project string
 	var position int
 
 	cmd := &cobra.Command{
@@ -1337,7 +1152,7 @@ func newTodosPositionCmd() *cobra.Command {
 		Long: `Reorder a todo within its todolist. Position is 1-based (1 = top).
 
 You can pass either a todo ID or a Basecamp URL:
-  basecamp todos position 789 --to 1 --in my-project
+  basecamp todos position 789 --to 1
   basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1354,43 +1169,15 @@ You can pass either a todo ID or a Basecamp URL:
 				return output.ErrUsage("--to is required (1 = top)")
 			}
 
-			// Extract ID and project from URL if provided
-			todoIDStr, urlProjectID := extractWithProject(args[0])
-
-			// Use project from: URL > flag > config, with interactive fallback
-			if project == "" && urlProjectID != "" {
-				project = urlProjectID
-			}
-			if project == "" {
-				project = app.Flags.Project
-			}
-			if project == "" {
-				project = app.Config.ProjectID
-			}
-			if project == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				project = app.Config.ProjectID
-			}
-
-			// Resolve project name to ID
-			resolvedProject, _, err := app.Names.ResolveProject(cmd.Context(), project)
-			if err != nil {
-				return err
-			}
-
-			projectID, err := strconv.ParseInt(resolvedProject, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+			// Extract ID from URL if provided
+			todoIDStr := extractID(args[0])
 
 			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			err = app.Account().Todos().Reposition(cmd.Context(), projectID, todoID, position)
+			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1400,29 +1187,17 @@ You can pass either a todo ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp todos show %d --in %s", todoID, resolvedProject),
+						Cmd:         fmt.Sprintf("basecamp todos show %d", todoID),
 						Description: "View todo",
-					},
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProject),
-						Description: "List todos",
 					},
 				),
 			)
 		},
 	}
 
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
 	_ = cmd.MarkFlagRequired("to")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
 }

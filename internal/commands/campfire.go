@@ -149,17 +149,13 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
 	campfireIDInt, err := strconv.ParseInt(campfireIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid campfire ID")
 	}
 
 	// Get campfire details using SDK
-	campfire, err := app.Account().Campfires().Get(cmd.Context(), bucketID, campfireIDInt)
+	campfire, err := app.Account().Campfires().Get(cmd.Context(), campfireIDInt)
 	if err != nil {
 		return err
 	}
@@ -240,17 +236,13 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		}
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
 	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid campfire ID")
 	}
 
 	// Get recent messages (lines) using SDK
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), bucketID, campfireIDInt)
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt)
 	if err != nil {
 		return err
 	}
@@ -346,10 +338,6 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 		}
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
 	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid campfire ID")
@@ -360,7 +348,7 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 	if contentType != "" {
 		opts = &basecamp.CreateLineOptions{ContentType: contentType}
 	}
-	line, err := app.Account().Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content, opts)
+	line, err := app.Account().Campfires().CreateLine(cmd.Context(), campfireIDInt, content, opts)
 	if err != nil {
 		return err
 	}
@@ -436,10 +424,6 @@ You can pass either a line ID or a Basecamp line URL:
 				}
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
 			campfireIDInt, err := strconv.ParseInt(effectiveCampfireID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid campfire ID")
@@ -450,7 +434,7 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Get line using SDK
-			line, err := app.Account().Campfires().GetLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
+			line, err := app.Account().Campfires().GetLine(cmd.Context(), campfireIDInt, lineIDInt)
 			if err != nil {
 				return err
 			}
@@ -532,10 +516,6 @@ You can pass either a line ID or a Basecamp line URL:
 				}
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
 			campfireIDInt, err := strconv.ParseInt(effectiveCampfireID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid campfire ID")
@@ -546,7 +526,7 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Delete line using SDK
-			err = app.Account().Campfires().DeleteLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
+			err = app.Account().Campfires().DeleteLine(cmd.Context(), campfireIDInt, lineIDInt)
 			if err != nil {
 				return err
 			}

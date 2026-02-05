@@ -122,11 +122,7 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 		return err
 	}
 
-	// Parse IDs as int64
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
+	// Parse todoset ID as int64
 	todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid todoset ID")
@@ -144,7 +140,7 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 	}
 
 	// Get todolists via SDK
-	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), bucketID, todosetID, opts)
+	todolistsResult, err := app.Account().Todolists().List(cmd.Context(), todosetID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -220,18 +216,14 @@ You can pass either a todolist ID or a Basecamp URL:
 				return err
 			}
 
-			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+			// Parse todolist ID as int64
 			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todolist ID")
 			}
 
 			// Get todolist via SDK
-			todolist, err := app.Account().Todolists().Get(cmd.Context(), bucketID, todolistID)
+			todolist, err := app.Account().Todolists().Get(cmd.Context(), todolistID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -304,11 +296,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+			// Parse todoset ID as int64
 			todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todoset ID")
@@ -321,7 +309,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 			}
 
 			// Create todolist via SDK
-			todolist, err := app.Account().Todolists().Create(cmd.Context(), bucketID, todosetID, req)
+			todolist, err := app.Account().Todolists().Create(cmd.Context(), todosetID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -406,11 +394,7 @@ You can pass either a todolist ID or a Basecamp URL:
 				return err
 			}
 
-			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+			// Parse todolist ID as int64
 			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todolist ID")
@@ -423,7 +407,7 @@ You can pass either a todolist ID or a Basecamp URL:
 			}
 
 			// Update todolist via SDK
-			todolist, err := app.Account().Todolists().Update(cmd.Context(), bucketID, todolistID, req)
+			todolist, err := app.Account().Todolists().Update(cmd.Context(), todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

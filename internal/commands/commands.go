@@ -54,7 +54,6 @@ func commandCategories() []CommandCategory {
 				{Name: "comment", Category: "shortcut", Description: "Add a comment"},
 				{Name: "assign", Category: "shortcut", Description: "Assign a recording"},
 				{Name: "unassign", Category: "shortcut", Description: "Remove assignment"},
-				{Name: "clock", Category: "shortcut", Description: "Log time"},
 				{Name: "react", Category: "shortcut", Description: "Boost a recording"},
 			},
 		},
@@ -71,7 +70,7 @@ func commandCategories() []CommandCategory {
 			Name: "Scheduling & Time",
 			Commands: []CommandInfo{
 				{Name: "schedule", Category: "scheduling", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},
-				{Name: "timesheet", Category: "scheduling", Description: "Manage time tracking", Actions: []string{"report", "project", "recording", "entry show", "entry create", "entry update", "entry trash"}},
+				{Name: "timesheet", Category: "scheduling", Description: "Manage time tracking", Actions: []string{"report", "project", "recording"}},
 				{Name: "checkins", Category: "scheduling", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
 				{Name: "timeline", Category: "scheduling", Description: "View activity timelines", Actions: []string{}},
 				{Name: "reports", Category: "scheduling", Description: "View reports", Actions: []string{"assignable", "assigned", "overdue", "schedule"}},

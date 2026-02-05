@@ -15,21 +15,20 @@ import (
 // NewShowCmd creates the show command for viewing any recording.
 func NewShowCmd() *cobra.Command {
 	var recordType string
-	var project string
 
 	cmd := &cobra.Command{
 		Use:   "show [type] <id|url>",
 		Short: "Show any recording by ID",
 		Long: `Show details of any Basecamp recording by ID or URL.
 
-Types: todo, todolist, message, comment, card, card-table, document,
-       schedule-entry, checkin, forward, upload
+	Types: todo, todolist, message, comment, card, card-table, document,
+	       schedule-entry, checkin, forward, upload
 
-If no type specified, uses generic recording lookup.
+	If no type specified, uses generic recording lookup.
 
-You can also pass a Basecamp URL directly:
-  basecamp show https://3.basecamp.com/123/buckets/456/todos/789
-  basecamp show todo 789 --in my-project`,
+	You can also pass a Basecamp URL directly:
+	  basecamp show https://3.basecamp.com/123/buckets/456/todos/789
+	  basecamp show todo 789`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -49,9 +48,6 @@ You can also pass a Basecamp URL directly:
 			// Check if the id is a URL and extract components
 			if parsed := urlarg.Parse(id); parsed != nil {
 				id = parsed.RecordingID
-				if project == "" && parsed.ProjectID != "" {
-					project = parsed.ProjectID
-				}
 				// Auto-detect type from URL if not specified
 				if recordType == "" && parsed.Type != "" {
 					recordType = parsed.Type
@@ -70,47 +66,26 @@ You can also pass a Basecamp URL directly:
 				return err
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			// Resolve project name to ID if needed
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
 			// Determine endpoint based on type
 			var endpoint string
 			switch recordType {
 			case "todo", "todos":
-				endpoint = fmt.Sprintf("/buckets/%s/todos/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/todos/%s.json", id)
 			case "todolist", "todolists":
-				endpoint = fmt.Sprintf("/buckets/%s/todolists/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/todolists/%s.json", id)
 			case "message", "messages":
-				endpoint = fmt.Sprintf("/buckets/%s/messages/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/messages/%s.json", id)
 			case "comment", "comments":
-				endpoint = fmt.Sprintf("/buckets/%s/comments/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/comments/%s.json", id)
 			case "card", "cards":
-				endpoint = fmt.Sprintf("/buckets/%s/card_tables/cards/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/card_tables/cards/%s.json", id)
 			case "card-table", "card_table", "cardtable":
-				endpoint = fmt.Sprintf("/buckets/%s/card_tables/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/card_tables/%s.json", id)
 			case "document", "documents":
-				endpoint = fmt.Sprintf("/buckets/%s/documents/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/documents/%s.json", id)
 			case "", "recording", "recordings":
 				// Generic recording lookup
-				endpoint = fmt.Sprintf("/buckets/%s/recordings/%s.json", resolvedProjectID, id)
+				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 			default:
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
@@ -174,8 +149,6 @@ You can also pass a Basecamp URL directly:
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type (todo, todolist, message, comment, card, card-table, document)")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	return cmd
 }

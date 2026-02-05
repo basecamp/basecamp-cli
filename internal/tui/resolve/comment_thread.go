@@ -138,13 +138,13 @@ func FetchCommentThread(ctx context.Context, r *Resolver, projectID, recordingID
 	accountClient := r.sdk.ForAccount(r.config.AccountID)
 
 	// Fetch the recording
-	recording, err := accountClient.Recordings().Get(ctx, projectID, recordingID)
+	recording, err := accountClient.Recordings().Get(ctx, recordingID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch recording: %w", err)
 	}
 
 	// Fetch comments
-	commentsResult, err := accountClient.Comments().List(ctx, projectID, recordingID, nil)
+	commentsResult, err := accountClient.Comments().List(ctx, recordingID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch comments: %w", err)
 	}

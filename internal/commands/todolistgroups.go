@@ -45,8 +45,8 @@ Todolist groups allow you to organize todolists into collapsible sections.`,
 		newTodolistgroupsListCmd(&project, &todolist),
 		newTodolistgroupsShowCmd(&project),
 		newTodolistgroupsCreateCmd(&project, &todolist),
-		newTodolistgroupsUpdateCmd(&project),
-		newTodolistgroupsPositionCmd(&project),
+		newTodolistgroupsUpdateCmd(),
+		newTodolistgroupsPositionCmd(),
 	)
 
 	return cmd
@@ -109,17 +109,13 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	}
 
 	// Parse IDs as int64
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
 	todolistID, err := strconv.ParseInt(resolvedTodolistID, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid todolist ID")
 	}
 
 	// Get groups via SDK
-	groupsResult, err := app.Account().TodolistGroups().List(cmd.Context(), bucketID, todolistID)
+	groupsResult, err := app.Account().TodolistGroups().List(cmd.Context(), todolistID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -180,17 +176,14 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 			}
 
 			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+
 			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid group ID")
 			}
 
 			// Get group via SDK
-			group, err := app.Account().TodolistGroups().Get(cmd.Context(), bucketID, groupID)
+			group, err := app.Account().TodolistGroups().Get(cmd.Context(), groupID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -268,10 +261,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 			}
 
 			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
+
 			todolistID, err := strconv.ParseInt(resolvedTodolistID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todolist ID")
@@ -283,7 +273,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 			}
 
 			// Create group via SDK
-			group, err := app.Account().TodolistGroups().Create(cmd.Context(), bucketID, todolistID, req)
+			group, err := app.Account().TodolistGroups().Create(cmd.Context(), todolistID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -307,7 +297,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 	return cmd
 }
 
-func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
+func newTodolistgroupsUpdateCmd() *cobra.Command {
 	var name string
 
 	cmd := &cobra.Command{
@@ -331,31 +321,6 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--name is required")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
 			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid group ID")
@@ -367,7 +332,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 			}
 
 			// Update group via SDK
-			group, err := app.Account().TodolistGroups().Update(cmd.Context(), bucketID, groupID, req)
+			group, err := app.Account().TodolistGroups().Update(cmd.Context(), groupID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -384,7 +349,7 @@ func newTodolistgroupsUpdateCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
+func newTodolistgroupsPositionCmd() *cobra.Command {
 	var position int
 
 	cmd := &cobra.Command{
@@ -408,38 +373,13 @@ func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--position is required (1-based)")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			// Parse IDs as int64
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
 			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid group ID")
 			}
 
 			// Reposition group via SDK
-			err = app.Account().TodolistGroups().Reposition(cmd.Context(), bucketID, groupID, position)
+			err = app.Account().TodolistGroups().Reposition(cmd.Context(), groupID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}
