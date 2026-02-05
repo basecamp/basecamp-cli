@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -12,7 +14,6 @@ import (
 	"github.com/basecamp/bcq/internal/commands"
 	"github.com/basecamp/bcq/internal/completion"
 	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/hostutil"
 	"github.com/basecamp/bcq/internal/output"
 	"github.com/basecamp/bcq/internal/tui"
 	"github.com/basecamp/bcq/internal/version"
@@ -37,7 +38,7 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
-			// Load configuration first (without host override to access hosts map)
+			// Load configuration (without profile-specific overrides first)
 			cfg, err := config.Load(config.FlagOverrides{
 				Account:  flags.Account,
 				Project:  flags.Project,
@@ -48,21 +49,26 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 
-			// Resolve host: check if --host matches a configured host name first,
-			// then fall back to URL normalization
-			baseURL := resolveHostFlag(flags.Host, cfg)
-			if baseURL != "" {
-				cfg.BaseURL = baseURL
-				cfg.Sources["base_url"] = string(config.SourceFlag)
-			} else if flags.Host == "" {
-				// No explicit host - try interactive resolution if multiple hosts configured
-				resolved, err := resolveHost(cfg, flags)
-				if err != nil {
+			// Resolve profile
+			profileName, err := resolveProfile(cfg, flags)
+			if err != nil {
+				return err
+			}
+			if profileName != "" {
+				if err := cfg.ApplyProfile(profileName); err != nil {
 					return err
 				}
-				if resolved != nil {
-					cfg.BaseURL = resolved.URL
-					cfg.Sources["base_url"] = string(resolved.Source)
+				// Re-apply env and flag overrides (they take precedence over profile values)
+				config.LoadFromEnv(cfg)
+				config.ApplyOverrides(cfg, config.FlagOverrides{
+					Account:  flags.Account,
+					Project:  flags.Project,
+					Todolist: flags.Todolist,
+					CacheDir: flags.CacheDir,
+				})
+				// Profile-scoped cache (only if cache dir was not explicitly set via flag)
+				if flags.CacheDir == "" {
+					cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 				}
 			}
 
@@ -94,9 +100,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&flags.Project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVarP(&flags.Account, "account", "a", "", "Account ID")
 	cmd.PersistentFlags().StringVar(&flags.Todolist, "todolist", "", "Todolist ID or name")
-	cmd.PersistentFlags().StringVar(&flags.Host, "host", "", "Basecamp host (e.g., localhost:3000, staging.example.com)")
-	cmd.PersistentFlags().StringVar(&flags.Host, "base-url", "", "Basecamp API base URL (deprecated: use --host)")
-	_ = cmd.PersistentFlags().MarkHidden("base-url")
+	cmd.PersistentFlags().StringVarP(&flags.Profile, "profile", "P", "", "Named profile")
 
 	// Behavior flags
 	cmd.PersistentFlags().CountVarP(&flags.Verbose, "verbose", "v", "Verbose output (-v for ops, -vv for requests)")
@@ -110,7 +114,7 @@ func NewRootCmd() *cobra.Command {
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("host", completer.HostCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("profile", completer.ProfileCompletion())
 
 	return cmd
 }
@@ -222,26 +226,121 @@ func Execute() {
 	}
 }
 
-// resolveHostFlag resolves a --host flag value to a base URL.
-// First checks if the value matches a configured host name (e.g., "production"),
-// then falls back to URL normalization for hostnames/URLs.
-func resolveHostFlag(host string, cfg *config.Config) string {
-	if host == "" {
-		return ""
+// resolveProfile determines which profile to use.
+// Resolution order:
+// 1. --profile / -P flag
+// 2. BCQ_PROFILE env var
+// 3. default_profile in config
+// 4. Single profile → auto-use
+// 5. Multiple profiles → interactive picker (if TTY)
+// 6. No profiles → empty string (use top-level config values)
+func resolveProfile(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
+	// 1. --profile flag
+	if flags.Profile != "" {
+		if len(cfg.Profiles) > 0 {
+			if _, ok := cfg.Profiles[flags.Profile]; !ok {
+				return "", fmt.Errorf("unknown profile %q (available: %s)", flags.Profile, profileNames(cfg))
+			}
+		}
+		return flags.Profile, nil
 	}
 
-	// Check if host matches a configured host name (case-insensitive)
-	if cfg != nil && len(cfg.Hosts) > 0 {
-		hostLower := strings.ToLower(host)
-		for name, hostConfig := range cfg.Hosts {
-			if strings.ToLower(name) == hostLower {
-				return hostConfig.BaseURL
+	// 2. BCQ_PROFILE env var
+	if profile := os.Getenv("BCQ_PROFILE"); profile != "" {
+		if len(cfg.Profiles) > 0 {
+			if _, ok := cfg.Profiles[profile]; !ok {
+				return "", fmt.Errorf("unknown profile %q from BCQ_PROFILE (available: %s)", profile, profileNames(cfg))
 			}
+		}
+		return profile, nil
+	}
+
+	// No profiles configured - use top-level config
+	if len(cfg.Profiles) == 0 {
+		return "", nil
+	}
+
+	// 3. default_profile in config
+	if cfg.DefaultProfile != "" {
+		if _, ok := cfg.Profiles[cfg.DefaultProfile]; ok {
+			return cfg.DefaultProfile, nil
+		}
+		fmt.Fprintf(os.Stderr, "Warning: default_profile %q not found in configured profiles\n", cfg.DefaultProfile)
+	}
+
+	// 4. Single profile → auto-use
+	if len(cfg.Profiles) == 1 {
+		for name := range cfg.Profiles {
+			return name, nil
 		}
 	}
 
-	// Not a configured host name - treat as hostname/URL
-	return hostutil.Normalize(host)
+	// 5. Multiple profiles → interactive picker (if TTY)
+	if isInteractiveTTY(flags) {
+		if name, err := promptForProfile(cfg); err == nil {
+			return name, nil
+		}
+	}
+
+	// 6. Multiple profiles but non-interactive — require explicit selection
+	return "", fmt.Errorf("multiple profiles configured but none selected; use --profile or set default_profile (available: %s)", profileNames(cfg))
+}
+
+// profileNames returns a sorted comma-separated list of profile names.
+func profileNames(cfg *config.Config) string {
+	names := make([]string, 0, len(cfg.Profiles))
+	for name := range cfg.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// isInteractiveTTY returns true if stdout is a terminal and no machine-output mode is set.
+func isInteractiveTTY(flags appctx.GlobalFlags) bool {
+	// Not interactive if any machine-output mode is set
+	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count {
+		return false
+	}
+
+	// Check if stdout is a terminal
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// promptForProfile shows an interactive picker for profile selection.
+func promptForProfile(cfg *config.Config) (string, error) {
+	// Build picker items from configured profiles
+	items := make([]tui.PickerItem, 0, len(cfg.Profiles))
+
+	// Sort profile names for consistent ordering
+	profileNames := make([]string, 0, len(cfg.Profiles))
+	for name := range cfg.Profiles {
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+
+	for _, name := range profileNames {
+		p := cfg.Profiles[name]
+		items = append(items, tui.PickerItem{
+			ID:          name,
+			Title:       name,
+			Description: p.BaseURL,
+		})
+	}
+
+	selected, err := tui.PickHost(items) // Reuse the host picker UI
+	if err != nil {
+		return "", err
+	}
+	if selected == nil {
+		return "", output.ErrUsage("profile selection canceled")
+	}
+
+	return selected.ID, nil
 }
 
 // transformCobraError transforms Cobra's default error messages to match the
@@ -310,113 +409,4 @@ func transformCobraError(err error) error {
 	}
 
 	return err
-}
-
-// resolvedHost holds a resolved host URL and its source.
-type resolvedHost struct {
-	URL    string
-	Source config.Source
-}
-
-// resolveHost determines the base URL to use based on configuration.
-// Resolution order:
-// 1. BCQ_HOST environment variable
-// 2. Config default_host (lookup in hosts map)
-// 3. If single host configured → use it
-// 4. If multiple hosts configured → show interactive picker (if TTY)
-// 5. Fall back to config base_url
-func resolveHost(cfg *config.Config, flags appctx.GlobalFlags) (*resolvedHost, error) {
-	// 1. Check BCQ_HOST environment variable
-	if host := os.Getenv("BCQ_HOST"); host != "" {
-		return &resolvedHost{
-			URL:    hostutil.Normalize(host),
-			Source: config.SourceEnv,
-		}, nil
-	}
-
-	// No hosts configured - use existing base_url
-	if len(cfg.Hosts) == 0 {
-		return nil, nil
-	}
-
-	// 2. Check default_host in config
-	if cfg.DefaultHost != "" {
-		if hostConfig, ok := cfg.Hosts[cfg.DefaultHost]; ok {
-			return &resolvedHost{
-				URL:    hostConfig.BaseURL,
-				Source: config.SourceGlobal,
-			}, nil
-		}
-	}
-
-	// 3. If only one host configured, use it
-	if len(cfg.Hosts) == 1 {
-		for _, hostConfig := range cfg.Hosts {
-			return &resolvedHost{
-				URL:    hostConfig.BaseURL,
-				Source: config.SourceDefault,
-			}, nil
-		}
-	}
-
-	// 4. Multiple hosts - try interactive picker if TTY
-	if !isInteractiveTTY(flags) {
-		return nil, output.ErrUsage("Multiple hosts configured. Use --host flag or set default_host in config.")
-	}
-
-	url, err := promptForHost(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &resolvedHost{
-		URL:    url,
-		Source: config.SourcePrompt,
-	}, nil
-}
-
-// isInteractiveTTY returns true if stdout is a terminal and no machine-output mode is set.
-func isInteractiveTTY(flags appctx.GlobalFlags) bool {
-	// Not interactive if any machine-output mode is set
-	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count {
-		return false
-	}
-
-	// Check if stdout is a terminal
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
-
-// promptForHost shows an interactive picker for host selection.
-func promptForHost(cfg *config.Config) (string, error) {
-	// Build picker items from configured hosts
-	items := make([]tui.PickerItem, 0, len(cfg.Hosts))
-
-	// Sort host names for consistent ordering
-	hostNames := make([]string, 0, len(cfg.Hosts))
-	for name := range cfg.Hosts {
-		hostNames = append(hostNames, name)
-	}
-	sort.Strings(hostNames)
-
-	for _, name := range hostNames {
-		hostConfig := cfg.Hosts[name]
-		items = append(items, tui.PickerItem{
-			ID:          hostConfig.BaseURL,
-			Title:       name,
-			Description: hostConfig.BaseURL,
-		})
-	}
-
-	selected, err := tui.PickHost(items)
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", output.ErrUsage("host selection canceled")
-	}
-
-	return selected.ID, nil
 }
