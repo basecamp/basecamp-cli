@@ -645,7 +645,7 @@ func TestNormalizeDataWithStruct(t *testing.T) {
 	result := NormalizeData(data)
 	m, ok := result.(map[string]any)
 	require.True(t, ok, "Expected map[string]any, got %T", result)
-	assert.Equal(t, float64(1), m["id"]) // JSON unmarshals numbers as float64
+	assert.Equal(t, json.Number("1"), m["id"]) // UseNumber preserves numeric precision
 }
 
 func TestNormalizeDataWithNil(t *testing.T) {
@@ -656,6 +656,15 @@ func TestNormalizeDataWithNil(t *testing.T) {
 // =============================================================================
 // formatCell Tests
 // =============================================================================
+
+func TestFormatCellWithJSONNumber(t *testing.T) {
+	// json.Number from UseNumber should render as the original string
+	result := formatCell(json.Number("9007199254740993"))
+	assert.Equal(t, "9007199254740993", result)
+
+	result = formatCell(json.Number("3.14"))
+	assert.Equal(t, "3.14", result)
+}
 
 func TestFormatCellWithScalarArray(t *testing.T) {
 	// Test string arrays (e.g., tags)
@@ -1770,6 +1779,79 @@ func TestWrapText(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestWriteJSONWithRawMessage(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	raw := json.RawMessage(`{"id": 1, "name": "Test"}`)
+	err := w.OK(raw)
+	require.NoError(t, err, "OK() failed")
+
+	var resp Response
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp), "Failed to unmarshal output")
+
+	assert.True(t, resp.OK)
+
+	// Data should be normalized from json.RawMessage to map[string]any
+	m, ok := resp.Data.(map[string]any)
+	require.True(t, ok, "Expected map[string]any, got %T", resp.Data)
+	assert.Equal(t, float64(1), m["id"])
+	assert.Equal(t, "Test", m["name"])
+}
+
+func TestWriteQuietWithRawMessage(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatQuiet,
+		Writer: &buf,
+	})
+
+	raw := json.RawMessage(`[{"id": 1}, {"id": 2}]`)
+	err := w.OK(raw)
+	require.NoError(t, err, "OK() failed")
+
+	// Quiet mode outputs just the data, normalized from json.RawMessage
+	var decoded []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "Failed to unmarshal output")
+
+	require.Len(t, decoded, 2)
+	assert.Equal(t, float64(1), decoded[0]["id"])
+	assert.Equal(t, float64(2), decoded[1]["id"])
+}
+
+func TestWriteJSONPreservesLargeIntegers(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	// 9007199254740993 exceeds float64's 53-bit integer precision
+	raw := json.RawMessage(`{"id": 9007199254740993}`)
+	err := w.OK(raw)
+	require.NoError(t, err, "OK() failed")
+
+	// Verify the raw output preserves the exact integer
+	assert.Contains(t, buf.String(), "9007199254740993")
+}
+
+func TestWriteQuietPreservesLargeIntegers(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatQuiet,
+		Writer: &buf,
+	})
+
+	raw := json.RawMessage(`{"id": 9007199254740993}`)
+	err := w.OK(raw)
+	require.NoError(t, err, "OK() failed")
+
+	assert.Contains(t, buf.String(), "9007199254740993")
 }
 
 func TestWriterStyledErrorWithHint(t *testing.T) {
