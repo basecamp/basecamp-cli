@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/spf13/cobra"
 
@@ -122,7 +123,7 @@ You can also pass a Basecamp URL directly:
 			}
 
 			// Check for empty response (204 No Content)
-			if len(resp.Data) == 0 {
+			if resp.StatusCode == http.StatusNoContent {
 				if recordType == "" || recordType == "recording" || recordType == "recordings" {
 					return output.ErrUsageHint(
 						fmt.Sprintf("Recording %s not found or type required", id),
