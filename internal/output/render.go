@@ -1,6 +1,7 @@
 package output
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -664,6 +665,8 @@ func formatCell(val any) string {
 			return "yes"
 		}
 		return "no"
+	case json.Number:
+		return v.String()
 	case float64:
 		if v == float64(int(v)) {
 			return fmt.Sprintf("%d", int(v))
@@ -681,6 +684,8 @@ func formatCell(val any) string {
 			switch elem := item.(type) {
 			case string:
 				items = append(items, elem)
+			case json.Number:
+				items = append(items, elem.String())
 			case float64:
 				if elem == float64(int(elem)) {
 					items = append(items, fmt.Sprintf("%d", int(elem)))
