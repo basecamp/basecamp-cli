@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func (r *DoctorResult) Summary() string {
 		parts = append(parts, fmt.Sprintf("%d failed", r.Failed))
 	}
 	if r.Warned > 0 {
-		parts = append(parts, fmt.Sprintf("%d warnings", r.Warned))
+		parts = append(parts, fmt.Sprintf("%d %s", r.Warned, pluralize(r.Warned, "warning", "warnings")))
 	}
 	if r.Skipped > 0 {
 		parts = append(parts, fmt.Sprintf("%d skipped", r.Skipped))
@@ -93,8 +94,8 @@ Examples:
 			result := summarizeChecks(checks)
 
 			// For styled/TTY output, render a human-friendly format
-			if app.Flags.Styled || (!app.Flags.JSON && !app.Flags.Quiet && !app.Flags.Agent && app.IsInteractive()) {
-				renderDoctorStyled(result)
+			if app.Output.EffectiveFormat() == output.FormatStyled {
+				renderDoctorStyled(cmd.OutOrStdout(), result)
 				return nil
 			}
 
@@ -595,6 +596,14 @@ func checkAccountAccess(ctx context.Context, app *appctx.App, verbose bool) Chec
 		Name: "Account Access",
 	}
 
+	// Validate account ID before calling Account() which panics on non-numeric IDs
+	if err := app.RequireAccount(); err != nil {
+		check.Status = "fail"
+		check.Message = "Invalid account configuration"
+		check.Hint = err.Error()
+		return check
+	}
+
 	// Try to list projects (simple account-scoped operation)
 	start := time.Now()
 	result, err := app.Account().Projects().List(ctx, nil)
@@ -657,12 +666,14 @@ func checkCacheHealth(app *appctx.App, verbose bool) Check {
 	// Count cache entries and size
 	var totalSize int64
 	var entryCount int
-	_ = filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // Best-effort counting, continue on errors
 		}
-		if !info.IsDir() {
-			totalSize += info.Size()
+		if !d.IsDir() {
+			if info, err := d.Info(); err == nil {
+				totalSize += info.Size()
+			}
 			entryCount++
 		}
 		return nil
@@ -699,6 +710,7 @@ func checkShellCompletion(verbose bool) Check {
 	case "bash":
 		// Check common bash completion paths
 		paths := []string{
+			"/opt/homebrew/etc/bash_completion.d/bcq",
 			"/usr/local/etc/bash_completion.d/bcq",
 			"/etc/bash_completion.d/bcq",
 			filepath.Join(os.Getenv("HOME"), ".local/share/bash-completion/completions/bcq"),
@@ -713,6 +725,7 @@ func checkShellCompletion(verbose bool) Check {
 	case "zsh":
 		// Check common zsh completion paths
 		paths := []string{
+			"/opt/homebrew/share/zsh/site-functions/_bcq",
 			"/usr/local/share/zsh/site-functions/_bcq",
 			filepath.Join(os.Getenv("HOME"), ".zsh/completions/_bcq"),
 		}
@@ -822,8 +835,16 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 	return unique
 }
 
+// pluralize returns singular or plural form based on count.
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
 // renderDoctorStyled outputs a human-friendly styled format for TTY.
-func renderDoctorStyled(result *DoctorResult) {
+func renderDoctorStyled(w io.Writer, result *DoctorResult) {
 	// ANSI color codes
 	const (
 		reset  = "\033[0m"
@@ -851,9 +872,9 @@ func renderDoctorStyled(result *DoctorResult) {
 		"skip": dim,
 	}
 
-	fmt.Println()
-	fmt.Printf("%s%sBasecamp CLI Doctor%s\n", bold, cyan, reset)
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%sBasecamp CLI Doctor%s\n", bold, cyan, reset)
+	fmt.Fprintln(w)
 
 	// Print each check
 	for _, check := range result.Checks {
@@ -861,7 +882,7 @@ func renderDoctorStyled(result *DoctorResult) {
 		color := statusColor[check.Status]
 
 		// Main line: icon + name + message
-		fmt.Printf("  %s %s%s%s %s%s%s\n",
+		fmt.Fprintf(w, "  %s %s%s%s %s%s%s\n",
 			icon,
 			bold, check.Name, reset,
 			color, check.Message, reset,
@@ -869,11 +890,11 @@ func renderDoctorStyled(result *DoctorResult) {
 
 		// Hint on next line, indented
 		if check.Hint != "" && (check.Status == "fail" || check.Status == "warn") {
-			fmt.Printf("      %s↳ %s%s\n", dim, check.Hint, reset)
+			fmt.Fprintf(w, "      %s↳ %s%s\n", dim, check.Hint, reset)
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	// Summary line
 	var summaryParts []string
@@ -884,12 +905,12 @@ func renderDoctorStyled(result *DoctorResult) {
 		summaryParts = append(summaryParts, fmt.Sprintf("%s%d failed%s", red, result.Failed, reset))
 	}
 	if result.Warned > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s%d warnings%s", yellow, result.Warned, reset))
+		summaryParts = append(summaryParts, fmt.Sprintf("%s%d %s%s", yellow, result.Warned, pluralize(result.Warned, "warning", "warnings"), reset))
 	}
 	if result.Skipped > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%s%d skipped%s", dim, result.Skipped, reset))
 	}
 
-	fmt.Printf("  %s\n", strings.Join(summaryParts, "  "))
-	fmt.Println()
+	fmt.Fprintf(w, "  %s\n", strings.Join(summaryParts, "  "))
+	fmt.Fprintln(w)
 }

@@ -47,7 +47,15 @@ func TestDoctorResultSummary(t *testing.T) {
 				Passed: 4,
 				Warned: 1,
 			},
-			expected: "4 passed, 1 warnings",
+			expected: "4 passed, 1 warning",
+		},
+		{
+			name: "with multiple warnings",
+			result: DoctorResult{
+				Passed: 4,
+				Warned: 3,
+			},
+			expected: "4 passed, 3 warnings",
 		},
 		{
 			name: "mixed results",
@@ -57,7 +65,7 @@ func TestDoctorResultSummary(t *testing.T) {
 				Warned:  1,
 				Skipped: 2,
 			},
-			expected: "3 passed, 1 failed, 1 warnings, 2 skipped",
+			expected: "3 passed, 1 failed, 1 warning, 2 skipped",
 		},
 		{
 			name: "only skipped",
@@ -223,6 +231,7 @@ func TestBuildDoctorBreadcrumbsNoFailures(t *testing.T) {
 func setupDoctorTestApp(t *testing.T, accountID string) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("BCQ_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
@@ -309,6 +318,25 @@ func TestCheckCacheHealth(t *testing.T) {
 	checkWithFiles := checkCacheHealth(app, true)
 	assert.Equal(t, "pass", checkWithFiles.Status)
 	assert.Contains(t, checkWithFiles.Message, "2 entries")
+}
+
+func TestCheckAccountAccessInvalidAccountID(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "not-a-number")
+
+	check := checkAccountAccess(context.Background(), app, false)
+	assert.Equal(t, "Account Access", check.Name)
+	assert.Equal(t, "fail", check.Status)
+	assert.Equal(t, "Invalid account configuration", check.Message)
+	assert.NotEmpty(t, check.Hint)
+}
+
+func TestCheckAccountAccessEmptyAccountID(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "")
+
+	check := checkAccountAccess(context.Background(), app, false)
+	assert.Equal(t, "Account Access", check.Name)
+	assert.Equal(t, "fail", check.Status)
+	assert.Equal(t, "Invalid account configuration", check.Message)
 }
 
 func TestCheckCacheHealthDisabled(t *testing.T) {
