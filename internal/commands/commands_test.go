@@ -52,6 +52,7 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 	root.AddCommand(commands.NewTemplatesCmd())
 	root.AddCommand(commands.NewLineupCmd())
 	root.AddCommand(commands.NewTimesheetCmd())
+	root.AddCommand(commands.NewClockCmd())
 	root.AddCommand(commands.NewTodosetsCmd())
 	root.AddCommand(commands.NewToolsCmd())
 	root.AddCommand(commands.NewConfigCmd())
