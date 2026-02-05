@@ -250,19 +250,19 @@ func (c *Completer) AccountCompletion() cobra.CompletionFunc {
 	}
 }
 
-// HostCompletion returns a Cobra completion function for host arguments.
-// Hosts come from the config file's hosts map. Since completion runs before
+// ProfileCompletion returns a Cobra completion function for profile arguments.
+// Profiles come from the config file's profiles map. Since completion runs before
 // PersistentPreRunE, we need to load the config directly here.
-func (c *Completer) HostCompletion() cobra.CompletionFunc {
+func (c *Completer) ProfileCompletion() cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-		hosts := c.store(cmd).Hosts()
-		if len(hosts) == 0 {
+		profiles := c.store(cmd).Profiles()
+		if len(profiles) == 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
 		// Sort alphabetically by name
-		sorted := make([]CachedHost, len(hosts))
-		copy(sorted, hosts)
+		sorted := make([]CachedProfile, len(profiles))
+		copy(sorted, profiles)
 		sort.Slice(sorted, func(i, j int) bool {
 			return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
 		})
@@ -270,12 +270,12 @@ func (c *Completer) HostCompletion() cobra.CompletionFunc {
 		// Filter by prefix
 		toCompleteLower := strings.ToLower(toComplete)
 		var completions []cobra.Completion
-		for _, h := range sorted {
-			nameLower := strings.ToLower(h.Name)
+		for _, p := range sorted {
+			nameLower := strings.ToLower(p.Name)
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Use name as completion value with base URL as description
-				completions = append(completions, cobra.CompletionWithDesc(h.Name, h.BaseURL))
+				completions = append(completions, cobra.CompletionWithDesc(p.Name, p.BaseURL))
 			}
 		}
 

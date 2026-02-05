@@ -32,7 +32,6 @@ type Flags struct {
 	Account  string
 	Project  string
 	Todolist string
-	Host     string
 
 	// Machine output flags - when any of these are set, interactive prompts are disabled
 	Agent   bool

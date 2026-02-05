@@ -10,7 +10,6 @@ import (
 
 	"github.com/basecamp/bcq/internal/appctx"
 	"github.com/basecamp/bcq/internal/auth"
-	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/output"
 )
 
@@ -56,7 +55,11 @@ func newAuthLoginCmd() *cobra.Command {
 				scope = "read"
 			}
 
-			fmt.Println("Starting Basecamp authentication...")
+			if app.Config.ActiveProfile != "" {
+				fmt.Printf("Starting authentication for profile %q...\n", app.Config.ActiveProfile)
+			} else {
+				fmt.Println("Starting Basecamp authentication...")
+			}
 			if scope == "read" {
 				fmt.Println("Scope: read-only (use --scope full for write access)")
 			} else {
@@ -130,37 +133,45 @@ func newAuthStatusCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			origin := config.NormalizeBaseURL(app.Config.BaseURL)
+			credKey := app.Auth.CredentialKey()
 
 			// Check if using BASECAMP_TOKEN environment variable
 			if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
-				return app.OK(map[string]any{
+				result := map[string]any{
 					"authenticated": true,
-					"origin":        origin,
 					"source":        "BASECAMP_TOKEN",
-				}, output.WithSummary("Authenticated via BASECAMP_TOKEN env var"))
+				}
+				if app.Config.ActiveProfile != "" {
+					result["profile"] = app.Config.ActiveProfile
+				}
+				return app.OK(result, output.WithSummary("Authenticated via BASECAMP_TOKEN env var"))
 			}
 
 			if !app.Auth.IsAuthenticated() {
-				return app.OK(map[string]any{
+				result := map[string]any{
 					"authenticated": false,
-					"origin":        origin,
-				}, output.WithSummary("Not authenticated"))
+				}
+				if app.Config.ActiveProfile != "" {
+					result["profile"] = app.Config.ActiveProfile
+				}
+				return app.OK(result, output.WithSummary("Not authenticated"))
 			}
 
 			// Get stored credentials info
 			store := app.Auth.GetStore()
-			creds, err := store.Load(origin)
+			creds, err := store.Load(credKey)
 			if err != nil {
 				return err
 			}
 
 			status := map[string]any{
 				"authenticated": true,
-				"origin":        origin,
 				"source":        "oauth",
 				"oauth_type":    creds.OAuthType,
 				"scope":         creds.Scope,
+			}
+			if app.Config.ActiveProfile != "" {
+				status["profile"] = app.Config.ActiveProfile
 			}
 
 			if creds.UserID != "" {
@@ -221,9 +232,9 @@ Examples:
   export BASECAMP_TOKEN=$(bcq auth token)
   curl -H "Authorization: Bearer $(bcq auth token)" ...
 
-Get tokens for different environments using the global --host flag:
-  bcq --host localhost:3000 auth token
-  bcq --host staging.example.com auth token
+Get tokens for different profiles:
+  bcq --profile personal auth token
+  bcq --profile staging auth token
 
 The --stored flag ignores BASECAMP_TOKEN and uses stored OAuth credentials:
   bcq auth token --stored

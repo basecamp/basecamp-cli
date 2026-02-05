@@ -56,6 +56,15 @@ func NewManager(cfg *config.Config, httpClient *http.Client) *Manager {
 	}
 }
 
+// credentialKey returns the storage key for credentials.
+// Profile mode: "profile:<name>", No-profile mode: origin URL.
+func (m *Manager) credentialKey() string {
+	if m.cfg.ActiveProfile != "" {
+		return "profile:" + m.cfg.ActiveProfile
+	}
+	return config.NormalizeBaseURL(m.cfg.BaseURL)
+}
+
 // AccessToken returns a valid access token, refreshing if needed.
 // If BASECAMP_TOKEN env var is set, it's used directly without OAuth.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
@@ -67,28 +76,28 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return "", output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", origin, err))
+		return "", output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
 	}
 
 	// Check if token is expired (with 5 minute buffer).
 	// ExpiresAt==0 means non-expiring token (e.g., from BASECAMP_TOKEN env var),
 	// so only refresh if ExpiresAt > 0 and is within the expiry window.
 	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
-		if err := m.refreshLocked(ctx, origin, creds); err != nil {
+		if err := m.refreshLocked(ctx, credKey, creds); err != nil {
 			return "", err
 		}
 		// Reload refreshed credentials
-		creds, err = m.store.Load(origin)
+		creds, err = m.store.Load(credKey)
 		if err != nil {
-			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", origin, err))
+			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
 		}
 	}
 
 	if creds.AccessToken == "" {
-		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", origin))
+		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
 	}
 
 	return creds.AccessToken, nil
@@ -101,27 +110,27 @@ func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return "", output.ErrAuth(fmt.Sprintf("No stored credentials for %s: %v", origin, err))
+		return "", output.ErrAuth(fmt.Sprintf("No stored credentials for %s: %v", credKey, err))
 	}
 
 	// Check if token is expired (with 5 minute buffer)
 	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
-		if err := m.refreshLocked(ctx, origin, creds); err != nil {
+		if err := m.refreshLocked(ctx, credKey, creds); err != nil {
 			// Preserve the original error type (API, network, etc.)
 			return "", err
 		}
 		// Reload refreshed credentials
-		creds, err = m.store.Load(origin)
+		creds, err = m.store.Load(credKey)
 		if err != nil {
-			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", origin, err))
+			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
 		}
 	}
 
 	if creds.AccessToken == "" {
-		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", origin))
+		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
 	}
 
 	return creds.AccessToken, nil
@@ -135,8 +144,8 @@ func (m *Manager) IsAuthenticated() bool {
 		return true
 	}
 
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
 		return false
 	}
@@ -148,13 +157,13 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", origin, err))
+		return output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
 	}
 
-	return m.refreshLocked(ctx, origin, creds)
+	return m.refreshLocked(ctx, credKey, creds)
 }
 
 func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Credentials) error {
@@ -230,7 +239,7 @@ func (o *LoginOptions) log(msg string) {
 // Login initiates the OAuth login flow.
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	opts.defaults()
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
+	credKey := m.credentialKey()
 
 	// Discover OAuth config
 	oauthCfg, oauthType, err := m.discoverOAuth(ctx)
@@ -276,13 +285,13 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	creds.TokenEndpoint = oauthCfg.TokenEndpoint
 	creds.Scope = opts.Scope
 
-	return m.store.Save(origin, creds)
+	return m.store.Save(credKey, creds)
 }
 
 // Logout removes stored credentials.
 func (m *Manager) Logout() error {
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	return m.store.Delete(origin)
+	credKey := m.credentialKey()
+	return m.store.Delete(credKey)
 }
 
 func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) { //nolint:unparam // error return for consistent signature
@@ -596,35 +605,41 @@ func openBrowser(url string) error {
 	return exec.Command(cmd, args...).Start() //nolint:gosec,noctx // G204: cmd is hardcoded per-platform; fire-and-forget
 }
 
-// GetOAuthType returns the OAuth type for the current origin ("bc3" or "launchpad").
+// GetOAuthType returns the OAuth type for the current credential key ("bc3" or "launchpad").
 func (m *Manager) GetOAuthType() string {
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
 		return ""
 	}
 	return creds.OAuthType
 }
 
-// GetUserID returns the stored user ID for the current origin.
+// GetUserID returns the stored user ID for the current credential key.
 func (m *Manager) GetUserID() string {
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
 		return ""
 	}
 	return creds.UserID
 }
 
-// SetUserID stores the user ID for the current origin.
+// SetUserID stores the user ID for the current credential key.
 func (m *Manager) SetUserID(userID string) error {
-	origin := config.NormalizeBaseURL(m.cfg.BaseURL)
-	creds, err := m.store.Load(origin)
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
 	if err != nil {
 		return err
 	}
 	creds.UserID = userID
-	return m.store.Save(origin, creds)
+	return m.store.Save(credKey, creds)
+}
+
+// CredentialKey returns the current credential storage key.
+// This is exported for use in commands that need to display or lookup credentials.
+func (m *Manager) CredentialKey() string {
+	return m.credentialKey()
 }
 
 // GetStore returns the credential store.
