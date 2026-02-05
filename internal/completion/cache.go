@@ -336,8 +336,8 @@ type configForCompletion struct {
 }
 
 // loadConfigForCompletion loads config files from all layers to get profiles
-// for completion. Layers are loaded in precedence order (system → global →
-// repo → local) so that higher-precedence layers override lower ones.
+// for completion. Layers are loaded from lowest to highest precedence
+// (system → global → repo → local) so that later layers override earlier ones.
 func loadConfigForCompletion() *configForCompletion {
 	cfg := &configForCompletion{
 		Profiles: make(map[string]*profileConfig),

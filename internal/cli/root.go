@@ -66,8 +66,8 @@ func NewRootCmd() *cobra.Command {
 					Todolist: flags.Todolist,
 					CacheDir: flags.CacheDir,
 				})
-				// Profile-scoped cache (only if cache dir was not explicitly set via flag)
-				if flags.CacheDir == "" {
+				// Profile-scoped cache (only if cache dir was not explicitly set via flag or env)
+				if flags.CacheDir == "" && os.Getenv("BCQ_CACHE_DIR") == "" {
 					cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 				}
 			}
@@ -238,20 +238,22 @@ func Execute() {
 func resolveProfile(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
 	// 1. --profile flag
 	if flags.Profile != "" {
-		if len(cfg.Profiles) > 0 {
-			if _, ok := cfg.Profiles[flags.Profile]; !ok {
-				return "", fmt.Errorf("unknown profile %q (available: %s)", flags.Profile, profileNames(cfg))
-			}
+		if len(cfg.Profiles) == 0 {
+			return "", fmt.Errorf("profile %q specified via --profile but no profiles are configured; create one with: bcq profile create", flags.Profile)
+		}
+		if _, ok := cfg.Profiles[flags.Profile]; !ok {
+			return "", fmt.Errorf("unknown profile %q (available: %s)", flags.Profile, profileNames(cfg))
 		}
 		return flags.Profile, nil
 	}
 
 	// 2. BCQ_PROFILE env var
 	if profile := os.Getenv("BCQ_PROFILE"); profile != "" {
-		if len(cfg.Profiles) > 0 {
-			if _, ok := cfg.Profiles[profile]; !ok {
-				return "", fmt.Errorf("unknown profile %q from BCQ_PROFILE (available: %s)", profile, profileNames(cfg))
-			}
+		if len(cfg.Profiles) == 0 {
+			return "", fmt.Errorf("profile %q specified via BCQ_PROFILE but no profiles are configured; create one with: bcq profile create", profile)
+		}
+		if _, ok := cfg.Profiles[profile]; !ok {
+			return "", fmt.Errorf("unknown profile %q from BCQ_PROFILE (available: %s)", profile, profileNames(cfg))
 		}
 		return profile, nil
 	}
