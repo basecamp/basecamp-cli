@@ -75,6 +75,7 @@ Full bcq CLI coverage: 130 endpoints across todos, cards, messages, files, sched
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
 5. **Rich text fields accept Markdown** - bcq converts to HTML automatically
+6. **Project scope is mandatory** — via `--in <project>` or `.basecamp/config.json`. There is no cross-project query mode. For cross-project data, use `bcq recordings <type>` or loop through projects individually.
 
 ### Output Modes
 
@@ -105,10 +106,13 @@ bcq <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). For cross-project data, use `bcq recordings <type>` or loop through projects individually.
+
 | Task | Command |
 |------|---------|
 | List projects | `bcq projects --json` |
-| My todos | `bcq todos --assignee me --json` |
+| My todos (in project) | `bcq todos --assignee me --in <project> --json` |
+| All todos (cross-project) | `bcq recordings todos --json` (filter client-side) |
 | Overdue todos | `bcq todos --overdue --in <project> --json` |
 | Create todo | `bcq todo --content "Task" --in <project> --list <list> --json` |
 | Create todolist | `bcq todolists create --name "Name" --in <project> --json` |
@@ -158,10 +162,11 @@ bcq comment --content "Reply" --on 123 --in <project>
 
 ```
 Need to find something?
-├── Know the type? → bcq <type> --in <project> --json
-├── Full-text search? → bcq search "query" --json
-├── Browse by type across projects? → bcq recordings <type> --json
+├── Know the type + project? → bcq <type> --in <project> --json
+├── Need cross-project data? → bcq recordings <type> --json (ONLY cross-project option)
 │   (types: todos, messages, documents, comments, cards, uploads)
+│   Note: Defaults to active status; use --status archived for archived items
+├── Full-text search? → bcq search "query" --json
 └── Have a URL? → bcq url parse "<url>" --json
 ```
 
@@ -252,7 +257,7 @@ bcq todos position <id> --to 1               # Move to top
 bcq todos sweep --overdue --complete --comment "Done" --in <project>
 ```
 
-**Flags:** `--assignee`, `--status` (completed/pending), `--overdue`, `--list`, `--due`, `--limit`, `--all`
+**Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/pending), `--overdue`, `--list`, `--due`, `--limit`, `--all`
 
 ### Todolists
 
@@ -268,16 +273,23 @@ bcq todolists update <id> --name "New" --in <project>        # Update
 
 ### Cards (Kanban)
 
+**Note:** Cards do NOT support `--assignee` filtering like todos. Fetch all cards and filter client-side if needed. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
+
 ```bash
 bcq cards --in <project> --json              # All cards
+bcq cards --card-table <id> --in <project>   # Cards from specific table (required if multiple)
 bcq cards --column <id> --in <project>       # Cards in column
-bcq cards columns --in <project> --json      # List columns with IDs
+bcq cards columns --in <project> --json      # List columns (needs --card-table if multiple)
 bcq cards show <id> --in <project>           # Card details
 bcq card --title "Title" --content "<p>Body</p>" --in <project> --column <id>
 bcq cards update <id> --title "New" --due tomorrow --assignee me
 bcq cards move <id> --to <column_id>         # Move to column (numeric ID)
 bcq cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
 ```
+
+**Identifying completed cards:** Cards in Done columns have `parent.type: "Kanban::DoneColumn"` and `completed: true`. Use this to identify completed cards that haven't been archived.
+
+**Limitation:** Basecamp does not track when cards are moved between columns. The `updated_at` field updates on any modification and cannot reliably indicate when a card was completed.
 
 **Card Steps (checklists):**
 ```bash
@@ -377,16 +389,24 @@ bcq timeline --watch                         # Live monitoring (TUI)
 bcq timeline --watch --interval 60           # Poll every 60 seconds
 ```
 
+**Note:** `bcq timeline` (account-wide) works reliably. The `--limit` flag is not supported on timeline commands.
+
 ### Recordings (Cross-project)
+
+Use `bcq recordings <type>` for cross-project queries - this is the only way to query across all projects in one call.
 
 ```bash
 bcq recordings todos --json                  # All todos across projects
+bcq recordings todos --all --json            # All todos (paginate through all)
 bcq recordings messages --in <project>       # Messages in project
 bcq recordings documents --status archived   # Archived docs
 bcq recordings cards --sort created_at --direction asc
+bcq recordings cards --status archived --all --json  # Include archived cards
 ```
 
 **Types:** `todos`, `messages`, `documents`, `comments`, `cards`, `uploads`
+
+**Status filtering:** By default, only `active` recordings are returned. Use `--status archived` or `--status trashed` to query other statuses. You may need separate queries to get complete data (e.g., active + archived).
 
 **Status management:**
 ```bash
