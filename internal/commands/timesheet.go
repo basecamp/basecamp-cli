@@ -386,7 +386,10 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 
 			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
+			entryIDInt, err := strconv.ParseInt(entryID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid entry ID")
+			}
 
 			entry, err := app.Account().Timesheet().Get(cmd.Context(), bucketID, entryIDInt)
 			if err != nil {
@@ -447,78 +450,10 @@ Dates support natural language: today, tomorrow, yesterday, monday, etc.`,
 				return output.ErrUsage("--recording required")
 			}
 
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			recordingID, urlProjectID := extractWithProject(recording)
-
-			projectID := project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			recordingIDInt, _ := strconv.ParseInt(recordingID, 10, 64)
-
-			// Parse natural language date
-			parsedDate := dateparse.Parse(date)
-
-			req := &basecamp.CreateTimesheetEntryRequest{
-				Date:        parsedDate,
-				Hours:       hours,
-				Description: description,
-			}
-			if personID != "" {
-				pid, err := strconv.ParseInt(personID, 10, 64)
-				if err != nil {
-					return output.ErrUsage("Invalid person ID")
-				}
-				req.PersonID = pid
-			}
-
-			entry, err := app.Account().Timesheet().Create(cmd.Context(), bucketID, recordingIDInt, req)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			return app.OK(entry,
-				output.WithSummary(fmt.Sprintf("Created timesheet entry #%d: %sh on %s", entry.ID, entry.Hours, entry.Date)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq timesheet entry show %d --project %s", entry.ID, resolvedProjectID),
-						Description: "View entry",
-					},
-					output.Breadcrumb{
-						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq timesheet entry update %d --project %s", entry.ID, resolvedProjectID),
-						Description: "Update entry",
-					},
-					output.Breadcrumb{
-						Action:      "trash",
-						Cmd:         fmt.Sprintf("bcq timesheet entry trash %d --project %s", entry.ID, resolvedProjectID),
-						Description: "Trash entry",
-					},
-				),
+			return runTimesheetCreate(cmd, project, recording, hours, date, description, personID,
+				func(entry *basecamp.TimesheetEntry) string {
+					return fmt.Sprintf("Created timesheet entry #%d: %sh on %s", entry.ID, entry.Hours, entry.Date)
+				},
 			)
 		},
 	}
@@ -534,6 +469,84 @@ Dates support natural language: today, tomorrow, yesterday, monday, etc.`,
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	return cmd
+}
+
+func runTimesheetCreate(cmd *cobra.Command, project, recording, hours, date, description, personID string, summaryFn func(*basecamp.TimesheetEntry) string) error {
+	app := appctx.FromContext(cmd.Context())
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	recordingID, urlProjectID := extractWithProject(recording)
+
+	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	recordingIDInt, err := strconv.ParseInt(recordingID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid recording ID")
+	}
+
+	parsedDate := dateparse.Parse(date)
+
+	req := &basecamp.CreateTimesheetEntryRequest{
+		Date:        parsedDate,
+		Hours:       hours,
+		Description: description,
+	}
+	if personID != "" {
+		pid, err := strconv.ParseInt(personID, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid person ID")
+		}
+		req.PersonID = pid
+	}
+
+	entry, err := app.Account().Timesheet().Create(cmd.Context(), bucketID, recordingIDInt, req)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.OK(entry,
+		output.WithSummary(summaryFn(entry)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("bcq timesheet entry show %d --project %s", entry.ID, resolvedProjectID),
+				Description: "View entry",
+			},
+			output.Breadcrumb{
+				Action:      "update",
+				Cmd:         fmt.Sprintf("bcq timesheet entry update %d --project %s", entry.ID, resolvedProjectID),
+				Description: "Update entry",
+			},
+			output.Breadcrumb{
+				Action:      "trash",
+				Cmd:         fmt.Sprintf("bcq timesheet entry trash %d --project %s", entry.ID, resolvedProjectID),
+				Description: "Trash entry",
+			},
+		),
+	)
 }
 
 func newTimesheetEntryUpdateCmd() *cobra.Command {
@@ -583,7 +596,10 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 
 			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
+			entryIDInt, err := strconv.ParseInt(entryID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid entry ID")
+			}
 
 			req := &basecamp.UpdateTimesheetEntryRequest{}
 			hasChanges := false
@@ -690,7 +706,10 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 
 			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
+			entryIDInt, err := strconv.ParseInt(entryID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid entry ID")
+			}
 
 			err = app.Account().Timesheet().Trash(cmd.Context(), bucketID, entryIDInt)
 			if err != nil {
@@ -759,77 +778,10 @@ Hours can be decimal (1.5) or time format (1:30).`,
 				date = time.Now().Format("2006-01-02")
 			}
 
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			recordingID, urlProjectID := extractWithProject(recording)
-
-			projectID := project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			recordingIDInt, _ := strconv.ParseInt(recordingID, 10, 64)
-
-			parsedDate := dateparse.Parse(date)
-
-			req := &basecamp.CreateTimesheetEntryRequest{
-				Date:        parsedDate,
-				Hours:       hours,
-				Description: description,
-			}
-			if personID != "" {
-				pid, err := strconv.ParseInt(personID, 10, 64)
-				if err != nil {
-					return output.ErrUsage("Invalid person ID")
-				}
-				req.PersonID = pid
-			}
-
-			entry, err := app.Account().Timesheet().Create(cmd.Context(), bucketID, recordingIDInt, req)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			return app.OK(entry,
-				output.WithSummary(fmt.Sprintf("Logged %sh on %s", entry.Hours, entry.Date)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq timesheet entry show %d --project %s", entry.ID, resolvedProjectID),
-						Description: "View entry",
-					},
-					output.Breadcrumb{
-						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq timesheet entry update %d --project %s", entry.ID, resolvedProjectID),
-						Description: "Update entry",
-					},
-					output.Breadcrumb{
-						Action:      "trash",
-						Cmd:         fmt.Sprintf("bcq timesheet entry trash %d --project %s", entry.ID, resolvedProjectID),
-						Description: "Trash entry",
-					},
-				),
+			return runTimesheetCreate(cmd, project, recording, hours, date, description, personID,
+				func(entry *basecamp.TimesheetEntry) string {
+					return fmt.Sprintf("Logged %sh on %s", entry.Hours, entry.Date)
+				},
 			)
 		},
 	}
