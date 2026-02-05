@@ -92,9 +92,8 @@ The --date flag accepts natural language dates:
 			}
 
 			result := map[string]any{
-				"title":     name,
-				"starts_on": parsedDate,
-				"ends_on":   parsedDate,
+				"name": name,
+				"date": parsedDate,
 			}
 
 			return app.OK(result,
@@ -165,11 +164,10 @@ You can pass either a marker ID or a Basecamp URL:
 
 			result := map[string]any{"id": markerID, "updated": true}
 			if req.Name != "" {
-				result["title"] = req.Name
+				result["name"] = req.Name
 			}
 			if req.Date != "" {
-				result["starts_on"] = req.Date
-				result["ends_on"] = req.Date
+				result["date"] = req.Date
 			}
 
 			summary := fmt.Sprintf("Updated lineup marker #%d", markerID)
