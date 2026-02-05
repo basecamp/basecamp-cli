@@ -262,7 +262,7 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			cardIDStr, _ := extractWithProject(args[0])
+			cardIDStr := extractID(args[0])
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -458,7 +458,7 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			cardIDStr, _ := extractWithProject(args[0])
+			cardIDStr := extractID(args[0])
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -1084,7 +1084,7 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr, _ := extractWithProject(args[0])
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1223,7 +1223,7 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr, _ := extractWithProject(args[0])
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1261,7 +1261,7 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr, _ := extractWithProject(args[0])
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1299,7 +1299,7 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr, _ := extractWithProject(args[0])
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1336,7 +1336,7 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr, _ := extractWithProject(args[0])
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1375,7 +1375,7 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr, _ := extractWithProject(args[0])
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1616,7 +1616,7 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr, _ := extractWithProject(args[0])
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -1677,7 +1677,7 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr, _ := extractWithProject(args[0])
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -1714,7 +1714,7 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr, _ := extractWithProject(args[0])
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -1754,7 +1754,7 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr, _ := extractWithProject(args[0])
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Step ID must be numeric")
@@ -1810,7 +1810,7 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr, _ := extractWithProject(args[0])
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
