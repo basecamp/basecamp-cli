@@ -38,13 +38,18 @@ Zsh:
   # you will need to enable it. You can execute the following once:
   $ echo "autoload -U compinit; compinit" >> ~/.zshrc
 
-  # To load completions for every new session, add to ~/.zshrc:
+  # To load completions in your current session:
+  $ source <(bcq completion zsh)
+
+  # To load completions for every new session, add AFTER compinit in ~/.zshrc:
   eval "$(bcq completion zsh)"
 
-  # Or install to a directory in your fpath:
+  # Or install to a directory in your fpath (add BEFORE compinit in ~/.zshrc):
   $ mkdir -p ~/.zsh/completions
   $ bcq completion zsh > ~/.zsh/completions/_bcq
-  # Then add to ~/.zshrc: fpath=(~/.zsh/completions $fpath)
+  # Then add to ~/.zshrc:
+  #   fpath=(~/.zsh/completions $fpath)
+  #   autoload -U compinit; compinit
 
 Fish:
   $ bcq completion fish | source
@@ -138,13 +143,15 @@ to enable it. You can execute the following once:
 To load completions in your current shell session:
   $ source <(bcq completion zsh)
 
-To load completions for every new session, add to ~/.zshrc:
+To load completions for every new session, add AFTER compinit in ~/.zshrc:
   eval "$(bcq completion zsh)"
 
-Or install to a directory in your fpath:
+Or install to a directory in your fpath (add BEFORE compinit in ~/.zshrc):
   $ mkdir -p ~/.zsh/completions
   $ bcq completion zsh > ~/.zsh/completions/_bcq
-  # Then add to ~/.zshrc: fpath=(~/.zsh/completions $fpath)
+  # Then add to ~/.zshrc:
+  #   fpath=(~/.zsh/completions $fpath)
+  #   autoload -U compinit; compinit
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
