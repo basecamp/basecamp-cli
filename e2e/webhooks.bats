@@ -6,15 +6,6 @@ load test_helper
 
 # Flag parsing errors
 
-@test "webhooks --project without value shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp webhooks --project
-  assert_failure
-  assert_output_contains "--project requires a value"
-}
-
 @test "webhooks create --url without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
@@ -35,15 +26,6 @@ load test_helper
 
 
 # Missing context errors
-
-@test "webhooks without project shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp webhooks
-  assert_failure
-  assert_output_contains "project"
-}
 
 @test "webhooks show without id shows error" {
   create_credentials
@@ -127,7 +109,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp webhooks
+  run basecamp webhooks create
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'

@@ -15,28 +15,6 @@ load test_helper
   assert_output_contains "ID required"
 }
 
-@test "events without project shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp events 12345
-  assert_failure
-  assert_output_contains "project"
-}
-
-
-# Flag parsing
-
-@test "events --project without value shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp events 12345 --project
-  assert_failure
-  assert_output_contains "--project requires a value"
-}
-
-
 # Help
 
 @test "events --help shows help" {

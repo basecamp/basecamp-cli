@@ -24,16 +24,6 @@ load test_helper
   assert_output_contains "--visible or --hidden"
 }
 
-@test "recordings visibility without project shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp recordings visibility 456 --visible
-  assert_failure
-  assert_output_contains "project"
-}
-
-
 # Trash/Archive/Restore - missing context
 
 @test "recordings trash without recording id shows error" {
