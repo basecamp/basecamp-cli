@@ -508,6 +508,11 @@ cat .basecamp/config.json 2>/dev/null || echo "No project configured"
 
 ## Error Handling
 
+**General diagnostics:**
+```bash
+bcq doctor --json                            # Check CLI health, auth, connectivity
+```
+
 **Rate limiting (429):** bcq handles backoff automatically. If you see 429 errors, reduce request frequency.
 
 **Authentication errors:**
