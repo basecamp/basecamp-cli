@@ -473,9 +473,9 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 	}
 
 	// Try to load credentials for details
-	origin := config.NormalizeBaseURL(app.Config.BaseURL)
+	credKey := app.Auth.CredentialKey()
 	store := app.Auth.GetStore()
-	creds, err := store.Load(origin)
+	creds, err := store.Load(credKey)
 	if err != nil {
 		// Authenticated but can't load details - still pass but note the issue
 		check.Status = "pass"
@@ -515,9 +515,9 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 	}
 
 	// Load credentials to check expiration
-	origin := config.NormalizeBaseURL(app.Config.BaseURL)
+	credKey := app.Auth.CredentialKey()
 	store := app.Auth.GetStore()
-	creds, err := store.Load(origin)
+	creds, err := store.Load(credKey)
 	if err != nil {
 		check.Status = "fail"
 		check.Message = "Cannot load credentials"

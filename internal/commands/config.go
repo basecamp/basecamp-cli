@@ -160,7 +160,7 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Set a configuration value",
 		Long: `Set a configuration value in the local or global config file.
 
-Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled, format, scope`,
+Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled, format, scope, default_profile`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -170,14 +170,15 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 
 			// Validate key
 			validKeys := map[string]bool{
-				"account_id":    true,
-				"project_id":    true,
-				"todolist_id":   true,
-				"base_url":      true,
-				"cache_dir":     true,
-				"cache_enabled": true,
-				"format":        true,
-				"scope":         true,
+				"account_id":      true,
+				"project_id":      true,
+				"todolist_id":     true,
+				"base_url":        true,
+				"cache_dir":       true,
+				"cache_enabled":   true,
+				"format":          true,
+				"scope":           true,
+				"default_profile": true,
 			}
 			if !validKeys[key] {
 				return output.ErrUsage(fmt.Sprintf("Invalid config key: %s", key))
