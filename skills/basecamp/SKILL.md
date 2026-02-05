@@ -75,7 +75,7 @@ Full bcq CLI coverage: 130 endpoints across todos, cards, messages, files, sched
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
 5. **Rich text fields accept Markdown** - bcq converts to HTML automatically
-6. **Project scope is mandatory** - `--in <project>` is required for resource queries (todos, cards, messages, etc.). There is no cross-project query mode. For cross-project data, use `bcq recordings <type>` or loop through projects individually.
+6. **Project scope is mandatory** — via `--in <project>` or `.basecamp/config.json`. There is no cross-project query mode. For cross-project data, use `bcq recordings <type>` or loop through projects individually.
 
 ### Output Modes
 
@@ -106,7 +106,7 @@ bcq <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require `--in <project>`. For cross-project data, use `bcq recordings <type>` or loop through projects individually.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). For cross-project data, use `bcq recordings <type>` or loop through projects individually.
 
 | Task | Command |
 |------|---------|

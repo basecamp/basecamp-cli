@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -191,15 +192,22 @@ func isTTY(w io.Writer) bool {
 }
 
 func (w *Writer) writeJSON(v any) error {
+	toEncode := v
+	if resp, ok := v.(*Response); ok {
+		// Avoid mutating the original Response; encode a shallow copy with normalized data.
+		respCopy := *resp
+		respCopy.Data = NormalizeData(resp.Data)
+		toEncode = &respCopy
+	}
 	enc := json.NewEncoder(w.opts.Writer)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	return enc.Encode(toEncode)
 }
 
 // writeQuiet outputs data for quiet mode as JSON without the envelope.
 // This preserves the JSON contract for --agent and --quiet modes.
 func (w *Writer) writeQuiet(v any) error {
-	return w.writeJSON(v)
+	return w.writeJSON(NormalizeData(v))
 }
 
 func (w *Writer) writeIDs(v any) error {
@@ -252,7 +260,7 @@ func NormalizeData(data any) any {
 	// Handle json.RawMessage by unmarshaling it
 	if raw, ok := data.(json.RawMessage); ok {
 		var unmarshaled any
-		if err := json.Unmarshal(raw, &unmarshaled); err == nil {
+		if err := unmarshalPreservingNumbers(raw, &unmarshaled); err == nil {
 			return normalizeUnmarshaled(unmarshaled)
 		}
 		return data
@@ -272,11 +280,20 @@ func NormalizeData(data any) any {
 			return data
 		}
 		var unmarshaled any
-		if err := json.Unmarshal(b, &unmarshaled); err != nil {
+		if err := unmarshalPreservingNumbers(b, &unmarshaled); err != nil {
 			return data
 		}
 		return normalizeUnmarshaled(unmarshaled)
 	}
+}
+
+// unmarshalPreservingNumbers decodes JSON using UseNumber so numeric values
+// remain as json.Number instead of being converted to float64. This preserves
+// precision for large integer IDs that exceed 53-bit float64 range.
+func unmarshalPreservingNumbers(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return dec.Decode(v)
 }
 
 // normalizeUnmarshaled converts []any to []map[string]any if all elements are maps.
@@ -590,6 +607,8 @@ func isZeroValue(v any) bool {
 		return val == "" || val == "0001-01-01T00:00:00Z"
 	case float64:
 		return val == 0
+	case json.Number:
+		return val.String() == "0"
 	case bool:
 		return !val
 	default:
