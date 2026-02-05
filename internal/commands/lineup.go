@@ -83,9 +83,8 @@ The --date flag accepts natural language dates:
 			}
 
 			req := &basecamp.CreateMarkerRequest{
-				Title:    name,
-				StartsOn: parsedDate,
-				EndsOn:   parsedDate,
+				Name: name,
+				Date: parsedDate,
 			}
 
 			if err := app.Account().Lineup().CreateMarker(cmd.Context(), req); err != nil {
@@ -149,7 +148,7 @@ You can pass either a marker ID or a Basecamp URL:
 
 			req := &basecamp.UpdateMarkerRequest{}
 			if name != "" {
-				req.Title = name
+				req.Name = name
 			}
 			if date != "" {
 				// Parse natural date if needed
@@ -157,8 +156,7 @@ You can pass either a marker ID or a Basecamp URL:
 				if parsedDate == "" {
 					parsedDate = date // fallback to raw value
 				}
-				req.StartsOn = parsedDate
-				req.EndsOn = parsedDate
+				req.Date = parsedDate
 			}
 
 			if err := app.Account().Lineup().UpdateMarker(cmd.Context(), markerID, req); err != nil {
@@ -166,12 +164,12 @@ You can pass either a marker ID or a Basecamp URL:
 			}
 
 			result := map[string]any{"id": markerID, "updated": true}
-			if req.Title != "" {
-				result["title"] = req.Title
+			if req.Name != "" {
+				result["title"] = req.Name
 			}
-			if req.StartsOn != "" {
-				result["starts_on"] = req.StartsOn
-				result["ends_on"] = req.EndsOn
+			if req.Date != "" {
+				result["starts_on"] = req.Date
+				result["ends_on"] = req.Date
 			}
 
 			summary := fmt.Sprintf("Updated lineup marker #%d", markerID)
