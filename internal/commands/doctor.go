@@ -125,19 +125,22 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	// 1. Version check
 	checks = append(checks, checkVersion(verbose))
 
-	// 2. Go runtime info (verbose only, always passes)
+	// 2. SDK provenance
+	checks = append(checks, checkSDKProvenance(verbose))
+
+	// 3. Go runtime info (verbose only, always passes)
 	if verbose {
 		checks = append(checks, checkRuntime())
 	}
 
-	// 3. Config files check
+	// 4. Config files check
 	checks = append(checks, checkConfigFiles(app, verbose)...)
 
-	// 4. Credentials check
+	// 5. Credentials check
 	credCheck := checkCredentials(app, verbose)
 	checks = append(checks, credCheck)
 
-	// 5. Authentication check (only if credentials exist)
+	// 6. Authentication check (only if credentials exist)
 	var canTestAPI bool
 	if credCheck.Status == "pass" || credCheck.Status == "warn" {
 		authCheck := checkAuthentication(ctx, app, verbose)
@@ -152,7 +155,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 6. API connectivity (only if authenticated)
+	// 7. API connectivity (only if authenticated)
 	if canTestAPI {
 		checks = append(checks, checkAPIConnectivity(ctx, app, verbose))
 	} else {
@@ -163,7 +166,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 7. Account access (only if API works)
+	// 8. Account access (only if API works)
 	if canTestAPI && app.Config.AccountID != "" {
 		checks = append(checks, checkAccountAccess(ctx, app, verbose))
 	} else if app.Config.AccountID == "" {
@@ -181,10 +184,10 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 8. Cache health
+	// 9. Cache health
 	checks = append(checks, checkCacheHealth(app, verbose))
 
-	// 9. Shell completion
+	// 10. Shell completion
 	checks = append(checks, checkShellCompletion(verbose))
 
 	return checks
@@ -214,6 +217,47 @@ func checkVersion(verbose bool) Check {
 		check.Status = "warn"
 		check.Message = fmt.Sprintf("%s (update available: %s)", v, latest)
 		check.Hint = "Upgrade to the latest version"
+	}
+
+	return check
+}
+
+// checkSDKProvenance reports the embedded SDK version and revision.
+func checkSDKProvenance(verbose bool) Check {
+	check := Check{
+		Name:   "SDK",
+		Status: "pass",
+	}
+
+	p := version.GetSDKProvenance()
+	if p == nil {
+		check.Status = "warn"
+		check.Message = "Provenance data unavailable"
+		return check
+	}
+
+	if verbose {
+		parts := []string{p.SDK.Version}
+		if p.SDK.Revision != "" {
+			parts = append(parts, fmt.Sprintf("[revision: %s", p.SDK.Revision))
+			if p.SDK.UpdatedAt != "" {
+				// Show just the date portion
+				date := p.SDK.UpdatedAt
+				if len(date) >= 10 {
+					date = date[:10]
+				}
+				parts[len(parts)-1] += fmt.Sprintf(", updated: %s]", date)
+			} else {
+				parts[len(parts)-1] += "]"
+			}
+		}
+		check.Message = strings.Join(parts, " ")
+	} else {
+		if p.SDK.Revision != "" {
+			check.Message = fmt.Sprintf("%s (%s)", p.SDK.Version, p.SDK.Revision)
+		} else {
+			check.Message = p.SDK.Version
+		}
 	}
 
 	return check

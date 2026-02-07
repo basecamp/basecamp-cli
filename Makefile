@@ -176,6 +176,11 @@ clean-pgo:
 	rm -rf profiles/
 	rm -f benchmarks-*.txt
 
+# Bump SDK dependency and update provenance
+.PHONY: bump-sdk
+bump-sdk:
+	./scripts/bump-sdk.sh $(REF)
+
 # Run go vet
 .PHONY: vet
 vet:
@@ -308,6 +313,9 @@ help:
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
 	@echo "  check          Run all checks (fmt-check, vet, lint, test, test-e2e)"
+	@echo ""
+	@echo "Dependencies:"
+	@echo "  bump-sdk       Bump SDK and update provenance (REF=<git-ref>)"
 	@echo ""
 	@echo "Other:"
 	@echo "  tools          Install development tools (golangci-lint, govulncheck, etc.)"

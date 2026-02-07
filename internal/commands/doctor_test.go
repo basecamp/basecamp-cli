@@ -114,6 +114,19 @@ func TestCheckVersion(t *testing.T) {
 	assert.Contains(t, checkVerbose.Message, "commit")
 }
 
+func TestCheckSDKProvenance(t *testing.T) {
+	// Non-verbose: shows version and short revision
+	check := checkSDKProvenance(false)
+	assert.Equal(t, "SDK", check.Name)
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "v0.0.0-")
+
+	// Verbose: shows detailed info
+	checkVerbose := checkSDKProvenance(true)
+	assert.Equal(t, "pass", checkVerbose.Status)
+	assert.Contains(t, checkVerbose.Message, "revision:")
+}
+
 func TestDetectShell(t *testing.T) {
 	// Save and restore SHELL env
 	originalShell := os.Getenv("SHELL")
