@@ -34,6 +34,9 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
+      - name: Check SDK provenance
+        run: make provenance-check
+
       - name: Run unit tests
         run: go test -v ./...
 

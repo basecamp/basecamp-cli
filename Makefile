@@ -176,6 +176,32 @@ clean-pgo:
 	rm -rf profiles/
 	rm -f benchmarks-*.txt
 
+# Bump SDK dependency and update provenance
+.PHONY: bump-sdk
+bump-sdk:
+	./scripts/bump-sdk.sh $(REF)
+
+# Verify sdk-provenance.json matches go.mod
+# Skips when a replace directive is active (local dev with go.work or go.mod replace)
+.PHONY: provenance-check
+provenance-check:
+	@REPLACE=$$(go list -m -f '{{.Replace}}' github.com/basecamp/basecamp-sdk/go) && \
+	if [ -n "$$REPLACE" ] && [ "$$REPLACE" != "<nil>" ]; then \
+		echo "SDK provenance check skipped (replace active: $$REPLACE)"; \
+		exit 0; \
+	fi && \
+	MOD_VER=$$(go list -m -f '{{.Version}}' github.com/basecamp/basecamp-sdk/go) && \
+	PROV_VER=$$(jq -r '.sdk.version' internal/version/sdk-provenance.json) && \
+	if [ "$$MOD_VER" != "$$PROV_VER" ]; then \
+		echo "ERROR: SDK provenance drift detected"; \
+		echo "  go.mod:              $$MOD_VER"; \
+		echo "  sdk-provenance.json: $$PROV_VER"; \
+		echo ""; \
+		echo "Run 'make bump-sdk' to update provenance."; \
+		exit 1; \
+	fi && \
+	echo "SDK provenance OK ($$MOD_VER)"
+
 # Run go vet
 .PHONY: vet
 vet:
@@ -308,6 +334,10 @@ help:
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
 	@echo "  check          Run all checks (fmt-check, vet, lint, test, test-e2e)"
+	@echo ""
+	@echo "Dependencies:"
+	@echo "  bump-sdk          Bump SDK and update provenance (REF=<git-ref>)"
+	@echo "  provenance-check  Verify sdk-provenance.json matches go.mod"
 	@echo ""
 	@echo "Other:"
 	@echo "  tools          Install development tools (golangci-lint, govulncheck, etc.)"
