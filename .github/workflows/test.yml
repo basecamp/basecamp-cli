@@ -29,7 +29,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version-file: 'go.mod'
 
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
@@ -65,7 +65,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version-file: 'go.mod'
 
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
@@ -95,7 +95,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version-file: 'go.mod'
 
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
@@ -104,7 +104,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/go/bin
-          key: go-tools-${{ runner.os }}-go1.25.7-govulncheck-v1.1.4
+          key: go-tools-${{ runner.os }}-${{ hashFiles('go.mod') }}-govulncheck-v1.1.4
 
       - name: Run govulncheck
         run: |
@@ -132,7 +132,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version-file: 'go.mod'
 
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
@@ -161,7 +161,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version-file: 'go.mod'
 
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
@@ -221,7 +221,7 @@ jobs:
         if: steps.filter.outputs.bench == 'true'
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version-file: 'go.mod'
 
       - name: Configure git for private modules
         if: steps.filter.outputs.bench == 'true'
