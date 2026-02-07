@@ -1,6 +1,6 @@
 module github.com/basecamp/bcq
 
-go 1.25.6
+go 1.25.7
 
 require (
 	github.com/basecamp/basecamp-sdk/go v0.0.0-20260205081632-0362dcaf3950
