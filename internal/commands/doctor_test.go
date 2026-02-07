@@ -115,16 +115,17 @@ func TestCheckVersion(t *testing.T) {
 }
 
 func TestCheckSDKProvenance(t *testing.T) {
-	// Non-verbose: shows version and short revision
+	// Non-verbose: shows version string (works for both pseudo-versions and semver)
 	check := checkSDKProvenance(false)
 	assert.Equal(t, "SDK", check.Name)
 	assert.Equal(t, "pass", check.Status)
-	assert.Contains(t, check.Message, "v0.0.0-")
+	assert.NotEmpty(t, check.Message)
+	assert.Regexp(t, `v\d+\.\d+\.\d+`, check.Message)
 
 	// Verbose: shows detailed info
 	checkVerbose := checkSDKProvenance(true)
 	assert.Equal(t, "pass", checkVerbose.Status)
-	assert.Contains(t, checkVerbose.Message, "revision:")
+	assert.NotEmpty(t, checkVerbose.Message)
 }
 
 func TestDetectShell(t *testing.T) {

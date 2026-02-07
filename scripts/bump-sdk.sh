@@ -37,11 +37,25 @@ if [[ "${RESOLVED}" =~ -([0-9]{14})-([0-9a-f]{12})$ ]]; then
   TIMESTAMP="${TS_RAW:0:4}-${TS_RAW:4:2}-${TS_RAW:6:2}T${TS_RAW:8:2}:${TS_RAW:10:2}:${TS_RAW:12:2}Z"
   echo "    Commit: ${COMMIT}"
   echo "    Timestamp: ${TIMESTAMP}"
-elif [[ "${RESOLVED}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  # Semver tag: try to resolve commit from go module cache
-  echo "    Semver release: ${RESOLVED} (no commit hash in version)"
-  COMMIT=""
-  TIMESTAMP=""
+elif [[ "${RESOLVED}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  # Semver tag: resolve commit via go mod download
+  echo "    Semver release: ${RESOLVED}"
+  MOD_JSON=$(go mod download -json "${MODULE}@${RESOLVED}" 2>/dev/null || echo "")
+  if [[ -n "${MOD_JSON}" ]]; then
+    VCS_REV=$(echo "${MOD_JSON}" | jq -r '.Origin.Hash // ""' 2>/dev/null || echo "")
+    if [[ -n "${VCS_REV}" ]]; then
+      COMMIT="${VCS_REV:0:12}"
+      echo "    Commit (from module metadata): ${COMMIT}"
+    fi
+  fi
+  # Fall back to prior provenance if we couldn't resolve
+  if [[ -z "${COMMIT}" && -f "${PROVENANCE_FILE}" ]]; then
+    COMMIT=$(jq -r '.sdk.revision // ""' "${PROVENANCE_FILE}" 2>/dev/null || echo "")
+    TIMESTAMP=$(jq -r '.sdk.updated_at // ""' "${PROVENANCE_FILE}" 2>/dev/null || echo "")
+    if [[ -n "${COMMIT}" ]]; then
+      echo "    Preserved prior revision: ${COMMIT}"
+    fi
+  fi
 else
   echo "    Non-standard version format: ${RESOLVED}"
 fi
@@ -60,8 +74,13 @@ if [[ -f "${LOCAL_API_PROVENANCE}" ]]; then
 elif command -v gh >/dev/null 2>&1 && [[ -n "${COMMIT}" ]]; then
   # Try remote via GitHub API
   echo "    Fetching API provenance from GitHub (ref: ${COMMIT})"
-  API_JSON=$(gh api "repos/basecamp/basecamp-sdk/contents/spec/api-provenance.json?ref=${COMMIT}" \
-    --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+  B64_CONTENT=$(gh api "repos/basecamp/basecamp-sdk/contents/spec/api-provenance.json?ref=${COMMIT}" \
+    --jq '.content' 2>/dev/null || echo "")
+  API_JSON=""
+  if [[ -n "${B64_CONTENT}" ]]; then
+    # base64 -d is GNU, -D is macOS; try both
+    API_JSON=$(echo "${B64_CONTENT}" | base64 --decode 2>/dev/null || echo "${B64_CONTENT}" | base64 -D 2>/dev/null || echo "")
+  fi
   if [[ -n "${API_JSON}" ]]; then
     API_REVISION=$(echo "${API_JSON}" | jq -r '.bc3.revision // ""' 2>/dev/null || echo "")
     API_SYNCED_AT=$(echo "${API_JSON}" | jq -r '.bc3.synced_at // ""' 2>/dev/null || echo "")
