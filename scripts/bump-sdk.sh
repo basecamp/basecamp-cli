@@ -10,16 +10,23 @@ REF="${1:-main}"
 MODULE="github.com/basecamp/basecamp-sdk/go"
 PROVENANCE_FILE="internal/version/sdk-provenance.json"
 
+# Preflight: check required tools before mutating anything
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required but not installed"
+  echo "  Install with: brew install jq"
+  exit 1
+fi
+
 echo "==> Bumping SDK to ${MODULE}@${REF}"
 
 # 1. Update go.mod
 go get "${MODULE}@${REF}"
 go mod tidy
 
-# 2. Parse the resolved version from go.mod
-RESOLVED=$(grep "${MODULE}" go.mod | head -1 | awk '{print $2}')
+# 2. Get the resolved version (handles replace directives correctly)
+RESOLVED=$(go list -m -f '{{.Version}}' "${MODULE}")
 if [[ -z "${RESOLVED}" ]]; then
-  echo "ERROR: Could not find ${MODULE} in go.mod after update"
+  echo "ERROR: Could not resolve version for ${MODULE}"
   exit 1
 fi
 echo "    Resolved version: ${RESOLVED}"

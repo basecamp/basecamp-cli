@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/bcq/internal/config"
 	"github.com/basecamp/bcq/internal/names"
 	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/bcq/internal/version"
 )
 
 func TestDoctorResultSummary(t *testing.T) {
@@ -126,6 +127,48 @@ func TestCheckSDKProvenance(t *testing.T) {
 	checkVerbose := checkSDKProvenance(true)
 	assert.Equal(t, "pass", checkVerbose.Status)
 	assert.NotEmpty(t, checkVerbose.Message)
+}
+
+func TestFormatSDKProvenanceNil(t *testing.T) {
+	check := formatSDKProvenance(nil, false)
+	assert.Equal(t, "SDK", check.Name)
+	assert.Equal(t, "warn", check.Status)
+	assert.Equal(t, "Provenance data unavailable", check.Message)
+
+	// Verbose nil also warns
+	checkVerbose := formatSDKProvenance(nil, true)
+	assert.Equal(t, "warn", checkVerbose.Status)
+	assert.Equal(t, "Provenance data unavailable", checkVerbose.Message)
+}
+
+func TestFormatSDKProvenanceVersionOnly(t *testing.T) {
+	p := &version.SDKProvenance{}
+	p.SDK.Version = "v1.0.0"
+	// No revision set
+
+	check := formatSDKProvenance(p, false)
+	assert.Equal(t, "pass", check.Status)
+	assert.Equal(t, "v1.0.0", check.Message)
+
+	checkVerbose := formatSDKProvenance(p, true)
+	assert.Equal(t, "pass", checkVerbose.Status)
+	assert.Equal(t, "v1.0.0", checkVerbose.Message)
+}
+
+func TestFormatSDKProvenanceWithRevision(t *testing.T) {
+	p := &version.SDKProvenance{}
+	p.SDK.Version = "v0.0.0-20260205081632-0362dcaf3950"
+	p.SDK.Revision = "0362dcaf3950"
+	p.SDK.UpdatedAt = "2026-02-05T08:16:32Z"
+
+	check := formatSDKProvenance(p, false)
+	assert.Equal(t, "pass", check.Status)
+	assert.Equal(t, "v0.0.0-20260205081632-0362dcaf3950 (0362dcaf3950)", check.Message)
+
+	checkVerbose := formatSDKProvenance(p, true)
+	assert.Equal(t, "pass", checkVerbose.Status)
+	assert.Contains(t, checkVerbose.Message, "revision: 0362dcaf3950")
+	assert.Contains(t, checkVerbose.Message, "updated: 2026-02-05")
 }
 
 func TestDetectShell(t *testing.T) {

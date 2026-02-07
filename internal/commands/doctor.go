@@ -224,12 +224,16 @@ func checkVersion(verbose bool) Check {
 
 // checkSDKProvenance reports the embedded SDK version and revision.
 func checkSDKProvenance(verbose bool) Check {
+	return formatSDKProvenance(version.GetSDKProvenance(), verbose)
+}
+
+// formatSDKProvenance formats SDK provenance into a doctor check result.
+func formatSDKProvenance(p *version.SDKProvenance, verbose bool) Check {
 	check := Check{
 		Name:   "SDK",
 		Status: "pass",
 	}
 
-	p := version.GetSDKProvenance()
 	if p == nil {
 		check.Status = "warn"
 		check.Message = "Provenance data unavailable"
