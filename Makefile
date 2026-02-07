@@ -182,9 +182,15 @@ bump-sdk:
 	./scripts/bump-sdk.sh $(REF)
 
 # Verify sdk-provenance.json matches go.mod
+# Skips when a replace directive is active (local dev with go.work or go.mod replace)
 .PHONY: provenance-check
 provenance-check:
-	@MOD_VER=$$(go list -m -f '{{.Version}}' github.com/basecamp/basecamp-sdk/go) && \
+	@REPLACE=$$(go list -m -f '{{.Replace}}' github.com/basecamp/basecamp-sdk/go) && \
+	if [ -n "$$REPLACE" ] && [ "$$REPLACE" != "<nil>" ]; then \
+		echo "SDK provenance check skipped (replace active: $$REPLACE)"; \
+		exit 0; \
+	fi && \
+	MOD_VER=$$(go list -m -f '{{.Version}}' github.com/basecamp/basecamp-sdk/go) && \
 	PROV_VER=$$(jq -r '.sdk.version' internal/version/sdk-provenance.json) && \
 	if [ "$$MOD_VER" != "$$PROV_VER" ]; then \
 		echo "ERROR: SDK provenance drift detected"; \

@@ -82,12 +82,19 @@ elif [[ "${RESOLVED}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
       echo "    Timestamp (from module metadata): ${TIMESTAMP}"
     fi
   fi
-  # Fall back to prior provenance if we couldn't resolve
-  if [[ -z "${COMMIT}" && -f "${PROVENANCE_FILE}" ]]; then
-    COMMIT=$(jq -r '.sdk.revision // ""' "${PROVENANCE_FILE}" 2>/dev/null || echo "")
-    TIMESTAMP=$(jq -r '.sdk.updated_at // ""' "${PROVENANCE_FILE}" 2>/dev/null || echo "")
-    if [[ -n "${COMMIT}" ]]; then
-      echo "    Preserved prior revision: ${COMMIT}"
+  # Fall back to prior provenance for any fields we couldn't resolve
+  if [[ -f "${PROVENANCE_FILE}" ]]; then
+    if [[ -z "${COMMIT}" ]]; then
+      COMMIT=$(jq -r '.sdk.revision // ""' "${PROVENANCE_FILE}" 2>/dev/null || echo "")
+      if [[ -n "${COMMIT}" ]]; then
+        echo "    Preserved prior revision: ${COMMIT}"
+      fi
+    fi
+    if [[ -z "${TIMESTAMP}" ]]; then
+      TIMESTAMP=$(jq -r '.sdk.updated_at // ""' "${PROVENANCE_FILE}" 2>/dev/null || echo "")
+      if [[ -n "${TIMESTAMP}" ]]; then
+        echo "    Preserved prior timestamp: ${TIMESTAMP}"
+      fi
     fi
   fi
 else
