@@ -3,6 +3,7 @@
 #   REF: git ref in SDK repo (default: main)
 #
 # Updates go.mod and internal/version/sdk-provenance.json atomically.
+# On failure after mutating go.mod, restores the original files.
 
 set -euo pipefail
 
@@ -16,6 +17,26 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "  Install with: brew install jq"
   exit 1
 fi
+
+# Save originals for rollback on failure
+BACKUP_DIR=$(mktemp -d)
+cp go.mod "${BACKUP_DIR}/go.mod"
+cp go.sum "${BACKUP_DIR}/go.sum"
+if [[ -f "${PROVENANCE_FILE}" ]]; then
+  cp "${PROVENANCE_FILE}" "${BACKUP_DIR}/sdk-provenance.json"
+fi
+
+rollback() {
+  echo ""
+  echo "ERROR: bump failed, restoring original files"
+  cp "${BACKUP_DIR}/go.mod" go.mod
+  cp "${BACKUP_DIR}/go.sum" go.sum
+  if [[ -f "${BACKUP_DIR}/sdk-provenance.json" ]]; then
+    cp "${BACKUP_DIR}/sdk-provenance.json" "${PROVENANCE_FILE}"
+  fi
+  rm -rf "${BACKUP_DIR}"
+}
+trap rollback ERR
 
 echo "==> Bumping SDK to ${MODULE}@${REF}"
 
@@ -45,7 +66,7 @@ if [[ "${RESOLVED}" =~ -([0-9]{14})-([0-9a-f]{12})$ ]]; then
   echo "    Commit: ${COMMIT}"
   echo "    Timestamp: ${TIMESTAMP}"
 elif [[ "${RESOLVED}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-  # Semver tag: resolve commit via go mod download
+  # Semver tag: resolve commit and timestamp via go mod download
   echo "    Semver release: ${RESOLVED}"
   MOD_JSON=$(go mod download -json "${MODULE}@${RESOLVED}" 2>/dev/null || echo "")
   if [[ -n "${MOD_JSON}" ]]; then
@@ -53,6 +74,12 @@ elif [[ "${RESOLVED}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
     if [[ -n "${VCS_REV}" ]]; then
       COMMIT="${VCS_REV:0:12}"
       echo "    Commit (from module metadata): ${COMMIT}"
+    fi
+    # Derive timestamp from module Time field (RFC3339 format)
+    MOD_TIME=$(echo "${MOD_JSON}" | jq -r '.Time // ""' 2>/dev/null || echo "")
+    if [[ -n "${MOD_TIME}" ]]; then
+      TIMESTAMP="${MOD_TIME}"
+      echo "    Timestamp (from module metadata): ${TIMESTAMP}"
     fi
   fi
   # Fall back to prior provenance if we couldn't resolve
@@ -85,7 +112,7 @@ elif command -v gh >/dev/null 2>&1 && [[ -n "${COMMIT}" ]]; then
     --jq '.content' 2>/dev/null || echo "")
   API_JSON=""
   if [[ -n "${B64_CONTENT}" ]]; then
-    # base64 -d is GNU, -D is macOS; try both
+    # base64 --decode is GNU, -D is macOS; try both
     API_JSON=$(echo "${B64_CONTENT}" | base64 --decode 2>/dev/null || echo "${B64_CONTENT}" | base64 -D 2>/dev/null || echo "")
   fi
   if [[ -n "${API_JSON}" ]]; then
@@ -120,6 +147,10 @@ cat > "${PROVENANCE_FILE}" <<EOF
   }
 }
 EOF
+
+# Success — remove backup
+trap - ERR
+rm -rf "${BACKUP_DIR}"
 
 echo ""
 echo "==> Updated ${PROVENANCE_FILE}"
