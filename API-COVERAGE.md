@@ -6,11 +6,11 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 36 | 130 |
+| ✅ Implemented | 37 | 136 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **40** | **142** |
+| **Total (docs)** | **41** | **148** |
 
-**100% coverage of in-scope API** (130/130 endpoints)
+**100% coverage of in-scope API** (136/136 endpoints)
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
@@ -30,6 +30,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
 | campfires | 14 | `campfire` | ✅ | - | list, messages, post, line show/delete |
 | comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update |
+| boosts | 6 | `boost`, `react` | ✅ | - | list (recording + event), show, create (recording + event), delete |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | - | list, show, create, update, move |

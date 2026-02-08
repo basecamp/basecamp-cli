@@ -149,3 +149,140 @@ func TestCampfirePostContentIsPlainText(t *testing.T) {
 	assert.NotContains(t, content, "</p>",
 		"Campfire content should not contain </p> tags")
 }
+
+// TestCampfirePostContentTypeSentInPayload verifies that --content-type is passed through
+// to the API request body as content_type.
+func TestCampfirePostContentTypeSentInPayload(t *testing.T) {
+	t.Setenv("BCQ_NO_KEYRING", "1")
+
+	transport := &mockCampfireCreateTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &campfireTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "post", "<b>Hello</b>", "--content-type", "text/html")
+	require.NoError(t, err, "command should succeed with mock transport")
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var requestBody map[string]interface{}
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err, "expected valid JSON in request body")
+
+	assert.Equal(t, "text/html", requestBody["content_type"],
+		"content_type should be sent when --content-type is specified")
+}
+
+// TestCampfirePostDefaultOmitsContentType verifies that content_type is not sent
+// when --content-type is not specified.
+func TestCampfirePostDefaultOmitsContentType(t *testing.T) {
+	t.Setenv("BCQ_NO_KEYRING", "1")
+
+	transport := &mockCampfireCreateTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &campfireTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "post", "Hello team!")
+	require.NoError(t, err, "command should succeed with mock transport")
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var requestBody map[string]interface{}
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err, "expected valid JSON in request body")
+
+	_, hasContentType := requestBody["content_type"]
+	assert.False(t, hasContentType,
+		"content_type should not be sent when --content-type is not specified")
+}
+
+// TestCampfireNumericIDPostContentType exercises the numeric-ID dispatch path:
+// `bcq campfire <id> post <msg> --content-type text/html` which goes through the
+// parent command's RunE rather than the post subcommand.
+func TestCampfireNumericIDPostContentType(t *testing.T) {
+	t.Setenv("BCQ_NO_KEYRING", "1")
+
+	transport := &mockCampfireCreateTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &campfireTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	// This hits the isNumeric(args[0]) branch in NewCampfireCmd().RunE
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "789", "post", "<b>Hello</b>", "--content-type", "text/html")
+	require.NoError(t, err, "numeric-ID dispatch should succeed")
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var requestBody map[string]interface{}
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err, "expected valid JSON in request body")
+
+	assert.Equal(t, "text/html", requestBody["content_type"],
+		"content_type should be sent via numeric-ID dispatch path")
+	assert.Equal(t, "<b>Hello</b>", requestBody["content"],
+		"content should be passed through numeric-ID dispatch path")
+}

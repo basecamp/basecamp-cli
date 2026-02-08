@@ -164,6 +164,8 @@ func Execute() {
 	cmd.AddCommand(commands.NewLineupCmd())
 	cmd.AddCommand(commands.NewTimesheetCmd())
 	cmd.AddCommand(commands.NewClockCmd())
+	cmd.AddCommand(commands.NewBoostsCmd())
+	cmd.AddCommand(commands.NewBoostShortcutCmd())
 	cmd.AddCommand(commands.NewTodosetsCmd())
 	cmd.AddCommand(commands.NewToolsCmd())
 	cmd.AddCommand(commands.NewConfigCmd())
