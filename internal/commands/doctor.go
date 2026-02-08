@@ -240,20 +240,30 @@ func formatSDKProvenance(p *version.SDKProvenance, verbose bool) Check {
 		return check
 	}
 
+	if p.SDK.Version == "" {
+		check.Status = "warn"
+		check.Message = "Provenance data incomplete (missing version)"
+		return check
+	}
+
 	if verbose {
 		parts := []string{p.SDK.Version}
+
+		metaParts := []string{}
 		if p.SDK.Revision != "" {
-			parts = append(parts, fmt.Sprintf("[revision: %s", p.SDK.Revision))
-			if p.SDK.UpdatedAt != "" {
-				// Show just the date portion
-				date := p.SDK.UpdatedAt
-				if len(date) >= 10 {
-					date = date[:10]
-				}
-				parts[len(parts)-1] += fmt.Sprintf(", updated: %s]", date)
-			} else {
-				parts[len(parts)-1] += "]"
+			metaParts = append(metaParts, fmt.Sprintf("revision: %s", p.SDK.Revision))
+		}
+		if p.SDK.UpdatedAt != "" {
+			// Show just the date portion
+			date := p.SDK.UpdatedAt
+			if len(date) >= 10 {
+				date = date[:10]
 			}
+			metaParts = append(metaParts, fmt.Sprintf("updated: %s", date))
+		}
+
+		if len(metaParts) > 0 {
+			parts = append(parts, fmt.Sprintf("[%s]", strings.Join(metaParts, ", ")))
 		}
 		check.Message = strings.Join(parts, " ")
 	} else {
