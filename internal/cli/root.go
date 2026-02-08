@@ -189,7 +189,6 @@ func Execute() {
 	cmd.AddCommand(commands.NewTemplatesCmd())
 	cmd.AddCommand(commands.NewLineupCmd())
 	cmd.AddCommand(commands.NewTimesheetCmd())
-	cmd.AddCommand(commands.NewClockCmd())
 	cmd.AddCommand(commands.NewBoostsCmd())
 	cmd.AddCommand(commands.NewBoostShortcutCmd())
 	cmd.AddCommand(commands.NewTodosetsCmd())
