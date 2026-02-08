@@ -73,3 +73,29 @@ make bench-compare    # Compare against baseline
 ```
 
 **Skills benchmarking:** See `skills-benchmarking/` for agent task evaluation harness.
+
+## SDK Sync
+
+The CLI depends on the Basecamp SDK (`github.com/basecamp/basecamp-sdk/go`). When the
+SDK adds new API operations, the CLI must add corresponding commands.
+
+**Tracking**: `internal/version/sdk-provenance.json` records the SDK version +
+API revision the CLI is built against. `API-COVERAGE.md` tracks endpoint coverage.
+
+**Workflow** (see also `.claude/skills/sdk-bump.md`):
+1. `make bump-sdk` — updates go.mod + provenance (never edit go.mod directly)
+2. `go build ./...` — detect breaking changes
+3. Fix any compilation errors in `internal/commands/` and `internal/sdk/`
+4. Check for new SDK services/methods → create corresponding CLI commands
+5. `make test` — verify all pass including catalog parity
+6. Update `API-COVERAGE.md` with new endpoint coverage
+
+**Completeness bar**: every new SDK service method needs:
+- Command file in `internal/commands/`
+- Catalog entry in `commands.go`
+- Registration in `root.go` + `commands_test.go`
+- API-COVERAGE.md row
+
+**Andon cord**: if the SDK lacks a Go service wrapper for generated endpoints,
+stop and file a communique to the SDK dev agent — never call the raw generated
+client from CLI code.
