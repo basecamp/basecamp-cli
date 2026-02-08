@@ -49,6 +49,7 @@ func commandCategories() []CommandCategory {
 				{Name: "assign", Category: "shortcut", Description: "Assign a recording"},
 				{Name: "unassign", Category: "shortcut", Description: "Remove assignment"},
 				{Name: "clock", Category: "shortcut", Description: "Log time"},
+				{Name: "react", Category: "shortcut", Description: "Boost a recording"},
 			},
 		},
 		{
@@ -87,6 +88,7 @@ func commandCategories() []CommandCategory {
 				{Name: "forwards", Category: "communication", Description: "Manage email forwards (inbox)", Actions: []string{"list", "show", "inbox", "replies", "reply"}},
 				{Name: "subscriptions", Category: "communication", Description: "Manage notification subscriptions", Actions: []string{"show", "subscribe", "unsubscribe", "add", "remove"}},
 				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"list", "show", "update"}},
+				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
 			},
 		},
 		{

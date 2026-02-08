@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/bcq/internal/appctx"
@@ -14,6 +15,7 @@ import (
 func NewCampfireCmd() *cobra.Command {
 	var project string
 	var campfireID string
+	var contentType string
 
 	cmd := &cobra.Command{
 		Use:     "campfire [action]",
@@ -41,7 +43,7 @@ Use 'bcq campfire post "message"' to post a message.`,
 						return runCampfireMessages(cmd, app, campfireID, project, 25)
 					case "post":
 						if len(args) > 2 {
-							return runCampfirePost(cmd, app, campfireID, project, args[2])
+							return runCampfirePost(cmd, app, campfireID, project, args[2], contentType)
 						}
 						return output.ErrUsage("Message content required")
 					default:
@@ -59,11 +61,12 @@ Use 'bcq campfire post "message"' to post a message.`,
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVarP(&campfireID, "campfire", "c", "", "Campfire ID")
+	cmd.PersistentFlags().StringVar(&contentType, "content-type", "", "Content type (text/html for rich text)")
 
 	cmd.AddCommand(
 		newCampfireListCmd(&project),
 		newCampfireMessagesCmd(&project, &campfireID),
-		newCampfirePostCmd(&project, &campfireID),
+		newCampfirePostCmd(&project, &campfireID, &contentType),
 		newCampfireLineShowCmd(&project, &campfireID),
 		newCampfireLineDeleteCmd(&project, &campfireID),
 	)
@@ -265,14 +268,17 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 	)
 }
 
-func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
+func newCampfirePostCmd(project, campfireID, contentType *string) *cobra.Command {
 	var content string
 
 	cmd := &cobra.Command{
 		Use:   "post [message]",
 		Short: "Post a message",
-		Long:  "Post a message to a Campfire.",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Post a message to a Campfire.
+
+By default, messages are sent as plain text. Use --content-type text/html
+for rich text (HTML) messages.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -290,7 +296,7 @@ func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
 				return err
 			}
 
-			return runCampfirePost(cmd, app, *campfireID, *project, messageContent)
+			return runCampfirePost(cmd, app, *campfireID, *project, messageContent, *contentType)
 		},
 	}
 
@@ -299,7 +305,7 @@ func newCampfirePostCmd(project, campfireID *string) *cobra.Command {
 	return cmd
 }
 
-func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, content string) error {
+func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, content, contentType string) error {
 	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
@@ -332,8 +338,11 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
 
 	// Post message using SDK
-	// Content is plain text (API forces text-only lines) - do not wrap in HTML
-	line, err := app.Account().Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content)
+	var opts *basecamp.CreateLineOptions
+	if contentType != "" {
+		opts = &basecamp.CreateLineOptions{ContentType: contentType}
+	}
+	line, err := app.Account().Campfires().CreateLine(cmd.Context(), bucketID, campfireIDInt, content, opts)
 	if err != nil {
 		return err
 	}
