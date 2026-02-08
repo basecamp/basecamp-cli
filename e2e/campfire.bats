@@ -97,6 +97,25 @@ load test_helper
   assert_output_contains "bcq campfire"
 }
 
+@test "campfire post help documents --content-type flag" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq campfire post --help
+  assert_success
+  assert_output_contains "--content-type"
+  assert_output_contains "rich text"
+}
+
+@test "campfire --content-type visible on parent command for numeric-ID path" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bcq campfire --help
+  assert_success
+  assert_output_contains "--content-type"
+}
+
 @test "campfire list help documents --all flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
