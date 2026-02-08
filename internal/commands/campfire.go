@@ -149,8 +149,14 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 		return err
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-	campfireIDInt, _ := strconv.ParseInt(campfireIDStr, 10, 64)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+	campfireIDInt, err := strconv.ParseInt(campfireIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid campfire ID")
+	}
 
 	// Get campfire details using SDK
 	campfire, err := app.Account().Campfires().Get(cmd.Context(), bucketID, campfireIDInt)
@@ -234,8 +240,14 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		}
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid campfire ID")
+	}
 
 	// Get recent messages (lines) using SDK
 	result, err := app.Account().Campfires().ListLines(cmd.Context(), bucketID, campfireIDInt)
@@ -334,8 +346,14 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 		}
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-	campfireIDInt, _ := strconv.ParseInt(campfireID, 10, 64)
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid campfire ID")
+	}
 
 	// Post message using SDK
 	var opts *basecamp.CreateLineOptions
@@ -418,9 +436,18 @@ You can pass either a line ID or a Basecamp line URL:
 				}
 			}
 
-			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
-			campfireIDInt, _ := strconv.ParseInt(effectiveCampfireID, 10, 64)
-			lineIDInt, _ := strconv.ParseInt(lineID, 10, 64)
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+			campfireIDInt, err := strconv.ParseInt(effectiveCampfireID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid campfire ID")
+			}
+			lineIDInt, err := strconv.ParseInt(lineID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid line ID")
+			}
 
 			// Get line using SDK
 			line, err := app.Account().Campfires().GetLine(cmd.Context(), bucketID, campfireIDInt, lineIDInt)
