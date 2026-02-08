@@ -155,6 +155,31 @@ func TestFormatSDKProvenanceVersionOnly(t *testing.T) {
 	assert.Equal(t, "v1.0.0", checkVerbose.Message)
 }
 
+func TestFormatSDKProvenanceEmptyVersion(t *testing.T) {
+	p := &version.SDKProvenance{}
+	// Version is empty
+
+	check := formatSDKProvenance(p, false)
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "missing version")
+
+	checkVerbose := formatSDKProvenance(p, true)
+	assert.Equal(t, "warn", checkVerbose.Status)
+	assert.Contains(t, checkVerbose.Message, "missing version")
+}
+
+func TestFormatSDKProvenanceUpdatedAtWithoutRevision(t *testing.T) {
+	p := &version.SDKProvenance{}
+	p.SDK.Version = "v1.0.0"
+	p.SDK.UpdatedAt = "2026-02-05T08:16:32Z"
+	// No revision set
+
+	checkVerbose := formatSDKProvenance(p, true)
+	assert.Equal(t, "pass", checkVerbose.Status)
+	assert.Contains(t, checkVerbose.Message, "updated: 2026-02-05")
+	assert.NotContains(t, checkVerbose.Message, "revision")
+}
+
 func TestFormatSDKProvenanceWithRevision(t *testing.T) {
 	p := &version.SDKProvenance{}
 	p.SDK.Version = "v0.0.0-20260205081632-0362dcaf3950"
