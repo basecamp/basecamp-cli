@@ -20,23 +20,30 @@ fi
 
 # Save originals for rollback on failure
 BACKUP_DIR=$(mktemp -d)
+BUMP_SUCCESS=false
 cp go.mod "${BACKUP_DIR}/go.mod"
 cp go.sum "${BACKUP_DIR}/go.sum"
+PROVENANCE_EXISTED=false
 if [[ -f "${PROVENANCE_FILE}" ]]; then
   cp "${PROVENANCE_FILE}" "${BACKUP_DIR}/sdk-provenance.json"
+  PROVENANCE_EXISTED=true
 fi
 
-rollback() {
-  echo ""
-  echo "ERROR: bump failed, restoring original files"
-  cp "${BACKUP_DIR}/go.mod" go.mod
-  cp "${BACKUP_DIR}/go.sum" go.sum
-  if [[ -f "${BACKUP_DIR}/sdk-provenance.json" ]]; then
-    cp "${BACKUP_DIR}/sdk-provenance.json" "${PROVENANCE_FILE}"
+cleanup() {
+  if [[ "${BUMP_SUCCESS}" != "true" ]]; then
+    echo ""
+    echo "ERROR: bump failed, restoring original files"
+    cp "${BACKUP_DIR}/go.mod" go.mod
+    cp "${BACKUP_DIR}/go.sum" go.sum
+    if [[ -f "${BACKUP_DIR}/sdk-provenance.json" ]]; then
+      cp "${BACKUP_DIR}/sdk-provenance.json" "${PROVENANCE_FILE}"
+    elif [[ "${PROVENANCE_EXISTED}" == "false" && -f "${PROVENANCE_FILE}" ]]; then
+      rm -f "${PROVENANCE_FILE}"
+    fi
   fi
   rm -rf "${BACKUP_DIR}"
 }
-trap rollback ERR
+trap cleanup EXIT
 
 echo "==> Bumping SDK to ${MODULE}@${REF}"
 
@@ -155,9 +162,8 @@ cat > "${PROVENANCE_FILE}" <<EOF
 }
 EOF
 
-# Success — remove backup
-trap - ERR
-rm -rf "${BACKUP_DIR}"
+# Success — cleanup trap will skip rollback
+BUMP_SUCCESS=true
 
 echo ""
 echo "==> Updated ${PROVENANCE_FILE}"
