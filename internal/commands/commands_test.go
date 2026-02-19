@@ -67,6 +67,7 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 	root.AddCommand(commands.NewSetupCmd())
 	root.AddCommand(commands.NewDoctorCmd())
 	root.AddCommand(commands.NewMigrateCmd())
+	root.AddCommand(commands.NewTUICmd())
 
 	// Trigger Cobra's auto-addition of help subcommand
 	root.InitDefaultHelpCmd()

@@ -179,6 +179,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewDoctorCmd())
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
+	cmd.AddCommand(commands.NewTUICmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
