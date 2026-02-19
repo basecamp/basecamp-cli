@@ -26,7 +26,7 @@ If system keyring is unavailable (headless servers, containers), set:
 export BCQ_NO_KEYRING=1
 ```
 
-Credentials will be stored in `~/.config/bcq/credentials.json` with `0600` permissions.
+Credentials will be stored in `~/.config/basecamp/credentials.json` with `0600` permissions.
 
 ## Supported Versions
 

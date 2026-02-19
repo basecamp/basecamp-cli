@@ -20,7 +20,7 @@ GOFMT := gofmt
 GOMOD := $(GOCMD) mod
 
 # Version package path
-VERSION_PKG := github.com/basecamp/bcq/internal/version
+VERSION_PKG := github.com/basecamp/basecamp-cli/internal/version
 
 # Build flags
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)

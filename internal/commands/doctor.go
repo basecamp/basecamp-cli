@@ -282,7 +282,7 @@ func fetchLatestVersion() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/basecamp/bcq/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest", nil)
 	if err != nil {
 		return "", err
 	}

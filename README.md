@@ -31,7 +31,7 @@ go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
 
 **Shell script:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 </details>
 
@@ -85,7 +85,7 @@ bcq auth token              # Print token for scripts
 bcq works with any AI agent that can run shell commands. Install skills for enhanced workflows:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-skills.sh | bash
 ```
 
 Skills install to `~/.local/share/bcq/skills/`.

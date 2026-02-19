@@ -37,7 +37,7 @@ go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
 
 ### Option D: Shell script
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 
 **Verify:**
@@ -76,7 +76,7 @@ bcq auth status
 Skills provide AI agents with Basecamp workflow knowledge.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-skills.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-skills.sh | bash
 ```
 
 **Verify:**
@@ -108,7 +108,7 @@ claude plugin list | grep -i basecamp
 
 ### Codex (OpenAI)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-codex.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-codex.sh | bash
 ```
 
 **Verify:**
@@ -118,7 +118,7 @@ ls ~/.codex/skills/bcq
 
 ### OpenCode
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/scripts/install-opencode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-opencode.sh | bash
 ```
 
 **Verify:**
@@ -128,13 +128,13 @@ ls ~/.config/opencode/skill/bcq
 
 ### Gemini
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/templates/gemini/GEMINI.md -o ~/GEMINI.md
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/templates/gemini/GEMINI.md -o ~/GEMINI.md
 ```
 
 ### GitHub Copilot
 ```bash
 mkdir -p .github
-curl -fsSL https://raw.githubusercontent.com/basecamp/bcq/main/templates/copilot/copilot-instructions.md -o .github/copilot-instructions.md
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/templates/copilot/copilot-instructions.md -o .github/copilot-instructions.md
 ```
 
 ### Other Agents

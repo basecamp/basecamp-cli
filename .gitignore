@@ -28,4 +28,4 @@ benchmarks-current.txt
 # benchmarks-baseline.txt
 
 # PGO profile (generated, can optionally be committed for reproducible builds)
-# default.pgo
+default.pgo

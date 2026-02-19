@@ -565,5 +565,5 @@ cat ~/.config/basecamp/accounts.json         # Check available accounts
 ## Learn More
 
 - API concepts: https://github.com/basecamp/bc3-api#key-concepts
-- bcq repo: https://github.com/basecamp/bcq
+- bcq repo: https://github.com/basecamp/basecamp-cli
 - API coverage: See API-COVERAGE.md in bcq repo

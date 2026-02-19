@@ -24,13 +24,13 @@ ARG BUILD_DATE=unknown
 RUN if [ -d vendor ]; then \
         CGO_ENABLED=0 GOOS=linux go build -mod=vendor \
             -trimpath \
-            -ldflags="-s -w -X github.com/basecamp/bcq/internal/version.Version=${VERSION} -X github.com/basecamp/bcq/internal/version.Commit=${COMMIT} -X github.com/basecamp/bcq/internal/version.Date=${BUILD_DATE}" \
+            -ldflags="-s -w -X github.com/basecamp/basecamp-cli/internal/version.Version=${VERSION} -X github.com/basecamp/basecamp-cli/internal/version.Commit=${COMMIT} -X github.com/basecamp/basecamp-cli/internal/version.Date=${BUILD_DATE}" \
             -o /bcq ./cmd/bcq; \
     else \
         go mod download && \
         CGO_ENABLED=0 GOOS=linux go build \
             -trimpath \
-            -ldflags="-s -w -X github.com/basecamp/bcq/internal/version.Version=${VERSION} -X github.com/basecamp/bcq/internal/version.Commit=${COMMIT} -X github.com/basecamp/bcq/internal/version.Date=${BUILD_DATE}" \
+            -ldflags="-s -w -X github.com/basecamp/basecamp-cli/internal/version.Version=${VERSION} -X github.com/basecamp/basecamp-cli/internal/version.Commit=${COMMIT} -X github.com/basecamp/basecamp-cli/internal/version.Date=${BUILD_DATE}" \
             -o /bcq ./cmd/bcq; \
     fi
 

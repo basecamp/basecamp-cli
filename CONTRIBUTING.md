@@ -5,7 +5,7 @@
 ```bash
 # Clone
 git clone https://github.com/basecamp/basecamp-cli
-cd bcq
+cd basecamp-cli
 
 # Install dev tools (golangci-lint, govulncheck, etc.)
 make tools
@@ -65,7 +65,7 @@ The `go.work` file is gitignored - your local setup won't affect the repo.
 ## Project Structure
 
 ```
-bcq/
+basecamp-cli/
 ├── cmd/bcq/          # Main entrypoint
 ├── internal/
 │   ├── auth/         # OAuth authentication
