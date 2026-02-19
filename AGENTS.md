@@ -1,9 +1,13 @@
-# bcq Development Context
+# Basecamp CLI Development Context
+
+## Getting Started
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build setup, testing, and PR workflow.
 
 ## Repository Structure
 
 ```
-bcq/
+basecamp-cli/
 ├── cmd/bcq/          # Main entrypoint
 ├── internal/
 │   ├── appctx/       # Application context
@@ -30,7 +34,7 @@ bcq/
 
 ## Basecamp API Reference
 
-API documentation: `~/Work/basecamp/bc3-api` (local clone)
+API documentation: https://github.com/basecamp/bc3-api
 
 Key endpoints used by bcq:
 - `/projects.json` - List projects
@@ -63,7 +67,6 @@ OAuth endpoints are discovered via `.well-known/oauth-authorization-server`.
 
 ## Benchmarks
 
-**Go benchmarks:**
 ```bash
 make bench            # Run all benchmarks
 make bench-cpu        # Run with CPU profiling
@@ -71,8 +74,6 @@ make bench-mem        # Run with memory profiling
 make bench-save       # Save baseline for comparison
 make bench-compare    # Compare against baseline
 ```
-
-**Skills benchmarking:** See `skills-benchmarking/` for agent task evaluation harness.
 
 ## SDK Sync
 
@@ -96,6 +97,6 @@ API revision the CLI is built against. `API-COVERAGE.md` tracks endpoint coverag
 - Registration in `root.go` + `commands_test.go`
 - API-COVERAGE.md row
 
-**Andon cord**: if the SDK lacks a Go service wrapper for generated endpoints,
-stop and file a communique to the SDK dev agent — never call the raw generated
-client from CLI code.
+**Andon cord**: if the SDK lacks a Go service wrapper for a generated endpoint,
+stop and open an issue on [basecamp-sdk](https://github.com/basecamp/basecamp-sdk) —
+never call the raw generated client from CLI code.

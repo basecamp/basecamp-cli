@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/
 
 ```bash
 bcq projects                     # List projects
-bcq todos --project 12345        # Todos in a project
+bcq todos --in 12345             # Todos in a project
 bcq todo --content "Fix bug" --in 12345  # Create todo
 bcq done 67890                   # Complete todo
 bcq search "authentication"      # Search across projects
