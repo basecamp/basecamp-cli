@@ -1,6 +1,7 @@
-# Minimal Dockerfile for GoReleaser
+# Minimal Dockerfile for GoReleaser (dockers_v2)
 # GoReleaser builds the binary with proper auth, then copies it here
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY bcq /bcq
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/bcq /bcq
 USER nonroot:nonroot
 ENTRYPOINT ["/bcq"]
