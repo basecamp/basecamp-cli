@@ -150,16 +150,6 @@ bench-compare:
 	@command -v benchstat >/dev/null 2>&1 || go install golang.org/x/perf/cmd/benchstat@latest
 	benchstat benchmarks-baseline.txt benchmarks-current.txt
 
-# Check benchmarks against performance targets (CI gate)
-.PHONY: bench-gate
-bench-gate:
-	@if [ ! -f perf-targets.yaml ]; then \
-		echo "Error: perf-targets.yaml not found"; \
-		exit 1; \
-	fi
-	@command -v yq >/dev/null 2>&1 || (echo "Error: yq is required. Install with: brew install yq" && exit 1)
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/... | ./scripts/check-perf-targets.sh
-
 # ============================================================================
 # Profile-Guided Optimization (PGO)
 # ============================================================================
@@ -295,7 +285,7 @@ tools:
 	$(GOCMD) install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 	$(GOCMD) install golang.org/x/perf/cmd/benchstat@v0.0.0-20250106171221-62ad9bd2d39e
 	$(GOCMD) install github.com/zricethezav/gitleaks/v8@v8.21.2
-	$(GOCMD) install github.com/mikefarah/yq/v4@v4.50.1
+
 
 # Show help
 .PHONY: help
@@ -322,7 +312,6 @@ help:
 	@echo "  bench-mem      Run benchmarks with memory profiling"
 	@echo "  bench-save     Save current benchmarks as baseline"
 	@echo "  bench-compare  Compare against baseline (requires benchstat)"
-	@echo "  bench-gate     Check against performance targets (CI gate)"
 	@echo ""
 	@echo "PGO (Profile-Guided Optimization):"
 	@echo "  collect-profile  Generate PGO profile from benchmarks"

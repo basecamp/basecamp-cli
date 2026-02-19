@@ -1,1 +1,0 @@
-../../../skills/basecamp/SKILL.md
