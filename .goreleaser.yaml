@@ -53,8 +53,6 @@ checksum:
 # Generate SBOM for supply chain transparency
 sboms:
   - artifacts: archive
-    documents:
-      - sbom
 
 # Sign checksums with cosign (keyless via Sigstore)
 # Requires: permissions.id-token: write in workflow for OIDC
@@ -109,7 +107,7 @@ brews:
       owner: basecamp
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    folder: Formula
+    directory: Formula
     homepage: "https://github.com/basecamp/basecamp-cli"
     description: "Command-line interface for Basecamp"
     license: "MIT"
@@ -129,7 +127,7 @@ scoops:
       owner: basecamp
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    folder: bucket
+    directory: bucket
     homepage: "https://github.com/basecamp/basecamp-cli"
     description: "Command-line interface for Basecamp"
     license: MIT
