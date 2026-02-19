@@ -452,6 +452,12 @@ func HTMLToMarkdown(html string) string {
 	html = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`).ReplaceAllString(html, "~~$1~~")
 	html = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`).ReplaceAllString(html, "~~$1~~")
 
+	// Basecamp attachments: <bc-attachment ... filename="report.pdf"> → 📎 report.pdf
+	html = regexp.MustCompile(`(?i)<bc-attachment[^>]*filename="([^"]*)"[^>]*/?\s*>`).
+		ReplaceAllString(html, "\n📎 $1\n")
+	// Self-closing bc-attachment end tags
+	html = regexp.MustCompile(`(?i)</bc-attachment>`).ReplaceAllString(html, "")
+
 	// Remove remaining HTML tags
 	html = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(html, "")
 
@@ -502,6 +508,36 @@ func IsMarkdown(s string) bool {
 	}
 
 	return false
+}
+
+// AttachmentRef holds the metadata needed to embed a <bc-attachment> in HTML.
+type AttachmentRef struct {
+	SGID        string
+	Filename    string
+	ContentType string
+}
+
+// AttachmentToHTML builds a <bc-attachment> tag for embedding in Trix-compatible HTML.
+func AttachmentToHTML(sgid, filename, contentType string) string {
+	return `<bc-attachment sgid="` + escapeAttr(sgid) +
+		`" content-type="` + escapeAttr(contentType) +
+		`" filename="` + escapeAttr(filename) +
+		`"></bc-attachment>`
+}
+
+// EmbedAttachments appends <bc-attachment> tags to HTML content.
+// Each attachment is added as a separate block after the main content.
+func EmbedAttachments(html string, attachments []AttachmentRef) string {
+	if len(attachments) == 0 {
+		return html
+	}
+	var b strings.Builder
+	b.WriteString(html)
+	for _, a := range attachments {
+		b.WriteString("\n")
+		b.WriteString(AttachmentToHTML(a.SGID, a.Filename, a.ContentType))
+	}
+	return b.String()
 }
 
 // IsHTML attempts to detect if the input string contains HTML.
