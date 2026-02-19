@@ -1,5 +1,7 @@
 # <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI – bcq
 
+> **Prerelease.** This is an early internal release for 37signals dogfooding. The repo is private — all install methods below require GitHub access. Expect rough edges; file issues as you find them.
+
 `bcq` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
@@ -9,7 +11,7 @@
 ## Quick Start
 
 ```bash
-brew install basecamp/tap/bcq
+brew install --cask basecamp/tap/bcq
 bcq auth login
 ```
 
@@ -18,13 +20,7 @@ That's it. You now have full access to Basecamp from your terminal.
 <details>
 <summary>Other installation methods</summary>
 
-**Windows (Scoop):**
-```bash
-scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install bcq
-```
-
-**Go install:**
+**Go install** (requires `GOPRIVATE=github.com/basecamp/*`):
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
 ```
@@ -32,6 +28,12 @@ go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
 **Shell script:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
+```
+
+**Windows (Scoop):**
+```bash
+scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+scoop install bcq
 ```
 </details>
 
@@ -98,13 +100,20 @@ See [install.md](install.md) for step-by-step setup instructions.
 ## Configuration
 
 ```
-~/.config/basecamp/
-├── credentials.json   # OAuth tokens
-├── client.json        # DCR registration
-└── config.json        # Preferences
+~/.config/basecamp/           # Your Basecamp identity
+├── credentials.json          #   OAuth tokens (fallback when keyring unavailable)
+├── client.json               #   DCR client registration
+└── config.json               #   Global preferences
 
-.basecamp/
-└── config.json        # Per-repo overrides
+~/.config/bcq/theme/          # Tool display (optional)
+└── colors.toml               #   TUI color scheme
+
+~/.cache/bcq/                 # Ephemeral tool data
+├── completion.json           #   Tab completion cache
+└── resilience/               #   Circuit breaker state
+
+.basecamp/                    # Per-repo (committed to git)
+└── config.json               #   Project, account defaults
 ```
 
 ## Troubleshooting

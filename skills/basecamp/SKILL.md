@@ -504,6 +504,22 @@ bcq show <type> <id> --in <project> --json   # Show any recording type
 
 ## Configuration
 
+bcq uses two directory namespaces: `basecamp` for your Basecamp identity and project relationships, `bcq` for tool-specific operational data.
+
+```
+~/.config/basecamp/           # Basecamp identity (DO NOT read credentials)
+├── credentials.json          #   OAuth tokens — NEVER read or log
+├── client.json               #   DCR client registration
+└── config.json               #   Global preferences (account_id, base_url, format)
+
+~/.cache/bcq/                 # Tool cache (ephemeral, auto-managed)
+├── completion.json           #   Tab completion cache
+└── resilience/               #   Circuit breaker state
+
+.basecamp/                    # Per-repo config (committed to git)
+└── config.json               #   Project defaults (project_id, account_id, todolist_id)
+```
+
 **Per-repo config:** `.basecamp/config.json`
 ```json
 {
@@ -524,7 +540,7 @@ bcq config set todolist_id <id>
 cat .basecamp/config.json 2>/dev/null || echo "No project configured"
 ```
 
-**Global config:** `~/.config/basecamp/config.json` (account_id, preferences)
+**Global config:** `~/.config/basecamp/config.json` (account_id, base_url, format preferences)
 
 ## Error Handling
 
