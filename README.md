@@ -82,55 +82,18 @@ bcq auth token              # Print token for scripts
 
 ## AI Agent Integration
 
-bcq works with any AI agent that can run shell commands. Install skills for enhanced workflows:
+bcq works with any AI agent that can run shell commands.
 
+**Claude Code:** The `.claude-plugin/` is discovered automatically when you clone this repo. For standalone use, point at `skills/basecamp/SKILL.md`.
+
+**Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for full Basecamp workflow coverage.
+
+**One-liner** to install skills locally (any agent):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-skills.sh | bash
 ```
 
-Skills install to `~/.local/share/bcq/skills/`.
-
-### Platform Setup
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-```bash
-claude plugin marketplace add basecamp/bcq
-claude plugin install basecamp
-```
-
-Adds `/basecamp` slash command, hooks, and agents with skills bundled.
-</details>
-
-<details>
-<summary><strong>Codex (OpenAI)</strong></summary>
-
-```bash
-./scripts/install-codex.sh
-```
-
-Or manually link skills and reference in `~/.codex/AGENTS.md`:
-```markdown
-@~/.codex/skills/bcq/basecamp/SKILL.md
-```
-</details>
-
-<details>
-<summary><strong>OpenCode</strong></summary>
-
-```bash
-./scripts/install-opencode.sh
-```
-</details>
-
-<details>
-<summary><strong>Gemini / Copilot / Other</strong></summary>
-
-Copy the appropriate template from `templates/` or point your agent at:
-- `~/.local/share/bcq/skills/basecamp/SKILL.md`
-- `~/.local/share/bcq/skills/basecamp-api-reference/SKILL.md`
-</details>
+See [install.md](install.md) for step-by-step setup instructions.
 
 ## Configuration
 
