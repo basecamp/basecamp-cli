@@ -1,4 +1,4 @@
-module github.com/basecamp/bcq
+module github.com/basecamp/basecamp-cli
 
 go 1.25.7
 

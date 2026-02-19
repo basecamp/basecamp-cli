@@ -9,8 +9,8 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // NewScheduleCmd creates the schedule command for managing schedules.

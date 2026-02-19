@@ -15,8 +15,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // NewTimelineCmd creates the timeline command for viewing activity feeds.

@@ -12,7 +12,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/basecamp/bcq
+        - github.com/basecamp/basecamp-cli
 
 linters:
   enable:

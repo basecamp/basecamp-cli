@@ -7,8 +7,8 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // defaultLaunchpadBaseURL is the default Launchpad base URL.

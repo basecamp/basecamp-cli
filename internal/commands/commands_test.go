@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/basecamp/bcq/internal/cli"
-	"github.com/basecamp/bcq/internal/commands"
+	"github.com/basecamp/basecamp-cli/internal/cli"
+	"github.com/basecamp/basecamp-cli/internal/commands"
 )
 
 func TestCatalogMatchesRegisteredCommands(t *testing.T) {

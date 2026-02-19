@@ -14,8 +14,8 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/x/term"
 
-	"github.com/basecamp/bcq/internal/observability"
-	"github.com/basecamp/bcq/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/observability"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // Renderer handles styled terminal output.

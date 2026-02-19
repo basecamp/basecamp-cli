@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 func TestNewApp(t *testing.T) {

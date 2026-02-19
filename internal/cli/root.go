@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/commands"
-	"github.com/basecamp/bcq/internal/completion"
-	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/tui"
-	"github.com/basecamp/bcq/internal/version"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/commands"
+	"github.com/basecamp/basecamp-cli/internal/completion"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 // NewRootCmd creates the root cobra command.

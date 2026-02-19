@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // NewAPICmd creates the api command for raw API access.

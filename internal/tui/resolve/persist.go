@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // PersistOption represents a config persistence option.

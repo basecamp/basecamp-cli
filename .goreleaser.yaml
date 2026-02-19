@@ -1,6 +1,7 @@
 # GoReleaser configuration for bcq
 # Docs: https://goreleaser.com
 version: 2
+project_name: bcq
 
 before:
   hooks:
@@ -29,9 +30,9 @@ builds:
       - -pgo=auto
     ldflags:
       - -s -w
-      - -X github.com/basecamp/bcq/internal/version.Version={{.Version}}
-      - -X github.com/basecamp/bcq/internal/version.Commit={{.Commit}}
-      - -X github.com/basecamp/bcq/internal/version.Date={{.Date}}
+      - -X github.com/basecamp/basecamp-cli/internal/version.Version={{.Version}}
+      - -X github.com/basecamp/basecamp-cli/internal/version.Commit={{.Commit}}
+      - -X github.com/basecamp/basecamp-cli/internal/version.Date={{.Date}}
 
 archives:
   - id: default

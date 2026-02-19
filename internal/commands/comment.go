@@ -10,9 +10,9 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewCommentsCmd creates the comments command group (list/show/update).

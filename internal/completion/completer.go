@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 )
 
 // CacheDirFunc returns the cache directory to use for completion.

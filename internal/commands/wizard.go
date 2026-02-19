@@ -8,12 +8,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/auth"
-	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/tui"
-	"github.com/basecamp/bcq/internal/tui/resolve"
-	"github.com/basecamp/bcq/internal/version"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 // WizardResult holds the outcome of the first-run wizard.

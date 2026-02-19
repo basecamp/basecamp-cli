@@ -3,7 +3,7 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // NewMCPCmd creates the mcp command group.

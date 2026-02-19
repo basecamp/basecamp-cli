@@ -3,7 +3,7 @@ package presenter
 import (
 	"io"
 
-	"github.com/basecamp/bcq/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // RenderMode controls the output format.

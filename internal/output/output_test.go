@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/basecamp/bcq/internal/observability"
+	"github.com/basecamp/basecamp-cli/internal/observability"
 )
 
 // =============================================================================

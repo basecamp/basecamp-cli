@@ -51,12 +51,12 @@ func TestUserAgent(t *testing.T) {
 	defer func() { Version = original }()
 
 	Version = "dev"
-	if got := UserAgent(); got != "bcq/dev (https://github.com/basecamp/bcq)" {
+	if got := UserAgent(); got != "bcq/dev (https://github.com/basecamp/basecamp-cli)" {
 		t.Errorf("UserAgent() with dev = %q", got)
 	}
 
 	Version = "1.0.0"
-	if got := UserAgent(); got != "bcq/1.0.0 (https://github.com/basecamp/bcq)" {
+	if got := UserAgent(); got != "bcq/1.0.0 (https://github.com/basecamp/basecamp-cli)" {
 		t.Errorf("UserAgent() with 1.0.0 = %q", got)
 	}
 }

@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/basecamp/bcq/internal/observability"
-	"github.com/basecamp/bcq/internal/presenter"
+	"github.com/basecamp/basecamp-cli/internal/observability"
+	"github.com/basecamp/basecamp-cli/internal/presenter"
 )
 
 // Response is the success envelope for JSON output.

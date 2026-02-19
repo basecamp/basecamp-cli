@@ -8,9 +8,9 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/tui"
-	"github.com/basecamp/bcq/internal/tui/format"
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/format"
 )
 
 // CommentThread represents a thread of comments on a recording.

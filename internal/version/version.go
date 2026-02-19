@@ -68,7 +68,7 @@ func UserAgent() string {
 	if v == "dev" {
 		v = "dev"
 	}
-	return "bcq/" + v + " (https://github.com/basecamp/bcq)"
+	return "bcq/" + v + " (https://github.com/basecamp/basecamp-cli)"
 }
 
 // IsDev returns true if this is a development build.

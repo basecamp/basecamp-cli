@@ -21,8 +21,8 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 
-	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // ClientCredentials holds OAuth client ID and secret.
@@ -371,7 +371,7 @@ func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint st
 	redirectURI := "http://" + opts.CallbackAddr + "/callback"
 	regReq := map[string]interface{}{
 		"client_name":                "bcq",
-		"client_uri":                 "https://github.com/basecamp/bcq",
+		"client_uri":                 "https://github.com/basecamp/basecamp-cli",
 		"redirect_uris":              []string{redirectURI},
 		"grant_types":                []string{"authorization_code"},
 		"response_types":             []string{"code"},

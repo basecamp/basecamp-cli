@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // TestIsFirstRunUnauthenticated verifies isFirstRun returns true for unauthenticated,

@@ -13,12 +13,12 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/auth"
-	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/names"
-	"github.com/basecamp/bcq/internal/output"
-	"github.com/basecamp/bcq/internal/version"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/names"
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 func TestDoctorResultSummary(t *testing.T) {

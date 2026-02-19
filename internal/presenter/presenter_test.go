@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basecamp/bcq/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // enUS is the default locale used by most tests.

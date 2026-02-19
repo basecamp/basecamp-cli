@@ -9,9 +9,9 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/bcq/internal/auth"
-	"github.com/basecamp/bcq/internal/config"
-	"github.com/basecamp/bcq/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // Resolver provides interactive prompts for resolving missing CLI options.

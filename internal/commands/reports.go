@@ -7,9 +7,9 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/bcq/internal/appctx"
-	"github.com/basecamp/bcq/internal/dateparse"
-	"github.com/basecamp/bcq/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // NewReportsCmd creates the reports command for viewing various reports.
