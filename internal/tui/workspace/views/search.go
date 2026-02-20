@@ -61,7 +61,6 @@ type searchDebounceMsg struct {
 // When multiple accounts are available, search fans out across all accounts.
 type Search struct {
 	session *workspace.Session
-	store   *data.Store
 	styles  *tui.Styles
 	keys    searchKeyMap
 
@@ -82,7 +81,7 @@ type Search struct {
 }
 
 // NewSearch creates the search view.
-func NewSearch(session *workspace.Session, store *data.Store) *Search {
+func NewSearch(session *workspace.Session) *Search {
 	styles := session.Styles()
 
 	ti := textinput.New()
@@ -100,7 +99,6 @@ func NewSearch(session *workspace.Session, store *data.Store) *Search {
 
 	return &Search{
 		session:    session,
-		store:      store,
 		styles:     styles,
 		keys:       defaultSearchKeyMap(),
 		textInput:  ti,
@@ -133,6 +131,9 @@ func (v *Search) StartFilter() { v.list.StartFilter() }
 
 // ShortHelp implements View.
 func (v *Search) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		v.keys.Submit,
 		v.keys.Select,
@@ -381,7 +382,7 @@ func (v *Search) View() string {
 
 func (v *Search) fetchResults(query string) tea.Cmd {
 	ms := v.session.MultiStore()
-	ctx := v.session.Context()
+	ctx := v.session.Hub().Global().Context()
 	client := v.session.AccountClient()
 	accountID := v.session.Scope().AccountID
 	return func() tea.Msg {

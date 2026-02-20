@@ -62,10 +62,10 @@ const (
 
 // Todos is the split-pane view for todolists and their todos.
 type Todos struct {
-	session *workspace.Session
-	store   *data.Store
-	styles  *tui.Styles
-	keys    todosKeyMap
+	session      *workspace.Session
+	todolistPool *data.Pool[[]data.TodolistInfo]
+	styles       *tui.Styles
+	keys         todosKeyMap
 
 	// Layout
 	split         *widget.SplitPane
@@ -88,9 +88,6 @@ type Todos struct {
 	editingDesc  bool
 	descComposer *widget.Composer
 	descTodoID   int64
-
-	// Data (local copies for rendering)
-	todos map[int64][]todoState // todolistID -> todos with local state
 }
 
 // todoDescUpdatedMsg is sent after a todo description is updated.
@@ -100,19 +97,12 @@ type todoDescUpdatedMsg struct {
 	err        error
 }
 
-// todoState tracks a todo with local optimistic state.
-type todoState struct {
-	id          int64
-	content     string
-	description string
-	completed   bool
-	dueOn       string
-	assignees   []string
-}
-
 // NewTodos creates the split-pane todos view.
-func NewTodos(session *workspace.Session, store *data.Store) *Todos {
+func NewTodos(session *workspace.Session) *Todos {
 	styles := session.Styles()
+	scope := session.Scope()
+
+	todolistPool := session.Hub().Todolists(scope.ProjectID, scope.ToolID)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -156,7 +146,7 @@ func NewTodos(session *workspace.Session, store *data.Store) *Todos {
 
 	return &Todos{
 		session:      session,
-		store:        store,
+		todolistPool: todolistPool,
 		styles:       styles,
 		keys:         defaultTodosKeyMap(),
 		split:        split,
@@ -167,7 +157,6 @@ func NewTodos(session *workspace.Session, store *data.Store) *Todos {
 		loadingLists: true,
 		textInput:    ti,
 		descComposer: descComp,
-		todos:        make(map[int64][]todoState),
 	}
 }
 
@@ -197,6 +186,9 @@ func (v *Todos) IsModal() bool {
 
 // ShortHelp implements View.
 func (v *Todos) ShortHelp() []key.Binding {
+	if v.listLists.Filtering() || v.listTodos.Filtering() {
+		return filterHints()
+	}
 	if v.editingDesc {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "save")),
@@ -229,50 +221,75 @@ func (v *Todos) SetSize(w, h int) {
 
 // Init implements tea.Model.
 func (v *Todos) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchTodolists())
+	snap := v.todolistPool.Get()
+	if snap.Usable() {
+		v.syncTodolists(snap.Data)
+		v.loadingLists = false
+		if snap.Fresh() {
+			if item := v.listLists.Selected(); item != nil {
+				return v.selectTodolist(item.ID)
+			}
+			return nil
+		}
+	}
+	return tea.Batch(v.spinner.Tick, v.todolistPool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 // Update implements tea.Model.
 func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.TodolistsLoadedMsg:
-		v.loadingLists = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading todolists")
-		}
-		v.syncTodolists(msg.Todolists)
-		// Auto-select first todolist
-		if item := v.listLists.Selected(); item != nil {
-			return v, v.selectTodolist(item.ID)
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.todolistPool.Key() {
+			snap := v.todolistPool.Get()
+			if snap.Usable() {
+				v.loadingLists = false
+				v.syncTodolists(snap.Data)
+				if v.selectedListID == 0 {
+					if item := v.listLists.Selected(); item != nil {
+						return v, v.selectTodolist(item.ID)
+					}
+				}
+			}
+			if snap.State == data.StateError {
+				v.loadingLists = false
+				return v, workspace.ReportError(snap.Err, "loading todolists")
+			}
+		} else {
+			// Check if this is a todos pool update for the currently selected list
+			if v.selectedListID != 0 {
+				todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
+				if msg.Key == todosPool.Key() {
+					snap := todosPool.Get()
+					if snap.Usable() {
+						v.loadingTodos = false
+						v.syncTodos(v.selectedListID, snap.Data)
+					}
+					if snap.State == data.StateError {
+						v.loadingTodos = false
+						return v, workspace.ReportError(snap.Err, "loading todos")
+					}
+				}
+			}
 		}
 		return v, nil
 
-	case workspace.TodosLoadedMsg:
-		v.loadingTodos = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading todos")
-		}
-		v.syncTodos(msg.TodolistID, msg.Todos)
-		return v, nil
-
-	case workspace.TodoCompletedMsg:
-		if msg.Err != nil {
-			// Revert optimistic update using the message's TodolistID (not current selection)
-			v.revertToggle(msg.TodolistID, msg.TodoID, msg.Completed)
-			return v, workspace.ReportError(msg.Err, "toggling todo")
-		}
-		return v, nil
+	case data.MutationErrorMsg:
+		// Mutation failed — pool already rolled back optimistic state.
+		// Just show the error.
+		return v, workspace.ReportError(msg.Err, "toggling todo")
 
 	case workspace.TodoCreatedMsg:
 		if msg.Err != nil {
 			return v, workspace.ReportError(msg.Err, "creating todo")
 		}
-		// Reload the todolist's todos to get the server state
-		return v, v.fetchTodos(msg.TodolistID)
+		todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, msg.TodolistID)
+		todosPool.Invalidate()
+		return v, todosPool.Fetch(v.session.Hub().ProjectContext())
 
 	case workspace.RefreshMsg:
+		v.todolistPool.Invalidate()
 		v.loadingLists = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchTodolists())
+		return v, tea.Batch(v.spinner.Tick, v.todolistPool.Fetch(v.session.Hub().ProjectContext()))
 
 	case spinner.TickMsg:
 		if v.loadingLists || v.loadingTodos {
@@ -288,8 +305,10 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only close the editor on success
 		v.editingDesc = false
 		v.descComposer.Reset()
+		todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, msg.todolistID)
+		todosPool.Invalidate()
 		return v, tea.Batch(
-			v.fetchTodos(msg.todolistID),
+			todosPool.Fetch(v.session.Hub().ProjectContext()),
 			workspace.SetStatus("Description updated", false),
 		)
 
@@ -448,16 +467,19 @@ func (v *Todos) selectTodolist(id string) tea.Cmd {
 	}
 	v.selectedListID = listID
 
-	// If we have cached todos, show them immediately
-	if cached, ok := v.todos[listID]; ok {
+	todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, listID)
+	snap := todosPool.Get()
+	if snap.Usable() {
 		v.loadingTodos = false
-		v.renderTodoItems(cached)
-		return nil
+		v.syncTodos(listID, snap.Data)
+		if snap.Fresh() {
+			return nil
+		}
 	}
 
 	v.loadingTodos = true
 	v.listTodos.SetItems(nil)
-	return tea.Batch(v.spinner.Tick, v.fetchTodos(listID))
+	return tea.Batch(v.spinner.Tick, todosPool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 func (v *Todos) toggleSelected() tea.Cmd {
@@ -469,34 +491,34 @@ func (v *Todos) toggleSelected() tea.Cmd {
 	var todoID int64
 	fmt.Sscanf(item.ID, "%d", &todoID)
 
-	// Find current state and toggle optimistically
-	todos := v.todos[v.selectedListID]
+	// Find current completion state from the MutatingPool
+	todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
+	snap := todosPool.Get()
+	if !snap.Usable() {
+		return nil
+	}
 	var wasCompleted bool
-	for i := range todos {
-		if todos[i].id == todoID {
-			wasCompleted = todos[i].completed
-			todos[i].completed = !wasCompleted
+	for _, t := range snap.Data {
+		if t.ID == todoID {
+			wasCompleted = t.Completed
 			break
 		}
 	}
-	v.renderTodoItems(todos)
 
-	return v.completeTodo(todoID, !wasCompleted)
-}
+	cmd := todosPool.Apply(v.session.Hub().ProjectContext(), data.TodoCompleteMutation{
+		TodoID:    todoID,
+		Completed: !wasCompleted,
+		Client:    v.session.AccountClient(),
+		ProjectID: v.session.Scope().ProjectID,
+	})
 
-func (v *Todos) revertToggle(todolistID, todoID int64, failedCompleted bool) {
-	todos := v.todos[todolistID]
-	for i := range todos {
-		if todos[i].id == todoID {
-			// Revert: set back to opposite of what was attempted
-			todos[i].completed = !failedCompleted
-			break
-		}
+	// Read optimistic state immediately and render
+	snap = todosPool.Get()
+	if snap.Usable() {
+		v.syncTodos(v.selectedListID, snap.Data)
 	}
-	// Only re-render if this is the currently visible list
-	if todolistID == v.selectedListID {
-		v.renderTodoItems(todos)
-	}
+
+	return cmd
 }
 
 func (v *Todos) startEditDescription() tea.Cmd {
@@ -507,13 +529,16 @@ func (v *Todos) startEditDescription() tea.Cmd {
 	var todoID int64
 	fmt.Sscanf(item.ID, "%d", &todoID)
 
-	// Find the todo's current description
-	todos := v.todos[v.selectedListID]
+	// Find the todo's current description from the MutatingPool
+	todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
+	snap := todosPool.Get()
 	var description string
-	for _, t := range todos {
-		if t.id == todoID {
-			description = t.description
-			break
+	if snap.Usable() {
+		for _, t := range snap.Data {
+			if t.ID == todoID {
+				description = t.Description
+				break
+			}
 		}
 	}
 
@@ -563,7 +588,7 @@ func (v *Todos) updateTodoDescription(content widget.ComposerContent) tea.Cmd {
 		html = richtext.EmbedAttachments(html, refs)
 	}
 
-	ctx := v.session.Context()
+	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
 		_, err := client.Todos().Update(ctx, scope.ProjectID, todoID, &basecamp.UpdateTodoRequest{
@@ -625,7 +650,7 @@ func (v *Todos) renderRightPanel() string {
 
 // -- Data sync
 
-func (v *Todos) syncTodolists(todolists []workspace.TodolistInfo) {
+func (v *Todos) syncTodolists(todolists []data.TodolistInfo) {
 	items := make([]widget.ListItem, 0, len(todolists))
 	for _, tl := range todolists {
 		items = append(items, widget.ListItem{
@@ -637,40 +662,27 @@ func (v *Todos) syncTodolists(todolists []workspace.TodolistInfo) {
 	v.listLists.SetItems(items)
 }
 
-func (v *Todos) syncTodos(todolistID int64, todos []workspace.TodoInfo) {
-	states := make([]todoState, 0, len(todos))
-	for _, t := range todos {
-		states = append(states, todoState{
-			id:          t.ID,
-			content:     t.Content,
-			description: t.Description,
-			completed:   t.Completed,
-			dueOn:       t.DueOn,
-			assignees:   t.Assignees,
-		})
-	}
-	v.todos[todolistID] = states
-
+func (v *Todos) syncTodos(todolistID int64, todos []data.TodoInfo) {
 	// Only update the right panel if this is still the selected list
 	if todolistID == v.selectedListID {
-		v.renderTodoItems(states)
+		v.renderTodoItems(todos)
 	}
 }
 
-func (v *Todos) renderTodoItems(todos []todoState) {
+func (v *Todos) renderTodoItems(todos []data.TodoInfo) {
 	items := make([]widget.ListItem, 0, len(todos))
 	for _, t := range todos {
 		check := "[ ]"
-		if t.completed {
+		if t.Completed {
 			check = "[x]"
 		}
 
 		desc := ""
-		if t.dueOn != "" {
-			desc = t.dueOn
+		if t.DueOn != "" {
+			desc = t.DueOn
 		}
-		if len(t.assignees) > 0 {
-			who := strings.Join(t.assignees, ", ")
+		if len(t.Assignees) > 0 {
+			who := strings.Join(t.Assignees, ", ")
 			if desc != "" {
 				desc += " - "
 			}
@@ -678,8 +690,8 @@ func (v *Todos) renderTodoItems(todos []todoState) {
 		}
 
 		items = append(items, widget.ListItem{
-			ID:          fmt.Sprintf("%d", t.id),
-			Title:       check + " " + t.content,
+			ID:          fmt.Sprintf("%d", t.ID),
+			Title:       check + " " + t.Content,
 			Description: desc,
 		})
 	}
@@ -688,78 +700,10 @@ func (v *Todos) renderTodoItems(todos []todoState) {
 
 // -- Commands (tea.Cmd factories)
 
-func (v *Todos) fetchTodolists() tea.Cmd {
-	scope := v.session.Scope()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		result, err := client.Todolists().List(ctx, scope.ProjectID, scope.ToolID, &basecamp.TodolistListOptions{})
-		if err != nil {
-			return workspace.TodolistsLoadedMsg{Err: err}
-		}
-
-		infos := make([]workspace.TodolistInfo, 0, len(result.Todolists))
-		for _, tl := range result.Todolists {
-			infos = append(infos, workspace.TodolistInfo{
-				ID:             tl.ID,
-				Title:          tl.Title,
-				CompletedRatio: tl.CompletedRatio,
-			})
-		}
-		return workspace.TodolistsLoadedMsg{Todolists: infos}
-	}
-}
-
-func (v *Todos) fetchTodos(todolistID int64) tea.Cmd {
-	scope := v.session.Scope()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		result, err := client.Todos().List(ctx, scope.ProjectID, todolistID, &basecamp.TodoListOptions{})
-		if err != nil {
-			return workspace.TodosLoadedMsg{TodolistID: todolistID, Err: err}
-		}
-
-		infos := make([]workspace.TodoInfo, 0, len(result.Todos))
-		for _, t := range result.Todos {
-			names := make([]string, 0, len(t.Assignees))
-			for _, a := range t.Assignees {
-				names = append(names, a.Name)
-			}
-			infos = append(infos, workspace.TodoInfo{
-				ID:          t.ID,
-				Content:     t.Content,
-				Description: t.Description,
-				Completed:   t.Completed,
-				DueOn:       t.DueOn,
-				Assignees:   names,
-				Position:    t.Position,
-			})
-		}
-		return workspace.TodosLoadedMsg{TodolistID: todolistID, Todos: infos}
-	}
-}
-
-func (v *Todos) completeTodo(todoID int64, completed bool) tea.Cmd {
-	scope := v.session.Scope()
-	todolistID := v.selectedListID
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		var err error
-		if completed {
-			err = client.Todos().Complete(ctx, scope.ProjectID, todoID)
-		} else {
-			err = client.Todos().Uncomplete(ctx, scope.ProjectID, todoID)
-		}
-		return workspace.TodoCompletedMsg{TodolistID: todolistID, TodoID: todoID, Completed: completed, Err: err}
-	}
-}
-
 func (v *Todos) createTodo(content string) tea.Cmd {
 	scope := v.session.Scope()
 	todolistID := v.selectedListID
-	ctx := v.session.Context()
+	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
 		_, err := client.Todos().Create(ctx, scope.ProjectID, todolistID, &basecamp.CreateTodoRequest{

@@ -4,14 +4,11 @@ package views
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -25,7 +22,7 @@ import (
 // with section headers.
 type Projects struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[[]data.ProjectInfo]
 	styles  *tui.Styles
 
 	list    *widget.List
@@ -33,17 +30,18 @@ type Projects struct {
 	spinner spinner.Model
 	loading bool
 
-	// Multi-account state
-	multiAccount    bool                            // true when showing projects from all accounts
-	accountGroups   []workspace.AccountProjectGroup // grouped projects by account
-	projectAccounts map[string]string               // projectID -> accountID for navigation
+	// Local rendering data read from pool on update
+	projects        []data.ProjectInfo
+	projectAccounts map[string]string // projectID -> accountID for navigation
 
 	width, height int
 }
 
 // NewProjects creates the projects dashboard view.
-func NewProjects(session *workspace.Session, store *data.Store) *Projects {
+func NewProjects(session *workspace.Session) *Projects {
 	styles := session.Styles()
+
+	pool := session.Hub().Projects()
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -55,19 +53,22 @@ func NewProjects(session *workspace.Session, store *data.Store) *Projects {
 
 	split := widget.NewSplitPane(styles, 0.35)
 
+	snap := pool.Get()
+
 	v := &Projects{
 		session:         session,
-		store:           store,
+		pool:            pool,
 		styles:          styles,
 		list:            list,
 		split:           split,
 		spinner:         s,
-		loading:         !store.HasProjects(),
+		loading:         !snap.Usable(),
 		projectAccounts: make(map[string]string),
 	}
 
-	if store.HasProjects() {
-		v.syncFromStore()
+	if snap.Usable() {
+		v.projects = snap.Data
+		v.syncProjectList()
 	}
 
 	return v
@@ -80,6 +81,9 @@ func (v *Projects) Title() string {
 
 // ShortHelp implements View.
 func (v *Projects) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -110,60 +114,56 @@ func (v *Projects) SetSize(w, h int) {
 func (v *Projects) Init() tea.Cmd {
 	cmds := []tea.Cmd{v.spinner.Tick}
 
-	// Try multi-account fetch if accounts are already discovered
-	ms := v.session.MultiStore()
-	if accounts := ms.Accounts(); len(accounts) > 1 {
-		cmds = append(cmds, v.fetchMultiAccountProjects())
-	} else if !v.store.HasProjects() {
-		cmds = append(cmds, v.fetchProjects())
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.projects = snap.Data
+		v.syncProjectList()
+		v.loading = false
+		if snap.Fresh() {
+			return tea.Batch(cmds...)
+		}
 	}
 
+	cmds = append(cmds, v.pool.FetchIfStale(v.session.Hub().Global().Context()))
 	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
 func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.ProjectsLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading projects")
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.projects = snap.Data
+				v.syncProjectList()
+				v.loading = false
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading projects")
+			}
 		}
-		v.store.SetProjects(msg.Projects)
-		v.syncFromStore()
-		return v, nil
-
-	case workspace.MultiAccountProjectsLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading projects")
-		}
-		v.multiAccount = true
-		v.accountGroups = msg.AccountProjects
-		v.syncFromMultiAccount()
 		return v, nil
 
 	case workspace.ProjectBookmarkedMsg:
 		if msg.Err != nil {
 			// Revert optimistic update
-			p := v.store.Project(msg.ProjectID)
+			p := v.findProject(msg.ProjectID)
 			if p != nil {
 				p.Bookmarked = !msg.Bookmarked
-				v.store.UpsertProject(*p)
-				v.updateAccountGroupProject(msg.ProjectID, !msg.Bookmarked)
-				v.resyncList()
+				v.syncProjectList()
 			}
 			return v, workspace.ReportError(msg.Err, "toggling bookmark")
 		}
+		// On success, invalidate pool so other views (Home bookmarks) get updated data
+		v.pool.Invalidate()
 		return v, workspace.SetStatus("Bookmark updated", false)
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		ms := v.session.MultiStore()
-		if accounts := ms.Accounts(); len(accounts) > 1 {
-			return v, tea.Batch(v.spinner.Tick, v.fetchMultiAccountProjects())
-		}
-		return v, tea.Batch(v.spinner.Tick, v.fetchProjects())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -213,90 +213,94 @@ func (v *Projects) View() string {
 	return v.split.View()
 }
 
-func (v *Projects) syncFromStore() {
-	projects := v.store.Projects()
-	items := make([]widget.ListItem, 0, len(projects))
-
-	// Bookmarked first, then alphabetical
-	var bookmarked, regular []basecamp.Project
-	for _, p := range projects {
-		if p.Bookmarked {
-			bookmarked = append(bookmarked, p)
-		} else {
-			regular = append(regular, p)
-		}
-	}
-
-	for _, p := range bookmarked {
-		items = append(items, projectToListItem(p, true))
-	}
-	for _, p := range regular {
-		items = append(items, projectToListItem(p, false))
-	}
-
-	v.list.SetItems(items)
-}
-
-func (v *Projects) syncFromMultiAccount() {
+func (v *Projects) syncProjectList() {
 	v.projectAccounts = make(map[string]string)
+
+	// Detect multi-account
+	accounts := make(map[string]string) // ID -> Name
+	for _, p := range v.projects {
+		accounts[p.AccountID] = p.AccountName
+	}
+	multiAccount := len(accounts) > 1
+
 	var items []widget.ListItem
-	multipleAccounts := len(v.accountGroups) > 1
 
-	// Also populate the store with projects from the current account for dock preview
-	for _, group := range v.accountGroups {
-		if multipleAccounts {
-			items = append(items, widget.ListItem{
-				Title:  group.Account.Name,
-				Header: true,
-			})
+	if multiAccount {
+		// Group by account
+		type group struct {
+			name     string
+			projects []data.ProjectInfo
 		}
-
-		// Bookmarked first within each account group
-		var bookmarked, regular []basecamp.Project
-		for _, p := range group.Projects {
-			if p.Bookmarked {
-				bookmarked = append(bookmarked, p)
+		var groups []group
+		seen := make(map[string]int)
+		for _, p := range v.projects {
+			if idx, ok := seen[p.AccountID]; ok {
+				groups[idx].projects = append(groups[idx].projects, p)
 			} else {
-				regular = append(regular, p)
+				seen[p.AccountID] = len(groups)
+				groups = append(groups, group{name: p.AccountName, projects: []data.ProjectInfo{p}})
 			}
 		}
-
-		for _, p := range bookmarked {
-			id := fmt.Sprintf("%d", p.ID)
-			v.projectAccounts[id] = group.Account.ID
-			items = append(items, projectToListItem(p, true))
+		for _, g := range groups {
+			items = append(items, widget.ListItem{Title: g.name, Header: true})
+			// Bookmarked first within each group
+			var bm, reg []data.ProjectInfo
+			for _, p := range g.projects {
+				if p.Bookmarked {
+					bm = append(bm, p)
+				} else {
+					reg = append(reg, p)
+				}
+			}
+			for _, p := range append(bm, reg...) {
+				id := fmt.Sprintf("%d", p.ID)
+				v.projectAccounts[id] = p.AccountID
+				items = append(items, projectInfoToListItem(p))
+			}
 		}
-		for _, p := range regular {
-			id := fmt.Sprintf("%d", p.ID)
-			v.projectAccounts[id] = group.Account.ID
-			items = append(items, projectToListItem(p, false))
+	} else {
+		// Single account: bookmarked first
+		var bm, reg []data.ProjectInfo
+		for _, p := range v.projects {
+			if p.Bookmarked {
+				bm = append(bm, p)
+			} else {
+				reg = append(reg, p)
+			}
 		}
-
-		// Upsert into store for dock preview
-		for _, p := range group.Projects {
-			v.store.UpsertProject(p)
+		for _, p := range append(bm, reg...) {
+			id := fmt.Sprintf("%d", p.ID)
+			v.projectAccounts[id] = p.AccountID
+			items = append(items, projectInfoToListItem(p))
 		}
 	}
 
 	v.list.SetItems(items)
 }
 
-func projectToListItem(p basecamp.Project, bookmarked bool) widget.ListItem {
+func projectInfoToListItem(p data.ProjectInfo) widget.ListItem {
 	desc := p.Purpose
 	if desc == "" {
 		desc = p.Description
 	}
-	// Truncate long descriptions
 	if len(desc) > 60 {
 		desc = desc[:57] + "..."
 	}
-
 	return widget.ListItem{
 		ID:          fmt.Sprintf("%d", p.ID),
 		Title:       p.Name,
 		Description: desc,
-		Marked:      bookmarked,
+		Marked:      p.Bookmarked,
 	}
+}
+
+func (v *Projects) findProject(projectID int64) *data.ProjectInfo {
+	for i := range v.projects {
+		if v.projects[i].ID == projectID {
+			return &v.projects[i]
+		}
+	}
+	return nil
 }
 
 func (v *Projects) renderDockPreview() string {
@@ -309,10 +313,10 @@ func (v *Projects) renderDockPreview() string {
 		return ""
 	}
 
-	// Find the full project from store
+	// Find the full project from local data
 	var projectID int64
 	fmt.Sscanf(item.ID, "%d", &projectID)
-	project := v.store.Project(projectID)
+	project := v.findProject(projectID)
 	if project == nil {
 		return ""
 	}
@@ -331,17 +335,16 @@ func (v *Projects) renderDockPreview() string {
 	b.WriteString("\n")
 
 	// Account badge (multi-account mode)
-	if v.multiAccount {
-		if acctID, ok := v.projectAccounts[item.ID]; ok {
-			for _, g := range v.accountGroups {
-				if g.Account.ID == acctID {
-					b.WriteString(lipgloss.NewStyle().
-						Foreground(theme.Muted).
-						Render(g.Account.Name))
-					b.WriteString("\n")
-					break
-				}
-			}
+	accounts := make(map[string]struct{})
+	for _, p := range v.projects {
+		accounts[p.AccountID] = struct{}{}
+	}
+	if len(accounts) > 1 {
+		if project.AccountName != "" {
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(theme.Muted).
+				Render(project.AccountName))
+			b.WriteString("\n")
 		}
 	}
 
@@ -405,102 +408,6 @@ func dockToolDisplayName(name string) string {
 	}
 }
 
-func (v *Projects) fetchProjects() tea.Cmd {
-	cache := v.store.Cache()
-	entry := cache.Get("projects:list")
-
-	if entry != nil {
-		projects, _ := entry.Value.([]basecamp.Project) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.ProjectsLoadedMsg{Projects: projects}
-			}
-		}
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.ProjectsLoadedMsg{Projects: projects}
-			},
-			v.fetchProjectsFromAPI(),
-		)
-	}
-
-	return v.fetchProjectsFromAPI()
-}
-
-func (v *Projects) fetchProjectsFromAPI() tea.Cmd {
-	if !v.session.HasAccount() {
-		return func() tea.Msg {
-			return workspace.ProjectsLoadedMsg{
-				Err: fmt.Errorf("no account selected"),
-			}
-		}
-	}
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		result, err := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
-		if err != nil {
-			return workspace.ProjectsLoadedMsg{Err: err}
-		}
-		v.store.Cache().Set("projects:list", result.Projects, 30*time.Second, 5*time.Minute)
-		return workspace.ProjectsLoadedMsg{Projects: result.Projects}
-	}
-}
-
-func (v *Projects) fetchMultiAccountProjects() tea.Cmd {
-	cache := v.session.MultiStore().Cache()
-	entry := cache.Get("projects:multi")
-
-	if entry != nil {
-		groups, _ := entry.Value.([]workspace.AccountProjectGroup) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.MultiAccountProjectsLoadedMsg{AccountProjects: groups}
-			}
-		}
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.MultiAccountProjectsLoadedMsg{AccountProjects: groups}
-			},
-			v.fetchMultiAccountProjectsFromAPI(),
-		)
-	}
-
-	return v.fetchMultiAccountProjectsFromAPI()
-}
-
-func (v *Projects) fetchMultiAccountProjectsFromAPI() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	return func() tea.Msg {
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			result, err := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			return result.Projects, nil
-		})
-
-		var groups []workspace.AccountProjectGroup
-		for _, r := range results {
-			if r.Err != nil {
-				continue // skip failed accounts
-			}
-			projects, _ := r.Data.([]basecamp.Project)
-			if len(projects) == 0 {
-				continue
-			}
-			groups = append(groups, workspace.AccountProjectGroup{
-				Account:  workspace.AccountInfo{ID: r.Account.ID, Name: r.Account.Name},
-				Projects: projects,
-			})
-		}
-
-		ms.Cache().Set("projects:multi", groups, 30*time.Second, 5*time.Minute)
-		return workspace.MultiAccountProjectsLoadedMsg{AccountProjects: groups}
-	}
-}
-
 func (v *Projects) toggleBookmark() tea.Cmd {
 	item := v.list.Selected()
 	if item == nil {
@@ -509,18 +416,16 @@ func (v *Projects) toggleBookmark() tea.Cmd {
 
 	var projectID int64
 	fmt.Sscanf(item.ID, "%d", &projectID)
-	project := v.store.Project(projectID)
-	if project == nil {
+
+	p := v.findProject(projectID)
+	if p == nil {
 		return nil
 	}
 
-	newBookmarked := !project.Bookmarked
-
-	// Optimistic update: flip in store and account groups, then re-sort
-	project.Bookmarked = newBookmarked
-	v.store.UpsertProject(*project)
-	v.updateAccountGroupProject(projectID, newBookmarked)
-	v.resyncList()
+	newBookmarked := !p.Bookmarked
+	// Optimistic: flip in local data, re-sort
+	p.Bookmarked = newBookmarked
+	v.syncProjectList()
 
 	return v.setBookmark(projectID, newBookmarked)
 }
@@ -554,33 +459,11 @@ func (v *Projects) setBookmark(projectID int64, bookmarked bool) tea.Cmd {
 	}
 }
 
-// updateAccountGroupProject updates the Bookmarked field for a project within
-// accountGroups, keeping the multi-account view data consistent.
-func (v *Projects) updateAccountGroupProject(projectID int64, bookmarked bool) {
-	for gi := range v.accountGroups {
-		for pi := range v.accountGroups[gi].Projects {
-			if v.accountGroups[gi].Projects[pi].ID == projectID {
-				v.accountGroups[gi].Projects[pi].Bookmarked = bookmarked
-				return
-			}
-		}
-	}
-}
-
-// resyncList rebuilds the list items from the appropriate source.
-func (v *Projects) resyncList() {
-	if v.multiAccount {
-		v.syncFromMultiAccount()
-	} else {
-		v.syncFromStore()
-	}
-}
-
 func (v *Projects) openProject(id string) tea.Cmd {
 	var projectID int64
 	fmt.Sscanf(id, "%d", &projectID)
 
-	project := v.store.Project(projectID)
+	project := v.findProject(projectID)
 	if project == nil {
 		return nil
 	}
@@ -592,12 +475,7 @@ func (v *Projects) openProject(id string) tea.Cmd {
 	// In multi-account mode, set the correct account for this project
 	if acctID, ok := v.projectAccounts[id]; ok && acctID != "" {
 		scope.AccountID = acctID
-		for _, g := range v.accountGroups {
-			if g.Account.ID == acctID {
-				scope.AccountName = g.Account.Name
-				break
-			}
-		}
+		scope.AccountName = project.AccountName
 	}
 
 	// Record in recents AFTER resolving the correct account

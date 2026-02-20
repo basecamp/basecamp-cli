@@ -64,6 +64,9 @@ func (v *Schedule) Title() string {
 
 // ShortHelp implements View.
 func (v *Schedule) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -99,7 +102,7 @@ func (v *Schedule) Init() tea.Cmd {
 			return nil
 		}
 	}
-	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Context()))
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 // Update implements tea.Model.
@@ -126,7 +129,7 @@ func (v *Schedule) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Context()))
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -223,4 +226,3 @@ func (v *Schedule) syncList() {
 	}
 	v.list.SetItems(items)
 }
-

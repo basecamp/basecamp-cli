@@ -52,7 +52,7 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 	session := testSession()
 	log := make([]*testView, 0)
 
-	factory := func(target ViewTarget, _ *Session, _ *data.Store, scope Scope) View {
+	factory := func(target ViewTarget, _ *Session, scope Scope) View {
 		v := &testView{title: targetName(target)}
 		log = append(log, v)
 		return v
@@ -61,7 +61,6 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 	w = &Workspace{
 		session:         session,
 		router:          NewRouter(),
-		store:           data.NewStore(),
 		styles:          styles,
 		keys:            DefaultGlobalKeyMap(),
 		registry:        DefaultActions(),
@@ -361,32 +360,18 @@ func TestWorkspace_ActionsSearchFindsNew(t *testing.T) {
 	assert.True(t, found, "searching 'activity' should find :pulse action")
 }
 
-func TestWorkspace_AccountsDiscoveredSingleNoRefresh(t *testing.T) {
+func TestWorkspace_AccountsDiscoveredRefreshesProjects(t *testing.T) {
 	w, _ := testWorkspace()
-	pushTestView(w, "Projects") // matches Title() == "Projects"
+	v := pushTestView(w, "Projects")
 
-	// Single account — should not trigger refresh
-	_, cmd := w.Update(AccountsDiscoveredMsg{
+	// Discovery (any account count) should refresh Projects/Home so
+	// identity-dependent pools (Assignments) get bootstrapped.
+	w.Update(AccountsDiscoveredMsg{
 		Accounts: []AccountInfo{
 			{ID: "1", Name: "Only One"},
 		},
 	})
-	assert.Nil(t, cmd, "single account should not trigger refresh")
-}
 
-func TestWorkspace_AccountsDiscoveredMultiRefreshesProjects(t *testing.T) {
-	w, _ := testWorkspace()
-	v := pushTestView(w, "Projects")
-
-	// Multiple accounts — should refresh the Projects view
-	w.Update(AccountsDiscoveredMsg{
-		Accounts: []AccountInfo{
-			{ID: "1", Name: "Alpha"},
-			{ID: "2", Name: "Beta"},
-		},
-	})
-
-	// The view should have received a RefreshMsg
 	hasRefresh := false
 	for _, msg := range v.msgs {
 		if _, ok := msg.(RefreshMsg); ok {
@@ -394,7 +379,7 @@ func TestWorkspace_AccountsDiscoveredMultiRefreshesProjects(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, hasRefresh, "Projects view should receive RefreshMsg")
+	assert.True(t, hasRefresh, "Projects view should receive RefreshMsg after discovery")
 }
 
 func TestWorkspace_AccountsDiscoveredMultiNonProjectsNoRefresh(t *testing.T) {
@@ -439,11 +424,9 @@ func testSessionWithContext(accountID, accountName string) *Session {
 // testWorkspaceWithSession builds a Workspace using the given session.
 func testWorkspaceWithSession(session *Session) *Workspace {
 	styles := session.Styles()
-	store := data.NewStore()
 	return &Workspace{
 		session:         session,
 		router:          NewRouter(),
-		store:           store,
 		styles:          styles,
 		keys:            DefaultGlobalKeyMap(),
 		registry:        DefaultActions(),
@@ -453,7 +436,7 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles, nil),
-		viewFactory: func(target ViewTarget, _ *Session, _ *data.Store, scope Scope) View {
+		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
 		width:  120,
@@ -623,6 +606,134 @@ func TestWorkspace_StaleQuickJumpExecDropped(t *testing.T) {
 	}
 }
 
+func TestWorkspace_CrossAccountNavigateRotatesHubRealm(t *testing.T) {
+	session := testSessionWithContext("account-A", "Alpha Corp")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Pings")
+
+	hub := session.Hub()
+	hub.EnsureAccount("account-A")
+
+	// Verify starting state.
+	assert.Equal(t, "account-A", session.Scope().AccountID)
+
+	// Simulate cross-account navigation (Pings → Campfire on account B).
+	scope := Scope{
+		AccountID: "account-B",
+		ProjectID: 42,
+		ToolType:  "chat",
+		ToolID:    99,
+	}
+	w.Update(NavigateMsg{Target: ViewCampfire, Scope: scope})
+
+	// Hub account realm should have rotated to account-B.
+	acctRealm := hub.Account()
+	require.NotNil(t, acctRealm)
+	assert.Equal(t, "account:account-B", acctRealm.Name(),
+		"Hub account realm must rotate to target account")
+
+	// Session scope should reflect the new account.
+	assert.Equal(t, "account-B", session.Scope().AccountID)
+}
+
+func TestWorkspace_CrossAccountNavigateUpdatesAccountName(t *testing.T) {
+	session := testSessionWithContext("account-A", "Alpha Corp")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Pings")
+
+	hub := session.Hub()
+	hub.EnsureAccount("account-A")
+
+	// Seed discovered accounts so navigate() can resolve names.
+	ms := session.MultiStore()
+	ms.SetAccountsForTest([]data.AccountInfo{
+		{ID: "account-A", Name: "Alpha Corp"},
+		{ID: "account-B", Name: "Beta Inc"},
+	})
+
+	scope := Scope{
+		AccountID: "account-B",
+		ProjectID: 42,
+		ToolType:  "chat",
+		ToolID:    99,
+	}
+	w.Update(NavigateMsg{Target: ViewCampfire, Scope: scope})
+
+	// Scope should have the resolved account name.
+	assert.Equal(t, "Beta Inc", session.Scope().AccountName,
+		"cross-account navigate must resolve and set account name")
+}
+
+func TestWorkspace_CrossAccountNavigateOverwritesStaleAccountName(t *testing.T) {
+	session := testSessionWithContext("account-A", "Alpha Corp")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Pings")
+
+	hub := session.Hub()
+	hub.EnsureAccount("account-A")
+
+	ms := session.MultiStore()
+	ms.SetAccountsForTest([]data.AccountInfo{
+		{ID: "account-A", Name: "Alpha Corp"},
+		{ID: "account-B", Name: "Beta Inc"},
+	})
+
+	// Simulate view cloning scope and only overwriting AccountID —
+	// AccountName still carries the old account's name ("Alpha Corp").
+	scope := Scope{
+		AccountID:   "account-B",
+		AccountName: "Alpha Corp", // stale!
+		ProjectID:   42,
+		ToolType:    "chat",
+		ToolID:      99,
+	}
+	w.Update(NavigateMsg{Target: ViewCampfire, Scope: scope})
+
+	// Must overwrite stale name with correct one.
+	assert.Equal(t, "Beta Inc", session.Scope().AccountName,
+		"stale AccountName from cloned scope must be replaced with target account's name")
+}
+
+func TestWorkspace_SameAccountNavigateNoRealmTeardown(t *testing.T) {
+	session := testSessionWithContext("account-A", "Alpha Corp")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Home")
+
+	hub := session.Hub()
+	hub.EnsureAccount("account-A")
+	realm := hub.Account()
+	realmCtx := realm.Context()
+
+	// Navigate within the same account — realm should be reused, not torn down.
+	scope := Scope{AccountID: "account-A", ProjectID: 42}
+	w.Update(NavigateMsg{Target: ViewTodos, Scope: scope})
+
+	assert.Same(t, realm, hub.Account(),
+		"same-account navigate must reuse the account realm")
+	assert.NoError(t, realmCtx.Err(),
+		"same-account navigate must not cancel the realm context")
+}
+
+func TestWorkspace_ForwardNavigateToNonProjectLeavesRealm(t *testing.T) {
+	session := testSessionWithContext("account-A", "Alpha Corp")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Campfire")
+
+	hub := session.Hub()
+	hub.EnsureAccount("account-A")
+	hub.EnsureProject(42)
+	projectCtx := hub.Project().Context()
+
+	// Navigate forward to a non-project view (Hey) — should leave project realm.
+	scope := Scope{AccountID: "account-A"}
+	w.Update(NavigateMsg{Target: ViewHey, Scope: scope})
+
+	assert.Nil(t, hub.Project(),
+		"forward navigate to non-project must tear down project realm")
+	assert.Error(t, projectCtx.Err(),
+		"project realm context must be canceled")
+}
+
 func TestWorkspace_StaleAccountNameMsgDropped(t *testing.T) {
 	session := testSessionWithContext("old-account", "Old")
 	w := testWorkspaceWithSession(session)
@@ -644,3 +755,54 @@ func TestWorkspace_StaleAccountNameMsgDropped(t *testing.T) {
 	assert.Equal(t, "New", session.Scope().AccountName,
 		"stale account name must not overwrite post-switch name")
 }
+
+func TestWorkspace_SyncChromeSetGlobalHints(t *testing.T) {
+	w, _ := testWorkspace()
+	w.relayout() // set width on chrome components
+	pushTestView(w, "Home")
+
+	// syncChrome was called by pushTestView. Verify global hints are set
+	// by rendering the status bar and checking for the hint text.
+	view := w.statusBar.View()
+	assert.Contains(t, view, "help", "status bar should contain global '? help' hint")
+	assert.Contains(t, view, "cmds", "status bar should contain global 'ctrl+p cmds' hint")
+}
+
+func TestWorkspace_ViewHintRefreshOnUpdate(t *testing.T) {
+	w, _ := testWorkspace()
+	w.relayout() // set width on chrome components
+
+	// Create a view that returns dynamic hints.
+	v := &dynamicHintView{title: "TestView"}
+	w.router.Push(v, Scope{})
+	w.syncChrome()
+
+	// Initially no hints.
+	v.hints = nil
+	w.syncChrome()
+
+	// Change hints and trigger a view update — replaceCurrentView should
+	// pick up the new hints.
+	v.hints = []key.Binding{
+		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "test")),
+	}
+	updated, _ := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	w.replaceCurrentView(updated)
+
+	view := w.statusBar.View()
+	assert.Contains(t, view, "test", "view hints should update after replaceCurrentView")
+}
+
+// dynamicHintView is a test view with configurable ShortHelp.
+type dynamicHintView struct {
+	title string
+	hints []key.Binding
+}
+
+func (v *dynamicHintView) Init() tea.Cmd                       { return nil }
+func (v *dynamicHintView) Update(tea.Msg) (tea.Model, tea.Cmd) { return v, nil }
+func (v *dynamicHintView) View() string                        { return v.title }
+func (v *dynamicHintView) Title() string                       { return v.title }
+func (v *dynamicHintView) ShortHelp() []key.Binding            { return v.hints }
+func (v *dynamicHintView) FullHelp() [][]key.Binding           { return [][]key.Binding{v.hints} }
+func (v *dynamicHintView) SetSize(int, int)                    {}

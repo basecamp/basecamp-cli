@@ -2,14 +2,11 @@ package views
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
@@ -22,7 +19,7 @@ import (
 // fetch the latest line from each.
 type Pings struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[[]data.PingRoomInfo]
 	styles  *tui.Styles
 
 	list    *widget.List
@@ -35,8 +32,9 @@ type Pings struct {
 }
 
 // NewPings creates the pings view.
-func NewPings(session *workspace.Session, store *data.Store) *Pings {
+func NewPings(session *workspace.Session) *Pings {
 	styles := session.Styles()
+	pool := session.Hub().PingRooms()
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -48,7 +46,7 @@ func NewPings(session *workspace.Session, store *data.Store) *Pings {
 
 	return &Pings{
 		session:  session,
-		store:    store,
+		pool:     pool,
 		styles:   styles,
 		list:     list,
 		spinner:  s,
@@ -60,6 +58,9 @@ func NewPings(session *workspace.Session, store *data.Store) *Pings {
 func (v *Pings) Title() string { return "Pings" }
 
 func (v *Pings) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open thread")),
@@ -83,22 +84,40 @@ func (v *Pings) SetSize(w, h int) {
 }
 
 func (v *Pings) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchPings())
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.syncRooms(snap.Data)
+		v.loading = false
+		if snap.Fresh() {
+			return nil
+		}
+	}
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().Global().Context()))
 }
 
 func (v *Pings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.PingRoomsLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading pings")
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.syncRooms(snap.Data)
+				v.loading = false
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading pings")
+			}
+			if snap.Loading() && !snap.HasData {
+				v.loading = true
+			}
 		}
-		v.syncRooms(msg.Rooms)
 		return v, nil
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchPings())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -188,90 +207,4 @@ func (v *Pings) openSelected() tea.Cmd {
 	scope.ToolType = "chat"
 	scope.ToolID = meta.CampfireID
 	return workspace.Navigate(workspace.ViewCampfire, scope)
-}
-
-func (v *Pings) fetchPings() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	return func() tea.Msg {
-		accounts := ms.Accounts()
-		if len(accounts) == 0 {
-			return workspace.PingRoomsLoadedMsg{}
-		}
-
-		var allRooms []workspace.PingRoomInfo
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			campfires, err := client.Campfires().List(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			var rooms []workspace.PingRoomInfo
-			for _, cf := range campfires.Campfires {
-				// Heuristic: 1:1 campfires are not associated with a project bucket
-				// or have a specific title pattern. The Basecamp API doesn't
-				// clearly distinguish ping rooms, so we look for campfires
-				// where the title contains a person name or the bucket type
-				// suggests a personal context.
-				// For now, include all non-project campfires as potential ping rooms.
-				if cf.Bucket != nil && cf.Bucket.Type == "Project" {
-					continue // skip project campfires
-				}
-
-				// Try to get the latest line
-				var lastMsg, lastAt string
-				var lastAtTS int64
-				lines, err := client.Campfires().ListLines(ctx, 0, cf.ID)
-				if err == nil && len(lines.Lines) > 0 {
-					last := lines.Lines[len(lines.Lines)-1]
-					if last.Creator != nil {
-						lastMsg = last.Creator.Name + ": "
-					}
-					lastMsg += truncate(last.Content, 40)
-					lastAt = last.CreatedAt.Format("Jan 2 3:04pm")
-					lastAtTS = last.CreatedAt.Unix()
-				}
-
-				var projectID int64
-				if cf.Bucket != nil {
-					projectID = cf.Bucket.ID
-				}
-
-				rooms = append(rooms, workspace.PingRoomInfo{
-					CampfireID:  cf.ID,
-					ProjectID:   projectID,
-					PersonName:  cf.Title,
-					Account:     acct.Name,
-					AccountID:   acct.ID,
-					LastMessage: lastMsg,
-					LastAt:      lastAt,
-					LastAtTS:    lastAtTS,
-				})
-			}
-			return rooms, nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if rooms, ok := r.Data.([]workspace.PingRoomInfo); ok {
-				allRooms = append(allRooms, rooms...)
-			}
-		}
-
-		// Sort by last message time descending (numeric timestamp)
-		sort.Slice(allRooms, func(i, j int) bool {
-			return allRooms[i].LastAtTS > allRooms[j].LastAtTS
-		})
-
-		return workspace.PingRoomsLoadedMsg{Rooms: allRooms}
-	}
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
-	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
@@ -20,7 +19,6 @@ const sectionHeader = "header:"
 // MyStuff is the personal dashboard view showing recent projects and items.
 type MyStuff struct {
 	session *workspace.Session
-	store   *data.Store
 	styles  *tui.Styles
 
 	list          *widget.List
@@ -31,7 +29,7 @@ type MyStuff struct {
 }
 
 // NewMyStuff creates the My Stuff personal dashboard view.
-func NewMyStuff(session *workspace.Session, store *data.Store) *MyStuff {
+func NewMyStuff(session *workspace.Session) *MyStuff {
 	styles := session.Styles()
 
 	list := widget.NewList(styles)
@@ -40,7 +38,6 @@ func NewMyStuff(session *workspace.Session, store *data.Store) *MyStuff {
 
 	v := &MyStuff{
 		session:           session,
-		store:             store,
 		styles:            styles,
 		list:              list,
 		recordingProjects: make(map[string]int64),
@@ -58,6 +55,9 @@ func (v *MyStuff) Title() string {
 
 // ShortHelp implements View.
 func (v *MyStuff) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),

@@ -3,14 +3,11 @@ package views
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -56,7 +53,7 @@ func defaultCardsKeyMap() cardsKeyMap {
 // Cards is the kanban board view for a card table.
 type Cards struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.MutatingPool[[]data.CardColumnInfo]
 	styles  *tui.Styles
 	keys    cardsKeyMap
 
@@ -74,13 +71,15 @@ type Cards struct {
 	moveSourceCard int64 // card ID being moved
 	moveTargetCol  int   // column index currently highlighted as target
 
-	// Data (local copy for optimistic moves and rendering)
+	// Data (local copy from pool for rendering)
 	columns []workspace.CardColumnInfo
 }
 
 // NewCards creates the kanban board cards view.
-func NewCards(session *workspace.Session, store *data.Store) *Cards {
+func NewCards(session *workspace.Session) *Cards {
 	styles := session.Styles()
+	scope := session.Scope()
+	pool := session.Hub().Cards(scope.ProjectID, scope.ToolID)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -90,7 +89,7 @@ func NewCards(session *workspace.Session, store *data.Store) *Cards {
 
 	return &Cards{
 		session: session,
-		store:   store,
+		pool:    pool,
 		styles:  styles,
 		keys:    defaultCardsKeyMap(),
 		kanban:  kanban,
@@ -140,31 +139,55 @@ func (v *Cards) SetSize(w, h int) {
 
 // Init implements tea.Model.
 func (v *Cards) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchColumns())
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.columns = snap.Data
+		v.syncKanban()
+		v.loading = false
+		if snap.Fresh() {
+			return nil
+		}
+	}
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 // Update implements tea.Model.
 func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.CardColumnsLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading card table")
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.columns = snap.Data
+				v.syncKanban()
+				v.loading = false
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading card table")
+			}
+			if snap.Loading() && !snap.HasData {
+				v.loading = true
+			}
 		}
-		v.columns = msg.Columns
-		v.syncKanban()
 		return v, nil
 
-	case workspace.CardMovedMsg:
-		if msg.Err != nil {
-			v.revertMoveScoped(msg.CardID, msg.ColumnID, msg.SourceColIdx)
+	case data.MutationErrorMsg:
+		if msg.Key == v.pool.Key() {
+			// Mutation failed — pool already rolled back. Re-read columns.
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.columns = snap.Data
+				v.syncKanban()
+			}
 			return v, workspace.ReportError(msg.Err, "moving card")
 		}
 		return v, nil
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchColumns())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -278,36 +301,23 @@ func (v *Cards) confirmMove() tea.Cmd {
 
 	targetColumnID := v.columns[v.moveTargetCol].ID
 
-	// Optimistic move: relocate card in local data
-	sourceColIdx := v.moveSourceCol
-	v.optimisticMove(v.moveSourceCard, sourceColIdx, v.moveTargetCol)
-	v.syncKanban()
+	cmd := v.pool.Apply(v.session.Hub().ProjectContext(), data.CardMoveMutation{
+		CardID:         v.moveSourceCard,
+		SourceColIdx:   v.moveSourceCol,
+		TargetColIdx:   v.moveTargetCol,
+		TargetColumnID: targetColumnID,
+		Client:         v.session.AccountClient(),
+		ProjectID:      v.session.Scope().ProjectID,
+	})
 
-	return v.moveCard(v.moveSourceCard, targetColumnID, sourceColIdx)
-}
-
-func (v *Cards) optimisticMove(cardID int64, fromColIdx, toColIdx int) {
-	if fromColIdx < 0 || fromColIdx >= len(v.columns) || toColIdx < 0 || toColIdx >= len(v.columns) {
-		return
+	// Read optimistic state immediately and render
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.columns = snap.Data
+		v.syncKanban()
 	}
 
-	// Find and remove from source
-	src := &v.columns[fromColIdx]
-	var moved *workspace.CardInfo
-	for i, c := range src.Cards {
-		if c.ID == cardID {
-			moved = &src.Cards[i]
-			src.Cards = append(src.Cards[:i], src.Cards[i+1:]...)
-			break
-		}
-	}
-	if moved == nil {
-		return
-	}
-
-	// Append to target
-	dst := &v.columns[toColIdx]
-	dst.Cards = append(dst.Cards, *moved)
+	return cmd
 }
 
 // View implements tea.Model.
@@ -345,6 +355,9 @@ func (v *Cards) renderMoveMode() string {
 	header.WriteString(lipgloss.NewStyle().Foreground(theme.Muted).Render(" > "))
 	for i, col := range v.columns {
 		style := lipgloss.NewStyle().Foreground(theme.Muted)
+		if col.Deferred {
+			style = style.Faint(true)
+		}
 		if i == v.moveTargetCol {
 			style = lipgloss.NewStyle().Bold(true).Foreground(theme.Primary).Underline(true)
 		}
@@ -375,122 +388,29 @@ func (v *Cards) syncKanban() {
 	for _, col := range v.columns {
 		items := make([]widget.KanbanCard, 0, len(col.Cards))
 		for _, card := range col.Cards {
-			subtitle := ""
-			if card.DueOn != "" {
-				subtitle = card.DueOn
-			}
-			if len(card.Assignees) > 0 {
-				who := strings.Join(card.Assignees, ", ")
-				if subtitle != "" {
-					subtitle += " - "
-				}
-				subtitle += who
+			assignees := strings.Join(card.Assignees, ", ")
+			var stepsProgress string
+			if card.StepsTotal > 0 {
+				stepsProgress = fmt.Sprintf("%d/%d", card.StepsDone, card.StepsTotal)
 			}
 			items = append(items, widget.KanbanCard{
-				ID:       fmt.Sprintf("%d", card.ID),
-				Title:    card.Title,
-				Subtitle: subtitle,
+				ID:            fmt.Sprintf("%d", card.ID),
+				Title:         card.Title,
+				Assignees:     assignees,
+				DueOn:         card.DueOn,
+				StepsProgress: stepsProgress,
+				CommentsCount: card.CommentsCount,
+				Completed:     card.Completed,
 			})
 		}
 		cols = append(cols, widget.KanbanColumn{
-			ID:    fmt.Sprintf("%d", col.ID),
-			Title: col.Title,
-			Items: items,
+			ID:       fmt.Sprintf("%d", col.ID),
+			Title:    col.Title,
+			Color:    col.Color,
+			Deferred: col.Deferred,
+			Count:    col.CardsCount,
+			Items:    items,
 		})
 	}
 	v.kanban.SetColumns(cols)
-}
-
-// -- Commands (tea.Cmd factories)
-
-func (v *Cards) fetchColumns() tea.Cmd {
-	scope := v.session.Scope()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		// 1. Get card table to learn columns
-		cardTable, err := client.CardTables().Get(ctx, scope.ProjectID, scope.ToolID)
-		if err != nil {
-			return workspace.CardColumnsLoadedMsg{Err: err}
-		}
-
-		// 2. Fetch cards for each column in parallel
-		type colResult struct {
-			idx   int
-			cards []workspace.CardInfo
-			err   error
-		}
-		results := make([]colResult, len(cardTable.Lists))
-		var wg sync.WaitGroup
-		for i, col := range cardTable.Lists {
-			wg.Add(1)
-			go func(idx int, columnID int64) {
-				defer wg.Done()
-				listResult, err := client.Cards().List(ctx, scope.ProjectID, columnID, &basecamp.CardListOptions{})
-				if err != nil {
-					results[idx] = colResult{idx: idx, err: err}
-					return
-				}
-				cards := make([]workspace.CardInfo, 0, len(listResult.Cards))
-				for _, c := range listResult.Cards {
-					names := make([]string, 0, len(c.Assignees))
-					for _, a := range c.Assignees {
-						names = append(names, a.Name)
-					}
-					cards = append(cards, workspace.CardInfo{
-						ID:        c.ID,
-						Title:     c.Title,
-						Assignees: names,
-						DueOn:     c.DueOn,
-						Position:  c.Position,
-					})
-				}
-				results[idx] = colResult{idx: idx, cards: cards}
-			}(i, col.ID)
-		}
-		wg.Wait()
-
-		// 3. Assemble columns
-		columns := make([]workspace.CardColumnInfo, 0, len(cardTable.Lists))
-		for i, col := range cardTable.Lists {
-			if results[i].err != nil {
-				return workspace.CardColumnsLoadedMsg{Err: fmt.Errorf("loading cards for %q: %w", col.Title, results[i].err)}
-			}
-			columns = append(columns, workspace.CardColumnInfo{
-				ID:    col.ID,
-				Title: col.Title,
-				Color: col.Color,
-				Cards: results[i].cards,
-			})
-		}
-
-		return workspace.CardColumnsLoadedMsg{Columns: columns}
-	}
-}
-
-func (v *Cards) moveCard(cardID, targetColumnID int64, sourceColIdx int) tea.Cmd {
-	scope := v.session.Scope()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		err := client.Cards().Move(ctx, scope.ProjectID, cardID, targetColumnID)
-		return workspace.CardMovedMsg{CardID: cardID, ColumnID: targetColumnID, SourceColIdx: sourceColIdx, Err: err}
-	}
-}
-
-// revertMoveScoped uses the request-scoped source column index for safe rollback.
-func (v *Cards) revertMoveScoped(cardID, failedTargetColumnID int64, sourceColIdx int) {
-	// Find the card in the failed target column
-	var fromIdx = -1
-	for i, col := range v.columns {
-		if col.ID == failedTargetColumnID {
-			fromIdx = i
-			break
-		}
-	}
-	if fromIdx < 0 || sourceColIdx < 0 || sourceColIdx >= len(v.columns) {
-		return
-	}
-	v.optimisticMove(cardID, fromIdx, sourceColIdx)
-	v.syncKanban()
 }

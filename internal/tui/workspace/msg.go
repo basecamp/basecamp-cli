@@ -86,14 +86,9 @@ type Scope struct {
 
 // AccountNameMsg is sent when the account name is resolved.
 type AccountNameMsg struct {
-	Name string
-	Err  error
-}
-
-// ProjectsLoadedMsg is sent when projects finish loading.
-type ProjectsLoadedMsg struct {
-	Projects []basecamp.Project
-	Err      error
+	AccountID string // which account this name belongs to
+	Name      string
+	Err       error
 }
 
 // DockLoadedMsg is sent when a project's dock is loaded.
@@ -102,45 +97,11 @@ type DockLoadedMsg struct {
 	Err     error
 }
 
-// TodolistsLoadedMsg is sent when todolists finish loading.
-type TodolistsLoadedMsg struct {
-	Todolists []TodolistInfo
-	Err       error
-}
+// TodolistInfo is a type alias for data.TodolistInfo.
+type TodolistInfo = data.TodolistInfo
 
-// TodolistInfo is a lightweight representation of a todolist for the view.
-type TodolistInfo struct {
-	ID             int64
-	Title          string
-	CompletedRatio string
-	TodosURL       string
-}
-
-// TodosLoadedMsg is sent when todos for a specific list finish loading.
-type TodosLoadedMsg struct {
-	TodolistID int64
-	Todos      []TodoInfo
-	Err        error
-}
-
-// TodoInfo is a lightweight representation of a todo for the view.
-type TodoInfo struct {
-	ID          int64
-	Content     string
-	Description string
-	Completed   bool
-	DueOn       string
-	Assignees   []string // names
-	Position    int
-}
-
-// TodoCompletedMsg is sent after a todo completion/uncompletion API call.
-type TodoCompletedMsg struct {
-	TodolistID int64 // which list the todo belongs to (for safe rollback)
-	TodoID     int64
-	Completed  bool
-	Err        error
-}
+// TodoInfo is a type alias for data.TodoInfo.
+type TodoInfo = data.TodoInfo
 
 // TodoCreatedMsg is sent after a todo is created.
 type TodoCreatedMsg struct {
@@ -159,88 +120,27 @@ type CampfireLinesLoadedMsg struct {
 	Err        error
 }
 
-// CampfireLineInfo is a lightweight representation of a campfire line.
-type CampfireLineInfo struct {
-	ID        int64
-	Body      string // HTML content
-	Creator   string
-	CreatedAt string // formatted time
-}
+// CampfireLineInfo is a type alias for data.CampfireLineInfo.
+type CampfireLineInfo = data.CampfireLineInfo
 
 // CampfireLineSentMsg is sent after posting a line.
 type CampfireLineSentMsg struct {
 	Err error
 }
 
-// Hey messages
-
-// HeyEntriesLoadedMsg is sent when inbox entries are loaded.
-type HeyEntriesLoadedMsg struct {
-	Entries []HeyEntryInfo
-	Err     error
-}
-
-// HeyEntryInfo is a lightweight representation of an inbox entry.
-type HeyEntryInfo struct {
-	ID        int64
-	Title     string
-	Excerpt   string
-	Creator   string
-	Project   string
-	CreatedAt string
-	IsRead    bool
-}
+// HeyEntryInfo is a type alias for data.HeyEntryInfo.
+type HeyEntryInfo = data.HeyEntryInfo
 
 // Card table messages
 
-// CardColumnsLoadedMsg is sent when card table columns are loaded.
-type CardColumnsLoadedMsg struct {
-	Columns []CardColumnInfo
-	Err     error
-}
+// CardColumnInfo is a type alias for data.CardColumnInfo.
+type CardColumnInfo = data.CardColumnInfo
 
-// CardColumnInfo represents a kanban column with its cards.
-type CardColumnInfo struct {
-	ID    int64
-	Title string
-	Color string
-	Cards []CardInfo
-}
+// CardInfo is a type alias for data.CardInfo.
+type CardInfo = data.CardInfo
 
-// CardInfo represents a single card.
-type CardInfo struct {
-	ID        int64
-	Title     string
-	Assignees []string
-	DueOn     string
-	Position  int
-}
-
-// CardMovedMsg is sent after a card move API call.
-type CardMovedMsg struct {
-	CardID       int64
-	ColumnID     int64 // target column
-	SourceColIdx int   // source column index for rollback
-	Err          error
-}
-
-// Message board messages
-
-// MessagesLoadedMsg is sent when messages are loaded.
-type MessagesLoadedMsg struct {
-	Messages []MessageInfo
-	Err      error
-}
-
-// MessageInfo represents a message board post.
-type MessageInfo struct {
-	ID        int64
-	Subject   string
-	Creator   string
-	CreatedAt string
-	Category  string
-	Pinned    bool
-}
+// MessageInfo is a type alias for data.MessageInfo.
+type MessageInfo = data.MessageInfo
 
 // MessageDetailLoadedMsg is sent when a single message's full content is fetched.
 type MessageDetailLoadedMsg struct {
@@ -262,60 +162,17 @@ type SearchResultsMsg struct {
 	Err     error
 }
 
-// SearchResultInfo represents a single search result.
-type SearchResultInfo struct {
-	ID          int64
-	Title       string
-	Excerpt     string
-	Type        string // "todo", "message", "document", etc.
-	Project     string
-	ProjectID   int64
-	Account     string // account name (populated in multi-account mode)
-	AccountID   string // account ID for navigation
-	CreatedAt   string
-	CreatedAtTS int64 // unix timestamp for sorting
-}
-
-// People messages
-
-// PeopleLoadedMsg is sent when the people list finishes loading.
-type PeopleLoadedMsg struct {
-	People []PersonInfo
-	Err    error
-}
+// SearchResultInfo is a type alias for data.SearchResultInfo.
+type SearchResultInfo = data.SearchResultInfo
 
 // PersonInfo is a type alias for data.PersonInfo.
 type PersonInfo = data.PersonInfo
 
-// Schedule messages
-
-// ScheduleEntriesLoadedMsg is sent when schedule entries are loaded.
-type ScheduleEntriesLoadedMsg struct {
-	Entries []ScheduleEntryInfo
-	Err     error
-}
-
 // ScheduleEntryInfo is a type alias for data.ScheduleEntryInfo.
 type ScheduleEntryInfo = data.ScheduleEntryInfo
 
-// Docs & Files messages
-
-// DocsFilesLoadedMsg is sent when vault contents are loaded.
-type DocsFilesLoadedMsg struct {
-	Items []DocsFilesItemInfo
-	Err   error
-}
-
 // DocsFilesItemInfo is a type alias for data.DocsFilesItemInfo.
 type DocsFilesItemInfo = data.DocsFilesItemInfo
-
-// Check-ins messages
-
-// CheckinQuestionsLoadedMsg is sent when check-in questions are loaded.
-type CheckinQuestionsLoadedMsg struct {
-	Questions []CheckinQuestionInfo
-	Err       error
-}
 
 // CheckinQuestionInfo is a type alias for data.CheckinQuestionInfo.
 type CheckinQuestionInfo = data.CheckinQuestionInfo
@@ -334,94 +191,14 @@ type AccountsDiscoveredMsg struct {
 	Err      error
 }
 
-// MultiAccountProjectsLoadedMsg is sent when projects from all accounts arrive.
-type MultiAccountProjectsLoadedMsg struct {
-	AccountProjects []AccountProjectGroup
-	Err             error
-}
+// ActivityEntryInfo is a type alias for data.ActivityEntryInfo.
+type ActivityEntryInfo = data.ActivityEntryInfo
 
-// AccountProjectGroup holds projects for a single account.
-type AccountProjectGroup struct {
-	Account  AccountInfo
-	Projects []basecamp.Project
-}
+// AssignmentInfo is a type alias for data.AssignmentInfo.
+type AssignmentInfo = data.AssignmentInfo
 
-// ActivityEntriesLoadedMsg is sent when cross-account activity entries arrive.
-type ActivityEntriesLoadedMsg struct {
-	Entries []ActivityEntryInfo
-	Err     error
-}
-
-// ActivityEntryInfo represents a recording from any account for the activity feed.
-type ActivityEntryInfo struct {
-	ID          int64
-	Title       string
-	Type        string // "Todo", "Message", "Document", etc.
-	Creator     string
-	Account     string
-	AccountID   string
-	Project     string
-	ProjectID   int64
-	UpdatedAt   string // formatted time
-	UpdatedAtTS int64  // unix timestamp for sorting
-}
-
-// AssignmentsLoadedMsg is sent when cross-account todo assignments arrive.
-type AssignmentsLoadedMsg struct {
-	Assignments []AssignmentInfo
-	Err         error
-}
-
-// AssignmentInfo represents a todo assigned to the current user.
-type AssignmentInfo struct {
-	ID        int64
-	Content   string
-	DueOn     string
-	Completed bool
-	Account   string
-	AccountID string
-	Project   string
-	ProjectID int64
-	Overdue   bool
-}
-
-// PingRoomsLoadedMsg is sent when 1:1 campfire rooms are discovered.
-type PingRoomsLoadedMsg struct {
-	Rooms []PingRoomInfo
-	Err   error
-}
-
-// PingRoomInfo represents a 1:1 campfire thread.
-type PingRoomInfo struct {
-	CampfireID  int64
-	ProjectID   int64
-	PersonName  string
-	Account     string
-	AccountID   string
-	LastMessage string
-	LastAt      string
-	LastAtTS    int64 // unix timestamp for sorting
-}
-
-// Home dashboard messages — separate types to avoid collision with view-specific messages.
-
-// HomeHeyLoadedMsg carries activity entries for the home dashboard.
-type HomeHeyLoadedMsg struct {
-	Entries []ActivityEntryInfo
-	Err     error
-}
-
-// HomeAssignmentsLoadedMsg carries assignment data for the home dashboard.
-type HomeAssignmentsLoadedMsg struct {
-	Assignments []AssignmentInfo
-	Err         error
-}
-
-// HomeProjectsLoadedMsg carries projects (for bookmarks) for the home dashboard.
-type HomeProjectsLoadedMsg struct {
-	Projects []basecamp.Project
-	Err      error
-}
+// PingRoomInfo is a type alias for data.PingRoomInfo.
+type PingRoomInfo = data.PingRoomInfo
 
 // ProjectBookmarkedMsg is sent after toggling a project bookmark.
 type ProjectBookmarkedMsg struct {

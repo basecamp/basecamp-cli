@@ -9,7 +9,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
-	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/views"
 )
 
@@ -51,28 +50,28 @@ func NewTUICmd() *cobra.Command {
 }
 
 // viewFactory creates views for navigation targets.
-func viewFactory(target workspace.ViewTarget, session *workspace.Session, store *data.Store, scope workspace.Scope) workspace.View {
+func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope workspace.Scope) workspace.View {
 	switch target {
 	case workspace.ViewProjects:
-		return views.NewProjects(session, store)
+		return views.NewProjects(session)
 	case workspace.ViewDock:
-		return views.NewDock(session, store, scope.ProjectID)
+		return views.NewDock(session, scope.ProjectID)
 	case workspace.ViewTodos:
-		return views.NewTodos(session, store)
+		return views.NewTodos(session)
 	case workspace.ViewCampfire:
-		return views.NewCampfire(session, store)
+		return views.NewCampfire(session)
 	case workspace.ViewCards:
-		return views.NewCards(session, store)
+		return views.NewCards(session)
 	case workspace.ViewMessages:
-		return views.NewMessages(session, store)
+		return views.NewMessages(session)
 	case workspace.ViewSearch:
-		return views.NewSearch(session, store)
+		return views.NewSearch(session)
 	case workspace.ViewMyStuff:
-		return views.NewMyStuff(session, store)
+		return views.NewMyStuff(session)
 	case workspace.ViewPeople:
 		return views.NewPeople(session)
 	case workspace.ViewHey:
-		return views.NewHey(session, store)
+		return views.NewHey(session)
 	case workspace.ViewSchedule:
 		return views.NewSchedule(session)
 	case workspace.ViewDocsFiles:
@@ -84,15 +83,15 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, store 
 	case workspace.ViewDetail:
 		return views.NewDetail(session, scope.RecordingID, scope.RecordingType)
 	case workspace.ViewPulse:
-		return views.NewPulse(session, store)
+		return views.NewPulse(session)
 	case workspace.ViewAssignments:
-		return views.NewAssignments(session, store)
+		return views.NewAssignments(session)
 	case workspace.ViewPings:
-		return views.NewPings(session, store)
+		return views.NewPings(session)
 	case workspace.ViewCompose:
-		return views.NewCompose(session, store)
+		return views.NewCompose(session)
 	case workspace.ViewHome:
-		return views.NewHome(session, store)
+		return views.NewHome(session)
 	default:
 		return views.NewPlaceholder(session, target)
 	}

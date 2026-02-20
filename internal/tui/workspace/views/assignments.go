@@ -1,17 +1,13 @@
 package views
 
 import (
-	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -24,7 +20,7 @@ import (
 // grouped by due date (overdue, this week, later).
 type Assignments struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[[]data.AssignmentInfo]
 	styles  *tui.Styles
 
 	list    *widget.List
@@ -37,8 +33,9 @@ type Assignments struct {
 }
 
 // NewAssignments creates the cross-account assignments view.
-func NewAssignments(session *workspace.Session, store *data.Store) *Assignments {
+func NewAssignments(session *workspace.Session) *Assignments {
 	styles := session.Styles()
+	pool := session.Hub().Assignments()
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -50,7 +47,7 @@ func NewAssignments(session *workspace.Session, store *data.Store) *Assignments 
 
 	return &Assignments{
 		session:        session,
-		store:          store,
+		pool:           pool,
 		styles:         styles,
 		list:           list,
 		spinner:        s,
@@ -62,6 +59,9 @@ func NewAssignments(session *workspace.Session, store *data.Store) *Assignments 
 func (v *Assignments) Title() string { return "Assignments" }
 
 func (v *Assignments) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -85,22 +85,40 @@ func (v *Assignments) SetSize(w, h int) {
 }
 
 func (v *Assignments) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchAssignments())
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.syncAssignments(snap.Data)
+		v.loading = false
+		if snap.Fresh() {
+			return nil
+		}
+	}
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().Global().Context()))
 }
 
 func (v *Assignments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.AssignmentsLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading assignments")
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.syncAssignments(snap.Data)
+				v.loading = false
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading assignments")
+			}
+			if snap.Loading() && !snap.HasData {
+				v.loading = true
+			}
 		}
-		v.syncAssignments(msg.Assignments)
 		return v, nil
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchAssignments())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -225,124 +243,4 @@ func (v *Assignments) openSelected() tea.Cmd {
 	scope.RecordingID = meta.ID
 	scope.RecordingType = "Todo"
 	return workspace.Navigate(workspace.ViewDetail, scope)
-}
-
-func (v *Assignments) fetchAssignments() tea.Cmd {
-	cache := v.session.MultiStore().Cache()
-	entry := cache.Get("assignments")
-
-	if entry != nil {
-		assignments, _ := entry.Value.([]workspace.AssignmentInfo) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.AssignmentsLoadedMsg{Assignments: assignments}
-			}
-		}
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.AssignmentsLoadedMsg{Assignments: assignments}
-			},
-			v.fetchAssignmentsFromAPI(),
-		)
-	}
-
-	return v.fetchAssignmentsFromAPI()
-}
-
-func (v *Assignments) fetchAssignmentsFromAPI() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	scope := v.session.Scope()
-	return func() tea.Msg {
-
-		// Get current user's identity to match assignees
-		identity := ms.Identity()
-		if identity == nil {
-			return workspace.AssignmentsLoadedMsg{
-				Err: fmt.Errorf("identity not available yet"),
-			}
-		}
-		myName := identity.FirstName + " " + identity.LastName
-
-		accounts := ms.Accounts()
-		if len(accounts) == 0 {
-			// Single-account fallback
-			if scope.AccountID == "" {
-				return workspace.AssignmentsLoadedMsg{}
-			}
-			assignments := fetchAccountAssignments(ctx, client,
-				data.AccountInfo{ID: scope.AccountID, Name: scope.AccountName},
-				myName)
-			ms.Cache().Set("assignments", assignments, 30*time.Second, 5*time.Minute)
-			return workspace.AssignmentsLoadedMsg{Assignments: assignments}
-		}
-
-		// Fan out across all accounts
-		var allAssignments []workspace.AssignmentInfo
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			return fetchAccountAssignments(ctx, client, acct, myName), nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if assignments, ok := r.Data.([]workspace.AssignmentInfo); ok {
-				allAssignments = append(allAssignments, assignments...)
-			}
-		}
-
-		// Sort by due date (empty last)
-		sort.Slice(allAssignments, func(i, j int) bool {
-			if allAssignments[i].DueOn == "" {
-				return false
-			}
-			if allAssignments[j].DueOn == "" {
-				return true
-			}
-			return allAssignments[i].DueOn < allAssignments[j].DueOn
-		})
-
-		ms.Cache().Set("assignments", allAssignments, 30*time.Second, 5*time.Minute)
-		return workspace.AssignmentsLoadedMsg{Assignments: allAssignments}
-	}
-}
-
-func fetchAccountAssignments(ctx context.Context, client *basecamp.AccountClient, acct data.AccountInfo, myName string) []workspace.AssignmentInfo {
-	result, err := client.Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
-		Status:    "active",
-		Sort:      "updated_at",
-		Direction: "desc",
-		Limit:     50,
-		Page:      1,
-	})
-	if err != nil {
-		return nil
-	}
-
-	var assignments []workspace.AssignmentInfo
-	for _, rec := range result.Recordings {
-		// We can't filter by assignee at the API level, so we fetch all active
-		// todos and include them all. A better approach would use the SDK's
-		// assignee filtering if available, but for now we show all active todos.
-		// The title will indicate the context.
-		project := ""
-		var projectID int64
-		if rec.Bucket != nil {
-			project = rec.Bucket.Name
-			projectID = rec.Bucket.ID
-		}
-		_ = myName // TODO: filter by assignee when SDK supports it
-		assignments = append(assignments, workspace.AssignmentInfo{
-			ID:        rec.ID,
-			Content:   rec.Title,
-			Account:   acct.Name,
-			AccountID: acct.ID,
-			Project:   project,
-			ProjectID: projectID,
-			// DueOn is not available on Recording — would need a follow-up fetch
-		})
-	}
-	return assignments
 }

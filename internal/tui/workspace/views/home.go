@@ -1,18 +1,14 @@
 package views
 
 import (
-	"context"
 	"fmt"
-	"sort"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -24,11 +20,14 @@ import (
 // Home is a combined dashboard view that shows recents, activity, assignments,
 // and bookmarked projects in a single scrollable list with section headers.
 // It renders instantly with local recents data, then progressively fills in
-// API-sourced sections.
+// API-sourced sections via shared Hub pools.
 type Home struct {
 	session *workspace.Session
-	store   *data.Store
 	styles  *tui.Styles
+
+	heyPool     *data.Pool[[]data.ActivityEntryInfo]
+	assignPool  *data.Pool[[]data.AssignmentInfo]
+	projectPool *data.Pool[[]data.ProjectInfo]
 
 	list    *widget.List
 	spinner spinner.Model
@@ -38,11 +37,6 @@ type Home struct {
 	heyItems      []widget.ListItem // from API
 	assignItems   []widget.ListItem // from API
 	bookmarkItems []widget.ListItem // from API
-
-	// Loading state
-	heyLoaded       bool
-	assignLoaded    bool
-	bookmarksLoaded bool
 
 	// Metadata for navigation
 	itemMeta map[string]homeItemMeta
@@ -59,8 +53,13 @@ type homeItemMeta struct {
 }
 
 // NewHome creates the home dashboard view.
-func NewHome(session *workspace.Session, store *data.Store) *Home {
+func NewHome(session *workspace.Session) *Home {
 	styles := session.Styles()
+
+	hub := session.Hub()
+	heyPool := hub.HeyActivity()
+	assignPool := hub.Assignments()
+	projectPool := hub.Projects()
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -71,12 +70,14 @@ func NewHome(session *workspace.Session, store *data.Store) *Home {
 	list.SetFocused(true)
 
 	v := &Home{
-		session:  session,
-		store:    store,
-		styles:   styles,
-		list:     list,
-		spinner:  s,
-		itemMeta: make(map[string]homeItemMeta),
+		session:     session,
+		styles:      styles,
+		heyPool:     heyPool,
+		assignPool:  assignPool,
+		projectPool: projectPool,
+		list:        list,
+		spinner:     s,
+		itemMeta:    make(map[string]homeItemMeta),
 	}
 
 	v.syncRecents()
@@ -87,6 +88,57 @@ func NewHome(session *workspace.Session, store *data.Store) *Home {
 func (v *Home) Title() string { return "Home" }
 
 func (v *Home) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
+
+	// Loading state — no misleading hints while spinner is on screen
+	if v.anyLoading() && v.list.Len() == 0 {
+		return nil
+	}
+
+	item := v.list.Selected()
+	if item == nil {
+		return v.defaultHints()
+	}
+
+	// Section headers: just navigation + projects
+	if item.Header {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+		}
+	}
+
+	meta, ok := v.itemMeta[item.ID]
+	if !ok {
+		return v.defaultHints()
+	}
+
+	// Contextual "enter" label based on item type
+	enterDesc := "open"
+	switch meta.viewTarget {
+	case workspace.ViewDock:
+		enterDesc = "open project"
+	case workspace.ViewCampfire:
+		enterDesc = "open campfire"
+	default:
+		if meta.recordType != "" {
+			label := strings.ToLower(meta.recordType)
+			if len(label) > 15 {
+				label = label[:15]
+			}
+			enterDesc = "open " + label
+		}
+	}
+
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", enterDesc)),
+		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+	}
+}
+
+func (v *Home) defaultHints() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -111,49 +163,82 @@ func (v *Home) StartFilter() { v.list.StartFilter() }
 func (v *Home) InputActive() bool { return v.list.Filtering() }
 
 func (v *Home) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 4)
-	cmds = append(cmds, v.spinner.Tick)
+	cmds := []tea.Cmd{v.spinner.Tick}
+	globalCtx := v.session.Hub().Global().Context()
 
-	// Recents are already synced in NewHome (instant, no API).
-	// Fire parallel API fetches for the remaining sections.
-	cmds = append(cmds, v.fetchHeyActivity(), v.fetchAssignments(), v.fetchBookmarks())
+	// Hey activity
+	snap := v.heyPool.Get()
+	if snap.Usable() {
+		v.syncHeyEntries(snap.Data)
+	}
+	if !snap.Fresh() {
+		cmds = append(cmds, v.heyPool.FetchIfStale(globalCtx))
+	}
 
+	// Assignments
+	snap2 := v.assignPool.Get()
+	if snap2.Usable() {
+		v.syncAssignments(snap2.Data)
+	}
+	if !snap2.Fresh() {
+		cmds = append(cmds, v.assignPool.FetchIfStale(globalCtx))
+	}
+
+	// Projects/Bookmarks
+	snap3 := v.projectPool.Get()
+	if snap3.Usable() {
+		v.syncBookmarks(snap3.Data)
+	}
+	if !snap3.Fresh() {
+		cmds = append(cmds, v.projectPool.FetchIfStale(globalCtx))
+	}
+
+	v.rebuildList()
 	return tea.Batch(cmds...)
 }
 
 func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.HomeHeyLoadedMsg:
-		v.heyLoaded = true
-		if msg.Err == nil {
-			v.syncHeyEntries(msg.Entries)
-		}
-		v.rebuildList()
-		return v, nil
-
-	case workspace.HomeAssignmentsLoadedMsg:
-		v.assignLoaded = true
-		if msg.Err == nil {
-			v.syncAssignments(msg.Assignments)
-		}
-		v.rebuildList()
-		return v, nil
-
-	case workspace.HomeProjectsLoadedMsg:
-		v.bookmarksLoaded = true
-		if msg.Err == nil {
-			v.syncBookmarks(msg.Projects)
+	case data.PoolUpdatedMsg:
+		switch msg.Key {
+		case v.heyPool.Key():
+			snap := v.heyPool.Get()
+			if snap.Usable() {
+				v.syncHeyEntries(snap.Data)
+			} else if snap.State == data.StateError {
+				v.heyItems = nil // clear section, stop loading
+			}
+		case v.assignPool.Key():
+			snap := v.assignPool.Get()
+			if snap.Usable() {
+				v.syncAssignments(snap.Data)
+			} else if snap.State == data.StateError {
+				v.assignItems = nil
+			}
+		case v.projectPool.Key():
+			snap := v.projectPool.Get()
+			if snap.Usable() {
+				v.syncBookmarks(snap.Data)
+			} else if snap.State == data.StateError {
+				v.bookmarkItems = nil
+			}
 		}
 		v.rebuildList()
 		return v, nil
 
 	case workspace.RefreshMsg:
-		v.heyLoaded = false
-		v.assignLoaded = false
-		v.bookmarksLoaded = false
+		v.heyPool.Invalidate()
+		v.assignPool.Invalidate()
+		v.projectPool.Invalidate()
+		globalCtx := v.session.Hub().Global().Context()
 		v.syncRecents()
 		v.rebuildList()
-		return v, tea.Batch(v.spinner.Tick, v.fetchHeyActivity(), v.fetchAssignments(), v.fetchBookmarks())
+		return v, tea.Batch(
+			v.spinner.Tick,
+			v.heyPool.Fetch(globalCtx),
+			v.assignPool.Fetch(globalCtx),
+			v.projectPool.Fetch(globalCtx),
+		)
 
 	case workspace.FocusMsg:
 		v.syncRecents()
@@ -193,8 +278,14 @@ func (v *Home) View() string {
 	return v.list.View()
 }
 
+// poolPending returns true if a pool has not yet resolved (no data, no error).
+// A pool in error state is NOT pending — it resolved with a failure.
+func poolPending[T any](snap data.Snapshot[T]) bool {
+	return !snap.Usable() && snap.State != data.StateError
+}
+
 func (v *Home) anyLoading() bool {
-	return !v.heyLoaded || !v.assignLoaded || !v.bookmarksLoaded
+	return poolPending(v.heyPool.Get()) || poolPending(v.assignPool.Get()) || poolPending(v.projectPool.Get())
 }
 
 // syncRecents populates recentItems from the local recents store.
@@ -338,13 +429,13 @@ func (v *Home) syncAssignments(assignments []workspace.AssignmentInfo) {
 }
 
 // syncBookmarks filters projects to bookmarked ones and builds bookmarkItems.
-func (v *Home) syncBookmarks(projects []basecamp.Project) {
+func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
 	var items []widget.ListItem
 	for _, p := range projects {
 		if !p.Bookmarked {
 			continue
 		}
-		id := fmt.Sprintf("bookmark:%d", p.ID)
+		id := fmt.Sprintf("bookmark:%s:%d", p.AccountID, p.ID)
 		desc := p.Purpose
 		if desc == "" {
 			desc = p.Description
@@ -359,6 +450,7 @@ func (v *Home) syncBookmarks(projects []basecamp.Project) {
 			Marked:      true,
 		})
 		v.itemMeta[id] = homeItemMeta{
+			accountID:  p.AccountID,
 			projectID:  p.ID,
 			viewTarget: workspace.ViewDock,
 		}
@@ -462,286 +554,4 @@ func (v *Home) openSelected() tea.Cmd {
 	}
 
 	return nil
-}
-
-// Fetch functions — slim versions of existing patterns for home dashboard.
-// Each uses stale-while-revalidate: serve cached data immediately, refresh
-// in background when stale.
-
-// fetchHeyActivity serves cached activity if available, revalidating when stale.
-func (v *Home) fetchHeyActivity() tea.Cmd {
-	cache := v.session.MultiStore().Cache()
-	entry := cache.Get("home:hey")
-
-	if entry != nil {
-		entries, _ := entry.Value.([]workspace.ActivityEntryInfo) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.HomeHeyLoadedMsg{Entries: entries}
-			}
-		}
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.HomeHeyLoadedMsg{Entries: entries}
-			},
-			v.fetchHeyActivityFromAPI(),
-		)
-	}
-
-	return v.fetchHeyActivityFromAPI()
-}
-
-// fetchHeyActivityFromAPI fans out across all accounts for recent recordings.
-func (v *Home) fetchHeyActivityFromAPI() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	scope := v.session.Scope()
-	return func() tea.Msg {
-		accounts := ms.Accounts()
-		if len(accounts) == 0 {
-			if scope.AccountID == "" {
-				return workspace.HomeHeyLoadedMsg{}
-			}
-			return v.fetchSingleAccountHey(ctx, client, scope)
-		}
-
-		recordingTypes := []basecamp.RecordingType{
-			basecamp.RecordingTypeMessage,
-			basecamp.RecordingTypeTodo,
-			basecamp.RecordingTypeDocument,
-		}
-
-		var allEntries []workspace.ActivityEntryInfo
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			var entries []workspace.ActivityEntryInfo
-			for _, rt := range recordingTypes {
-				result, err := client.Recordings().List(ctx, rt, &basecamp.RecordingsListOptions{
-					Sort:      "updated_at",
-					Direction: "desc",
-					Limit:     3,
-					Page:      1,
-				})
-				if err != nil {
-					continue
-				}
-				for _, rec := range result.Recordings {
-					entries = append(entries, recordingToEntry(rec, acct))
-				}
-			}
-			return entries, nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if entries, ok := r.Data.([]workspace.ActivityEntryInfo); ok {
-				allEntries = append(allEntries, entries...)
-			}
-		}
-
-		sort.Slice(allEntries, func(i, j int) bool {
-			return allEntries[i].UpdatedAtTS > allEntries[j].UpdatedAtTS
-		})
-		if len(allEntries) > 8 {
-			allEntries = allEntries[:8]
-		}
-
-		ms.Cache().Set("home:hey", allEntries, 30*time.Second, 5*time.Minute)
-		// Warm the Hey! view cache so navigating there is instant.
-		ms.Cache().Set("hey:activity", allEntries, 15*time.Second, 2*time.Minute)
-		return workspace.HomeHeyLoadedMsg{Entries: allEntries}
-	}
-}
-
-func (v *Home) fetchSingleAccountHey(ctx context.Context, client *basecamp.AccountClient, scope workspace.Scope) workspace.HomeHeyLoadedMsg {
-	var entries []workspace.ActivityEntryInfo
-	for _, rt := range []basecamp.RecordingType{
-		basecamp.RecordingTypeMessage,
-		basecamp.RecordingTypeTodo,
-		basecamp.RecordingTypeDocument,
-	} {
-		result, err := client.Recordings().List(ctx, rt, &basecamp.RecordingsListOptions{
-			Sort:      "updated_at",
-			Direction: "desc",
-			Limit:     3,
-			Page:      1,
-		})
-		if err != nil {
-			continue
-		}
-		acct := data.AccountInfo{ID: scope.AccountID, Name: scope.AccountName}
-		for _, rec := range result.Recordings {
-			entries = append(entries, recordingToEntry(rec, acct))
-		}
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].UpdatedAtTS > entries[j].UpdatedAtTS
-	})
-	if len(entries) > 8 {
-		entries = entries[:8]
-	}
-
-	return workspace.HomeHeyLoadedMsg{Entries: entries}
-}
-
-// fetchAssignments serves cached assignments if available, revalidating when stale.
-func (v *Home) fetchAssignments() tea.Cmd {
-	cache := v.session.MultiStore().Cache()
-	entry := cache.Get("home:assignments")
-
-	if entry != nil {
-		assignments, _ := entry.Value.([]workspace.AssignmentInfo) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.HomeAssignmentsLoadedMsg{Assignments: assignments}
-			}
-		}
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.HomeAssignmentsLoadedMsg{Assignments: assignments}
-			},
-			v.fetchAssignmentsFromAPI(),
-		)
-	}
-
-	return v.fetchAssignmentsFromAPI()
-}
-
-// fetchAssignmentsFromAPI fans out to get active todos across all accounts.
-func (v *Home) fetchAssignmentsFromAPI() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	scope := v.session.Scope()
-	return func() tea.Msg {
-
-		identity := ms.Identity()
-		if identity == nil {
-			return workspace.HomeAssignmentsLoadedMsg{
-				Err: fmt.Errorf("identity not available yet"),
-			}
-		}
-		myName := identity.FirstName + " " + identity.LastName
-
-		accounts := ms.Accounts()
-		if len(accounts) == 0 {
-			if scope.AccountID == "" {
-				return workspace.HomeAssignmentsLoadedMsg{}
-			}
-			assignments := fetchAccountAssignments(ctx, client,
-				data.AccountInfo{ID: scope.AccountID, Name: scope.AccountName},
-				myName)
-			if len(assignments) > 5 {
-				assignments = assignments[:5]
-			}
-			ms.Cache().Set("home:assignments", assignments, 30*time.Second, 5*time.Minute)
-			ms.Cache().Set("assignments", assignments, 15*time.Second, 2*time.Minute)
-			return workspace.HomeAssignmentsLoadedMsg{Assignments: assignments}
-		}
-
-		var allAssignments []workspace.AssignmentInfo
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			return fetchAccountAssignments(ctx, client, acct, myName), nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if assignments, ok := r.Data.([]workspace.AssignmentInfo); ok {
-				allAssignments = append(allAssignments, assignments...)
-			}
-		}
-
-		sort.Slice(allAssignments, func(i, j int) bool {
-			if allAssignments[i].DueOn == "" {
-				return false
-			}
-			if allAssignments[j].DueOn == "" {
-				return true
-			}
-			return allAssignments[i].DueOn < allAssignments[j].DueOn
-		})
-
-		if len(allAssignments) > 15 {
-			allAssignments = allAssignments[:15]
-		}
-
-		ms.Cache().Set("home:assignments", allAssignments, 30*time.Second, 5*time.Minute)
-		// Warm the Assignments view cache so navigating there is instant.
-		ms.Cache().Set("assignments", allAssignments, 15*time.Second, 2*time.Minute)
-		return workspace.HomeAssignmentsLoadedMsg{Assignments: allAssignments}
-	}
-}
-
-// fetchBookmarks serves cached bookmarks if available, revalidating when stale.
-func (v *Home) fetchBookmarks() tea.Cmd {
-	cache := v.session.MultiStore().Cache()
-	entry := cache.Get("home:bookmarks")
-
-	if entry != nil {
-		projects, _ := entry.Value.([]basecamp.Project) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.HomeProjectsLoadedMsg{Projects: projects}
-			}
-		}
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.HomeProjectsLoadedMsg{Projects: projects}
-			},
-			v.fetchBookmarksFromAPI(),
-		)
-	}
-
-	return v.fetchBookmarksFromAPI()
-}
-
-// fetchBookmarksFromAPI fans out to get all projects and filter to bookmarked ones.
-func (v *Home) fetchBookmarksFromAPI() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	scope := v.session.Scope()
-	return func() tea.Msg {
-		accounts := ms.Accounts()
-
-		if len(accounts) == 0 {
-			if scope.AccountID == "" {
-				return workspace.HomeProjectsLoadedMsg{}
-			}
-			result, err := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
-			if err != nil {
-				return workspace.HomeProjectsLoadedMsg{Err: err}
-			}
-			ms.Cache().Set("home:bookmarks", result.Projects, 30*time.Second, 5*time.Minute)
-			ms.Cache().Set("projects:list", result.Projects, 15*time.Second, 2*time.Minute)
-			return workspace.HomeProjectsLoadedMsg{Projects: result.Projects}
-		}
-
-		var allProjects []basecamp.Project
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			result, err := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			return result.Projects, nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if projects, ok := r.Data.([]basecamp.Project); ok {
-				allProjects = append(allProjects, projects...)
-			}
-		}
-
-		ms.Cache().Set("home:bookmarks", allProjects, 30*time.Second, 5*time.Minute)
-		// Can't warm projects:multi (different type), but projects:list works for data overlap
-		return workspace.HomeProjectsLoadedMsg{Projects: allProjects}
-	}
 }

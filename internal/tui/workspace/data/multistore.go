@@ -34,7 +34,6 @@ type MultiStore struct {
 	accounts []AccountInfo
 	clients  map[string]*basecamp.AccountClient
 	identity *basecamp.Identity
-	cache    *Cache
 }
 
 // NewMultiStore creates a MultiStore backed by the given SDK client.
@@ -42,13 +41,7 @@ func NewMultiStore(sdk *basecamp.Client) *MultiStore {
 	return &MultiStore{
 		sdk:     sdk,
 		clients: make(map[string]*basecamp.AccountClient),
-		cache:   NewCache(),
 	}
-}
-
-// Cache returns the response cache for stale-while-revalidate patterns.
-func (ms *MultiStore) Cache() *Cache {
-	return ms.cache
 }
 
 // DiscoverAccounts fetches all accessible accounts and initializes the store.
@@ -78,6 +71,14 @@ func (ms *MultiStore) DiscoverAccounts(ctx context.Context) ([]AccountInfo, erro
 	ms.mu.Unlock()
 
 	return accounts, nil
+}
+
+// SetAccountsForTest sets the account list directly, bypassing DiscoverAccounts.
+// Only for use in tests.
+func (ms *MultiStore) SetAccountsForTest(accounts []AccountInfo) {
+	ms.mu.Lock()
+	ms.accounts = accounts
+	ms.mu.Unlock()
 }
 
 // Accounts returns the discovered account list. Returns nil before DiscoverAccounts.

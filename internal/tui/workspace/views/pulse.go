@@ -2,14 +2,11 @@ package views
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -22,7 +19,7 @@ import (
 // recently updated recordings grouped by time bucket.
 type Pulse struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[[]data.ActivityEntryInfo]
 	styles  *tui.Styles
 
 	list    *widget.List
@@ -35,8 +32,9 @@ type Pulse struct {
 }
 
 // NewPulse creates the activity pulse view.
-func NewPulse(session *workspace.Session, store *data.Store) *Pulse {
+func NewPulse(session *workspace.Session) *Pulse {
 	styles := session.Styles()
+	pool := session.Hub().Pulse()
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -48,7 +46,7 @@ func NewPulse(session *workspace.Session, store *data.Store) *Pulse {
 
 	return &Pulse{
 		session:   session,
-		store:     store,
+		pool:      pool,
 		styles:    styles,
 		list:      list,
 		spinner:   s,
@@ -60,6 +58,9 @@ func NewPulse(session *workspace.Session, store *data.Store) *Pulse {
 func (v *Pulse) Title() string { return "Pulse" }
 
 func (v *Pulse) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -83,22 +84,40 @@ func (v *Pulse) SetSize(w, h int) {
 }
 
 func (v *Pulse) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchPulse())
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.syncEntries(snap.Data)
+		v.loading = false
+		if snap.Fresh() {
+			return nil
+		}
+	}
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().Global().Context()))
 }
 
 func (v *Pulse) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.ActivityEntriesLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading pulse")
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.syncEntries(snap.Data)
+				v.loading = false
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading pulse")
+			}
+			if snap.Loading() && !snap.HasData {
+				v.loading = true
+			}
 		}
-		v.syncEntries(msg.Entries)
 		return v, nil
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchPulse())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -204,63 +223,4 @@ func (v *Pulse) openSelected() tea.Cmd {
 	scope.RecordingID = meta.ID
 	scope.RecordingType = meta.Type
 	return workspace.Navigate(workspace.ViewDetail, scope)
-}
-
-func (v *Pulse) fetchPulse() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	return func() tea.Msg {
-		accounts := ms.Accounts()
-		if len(accounts) == 0 {
-			return workspace.ActivityEntriesLoadedMsg{}
-		}
-
-		// Fetch multiple recording types per account
-		recordingTypes := []basecamp.RecordingType{
-			basecamp.RecordingTypeMessage,
-			basecamp.RecordingTypeTodo,
-			basecamp.RecordingTypeDocument,
-			basecamp.RecordingTypeKanbanCard,
-		}
-
-		var allEntries []workspace.ActivityEntryInfo
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			var entries []workspace.ActivityEntryInfo
-			for _, rt := range recordingTypes {
-				result, err := client.Recordings().List(ctx, rt, &basecamp.RecordingsListOptions{
-					Sort:      "updated_at",
-					Direction: "desc",
-					Limit:     5,
-					Page:      1,
-				})
-				if err != nil {
-					continue
-				}
-				for _, rec := range result.Recordings {
-					entries = append(entries, recordingToEntry(rec, acct))
-				}
-			}
-			return entries, nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if entries, ok := r.Data.([]workspace.ActivityEntryInfo); ok {
-				allEntries = append(allEntries, entries...)
-			}
-		}
-
-		// Sort by UpdatedAt descending
-		sort.Slice(allEntries, func(i, j int) bool {
-			return allEntries[i].UpdatedAtTS > allEntries[j].UpdatedAtTS
-		})
-
-		if len(allEntries) > 60 {
-			allEntries = allEntries[:60]
-		}
-
-		return workspace.ActivityEntriesLoadedMsg{Entries: allEntries}
-	}
 }

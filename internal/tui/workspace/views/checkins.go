@@ -63,6 +63,9 @@ func (v *Checkins) Title() string {
 
 // ShortHelp implements View.
 func (v *Checkins) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -98,7 +101,7 @@ func (v *Checkins) Init() tea.Cmd {
 			return nil
 		}
 	}
-	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Context()))
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 // Update implements tea.Model.
@@ -125,7 +128,7 @@ func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Context()))
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -234,4 +237,3 @@ func formatFrequency(freq string) string {
 		return freq
 	}
 }
-

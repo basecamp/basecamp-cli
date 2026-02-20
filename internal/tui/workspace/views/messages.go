@@ -8,8 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
-
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
@@ -20,12 +18,8 @@ import (
 // Messages is the split-pane view for a project's message board.
 type Messages struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[[]data.MessageInfo]
 	styles  *tui.Styles
-
-	// IDs
-	projectID int64
-	boardID   int64
 
 	// Layout
 	split         *widget.SplitPane
@@ -45,7 +39,7 @@ type Messages struct {
 }
 
 // NewMessages creates the split-pane messages view.
-func NewMessages(session *workspace.Session, store *data.Store) *Messages {
+func NewMessages(session *workspace.Session) *Messages {
 	styles := session.Styles()
 	scope := session.Scope()
 
@@ -60,12 +54,12 @@ func NewMessages(session *workspace.Session, store *data.Store) *Messages {
 	preview := widget.NewPreview(styles)
 	split := widget.NewSplitPane(styles, 0.35)
 
+	pool := session.Hub().Messages(scope.ProjectID, scope.ToolID)
+
 	return &Messages{
 		session:      session,
-		store:        store,
+		pool:         pool,
 		styles:       styles,
-		projectID:    scope.ProjectID,
-		boardID:      scope.ToolID,
 		split:        split,
 		list:         list,
 		preview:      preview,
@@ -82,6 +76,9 @@ func (v *Messages) Title() string {
 
 // ShortHelp implements View.
 func (v *Messages) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -111,22 +108,46 @@ func (v *Messages) SetSize(w, h int) {
 
 // Init implements tea.Model.
 func (v *Messages) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchMessages())
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.messages = snap.Data
+		v.syncList()
+		v.loading = false
+		if snap.Fresh() {
+			// Auto-select first message
+			if item := v.list.Selected(); item != nil {
+				return v.selectMessage(item.ID)
+			}
+			return nil
+		}
+	}
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 // Update implements tea.Model.
 func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.MessagesLoadedMsg:
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading messages")
-		}
-		v.messages = msg.Messages
-		v.syncList()
-		// Auto-select first message
-		if item := v.list.Selected(); item != nil {
-			return v, v.selectMessage(item.ID)
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				v.messages = snap.Data
+				v.syncList()
+				v.loading = false
+				// Auto-select first message if nothing selected yet
+				if v.selectedMsgID == 0 {
+					if item := v.list.Selected(); item != nil {
+						return v, v.selectMessage(item.ID)
+					}
+				}
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading messages")
+			}
+			if snap.Loading() && !snap.HasData {
+				v.loading = true
+			}
 		}
 		return v, nil
 
@@ -145,13 +166,14 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.MessageCreatedMsg:
 		// A message was created from the compose view — refresh the list
 		if msg.Err == nil {
-			return v, v.fetchMessages()
+			return v, v.pool.Fetch(v.session.Hub().ProjectContext())
 		}
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
 		v.cachedDetail = make(map[int64]*workspace.MessageDetailLoadedMsg)
-		return v, tea.Batch(v.spinner.Tick, v.fetchMessages())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
 	case spinner.TickMsg:
 		if v.loading || v.fetching != 0 {
@@ -313,42 +335,9 @@ func (v *Messages) syncList() {
 
 // -- Commands (tea.Cmd factories)
 
-func (v *Messages) fetchMessages() tea.Cmd {
-	projectID := v.projectID
-	boardID := v.boardID
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		result, err := client.Messages().List(ctx, projectID, boardID, &basecamp.MessageListOptions{})
-		if err != nil {
-			return workspace.MessagesLoadedMsg{Err: err}
-		}
-
-		infos := make([]workspace.MessageInfo, 0, len(result.Messages))
-		for _, m := range result.Messages {
-			creator := ""
-			if m.Creator != nil {
-				creator = m.Creator.Name
-			}
-			category := ""
-			if m.Category != nil {
-				category = m.Category.Name
-			}
-			infos = append(infos, workspace.MessageInfo{
-				ID:        m.ID,
-				Subject:   m.Subject,
-				Creator:   creator,
-				CreatedAt: m.CreatedAt.Format("Jan 2, 2006"),
-				Category:  category,
-			})
-		}
-		return workspace.MessagesLoadedMsg{Messages: infos}
-	}
-}
-
 func (v *Messages) fetchMessageDetail(messageID int64) tea.Cmd {
-	projectID := v.projectID
-	ctx := v.session.Context()
+	projectID := v.session.Scope().ProjectID
+	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
 		msg, err := client.Messages().Get(ctx, projectID, messageID)

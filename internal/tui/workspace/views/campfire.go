@@ -81,7 +81,7 @@ type pendingLine struct {
 // Campfire is the chat stream view for a project campfire.
 type Campfire struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[data.CampfireLinesResult]
 	styles  *tui.Styles
 	keys    campfireKeyMap
 
@@ -110,15 +110,10 @@ type Campfire struct {
 	// Loading
 	spinner spinner.Model
 	loading bool
-
-	// Polling
-	poller *data.Poller
 }
 
-const campfirePollTag = "campfire"
-
 // NewCampfire creates the campfire chat view.
-func NewCampfire(session *workspace.Session, store *data.Store) *Campfire {
+func NewCampfire(session *workspace.Session) *Campfire {
 	styles := session.Styles()
 	scope := session.Scope()
 
@@ -129,13 +124,7 @@ func NewCampfire(session *workspace.Session, store *data.Store) *Campfire {
 	vp := viewport.New(0, 0)
 	vp.MouseWheelEnabled = true
 
-	poller := data.NewPoller()
-	poller.Add(data.PollConfig{
-		Tag:        campfirePollTag,
-		Base:       5 * time.Second,
-		Background: 30 * time.Second,
-		Max:        2 * time.Minute,
-	})
+	pool := session.Hub().CampfireLines(scope.ProjectID, scope.ToolID)
 
 	// Create upload function for the composer — capture client at construction time.
 	client := session.AccountClient()
@@ -162,7 +151,7 @@ func NewCampfire(session *workspace.Session, store *data.Store) *Campfire {
 
 	return &Campfire{
 		session:     session,
-		store:       store,
+		pool:        pool,
 		styles:      styles,
 		keys:        defaultCampfireKeyMap(),
 		projectID:   scope.ProjectID,
@@ -173,7 +162,6 @@ func NewCampfire(session *workspace.Session, store *data.Store) *Campfire {
 		spinner:     s,
 		loading:     true,
 		currentPage: 1,
-		poller:      poller,
 	}
 }
 
@@ -226,22 +214,65 @@ func (v *Campfire) Init() tea.Cmd {
 		})
 	}
 
-	return tea.Batch(
-		v.spinner.Tick,
-		v.fetchLines(),
-		v.poller.Start(),
-		v.composer.Focus(),
-	)
+	cmds := []tea.Cmd{v.spinner.Tick, v.composer.Focus()}
+
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.lines = snap.Data.Lines
+		v.totalCount = snap.Data.TotalCount
+		v.hasMore = v.totalCount > len(v.lines)
+		v.updateLastID()
+		v.renderMessages()
+		v.loading = false
+	}
+	if !snap.Fresh() {
+		cmds = append(cmds, v.pool.FetchIfStale(v.session.Hub().ProjectContext()))
+	}
+	cmds = append(cmds, v.schedulePoll())
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
 func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				// Detect new lines for hit/miss
+				newHighest := v.lastID
+				for _, line := range snap.Data.Lines {
+					if line.ID > newHighest {
+						newHighest = line.ID
+					}
+				}
+				if newHighest > v.lastID {
+					v.pool.RecordHit()
+				} else if v.lastID > 0 {
+					v.pool.RecordMiss()
+				}
+				v.lastID = newHighest
+
+				v.lines = snap.Data.Lines
+				v.totalCount = snap.Data.TotalCount
+				v.hasMore = v.totalCount > len(v.lines)
+				v.reconcilePending()
+				v.renderMessages()
+				v.loading = false
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading campfire")
+			}
+		}
+		return v, nil
+
 	case workspace.CampfireLinesLoadedMsg:
+		// Only prepend case remains (from fetchOlderLines)
 		if msg.Prepend {
 			return v, v.handleOlderLinesLoaded(msg)
 		}
-		return v, v.handleLinesLoaded(msg)
+		return v, nil
 
 	case workspace.CampfireLineSentMsg:
 		if msg.Err != nil {
@@ -264,19 +295,23 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, workspace.SetStatus("Paste a file path or drag a file into the terminal", false)
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchLines())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
 	case data.PollMsg:
-		if msg.Tag == campfirePollTag {
-			return v, tea.Batch(v.fetchLines(), v.poller.Schedule(campfirePollTag))
+		if msg.Tag == v.pool.Key() {
+			return v, tea.Batch(
+				v.pool.FetchIfStale(v.session.Hub().ProjectContext()),
+				v.schedulePoll(),
+			)
 		}
 
 	case workspace.FocusMsg:
-		v.poller.SetFocused(campfirePollTag, true)
+		v.pool.SetFocused(true)
 
 	case workspace.BlurMsg:
-		v.poller.SetFocused(campfirePollTag, false)
+		v.pool.SetFocused(false)
 
 	case spinner.TickMsg:
 		if v.loading || v.loadingMore {
@@ -328,37 +363,6 @@ func (v *Campfire) handleComposerSubmit(msg widget.ComposerSubmitMsg) tea.Cmd {
 		html = richtext.EmbedAttachments(html, refs)
 	}
 	return v.sendLine(html, true)
-}
-
-func (v *Campfire) handleLinesLoaded(msg workspace.CampfireLinesLoadedMsg) tea.Cmd {
-	v.loading = false
-	if msg.Err != nil {
-		return workspace.ReportError(msg.Err, "loading campfire")
-	}
-
-	// Detect new lines
-	newHighest := v.lastID
-	for _, line := range msg.Lines {
-		if line.ID > newHighest {
-			newHighest = line.ID
-		}
-	}
-
-	if newHighest > v.lastID {
-		v.poller.RecordHit(campfirePollTag)
-	} else if v.lastID > 0 {
-		v.poller.RecordMiss(campfirePollTag)
-	}
-
-	v.lastID = newHighest
-	v.lines = msg.Lines
-	v.totalCount = msg.TotalCount
-	v.hasMore = msg.TotalCount > len(msg.Lines)
-
-	// Clear pending lines that now appear in the server response
-	v.reconcilePending()
-	v.renderMessages()
-	return nil
 }
 
 func (v *Campfire) handleOlderLinesLoaded(msg workspace.CampfireLinesLoadedMsg) tea.Cmd {
@@ -474,7 +478,7 @@ func (v *Campfire) sendLine(content string, isHTML bool) tea.Cmd {
 
 	projectID := v.projectID
 	campfireID := v.campfireID
-	ctx := v.session.Context()
+	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
 		var opts *basecamp.CreateLineOptions
@@ -688,48 +692,32 @@ func (v *Campfire) View() string {
 	)
 }
 
-// -- Commands
-
-func (v *Campfire) fetchLines() tea.Cmd {
-	projectID := v.projectID
-	campfireID := v.campfireID
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		result, err := client.Campfires().ListLines(ctx, projectID, campfireID)
-		if err != nil {
-			return workspace.CampfireLinesLoadedMsg{Err: err}
-		}
-
-		infos := make([]workspace.CampfireLineInfo, 0, len(result.Lines))
-		for _, line := range result.Lines {
-			creator := ""
-			if line.Creator != nil {
-				creator = line.Creator.Name
-			}
-			infos = append(infos, workspace.CampfireLineInfo{
-				ID:        line.ID,
-				Body:      line.Content,
-				Creator:   creator,
-				CreatedAt: line.CreatedAt.Format("3:04pm"),
-			})
-		}
-
-		// API returns newest-first; reverse for chronological display (oldest at top)
-		reverseLines(infos)
-
-		return workspace.CampfireLinesLoadedMsg{
-			Lines:      infos,
-			TotalCount: result.Meta.TotalCount,
+func (v *Campfire) updateLastID() {
+	for _, line := range v.lines {
+		if line.ID > v.lastID {
+			v.lastID = line.ID
 		}
 	}
 }
+
+func (v *Campfire) schedulePoll() tea.Cmd {
+	interval := v.pool.PollInterval()
+	if interval == 0 {
+		return nil
+	}
+	key := v.pool.Key()
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return data.PollMsg{Tag: key}
+	})
+}
+
+// -- Commands
 
 func (v *Campfire) fetchOlderLines() tea.Cmd {
 	projectID := v.projectID
 	campfireID := v.campfireID
 	page := v.currentPage
-	ctx := v.session.Context()
+	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
 		path := fmt.Sprintf("/buckets/%d/chats/%d/lines.json?page=%d", projectID, campfireID, page)

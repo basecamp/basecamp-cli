@@ -19,6 +19,7 @@ type StatusBar struct {
 	status      string
 	isError     bool
 	keyHints    []key.Binding
+	globalHints []key.Binding
 }
 
 // NewStatusBar creates a new status bar.
@@ -48,6 +49,11 @@ func (s *StatusBar) ClearStatus() {
 // SetKeyHints sets the key bindings shown as hints.
 func (s *StatusBar) SetKeyHints(hints []key.Binding) {
 	s.keyHints = hints
+}
+
+// SetGlobalHints sets the always-visible global key hints shown on the right.
+func (s *StatusBar) SetGlobalHints(hints []key.Binding) {
+	s.globalHints = hints
 }
 
 // SetWidth sets the available width.
@@ -94,7 +100,7 @@ func (s StatusBar) View() string {
 	}
 	left := strings.Join(hints, "  ")
 
-	// Build right side: status or account
+	// Build right side: status message > global hints > account name
 	var right string
 	if s.status != "" {
 		style := lipgloss.NewStyle().Foreground(theme.Success)
@@ -102,6 +108,8 @@ func (s StatusBar) View() string {
 			style = lipgloss.NewStyle().Foreground(theme.Error)
 		}
 		right = style.Render(s.status)
+	} else if len(s.globalHints) > 0 {
+		right = s.renderGlobalHints(theme, lipgloss.Width(left))
 	} else if s.accountName != "" {
 		right = lipgloss.NewStyle().
 			Foreground(theme.Muted).
@@ -115,4 +123,36 @@ func (s StatusBar) View() string {
 	}
 
 	return barStyle.Render(left + strings.Repeat(" ", gap) + right)
+}
+
+// renderGlobalHints renders as many global hints as fit given the left zone width.
+// Hints are rendered in a dimmer color pair (Border/Muted) so they visually
+// recede behind the context-specific view hints on the left.
+func (s StatusBar) renderGlobalHints(theme tui.Theme, leftWidth int) string {
+	const minGap = 2 // minimum space between left and right zones
+	budget := s.width - leftWidth - minGap
+
+	keyStyle := lipgloss.NewStyle().Foreground(theme.Border)
+	descStyle := lipgloss.NewStyle().Foreground(theme.Muted)
+
+	var parts []string
+	used := 0
+	for _, k := range s.globalHints {
+		if !k.Enabled() {
+			continue
+		}
+		help := k.Help()
+		plain := help.Key + " " + help.Desc
+		w := lipgloss.Width(plain)
+		need := w
+		if len(parts) > 0 {
+			need += 2 // separator
+		}
+		if used+need > budget {
+			break
+		}
+		parts = append(parts, keyStyle.Render(help.Key)+descStyle.Render(" "+help.Desc))
+		used += need
+	}
+	return strings.Join(parts, "  ")
 }

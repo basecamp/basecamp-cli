@@ -9,10 +9,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
-
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 )
 
 // quickJumpItem represents a single entry in the quick-jump list.
@@ -62,7 +61,7 @@ func NewQuickJump(styles *tui.Styles) QuickJump {
 type QuickJumpSource struct {
 	RecentProjects   []recents.Item
 	RecentRecordings []recents.Item
-	Projects         []basecamp.Project
+	Projects         []data.ProjectInfo
 	AccountID        string
 	// NavigateProject is called with (projectID, accountID) to produce a nav command.
 	NavigateProject func(projectID int64, accountID string) tea.Cmd
@@ -202,7 +201,7 @@ func (q *QuickJump) populateItems(src QuickJumpSource) {
 		}
 		seen[id] = true
 		projectID := p.ID
-		acctID := src.AccountID
+		acctID := p.AccountID
 		nav := src.NavigateProject
 		q.items = append(q.items, quickJumpItem{
 			ID:       id,
@@ -220,7 +219,7 @@ func (q *QuickJump) populateItems(src QuickJumpSource) {
 		}
 		seen[id] = true
 		projectID := p.ID
-		acctID := src.AccountID
+		acctID := p.AccountID
 		nav := src.NavigateProject
 		q.items = append(q.items, quickJumpItem{
 			ID:       id,

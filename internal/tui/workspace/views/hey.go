@@ -1,17 +1,13 @@
 package views
 
 import (
-	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -25,7 +21,7 @@ import (
 // from Recordings().List() fan-out.
 type Hey struct {
 	session *workspace.Session
-	store   *data.Store
+	pool    *data.Pool[[]data.ActivityEntryInfo]
 	styles  *tui.Styles
 
 	list    *widget.List
@@ -35,16 +31,11 @@ type Hey struct {
 	// Entries metadata for navigation
 	entryMeta map[string]workspace.ActivityEntryInfo
 
-	// Polling
-	poller *data.Poller
-
 	width, height int
 }
 
-const heyPollTag = "hey"
-
 // NewHey creates the Hey! activity feed view.
-func NewHey(session *workspace.Session, store *data.Store) *Hey {
+func NewHey(session *workspace.Session) *Hey {
 	styles := session.Styles()
 
 	s := spinner.New()
@@ -55,29 +46,25 @@ func NewHey(session *workspace.Session, store *data.Store) *Hey {
 	list.SetEmptyText("No recent activity.")
 	list.SetFocused(true)
 
-	poller := data.NewPoller()
-	poller.Add(data.PollConfig{
-		Tag:        heyPollTag,
-		Base:       30 * time.Second,
-		Background: 2 * time.Minute,
-		Max:        5 * time.Minute,
-	})
+	pool := session.Hub().HeyActivity()
 
 	return &Hey{
 		session:   session,
-		store:     store,
+		pool:      pool,
 		styles:    styles,
 		list:      list,
 		spinner:   s,
 		loading:   true,
 		entryMeta: make(map[string]workspace.ActivityEntryInfo),
-		poller:    poller,
 	}
 }
 
 func (v *Hey) Title() string { return "Hey!" }
 
 func (v *Hey) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -101,40 +88,62 @@ func (v *Hey) SetSize(w, h int) {
 }
 
 func (v *Hey) Init() tea.Cmd {
-	return tea.Batch(v.spinner.Tick, v.fetchActivity(), v.poller.Start())
+	cmds := []tea.Cmd{v.spinner.Tick}
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.syncEntries(snap.Data)
+		v.loading = false
+	}
+	if !snap.Fresh() {
+		cmds = append(cmds, v.pool.FetchIfStale(v.session.Hub().Global().Context()))
+	}
+	cmds = append(cmds, v.schedulePoll())
+	return tea.Batch(cmds...)
 }
 
 func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspace.ActivityEntriesLoadedMsg:
-		wasLoading := v.loading
-		v.loading = false
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "loading activity")
-		}
-		hadEntries := v.list.Len() > 0
-		v.syncEntries(msg.Entries)
-		if hadEntries && !wasLoading {
-			v.poller.RecordHit(heyPollTag)
-		} else if !wasLoading {
-			v.poller.RecordMiss(heyPollTag)
+	case data.PoolUpdatedMsg:
+		if msg.Key == v.pool.Key() {
+			snap := v.pool.Get()
+			if snap.Usable() {
+				hadEntries := v.list.Len() > 0
+				v.syncEntries(snap.Data)
+				v.loading = false
+				if hadEntries {
+					v.pool.RecordHit()
+				} else {
+					v.pool.RecordMiss()
+				}
+			}
+			if snap.State == data.StateError {
+				v.loading = false
+				return v, workspace.ReportError(snap.Err, "loading activity")
+			}
+			if snap.Loading() && !snap.HasData {
+				v.loading = true
+			}
 		}
 		return v, nil
 
 	case workspace.RefreshMsg:
+		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchActivity())
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case data.PollMsg:
-		if msg.Tag == heyPollTag {
-			return v, tea.Batch(v.fetchActivity(), v.poller.Schedule(heyPollTag))
+		if msg.Tag == v.pool.Key() {
+			return v, tea.Batch(
+				v.pool.FetchIfStale(v.session.Hub().Global().Context()),
+				v.schedulePoll(),
+			)
 		}
 
 	case workspace.FocusMsg:
-		v.poller.SetFocused(heyPollTag, true)
+		v.pool.SetFocused(true)
 
 	case workspace.BlurMsg:
-		v.poller.SetFocused(heyPollTag, false)
+		v.pool.SetFocused(false)
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -253,151 +262,13 @@ func (v *Hey) openSelected() tea.Cmd {
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
 
-// fetchActivity serves cached data immediately when available, firing a
-// background revalidation when the entry is stale.
-func (v *Hey) fetchActivity() tea.Cmd {
-	cache := v.session.MultiStore().Cache()
-	entry := cache.Get("hey:activity")
-
-	if entry != nil {
-		entries, _ := entry.Value.([]workspace.ActivityEntryInfo) //nolint:errcheck
-		if entry.IsFresh() {
-			return func() tea.Msg {
-				return workspace.ActivityEntriesLoadedMsg{Entries: entries}
-			}
-		}
-		// Stale — serve immediately, refresh in background
-		return tea.Batch(
-			func() tea.Msg {
-				return workspace.ActivityEntriesLoadedMsg{Entries: entries}
-			},
-			v.fetchActivityFromAPI(),
-		)
+func (v *Hey) schedulePoll() tea.Cmd {
+	interval := v.pool.PollInterval()
+	if interval == 0 {
+		return nil
 	}
-
-	return v.fetchActivityFromAPI()
-}
-
-// fetchActivityFromAPI fans out Recordings().List() across all accounts and
-// stores the result in the response cache.
-func (v *Hey) fetchActivityFromAPI() tea.Cmd {
-	ms := v.session.MultiStore()
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
-	scope := v.session.Scope()
-	return func() tea.Msg {
-		accounts := ms.Accounts()
-		if len(accounts) == 0 {
-			// Fall back to single-account if discovery hasn't completed
-			if scope.AccountID == "" {
-				return workspace.ActivityEntriesLoadedMsg{}
-			}
-			return v.fetchSingleAccountActivity(ctx, client, scope)
-		}
-
-		// Fan out across all accounts, fetching recent Messages and Todos
-		recordingTypes := []basecamp.RecordingType{
-			basecamp.RecordingTypeMessage,
-			basecamp.RecordingTypeTodo,
-			basecamp.RecordingTypeDocument,
-		}
-
-		var allEntries []workspace.ActivityEntryInfo
-		results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-			var entries []workspace.ActivityEntryInfo
-			for _, rt := range recordingTypes {
-				result, err := client.Recordings().List(ctx, rt, &basecamp.RecordingsListOptions{
-					Sort:      "updated_at",
-					Direction: "desc",
-					Limit:     10,
-					Page:      1,
-				})
-				if err != nil {
-					continue // skip this type, try next
-				}
-				for _, rec := range result.Recordings {
-					entries = append(entries, recordingToEntry(rec, acct))
-				}
-			}
-			return entries, nil
-		})
-
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			if entries, ok := r.Data.([]workspace.ActivityEntryInfo); ok {
-				allEntries = append(allEntries, entries...)
-			}
-		}
-
-		// Sort by UpdatedAt descending
-		sort.Slice(allEntries, func(i, j int) bool {
-			return allEntries[i].UpdatedAtTS > allEntries[j].UpdatedAtTS
-		})
-
-		// Cap at 50 entries
-		if len(allEntries) > 50 {
-			allEntries = allEntries[:50]
-		}
-
-		ms.Cache().Set("hey:activity", allEntries, 30*time.Second, 5*time.Minute)
-		return workspace.ActivityEntriesLoadedMsg{Entries: allEntries}
-	}
-}
-
-func (v *Hey) fetchSingleAccountActivity(ctx context.Context, client *basecamp.AccountClient, scope workspace.Scope) workspace.ActivityEntriesLoadedMsg {
-	var entries []workspace.ActivityEntryInfo
-	for _, rt := range []basecamp.RecordingType{
-		basecamp.RecordingTypeMessage,
-		basecamp.RecordingTypeTodo,
-	} {
-		result, err := client.Recordings().List(ctx, rt, &basecamp.RecordingsListOptions{
-			Sort:      "updated_at",
-			Direction: "desc",
-			Limit:     15,
-			Page:      1,
-		})
-		if err != nil {
-			continue
-		}
-		acct := data.AccountInfo{ID: scope.AccountID, Name: scope.AccountName}
-		for _, rec := range result.Recordings {
-			entries = append(entries, recordingToEntry(rec, acct))
-		}
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].UpdatedAtTS > entries[j].UpdatedAtTS
+	key := v.pool.Key()
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return data.PollMsg{Tag: key}
 	})
-	if len(entries) > 30 {
-		entries = entries[:30]
-	}
-
-	return workspace.ActivityEntriesLoadedMsg{Entries: entries}
-}
-
-func recordingToEntry(rec basecamp.Recording, acct data.AccountInfo) workspace.ActivityEntryInfo {
-	creator := ""
-	if rec.Creator != nil {
-		creator = rec.Creator.Name
-	}
-	project := ""
-	var projectID int64
-	if rec.Bucket != nil {
-		project = rec.Bucket.Name
-		projectID = rec.Bucket.ID
-	}
-	return workspace.ActivityEntryInfo{
-		ID:          rec.ID,
-		Title:       rec.Title,
-		Type:        rec.Type,
-		Creator:     creator,
-		Account:     acct.Name,
-		AccountID:   acct.ID,
-		Project:     project,
-		ProjectID:   projectID,
-		UpdatedAt:   rec.UpdatedAt.Format("Jan 2 3:04pm"),
-		UpdatedAtTS: rec.UpdatedAt.Unix(),
-	}
 }

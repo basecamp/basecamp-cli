@@ -15,7 +15,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
-	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
@@ -54,7 +53,6 @@ func defaultComposeKeyMap() composeKeyMap {
 // Compose is a general-purpose compose view for creating messages.
 type Compose struct {
 	session *workspace.Session
-	store   *data.Store
 	styles  *tui.Styles
 	keys    composeKeyMap
 
@@ -72,7 +70,7 @@ type Compose struct {
 }
 
 // NewCompose creates a new compose view.
-func NewCompose(session *workspace.Session, store *data.Store) *Compose {
+func NewCompose(session *workspace.Session) *Compose {
 	styles := session.Styles()
 	scope := session.Scope()
 
@@ -105,7 +103,6 @@ func NewCompose(session *workspace.Session, store *data.Store) *Compose {
 
 	return &Compose{
 		session:     session,
-		store:       store,
 		styles:      styles,
 		keys:        defaultComposeKeyMap(),
 		subject:     subj,
@@ -276,7 +273,7 @@ func (v *Compose) postMessage(content widget.ComposerContent) tea.Cmd {
 		html = richtext.EmbedAttachments(html, refs)
 	}
 
-	ctx := v.session.Context()
+	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
 		msg, err := client.Messages().Create(ctx, projectID, boardID, &basecamp.CreateMessageRequest{

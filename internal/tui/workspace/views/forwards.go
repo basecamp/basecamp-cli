@@ -56,6 +56,9 @@ func NewForwards(session *workspace.Session) *Forwards {
 func (v *Forwards) Title() string { return "Email Forwards" }
 
 func (v *Forwards) ShortHelp() []key.Binding {
+	if v.list.Filtering() {
+		return filterHints()
+	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
@@ -82,7 +85,7 @@ func (v *Forwards) Init() tea.Cmd {
 			return nil
 		}
 	}
-	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Context()))
+	return tea.Batch(v.spinner.Tick, v.pool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 func (v *Forwards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -108,7 +111,7 @@ func (v *Forwards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Context()))
+		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -175,4 +178,3 @@ func (v *Forwards) openSelected() tea.Cmd {
 	scope.RecordingType = "Forward"
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
-

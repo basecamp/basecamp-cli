@@ -20,7 +20,6 @@ const chromeHeight = 3
 type Workspace struct {
 	session  *Session
 	router   *Router
-	store    *data.Store
 	styles   *tui.Styles
 	keys     GlobalKeyMap
 	registry *Registry
@@ -48,18 +47,16 @@ type Workspace struct {
 }
 
 // ViewFactory creates views for navigation targets.
-type ViewFactory func(target ViewTarget, session *Session, store *data.Store, scope Scope) View
+type ViewFactory func(target ViewTarget, session *Session, scope Scope) View
 
 // New creates a new Workspace model.
 func New(session *Session, factory ViewFactory) *Workspace {
 	styles := session.Styles()
-	store := data.NewStore()
 	registry := DefaultActions()
 
 	w := &Workspace{
 		session:         session,
 		router:          NewRouter(),
-		store:           store,
 		styles:          styles,
 		keys:            DefaultGlobalKeyMap(),
 		registry:        registry,
@@ -86,7 +83,7 @@ func (w *Workspace) Init() tea.Cmd {
 		w.session.Hub().EnsureAccount(scope.AccountID)
 	}
 
-	view := w.viewFactory(ViewHome, w.session, w.store, scope)
+	view := w.viewFactory(ViewHome, w.session, scope)
 	w.router.Push(view, scope)
 	w.syncChrome()
 
@@ -122,19 +119,21 @@ func (w *Workspace) discoverAccounts() tea.Cmd {
 }
 
 func (w *Workspace) fetchAccountName() tea.Cmd {
+	// Capture the account ID at dispatch time so the handler can reject
+	// stale results if the account changed (defense-in-depth beyond epoch guard).
+	accountID := w.session.Scope().AccountID
 	return func() tea.Msg {
 		ctx := w.session.Context()
 		accounts, err := w.session.App().Resolve().SDK().Authorization().GetInfo(ctx, nil)
 		if err != nil {
-			return AccountNameMsg{Err: err}
+			return AccountNameMsg{AccountID: accountID, Err: err}
 		}
-		accountID := w.session.Scope().AccountID
 		for _, acct := range accounts.Accounts {
 			if fmt.Sprintf("%d", acct.ID) == accountID {
-				return AccountNameMsg{Name: acct.Name}
+				return AccountNameMsg{AccountID: accountID, Name: acct.Name}
 			}
 		}
-		return AccountNameMsg{Name: accountID} // fallback to ID
+		return AccountNameMsg{AccountID: accountID, Name: accountID} // fallback to ID
 	}
 }
 
@@ -157,6 +156,11 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w.Update(msg.Inner)
 
 	case AccountNameMsg:
+		// Reject if the account changed since this fetch was dispatched
+		// (defense-in-depth beyond epoch guard).
+		if msg.AccountID != "" && msg.AccountID != w.session.Scope().AccountID {
+			return w, nil
+		}
 		name := msg.Name
 		if name == "" && msg.Err != nil {
 			// Fallback: show account ID when name lookup fails
@@ -173,11 +177,13 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AccountsDiscoveredMsg:
 		// Account discovery is best-effort — errors are silent.
-		if msg.Err != nil || len(msg.Accounts) <= 1 {
+		if msg.Err != nil {
 			return w, nil
 		}
-		// Multiple accounts discovered — trigger a refresh if on Home or Projects
-		// so they switch to multi-account mode.
+		// Refresh Home/Projects after discovery completes. This handles:
+		// - Multi-account: views switch to cross-account fan-out mode.
+		// - Single-account: identity is now available for identity-dependent
+		//   pools (Assignments), replacing bootstrap-empty data.
 		if view := w.router.Current(); view != nil {
 			title := view.Title()
 			if title == "Home" || title == "Projects" {
@@ -276,7 +282,7 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Command palette consumes keys when active
 	if w.showPalette {
-		return w.palette.Update(msg)
+		return w.stampCmd(w.palette.Update(msg))
 	}
 
 	// Account switcher consumes keys when active
@@ -286,7 +292,7 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Quick-jump consumes keys when active
 	if w.showQuickJump {
-		return w.quickJump.Update(msg)
+		return w.stampCmd(w.quickJump.Update(msg))
 	}
 
 	// When a view is capturing text input, only allow ctrl-chord globals
@@ -414,8 +420,38 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 		outgoing.Update(BlurMsg{})
 	}
 
+	prevAccountID := w.session.Scope().AccountID
 	w.session.SetScope(scope)
-	view := w.viewFactory(target, w.session, w.store, scope)
+
+	// Sync Hub realms to match the target scope. This handles:
+	// - Cross-account navigation (Pings → Campfire on different account):
+	//   EnsureAccount rotates the account realm + tears down project realm,
+	//   and we resolve + update chrome to reflect the new account name.
+	// - Forward navigation to non-project views (any view → Hey):
+	//   syncProjectRealm tears down the project realm.
+	if hub := w.session.Hub(); hub != nil && scope.AccountID != "" {
+		hub.EnsureAccount(scope.AccountID)
+		// On cross-account hops the cloned scope often carries the old
+		// account's name. Resolve the correct name whenever the account
+		// actually changed.
+		if scope.AccountID != prevAccountID {
+			scope.AccountName = "" // clear stale name
+			for _, a := range w.session.MultiStore().Accounts() {
+				if a.ID == scope.AccountID {
+					scope.AccountName = a.Name
+					break
+				}
+			}
+			w.session.SetScope(scope)
+		}
+		if scope.AccountName != "" {
+			w.statusBar.SetAccount(scope.AccountName)
+			w.breadcrumb.SetAccount(scope.AccountName)
+		}
+	}
+	w.syncProjectRealm(scope)
+
+	view := w.viewFactory(target, w.session, scope)
 	view.SetSize(w.width, w.viewHeight())
 	w.router.Push(view, scope)
 	w.syncChrome()
@@ -435,6 +471,7 @@ func (w *Workspace) goBack() tea.Cmd {
 	w.router.Pop()
 	scope := w.router.CurrentScope()
 	w.session.SetScope(scope)
+	w.syncProjectRealm(scope)
 	w.syncChrome()
 	// Refresh dimensions and focus for the restored view
 	if view := w.router.Current(); view != nil {
@@ -457,6 +494,7 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 	w.router.PopToDepth(depth)
 	scope := w.router.CurrentScope()
 	w.session.SetScope(scope)
+	w.syncProjectRealm(scope)
 	w.syncChrome()
 	// Refresh dimensions and focus for the restored view
 	if view := w.router.Current(); view != nil {
@@ -465,6 +503,33 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 		return chrome.SetTerminalTitle("bcq - " + view.Title())
 	}
 	return nil
+}
+
+// hubProjects returns the current projects from the Hub's global pool,
+// or nil if no data is available yet. Used by quickJump.
+func (w *Workspace) hubProjects() []data.ProjectInfo {
+	hub := w.session.Hub()
+	if hub == nil {
+		return nil
+	}
+	snap := hub.Projects().Get()
+	if snap.Usable() {
+		return snap.Data
+	}
+	return nil
+}
+
+// syncProjectRealm tears down the project realm when navigation leaves
+// project scope. This ensures in-flight project fetches are canceled
+// via the realm's context and project pools are released.
+func (w *Workspace) syncProjectRealm(scope Scope) {
+	hub := w.session.Hub()
+	if hub == nil {
+		return
+	}
+	if scope.ProjectID == 0 && hub.Project() != nil {
+		hub.LeaveProject()
+	}
 }
 
 func (w *Workspace) openPalette() tea.Cmd {
@@ -489,7 +554,7 @@ func (w *Workspace) openQuickJump() tea.Cmd {
 	src := chrome.QuickJumpSource{
 		RecentProjects:   recentProjects,
 		RecentRecordings: recentRecordings,
-		Projects:         w.store.Projects(),
+		Projects:         w.hubProjects(),
 		AccountID:        scope.AccountID,
 		NavigateProject: func(projectID int64, accountID string) tea.Cmd {
 			return Navigate(ViewDock, Scope{
@@ -532,15 +597,12 @@ func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {
 	// Update status bar
 	w.statusBar.SetAccount(accountName)
 
-	// Clear stale data (Store still used by views until Phase 3 migration)
-	w.store.Clear()
-
 	// Update breadcrumb with new account name
 	w.breadcrumb.SetAccount(accountName)
 
 	// Reset navigation and push fresh home dashboard
 	w.router.Reset()
-	view := w.viewFactory(ViewHome, w.session, w.store, scope)
+	view := w.viewFactory(ViewHome, w.session, scope)
 	view.SetSize(w.width, w.viewHeight())
 	w.router.Push(view, scope)
 	w.syncChrome()
@@ -618,6 +680,10 @@ func (w *Workspace) replaceCurrentView(updated tea.Model) {
 func (w *Workspace) syncChrome() {
 	w.breadcrumb.SetCrumbs(w.router.Breadcrumbs())
 	w.help.SetGlobalKeys(w.keys.FullHelp())
+	w.statusBar.SetGlobalHints([]key.Binding{
+		key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "cmds")),
+	})
 	if view := w.router.Current(); view != nil {
 		w.statusBar.SetKeyHints(view.ShortHelp())
 		w.help.SetViewTitle(view.Title())
