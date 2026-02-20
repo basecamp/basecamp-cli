@@ -2,8 +2,9 @@ package workspace
 
 // routerEntry holds a view and its associated scope for the navigation stack.
 type routerEntry struct {
-	view  View
-	scope Scope
+	view   View
+	scope  Scope
+	target ViewTarget
 }
 
 // Router manages the navigation stack with state preservation.
@@ -22,8 +23,16 @@ func (r *Router) Reset() {
 }
 
 // Push adds a view to the navigation stack.
-func (r *Router) Push(view View, scope Scope) {
-	r.stack = append(r.stack, routerEntry{view: view, scope: scope})
+func (r *Router) Push(view View, scope Scope, target ViewTarget) {
+	r.stack = append(r.stack, routerEntry{view: view, scope: scope, target: target})
+}
+
+// CurrentTarget returns the ViewTarget of the current view, or 0 if empty.
+func (r *Router) CurrentTarget() ViewTarget {
+	if len(r.stack) == 0 {
+		return 0
+	}
+	return r.stack[len(r.stack)-1].target
 }
 
 // Pop removes and returns the top view from the stack.

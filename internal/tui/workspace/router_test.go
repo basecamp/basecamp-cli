@@ -33,12 +33,12 @@ func TestNewRouter(t *testing.T) {
 func TestRouter_Push(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Home"}, Scope{AccountID: "1"})
+	r.Push(mockView{title: "Home"}, Scope{AccountID: "1"}, 0)
 	assert.Equal(t, 1, r.Depth())
 	assert.Equal(t, "Home", r.Current().(mockView).title)
 	assert.False(t, r.CanGoBack(), "single entry cannot go back")
 
-	r.Push(mockView{title: "Project"}, Scope{AccountID: "1", ProjectID: 42})
+	r.Push(mockView{title: "Project"}, Scope{AccountID: "1", ProjectID: 42}, 0)
 	assert.Equal(t, 2, r.Depth())
 	assert.Equal(t, "Project", r.Current().(mockView).title)
 	assert.True(t, r.CanGoBack())
@@ -47,9 +47,9 @@ func TestRouter_Push(t *testing.T) {
 func TestRouter_Pop(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Home"}, Scope{})
-	r.Push(mockView{title: "Project"}, Scope{ProjectID: 1})
-	r.Push(mockView{title: "Todolist"}, Scope{ProjectID: 1, ToolID: 2})
+	r.Push(mockView{title: "Home"}, Scope{}, 0)
+	r.Push(mockView{title: "Project"}, Scope{ProjectID: 1}, 0)
+	r.Push(mockView{title: "Todolist"}, Scope{ProjectID: 1, ToolID: 2}, 0)
 
 	assert.Equal(t, 3, r.Depth())
 
@@ -65,7 +65,7 @@ func TestRouter_Pop(t *testing.T) {
 
 func TestRouter_PopProtectsRoot(t *testing.T) {
 	r := NewRouter()
-	r.Push(mockView{title: "Root"}, Scope{})
+	r.Push(mockView{title: "Root"}, Scope{}, 0)
 
 	v := r.Pop()
 	assert.Nil(t, v, "Pop on root should return nil")
@@ -88,11 +88,11 @@ func TestRouter_CurrentScope(t *testing.T) {
 	assert.Equal(t, Scope{}, r.CurrentScope())
 
 	scope1 := Scope{AccountID: "acct-1"}
-	r.Push(mockView{title: "Home"}, scope1)
+	r.Push(mockView{title: "Home"}, scope1, 0)
 	assert.Equal(t, scope1, r.CurrentScope())
 
 	scope2 := Scope{AccountID: "acct-1", ProjectID: 99, ProjectName: "HQ"}
-	r.Push(mockView{title: "Project"}, scope2)
+	r.Push(mockView{title: "Project"}, scope2, 0)
 	assert.Equal(t, scope2, r.CurrentScope())
 
 	r.Pop()
@@ -102,9 +102,9 @@ func TestRouter_CurrentScope(t *testing.T) {
 func TestRouter_Breadcrumbs(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Home"}, Scope{})
-	r.Push(mockView{title: "HQ"}, Scope{})
-	r.Push(mockView{title: "To-dos"}, Scope{})
+	r.Push(mockView{title: "Home"}, Scope{}, 0)
+	r.Push(mockView{title: "HQ"}, Scope{}, 0)
+	r.Push(mockView{title: "To-dos"}, Scope{}, 0)
 
 	crumbs := r.Breadcrumbs()
 	assert.Equal(t, []string{"Home", "HQ", "To-dos"}, crumbs)
@@ -113,9 +113,9 @@ func TestRouter_Breadcrumbs(t *testing.T) {
 func TestRouter_BreadcrumbsReflectPop(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "A"}, Scope{})
-	r.Push(mockView{title: "B"}, Scope{})
-	r.Push(mockView{title: "C"}, Scope{})
+	r.Push(mockView{title: "A"}, Scope{}, 0)
+	r.Push(mockView{title: "B"}, Scope{}, 0)
+	r.Push(mockView{title: "C"}, Scope{}, 0)
 
 	r.Pop()
 	assert.Equal(t, []string{"A", "B"}, r.Breadcrumbs())
@@ -127,10 +127,10 @@ func TestRouter_BreadcrumbsReflectPop(t *testing.T) {
 func TestRouter_PopToDepth(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Root"}, Scope{})
-	r.Push(mockView{title: "Level 2"}, Scope{})
-	r.Push(mockView{title: "Level 3"}, Scope{})
-	r.Push(mockView{title: "Level 4"}, Scope{})
+	r.Push(mockView{title: "Root"}, Scope{}, 0)
+	r.Push(mockView{title: "Level 2"}, Scope{}, 0)
+	r.Push(mockView{title: "Level 3"}, Scope{}, 0)
+	r.Push(mockView{title: "Level 4"}, Scope{}, 0)
 
 	assert.Equal(t, 4, r.Depth())
 
@@ -144,9 +144,9 @@ func TestRouter_PopToDepth(t *testing.T) {
 func TestRouter_PopToDepthOne(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Root"}, Scope{})
-	r.Push(mockView{title: "Deep"}, Scope{})
-	r.Push(mockView{title: "Deeper"}, Scope{})
+	r.Push(mockView{title: "Root"}, Scope{}, 0)
+	r.Push(mockView{title: "Deep"}, Scope{}, 0)
+	r.Push(mockView{title: "Deeper"}, Scope{}, 0)
 
 	v := r.PopToDepth(1)
 	assert.Equal(t, "Root", v.(mockView).title)
@@ -156,8 +156,8 @@ func TestRouter_PopToDepthOne(t *testing.T) {
 func TestRouter_PopToDepthInvalid(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Root"}, Scope{})
-	r.Push(mockView{title: "Child"}, Scope{})
+	r.Push(mockView{title: "Root"}, Scope{}, 0)
+	r.Push(mockView{title: "Child"}, Scope{}, 0)
 
 	// Zero is invalid
 	assert.Nil(t, r.PopToDepth(0))
@@ -175,8 +175,8 @@ func TestRouter_PopToDepthInvalid(t *testing.T) {
 func TestRouter_PopToDepthSameDepth(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "Root"}, Scope{})
-	r.Push(mockView{title: "Current"}, Scope{})
+	r.Push(mockView{title: "Root"}, Scope{}, 0)
+	r.Push(mockView{title: "Current"}, Scope{}, 0)
 
 	// Pop to the current depth is a no-op
 	v := r.PopToDepth(2)
@@ -189,13 +189,13 @@ func TestRouter_CanGoBack(t *testing.T) {
 
 	assert.False(t, r.CanGoBack(), "empty stack")
 
-	r.Push(mockView{title: "One"}, Scope{})
+	r.Push(mockView{title: "One"}, Scope{}, 0)
 	assert.False(t, r.CanGoBack(), "single entry")
 
-	r.Push(mockView{title: "Two"}, Scope{})
+	r.Push(mockView{title: "Two"}, Scope{}, 0)
 	assert.True(t, r.CanGoBack(), "two entries")
 
-	r.Push(mockView{title: "Three"}, Scope{})
+	r.Push(mockView{title: "Three"}, Scope{}, 0)
 	assert.True(t, r.CanGoBack(), "three entries")
 
 	r.Pop()
@@ -211,7 +211,7 @@ func TestRouter_Depth(t *testing.T) {
 	assert.Equal(t, 0, r.Depth())
 
 	for i := 1; i <= 5; i++ {
-		r.Push(mockView{title: "V"}, Scope{})
+		r.Push(mockView{title: "V"}, Scope{}, 0)
 		assert.Equal(t, i, r.Depth())
 	}
 
@@ -225,8 +225,8 @@ func TestRouter_Depth(t *testing.T) {
 func TestRouter_PushPreservesEarlierEntries(t *testing.T) {
 	r := NewRouter()
 
-	r.Push(mockView{title: "First"}, Scope{AccountID: "a"})
-	r.Push(mockView{title: "Second"}, Scope{AccountID: "b"})
+	r.Push(mockView{title: "First"}, Scope{AccountID: "a"}, 0)
+	r.Push(mockView{title: "Second"}, Scope{AccountID: "b"}, 0)
 
 	// Verify the first entry is still accessible via breadcrumbs
 	crumbs := r.Breadcrumbs()

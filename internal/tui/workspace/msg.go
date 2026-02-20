@@ -51,6 +51,17 @@ const (
 	ViewHome
 )
 
+// IsGlobal returns true for view targets that aggregate across all accounts.
+func (t ViewTarget) IsGlobal() bool {
+	switch t {
+	case ViewHome, ViewHey, ViewPulse, ViewAssignments,
+		ViewPings, ViewProjects, ViewSearch:
+		return true
+	default:
+		return false
+	}
+}
+
 // ComposeType identifies what kind of content is being composed.
 type ComposeType int
 
