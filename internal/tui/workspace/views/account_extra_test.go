@@ -177,48 +177,59 @@ func TestHome_Bookmarks_PreserveDescription(t *testing.T) {
 }
 
 // --- Search openSelected regression test ---
-// Search.openSelected() reads RecordingType from resultMeta (not item.Extra),
-// which is critical when Extra carries an account index prefix.
-// Full openSelected requires a live Session, so we test the invariant through
-// handleResults: item.Extra has the prefix while resultMeta.Type has the raw type.
+// Exercises the actual multi-account path: item.Extra carries a prefixed value
+// like "2·Message", but openSelected() must read the raw type from resultMeta
+// for RecordingType and recents.
 
-func TestSearch_HandleResults_ExtraVsMetaType(t *testing.T) {
-	styles := tui.NewStyles()
+func TestSearch_OpenSelected_UsesMeta_NotPrefixedExtra(t *testing.T) {
+	session := workspace.NewTestSession()
+	styles := session.Styles()
 	list := widget.NewList(styles)
 	list.SetEmptyText("No results.")
+	list.SetFocused(true)
 	list.SetSize(80, 20)
 
 	v := &Search{
+		session:    session,
 		styles:     styles,
 		list:       list,
 		query:      "test",
 		resultMeta: make(map[string]workspace.SearchResultInfo),
 	}
 
-	msg := workspace.SearchResultsMsg{
-		Query: "test",
-		Results: []workspace.SearchResultInfo{
-			{
-				ID:        5001,
-				Title:     "Weekly update",
-				Type:      "Message",
-				Project:   "Alpha",
-				ProjectID: 42,
-				Account:   "Acme",
-				AccountID: "a1",
-			},
-		},
+	// Simulate multi-account prefixed Extra (what handleResults would produce)
+	id := fmt.Sprintf("%d", int64(5001))
+	v.resultMeta[id] = workspace.SearchResultInfo{
+		ID:        5001,
+		Title:     "Weekly update",
+		Type:      "Message",
+		Project:   "Alpha",
+		ProjectID: 42,
+		Account:   "Beta Corp",
+		AccountID: "acct-2",
 	}
-	v.handleResults(msg)
+	list.SetItems([]widget.ListItem{
+		{
+			ID:          id,
+			Title:       "Weekly update",
+			Description: "Beta Corp > Alpha",
+			Extra:       "2\u00b7Message", // prefixed — simulates multi-account
+		},
+	})
 
-	// With nil session -> nil accounts -> no prefix (single-account equivalent)
-	items := v.list.Items()
-	assert.Len(t, items, 1)
-	assert.Equal(t, "Message", items[0].Extra,
-		"Extra should be raw type when single-account (nil session)")
+	cmd := v.openSelected()
+	assert.NotNil(t, cmd, "openSelected must return a cmd")
 
-	// Confirm resultMeta always stores the raw type
-	meta := v.resultMeta[fmt.Sprintf("%d", int64(5001))]
-	assert.Equal(t, "Message", meta.Type,
-		"resultMeta.Type must always be the raw recording type, never prefixed")
+	msg := cmd()
+	nav, ok := msg.(workspace.NavigateMsg)
+	assert.True(t, ok, "must produce NavigateMsg, got %T", msg)
+
+	assert.Equal(t, "Message", nav.Scope.RecordingType,
+		"RecordingType must come from resultMeta.Type, not the prefixed item.Extra")
+	assert.Equal(t, int64(5001), nav.Scope.RecordingID,
+		"RecordingID must come from resultMeta.ID")
+	assert.Equal(t, "acct-2", nav.Scope.AccountID,
+		"AccountID must come from resultMeta")
+	assert.Equal(t, int64(42), nav.Scope.ProjectID,
+		"ProjectID must come from resultMeta")
 }
