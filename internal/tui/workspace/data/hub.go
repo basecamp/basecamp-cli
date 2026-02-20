@@ -280,10 +280,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			foldersResult, err := client.Vaults().List(ctx, projectID, vaultID, nil)
 			if err == nil {
 				for _, f := range foldersResult.Vaults {
-					creator := ""
-					if f.Creator != nil {
-						creator = f.Creator.Name
-					}
+					creator := personName(f.Creator)
 					allItems = append(allItems, DocsFilesItemInfo{
 						ID:        f.ID,
 						Title:     f.Title,
@@ -298,10 +295,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			docsResult, docErr := client.Documents().List(ctx, projectID, vaultID, nil)
 			if docErr == nil {
 				for _, d := range docsResult.Documents {
-					creator := ""
-					if d.Creator != nil {
-						creator = d.Creator.Name
-					}
+					creator := personName(d.Creator)
 					allItems = append(allItems, DocsFilesItemInfo{
 						ID:        d.ID,
 						Title:     d.Title,
@@ -316,10 +310,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			uploadsResult, uploadErr := client.Uploads().List(ctx, projectID, vaultID, nil)
 			if uploadErr == nil {
 				for _, u := range uploadsResult.Uploads {
-					creator := ""
-					if u.Creator != nil {
-						creator = u.Creator.Name
-					}
+					creator := personName(u.Creator)
 					title := u.Filename
 					if title == "" {
 						title = u.Title
@@ -370,20 +361,20 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 				return nil, err
 			}
 			infos := make([]PersonInfo, 0, len(result.People))
-			for _, p := range result.People {
+			for _, pp := range result.People {
 				var company string
-				if p.Company != nil {
-					company = p.Company.Name
+				if pp.Company != nil {
+					company = pp.Company.Name
 				}
 				infos = append(infos, PersonInfo{
-					ID:         p.ID,
-					Name:       p.Name,
-					Email:      p.EmailAddress,
-					Title:      p.Title,
-					Admin:      p.Admin,
-					Owner:      p.Owner,
-					Client:     p.Client,
-					PersonType: p.PersonableType,
+					ID:         pp.ID,
+					Name:       pp.Name,
+					Email:      pp.EmailAddress,
+					Title:      pp.Title,
+					Admin:      pp.Admin,
+					Owner:      pp.Owner,
+					Client:     pp.Client,
+					PersonType: pp.PersonableType,
 					Company:    company,
 				})
 			}
@@ -583,10 +574,7 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 			}
 			infos := make([]CampfireLineInfo, 0, len(result.Lines))
 			for _, line := range result.Lines {
-				creator := ""
-				if line.Creator != nil {
-					creator = line.Creator.Name
-				}
+				creator := personName(line.Creator)
 				infos = append(infos, CampfireLineInfo{
 					ID:        line.ID,
 					Body:      line.Content,
@@ -619,10 +607,7 @@ func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
 			}
 			infos := make([]MessageInfo, 0, len(result.Messages))
 			for _, m := range result.Messages {
-				creator := ""
-				if m.Creator != nil {
-					creator = m.Creator.Name
-				}
+				creator := personName(m.Creator)
 				category := ""
 				if m.Category != nil {
 					category = m.Category.Name

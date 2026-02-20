@@ -8,6 +8,16 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
+// -- Helpers
+
+// personName returns the person's name, or "" if the person is nil.
+func personName(p *basecamp.Person) string {
+	if p != nil {
+		return p.Name
+	}
+	return ""
+}
+
 // -- Global-realm pool accessors (cross-account fan-out)
 
 // currentAccountInfo returns the Hub's active account as an AccountInfo,
@@ -259,10 +269,7 @@ func fetchRecordingsAsActivity(ctx context.Context, client *basecamp.AccountClie
 			continue
 		}
 		for _, rec := range result.Recordings {
-			creator := ""
-			if rec.Creator != nil {
-				creator = rec.Creator.Name
-			}
+			creator := personName(rec.Creator)
 			project := ""
 			var projectID int64
 			if rec.Bucket != nil {
