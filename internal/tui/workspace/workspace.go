@@ -33,6 +33,9 @@ type Workspace struct {
 	accountSwitcher chrome.AccountSwitcher
 	quickJump       chrome.QuickJump
 
+	// Multi-account
+	accountList []AccountInfo
+
 	// State
 	showHelp            bool
 	showPalette         bool
@@ -84,7 +87,7 @@ func (w *Workspace) Init() tea.Cmd {
 	}
 
 	view := w.viewFactory(ViewHome, w.session, scope)
-	w.router.Push(view, scope)
+	w.router.Push(view, scope, ViewHome)
 	w.syncChrome()
 
 	cmds := []tea.Cmd{w.stampCmd(view.Init()), chrome.SetTerminalTitle("bcq")}
@@ -168,10 +171,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if name != "" {
 			w.statusBar.SetAccount(name)
-			w.breadcrumb.SetAccount(name)
 			scope := w.session.Scope()
 			scope.AccountName = name
 			w.session.SetScope(scope)
+			w.syncAccountBadge(w.router.CurrentTarget())
 		}
 		return w, nil
 
@@ -180,6 +183,9 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return w, nil
 		}
+		w.accountList = msg.Accounts
+		w.syncAccountBadge(w.router.CurrentTarget())
+		w.syncChrome() // refresh global hints (ctrl+a visibility)
 		// Refresh Home/Projects after discovery completes. This handles:
 		// - Multi-account: views switch to cross-account fan-out mode.
 		// - Single-account: identity is now available for identity-dependent
@@ -446,14 +452,14 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 		}
 		if scope.AccountName != "" {
 			w.statusBar.SetAccount(scope.AccountName)
-			w.breadcrumb.SetAccount(scope.AccountName)
 		}
 	}
 	w.syncProjectRealm(scope)
 
 	view := w.viewFactory(target, w.session, scope)
 	view.SetSize(w.width, w.viewHeight())
-	w.router.Push(view, scope)
+	w.router.Push(view, scope, target)
+	w.syncAccountBadge(target)
 	w.syncChrome()
 
 	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("bcq - "+view.Title()))
@@ -472,6 +478,7 @@ func (w *Workspace) goBack() tea.Cmd {
 	scope := w.router.CurrentScope()
 	w.session.SetScope(scope)
 	w.syncProjectRealm(scope)
+	w.syncAccountBadge(w.router.CurrentTarget())
 	w.syncChrome()
 	// Refresh dimensions and focus for the restored view
 	if view := w.router.Current(); view != nil {
@@ -495,6 +502,7 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 	scope := w.router.CurrentScope()
 	w.session.SetScope(scope)
 	w.syncProjectRealm(scope)
+	w.syncAccountBadge(w.router.CurrentTarget())
 	w.syncChrome()
 	// Refresh dimensions and focus for the restored view
 	if view := w.router.Current(); view != nil {
@@ -529,6 +537,40 @@ func (w *Workspace) syncProjectRealm(scope Scope) {
 	}
 	if scope.ProjectID == 0 && hub.Project() != nil {
 		hub.LeaveProject()
+	}
+}
+
+// accountIndex returns the 1-based index of accountID in the discovered
+// accounts list, or 0 if not found (used for "All Accounts").
+func (w *Workspace) accountIndex(accountID string) int {
+	for i, a := range w.accountList {
+		if a.ID == accountID {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// syncAccountBadge updates the breadcrumb badge based on the current target
+// and account context.
+func (w *Workspace) syncAccountBadge(target ViewTarget) {
+	name := w.session.Scope().AccountName
+	multiAccount := len(w.accountList) > 1
+
+	if !multiAccount {
+		// Single account (or not yet discovered): plain name badge
+		w.breadcrumb.SetAccountBadge(name, false)
+		return
+	}
+	if target.IsGlobal() {
+		w.breadcrumb.SetAccountBadge("✱ All Accounts", true)
+		return
+	}
+	idx := w.accountIndex(w.session.Scope().AccountID)
+	if idx > 0 && name != "" {
+		w.breadcrumb.SetAccountBadge(fmt.Sprintf("%d:%s", idx, name), false)
+	} else if name != "" {
+		w.breadcrumb.SetAccountBadge(name, false)
 	}
 }
 
@@ -597,14 +639,12 @@ func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {
 	// Update status bar
 	w.statusBar.SetAccount(accountName)
 
-	// Update breadcrumb with new account name
-	w.breadcrumb.SetAccount(accountName)
-
 	// Reset navigation and push fresh home dashboard
 	w.router.Reset()
 	view := w.viewFactory(ViewHome, w.session, scope)
 	view.SetSize(w.width, w.viewHeight())
-	w.router.Push(view, scope)
+	w.router.Push(view, scope, ViewHome)
+	w.syncAccountBadge(ViewHome)
 	w.syncChrome()
 
 	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("bcq"))
@@ -680,10 +720,16 @@ func (w *Workspace) replaceCurrentView(updated tea.Model) {
 func (w *Workspace) syncChrome() {
 	w.breadcrumb.SetCrumbs(w.router.Breadcrumbs())
 	w.help.SetGlobalKeys(w.keys.FullHelp())
-	w.statusBar.SetGlobalHints([]key.Binding{
+
+	globalHints := []key.Binding{
 		key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "cmds")),
-	})
+	}
+	if len(w.accountList) > 1 {
+		globalHints = append(globalHints,
+			key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "switch")))
+	}
+	w.statusBar.SetGlobalHints(globalHints)
 	if view := w.router.Current(); view != nil {
 		w.statusBar.SetKeyHints(view.ShortHelp())
 		w.help.SetViewTitle(view.Title())

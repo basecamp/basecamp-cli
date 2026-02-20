@@ -102,7 +102,7 @@ func targetName(t ViewTarget) string {
 // pushTestView is a helper that pushes a named testView onto the workspace router.
 func pushTestView(w *Workspace, title string) *testView {
 	v := &testView{title: title}
-	w.router.Push(v, Scope{})
+	w.router.Push(v, Scope{}, 0)
 	w.syncChrome()
 	return v
 }
@@ -774,7 +774,7 @@ func TestWorkspace_ViewHintRefreshOnUpdate(t *testing.T) {
 
 	// Create a view that returns dynamic hints.
 	v := &dynamicHintView{title: "TestView"}
-	w.router.Push(v, Scope{})
+	w.router.Push(v, Scope{}, 0)
 	w.syncChrome()
 
 	// Initially no hints.
