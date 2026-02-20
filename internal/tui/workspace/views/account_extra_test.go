@@ -1,9 +1,16 @@
 package views
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
 func TestAccountExtra_SingleAccount(t *testing.T) {
@@ -33,7 +40,7 @@ func TestAccountExtra_MultiAccount(t *testing.T) {
 		{"first account with extra", "aaa", "Message", "1\u00b7Message"},
 		{"second account with extra", "bbb", "Todo", "2\u00b7Todo"},
 		{"third account with extra", "ccc", "Jan 15", "3\u00b7Jan 15"},
-		{"first account empty extra", "aaa", "", "1"},
+		{"empty extra preserved", "aaa", "", ""},
 		{"unknown account", "zzz", "Message", "Message"},
 		{"unknown account empty extra", "zzz", "", ""},
 	}
@@ -72,4 +79,146 @@ func TestAccountIndex(t *testing.T) {
 	if got := accountIndex(accounts, "zzz"); got != 0 {
 		t.Errorf("unknown account: got %d, want 0", got)
 	}
+}
+
+// --- View-level regression tests ---
+// These exercise the full sync path with nil session (-> nil accounts -> no
+// prefix) and confirm that empty Extra stays empty, preserving Description
+// rendering in the list widget.
+
+func TestActivity_EmptyExcerpt_PreservesDescription(t *testing.T) {
+	now := time.Now()
+	entries := []data.TimelineEventInfo{
+		{
+			RecordingID:    1001,
+			CreatedAt:      now.Format("Jan 2 3:04pm"),
+			CreatedAtTS:    now.Add(-5 * time.Minute).Unix(),
+			Action:         "created",
+			Target:         "Todo",
+			Title:          "Ship it",
+			Creator:        "Alice",
+			Project:        "Alpha",
+			SummaryExcerpt: "", // no excerpt
+			AccountID:      "a1",
+		},
+	}
+	v := testActivity(entries)
+
+	for _, item := range v.list.Items() {
+		if item.Header {
+			continue
+		}
+		assert.Empty(t, item.Extra,
+			"Activity item with no excerpt must have empty Extra to preserve Description")
+		assert.NotEmpty(t, item.Description,
+			"Activity item Description must remain visible when Extra is empty")
+	}
+}
+
+func TestAssignments_NoDueDate_PreservesDescription(t *testing.T) {
+	assignments := []data.AssignmentInfo{
+		{
+			ID:        2001,
+			Content:   "Review design",
+			Account:   "Acme",
+			AccountID: "a1",
+			Project:   "Alpha",
+			ProjectID: 42,
+			DueOn:     "", // no due date
+		},
+	}
+
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetEmptyText("No assignments.")
+	list.SetFocused(true)
+	list.SetSize(80, 20)
+
+	pool := testPool("assign", assignments, true)
+	v := &Assignments{
+		pool:           pool,
+		styles:         styles,
+		list:           list,
+		assignmentMeta: make(map[string]workspace.AssignmentInfo),
+	}
+	v.syncAssignments(assignments)
+
+	for _, item := range v.list.Items() {
+		if item.Header {
+			continue
+		}
+		assert.Empty(t, item.Extra,
+			"Assignment with no DueOn must have empty Extra to preserve Description")
+		assert.Contains(t, item.Description, "Acme",
+			"Assignment Description must remain visible")
+	}
+}
+
+func TestHome_Bookmarks_PreserveDescription(t *testing.T) {
+	v := testHome(true)
+	projects := []data.ProjectInfo{
+		{
+			ID:         100,
+			Name:       "Alpha",
+			Purpose:    "The main project",
+			Bookmarked: true,
+			AccountID:  "a1",
+		},
+	}
+	v.syncBookmarks(projects)
+
+	assert.NotEmpty(t, v.bookmarkItems, "should have bookmark items")
+	for _, item := range v.bookmarkItems {
+		assert.Empty(t, item.Extra,
+			"Bookmark must have empty Extra to preserve Description (purpose)")
+		assert.Equal(t, "The main project", item.Description,
+			"Bookmark Description must show project purpose")
+	}
+}
+
+// --- Search openSelected regression test ---
+// Search.openSelected() reads RecordingType from resultMeta (not item.Extra),
+// which is critical when Extra carries an account index prefix.
+// Full openSelected requires a live Session, so we test the invariant through
+// handleResults: item.Extra has the prefix while resultMeta.Type has the raw type.
+
+func TestSearch_HandleResults_ExtraVsMetaType(t *testing.T) {
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetEmptyText("No results.")
+	list.SetSize(80, 20)
+
+	v := &Search{
+		styles:     styles,
+		list:       list,
+		query:      "test",
+		resultMeta: make(map[string]workspace.SearchResultInfo),
+	}
+
+	msg := workspace.SearchResultsMsg{
+		Query: "test",
+		Results: []workspace.SearchResultInfo{
+			{
+				ID:        5001,
+				Title:     "Weekly update",
+				Type:      "Message",
+				Project:   "Alpha",
+				ProjectID: 42,
+				Account:   "Acme",
+				AccountID: "a1",
+			},
+		},
+	}
+	v.handleResults(msg)
+
+	// With nil session -> nil accounts -> no prefix (single-account equivalent)
+	items := v.list.Items()
+	assert.Len(t, items, 1)
+	assert.Equal(t, "Message", items[0].Extra,
+		"Extra should be raw type when single-account (nil session)")
+
+	// Confirm resultMeta always stores the raw type
+	meta := v.resultMeta[fmt.Sprintf("%d", int64(5001))]
+	assert.Equal(t, "Message", meta.Type,
+		"resultMeta.Type must always be the raw recording type, never prefixed")
 }
