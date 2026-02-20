@@ -38,7 +38,7 @@ func (h *Hub) currentAccountInfo() AccountInfo {
 // The pool fans out Recordings.List across all accounts, caches for 30s (fresh)
 // / 5m (stale), and polls at 30s/2m intervals.
 func (h *Hub) HeyActivity() *Pool[[]ActivityEntryInfo] {
-	return RealmPool(h.Global(), "hey:activity", func() *Pool[[]ActivityEntryInfo] {
+	p := RealmPool(h.Global(), "hey:activity", func() *Pool[[]ActivityEntryInfo] {
 		return NewPool("hey:activity", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
@@ -85,12 +85,14 @@ func (h *Hub) HeyActivity() *Pool[[]ActivityEntryInfo] {
 			return all, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Pulse returns a global-scope pool of cross-account recent activity.
 // Like HeyActivity but includes more recording types and groups by account.
 func (h *Hub) Pulse() *Pool[[]ActivityEntryInfo] {
-	return RealmPool(h.Global(), "pulse", func() *Pool[[]ActivityEntryInfo] {
+	p := RealmPool(h.Global(), "pulse", func() *Pool[[]ActivityEntryInfo] {
 		return NewPool("pulse", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
@@ -126,11 +128,13 @@ func (h *Hub) Pulse() *Pool[[]ActivityEntryInfo] {
 			return all, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Assignments returns a global-scope pool of cross-account todo assignments.
 func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
-	return RealmPool(h.Global(), "assignments", func() *Pool[[]AssignmentInfo] {
+	p := RealmPool(h.Global(), "assignments", func() *Pool[[]AssignmentInfo] {
 		return NewPool("assignments", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
@@ -177,11 +181,13 @@ func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
 			return all, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // PingRooms returns a global-scope pool of 1:1 campfire threads.
 func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
-	return RealmPool(h.Global(), "ping-rooms", func() *Pool[[]PingRoomInfo] {
+	p := RealmPool(h.Global(), "ping-rooms", func() *Pool[[]PingRoomInfo] {
 		return NewPool("ping-rooms", PoolConfig{
 			FreshTTL: 1 * time.Minute,
 			StaleTTL: 5 * time.Minute,
@@ -248,6 +254,8 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 			return all, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // -- Shared fetch helpers
@@ -333,7 +341,7 @@ func fetchAccountAssignments(ctx context.Context, client *basecamp.AccountClient
 // Each project carries account attribution for cross-account navigation.
 // Used by Home (bookmarks), Projects view, and Dock.
 func (h *Hub) Projects() *Pool[[]ProjectInfo] {
-	return RealmPool(h.Global(), "projects", func() *Pool[[]ProjectInfo] {
+	p := RealmPool(h.Global(), "projects", func() *Pool[[]ProjectInfo] {
 		return NewPool("projects", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
@@ -370,6 +378,8 @@ func (h *Hub) Projects() *Pool[[]ProjectInfo] {
 			return all, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // projectsToInfos maps SDK projects to ProjectInfo with account attribution.

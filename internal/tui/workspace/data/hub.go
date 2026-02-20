@@ -28,16 +28,21 @@ type Hub struct {
 	projectID int64  // tracks which project the realm belongs to
 	multi     *MultiStore
 	poller    *Poller
+	metrics   *PoolMetrics
 }
 
 // NewHub creates a Hub with a global realm and the given dependencies.
 func NewHub(multi *MultiStore, poller *Poller) *Hub {
 	return &Hub{
-		global: NewRealm("global", context.Background()),
-		multi:  multi,
-		poller: poller,
+		global:  NewRealm("global", context.Background()),
+		multi:   multi,
+		poller:  poller,
+		metrics: NewPoolMetrics(),
 	}
 }
+
+// Metrics returns the pool metrics collector.
+func (h *Hub) Metrics() *PoolMetrics { return h.metrics }
 
 // Global returns the app-lifetime realm.
 func (h *Hub) Global() *Realm {
@@ -200,7 +205,7 @@ func (h *Hub) accountClient() *basecamp.AccountClient {
 func (h *Hub) ScheduleEntries(projectID, scheduleID int64) *Pool[[]ScheduleEntryInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("schedule-entries:%d:%d", projectID, scheduleID)
-	return RealmPool(realm, key, func() *Pool[[]ScheduleEntryInfo] {
+	p := RealmPool(realm, key, func() *Pool[[]ScheduleEntryInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]ScheduleEntryInfo, error) {
 			client := h.accountClient()
 			result, err := client.Schedules().ListEntries(ctx, projectID, scheduleID, &basecamp.ScheduleEntryListOptions{})
@@ -235,13 +240,15 @@ func (h *Hub) ScheduleEntries(projectID, scheduleID int64) *Pool[[]ScheduleEntry
 			return infos, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Checkins returns a project-scoped pool of check-in questions.
 func (h *Hub) Checkins(projectID, questionnaireID int64) *Pool[[]CheckinQuestionInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("checkins:%d:%d", projectID, questionnaireID)
-	return RealmPool(realm, key, func() *Pool[[]CheckinQuestionInfo] {
+	p := RealmPool(realm, key, func() *Pool[[]CheckinQuestionInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]CheckinQuestionInfo, error) {
 			client := h.accountClient()
 			result, err := client.Checkins().ListQuestions(ctx, projectID, questionnaireID, &basecamp.QuestionListOptions{})
@@ -265,13 +272,15 @@ func (h *Hub) Checkins(projectID, questionnaireID int64) *Pool[[]CheckinQuestion
 			return infos, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // DocsFiles returns a project-scoped pool of vault items (folders, documents, uploads).
 func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("docsfiles:%d:%d", projectID, vaultID)
-	return RealmPool(realm, key, func() *Pool[[]DocsFilesItemInfo] {
+	p := RealmPool(realm, key, func() *Pool[[]DocsFilesItemInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]DocsFilesItemInfo, error) {
 			client := h.accountClient()
 			var allItems []DocsFilesItemInfo
@@ -341,6 +350,8 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			return allItems, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // People returns an account-scoped pool of people in the current account.
@@ -353,7 +364,7 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 	if realm == nil {
 		panic(fmt.Sprintf("Hub.People() called without active account realm (accountID=%q); call EnsureAccount first", id))
 	}
-	return RealmPool(realm, "people", func() *Pool[[]PersonInfo] {
+	p := RealmPool(realm, "people", func() *Pool[[]PersonInfo] {
 		return NewPool("people", PoolConfig{}, func(ctx context.Context) ([]PersonInfo, error) {
 			client := h.accountClient()
 			result, err := client.People().List(ctx, &basecamp.PeopleListOptions{})
@@ -381,13 +392,15 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 			return infos, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Todolists returns a project-scoped pool of todolists.
 func (h *Hub) Todolists(projectID, todosetID int64) *Pool[[]TodolistInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("todolists:%d:%d", projectID, todosetID)
-	return RealmPool(realm, key, func() *Pool[[]TodolistInfo] {
+	p := RealmPool(realm, key, func() *Pool[[]TodolistInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]TodolistInfo, error) {
 			client := h.accountClient()
 			result, err := client.Todolists().List(ctx, projectID, todosetID, &basecamp.TodolistListOptions{})
@@ -405,6 +418,8 @@ func (h *Hub) Todolists(projectID, todosetID int64) *Pool[[]TodolistInfo] {
 			return infos, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Todos returns a project-scoped MutatingPool of todos for a specific todolist.
@@ -412,7 +427,7 @@ func (h *Hub) Todolists(projectID, todosetID int64) *Pool[[]TodolistInfo] {
 func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("todos:%d:%d", projectID, todolistID)
-	return RealmPool(realm, key, func() *MutatingPool[[]TodoInfo] {
+	mp := RealmPool(realm, key, func() *MutatingPool[[]TodoInfo] {
 		return NewMutatingPool(key, PoolConfig{}, func(ctx context.Context) ([]TodoInfo, error) {
 			client := h.accountClient()
 			result, err := client.Todos().List(ctx, projectID, todolistID, &basecamp.TodoListOptions{})
@@ -438,6 +453,8 @@ func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 			return infos, nil
 		})
 	})
+	mp.SetMetrics(h.metrics)
+	return mp
 }
 
 // Cards returns a project-scoped MutatingPool of card columns with their cards.
@@ -446,7 +463,7 @@ func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 func (h *Hub) Cards(projectID, tableID int64) *MutatingPool[[]CardColumnInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("cards:%d:%d", projectID, tableID)
-	return RealmPool(realm, key, func() *MutatingPool[[]CardColumnInfo] {
+	mp := RealmPool(realm, key, func() *MutatingPool[[]CardColumnInfo] {
 		return NewMutatingPool(key, PoolConfig{}, func(ctx context.Context) ([]CardColumnInfo, error) {
 			client := h.accountClient()
 			cardTable, err := client.CardTables().Get(ctx, projectID, tableID)
@@ -489,6 +506,8 @@ func (h *Hub) Cards(projectID, tableID int64) *MutatingPool[[]CardColumnInfo] {
 			return columns, nil
 		})
 	})
+	mp.SetMetrics(h.metrics)
+	return mp
 }
 
 // cardFetchJob identifies a column whose cards need fetching.
@@ -559,7 +578,7 @@ func mapCardInfo(c basecamp.Card) CardInfo {
 func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResult] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("campfire-lines:%d:%d", projectID, campfireID)
-	return RealmPool(realm, key, func() *Pool[CampfireLinesResult] {
+	p := RealmPool(realm, key, func() *Pool[CampfireLinesResult] {
 		return NewPool(key, PoolConfig{
 			FreshTTL: 4 * time.Second, // expire before PollBase fires
 			StaleTTL: 5 * time.Minute, // serve stale during re-fetch
@@ -592,13 +611,15 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 			}, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Messages returns a project-scoped pool of message board posts.
 func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("messages:%d:%d", projectID, boardID)
-	return RealmPool(realm, key, func() *Pool[[]MessageInfo] {
+	p := RealmPool(realm, key, func() *Pool[[]MessageInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]MessageInfo, error) {
 			client := h.accountClient()
 			result, err := client.Messages().List(ctx, projectID, boardID, &basecamp.MessageListOptions{})
@@ -623,13 +644,15 @@ func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
 			return infos, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
 
 // Forwards returns a project-scoped pool of email forwards.
 func (h *Hub) Forwards(projectID, inboxID int64) *Pool[[]ForwardInfo] {
 	realm := h.EnsureProject(projectID)
 	key := fmt.Sprintf("forwards:%d:%d", projectID, inboxID)
-	return RealmPool(realm, key, func() *Pool[[]ForwardInfo] {
+	p := RealmPool(realm, key, func() *Pool[[]ForwardInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]ForwardInfo, error) {
 			client := h.accountClient()
 			result, err := client.Forwards().List(ctx, projectID, inboxID, &basecamp.ForwardListOptions{})
@@ -647,4 +670,7 @@ func (h *Hub) Forwards(projectID, inboxID int64) *Pool[[]ForwardInfo] {
 			return infos, nil
 		})
 	})
+	p.SetMetrics(h.metrics)
+	return p
 }
+

@@ -2,7 +2,9 @@
 package chrome
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,6 +12,13 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
+
+// PoolMetricsSummary is the status bar's view of pool health.
+type PoolMetricsSummary struct {
+	ActivePools int
+	P50Latency  time.Duration
+	ErrorRate   float64
+}
 
 // StatusBar renders the bottom status bar with key hints and status info.
 type StatusBar struct {
@@ -20,6 +29,7 @@ type StatusBar struct {
 	isError     bool
 	keyHints    []key.Binding
 	globalHints []key.Binding
+	metrics     *PoolMetricsSummary
 }
 
 // NewStatusBar creates a new status bar.
@@ -54,6 +64,11 @@ func (s *StatusBar) SetKeyHints(hints []key.Binding) {
 // SetGlobalHints sets the always-visible global key hints shown on the right.
 func (s *StatusBar) SetGlobalHints(hints []key.Binding) {
 	s.globalHints = hints
+}
+
+// SetMetrics updates the pool health metrics display.
+func (s *StatusBar) SetMetrics(summary *PoolMetricsSummary) {
+	s.metrics = summary
 }
 
 // SetWidth sets the available width.
@@ -100,7 +115,9 @@ func (s StatusBar) View() string {
 	}
 	left := strings.Join(hints, "  ")
 
-	// Build right side: status message > global hints > account name
+	// Build right side: metrics + status/hints
+	metricsStr := s.renderMetrics(theme)
+
 	var right string
 	if s.status != "" {
 		style := lipgloss.NewStyle().Foreground(theme.Success)
@@ -109,11 +126,18 @@ func (s StatusBar) View() string {
 		}
 		right = style.Render(s.status)
 	} else if len(s.globalHints) > 0 {
-		right = s.renderGlobalHints(theme, lipgloss.Width(left))
+		right = s.renderGlobalHints(theme, lipgloss.Width(left)+lipgloss.Width(metricsStr))
 	} else if s.accountName != "" {
 		right = lipgloss.NewStyle().
 			Foreground(theme.Muted).
 			Render("[" + s.accountName + "]")
+	}
+	if metricsStr != "" {
+		if right != "" {
+			right = metricsStr + "  " + right
+		} else {
+			right = metricsStr
+		}
 	}
 
 	// Lay out: left-align hints, right-align status
@@ -123,6 +147,22 @@ func (s StatusBar) View() string {
 	}
 
 	return barStyle.Render(left + strings.Repeat(" ", gap) + right)
+}
+
+// renderMetrics renders the pool health indicator: ● 4 pools · 180ms
+func (s StatusBar) renderMetrics(theme tui.Theme) string {
+	if s.metrics == nil || s.metrics.ActivePools == 0 {
+		return ""
+	}
+	indicator := "●"
+	color := theme.Success
+	if s.metrics.ErrorRate > 0.1 {
+		indicator = "○"
+		color = theme.Error
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(indicator) +
+		lipgloss.NewStyle().Foreground(theme.Muted).Render(
+			fmt.Sprintf(" %d pools · %dms", s.metrics.ActivePools, s.metrics.P50Latency.Milliseconds()))
 }
 
 // renderGlobalHints renders as many global hints as fit given the left zone width.

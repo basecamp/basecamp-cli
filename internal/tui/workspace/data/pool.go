@@ -53,6 +53,7 @@ type Pool[T any] struct {
 	pushMode   bool // when true, extend poll intervals (SSE connected)
 	missCount  int
 	focused    bool
+	metrics    *PoolMetrics
 }
 
 // NewPool creates a Pool with the given key, config, and fetch function.
@@ -67,6 +68,13 @@ func NewPool[T any](key string, config PoolConfig, fetchFn FetchFunc[T]) *Pool[T
 
 // Key returns the pool's identifier.
 func (p *Pool[T]) Key() string { return p.key }
+
+// SetMetrics sets the metrics collector for this pool.
+func (p *Pool[T]) SetMetrics(m *PoolMetrics) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.metrics = m
+}
 
 // Get returns the current snapshot. Never blocks.
 // Recalculates state based on TTL — a snapshot stored as Fresh may
@@ -116,7 +124,25 @@ func (p *Pool[T]) Fetch(ctx context.Context) tea.Cmd {
 	p.mu.Unlock()
 
 	return func() tea.Msg {
+		p.mu.RLock()
+		m := p.metrics
+		fetchKey := p.key
+		p.mu.RUnlock()
+
+		if m != nil {
+			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, EventType: FetchStart})
+		}
+		start := time.Now()
 		data, err := p.fetchFn(ctx)
+		elapsed := time.Since(start)
+
+		if m != nil {
+			evType := FetchComplete
+			if err != nil {
+				evType = FetchError
+			}
+			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, EventType: evType, Duration: elapsed})
+		}
 
 		p.mu.Lock()
 		defer p.mu.Unlock()
