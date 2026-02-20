@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,6 +36,13 @@ type Workspace struct {
 
 	// Multi-account
 	accountList []AccountInfo
+
+	// Sidebar
+	sidebarView    View
+	sidebarTarget  ViewTarget
+	sidebarRatio   float64 // left panel ratio (0.30 default)
+	showSidebar    bool
+	sidebarFocused bool
 
 	// State
 	showHelp            bool
@@ -71,6 +79,8 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		quickJump:       chrome.NewQuickJump(styles),
 		viewFactory:     factory,
+		sidebarTarget:   ViewActivity,
+		sidebarRatio:    0.30,
 	}
 
 	return w
@@ -216,6 +226,36 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrorMsg:
 		return w, w.toast.Show(msg.Context+": "+msg.Err.Error(), true)
 
+	case data.PoolUpdatedMsg:
+		// Refresh status bar metrics on every pool update
+		if hub := w.session.Hub(); hub != nil {
+			summary := hub.Metrics().Summary()
+			w.statusBar.SetMetrics(&chrome.PoolMetricsSummary{
+				ActivePools: summary.ActivePools,
+				P50Latency:  summary.P50Latency,
+				ErrorRate:   summary.ErrorRate,
+			})
+		}
+		// Forward to sidebar if active
+		var sidebarCmd tea.Cmd
+		if w.sidebarActive() {
+			updated, sc := w.sidebarView.Update(msg)
+			if v, ok := updated.(View); ok {
+				w.sidebarView = v
+			}
+			sidebarCmd = w.stampCmd(sc)
+		}
+		// Forward to current view
+		if view := w.router.Current(); view != nil {
+			updated, cmd := view.Update(msg)
+			w.replaceCurrentView(updated)
+			if sidebarCmd != nil {
+				return w, tea.Batch(w.stampCmd(cmd), sidebarCmd)
+			}
+			return w, w.stampCmd(cmd)
+		}
+		return w, sidebarCmd
+
 	case RefreshMsg:
 		if view := w.router.Current(); view != nil {
 			updated, cmd := view.Update(msg)
@@ -269,14 +309,30 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w, cmd
 	}
 
+	// Forward PollMsg to sidebar alongside the main view
+	// (PoolUpdatedMsg is handled by the explicit case above)
+	var sidebarCmd tea.Cmd
+	if w.sidebarActive() {
+		if _, ok := msg.(data.PollMsg); ok {
+			updated, sc := w.sidebarView.Update(msg)
+			if v, ok := updated.(View); ok {
+				w.sidebarView = v
+			}
+			sidebarCmd = w.stampCmd(sc)
+		}
+	}
+
 	// Forward to current view
 	if view := w.router.Current(); view != nil {
 		updated, cmd := view.Update(msg)
 		w.replaceCurrentView(updated)
+		if sidebarCmd != nil {
+			return w, tea.Batch(w.stampCmd(cmd), sidebarCmd)
+		}
 		return w, w.stampCmd(cmd)
 	}
 
-	return w, nil
+	return w, sidebarCmd
 }
 
 func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -329,6 +385,8 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return w.navigate(ViewMyStuff, w.session.Scope())
 		case key.Matches(msg, w.keys.Activity):
 			return w.navigate(ViewActivity, w.session.Scope())
+		case key.Matches(msg, w.keys.Sidebar):
+			return w.toggleSidebar()
 		case key.Matches(msg, w.keys.Jump):
 			return w.openQuickJump()
 		}
@@ -403,6 +461,13 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, w.keys.Open):
 		return openInBrowser(w.session.Scope())
 
+	case key.Matches(msg, w.keys.Sidebar):
+		return w.toggleSidebar()
+
+	case key.Matches(msg, w.keys.SidebarFocus):
+		w.switchSidebarFocus()
+		return nil
+
 	case key.Matches(msg, w.keys.Jump):
 		return w.openQuickJump()
 	}
@@ -416,7 +481,14 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
-	// Forward to current view
+	// Forward to focused panel
+	if w.sidebarActive() && w.sidebarFocused {
+		updated, cmd := w.sidebarView.Update(msg)
+		if v, ok := updated.(View); ok {
+			w.sidebarView = v
+		}
+		return w.stampCmd(cmd)
+	}
 	if view := w.router.Current(); view != nil {
 		updated, cmd := view.Update(msg)
 		w.replaceCurrentView(updated)
@@ -466,6 +538,7 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 	w.router.Push(view, scope, target)
 	w.syncAccountBadge(target)
 	w.syncChrome()
+
 
 	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("bcq - "+view.Title()))
 }
@@ -557,11 +630,9 @@ func (w *Workspace) accountIndex(accountID string) int {
 }
 
 // syncAccountBadge updates the breadcrumb badge based on the current target
-// and account context. Always sets the badge deterministically — never leaves
-// stale state from a previous view.
+// and account context.
 func (w *Workspace) syncAccountBadge(target ViewTarget) {
-	scope := w.session.Scope()
-	name := scope.AccountName
+	name := w.session.Scope().AccountName
 	multiAccount := len(w.accountList) > 1
 
 	if !multiAccount {
@@ -573,17 +644,11 @@ func (w *Workspace) syncAccountBadge(target ViewTarget) {
 		w.breadcrumb.SetAccountBadge("✱ All Accounts", true)
 		return
 	}
-	// Scoped view: show indexed badge. Fall back to AccountID when name
-	// hasn't resolved yet, so the badge always reflects the current scope.
-	label := name
-	if label == "" {
-		label = scope.AccountID
-	}
-	idx := w.accountIndex(scope.AccountID)
-	if idx > 0 {
-		w.breadcrumb.SetAccountBadgeIndexed(idx, label)
-	} else {
-		w.breadcrumb.SetAccountBadge(label, false)
+	idx := w.accountIndex(w.session.Scope().AccountID)
+	if idx > 0 && name != "" {
+		w.breadcrumb.SetAccountBadge(fmt.Sprintf("%d:%s", idx, name), false)
+	} else if name != "" {
+		w.breadcrumb.SetAccountBadge(name, false)
 	}
 }
 
@@ -639,6 +704,42 @@ func (w *Workspace) openAccountSwitcher() tea.Cmd {
 		entries[i] = chrome.AccountEntry{ID: a.ID, Name: a.Name}
 	}
 	return w.accountSwitcher.Focus(entries)
+}
+
+func (w *Workspace) toggleSidebar() tea.Cmd {
+	if w.showSidebar && w.sidebarView != nil {
+		// Close sidebar
+		w.sidebarView.Update(BlurMsg{})
+		w.showSidebar = false
+		w.sidebarFocused = false
+		w.relayout()
+		return nil
+	}
+	// Open sidebar
+	w.showSidebar = true
+	w.sidebarFocused = false
+	scope := w.session.Scope()
+	w.sidebarView = w.viewFactory(w.sidebarTarget, w.session, scope)
+	w.relayout()
+	return tea.Batch(w.stampCmd(w.sidebarView.Init()), func() tea.Msg { return FocusMsg{} })
+}
+
+func (w *Workspace) switchSidebarFocus() {
+	if !w.sidebarActive() {
+		return
+	}
+	w.sidebarFocused = !w.sidebarFocused
+	if w.sidebarFocused {
+		if view := w.router.Current(); view != nil {
+			view.Update(BlurMsg{})
+		}
+		w.sidebarView.Update(FocusMsg{})
+	} else {
+		w.sidebarView.Update(BlurMsg{})
+		if view := w.router.Current(); view != nil {
+			view.Update(FocusMsg{})
+		}
+	}
 }
 
 func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {
@@ -756,6 +857,9 @@ func (w *Workspace) syncChrome() {
 	}
 }
 
+// sidebarMinWidth is the minimum terminal width for showing the sidebar.
+const sidebarMinWidth = 100
+
 func (w *Workspace) relayout() {
 	w.breadcrumb.SetWidth(w.width)
 	w.statusBar.SetWidth(w.width)
@@ -765,9 +869,21 @@ func (w *Workspace) relayout() {
 	w.accountSwitcher.SetSize(w.width, w.viewHeight())
 	w.quickJump.SetSize(w.width, w.viewHeight())
 
-	if view := w.router.Current(); view != nil {
+	if w.sidebarActive() {
+		sidebarW := int(float64(w.width) * w.sidebarRatio)
+		mainW := w.width - sidebarW - 1 // -1 for divider
+		w.sidebarView.SetSize(sidebarW, w.viewHeight())
+		if view := w.router.Current(); view != nil {
+			view.SetSize(mainW, w.viewHeight())
+		}
+	} else if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
 	}
+}
+
+// sidebarActive returns true when the sidebar should be rendered.
+func (w *Workspace) sidebarActive() bool {
+	return w.showSidebar && w.sidebarView != nil && w.width >= sidebarMinWidth
 }
 
 func (w *Workspace) viewHeight() int {
@@ -806,6 +922,18 @@ func (w *Workspace) View() string {
 		sections = append(sections, w.palette.View())
 	} else if w.showHelp {
 		sections = append(sections, w.help.View())
+	} else if w.sidebarActive() {
+		vDivider := lipgloss.NewStyle().
+			Foreground(theme.Border).
+			Height(w.viewHeight()).
+			Render(strings.Repeat("│\n", w.viewHeight()))
+		mainContent := ""
+		if view := w.router.Current(); view != nil {
+			mainContent = view.View()
+		}
+		sections = append(sections,
+			lipgloss.JoinHorizontal(lipgloss.Top,
+				w.sidebarView.View(), vDivider, mainContent))
 	} else if view := w.router.Current(); view != nil {
 		sections = append(sections, view.View())
 	}

@@ -13,6 +13,8 @@ type GlobalKeyMap struct {
 	Hey           key.Binding
 	MyStuff       key.Binding
 	Activity      key.Binding
+	Sidebar       key.Binding
+	SidebarFocus  key.Binding
 	Refresh       key.Binding
 	Open          key.Binding
 	Jump          key.Binding
@@ -56,6 +58,14 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 		Activity: key.NewBinding(
 			key.WithKeys("ctrl+t"),
 			key.WithHelp("ctrl+t", "activity"),
+		),
+		Sidebar: key.NewBinding(
+			key.WithKeys("ctrl+b"),
+			key.WithHelp("ctrl+b", "sidebar"),
+		),
+		SidebarFocus: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "switch panel"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
@@ -133,6 +143,6 @@ func (k GlobalKeyMap) FullHelp() [][]key.Binding {
 		{k.Back, k.Quit},
 		{k.Search, k.Palette},
 		{k.AccountSwitch, k.Hey, k.MyStuff, k.Activity},
-		{k.Help, k.Refresh, k.Open, k.Jump},
+		{k.Help, k.Refresh, k.Open, k.Jump, k.Sidebar},
 	}
 }
