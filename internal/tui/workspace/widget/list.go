@@ -19,7 +19,7 @@ type ListItem struct {
 	Title       string
 	Description string
 	Extra       string // right-aligned detail (count, date, etc.)
-		Boosts      int    // number of boosts (will render as [♥ N])
+	Boosts      int    // number of boosts (will render as [♥ N])
 	Marked      bool   // visual mark (star, check, etc.)
 	Header      bool   // section header (non-selectable, rendered differently)
 }

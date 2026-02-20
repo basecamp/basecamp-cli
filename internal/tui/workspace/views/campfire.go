@@ -97,9 +97,10 @@ type Campfire struct {
 	mode              campfireMode
 
 	// Data
-	lines   []workspace.CampfireLineInfo
-	pending []pendingLine
-	lastID  int64 // highest line ID seen, for detecting new lines
+	lines          []workspace.CampfireLineInfo
+	pending        []pendingLine
+	lastID         int64 // highest line ID seen, for detecting new lines
+	selectedLineID int64 // the line currently selected for boost/action
 
 	// Pagination
 	totalCount  int  // total lines available (from X-Total-Count)
@@ -181,7 +182,10 @@ func (v *Campfire) ShortHelp() []key.Binding {
 	bindings := make([]key.Binding, 0, 3+len(composerHelp))
 	bindings = append(bindings, v.keys.EnterInput, v.keys.ScrollMode)
 	bindings = append(bindings, composerHelp...)
-	bindings = append(bindings, key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")))
+	// Boost is only available in scroll mode, not input mode
+	if v.mode == campfireModeScroll {
+		bindings = append(bindings, key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")))
+	}
 	return bindings
 }
 
@@ -223,6 +227,10 @@ func (v *Campfire) Init() tea.Cmd {
 		v.totalCount = snap.Data.TotalCount
 		v.hasMore = v.totalCount > len(v.lines)
 		v.updateLastID()
+		// Default to most recent line for boost targeting
+		if len(v.lines) > 0 && v.selectedLineID == 0 {
+			v.selectedLineID = v.lines[len(v.lines)-1].ID
+		}
 		v.renderMessages()
 		v.loading = false
 	}
@@ -481,24 +489,19 @@ func (v *Campfire) maybeLoadMore() tea.Cmd {
 }
 
 func (v *Campfire) boostSelectedLine() tea.Cmd {
-	// Get the visible line at the current viewport position
-	// We need to find which line is currently visible/focused
-	// For now, boost the first visible line or the one at cursor position
-	// Actually, let's just boost the line at the current scroll position
 	if len(v.lines) == 0 {
 		return nil
 	}
-	// Get the line index from viewport YOffset
-	lineIdx := v.viewport.YOffset
-	if lineIdx >= len(v.lines) {
-		lineIdx = len(v.lines) - 1
+	// Use selectedLineID if set, otherwise default to the most recent line
+	targetID := v.selectedLineID
+	if targetID == 0 {
+		targetID = v.lines[len(v.lines)-1].ID
 	}
-	line := v.lines[lineIdx]
 	return func() tea.Msg {
 		return workspace.OpenBoostPickerMsg{
 			Target: workspace.BoostTarget{
 				ProjectID:   v.session.Scope().ProjectID,
-				RecordingID: line.ID,
+				RecordingID: targetID,
 				Title:       "Campfire line",
 			},
 		}

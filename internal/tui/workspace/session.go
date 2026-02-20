@@ -150,6 +150,13 @@ func NewTestSession() *Session {
 	}
 }
 
+// NewTestSessionWithRecents is like NewTestSession but includes a recents store.
+func NewTestSessionWithRecents(r *recents.Store) *Session {
+	s := NewTestSession()
+	s.recents = r
+	return s
+}
+
 // Shutdown cancels the session context and tears down all Hub realms.
 // Called on program exit.
 func (s *Session) Shutdown() {

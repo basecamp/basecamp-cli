@@ -448,6 +448,9 @@ func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 					DueOn:       t.DueOn,
 					Assignees:   names,
 					Position:    t.Position,
+					BoostEmbed: BoostEmbed{
+						BoostsSummary: BoostSummary{Count: t.BoostsCount},
+					},
 				})
 			}
 			return infos, nil
@@ -569,6 +572,9 @@ func mapCardInfo(c basecamp.Card) CardInfo {
 		StepsTotal:    len(c.Steps),
 		StepsDone:     stepsDone,
 		CommentsCount: c.CommentsCount,
+		BoostEmbed: BoostEmbed{
+			BoostsSummary: BoostSummary{Count: c.BoostsCount},
+		},
 	}
 }
 
@@ -599,6 +605,9 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 					Body:      line.Content,
 					Creator:   creator,
 					CreatedAt: line.CreatedAt.Format("3:04pm"),
+					BoostEmbed: BoostEmbed{
+						BoostsSummary: BoostSummary{Count: line.BoostsCount},
+					},
 				})
 			}
 			// API returns newest-first; reverse for chronological display
@@ -639,6 +648,9 @@ func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
 					Creator:   creator,
 					CreatedAt: m.CreatedAt.Format("Jan 2, 2006"),
 					Category:  category,
+					BoostEmbed: BoostEmbed{
+						BoostsSummary: BoostSummary{Count: m.BoostsCount},
+					},
 				})
 			}
 			return infos, nil

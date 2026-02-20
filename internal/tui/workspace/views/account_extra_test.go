@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
@@ -182,7 +183,8 @@ func TestHome_Bookmarks_PreserveDescription(t *testing.T) {
 // for RecordingType and recents.
 
 func TestSearch_OpenSelected_UsesMeta_NotPrefixedExtra(t *testing.T) {
-	session := workspace.NewTestSession()
+	store := recents.NewStore(t.TempDir())
+	session := workspace.NewTestSessionWithRecents(store)
 	styles := session.Styles()
 	list := widget.NewList(styles)
 	list.SetEmptyText("No results.")
@@ -232,4 +234,10 @@ func TestSearch_OpenSelected_UsesMeta_NotPrefixedExtra(t *testing.T) {
 		"AccountID must come from resultMeta")
 	assert.Equal(t, int64(42), nav.Scope.ProjectID,
 		"ProjectID must come from resultMeta")
+
+	// Verify recents entry uses raw type, not prefixed Extra
+	saved := store.Get(recents.TypeRecording, "", "")
+	assert.Len(t, saved, 1, "one recents entry should be saved")
+	assert.Equal(t, "Message", saved[0].Description,
+		"recents Description must be raw type from resultMeta, not prefixed Extra")
 }

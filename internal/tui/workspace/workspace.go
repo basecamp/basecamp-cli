@@ -1019,10 +1019,10 @@ func (w *Workspace) createBoost(target BoostTarget, emoji string) tea.Cmd {
 			return ErrorMsg{Err: err, Context: "creating boost"}
 		}
 		// Refetch boosts or timeline
-			return tea.Batch(
-				func() tea.Msg { return BoostCreatedMsg{Target: target, Emoji: emoji} },
-				func() tea.Msg { return StatusMsg{Text: "Boosted!"} },
-			)()
+		return tea.Batch(
+			func() tea.Msg { return BoostCreatedMsg{Target: target, Emoji: emoji} },
+			func() tea.Msg { return StatusMsg{Text: "Boosted!"} },
+		)()
 
 	}
 }
