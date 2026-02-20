@@ -252,6 +252,12 @@ func (v *Projects) handleProjectKey(msg tea.KeyMsg) tea.Cmd {
 
 // handleToolKey processes keys when the right (tool) panel is focused.
 func (v *Projects) handleToolKey(msg tea.KeyMsg) tea.Cmd {
+	// When filtering, let the tool list handle all keys (esc exits filter,
+	// typing narrows results, enter confirms). Don't intercept hotkeys.
+	if v.toolList.Filtering() {
+		return v.toolList.Update(msg)
+	}
+
 	dk := v.dockKeys
 	listKeys := workspace.DefaultListKeyMap()
 	globalKeys := workspace.DefaultGlobalKeyMap()
@@ -297,6 +303,7 @@ func (v *Projects) enterDock(itemID string) {
 func (v *Projects) leaveDock() {
 	v.focusRight = false
 	v.toolList.SetFocused(false)
+	v.toolList.StopFilter()
 	v.list.SetFocused(true)
 }
 
@@ -503,14 +510,21 @@ func (v *Projects) updateSelectedProject() {
 }
 
 // afterPoolUpdate handles right-panel state after a data refresh.
-// If focusRight and the selected project disappeared, fall back to left panel.
+// Rebinds selectedProject to the new slice so tool data stays current.
 func (v *Projects) afterPoolUpdate() {
 	if v.focusRight {
-		if v.selectedProject != nil && v.findProject(v.selectedProject.ID) == nil {
+		if v.selectedProject == nil {
+			return
+		}
+		fresh := v.findProject(v.selectedProject.ID)
+		if fresh == nil {
 			v.leaveDock()
 			v.selectedProject = nil
 			v.toolList.SetItems(nil)
+			return
 		}
+		v.selectedProject = fresh
+		v.syncToolList()
 		return
 	}
 	v.updateSelectedProject()
