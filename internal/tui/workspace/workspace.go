@@ -3,6 +3,7 @@ package workspace
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -539,6 +540,9 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 	w.syncAccountBadge(target)
 	w.syncChrome()
 
+	// Record navigation quality for observability.
+	// Forward navigations start at quality 0 (data not yet loaded).
+	w.recordNavigation(view.Title(), 0.0)
 
 	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("bcq - "+view.Title()))
 }
@@ -562,6 +566,8 @@ func (w *Workspace) goBack() tea.Cmd {
 	if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
 		view.Update(FocusMsg{})
+		// Back navigation returns to a view with cached data — quality 1.0.
+		w.recordNavigation(view.Title(), 1.0)
 		return chrome.SetTerminalTitle("bcq - " + view.Title())
 	}
 	return nil
@@ -586,6 +592,7 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 	if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
 		view.Update(FocusMsg{})
+		w.recordNavigation(view.Title(), 1.0)
 		return chrome.SetTerminalTitle("bcq - " + view.Title())
 	}
 	return nil
@@ -834,6 +841,18 @@ func (w *Workspace) replaceCurrentView(updated tea.Model) {
 		}
 		// Refresh key hints — view mode may have changed (e.g., cards move mode)
 		w.statusBar.SetKeyHints(v.ShortHelp())
+	}
+}
+
+// recordNavigation logs a navigation event for Apdex tracking.
+// quality: 1.0 = cached/fresh, 0.5 = stale, 0.0 = empty/loading.
+func (w *Workspace) recordNavigation(viewTitle string, quality float64) {
+	if hub := w.session.Hub(); hub != nil {
+		hub.Metrics().RecordNavigation(data.NavigationEvent{
+			Timestamp: time.Now(),
+			ViewTitle: viewTitle,
+			Quality:   quality,
+		})
 	}
 }
 
