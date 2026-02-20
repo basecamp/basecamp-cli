@@ -1,20 +1,17 @@
 package chrome
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
-
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
-// accountEntry holds a resolved account for display in the switcher.
-type accountEntry struct {
+// AccountEntry holds a resolved account for display in the switcher.
+type AccountEntry struct {
 	ID   string
 	Name string
 }
@@ -28,64 +25,39 @@ type AccountSwitchedMsg struct {
 // AccountSwitchCloseMsg is sent when the switcher is dismissed without selecting.
 type AccountSwitchCloseMsg struct{}
 
-// accountsLoadedMsg carries async-fetched accounts into the switcher.
-type accountsLoadedMsg struct {
-	accounts []accountEntry
-	err      error
-}
-
 // AccountSwitcher is an overlay that lists available Basecamp accounts
 // and lets the user pick one. Structurally similar to the command palette.
 type AccountSwitcher struct {
 	styles *tui.Styles
-	sdk    *basecamp.Client
 
-	accounts []accountEntry
+	accounts []AccountEntry
 	cursor   int
-	loading  bool
 	err      error
 
 	width, height int
 }
 
 // NewAccountSwitcher creates a new account switcher component.
-func NewAccountSwitcher(styles *tui.Styles, sdk *basecamp.Client) AccountSwitcher {
+func NewAccountSwitcher(styles *tui.Styles) AccountSwitcher {
 	return AccountSwitcher{
 		styles: styles,
-		sdk:    sdk,
 	}
 }
 
-// Focus activates the switcher and kicks off an async account fetch.
-func (a *AccountSwitcher) Focus() tea.Cmd {
+// Focus activates the switcher with pre-loaded account data.
+func (a *AccountSwitcher) Focus(accounts []AccountEntry) tea.Cmd {
 	a.cursor = 0
-	a.loading = true
 	a.err = nil
-	a.accounts = nil
-
-	sdk := a.sdk
-	return func() tea.Msg {
-		info, err := sdk.Authorization().GetInfo(context.Background(), nil)
-		if err != nil {
-			return accountsLoadedMsg{err: err}
-		}
-		var entries []accountEntry
-		for _, acct := range info.Accounts {
-			entries = append(entries, accountEntry{
-				ID:   fmt.Sprintf("%d", acct.ID),
-				Name: acct.Name,
-			})
-		}
-		if len(entries) > 1 {
-			entries = append([]accountEntry{{ID: "", Name: "All Accounts"}}, entries...)
-		}
-		return accountsLoadedMsg{accounts: entries}
+	if len(accounts) > 1 {
+		a.accounts = append([]AccountEntry{{ID: "", Name: "All Accounts"}}, accounts...)
+	} else {
+		a.accounts = accounts
 	}
+	return nil
 }
 
 // Blur deactivates the switcher.
 func (a *AccountSwitcher) Blur() {
-	a.loading = false
 	a.err = nil
 }
 
@@ -99,15 +71,6 @@ func (a *AccountSwitcher) SetSize(width, height int) {
 // Returns a tea.Cmd when the switcher produces an action or wants to close.
 func (a *AccountSwitcher) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case accountsLoadedMsg:
-		a.loading = false
-		if msg.err != nil {
-			a.err = msg.err
-			return nil
-		}
-		a.accounts = msg.accounts
-		a.cursor = 0
-		return nil
 	case tea.KeyMsg:
 		return a.handleKey(msg)
 	}
@@ -193,11 +156,7 @@ func (a AccountSwitcher) View() string {
 
 	var rows []string
 
-	if a.loading {
-		rows = append(rows, lipgloss.NewStyle().
-			Foreground(theme.Muted).
-			Render("Loading accounts..."))
-	} else if a.err != nil {
+	if a.err != nil {
 		rows = append(rows, lipgloss.NewStyle().
 			Foreground(theme.Error).
 			Render("Error: "+a.err.Error()))

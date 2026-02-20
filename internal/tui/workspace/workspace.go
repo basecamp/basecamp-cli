@@ -68,7 +68,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		toast:           chrome.NewToast(styles),
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
-		accountSwitcher: chrome.NewAccountSwitcher(styles, session.App().SDK),
+		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		quickJump:       chrome.NewQuickJump(styles),
 		viewFactory:     factory,
 	}
@@ -632,7 +632,13 @@ func (w *Workspace) openQuickJump() tea.Cmd {
 func (w *Workspace) openAccountSwitcher() tea.Cmd {
 	w.showAccountSwitcher = true
 	w.accountSwitcher.SetSize(w.width, w.viewHeight())
-	return w.accountSwitcher.Focus()
+
+	// Build entries from already-discovered accounts
+	entries := make([]chrome.AccountEntry, len(w.accountList))
+	for i, a := range w.accountList {
+		entries[i] = chrome.AccountEntry{ID: a.ID, Name: a.Name}
+	}
+	return w.accountSwitcher.Focus(entries)
 }
 
 func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {

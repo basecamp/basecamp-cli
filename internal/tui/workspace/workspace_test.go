@@ -69,7 +69,7 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 		toast:           chrome.NewToast(styles),
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
-		accountSwitcher: chrome.NewAccountSwitcher(styles, nil),
+		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		viewFactory:     factory,
 		width:           120,
 		height:          40,
@@ -435,7 +435,7 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		toast:           chrome.NewToast(styles),
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
-		accountSwitcher: chrome.NewAccountSwitcher(styles, nil),
+		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
