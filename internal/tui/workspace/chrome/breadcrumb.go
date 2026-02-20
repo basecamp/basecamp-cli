@@ -12,10 +12,11 @@ import (
 
 // Breadcrumb renders a navigable scope trail.
 type Breadcrumb struct {
-	styles  *tui.Styles
-	crumbs  []string
-	account string
-	width   int
+	styles       *tui.Styles
+	crumbs       []string
+	accountBadge string
+	badgeGlobal  bool
+	width        int
 }
 
 // NewBreadcrumb creates a new breadcrumb component.
@@ -25,9 +26,12 @@ func NewBreadcrumb(styles *tui.Styles) Breadcrumb {
 	}
 }
 
-// SetAccount sets the account name displayed before the breadcrumb trail.
-func (b *Breadcrumb) SetAccount(name string) {
-	b.account = name
+// SetAccountBadge sets the account badge displayed before the breadcrumb trail.
+// When global is true, the badge is rendered in a standout color to indicate
+// the view aggregates across all accounts.
+func (b *Breadcrumb) SetAccountBadge(label string, global bool) {
+	b.accountBadge = label
+	b.badgeGlobal = global
 }
 
 // SetCrumbs updates the breadcrumb trail.
@@ -61,10 +65,14 @@ func (b Breadcrumb) View() string {
 	var parts []string
 
 	// Account badge
-	if b.account != "" {
+	if b.accountBadge != "" {
+		color := theme.Muted
+		if b.badgeGlobal {
+			color = theme.Secondary
+		}
 		badge := lipgloss.NewStyle().
-			Foreground(theme.Muted).
-			Render("[" + b.account + "]")
+			Foreground(color).
+			Render("[" + b.accountBadge + "]")
 		parts = append(parts, badge)
 	}
 

@@ -143,6 +143,23 @@ func (a *AccountSwitcher) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	}
+
+	// Digit-key selection: 0 selects "All Accounts", 1-9 select accounts.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		r := msg.Runes[0]
+		if r >= '0' && r <= '9' {
+			idx := int(r - '0')
+			if idx < len(a.accounts) {
+				acct := a.accounts[idx]
+				return func() tea.Msg {
+					return AccountSwitchedMsg{
+						AccountID:   acct.ID,
+						AccountName: acct.Name,
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -201,14 +218,19 @@ func (a AccountSwitcher) View() string {
 		visible := a.accounts[start:end]
 		for vi, acct := range visible {
 			i := start + vi
+			// Number prefix: "0" for All Accounts, "1"-"9" for real accounts
+			numStr := fmt.Sprintf("%d", i)
+			numPrefix := lipgloss.NewStyle().Foreground(theme.Muted).Render(numStr + "  ")
+
 			name := lipgloss.NewStyle().Foreground(theme.Primary).Render(acct.Name)
-			line := name
+			line := numPrefix + name
 			if acct.ID != "" {
 				line += lipgloss.NewStyle().Foreground(theme.Muted).Render("  #" + acct.ID)
 			}
 
 			if i == a.cursor {
-				highlighted := lipgloss.NewStyle().Foreground(theme.Primary).Background(theme.Border).Render(acct.Name)
+				hlNum := lipgloss.NewStyle().Foreground(theme.Muted).Background(theme.Border).Render(numStr + "  ")
+				highlighted := hlNum + lipgloss.NewStyle().Foreground(theme.Primary).Background(theme.Border).Render(acct.Name)
 				if acct.ID != "" {
 					highlighted += lipgloss.NewStyle().Foreground(theme.Muted).Background(theme.Border).Render("  #" + acct.ID)
 				}
@@ -222,7 +244,7 @@ func (a AccountSwitcher) View() string {
 	}
 
 	// Footer hint
-	footer := lipgloss.NewStyle().Foreground(theme.Muted).Render("enter select  esc cancel")
+	footer := lipgloss.NewStyle().Foreground(theme.Muted).Render("0-9/enter select  esc cancel")
 
 	// Assemble
 	sections := make([]string, 0, 2+len(rows)+2)
