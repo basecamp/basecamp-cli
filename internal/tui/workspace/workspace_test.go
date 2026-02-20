@@ -806,3 +806,134 @@ func (v *dynamicHintView) Title() string                       { return v.title 
 func (v *dynamicHintView) ShortHelp() []key.Binding            { return v.hints }
 func (v *dynamicHintView) FullHelp() [][]key.Binding           { return [][]key.Binding{v.hints} }
 func (v *dynamicHintView) SetSize(int, int)                    {}
+
+// pushTestViewWithTarget pushes a named testView with a specific ViewTarget.
+func pushTestViewWithTarget(w *Workspace, title string, target ViewTarget) *testView {
+	v := &testView{title: title}
+	w.router.Push(v, w.session.Scope(), target)
+	w.syncChrome()
+	return v
+}
+
+// --- ViewTarget.IsGlobal tests ---
+
+func TestViewTarget_IsGlobal(t *testing.T) {
+	globals := []ViewTarget{ViewHome, ViewHey, ViewPulse, ViewAssignments,
+		ViewPings, ViewProjects, ViewSearch, ViewActivity}
+	for _, vt := range globals {
+		assert.True(t, vt.IsGlobal(), "ViewTarget %d should be global", vt)
+	}
+
+	scoped := []ViewTarget{ViewDock, ViewTodos, ViewCampfire, ViewCards,
+		ViewMessages, ViewMyStuff, ViewPeople, ViewDetail, ViewSchedule,
+		ViewDocsFiles, ViewCheckins, ViewForwards, ViewCompose}
+	for _, vt := range scoped {
+		assert.False(t, vt.IsGlobal(), "ViewTarget %d should not be global", vt)
+	}
+}
+
+// --- syncAccountBadge tests ---
+
+func TestWorkspace_SyncAccountBadge_SingleAccount(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session.SetScope(Scope{AccountID: "1", AccountName: "Acme Corp"})
+	w.accountList = []AccountInfo{{ID: "1", Name: "Acme Corp"}}
+
+	pushTestViewWithTarget(w, "Home", ViewHome)
+	w.syncAccountBadge(ViewHome)
+
+	assert.Equal(t, "Acme Corp", w.breadcrumb.AccountBadge())
+	assert.False(t, w.breadcrumb.BadgeGlobal())
+	assert.Equal(t, 0, w.breadcrumb.BadgeIndex())
+}
+
+func TestWorkspace_SyncAccountBadge_MultiGlobal(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session.SetScope(Scope{AccountID: "1", AccountName: "Acme Corp"})
+	w.accountList = []AccountInfo{
+		{ID: "1", Name: "Acme Corp"},
+		{ID: "2", Name: "Beta Inc"},
+	}
+
+	pushTestViewWithTarget(w, "Home", ViewHome)
+	w.syncAccountBadge(ViewHome)
+
+	assert.Equal(t, "✱ All Accounts", w.breadcrumb.AccountBadge())
+	assert.True(t, w.breadcrumb.BadgeGlobal())
+}
+
+func TestWorkspace_SyncAccountBadge_MultiScoped(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session.SetScope(Scope{AccountID: "1", AccountName: "Acme Corp"})
+	w.accountList = []AccountInfo{
+		{ID: "1", Name: "Acme Corp"},
+		{ID: "2", Name: "Beta Inc"},
+	}
+
+	pushTestViewWithTarget(w, "Todos", ViewTodos)
+	w.syncAccountBadge(ViewTodos)
+
+	assert.Equal(t, "Acme Corp", w.breadcrumb.AccountBadge())
+	assert.False(t, w.breadcrumb.BadgeGlobal())
+	assert.Equal(t, 1, w.breadcrumb.BadgeIndex(), "first account should be index 1")
+}
+
+func TestWorkspace_SyncAccountBadge_MultiScopedNoName(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session.SetScope(Scope{AccountID: "1"}) // no name yet
+	w.accountList = []AccountInfo{
+		{ID: "1", Name: "Acme Corp"},
+		{ID: "2", Name: "Beta Inc"},
+	}
+
+	pushTestViewWithTarget(w, "Todos", ViewTodos)
+	w.syncAccountBadge(ViewTodos)
+
+	// Should fall back to AccountID, not leave badge empty/stale
+	assert.Equal(t, "1", w.breadcrumb.AccountBadge())
+	assert.Equal(t, 1, w.breadcrumb.BadgeIndex())
+}
+
+func TestWorkspace_SyncAccountBadge_TransitionGlobalToScoped(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session.SetScope(Scope{AccountID: "1", AccountName: "Acme Corp"})
+	w.accountList = []AccountInfo{
+		{ID: "1", Name: "Acme Corp"},
+		{ID: "2", Name: "Beta Inc"},
+	}
+
+	// Start global
+	pushTestViewWithTarget(w, "Home", ViewHome)
+	w.syncAccountBadge(ViewHome)
+	assert.True(t, w.breadcrumb.BadgeGlobal())
+
+	// Navigate to scoped view
+	pushTestViewWithTarget(w, "Todos", ViewTodos)
+	w.syncAccountBadge(ViewTodos)
+	assert.False(t, w.breadcrumb.BadgeGlobal())
+	assert.Equal(t, 1, w.breadcrumb.BadgeIndex())
+	assert.Equal(t, "Acme Corp", w.breadcrumb.AccountBadge())
+}
+
+// --- ctrl+a hint tests ---
+
+func TestWorkspace_CtrlAHintMultiAccountOnly(t *testing.T) {
+	w, _ := testWorkspace()
+	w.relayout()
+	pushTestView(w, "Home")
+
+	// Single account: no ctrl+a hint
+	w.accountList = []AccountInfo{{ID: "1", Name: "Acme"}}
+	w.syncChrome()
+	view := w.statusBar.View()
+	assert.NotContains(t, view, "switch", "single-account should not show ctrl+a hint")
+
+	// Multiple accounts: ctrl+a hint visible
+	w.accountList = []AccountInfo{
+		{ID: "1", Name: "Acme"},
+		{ID: "2", Name: "Beta"},
+	}
+	w.syncChrome()
+	view = w.statusBar.View()
+	assert.Contains(t, view, "switch", "multi-account should show ctrl+a hint")
+}

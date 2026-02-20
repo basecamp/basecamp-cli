@@ -651,11 +651,17 @@ func (w *Workspace) syncAccountBadge(target ViewTarget) {
 		w.breadcrumb.SetAccountBadge("✱ All Accounts", true)
 		return
 	}
+	// Scoped view: show indexed badge. Fall back to AccountID when name
+	// hasn't resolved yet so the badge is never stale/empty.
+	label := name
+	if label == "" {
+		label = w.session.Scope().AccountID
+	}
 	idx := w.accountIndex(w.session.Scope().AccountID)
-	if idx > 0 && name != "" {
-		w.breadcrumb.SetAccountBadge(fmt.Sprintf("%d:%s", idx, name), false)
-	} else if name != "" {
-		w.breadcrumb.SetAccountBadge(name, false)
+	if idx > 0 {
+		w.breadcrumb.SetAccountBadgeIndexed(idx, label)
+	} else {
+		w.breadcrumb.SetAccountBadge(label, false)
 	}
 }
 
