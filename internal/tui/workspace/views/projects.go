@@ -17,9 +17,13 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
-// Projects is the dashboard view showing all projects with a dock preview.
+// Projects is the dashboard view showing all projects with an inline dock.
 // When multiple accounts are available, projects are grouped by account
 // with section headers.
+//
+// The view has two focus phases:
+//   - Left panel (default): navigate projects with j/k, Enter/l opens inline dock
+//   - Right panel (inline dock): navigate tools with j/k, Enter opens tool view
 type Projects struct {
 	session *workspace.Session
 	pool    *data.Pool[[]data.ProjectInfo]
@@ -29,6 +33,12 @@ type Projects struct {
 	split   *widget.SplitPane
 	spinner spinner.Model
 	loading bool
+
+	// Inline dock (right panel)
+	toolList        *widget.List
+	focusRight      bool
+	selectedProject *data.ProjectInfo
+	dockKeys        dockKeyMap
 
 	// Local rendering data read from pool on update
 	projects        []data.ProjectInfo
@@ -51,6 +61,10 @@ func NewProjects(session *workspace.Session) *Projects {
 	list.SetEmptyText("No projects found. Try 'bcq projects list' to verify access.")
 	list.SetFocused(true)
 
+	toolList := widget.NewList(styles)
+	toolList.SetEmptyText("No tools enabled")
+	toolList.SetFocused(false)
+
 	split := widget.NewSplitPane(styles, 0.35)
 
 	snap := pool.Get()
@@ -60,15 +74,18 @@ func NewProjects(session *workspace.Session) *Projects {
 		pool:            pool,
 		styles:          styles,
 		list:            list,
+		toolList:        toolList,
 		split:           split,
 		spinner:         s,
 		loading:         !snap.Usable(),
+		dockKeys:        defaultDockKeyMap(),
 		projectAccounts: make(map[string]string),
 	}
 
 	if snap.Usable() {
 		v.projects = snap.Data
 		v.syncProjectList()
+		v.updateSelectedProject()
 	}
 
 	return v
@@ -81,8 +98,18 @@ func (v *Projects) Title() string {
 
 // ShortHelp implements View.
 func (v *Projects) ShortHelp() []key.Binding {
-	if v.list.Filtering() {
+	if v.list.Filtering() || v.toolList.Filtering() {
 		return filterHints()
+	}
+	if v.focusRight {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+			v.dockKeys.Todos,
+			v.dockKeys.Campfire,
+			v.dockKeys.Messages,
+			v.dockKeys.Cards,
+		}
 	}
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
@@ -97,10 +124,25 @@ func (v *Projects) FullHelp() [][]key.Binding {
 }
 
 // StartFilter implements workspace.Filterable.
-func (v *Projects) StartFilter() { v.list.StartFilter() }
+func (v *Projects) StartFilter() {
+	if v.focusRight {
+		v.toolList.StartFilter()
+	} else {
+		v.list.StartFilter()
+	}
+}
 
 // InputActive implements workspace.InputCapturer.
-func (v *Projects) InputActive() bool { return v.list.Filtering() }
+func (v *Projects) InputActive() bool {
+	return v.list.Filtering() || v.toolList.Filtering()
+}
+
+// IsModal implements workspace.ModalActive.
+// When the right panel (inline dock) is focused, Esc returns to the project
+// list instead of triggering global back navigation.
+func (v *Projects) IsModal() bool {
+	return v.focusRight
+}
 
 // SetSize implements View.
 func (v *Projects) SetSize(w, h int) {
@@ -112,12 +154,14 @@ func (v *Projects) SetSize(w, h int) {
 
 // Init implements tea.Model.
 func (v *Projects) Init() tea.Cmd {
-	cmds := []tea.Cmd{v.spinner.Tick}
+	cmds := make([]tea.Cmd, 0, 2)
+	cmds = append(cmds, v.spinner.Tick)
 
 	snap := v.pool.Get()
 	if snap.Usable() {
 		v.projects = snap.Data
 		v.syncProjectList()
+		v.updateSelectedProject()
 		v.loading = false
 		if snap.Fresh() {
 			return tea.Batch(cmds...)
@@ -137,6 +181,7 @@ func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if snap.Usable() {
 				v.projects = snap.Data
 				v.syncProjectList()
+				v.afterPoolUpdate()
 				v.loading = false
 			}
 			if snap.State == data.StateError {
@@ -176,21 +221,83 @@ func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.loading {
 			return v, nil
 		}
-
-		keys := workspace.DefaultListKeyMap()
-		switch {
-		case key.Matches(msg, keys.Open):
-			if item := v.list.Selected(); item != nil {
-				return v, v.openProject(item.ID)
-			}
-		case msg.String() == "b":
-			return v, v.toggleBookmark()
-		default:
-			cmd := v.list.Update(msg)
-			return v, cmd
+		if v.focusRight {
+			return v, v.handleToolKey(msg)
 		}
+		return v, v.handleProjectKey(msg)
 	}
 	return v, nil
+}
+
+// handleProjectKey processes keys when the left (project) panel is focused.
+func (v *Projects) handleProjectKey(msg tea.KeyMsg) tea.Cmd {
+	keys := workspace.DefaultListKeyMap()
+	switch {
+	case key.Matches(msg, keys.Open), msg.String() == "l":
+		if item := v.list.Selected(); item != nil {
+			v.enterDock(item.ID)
+		}
+		return nil
+	case msg.String() == "b":
+		return v.toggleBookmark()
+	default:
+		prevIdx := v.list.SelectedIndex()
+		cmd := v.list.Update(msg)
+		if v.list.SelectedIndex() != prevIdx {
+			v.updateSelectedProject()
+		}
+		return cmd
+	}
+}
+
+// handleToolKey processes keys when the right (tool) panel is focused.
+func (v *Projects) handleToolKey(msg tea.KeyMsg) tea.Cmd {
+	dk := v.dockKeys
+	listKeys := workspace.DefaultListKeyMap()
+	globalKeys := workspace.DefaultGlobalKeyMap()
+
+	switch {
+	case key.Matches(msg, globalKeys.Back), msg.String() == "h":
+		v.leaveDock()
+		return nil
+	case key.Matches(msg, dk.Todos):
+		return v.navigateToTool("todoset", workspace.ViewTodos)
+	case key.Matches(msg, dk.Campfire):
+		return v.navigateToTool("chat", workspace.ViewCampfire)
+	case key.Matches(msg, dk.Messages):
+		return v.navigateToTool("message_board", workspace.ViewMessages)
+	case key.Matches(msg, dk.Cards):
+		return v.navigateToTool("kanban_board", workspace.ViewCards)
+	case key.Matches(msg, dk.Schedule):
+		return v.navigateToTool("schedule", workspace.ViewSchedule)
+	case key.Matches(msg, listKeys.Open):
+		return v.openTool()
+	default:
+		return v.toolList.Update(msg)
+	}
+}
+
+// enterDock shifts focus to the right panel (inline dock) for the given project.
+func (v *Projects) enterDock(itemID string) {
+	var projectID int64
+	fmt.Sscanf(itemID, "%d", &projectID)
+	project := v.findProject(projectID)
+	if project == nil {
+		return
+	}
+
+	v.selectedProject = project
+	v.focusRight = true
+	v.list.SetFocused(false)
+	v.toolList.SetFocused(true)
+	v.syncToolList()
+}
+
+// leaveDock returns focus to the left panel (project list).
+func (v *Projects) leaveDock() {
+	v.focusRight = false
+	v.toolList.SetFocused(false)
+	v.list.SetFocused(true)
 }
 
 // View implements tea.Model.
@@ -203,14 +310,91 @@ func (v *Projects) View() string {
 			Render(v.spinner.View() + " Loading projects...")
 	}
 
+	// Collapsed mode: show one panel at a time
+	if v.split.IsCollapsed() && v.focusRight {
+		w := v.width - 2 // padding
+		header := v.renderToolHeader(w)
+		headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
+		v.toolList.SetSize(w, v.height-headerLines)
+		return lipgloss.NewStyle().
+			Width(v.width).
+			Height(v.height).
+			Padding(0, 1).
+			Render(header + "\n\n" + v.toolList.View())
+	}
+
 	// Left panel: project list
 	left := v.list.View()
 
-	// Right panel: dock preview for selected project
-	right := v.renderDockPreview()
+	// Right panel: inline dock (tool list with project header)
+	right := v.renderRightPanel()
 
 	v.split.SetContent(left, right)
 	return v.split.View()
+}
+
+// renderRightPanel renders the tool list with a project header for the right pane.
+func (v *Projects) renderRightPanel() string {
+	if v.split.IsCollapsed() {
+		return ""
+	}
+
+	if v.selectedProject == nil {
+		return ""
+	}
+
+	w := v.split.RightWidth() - 2 // padding
+	header := v.renderToolHeader(w)
+	headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
+	v.toolList.SetSize(w, v.height-headerLines)
+
+	return lipgloss.NewStyle().Padding(0, 1).Render(
+		header + "\n\n" + v.toolList.View(),
+	)
+}
+
+// renderToolHeader renders the project name, account badge, and purpose above the tool list.
+func (v *Projects) renderToolHeader(w int) string {
+	if v.selectedProject == nil {
+		return ""
+	}
+
+	theme := v.styles.Theme()
+	var b strings.Builder
+
+	// Project name
+	b.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Primary).
+		Width(w).
+		Render(v.selectedProject.Name))
+
+	// Account badge (multi-account mode)
+	if v.isMultiAccount() && v.selectedProject.AccountName != "" {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(theme.Muted).
+			Render(v.selectedProject.AccountName))
+	}
+
+	// Purpose
+	if v.selectedProject.Purpose != "" {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(theme.Muted).
+			Width(w).
+			Render(v.selectedProject.Purpose))
+	}
+
+	return b.String()
+}
+
+func (v *Projects) isMultiAccount() bool {
+	accounts := make(map[string]struct{})
+	for _, p := range v.projects {
+		accounts[p.AccountID] = struct{}{}
+	}
+	return len(accounts) > 1
 }
 
 func (v *Projects) syncProjectList() {
@@ -303,86 +487,59 @@ func (v *Projects) findProject(projectID int64) *data.ProjectInfo {
 	return nil
 }
 
-func (v *Projects) renderDockPreview() string {
-	if v.split.IsCollapsed() {
-		return ""
-	}
-
+// updateSelectedProject syncs selectedProject and tool list to the current
+// project list cursor. Called when the cursor moves or data refreshes.
+func (v *Projects) updateSelectedProject() {
 	item := v.list.Selected()
 	if item == nil {
-		return ""
+		v.selectedProject = nil
+		v.toolList.SetItems(nil)
+		return
 	}
-
-	// Find the full project from local data
 	var projectID int64
 	fmt.Sscanf(item.ID, "%d", &projectID)
-	project := v.findProject(projectID)
-	if project == nil {
-		return ""
-	}
+	v.selectedProject = v.findProject(projectID)
+	v.syncToolList()
+}
 
-	theme := v.styles.Theme()
-	w := v.split.RightWidth() - 2 // padding
-
-	var b strings.Builder
-
-	// Project name
-	b.WriteString(lipgloss.NewStyle().
-		Bold(true).
-		Foreground(theme.Primary).
-		Width(w).
-		Render(project.Name))
-	b.WriteString("\n")
-
-	// Account badge (multi-account mode)
-	accounts := make(map[string]struct{})
-	for _, p := range v.projects {
-		accounts[p.AccountID] = struct{}{}
-	}
-	if len(accounts) > 1 {
-		if project.AccountName != "" {
-			b.WriteString(lipgloss.NewStyle().
-				Foreground(theme.Muted).
-				Render(project.AccountName))
-			b.WriteString("\n")
+// afterPoolUpdate handles right-panel state after a data refresh.
+// If focusRight and the selected project disappeared, fall back to left panel.
+func (v *Projects) afterPoolUpdate() {
+	if v.focusRight {
+		if v.selectedProject != nil && v.findProject(v.selectedProject.ID) == nil {
+			v.leaveDock()
+			v.selectedProject = nil
+			v.toolList.SetItems(nil)
 		}
+		return
+	}
+	v.updateSelectedProject()
+}
+
+// syncToolList populates the tool list from the selected project's dock.
+func (v *Projects) syncToolList() {
+	if v.selectedProject == nil {
+		v.toolList.SetItems(nil)
+		return
 	}
 
-	// Purpose
-	if project.Purpose != "" {
-		b.WriteString(lipgloss.NewStyle().
-			Foreground(theme.Muted).
-			Width(w).
-			Render(project.Purpose))
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-
-	// Dock tools
-	if len(project.Dock) > 0 {
-		for _, tool := range project.Dock {
-			if !tool.Enabled {
-				continue
-			}
-			name := dockToolDisplayName(tool.Name)
-			line := lipgloss.NewStyle().
-				Foreground(theme.Foreground).
-				Render("  " + name)
-			if tool.Title != "" && tool.Title != name {
-				line += lipgloss.NewStyle().
-					Foreground(theme.Muted).
-					Render(" - " + tool.Title)
-			}
-			b.WriteString(line + "\n")
+	var items []widget.ListItem
+	for _, tool := range v.selectedProject.Dock {
+		if !tool.Enabled {
+			continue
 		}
-	} else {
-		b.WriteString(lipgloss.NewStyle().
-			Foreground(theme.Muted).
-			Render("  No dock tools loaded"))
+		title := tool.Title
+		if title == "" {
+			title = dockToolDisplayName(tool.Name)
+		}
+		items = append(items, widget.ListItem{
+			ID:          fmt.Sprintf("%d", tool.ID),
+			Title:       title,
+			Description: dockToolDisplayName(tool.Name),
+			Extra:       toolHotkey(tool.Name),
+		})
 	}
-
-	return lipgloss.NewStyle().Padding(0, 1).Render(b.String())
+	v.toolList.SetItems(items)
 }
 
 func dockToolDisplayName(name string) string {
@@ -406,6 +563,118 @@ func dockToolDisplayName(name string) string {
 	default:
 		return strings.ReplaceAll(name, "_", " ")
 	}
+}
+
+// toolHotkey returns the single-key shortcut for a dock tool, or "".
+func toolHotkey(name string) string {
+	switch name {
+	case "todoset":
+		return "t"
+	case "chat":
+		return "c"
+	case "message_board":
+		return "m"
+	case "kanban_board":
+		return "k"
+	case "schedule":
+		return "s"
+	default:
+		return ""
+	}
+}
+
+// toolNameToView maps a dock tool API name to its ViewTarget.
+func toolNameToView(name string) (workspace.ViewTarget, bool) {
+	switch name {
+	case "todoset":
+		return workspace.ViewTodos, true
+	case "chat":
+		return workspace.ViewCampfire, true
+	case "message_board":
+		return workspace.ViewMessages, true
+	case "kanban_board":
+		return workspace.ViewCards, true
+	case "schedule":
+		return workspace.ViewSchedule, true
+	case "vault":
+		return workspace.ViewDocsFiles, true
+	case "questionnaire":
+		return workspace.ViewCheckins, true
+	case "inbox":
+		return workspace.ViewForwards, true
+	default:
+		return 0, false
+	}
+}
+
+// projectScope builds a navigation scope for the selected project.
+func (v *Projects) projectScope() workspace.Scope {
+	scope := v.session.Scope()
+	scope.ProjectID = v.selectedProject.ID
+	scope.ProjectName = v.selectedProject.Name
+	if acctID, ok := v.projectAccounts[fmt.Sprintf("%d", v.selectedProject.ID)]; ok && acctID != "" {
+		scope.AccountID = acctID
+		scope.AccountName = v.selectedProject.AccountName
+	}
+	return scope
+}
+
+// recordProjectVisit adds the selected project to recents.
+func (v *Projects) recordProjectVisit(scope workspace.Scope) {
+	if r := v.session.Recents(); r != nil {
+		r.Add(recents.Item{
+			ID:        fmt.Sprintf("%d", v.selectedProject.ID),
+			Title:     v.selectedProject.Name,
+			Type:      recents.TypeProject,
+			AccountID: scope.AccountID,
+		})
+	}
+}
+
+// openTool navigates directly to the tool selected in the tool list.
+func (v *Projects) openTool() tea.Cmd {
+	item := v.toolList.Selected()
+	if item == nil || v.selectedProject == nil {
+		return nil
+	}
+
+	var toolID int64
+	fmt.Sscanf(item.ID, "%d", &toolID)
+
+	for _, tool := range v.selectedProject.Dock {
+		if tool.ID == toolID {
+			target, ok := toolNameToView(tool.Name)
+			if !ok {
+				return workspace.SetStatus(dockToolDisplayName(tool.Name), false)
+			}
+			scope := v.projectScope()
+			scope.ToolType = tool.Name
+			scope.ToolID = tool.ID
+			v.recordProjectVisit(scope)
+			return workspace.Navigate(target, scope)
+		}
+	}
+	return nil
+}
+
+// navigateToTool jumps to a tool by name (used by dock hotkeys).
+func (v *Projects) navigateToTool(toolName string, target workspace.ViewTarget) tea.Cmd {
+	if v.selectedProject == nil {
+		return nil
+	}
+
+	for _, tool := range v.selectedProject.Dock {
+		if tool.Name == toolName && tool.Enabled {
+			scope := v.projectScope()
+			scope.ToolType = toolName
+			scope.ToolID = tool.ID
+			v.recordProjectVisit(scope)
+			return workspace.Navigate(target, scope)
+		}
+	}
+
+	return workspace.SetStatus(
+		fmt.Sprintf("No %s in this project", strings.ReplaceAll(toolName, "_", " ")), true)
 }
 
 func (v *Projects) toggleBookmark() tea.Cmd {
@@ -457,36 +726,4 @@ func (v *Projects) setBookmark(projectID int64, bookmarked bool) tea.Cmd {
 			Err:        err,
 		}
 	}
-}
-
-func (v *Projects) openProject(id string) tea.Cmd {
-	var projectID int64
-	fmt.Sscanf(id, "%d", &projectID)
-
-	project := v.findProject(projectID)
-	if project == nil {
-		return nil
-	}
-
-	scope := v.session.Scope()
-	scope.ProjectID = projectID
-	scope.ProjectName = project.Name
-
-	// In multi-account mode, set the correct account for this project
-	if acctID, ok := v.projectAccounts[id]; ok && acctID != "" {
-		scope.AccountID = acctID
-		scope.AccountName = project.AccountName
-	}
-
-	// Record in recents AFTER resolving the correct account
-	if r := v.session.Recents(); r != nil {
-		r.Add(recents.Item{
-			ID:        id,
-			Title:     project.Name,
-			Type:      recents.TypeProject,
-			AccountID: scope.AccountID,
-		})
-	}
-
-	return workspace.Navigate(workspace.ViewDock, scope)
 }

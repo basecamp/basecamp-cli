@@ -271,46 +271,6 @@ func (v *Dock) syncTools() {
 	v.list.SetItems(items)
 }
 
-func toolHotkey(name string) string {
-	switch name {
-	case "todoset":
-		return "t"
-	case "chat":
-		return "c"
-	case "message_board":
-		return "m"
-	case "kanban_board":
-		return "k"
-	case "schedule":
-		return "s"
-	default:
-		return ""
-	}
-}
-
-func toolNameToView(name string) (workspace.ViewTarget, bool) {
-	switch name {
-	case "todoset":
-		return workspace.ViewTodos, true
-	case "chat":
-		return workspace.ViewCampfire, true
-	case "message_board":
-		return workspace.ViewMessages, true
-	case "kanban_board":
-		return workspace.ViewCards, true
-	case "schedule":
-		return workspace.ViewSchedule, true
-	case "vault":
-		return workspace.ViewDocsFiles, true
-	case "questionnaire":
-		return workspace.ViewCheckins, true
-	case "inbox":
-		return workspace.ViewForwards, true
-	default:
-		return 0, false
-	}
-}
-
 func (v *Dock) navigateToTool(toolName string, target workspace.ViewTarget) tea.Cmd {
 	if v.projectInfo == nil {
 		return nil
