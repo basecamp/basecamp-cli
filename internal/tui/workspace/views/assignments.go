@@ -156,6 +156,7 @@ func (v *Assignments) View() string {
 func (v *Assignments) syncAssignments(assignments []workspace.AssignmentInfo) {
 	v.assignmentMeta = make(map[string]workspace.AssignmentInfo, len(assignments))
 	var items []widget.ListItem
+	accounts := sessionAccounts(v.session)
 	now := time.Now()
 	weekEnd := now.AddDate(0, 0, 7-int(now.Weekday()))
 
@@ -196,7 +197,7 @@ func (v *Assignments) syncAssignments(assignments []workspace.AssignmentInfo) {
 			if a.Project != "" {
 				desc += " > " + a.Project
 			}
-			extra := a.DueOn
+			extra := accountExtra(accounts, a.AccountID, a.DueOn)
 			items = append(items, widget.ListItem{
 				ID:          id,
 				Title:       a.Content,

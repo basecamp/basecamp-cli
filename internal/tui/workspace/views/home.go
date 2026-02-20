@@ -308,6 +308,7 @@ func (v *Home) syncRecents() {
 		recordings = recordings[:5]
 	}
 
+	accounts := sessionAccounts(v.session)
 	var items []widget.ListItem
 
 	for _, p := range projects {
@@ -316,7 +317,7 @@ func (v *Home) syncRecents() {
 			ID:          id,
 			Title:       p.Title,
 			Description: p.Description,
-			Extra:       "project",
+			Extra:       accountExtra(accounts, p.AccountID, "project"),
 		})
 
 		pid, _ := strconv.ParseInt(p.ID, 10, 64)
@@ -337,7 +338,7 @@ func (v *Home) syncRecents() {
 			ID:          id,
 			Title:       r.Title,
 			Description: desc,
-			Extra:       "recent",
+			Extra:       accountExtra(accounts, r.AccountID, "recent"),
 		})
 
 		rid, _ := strconv.ParseInt(r.ID, 10, 64)
@@ -365,6 +366,7 @@ func (v *Home) syncHeyEntries(entries []workspace.ActivityEntryInfo) {
 		entries = entries[:8]
 	}
 
+	accounts := sessionAccounts(v.session)
 	items := make([]widget.ListItem, 0, len(entries))
 	for _, e := range entries {
 		id := fmt.Sprintf("hey:%s:%d", e.AccountID, e.ID)
@@ -376,7 +378,7 @@ func (v *Home) syncHeyEntries(entries []workspace.ActivityEntryInfo) {
 			ID:          id,
 			Title:       e.Title,
 			Description: desc,
-			Extra:       e.Type,
+			Extra:       accountExtra(accounts, e.AccountID, e.Type),
 		})
 		v.itemMeta[id] = homeItemMeta{
 			accountID:   e.AccountID,
@@ -402,6 +404,7 @@ func (v *Home) syncAssignments(assignments []workspace.AssignmentInfo) {
 		active = active[:5]
 	}
 
+	accounts := sessionAccounts(v.session)
 	items := make([]widget.ListItem, 0, len(active))
 	for _, a := range active {
 		id := fmt.Sprintf("assign:%s:%d", a.AccountID, a.ID)
@@ -409,7 +412,7 @@ func (v *Home) syncAssignments(assignments []workspace.AssignmentInfo) {
 		if a.Project != "" {
 			desc += " > " + a.Project
 		}
-		extra := a.DueOn
+		extra := accountExtra(accounts, a.AccountID, a.DueOn)
 		items = append(items, widget.ListItem{
 			ID:          id,
 			Title:       a.Content,
@@ -430,6 +433,7 @@ func (v *Home) syncAssignments(assignments []workspace.AssignmentInfo) {
 
 // syncBookmarks filters projects to bookmarked ones and builds bookmarkItems.
 func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
+	accounts := sessionAccounts(v.session)
 	var items []widget.ListItem
 	for _, p := range projects {
 		if !p.Bookmarked {
@@ -447,6 +451,7 @@ func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
 			ID:          id,
 			Title:       p.Name,
 			Description: desc,
+			Extra:       accountExtra(accounts, p.AccountID, ""),
 			Marked:      true,
 		})
 		v.itemMeta[id] = homeItemMeta{

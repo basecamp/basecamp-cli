@@ -180,6 +180,7 @@ func (v *Activity) View() string {
 func (v *Activity) syncEntries(entries []workspace.TimelineEventInfo) {
 	v.entryMeta = make(map[string]workspace.TimelineEventInfo, len(entries))
 	items := make([]widget.ListItem, 0, len(entries)+4) // room for time headers
+	accounts := sessionAccounts(v.session)
 
 	// Group by time bucket
 	now := time.Now()
@@ -235,7 +236,7 @@ func (v *Activity) syncEntries(entries []workspace.TimelineEventInfo) {
 				ID:          id,
 				Title:       title,
 				Description: desc,
-				Extra:       extra,
+				Extra:       accountExtra(accounts, e.AccountID, extra),
 			})
 		}
 	}

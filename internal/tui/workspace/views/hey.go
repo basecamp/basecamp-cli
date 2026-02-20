@@ -181,6 +181,7 @@ func (v *Hey) View() string {
 func (v *Hey) syncEntries(entries []workspace.ActivityEntryInfo) {
 	v.entryMeta = make(map[string]workspace.ActivityEntryInfo, len(entries))
 	items := make([]widget.ListItem, 0, len(entries)+4) // room for time headers
+	accounts := sessionAccounts(v.session)
 
 	// Group by time bucket
 	now := time.Now()
@@ -218,7 +219,7 @@ func (v *Hey) syncEntries(entries []workspace.ActivityEntryInfo) {
 				ID:          id,
 				Title:       e.Title,
 				Description: desc,
-				Extra:       e.Type,
+				Extra:       accountExtra(accounts, e.AccountID, e.Type),
 			})
 		}
 	}

@@ -154,6 +154,7 @@ func (v *Pings) View() string {
 
 func (v *Pings) syncRooms(rooms []workspace.PingRoomInfo) {
 	v.roomMeta = make(map[string]workspace.PingRoomInfo, len(rooms))
+	accounts := sessionAccounts(v.session)
 	var items []widget.ListItem
 
 	// Group by account if multiple
@@ -181,7 +182,7 @@ func (v *Pings) syncRooms(rooms []workspace.PingRoomInfo) {
 				ID:          id,
 				Title:       r.PersonName,
 				Description: r.LastMessage,
-				Extra:       r.LastAt,
+				Extra:       accountExtra(accounts, r.AccountID, r.LastAt),
 			})
 		}
 	}

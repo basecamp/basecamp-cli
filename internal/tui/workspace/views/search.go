@@ -209,6 +209,7 @@ func (v *Search) handleResults(msg workspace.SearchResultsMsg) tea.Cmd {
 	}
 
 	v.resultMeta = make(map[string]workspace.SearchResultInfo, len(msg.Results))
+	accounts := sessionAccounts(v.session)
 	items := make([]widget.ListItem, 0, len(msg.Results))
 	for _, r := range msg.Results {
 		id := fmt.Sprintf("%d", r.ID)
@@ -222,7 +223,7 @@ func (v *Search) handleResults(msg workspace.SearchResultsMsg) tea.Cmd {
 			ID:          id,
 			Title:       r.Title,
 			Description: desc,
-			Extra:       r.Type,
+			Extra:       accountExtra(accounts, r.AccountID, r.Type),
 		})
 	}
 	v.list.SetItems(items)
@@ -295,28 +296,26 @@ func (v *Search) openSelected() tea.Cmd {
 		return nil
 	}
 
-	var recordingID int64
-	fmt.Sscanf(item.ID, "%d", &recordingID)
+	meta, ok := v.resultMeta[item.ID]
+	if !ok {
+		return nil
+	}
 
 	scope := v.session.Scope()
-	scope.RecordingID = recordingID
-	scope.RecordingType = item.Extra // Type from SearchResultInfo (e.g. "Todo", "Message")
-
-	// Use the result's project ID and account so detail fetches from the correct bucket
-	if meta, ok := v.resultMeta[item.ID]; ok {
-		if meta.ProjectID != 0 {
-			scope.ProjectID = meta.ProjectID
-		}
-		if meta.AccountID != "" {
-			scope.AccountID = meta.AccountID
-		}
+	scope.RecordingID = meta.ID
+	scope.RecordingType = meta.Type
+	if meta.ProjectID != 0 {
+		scope.ProjectID = meta.ProjectID
+	}
+	if meta.AccountID != "" {
+		scope.AccountID = meta.AccountID
 	}
 
 	if r := v.session.Recents(); r != nil {
 		r.Add(recents.Item{
 			ID:          item.ID,
 			Title:       item.Title,
-			Description: item.Extra, // recording type
+			Description: meta.Type,
 			Type:        recents.TypeRecording,
 			AccountID:   scope.AccountID,
 			ProjectID:   fmt.Sprintf("%d", scope.ProjectID),

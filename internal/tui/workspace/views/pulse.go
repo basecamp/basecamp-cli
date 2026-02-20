@@ -155,6 +155,7 @@ func (v *Pulse) View() string {
 func (v *Pulse) syncEntries(entries []workspace.ActivityEntryInfo) {
 	// Reuse the same time-bucket grouping as Hey
 	v.entryMeta = make(map[string]workspace.ActivityEntryInfo, len(entries))
+	accounts := sessionAccounts(v.session)
 	var items []widget.ListItem
 
 	// Group by account
@@ -187,7 +188,7 @@ func (v *Pulse) syncEntries(entries []workspace.ActivityEntryInfo) {
 				ID:          id,
 				Title:       e.Title,
 				Description: desc,
-				Extra:       e.UpdatedAt,
+				Extra:       accountExtra(accounts, e.AccountID, e.UpdatedAt),
 			})
 		}
 	}
