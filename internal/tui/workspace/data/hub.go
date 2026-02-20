@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
-// Hub is the central data coordinator. It replaces Store + MultiStore.Cache()
-// + ad-hoc view fetch functions with typed, realm-scoped pool access.
+// Hub is the central data coordinator providing typed, realm-scoped pool access.
 //
 // Hub manages three realm tiers:
 //   - Global: app lifetime (identity, account list)
@@ -154,6 +154,35 @@ func (h *Hub) Shutdown() {
 		h.accountID = ""
 	}
 	h.global.Teardown()
+}
+
+// -- Context helpers
+
+// ProjectContext returns the project realm's context, or the account/global
+// context as fallback. Views should pass this to pool Fetch calls for
+// project-scoped data so that LeaveProject cancels in-flight fetches.
+func (h *Hub) ProjectContext() context.Context {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.project != nil {
+		return h.project.Context()
+	}
+	if h.account != nil {
+		return h.account.Context()
+	}
+	return h.global.Context()
+}
+
+// AccountContext returns the account realm's context, or the global context
+// as fallback. Views should pass this to pool Fetch calls for account-scoped
+// data so that SwitchAccount cancels in-flight fetches.
+func (h *Hub) AccountContext() context.Context {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.account != nil {
+		return h.account.Context()
+	}
+	return h.global.Context()
 }
 
 // -- Typed pool accessors
@@ -324,8 +353,15 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 }
 
 // People returns an account-scoped pool of people in the current account.
+// Panics if no account realm is active — callers must EnsureAccount first.
 func (h *Hub) People() *Pool[[]PersonInfo] {
-	realm := h.Account()
+	h.mu.RLock()
+	realm := h.account
+	id := h.accountID
+	h.mu.RUnlock()
+	if realm == nil {
+		panic(fmt.Sprintf("Hub.People() called without active account realm (accountID=%q); call EnsureAccount first", id))
+	}
 	return RealmPool(realm, "people", func() *Pool[[]PersonInfo] {
 		return NewPool("people", PoolConfig{}, func(ctx context.Context) ([]PersonInfo, error) {
 			client := h.accountClient()
@@ -349,6 +385,254 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 					Client:     p.Client,
 					PersonType: p.PersonableType,
 					Company:    company,
+				})
+			}
+			return infos, nil
+		})
+	})
+}
+
+// Todolists returns a project-scoped pool of todolists.
+func (h *Hub) Todolists(projectID, todosetID int64) *Pool[[]TodolistInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("todolists:%d:%d", projectID, todosetID)
+	return RealmPool(realm, key, func() *Pool[[]TodolistInfo] {
+		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]TodolistInfo, error) {
+			client := h.accountClient()
+			result, err := client.Todolists().List(ctx, projectID, todosetID, &basecamp.TodolistListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]TodolistInfo, 0, len(result.Todolists))
+			for _, tl := range result.Todolists {
+				infos = append(infos, TodolistInfo{
+					ID:             tl.ID,
+					Title:          tl.Title,
+					CompletedRatio: tl.CompletedRatio,
+				})
+			}
+			return infos, nil
+		})
+	})
+}
+
+// Todos returns a project-scoped MutatingPool of todos for a specific todolist.
+// The MutatingPool supports optimistic todo completion via TodoCompleteMutation.
+func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("todos:%d:%d", projectID, todolistID)
+	return RealmPool(realm, key, func() *MutatingPool[[]TodoInfo] {
+		return NewMutatingPool(key, PoolConfig{}, func(ctx context.Context) ([]TodoInfo, error) {
+			client := h.accountClient()
+			result, err := client.Todos().List(ctx, projectID, todolistID, &basecamp.TodoListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]TodoInfo, 0, len(result.Todos))
+			for _, t := range result.Todos {
+				names := make([]string, 0, len(t.Assignees))
+				for _, a := range t.Assignees {
+					names = append(names, a.Name)
+				}
+				infos = append(infos, TodoInfo{
+					ID:          t.ID,
+					Content:     t.Content,
+					Description: t.Description,
+					Completed:   t.Completed,
+					DueOn:       t.DueOn,
+					Assignees:   names,
+					Position:    t.Position,
+				})
+			}
+			return infos, nil
+		})
+	})
+}
+
+// Cards returns a project-scoped MutatingPool of card columns with their cards.
+// The MutatingPool supports optimistic card moves via CardMoveMutation.
+// Done and Not Now columns are deferred: metadata only, no card fetching.
+func (h *Hub) Cards(projectID, tableID int64) *MutatingPool[[]CardColumnInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("cards:%d:%d", projectID, tableID)
+	return RealmPool(realm, key, func() *MutatingPool[[]CardColumnInfo] {
+		return NewMutatingPool(key, PoolConfig{}, func(ctx context.Context) ([]CardColumnInfo, error) {
+			client := h.accountClient()
+			cardTable, err := client.CardTables().Get(ctx, projectID, tableID)
+			if err != nil {
+				return nil, err
+			}
+
+			columns, jobs := buildCardColumns(cardTable.Lists)
+
+			// Fetch cards in parallel for non-deferred columns
+			type fetchResult struct {
+				idx   int
+				cards []CardInfo
+				err   error
+			}
+			results := make(chan fetchResult, len(jobs))
+			for _, job := range jobs {
+				go func(j cardFetchJob) {
+					listResult, err := client.Cards().List(ctx, projectID, j.colID, &basecamp.CardListOptions{})
+					if err != nil {
+						results <- fetchResult{idx: j.idx, err: fmt.Errorf("loading cards for %q: %w", j.title, err)}
+						return
+					}
+					cards := make([]CardInfo, 0, len(listResult.Cards))
+					for _, c := range listResult.Cards {
+						cards = append(cards, mapCardInfo(c))
+					}
+					results <- fetchResult{idx: j.idx, cards: cards}
+				}(job)
+			}
+			for range jobs {
+				r := <-results
+				if r.err != nil {
+					return nil, r.err
+				}
+				columns[r.idx].Cards = r.cards
+				columns[r.idx].CardsCount = len(r.cards)
+			}
+
+			return columns, nil
+		})
+	})
+}
+
+// cardFetchJob identifies a column whose cards need fetching.
+type cardFetchJob struct {
+	idx   int
+	colID int64
+	title string
+}
+
+// isColumnDeferred returns true for column types that should not have
+// their cards fetched (Done and Not Now columns, which can contain
+// hundreds of cards that are never displayed by default).
+func isColumnDeferred(colType string) bool {
+	return colType == "Kanban::DoneColumn" || colType == "Kanban::NotNowColumn"
+}
+
+// buildCardColumns classifies SDK columns into CardColumnInfo entries and
+// returns fetch jobs for non-deferred columns. Pure function, no I/O.
+func buildCardColumns(lists []basecamp.CardColumn) ([]CardColumnInfo, []cardFetchJob) {
+	columns := make([]CardColumnInfo, len(lists))
+	var jobs []cardFetchJob
+	for i, col := range lists {
+		columns[i] = CardColumnInfo{
+			ID:         col.ID,
+			Title:      col.Title,
+			Color:      col.Color,
+			Type:       col.Type,
+			CardsCount: col.CardsCount,
+		}
+		if isColumnDeferred(col.Type) {
+			columns[i].Deferred = true
+		} else {
+			jobs = append(jobs, cardFetchJob{idx: i, colID: col.ID, title: col.Title})
+		}
+	}
+	return columns, jobs
+}
+
+// mapCardInfo converts an SDK Card to a CardInfo, enriching with step
+// progress, completion status, and comment counts.
+func mapCardInfo(c basecamp.Card) CardInfo {
+	names := make([]string, 0, len(c.Assignees))
+	for _, a := range c.Assignees {
+		names = append(names, a.Name)
+	}
+	stepsDone := 0
+	for _, s := range c.Steps {
+		if s.Completed {
+			stepsDone++
+		}
+	}
+	return CardInfo{
+		ID:            c.ID,
+		Title:         c.Title,
+		Assignees:     names,
+		DueOn:         c.DueOn,
+		Position:      c.Position,
+		Completed:     c.Completed,
+		StepsTotal:    len(c.Steps),
+		StepsDone:     stepsDone,
+		CommentsCount: c.CommentsCount,
+	}
+}
+
+// CampfireLines returns a project-scoped pool of campfire lines with polling config.
+// The pool stores CampfireLinesResult (lines + TotalCount) for pagination support.
+// Pagination (fetchOlderLines) and writes (sendLine) remain view-owned.
+func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResult] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("campfire-lines:%d:%d", projectID, campfireID)
+	return RealmPool(realm, key, func() *Pool[CampfireLinesResult] {
+		return NewPool(key, PoolConfig{
+			FreshTTL: 4 * time.Second, // expire before PollBase fires
+			StaleTTL: 5 * time.Minute, // serve stale during re-fetch
+			PollBase: 5 * time.Second,
+			PollBg:   30 * time.Second,
+			PollMax:  2 * time.Minute,
+		}, func(ctx context.Context) (CampfireLinesResult, error) {
+			client := h.accountClient()
+			result, err := client.Campfires().ListLines(ctx, projectID, campfireID)
+			if err != nil {
+				return CampfireLinesResult{}, err
+			}
+			infos := make([]CampfireLineInfo, 0, len(result.Lines))
+			for _, line := range result.Lines {
+				creator := ""
+				if line.Creator != nil {
+					creator = line.Creator.Name
+				}
+				infos = append(infos, CampfireLineInfo{
+					ID:        line.ID,
+					Body:      line.Content,
+					Creator:   creator,
+					CreatedAt: line.CreatedAt.Format("3:04pm"),
+				})
+			}
+			// API returns newest-first; reverse for chronological display
+			for i, j := 0, len(infos)-1; i < j; i, j = i+1, j-1 {
+				infos[i], infos[j] = infos[j], infos[i]
+			}
+			return CampfireLinesResult{
+				Lines:      infos,
+				TotalCount: result.Meta.TotalCount,
+			}, nil
+		})
+	})
+}
+
+// Messages returns a project-scoped pool of message board posts.
+func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("messages:%d:%d", projectID, boardID)
+	return RealmPool(realm, key, func() *Pool[[]MessageInfo] {
+		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]MessageInfo, error) {
+			client := h.accountClient()
+			result, err := client.Messages().List(ctx, projectID, boardID, &basecamp.MessageListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]MessageInfo, 0, len(result.Messages))
+			for _, m := range result.Messages {
+				creator := ""
+				if m.Creator != nil {
+					creator = m.Creator.Name
+				}
+				category := ""
+				if m.Category != nil {
+					category = m.Category.Name
+				}
+				infos = append(infos, MessageInfo{
+					ID:        m.ID,
+					Subject:   m.Subject,
+					Creator:   creator,
+					CreatedAt: m.CreatedAt.Format("Jan 2, 2006"),
+					Category:  category,
 				})
 			}
 			return infos, nil

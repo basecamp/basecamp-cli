@@ -133,6 +133,40 @@ func TestPoolFetchIfStaleNoTTL(t *testing.T) {
 	assert.Nil(t, p.FetchIfStale(context.Background()))
 }
 
+// Regression: proves that poll-driven FetchIfStale actually triggers a second
+// fetch after TTL expiry — caught the campfire "forever fresh" bug where
+// FreshTTL was 0 but the view polled with FetchIfStale.
+func TestPoolPollTriggersRefetchAfterTTL(t *testing.T) {
+	var fetchCount atomic.Int32
+	p := NewPool("poll-ttl", PoolConfig{
+		FreshTTL: 20 * time.Millisecond,
+		PollBase: 30 * time.Millisecond,
+	}, func(ctx context.Context) (int, error) {
+		fetchCount.Add(1)
+		return int(fetchCount.Load()), nil
+	})
+
+	// Initial fetch.
+	cmd := p.Fetch(context.Background())
+	require.NotNil(t, cmd)
+	cmd()
+	assert.Equal(t, int32(1), fetchCount.Load())
+	assert.Equal(t, 1, p.Get().Data)
+
+	// Immediately after: FetchIfStale returns nil (data is fresh).
+	assert.Nil(t, p.FetchIfStale(context.Background()))
+
+	// Wait for FreshTTL to expire, simulating a poll tick.
+	time.Sleep(25 * time.Millisecond)
+
+	// Now FetchIfStale should trigger a real fetch.
+	cmd = p.FetchIfStale(context.Background())
+	require.NotNil(t, cmd, "FetchIfStale must trigger after FreshTTL expiry")
+	cmd()
+	assert.Equal(t, int32(2), fetchCount.Load())
+	assert.Equal(t, 2, p.Get().Data)
+}
+
 func TestPoolInvalidate(t *testing.T) {
 	p := NewPool("inv", PoolConfig{}, func(ctx context.Context) (int, error) {
 		return 1, nil
