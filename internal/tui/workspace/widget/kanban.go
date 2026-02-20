@@ -18,6 +18,7 @@ type KanbanCard struct {
 	StepsProgress string // e.g. "3/5"
 	CommentsCount int
 	Completed     bool
+	Boosts        int // number of boosts (will render as [♥ N])
 }
 
 // KanbanColumn represents a column in the kanban board.
@@ -438,12 +439,17 @@ func (k *Kanban) renderFocusedCard(card KanbanCard, width int, theme tui.Theme) 
 }
 
 func (k *Kanban) renderUnfocusedCard(card KanbanCard, width int, theme tui.Theme) string {
-	title := truncate(card.Title, width-2) // 2 for "  " prefix
+	boostStr := ""
+	if card.Boosts > 0 {
+		boostStr = fmt.Sprintf(" [♥ %d]", card.Boosts)
+	}
+	availWidth := width - 2 - len(boostStr) // 2 for "  " prefix
+	title := truncate(card.Title, availWidth)
 	style := lipgloss.NewStyle().Width(width)
 	if card.Completed {
 		style = style.Foreground(theme.Muted).Strikethrough(true)
 	}
-	return style.Render("  " + title)
+	return style.Render("  " + title + boostStr)
 }
 
 // focusedCardHeight returns the number of lines a focused card occupies.
@@ -482,6 +488,9 @@ func buildDetailLine(card KanbanCard) string {
 	}
 	if card.CommentsCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d comments", card.CommentsCount))
+	}
+	if card.Boosts > 0 {
+		parts = append(parts, fmt.Sprintf("♥ %d", card.Boosts))
 	}
 	return strings.Join(parts, " \u00b7 ") // middle dot separator
 }

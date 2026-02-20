@@ -291,3 +291,23 @@ func SetStatus(text string, isError bool) tea.Cmd {
 		return StatusMsg{Text: text, IsError: isError}
 	}
 }
+
+// BoostTarget defines the context needed to apply a boost.
+type BoostTarget struct {
+	ProjectID   int64
+	RecordingID int64
+	Title       string // brief context for the picker UI
+}
+
+// OpenBoostPickerMsg signals the workspace to open the boost emoji picker
+// for the given target.
+type OpenBoostPickerMsg struct {
+	Target BoostTarget
+}
+
+// BoostCreatedMsg is sent when a boost has been successfully created.
+// Views can use this to optimistically update their local item counts.
+type BoostCreatedMsg struct {
+	Target BoostTarget
+	Emoji  string
+}

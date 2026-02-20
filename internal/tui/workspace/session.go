@@ -156,5 +156,7 @@ func (s *Session) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cancel()
-	s.hub.Shutdown()
+	if s.hub != nil {
+		s.hub.Shutdown()
+	}
 }

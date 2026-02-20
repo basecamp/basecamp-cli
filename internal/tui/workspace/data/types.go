@@ -58,6 +58,7 @@ type CampfireLineInfo struct {
 	Body      string // HTML content
 	Creator   string
 	CreatedAt string // formatted time
+	BoostEmbed
 }
 
 // CampfireLinesResult holds the lines plus pagination metadata from a

@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -83,6 +84,7 @@ func (v *Messages) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new message")),
+		key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 	}
 }
 
@@ -175,6 +177,23 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.cachedDetail = make(map[int64]*workspace.MessageDetailLoadedMsg)
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
+	case workspace.BoostCreatedMsg:
+		// Optimistically update the boost count in the message list
+		if msg.Target.RecordingID != 0 {
+			items := v.list.Items()
+			for i, item := range items {
+				var itemID int64
+				fmt.Sscanf(item.ID, "%d", &itemID)
+				if itemID == msg.Target.RecordingID {
+					item.Boosts++
+					items[i] = item
+					break
+				}
+			}
+			v.list.SetItems(items)
+		}
+		return v, nil
+
 	case spinner.TickMsg:
 		if v.loading || v.fetching != 0 {
 			var cmd tea.Cmd
@@ -195,6 +214,9 @@ func (v *Messages) handleKey(msg tea.KeyMsg) tea.Cmd {
 	keys := workspace.DefaultListKeyMap()
 
 	switch {
+	case msg.String() == "b" || msg.String() == "B":
+		return v.boostSelectedMessage()
+
 	case msg.String() == "n":
 		return v.composeNewMessage()
 	case key.Matches(msg, keys.Open):
@@ -328,6 +350,7 @@ func (v *Messages) syncList() {
 			ID:          fmt.Sprintf("%d", m.ID),
 			Title:       m.Subject,
 			Description: desc,
+			Boosts:      m.GetBoosts().Count,
 		})
 	}
 	v.list.SetItems(items)
@@ -361,6 +384,26 @@ func (v *Messages) fetchMessageDetail(messageID int64) tea.Cmd {
 			CreatedAt: msg.CreatedAt.Format("Jan 2, 2006"),
 			Category:  category,
 			Content:   msg.Content,
+		}
+	}
+}
+
+func (v *Messages) boostSelectedMessage() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	id, err := strconv.ParseInt(item.ID, 10, 64)
+	if err != nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return workspace.OpenBoostPickerMsg{
+			Target: workspace.BoostTarget{
+				ProjectID:   v.session.Scope().ProjectID,
+				RecordingID: id,
+				Title:       item.Title,
+			},
 		}
 	}
 }

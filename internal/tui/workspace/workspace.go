@@ -33,6 +33,9 @@ type Workspace struct {
 	help            chrome.Help
 	palette         chrome.Palette
 	accountSwitcher chrome.AccountSwitcher
+	boostPicker     *BoostPicker
+	pickingBoost    bool
+	boostTarget     BoostTarget
 	quickJump       chrome.QuickJump
 
 	// Multi-account
@@ -79,6 +82,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		quickJump:       chrome.NewQuickJump(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTarget:   ViewActivity,
 		sidebarRatio:    0.30,
@@ -211,6 +215,17 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return w, nil
 
+	case BoostSelectedMsg:
+		w.pickingBoost = false
+		w.boostPicker.Blur()
+		return w, w.createBoost(w.boostTarget, msg.Emoji)
+
+	case OpenBoostPickerMsg:
+		w.pickingBoost = true
+		w.boostTarget = msg.Target
+		w.boostPicker.Focus()
+		return w, nil
+
 	case NavigateMsg:
 		return w, w.navigate(msg.Target, msg.Scope)
 
@@ -338,6 +353,18 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Help overlay consumes all keys when active
+	if w.pickingBoost {
+		switch msg.Type {
+		case tea.KeyEsc:
+			w.pickingBoost = false
+			w.boostPicker.Blur()
+			return nil
+		}
+		var cmd tea.Cmd
+		w.boostPicker, cmd = w.boostPicker.Update(msg)
+		return cmd
+	}
+
 	if w.showHelp {
 		w.showHelp = false
 		return nil
@@ -974,5 +1001,28 @@ func (w *Workspace) View() string {
 	// Status bar
 	sections = append(sections, w.statusBar.View())
 
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	ui := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	if w.pickingBoost {
+		pickerView := w.boostPicker.View()
+		ui = lipgloss.Place(w.width, w.height, lipgloss.Center, lipgloss.Center, pickerView)
+	}
+
+	return ui
+}
+
+func (w *Workspace) createBoost(target BoostTarget, emoji string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := w.session.Hub().ProjectContext()
+		_, err := w.session.Hub().CreateBoost(ctx, target.ProjectID, target.RecordingID, emoji)
+		if err != nil {
+			return ErrorMsg{Err: err, Context: "creating boost"}
+		}
+		// Refetch boosts or timeline
+			return tea.Batch(
+				func() tea.Msg { return BoostCreatedMsg{Target: target, Emoji: emoji} },
+				func() tea.Msg { return StatusMsg{Text: "Boosted!"} },
+			)()
+
+	}
 }

@@ -39,6 +39,7 @@ type detailData struct {
 	completed  bool
 	dueOn      string
 	comments   []detailComment
+	boosts     int
 }
 
 // detailLoadedMsg is sent when the recording detail is fetched.
@@ -131,6 +132,7 @@ func (v *Detail) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "scroll")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
+		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
 	}
 	if v.composing {
 		bindings = append(bindings,
@@ -218,6 +220,17 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
+	case workspace.BoostCreatedMsg:
+		// Refresh to get the updated boost count
+		if msg.Target.RecordingID == v.recordingID {
+			v.loading = true
+			return v, tea.Batch(
+				v.spinner.Tick,
+				v.fetchDetail(),
+			)
+		}
+		return v, nil
+
 	case tea.KeyMsg:
 		if v.loading {
 			return v, nil
@@ -241,6 +254,20 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
+	case "b", "B":
+		if v.data == nil {
+			return nil
+		}
+		return func() tea.Msg {
+			return workspace.OpenBoostPickerMsg{
+				Target: workspace.BoostTarget{
+					ProjectID:   v.session.Scope().ProjectID,
+					RecordingID: v.session.Scope().RecordingID,
+					Title:       v.data.title,
+				},
+			}
+		}
+
 	case "c":
 		v.composing = true
 		v.relayout()
@@ -369,6 +396,12 @@ func (v *Detail) syncPreview() {
 			Value: fmt.Sprintf("%d", len(v.data.comments)),
 		})
 	}
+	if v.data.boosts > 0 {
+		fields = append(fields, widget.PreviewField{
+			Key:   "Boosts",
+			Value: fmt.Sprintf("♥ %d", v.data.boosts),
+		})
+	}
 	v.preview.SetFields(fields)
 
 	body := v.data.content
@@ -431,6 +464,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				assignees:  assignees,
 				completed:  todo.Completed,
 				dueOn:      todo.DueOn,
+				boosts:     todo.BoostsCount,
 			}
 
 		case "message", "Message":
@@ -453,6 +487,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				creator:    creator,
 				createdAt:  msg.CreatedAt,
 				dueOn:      category, // reuse field for category display
+				boosts:     msg.BoostsCount,
 			}
 
 		case "card", "Card":
@@ -477,6 +512,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				assignees:  assignees,
 				completed:  card.Completed,
 				dueOn:      card.DueOn,
+				boosts:     card.BoostsCount,
 			}
 
 		default:

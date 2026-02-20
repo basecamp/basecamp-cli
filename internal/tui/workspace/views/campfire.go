@@ -178,9 +178,10 @@ func (v *Campfire) InputActive() bool {
 // ShortHelp implements View.
 func (v *Campfire) ShortHelp() []key.Binding {
 	composerHelp := v.composer.ShortHelp()
-	bindings := make([]key.Binding, 0, 2+len(composerHelp))
+	bindings := make([]key.Binding, 0, 3+len(composerHelp))
 	bindings = append(bindings, v.keys.EnterInput, v.keys.ScrollMode)
 	bindings = append(bindings, composerHelp...)
+	bindings = append(bindings, key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")))
 	return bindings
 }
 
@@ -298,6 +299,19 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.pool.Invalidate()
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
+
+	case workspace.BoostCreatedMsg:
+		// Optimistically update the boost count in the lines
+		if msg.Target.RecordingID != 0 {
+			for i, line := range v.lines {
+				if line.ID == msg.Target.RecordingID {
+					v.lines[i].BoostsSummary.Count++
+					break
+				}
+			}
+			v.renderMessages()
+		}
+		return v, nil
 
 	case data.PollMsg:
 		if msg.Tag == v.pool.Key() {
@@ -449,6 +463,9 @@ func (v *Campfire) handleScrollKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, v.keys.ScrollBottom):
 		v.viewport.GotoBottom()
+
+	case msg.String() == "b" || msg.String() == "B":
+		return v.boostSelectedLine()
 	}
 	return nil
 }
@@ -461,6 +478,31 @@ func (v *Campfire) maybeLoadMore() tea.Cmd {
 		return tea.Batch(v.spinner.Tick, v.fetchOlderLines())
 	}
 	return nil
+}
+
+func (v *Campfire) boostSelectedLine() tea.Cmd {
+	// Get the visible line at the current viewport position
+	// We need to find which line is currently visible/focused
+	// For now, boost the first visible line or the one at cursor position
+	// Actually, let's just boost the line at the current scroll position
+	if len(v.lines) == 0 {
+		return nil
+	}
+	// Get the line index from viewport YOffset
+	lineIdx := v.viewport.YOffset
+	if lineIdx >= len(v.lines) {
+		lineIdx = len(v.lines) - 1
+	}
+	line := v.lines[lineIdx]
+	return func() tea.Msg {
+		return workspace.OpenBoostPickerMsg{
+			Target: workspace.BoostTarget{
+				ProjectID:   v.session.Scope().ProjectID,
+				RecordingID: line.ID,
+				Title:       "Campfire line",
+			},
+		}
+	}
 }
 
 func (v *Campfire) sendLine(content string, isHTML bool) tea.Cmd {
@@ -548,6 +590,9 @@ func (v *Campfire) renderMessages() {
 		b.WriteString(nameStyle.Render(line.Creator))
 		b.WriteString("  ")
 		b.WriteString(timeStyle.Render(line.CreatedAt))
+		if line.GetBoosts().Count > 0 {
+			b.WriteString(lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf("  [♥ %d]", line.GetBoosts().Count)))
+		}
 		b.WriteString("\n")
 
 		body := richtext.HTMLToMarkdown(line.Body)

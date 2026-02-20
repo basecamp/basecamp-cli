@@ -122,6 +122,7 @@ func (v *Cards) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "cards")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		v.keys.Move,
+		key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 	}
 }
 
@@ -189,6 +190,22 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
+	case workspace.BoostCreatedMsg:
+		// Optimistically update the boost count in the card
+		if msg.Target.RecordingID != 0 {
+			for colIdx, col := range v.columns {
+				for cardIdx, card := range col.Cards {
+					if card.ID == msg.Target.RecordingID {
+						// Update the local data
+						v.columns[colIdx].Cards[cardIdx].BoostsSummary.Count++
+						v.syncKanban()
+						break
+					}
+				}
+			}
+		}
+		return v, nil
+
 	case spinner.TickMsg:
 		if v.loading {
 			var cmd tea.Cmd
@@ -212,6 +229,9 @@ func (v *Cards) handleKey(msg tea.KeyMsg) tea.Cmd {
 	listKeys := workspace.DefaultListKeyMap()
 
 	switch {
+	case msg.String() == "b" || msg.String() == "B":
+		return v.boostFocusedCard()
+
 	case key.Matches(msg, listKeys.Open):
 		return v.openFocusedCard()
 	case key.Matches(msg, v.keys.Left):
@@ -401,6 +421,7 @@ func (v *Cards) syncKanban() {
 				StepsProgress: stepsProgress,
 				CommentsCount: card.CommentsCount,
 				Completed:     card.Completed,
+				Boosts:        card.GetBoosts().Count,
 			})
 		}
 		cols = append(cols, widget.KanbanColumn{
@@ -413,4 +434,22 @@ func (v *Cards) syncKanban() {
 		})
 	}
 	v.kanban.SetColumns(cols)
+}
+
+func (v *Cards) boostFocusedCard() tea.Cmd {
+	card := v.kanban.FocusedCard()
+	if card == nil {
+		return nil
+	}
+	var cardID int64
+	fmt.Sscanf(card.ID, "%d", &cardID)
+	return func() tea.Msg {
+		return workspace.OpenBoostPickerMsg{
+			Target: workspace.BoostTarget{
+				ProjectID:   v.session.Scope().ProjectID,
+				RecordingID: cardID,
+				Title:       card.Title,
+			},
+		}
+	}
 }

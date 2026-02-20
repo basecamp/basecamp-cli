@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -29,6 +30,7 @@ type todosKeyMap struct {
 	New       key.Binding
 	SwitchTab key.Binding
 	EditDesc  key.Binding
+	Boost     key.Binding
 }
 
 func defaultTodosKeyMap() todosKeyMap {
@@ -45,6 +47,7 @@ func defaultTodosKeyMap() todosKeyMap {
 			key.WithKeys("tab", "shift+tab"),
 			key.WithHelp("tab", "switch pane"),
 		),
+		Boost: key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 		EditDesc: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "edit description"),
@@ -202,6 +205,7 @@ func (v *Todos) ShortHelp() []key.Binding {
 		v.keys.Toggle,
 		v.keys.New,
 		v.keys.EditDesc,
+		v.keys.Boost,
 	}
 }
 
@@ -324,6 +328,23 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, v.descComposer.HandleEditorReturn(msg)
 		}
 
+	case workspace.BoostCreatedMsg:
+		// Optimistically update the boost count in the todo list
+		if msg.Target.RecordingID != 0 {
+			items := v.listTodos.Items()
+			for i, item := range items {
+				var itemID int64
+				fmt.Sscanf(item.ID, "%d", &itemID)
+				if itemID == msg.Target.RecordingID {
+					item.Boosts++
+					items[i] = item
+					break
+				}
+			}
+			v.listTodos.SetItems(items)
+		}
+		return v, nil
+
 	case tea.KeyMsg:
 		if v.editingDesc {
 			return v, v.handleEditDescKey(msg)
@@ -371,6 +392,11 @@ func (v *Todos) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, v.keys.EditDesc):
 		if v.focus == todosPaneRight {
 			return v.startEditDescription()
+		}
+
+	case key.Matches(msg, v.keys.Boost):
+		if v.focus == todosPaneRight {
+			return v.boostSelectedTodo()
 		}
 
 	case key.Matches(msg, listKeys.Open):
@@ -693,6 +719,7 @@ func (v *Todos) renderTodoItems(todos []data.TodoInfo) {
 			ID:          fmt.Sprintf("%d", t.ID),
 			Title:       check + " " + t.Content,
 			Description: desc,
+			Boosts:      t.GetBoosts().Count,
 		})
 	}
 	v.listTodos.SetItems(items)
@@ -710,5 +737,25 @@ func (v *Todos) createTodo(content string) tea.Cmd {
 			Content: content,
 		})
 		return workspace.TodoCreatedMsg{TodolistID: todolistID, Content: content, Err: err}
+	}
+}
+
+func (v *Todos) boostSelectedTodo() tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	id, err := strconv.ParseInt(item.ID, 10, 64)
+	if err != nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return workspace.OpenBoostPickerMsg{
+			Target: workspace.BoostTarget{
+				ProjectID:   v.session.Scope().ProjectID,
+				RecordingID: id,
+				Title:       item.Title,
+			},
+		}
 	}
 }

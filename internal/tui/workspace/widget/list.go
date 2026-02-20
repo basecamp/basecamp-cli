@@ -19,6 +19,7 @@ type ListItem struct {
 	Title       string
 	Description string
 	Extra       string // right-aligned detail (count, date, etc.)
+		Boosts      int    // number of boosts (will render as [♥ N])
 	Marked      bool   // visual mark (star, check, etc.)
 	Header      bool   // section header (non-selectable, rendered differently)
 }
@@ -412,6 +413,10 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 	}
 
 	line := cursor + titleStyle.Render(title)
+	if item.Boosts > 0 {
+		boostStr := fmt.Sprintf(" [♥ %d]", item.Boosts)
+		line += lipgloss.NewStyle().Foreground(theme.Success).Render(boostStr)
+	}
 
 	// Add extra (right-aligned) if space permits
 	if item.Extra != "" {
