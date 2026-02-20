@@ -49,13 +49,14 @@ const (
 	ViewPings
 	ViewCompose
 	ViewHome
+	ViewActivity
 )
 
 // IsGlobal returns true for view targets that aggregate across all accounts.
 func (t ViewTarget) IsGlobal() bool {
 	switch t {
 	case ViewHome, ViewHey, ViewPulse, ViewAssignments,
-		ViewPings, ViewProjects, ViewSearch:
+		ViewPings, ViewProjects, ViewSearch, ViewActivity:
 		return true
 	default:
 		return false
@@ -210,6 +211,9 @@ type AssignmentInfo = data.AssignmentInfo
 
 // PingRoomInfo is a type alias for data.PingRoomInfo.
 type PingRoomInfo = data.PingRoomInfo
+
+// TimelineEventInfo is a type alias for data.TimelineEventInfo.
+type TimelineEventInfo = data.TimelineEventInfo
 
 // ProjectBookmarkedMsg is sent after toggling a project bookmark.
 type ProjectBookmarkedMsg struct {

@@ -258,7 +258,89 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 	return p
 }
 
+// Timeline returns a global-scope pool of cross-account timeline events.
+// Uses the richer Timeline.Progress() API instead of Recordings.List.
+func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
+	p := RealmPool(h.Global(), "timeline", func() *Pool[[]TimelineEventInfo] {
+		return NewPool("timeline", PoolConfig{
+			FreshTTL: 30 * time.Second,
+			StaleTTL: 5 * time.Minute,
+			PollBase: 30 * time.Second,
+			PollBg:   2 * time.Minute,
+			PollMax:  5 * time.Minute,
+		}, func(ctx context.Context) ([]TimelineEventInfo, error) {
+			accounts := h.multi.Accounts()
+			if len(accounts) == 0 {
+				acct := h.currentAccountInfo()
+				if acct.ID == "" {
+					return nil, nil
+				}
+				client := h.multi.ClientFor(acct.ID)
+				return fetchTimelineEvents(ctx, client, acct)
+			}
+
+			results := FanOut[[]TimelineEventInfo](ctx, h.multi,
+				func(acct AccountInfo, client *basecamp.AccountClient) ([]TimelineEventInfo, error) {
+					return fetchTimelineEvents(ctx, client, acct)
+				})
+
+			var all []TimelineEventInfo
+			for _, r := range results {
+				if r.Err == nil {
+					all = append(all, r.Data...)
+				}
+			}
+			sort.Slice(all, func(i, j int) bool {
+				return all[i].CreatedAtTS > all[j].CreatedAtTS
+			})
+			if len(all) > 80 {
+				all = all[:80]
+			}
+			return all, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
 // -- Shared fetch helpers
+
+// fetchTimelineEvents fetches timeline events from a single account.
+func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, acct AccountInfo) ([]TimelineEventInfo, error) {
+	events, err := client.Timeline().Progress(ctx)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]TimelineEventInfo, 0, len(events))
+	for _, e := range events {
+		project := ""
+		var projectID int64
+		if e.Bucket != nil {
+			project = e.Bucket.Name
+			projectID = e.Bucket.ID
+		}
+		excerpt := e.SummaryExcerpt
+		if len(excerpt) > 100 {
+			excerpt = excerpt[:97] + "..."
+		}
+		infos = append(infos, TimelineEventInfo{
+			ID:             e.ID,
+			CreatedAt:      e.CreatedAt.Format("Jan 2 3:04pm"),
+			CreatedAtTS:    e.CreatedAt.Unix(),
+			Kind:           e.Kind,
+			Action:         e.Action,
+			Target:         e.Target,
+			Title:          e.Title,
+			SummaryExcerpt: excerpt,
+			Creator:        personName(e.Creator),
+			Project:        project,
+			ProjectID:      projectID,
+			Account:        acct.Name,
+			AccountID:      acct.ID,
+		})
+	}
+	return infos, nil
+}
 
 // fetchRecordingsAsActivity fetches recordings of the given types from a single
 // account and maps them to ActivityEntryInfo. Shared by HeyActivity and Pulse.

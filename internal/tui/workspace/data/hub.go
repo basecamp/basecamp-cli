@@ -674,3 +674,130 @@ func (h *Hub) Forwards(projectID, inboxID int64) *Pool[[]ForwardInfo] {
 	return p
 }
 
+// ProjectTimeline returns a project-scoped pool of timeline events.
+func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("project-timeline:%d", projectID)
+	p := RealmPool(realm, key, func() *Pool[[]TimelineEventInfo] {
+		return NewPool(key, PoolConfig{
+			FreshTTL: 30 * time.Second,
+			StaleTTL: 5 * time.Minute,
+		}, func(ctx context.Context) ([]TimelineEventInfo, error) {
+			client := h.accountClient()
+			acct := h.currentAccountInfo()
+			events, err := client.Timeline().ProjectTimeline(ctx, projectID)
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]TimelineEventInfo, 0, len(events))
+			for _, e := range events {
+				project := ""
+				var pID int64
+				if e.Bucket != nil {
+					project = e.Bucket.Name
+					pID = e.Bucket.ID
+				}
+				excerpt := e.SummaryExcerpt
+				if len(excerpt) > 100 {
+					excerpt = excerpt[:97] + "..."
+				}
+				infos = append(infos, TimelineEventInfo{
+					ID:             e.ID,
+					CreatedAt:      e.CreatedAt.Format("Jan 2 3:04pm"),
+					CreatedAtTS:    e.CreatedAt.Unix(),
+					Kind:           e.Kind,
+					Action:         e.Action,
+					Target:         e.Target,
+					Title:          e.Title,
+					SummaryExcerpt: excerpt,
+					Creator:        personName(e.Creator),
+					Project:        project,
+					ProjectID:      pID,
+					Account:        acct.Name,
+					AccountID:      acct.ID,
+				})
+			}
+			return infos, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
+// Boosts returns a project-scoped pool of boosts for a recording.
+// The pool stores BoostSummary (count + preview) for list item display.
+func (h *Hub) Boosts(projectID, recordingID int64) *Pool[BoostSummary] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("boosts:%d:%d", projectID, recordingID)
+	p := RealmPool(realm, key, func() *Pool[BoostSummary] {
+		return NewPool(key, PoolConfig{}, func(ctx context.Context) (BoostSummary, error) {
+			client := h.accountClient()
+			result, err := client.Boosts().ListRecording(ctx, projectID, recordingID)
+			if err != nil {
+				return BoostSummary{}, err
+			}
+			return mapBoostSummary(result.Boosts), nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
+// CreateBoost creates a new boost on a recording.
+// Returns the created BoostInfo or an error.
+func (h *Hub) CreateBoost(ctx context.Context, projectID, recordingID int64, content string) (BoostInfo, error) {
+	client := h.accountClient()
+	boost, err := client.Boosts().CreateRecording(ctx, projectID, recordingID, content)
+	if err != nil {
+		return BoostInfo{}, err
+	}
+	return mapBoostInfo(*boost), nil
+}
+
+// DeleteBoost deletes a boost by ID.
+func (h *Hub) DeleteBoost(ctx context.Context, projectID, boostID int64) error {
+	client := h.accountClient()
+	return client.Boosts().Delete(ctx, projectID, boostID)
+}
+
+// mapBoostSummary converts SDK boosts to a BoostSummary for list display.
+func mapBoostSummary(boosts []basecamp.Boost) BoostSummary {
+	summary := BoostSummary{
+		Count:   len(boosts),
+		Preview: make([]BoostPreview, 0, min(len(boosts), 3)), // max 3 preview items
+	}
+	// Take up to 3 most recent boosts for preview
+	start := 0
+	if len(boosts) > 3 {
+		start = len(boosts) - 3
+	}
+	for i := start; i < len(boosts); i++ {
+		b := boosts[i]
+		boosterID := int64(0)
+		if b.Booster != nil {
+			boosterID = b.Booster.ID
+		}
+		summary.Preview = append(summary.Preview, BoostPreview{
+			Content:   b.Content,
+			BoosterID: boosterID,
+		})
+	}
+	return summary
+}
+
+// mapBoostInfo converts an SDK Boost to BoostInfo.
+func mapBoostInfo(b basecamp.Boost) BoostInfo {
+	booster := ""
+	boosterID := int64(0)
+	if b.Booster != nil {
+		booster = b.Booster.Name
+		boosterID = b.Booster.ID
+	}
+	return BoostInfo{
+		ID:        b.ID,
+		Content:   b.Content,
+		Booster:   booster,
+		BoosterID: boosterID,
+		CreatedAt: b.CreatedAt.Format("Jan 2 3:04pm"),
+	}
+}

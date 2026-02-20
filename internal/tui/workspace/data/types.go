@@ -70,12 +70,13 @@ type CampfireLinesResult struct {
 
 // MessageInfo represents a message board post.
 type MessageInfo struct {
-	ID        int64
-	Subject   string
-	Creator   string
-	CreatedAt string
-	Category  string
-	Pinned    bool
+	ID         int64
+	Subject    string
+	Creator    string
+	CreatedAt  string
+	Category   string
+	Pinned     bool
+	BoostEmbed // embedded boost support
 }
 
 // HeyEntryInfo is a lightweight representation of an inbox entry.
@@ -111,6 +112,7 @@ type CardInfo struct {
 	StepsTotal    int
 	StepsDone     int
 	CommentsCount int
+	BoostEmbed    // embedded boost support
 }
 
 // TodolistInfo is a lightweight representation of a todolist for the view.
@@ -130,6 +132,7 @@ type TodoInfo struct {
 	DueOn       string
 	Assignees   []string // names
 	Position    int
+	BoostEmbed  // embedded boost support
 }
 
 // SearchResultInfo represents a single search result.
@@ -205,4 +208,70 @@ type PingRoomInfo struct {
 	LastMessage string
 	LastAt      string
 	LastAtTS    int64 // unix timestamp for sorting
+}
+
+// TimelineEventInfo is a lightweight representation of a timeline event.
+type TimelineEventInfo struct {
+	ID             int64
+	CreatedAt      string // formatted time
+	CreatedAtTS    int64  // unix timestamp for sorting
+	Kind           string // "todo_completed", "message_created", etc.
+	Action         string // "completed", "created", "commented on"
+	Target         string // "Todo", "Message", "Document"
+	Title          string
+	SummaryExcerpt string // first ~100 chars of body
+	Creator        string
+	Project        string
+	ProjectID      int64
+	Account        string
+	AccountID      string
+}
+
+// BoostInfo is a lightweight representation of a boost (emoji reaction).
+type BoostInfo struct {
+	ID        int64
+	Content   string // emoji or short text
+	Booster   string // name of person who boosted
+	BoosterID int64
+	CreatedAt string // formatted time
+}
+
+// BoostSummary holds boost metadata for display on list items.
+// Includes both a count and a preview of who's boosting.
+type BoostSummary struct {
+	Count   int            // total boost count
+	Preview []BoostPreview // compact preview for list display
+}
+
+// BoostPreview is a single boost preview for list display.
+// Shows either emoji content or avatar indicator depending on context.
+type BoostPreview struct {
+	Content   string // the boost content (emoji or text)
+	BoosterID int64  // for avatar-based display
+}
+
+// RecordingWithBoosts extends recording info types to include boost metadata.
+type RecordingWithBoosts interface {
+	GetBoosts() BoostSummary
+}
+
+// GetBoosts returns an empty boost summary - recording types
+// should embed BoostEmbed and override this if they have boosts.
+func (b BoostSummary) GetBoosts() BoostSummary {
+	return b
+}
+
+// BoostEmbed can be embedded in recording info types to add boost support.
+type BoostEmbed struct {
+	BoostsSummary BoostSummary
+}
+
+// GetBoosts returns the embedded boost summary.
+func (be BoostEmbed) GetBoosts() BoostSummary {
+	return be.BoostsSummary
+}
+
+// SetBoosts sets the boost summary on the embedded field.
+func (be *BoostEmbed) SetBoosts(summary BoostSummary) {
+	be.BoostsSummary = summary
 }
