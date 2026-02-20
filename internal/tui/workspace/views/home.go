@@ -253,6 +253,9 @@ func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if v.list.Filtering() {
+			return v, v.list.Update(msg)
+		}
 		keys := workspace.DefaultListKeyMap()
 		switch {
 		case key.Matches(msg, keys.Open):

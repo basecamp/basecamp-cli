@@ -209,6 +209,24 @@ func TestProjects_ToolFilterDelegatesAllKeys(t *testing.T) {
 	assert.True(t, v.toolList.Filtering(), "filter should still be active")
 }
 
+func TestProjects_ProjectFilterDelegatesAllKeys(t *testing.T) {
+	v := testProjectsView(sampleProjects())
+
+	// Start filter on project list (left panel)
+	v.list.StartFilter()
+	require.True(t, v.list.Filtering())
+
+	// Press 'b' — should be absorbed by filter, NOT trigger bookmark
+	v.handleProjectKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	assert.True(t, v.list.Filtering(), "filter should still be active after 'b'")
+	assert.False(t, v.focusRight, "should not have entered dock")
+
+	// Press 'l' — should be absorbed by filter, NOT enter dock
+	v.handleProjectKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	assert.True(t, v.list.Filtering(), "filter should still be active after 'l'")
+	assert.False(t, v.focusRight, "should not have entered dock")
+}
+
 func TestProjects_InputActiveReflectsBothLists(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 

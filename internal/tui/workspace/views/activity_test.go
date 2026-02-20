@@ -111,17 +111,17 @@ func TestActivity_CrossAccountSameRecordingID_NoCollision(t *testing.T) {
 	entries := []data.TimelineEventInfo{
 		{
 			ID: 200, RecordingID: 9999,
-			CreatedAt: now.Add(-1 * time.Minute).Format("Jan 2 3:04pm"),
+			CreatedAt:   now.Add(-1 * time.Minute).Format("Jan 2 3:04pm"),
 			CreatedAtTS: now.Add(-1 * time.Minute).Unix(),
-			Action: "completed", Target: "Todo", Title: "Same recording",
+			Action:      "completed", Target: "Todo", Title: "Same recording",
 			Creator: "Alice", Project: "P1", ProjectID: 10,
 			Account: "Acme", AccountID: "account-A",
 		},
 		{
 			ID: 300, RecordingID: 9999, // same RecordingID, different account
-			CreatedAt: now.Add(-2 * time.Minute).Format("Jan 2 3:04pm"),
+			CreatedAt:   now.Add(-2 * time.Minute).Format("Jan 2 3:04pm"),
 			CreatedAtTS: now.Add(-2 * time.Minute).Unix(),
-			Action: "created", Target: "Todo", Title: "Same recording other account",
+			Action:      "created", Target: "Todo", Title: "Same recording other account",
 			Creator: "Bob", Project: "P2", ProjectID: 20,
 			Account: "Beta", AccountID: "account-B",
 		},
@@ -153,9 +153,9 @@ func TestActivity_ZeroRecordingID_OpenSelectedReturnsStatus(t *testing.T) {
 	entries := []data.TimelineEventInfo{
 		{
 			ID: 500, RecordingID: 0, // no parent recording
-			CreatedAt: now.Add(-1 * time.Minute).Format("Jan 2 3:04pm"),
+			CreatedAt:   now.Add(-1 * time.Minute).Format("Jan 2 3:04pm"),
 			CreatedAtTS: now.Add(-1 * time.Minute).Unix(),
-			Action: "archived", Target: "Project", Title: "Old project",
+			Action:      "archived", Target: "Project", Title: "Old project",
 			Creator: "Alice", Project: "Archive", ProjectID: 0,
 			Account: "Acme", AccountID: "a1",
 		},

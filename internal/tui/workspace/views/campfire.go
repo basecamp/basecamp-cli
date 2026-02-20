@@ -228,8 +228,8 @@ func (v *Campfire) Init() tea.Cmd {
 		v.hasMore = v.totalCount > len(v.lines)
 		v.updateLastID()
 		// Default to most recent line for boost targeting
-		if len(v.lines) > 0 && v.selectedLineID == 0 {
-			v.selectedLineID = v.lines[len(v.lines)-1].ID
+		if len(v.lines) > 0 {
+			v.updateSelectedToLatest()
 		}
 		v.renderMessages()
 		v.loading = false
@@ -266,6 +266,10 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.totalCount = snap.Data.TotalCount
 				v.hasMore = v.totalCount > len(v.lines)
 				v.reconcilePending()
+				// Update boost target to latest line when new lines arrive
+				if len(v.lines) > 0 {
+					v.updateSelectedToLatest()
+				}
 				v.renderMessages()
 				v.loading = false
 			}
@@ -460,17 +464,22 @@ func (v *Campfire) handleScrollKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, v.keys.ScrollUp):
 		v.viewport.LineUp(1)
+		// After scrolling, target the most recent visible message for boost
+		v.updateSelectedToLatest()
 		return v.maybeLoadMore()
 
 	case key.Matches(msg, v.keys.ScrollDown):
 		v.viewport.LineDown(1)
+		v.updateSelectedToLatest()
 
 	case key.Matches(msg, v.keys.ScrollTop):
 		v.viewport.GotoTop()
+		v.updateSelectedToLatest()
 		return v.maybeLoadMore()
 
 	case key.Matches(msg, v.keys.ScrollBottom):
 		v.viewport.GotoBottom()
+		v.updateSelectedToLatest()
 
 	case msg.String() == "b" || msg.String() == "B":
 		return v.boostSelectedLine()
@@ -486,6 +495,15 @@ func (v *Campfire) maybeLoadMore() tea.Cmd {
 		return tea.Batch(v.spinner.Tick, v.fetchOlderLines())
 	}
 	return nil
+}
+
+// updateSelectedToLatest sets selectedLineID to the most recent line.
+// This is called after scroll navigation so that boost always targets
+// the latest message in the stream (most common use case).
+func (v *Campfire) updateSelectedToLatest() {
+	if len(v.lines) > 0 {
+		v.selectedLineID = v.lines[len(v.lines)-1].ID
+	}
 }
 
 func (v *Campfire) boostSelectedLine() tea.Cmd {

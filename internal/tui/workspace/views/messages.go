@@ -211,6 +211,9 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *Messages) handleKey(msg tea.KeyMsg) tea.Cmd {
+	if v.list.Filtering() {
+		return v.list.Update(msg)
+	}
 	keys := workspace.DefaultListKeyMap()
 
 	switch {

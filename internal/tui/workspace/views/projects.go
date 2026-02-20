@@ -231,6 +231,9 @@ func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleProjectKey processes keys when the left (project) panel is focused.
 func (v *Projects) handleProjectKey(msg tea.KeyMsg) tea.Cmd {
+	if v.list.Filtering() {
+		return v.list.Update(msg)
+	}
 	keys := workspace.DefaultListKeyMap()
 	switch {
 	case key.Matches(msg, keys.Open), msg.String() == "l":
