@@ -92,6 +92,7 @@ func targetName(t ViewTarget) string {
 		ViewPulse:       "Pulse",
 		ViewAssignments: "Assignments",
 		ViewPings:       "Pings",
+		ViewActivity:    "Activity",
 	}
 	if n, ok := names[t]; ok {
 		return n
@@ -916,6 +917,48 @@ func TestWorkspace_SyncAccountBadge_TransitionGlobalToScoped(t *testing.T) {
 }
 
 // --- ctrl+a hint tests ---
+
+func TestWorkspace_TabForwardedWhenSidebarInactive(t *testing.T) {
+	w, _ := testWorkspace()
+	v := pushTestView(w, "Search")
+
+	// Sidebar is not open — tab should reach the view.
+	require.False(t, w.sidebarActive())
+
+	w.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	found := false
+	for _, m := range v.msgs {
+		if km, ok := m.(tea.KeyMsg); ok && km.Type == tea.KeyTab {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "tab must be forwarded to view when sidebar is inactive")
+}
+
+func TestWorkspace_TabConsumedWhenSidebarActive(t *testing.T) {
+	w, _ := testWorkspace()
+	v := pushTestView(w, "Home")
+
+	// Open sidebar — sets showSidebar, creates sidebarView, width >= 100.
+	w.toggleSidebar()
+	require.True(t, w.sidebarActive(), "sidebar should be active after toggle")
+	require.False(t, w.sidebarFocused, "sidebar starts unfocused")
+
+	// Tab should switch focus to sidebar, not reach the main view.
+	cmd := w.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	assert.True(t, w.sidebarFocused, "tab should switch focus to sidebar")
+	assert.Nil(t, cmd, "switchSidebarFocus returns nil")
+
+	// The main view should NOT have received the tab key.
+	for _, m := range v.msgs {
+		if km, ok := m.(tea.KeyMsg); ok && km.Type == tea.KeyTab {
+			t.Fatal("main view must not receive tab when sidebar is active")
+		}
+	}
+}
 
 func TestWorkspace_CtrlAHintMultiAccountOnly(t *testing.T) {
 	w, _ := testWorkspace()

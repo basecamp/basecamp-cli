@@ -466,8 +466,11 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return w.toggleSidebar()
 
 	case key.Matches(msg, w.keys.SidebarFocus):
-		w.switchSidebarFocus()
-		return nil
+		if w.sidebarActive() {
+			w.switchSidebarFocus()
+			return nil
+		}
+		// Fall through to view when sidebar is inactive
 
 	case key.Matches(msg, w.keys.Jump):
 		return w.openQuickJump()

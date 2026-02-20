@@ -703,6 +703,7 @@ func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
 				}
 				infos = append(infos, TimelineEventInfo{
 					ID:             e.ID,
+					RecordingID:    e.ParentRecordingID,
 					CreatedAt:      e.CreatedAt.Format("Jan 2 3:04pm"),
 					CreatedAtTS:    e.CreatedAt.Unix(),
 					Kind:           e.Kind,

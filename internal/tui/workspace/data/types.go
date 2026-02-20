@@ -213,6 +213,7 @@ type PingRoomInfo struct {
 // TimelineEventInfo is a lightweight representation of a timeline event.
 type TimelineEventInfo struct {
 	ID             int64
+	RecordingID    int64  // parent recording ID for navigation/detail
 	CreatedAt      string // formatted time
 	CreatedAtTS    int64  // unix timestamp for sorting
 	Kind           string // "todo_completed", "message_created", etc.

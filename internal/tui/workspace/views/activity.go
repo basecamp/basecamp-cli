@@ -207,7 +207,7 @@ func (v *Activity) syncEntries(entries []workspace.TimelineEventInfo) {
 		}
 		items = append(items, widget.ListItem{Title: label, Header: true})
 		for _, e := range group {
-			id := fmt.Sprintf("%s:%d", e.AccountID, e.ID)
+			id := fmt.Sprintf("%d", e.RecordingID)
 			v.entryMeta[id] = e
 
 			// Title: "Action Target: Title" e.g. "completed Todo: Ship feature"
@@ -262,7 +262,7 @@ func (v *Activity) openSelected() tea.Cmd {
 
 	if r := v.session.Recents(); r != nil {
 		r.Add(recents.Item{
-			ID:          item.ID,
+			ID:          fmt.Sprintf("%d", meta.RecordingID),
 			Title:       meta.Title,
 			Description: meta.Target,
 			Type:        recents.TypeRecording,
@@ -274,7 +274,7 @@ func (v *Activity) openSelected() tea.Cmd {
 	scope := v.session.Scope()
 	scope.AccountID = meta.AccountID
 	scope.ProjectID = meta.ProjectID
-	scope.RecordingID = meta.ID
+	scope.RecordingID = meta.RecordingID
 	scope.RecordingType = meta.Target
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
