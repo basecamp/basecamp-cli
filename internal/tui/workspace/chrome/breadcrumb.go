@@ -16,6 +16,7 @@ type Breadcrumb struct {
 	crumbs       []string
 	accountBadge string
 	badgeGlobal  bool
+	badgeIndex   int // 1-based account index for scoped views, 0 for unindexed
 	width        int
 }
 
@@ -32,7 +33,26 @@ func NewBreadcrumb(styles *tui.Styles) Breadcrumb {
 func (b *Breadcrumb) SetAccountBadge(label string, global bool) {
 	b.accountBadge = label
 	b.badgeGlobal = global
+	b.badgeIndex = 0
 }
+
+// SetAccountBadgeIndexed sets a scoped account badge with a numbered index.
+// The index is rendered in Foreground and the name in Muted to visually
+// connect to the account switcher's numbered shortcuts.
+func (b *Breadcrumb) SetAccountBadgeIndexed(index int, name string) {
+	b.accountBadge = name
+	b.badgeGlobal = false
+	b.badgeIndex = index
+}
+
+// AccountBadge returns the current badge label (for testing).
+func (b *Breadcrumb) AccountBadge() string { return b.accountBadge }
+
+// BadgeGlobal returns whether the badge is in global mode (for testing).
+func (b *Breadcrumb) BadgeGlobal() bool { return b.badgeGlobal }
+
+// BadgeIndex returns the badge index (for testing).
+func (b *Breadcrumb) BadgeIndex() int { return b.badgeIndex }
 
 // SetCrumbs updates the breadcrumb trail.
 func (b *Breadcrumb) SetCrumbs(crumbs []string) {
@@ -66,13 +86,25 @@ func (b Breadcrumb) View() string {
 
 	// Account badge
 	if b.accountBadge != "" {
-		color := theme.Muted
+		var badge string
 		if b.badgeGlobal {
-			color = theme.Secondary
+			badge = lipgloss.NewStyle().
+				Foreground(theme.Secondary).
+				Render("[" + b.accountBadge + "]")
+		} else if b.badgeIndex > 0 {
+			// Indexed scoped badge: index in Foreground, name in Muted
+			idxPart := lipgloss.NewStyle().
+				Foreground(theme.Foreground).
+				Render(fmt.Sprintf("[%d:", b.badgeIndex))
+			namePart := lipgloss.NewStyle().
+				Foreground(theme.Muted).
+				Render(b.accountBadge + "]")
+			badge = idxPart + namePart
+		} else {
+			badge = lipgloss.NewStyle().
+				Foreground(theme.Muted).
+				Render("[" + b.accountBadge + "]")
 		}
-		badge := lipgloss.NewStyle().
-			Foreground(color).
-			Render("[" + b.accountBadge + "]")
 		parts = append(parts, badge)
 	}
 

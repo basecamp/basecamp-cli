@@ -327,6 +327,8 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return w.navigate(ViewHey, w.session.Scope())
 		case key.Matches(msg, w.keys.MyStuff):
 			return w.navigate(ViewMyStuff, w.session.Scope())
+		case key.Matches(msg, w.keys.Activity):
+			return w.navigate(ViewActivity, w.session.Scope())
 		case key.Matches(msg, w.keys.Jump):
 			return w.openQuickJump()
 		}
@@ -394,6 +396,9 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, w.keys.MyStuff):
 		return w.navigate(ViewMyStuff, w.session.Scope())
+
+	case key.Matches(msg, w.keys.Activity):
+		return w.navigate(ViewActivity, w.session.Scope())
 
 	case key.Matches(msg, w.keys.Open):
 		return openInBrowser(w.session.Scope())
@@ -552,9 +557,11 @@ func (w *Workspace) accountIndex(accountID string) int {
 }
 
 // syncAccountBadge updates the breadcrumb badge based on the current target
-// and account context.
+// and account context. Always sets the badge deterministically — never leaves
+// stale state from a previous view.
 func (w *Workspace) syncAccountBadge(target ViewTarget) {
-	name := w.session.Scope().AccountName
+	scope := w.session.Scope()
+	name := scope.AccountName
 	multiAccount := len(w.accountList) > 1
 
 	if !multiAccount {
@@ -566,11 +573,17 @@ func (w *Workspace) syncAccountBadge(target ViewTarget) {
 		w.breadcrumb.SetAccountBadge("✱ All Accounts", true)
 		return
 	}
-	idx := w.accountIndex(w.session.Scope().AccountID)
-	if idx > 0 && name != "" {
-		w.breadcrumb.SetAccountBadge(fmt.Sprintf("%d:%s", idx, name), false)
-	} else if name != "" {
-		w.breadcrumb.SetAccountBadge(name, false)
+	// Scoped view: show indexed badge. Fall back to AccountID when name
+	// hasn't resolved yet, so the badge always reflects the current scope.
+	label := name
+	if label == "" {
+		label = scope.AccountID
+	}
+	idx := w.accountIndex(scope.AccountID)
+	if idx > 0 {
+		w.breadcrumb.SetAccountBadgeIndexed(idx, label)
+	} else {
+		w.breadcrumb.SetAccountBadge(label, false)
 	}
 }
 
