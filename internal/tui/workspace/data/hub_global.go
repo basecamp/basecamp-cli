@@ -369,7 +369,7 @@ func (h *Hub) Projects() *Pool[[]ProjectInfo] {
 func projectsToInfos(projects []basecamp.Project, acct AccountInfo) []ProjectInfo {
 	infos := make([]ProjectInfo, 0, len(projects))
 	for _, p := range projects {
-		var dock []DockToolInfo
+		dock := make([]DockToolInfo, 0, len(p.Dock))
 		for _, d := range p.Dock {
 			dock = append(dock, DockToolInfo{
 				ID:      d.ID,

@@ -73,7 +73,7 @@ func TestStatusBar_GlobalHintsTruncateOnNarrowTerminal(t *testing.T) {
 	})
 	s.SetGlobalHints([]key.Binding{helpBinding(), paletteBinding()})
 
-	view := stripAnsi(s.View())
+	_ = stripAnsi(s.View())
 	// With 40 chars, left hints take ~25 chars + min gap of 2 = 27.
 	// Budget for globals is ~13 chars. "? help" = 6 chars fits, "ctrl+p cmds" = 11 chars may not.
 	// At minimum, the bar should not overflow.
@@ -81,8 +81,7 @@ func TestStatusBar_GlobalHintsTruncateOnNarrowTerminal(t *testing.T) {
 
 	// When extremely narrow, globals may be fully dropped
 	s.SetWidth(20)
-	view = stripAnsi(s.View())
-	_ = view // Should not panic
+	_ = stripAnsi(s.View()) // Should not panic
 }
 
 func TestStatusBar_EmptyGlobalHintsShowAccountName(t *testing.T) {
