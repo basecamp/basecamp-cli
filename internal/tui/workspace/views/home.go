@@ -433,7 +433,6 @@ func (v *Home) syncAssignments(assignments []workspace.AssignmentInfo) {
 
 // syncBookmarks filters projects to bookmarked ones and builds bookmarkItems.
 func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
-	accounts := sessionAccounts(v.session)
 	var items []widget.ListItem
 	for _, p := range projects {
 		if !p.Bookmarked {
@@ -451,7 +450,6 @@ func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
 			ID:          id,
 			Title:       p.Name,
 			Description: desc,
-			Extra:       accountExtra(accounts, p.AccountID, ""),
 			Marked:      true,
 		})
 		v.itemMeta[id] = homeItemMeta{
