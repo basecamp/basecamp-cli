@@ -137,6 +137,19 @@ func (s *Session) ResetContext() {
 	s.epoch++
 }
 
+// NewTestSession returns a minimal Session for use in external package tests.
+// It provides styles and an empty MultiStore (no accounts discovered),
+// but no app, hub, or recents.
+func NewTestSession() *Session {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Session{
+		styles:     tui.NewStyles(),
+		multiStore: data.NewMultiStore(nil),
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+}
+
 // Shutdown cancels the session context and tears down all Hub realms.
 // Called on program exit.
 func (s *Session) Shutdown() {

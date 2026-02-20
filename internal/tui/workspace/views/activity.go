@@ -208,7 +208,10 @@ func (v *Activity) syncEntries(entries []workspace.TimelineEventInfo) {
 		}
 		items = append(items, widget.ListItem{Title: label, Header: true})
 		for _, e := range group {
-			id := fmt.Sprintf("%d", e.RecordingID)
+			// Key by account+event ID (globally unique) — NOT recording ID,
+			// since multiple events can reference the same recording and
+			// the same recording ID can appear across accounts.
+			id := e.AccountID + ":" + fmt.Sprintf("%d", e.ID)
 			v.entryMeta[id] = e
 
 			// Title: "Action Target: Title" e.g. "completed Todo: Ship feature"
@@ -259,6 +262,11 @@ func (v *Activity) openSelected() tea.Cmd {
 	meta, ok := v.entryMeta[item.ID]
 	if !ok {
 		return nil
+	}
+
+	// Some timeline events (e.g., project-level) have no parent recording.
+	if meta.RecordingID <= 0 {
+		return workspace.SetStatus("Cannot open this event type", false)
 	}
 
 	if r := v.session.Recents(); r != nil {
