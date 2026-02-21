@@ -48,6 +48,15 @@ type detailLoadedMsg struct {
 	err  error
 }
 
+// Detail-local mutation result messages.
+type todoToggleResultMsg struct {
+	completed bool
+	err       error
+}
+
+type trashTimeoutMsg struct{}
+type trashResultMsg struct{ err error }
+
 // Detail shows a single recording with its content and metadata.
 type Detail struct {
 	session *workspace.Session
@@ -66,6 +75,9 @@ type Detail struct {
 	composer   *widget.Composer
 	composing  bool
 	submitting bool
+
+	// Double-press trash confirmation
+	trashPending bool
 
 	width, height int
 }
@@ -133,18 +145,31 @@ func (v *Detail) IsModal() bool {
 }
 
 func (v *Detail) ShortHelp() []key.Binding {
-	bindings := []key.Binding{
+	hints := []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "scroll")),
+	}
+	if v.data != nil && strings.EqualFold(v.data.recordType, "Todo") {
+		verb := "complete"
+		if v.data.completed {
+			verb = "reopen"
+		}
+		hints = append(hints, key.NewBinding(key.WithKeys("x"), key.WithHelp("x", verb)))
+	}
+	hints = append(hints,
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
+	)
+	if v.session != nil && v.session.Scope().ProjectID != 0 {
+		hints = append(hints, key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "project")))
 	}
 	if v.composing {
-		bindings = append(bindings,
+		hints = append(hints,
 			key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "post comment")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		)
 	}
-	return bindings
+	return hints
 }
 
 func (v *Detail) FullHelp() [][]key.Binding {
@@ -235,6 +260,28 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case todoToggleResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "toggling todo")
+		}
+		v.data.completed = msg.completed
+		v.syncPreview()
+		verb := "Completed"
+		if !msg.completed {
+			verb = "Reopened"
+		}
+		return v, workspace.SetStatus(verb, false)
+
+	case trashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing recording")
+		}
+		return v, tea.Batch(workspace.SetStatus("Trashed", false), workspace.NavigateBack())
+
+	case trashTimeoutMsg:
+		v.trashPending = false
+		return v, nil
+
 	case tea.KeyMsg:
 		if v.loading {
 			return v, nil
@@ -257,6 +304,11 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return v.handleComposingKey(msg)
 	}
 
+	// Any non-t key resets trash confirmation
+	if msg.String() != "t" {
+		v.trashPending = false
+	}
+
 	switch msg.String() {
 	case "b", "B":
 		if v.data == nil {
@@ -276,6 +328,23 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.composing = true
 		v.relayout()
 		return v.composer.Focus()
+	case "x":
+		return v.toggleComplete()
+	case "t":
+		if v.data == nil {
+			return nil
+		}
+		if v.trashPending {
+			v.trashPending = false
+			return v.trashRecording()
+		}
+		v.trashPending = true
+		return tea.Batch(
+			workspace.SetStatus("Press t again to trash", false),
+			v.trashConfirmTimeout(),
+		)
+	case "g":
+		return v.goToProject()
 	case "j", "down":
 		v.preview.ScrollDown(1)
 	case "k", "up":
@@ -286,6 +355,49 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.preview.ScrollUp(v.height / 2)
 	}
 	return nil
+}
+
+func (v *Detail) toggleComplete() tea.Cmd {
+	if v.data == nil || !strings.EqualFold(v.data.recordType, "Todo") {
+		return workspace.SetStatus("Can only complete todos", false)
+	}
+	newState := !v.data.completed
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	return func() tea.Msg {
+		var err error
+		if newState {
+			err = hub.CompleteTodo(ctx, scope.AccountID, scope.ProjectID, v.recordingID)
+		} else {
+			err = hub.UncompleteTodo(ctx, scope.AccountID, scope.ProjectID, v.recordingID)
+		}
+		return todoToggleResultMsg{completed: newState, err: err}
+	}
+}
+
+func (v *Detail) trashConfirmTimeout() tea.Cmd {
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return trashTimeoutMsg{}
+	})
+}
+
+func (v *Detail) trashRecording() tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	return func() tea.Msg {
+		err := hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, v.recordingID)
+		return trashResultMsg{err: err}
+	}
+}
+
+func (v *Detail) goToProject() tea.Cmd {
+	scope := v.session.Scope()
+	if scope.ProjectID == 0 {
+		return workspace.SetStatus("No project context", false)
+	}
+	return workspace.Navigate(workspace.ViewDock, scope)
 }
 
 func (v *Detail) handleComposingKey(msg tea.KeyMsg) tea.Cmd {

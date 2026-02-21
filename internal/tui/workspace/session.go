@@ -150,6 +150,23 @@ func NewTestSession() *Session {
 	}
 }
 
+// NewTestSessionWithHub returns a test Session that includes a Hub.
+// The Hub's MultiStore has nil SDK, so ClientFor returns nil and Hub
+// mutation methods return an error — but the Hub itself is non-nil,
+// which is enough for key handler tests that exercise the state machine.
+func NewTestSessionWithHub() *Session {
+	s := NewTestSession()
+	s.hub = data.NewHub(s.multiStore, data.NewPoller())
+	return s
+}
+
+// NewTestSessionWithScope returns a test Session with a Hub and a pre-set scope.
+func NewTestSessionWithScope(scope Scope) *Session {
+	s := NewTestSessionWithHub()
+	s.scope = scope
+	return s
+}
+
 // NewTestSessionWithRecents is like NewTestSession but includes a recents store.
 func NewTestSessionWithRecents(r *recents.Store) *Session {
 	s := NewTestSession()

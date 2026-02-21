@@ -798,6 +798,34 @@ func mapBoostSummary(boosts []basecamp.Boost) BoostSummary {
 	return summary
 }
 
+// CompleteTodo marks a todo as completed. Uses explicit accountID for
+// cross-account mutations from aggregate views (Assignments, Hey).
+func (h *Hub) CompleteTodo(ctx context.Context, accountID string, projectID, todoID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Todos().Complete(ctx, projectID, todoID)
+}
+
+// UncompleteTodo reopens a completed todo.
+func (h *Hub) UncompleteTodo(ctx context.Context, accountID string, projectID, todoID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Todos().Uncomplete(ctx, projectID, todoID)
+}
+
+// TrashRecording moves a recording to the trash.
+func (h *Hub) TrashRecording(ctx context.Context, accountID string, projectID, recordingID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Recordings().Trash(ctx, projectID, recordingID)
+}
+
 // mapBoostInfo converts an SDK Boost to BoostInfo.
 func mapBoostInfo(b basecamp.Boost) BoostInfo {
 	booster := ""
