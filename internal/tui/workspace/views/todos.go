@@ -279,16 +279,14 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case data.MutationErrorMsg:
 		// Mutation failed — pool already rolled back optimistic state.
-		// Just show the error.
-		return v, workspace.ReportError(msg.Err, "toggling todo")
-
-	case workspace.TodoCreatedMsg:
-		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "creating todo")
+		// Re-sync the view and show the error.
+		if v.selectedListID != 0 {
+			todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
+			if snap := todosPool.Get(); snap.Usable() {
+				v.syncTodos(v.selectedListID, snap.Data)
+			}
 		}
-		todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, msg.TodolistID)
-		todosPool.Invalidate()
-		return v, todosPool.Fetch(v.session.Hub().ProjectContext())
+		return v, workspace.ReportError(msg.Err, "updating todo")
 
 	case workspace.RefreshMsg:
 		v.todolistPool.Invalidate()
@@ -730,14 +728,22 @@ func (v *Todos) renderTodoItems(todos []data.TodoInfo) {
 func (v *Todos) createTodo(content string) tea.Cmd {
 	scope := v.session.Scope()
 	todolistID := v.selectedListID
-	ctx := v.session.Hub().ProjectContext()
-	client := v.session.AccountClient()
-	return func() tea.Msg {
-		_, err := client.Todos().Create(ctx, scope.ProjectID, todolistID, &basecamp.CreateTodoRequest{
-			Content: content,
-		})
-		return workspace.TodoCreatedMsg{TodolistID: todolistID, Content: content, Err: err}
+
+	todosPool := v.session.Hub().Todos(scope.ProjectID, todolistID)
+	cmd := todosPool.Apply(v.session.Hub().ProjectContext(), &data.TodoCreateMutation{
+		Content:    content,
+		TodolistID: todolistID,
+		ProjectID:  scope.ProjectID,
+		Client:     v.session.AccountClient(),
+	})
+
+	// Read optimistic state immediately and render
+	snap := todosPool.Get()
+	if snap.Usable() {
+		v.syncTodos(todolistID, snap.Data)
 	}
+
+	return cmd
 }
 
 func (v *Todos) boostSelectedTodo() tea.Cmd {
