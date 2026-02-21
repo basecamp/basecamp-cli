@@ -93,6 +93,11 @@ type Scope struct {
 	ToolID        int64
 	RecordingID   int64
 	RecordingType string
+
+	// Ephemeral origin context — meaningful only for the target view, not session state.
+	// Stripped from session scope during navigate() and restored in the view scope.
+	OriginView string // source view name ("Activity", "Hey!", "Pulse")
+	OriginHint string // context ("completed Todo", "needs your attention")
 }
 
 // Data messages

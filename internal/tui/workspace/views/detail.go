@@ -55,6 +55,8 @@ type Detail struct {
 
 	recordingID   int64
 	recordingType string
+	originView    string
+	originHint    string
 	data          *detailData
 	preview       *widget.Preview
 	spinner       spinner.Model
@@ -69,7 +71,7 @@ type Detail struct {
 }
 
 // NewDetail creates a detail view for a specific recording.
-func NewDetail(session *workspace.Session, recordingID int64, recordingType string) *Detail {
+func NewDetail(session *workspace.Session, recordingID int64, recordingType, originView, originHint string) *Detail {
 	styles := session.Styles()
 
 	s := spinner.New()
@@ -104,6 +106,8 @@ func NewDetail(session *workspace.Session, recordingID int64, recordingType stri
 		styles:        styles,
 		recordingID:   recordingID,
 		recordingType: recordingType,
+		originView:    originView,
+		originHint:    originHint,
 		preview:       widget.NewPreview(styles),
 		spinner:       s,
 		loading:       true,
@@ -372,6 +376,13 @@ func (v *Detail) syncPreview() {
 	v.preview.SetTitle(v.data.title)
 
 	var fields []widget.PreviewField
+	if v.originView != "" {
+		hint := v.originView
+		if v.originHint != "" {
+			hint += " · " + v.originHint
+		}
+		fields = append(fields, widget.PreviewField{Key: "From", Value: hint})
+	}
 	if v.data.recordType != "" {
 		fields = append(fields, widget.PreviewField{Key: "Type", Value: v.data.recordType})
 	}

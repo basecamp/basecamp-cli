@@ -981,3 +981,115 @@ func TestWorkspace_CtrlAHintMultiAccountOnly(t *testing.T) {
 	view = w.statusBar.View()
 	assert.Contains(t, view, "switch", "multi-account should show ctrl+a hint")
 }
+
+// --- Origin context tests ---
+
+func TestWorkspace_Navigate_StripsOriginFromSession(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Root")
+
+	scope := Scope{
+		AccountID:  "1",
+		ProjectID:  42,
+		OriginView: "Activity",
+		OriginHint: "completed Todo",
+	}
+	w.Update(NavigateMsg{Target: ViewDetail, Scope: scope})
+
+	// Session scope should NOT have origin fields
+	assert.Empty(t, w.session.Scope().OriginView,
+		"session scope must not carry OriginView after navigate")
+	assert.Empty(t, w.session.Scope().OriginHint,
+		"session scope must not carry OriginHint after navigate")
+}
+
+func TestWorkspace_Navigate_ViewScopeRetainsOrigin(t *testing.T) {
+	styles := tui.NewStyles()
+	session := testSession()
+	var capturedScope Scope
+
+	factory := func(target ViewTarget, _ *Session, scope Scope) View {
+		capturedScope = scope
+		return &testView{title: targetName(target)}
+	}
+
+	w := &Workspace{
+		session:         session,
+		router:          NewRouter(),
+		styles:          styles,
+		keys:            DefaultGlobalKeyMap(),
+		registry:        DefaultActions(),
+		statusBar:       chrome.NewStatusBar(styles),
+		breadcrumb:      chrome.NewBreadcrumb(styles),
+		toast:           chrome.NewToast(styles),
+		help:            chrome.NewHelp(styles),
+		palette:         chrome.NewPalette(styles),
+		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		viewFactory:     factory,
+		sidebarTarget:   ViewActivity,
+		width:           120,
+		height:          40,
+	}
+	pushTestView(w, "Root")
+
+	scope := Scope{
+		AccountID:  "1",
+		OriginView: "Activity",
+		OriginHint: "completed Todo",
+	}
+	w.Update(NavigateMsg{Target: ViewDetail, Scope: scope})
+
+	assert.Equal(t, "Activity", capturedScope.OriginView,
+		"factory must receive scope with OriginView")
+	assert.Equal(t, "completed Todo", capturedScope.OriginHint,
+		"factory must receive scope with OriginHint")
+}
+
+func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
+	styles := tui.NewStyles()
+	session := testSession()
+	var capturedScopes []Scope
+
+	factory := func(target ViewTarget, _ *Session, scope Scope) View {
+		capturedScopes = append(capturedScopes, scope)
+		return &testView{title: targetName(target)}
+	}
+
+	w := &Workspace{
+		session:         session,
+		router:          NewRouter(),
+		styles:          styles,
+		keys:            DefaultGlobalKeyMap(),
+		registry:        DefaultActions(),
+		statusBar:       chrome.NewStatusBar(styles),
+		breadcrumb:      chrome.NewBreadcrumb(styles),
+		toast:           chrome.NewToast(styles),
+		help:            chrome.NewHelp(styles),
+		palette:         chrome.NewPalette(styles),
+		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		viewFactory:     factory,
+		sidebarTarget:   ViewActivity,
+		width:           120,
+		height:          40,
+	}
+	pushTestView(w, "Root")
+
+	// First navigation with origin
+	w.Update(NavigateMsg{Target: ViewDetail, Scope: Scope{
+		AccountID:  "1",
+		OriginView: "Activity",
+		OriginHint: "completed Todo",
+	}})
+
+	// Second navigation without origin
+	w.Update(NavigateMsg{Target: ViewSearch, Scope: Scope{
+		AccountID: "1",
+	}})
+
+	require.Len(t, capturedScopes, 2)
+	assert.Equal(t, "Activity", capturedScopes[0].OriginView)
+	assert.Empty(t, capturedScopes[1].OriginView,
+		"second navigation must not inherit stale OriginView")
+	assert.Empty(t, capturedScopes[1].OriginHint,
+		"second navigation must not inherit stale OriginHint")
+}

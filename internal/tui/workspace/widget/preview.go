@@ -43,6 +43,11 @@ func (p *Preview) SetFields(fields []PreviewField) {
 	p.fields = fields
 }
 
+// Fields returns the current metadata fields.
+func (p *Preview) Fields() []PreviewField {
+	return p.fields
+}
+
 // SetBody sets the HTML/Markdown body content.
 func (p *Preview) SetBody(html string) {
 	p.content.SetContent(html)

@@ -214,6 +214,8 @@ func (v *Activity) openSelected() tea.Cmd {
 	scope.ProjectID = meta.ProjectID
 	scope.RecordingID = meta.RecordingID
 	scope.RecordingType = meta.Target
+	scope.OriginView = "Activity"
+	scope.OriginHint = meta.Action + " " + meta.Target
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
 

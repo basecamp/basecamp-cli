@@ -81,7 +81,8 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 	case workspace.ViewForwards:
 		return views.NewForwards(session)
 	case workspace.ViewDetail:
-		return views.NewDetail(session, scope.RecordingID, scope.RecordingType)
+		return views.NewDetail(session, scope.RecordingID, scope.RecordingType,
+			scope.OriginView, scope.OriginHint)
 	case workspace.ViewPulse:
 		return views.NewPulse(session)
 	case workspace.ViewAssignments:

@@ -260,6 +260,8 @@ func (v *Hey) openSelected() tea.Cmd {
 	scope.ProjectID = meta.ProjectID
 	scope.RecordingID = meta.ID
 	scope.RecordingType = meta.Type
+	scope.OriginView = "Hey!"
+	scope.OriginHint = meta.Type
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
 

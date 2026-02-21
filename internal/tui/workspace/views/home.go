@@ -545,6 +545,7 @@ func (v *Home) openSelected() tea.Cmd {
 	case workspace.ViewDetail:
 		scope.RecordingID = meta.recordingID
 		scope.RecordingType = meta.recordType
+		scope.OriginView = "Home"
 		// Record in recents
 		if r := v.session.Recents(); r != nil {
 			r.Add(recents.Item{

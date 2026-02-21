@@ -223,5 +223,7 @@ func (v *Pulse) openSelected() tea.Cmd {
 	scope.ProjectID = meta.ProjectID
 	scope.RecordingID = meta.ID
 	scope.RecordingType = meta.Type
+	scope.OriginView = "Pulse"
+	scope.OriginHint = meta.Creator + " · " + meta.Type
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }

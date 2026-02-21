@@ -534,6 +534,13 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 		outgoing.Update(BlurMsg{})
 	}
 
+	// Capture ephemeral origin context, then clear from scope.
+	// Origin is meaningful only for the target view, not session state.
+	originView := scope.OriginView
+	originHint := scope.OriginHint
+	scope.OriginView = ""
+	scope.OriginHint = ""
+
 	prevAccountID := w.session.Scope().AccountID
 	w.session.SetScope(scope)
 
@@ -564,9 +571,14 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 	}
 	w.syncProjectRealm(scope)
 
-	view := w.viewFactory(target, w.session, scope)
+	// Build viewScope from the fully-normalized scope, reattach origin.
+	viewScope := scope
+	viewScope.OriginView = originView
+	viewScope.OriginHint = originHint
+
+	view := w.viewFactory(target, w.session, viewScope)
 	view.SetSize(w.width, w.viewHeight())
-	w.router.Push(view, scope, target)
+	w.router.Push(view, viewScope, target)
 	w.syncAccountBadge(target)
 	w.syncChrome()
 
@@ -588,6 +600,8 @@ func (w *Workspace) goBack() tea.Cmd {
 
 	w.router.Pop()
 	scope := w.router.CurrentScope()
+	scope.OriginView = ""
+	scope.OriginHint = ""
 	w.session.SetScope(scope)
 	w.syncProjectRealm(scope)
 	w.syncAccountBadge(w.router.CurrentTarget())
@@ -614,6 +628,8 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 
 	w.router.PopToDepth(depth)
 	scope := w.router.CurrentScope()
+	scope.OriginView = ""
+	scope.OriginHint = ""
 	w.session.SetScope(scope)
 	w.syncProjectRealm(scope)
 	w.syncAccountBadge(w.router.CurrentTarget())

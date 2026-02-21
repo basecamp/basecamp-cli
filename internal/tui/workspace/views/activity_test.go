@@ -204,6 +204,22 @@ func TestActivity_ValidRecordingID_OpenSelectedNavigates(t *testing.T) {
 		"NavigateMsg must carry the correct AccountID from the event metadata")
 }
 
+func TestActivity_OpenSelected_SetsOriginView(t *testing.T) {
+	entries := sampleTimeline()
+	v := testActivity(entries)
+
+	cmd := v.openSelected()
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	nav, isNav := msg.(workspace.NavigateMsg)
+	require.True(t, isNav)
+	assert.Equal(t, "Activity", nav.Scope.OriginView,
+		"openSelected must set OriginView to Activity")
+	assert.NotEmpty(t, nav.Scope.OriginHint,
+		"openSelected must set OriginHint from event action+target")
+}
+
 func TestActivity_SyncEntries_ListItemIDMatchesMetaKey(t *testing.T) {
 	entries := sampleTimeline()
 	v := testActivity(entries)
