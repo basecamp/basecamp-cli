@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -23,6 +24,7 @@ type cardsKeyMap struct {
 	Up    key.Binding
 	Down  key.Binding
 	Move  key.Binding
+	New   key.Binding
 }
 
 func defaultCardsKeyMap() cardsKeyMap {
@@ -46,6 +48,10 @@ func defaultCardsKeyMap() cardsKeyMap {
 		Move: key.NewBinding(
 			key.WithKeys("m"),
 			key.WithHelp("m", "move card"),
+		),
+		New: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "new card"),
 		),
 	}
 }
@@ -71,6 +77,10 @@ type Cards struct {
 	moveSourceCard int64 // card ID being moved
 	moveTargetCol  int   // column index currently highlighted as target
 
+	// Inline creation
+	creating    bool
+	createInput textinput.Model
+
 	// Data (local copy from pool for rendering)
 	columns []workspace.CardColumnInfo
 }
@@ -87,14 +97,19 @@ func NewCards(session *workspace.Session) *Cards {
 
 	kanban := widget.NewKanban(styles)
 
+	ti := textinput.New()
+	ti.Placeholder = "New card..."
+	ti.CharLimit = 256
+
 	return &Cards{
-		session: session,
-		pool:    pool,
-		styles:  styles,
-		keys:    defaultCardsKeyMap(),
-		kanban:  kanban,
-		spinner: s,
-		loading: true,
+		session:     session,
+		pool:        pool,
+		styles:      styles,
+		keys:        defaultCardsKeyMap(),
+		kanban:      kanban,
+		spinner:     s,
+		loading:     true,
+		createInput: ti,
 	}
 }
 
@@ -103,13 +118,24 @@ func (v *Cards) Title() string {
 	return "Card Table"
 }
 
+// InputActive implements workspace.InputCapturer.
+func (v *Cards) InputActive() bool {
+	return v.creating
+}
+
 // IsModal implements workspace.ModalActive.
 func (v *Cards) IsModal() bool {
-	return v.moving
+	return v.moving || v.creating
 }
 
 // ShortHelp implements View.
 func (v *Cards) ShortHelp() []key.Binding {
+	if v.creating {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	}
 	if v.moving {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("h/l"), key.WithHelp("h/l", "pick column")),
@@ -122,6 +148,7 @@ func (v *Cards) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "cards")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		v.keys.Move,
+		v.keys.New,
 		key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 	}
 }
@@ -217,6 +244,9 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.loading {
 			return v, nil
 		}
+		if v.creating {
+			return v, v.handleCreatingKey(msg)
+		}
 		if v.moving {
 			return v, v.handleMoveKey(msg)
 		}
@@ -244,6 +274,8 @@ func (v *Cards) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.kanban.MoveDown()
 	case key.Matches(msg, v.keys.Move):
 		return v.enterMoveMode()
+	case key.Matches(msg, v.keys.New):
+		return v.enterCreateMode()
 	}
 	return nil
 }
@@ -348,6 +380,64 @@ func (v *Cards) confirmMove() tea.Cmd {
 	return cmd
 }
 
+func (v *Cards) enterCreateMode() tea.Cmd {
+	if v.kanban.FocusedColumn() >= len(v.columns) {
+		return nil
+	}
+	col := v.columns[v.kanban.FocusedColumn()]
+	if col.Deferred {
+		return workspace.SetStatus("Cannot create in deferred column", false)
+	}
+	v.creating = true
+	v.createInput.Reset()
+	v.createInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Cards) handleCreatingKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		title := strings.TrimSpace(v.createInput.Value())
+		if title == "" {
+			v.creating = false
+			return nil
+		}
+		v.creating = false
+		return v.createCard(title)
+	case "esc":
+		v.creating = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.createInput, cmd = v.createInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Cards) createCard(title string) tea.Cmd {
+	colIdx := v.kanban.FocusedColumn()
+	if colIdx >= len(v.columns) {
+		return nil
+	}
+	col := v.columns[colIdx]
+
+	cmd := v.pool.Apply(v.session.Hub().ProjectContext(), &data.CardCreateMutation{
+		Title:     title,
+		ColumnID:  col.ID,
+		ProjectID: v.session.Scope().ProjectID,
+		Client:    v.session.AccountClient(),
+	})
+
+	// Read optimistic state immediately and render
+	snap := v.pool.Get()
+	if snap.Usable() {
+		v.columns = snap.Data
+		v.syncKanban()
+	}
+
+	return cmd
+}
+
 // View implements tea.Model.
 func (v *Cards) View() string {
 	if v.loading {
@@ -371,7 +461,13 @@ func (v *Cards) View() string {
 		return v.renderMoveMode()
 	}
 
-	return v.kanban.View()
+	board := v.kanban.View()
+	if v.creating {
+		theme := v.styles.Theme()
+		prefix := lipgloss.NewStyle().Foreground(theme.Muted).Render("  + ")
+		board += "\n" + prefix + v.createInput.View()
+	}
+	return board
 }
 
 func (v *Cards) renderMoveMode() string {
