@@ -28,16 +28,25 @@ func NewContent(styles *tui.Styles) *Content {
 }
 
 // SetContent sets the raw HTML or Markdown content and renders it.
+// Skips re-render if content is unchanged.
 func (c *Content) SetContent(html string) {
+	if html == c.raw {
+		return
+	}
 	c.raw = html
+	c.offset = 0
 	c.render()
 }
 
-// SetSize updates dimensions and re-renders.
+// SetSize updates dimensions and re-renders only if width changed.
+// Height changes affect the viewport but don't require re-rendering.
 func (c *Content) SetSize(w, h int) {
-	c.width = w
+	widthChanged := w != c.width
 	c.height = h
-	c.render()
+	if widthChanged {
+		c.width = w
+		c.render()
+	}
 }
 
 // ScrollDown scrolls the content down by n lines.
@@ -99,4 +108,14 @@ func (c *Content) render() {
 
 	c.rendered = rendered
 	c.lines = strings.Split(rendered, "\n")
+
+	// Clamp offset after render — if new content is shorter, stale offset
+	// would produce an empty or incorrect view window.
+	maxOffset := len(c.lines) - c.height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if c.offset > maxOffset {
+		c.offset = maxOffset
+	}
 }
