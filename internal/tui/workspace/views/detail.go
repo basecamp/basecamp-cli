@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -40,6 +41,7 @@ type detailData struct {
 	dueOn      string
 	comments   []detailComment
 	boosts     int
+	subscribed bool
 }
 
 // detailLoadedMsg is sent when the recording detail is fetched.
@@ -52,6 +54,15 @@ type detailLoadedMsg struct {
 type todoToggleResultMsg struct {
 	completed bool
 	err       error
+}
+
+type editTitleResultMsg struct {
+	title string
+	err   error
+}
+type subscribeResultMsg struct {
+	subscribed bool
+	err        error
 }
 
 type trashTimeoutMsg struct{}
@@ -75,6 +86,10 @@ type Detail struct {
 	composer   *widget.Composer
 	composing  bool
 	submitting bool
+
+	// Inline title editing
+	editing   bool
+	editInput textinput.Model
 
 	// Double-press trash confirmation
 	trashPending bool
@@ -136,15 +151,21 @@ func (v *Detail) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Detail) InputActive() bool {
-	return v.composing
+	return v.composing || v.editing
 }
 
 // IsModal implements workspace.ModalActive.
 func (v *Detail) IsModal() bool {
-	return v.composing
+	return v.composing || v.editing
 }
 
 func (v *Detail) ShortHelp() []key.Binding {
+	if v.editing {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	}
 	hints := []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "scroll")),
 	}
@@ -156,6 +177,8 @@ func (v *Detail) ShortHelp() []key.Binding {
 		hints = append(hints, key.NewBinding(key.WithKeys("x"), key.WithHelp("x", verb)))
 	}
 	hints = append(hints,
+		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit title")),
+		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "subscribe")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
 		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
@@ -272,6 +295,26 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, workspace.SetStatus(verb, false)
 
+	case editTitleResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "editing title")
+		}
+		v.editing = false
+		v.data.title = msg.title
+		v.syncPreview()
+		return v, workspace.SetStatus("Title updated", false)
+
+	case subscribeResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "updating subscription")
+		}
+		v.data.subscribed = msg.subscribed
+		verb := "Subscribed"
+		if !msg.subscribed {
+			verb = "Unsubscribed"
+		}
+		return v, workspace.SetStatus(verb, false)
+
 	case trashResultMsg:
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "trashing recording")
@@ -300,6 +343,9 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
+	if v.editing {
+		return v.handleEditingKey(msg)
+	}
 	if v.composing {
 		return v.handleComposingKey(msg)
 	}
@@ -310,6 +356,10 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
+	case "e":
+		return v.startEditTitle()
+	case "s":
+		return v.toggleSubscribe()
 	case "b", "B":
 		if v.data == nil {
 			return nil
@@ -400,6 +450,81 @@ func (v *Detail) goToProject() tea.Cmd {
 	return workspace.Navigate(workspace.ViewDock, scope)
 }
 
+func (v *Detail) startEditTitle() tea.Cmd {
+	if v.data == nil {
+		return nil
+	}
+	v.editing = true
+	v.editInput = textinput.New()
+	v.editInput.SetValue(v.data.title)
+	v.editInput.CharLimit = 256
+	v.editInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Detail) handleEditingKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		title := strings.TrimSpace(v.editInput.Value())
+		if title == "" || title == v.data.title {
+			v.editing = false
+			return nil
+		}
+		return v.submitEditTitle(title)
+	case "esc":
+		v.editing = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.editInput, cmd = v.editInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Detail) submitEditTitle(title string) tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	recordType := v.data.recordType
+	recordingID := v.recordingID
+
+	return func() tea.Msg {
+		var err error
+		switch strings.ToLower(recordType) {
+		case "todo":
+			err = hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
+				&basecamp.UpdateTodoRequest{Content: title})
+		case "card":
+			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
+				&basecamp.UpdateCardRequest{Title: title})
+		default:
+			err = fmt.Errorf("editing %s titles is not supported", recordType)
+		}
+		return editTitleResultMsg{title: title, err: err}
+	}
+}
+
+func (v *Detail) toggleSubscribe() tea.Cmd {
+	if v.data == nil {
+		return nil
+	}
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	wasSubscribed := v.data.subscribed
+	recordingID := v.recordingID
+
+	return func() tea.Msg {
+		var err error
+		if wasSubscribed {
+			err = hub.Unsubscribe(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		} else {
+			err = hub.Subscribe(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		}
+		return subscribeResultMsg{subscribed: !wasSubscribed, err: err}
+	}
+}
+
 func (v *Detail) handleComposingKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case msg.String() == "esc":
@@ -477,7 +602,13 @@ func (v *Detail) View() string {
 		)
 	}
 
-	return lipgloss.NewStyle().Padding(0, 1).Render(v.preview.View())
+	view := v.preview.View()
+	if v.editing {
+		theme := v.styles.Theme()
+		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Title: ")
+		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.editInput.View())
+	}
+	return lipgloss.NewStyle().Padding(0, 1).Render(view)
 }
 
 func (v *Detail) syncPreview() {
@@ -700,6 +831,20 @@ func (v *Detail) fetchDetail() tea.Cmd {
 			}
 		}
 
+		// Best-effort subscription state — default to false if fetch fails
+		data.subscribed = fetchSubscriptionState(
+			client.Subscriptions().Get(ctx, scope.ProjectID, recordingID),
+		)
+
 		return detailLoadedMsg{data: data}
 	}
+}
+
+// fetchSubscriptionState extracts the subscribed flag from a Subscriptions().Get
+// result. Returns false on any error or nil response (best-effort fallback).
+func fetchSubscriptionState(sub *basecamp.Subscription, err error) bool {
+	if err != nil || sub == nil {
+		return false
+	}
+	return sub.Subscribed
 }

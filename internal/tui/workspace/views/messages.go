@@ -16,6 +16,12 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
+// pinResultMsg is sent after a pin/unpin operation.
+type pinResultMsg struct {
+	pinned bool
+	err    error
+}
+
 // Messages is the split-pane view for a project's message board.
 type Messages struct {
 	session *workspace.Session
@@ -84,6 +90,8 @@ func (v *Messages) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new message")),
+		key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "pin")),
+		key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "unpin")),
 		key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 	}
 }
@@ -165,6 +173,25 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case pinResultMsg:
+		if msg.err != nil {
+			action := "pinning"
+			if !msg.pinned {
+				action = "unpinning"
+			}
+			return v, workspace.ReportError(msg.err, action+" message")
+		}
+		verb := "Pinned"
+		if !msg.pinned {
+			verb = "Unpinned"
+		}
+		// Refresh list so pin-order changes appear immediately.
+		v.pool.Invalidate()
+		return v, tea.Batch(
+			workspace.SetStatus(verb, false),
+			v.pool.Fetch(v.session.Hub().ProjectContext()),
+		)
+
 	case workspace.MessageCreatedMsg:
 		// A message was created from the compose view — refresh the list
 		if msg.Err == nil {
@@ -219,7 +246,10 @@ func (v *Messages) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case msg.String() == "b" || msg.String() == "B":
 		return v.boostSelectedMessage()
-
+	case msg.String() == "P":
+		return v.pinSelectedMessage()
+	case msg.String() == "U":
+		return v.unpinSelectedMessage()
 	case msg.String() == "n":
 		return v.composeNewMessage()
 	case key.Matches(msg, keys.Open):
@@ -388,6 +418,38 @@ func (v *Messages) fetchMessageDetail(messageID int64) tea.Cmd {
 			Category:  category,
 			Content:   msg.Content,
 		}
+	}
+}
+
+func (v *Messages) pinSelectedMessage() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	var msgID int64
+	fmt.Sscanf(item.ID, "%d", &msgID)
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	return func() tea.Msg {
+		err := hub.PinMessage(ctx, scope.AccountID, scope.ProjectID, msgID)
+		return pinResultMsg{pinned: true, err: err}
+	}
+}
+
+func (v *Messages) unpinSelectedMessage() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	var msgID int64
+	fmt.Sscanf(item.ID, "%d", &msgID)
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	return func() tea.Msg {
+		err := hub.UnpinMessage(ctx, scope.AccountID, scope.ProjectID, msgID)
+		return pinResultMsg{pinned: false, err: err}
 	}
 }
 

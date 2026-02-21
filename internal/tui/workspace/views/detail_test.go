@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
@@ -260,4 +262,112 @@ func TestDetail_ShortHelp_HidesProject_WithoutScope(t *testing.T) {
 	for _, h := range hints {
 		assert.NotEqual(t, "g", h.Help().Key, "should not show g hint without project")
 	}
+}
+
+// -- Edit title tests --
+
+func TestDetail_EditTitle_EnterSubmits(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+
+	// Press 'e' to enter edit mode
+	cmd := v.handleKey(runeKey('e'))
+	require.NotNil(t, cmd, "e should return a cmd (textinput.Blink)")
+	assert.True(t, v.editing, "should be in editing mode after pressing e")
+
+	// Type a new title
+	v.editInput.SetValue("Updated Title")
+
+	// Press Enter to submit
+	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd, "enter with changed title should return a cmd")
+
+	msg := cmd()
+	result, ok := msg.(editTitleResultMsg)
+	require.True(t, ok, "cmd should produce editTitleResultMsg")
+	assert.Equal(t, "Updated Title", result.title)
+	// Error expected since test session has nil SDK
+	assert.Error(t, result.err)
+}
+
+func TestDetail_EditTitle_EscCancels(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+
+	// Enter edit mode
+	v.handleKey(runeKey('e'))
+	assert.True(t, v.editing)
+
+	// Press Esc to cancel
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd, "esc should return nil cmd")
+	assert.False(t, v.editing, "editing should be false after esc")
+}
+
+func TestDetail_EditTitle_InputCapturer(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+
+	assert.False(t, v.InputActive(), "should not capture input before editing")
+
+	// Enter edit mode
+	v.handleKey(runeKey('e'))
+	assert.True(t, v.InputActive(), "should capture input while editing")
+
+	// Cancel editing
+	v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.False(t, v.InputActive(), "should not capture input after cancel")
+}
+
+// -- Subscribe toggle tests --
+
+func TestDetail_Subscribe_Toggle(t *testing.T) {
+	// Subscribe: subscribed=false → should call subscribe
+	v := testDetailWithSession("Todo", false)
+	v.data.subscribed = false
+
+	cmd := v.handleKey(runeKey('s'))
+	require.NotNil(t, cmd, "s should return a cmd")
+
+	msg := cmd()
+	result, ok := msg.(subscribeResultMsg)
+	require.True(t, ok, "cmd should produce subscribeResultMsg")
+	assert.True(t, result.subscribed, "should request subscribe when currently unsubscribed")
+	// Error expected since test session has nil SDK
+	assert.Error(t, result.err)
+
+	// Unsubscribe: subscribed=true → should call unsubscribe
+	v2 := testDetailWithSession("Todo", false)
+	v2.data.subscribed = true
+
+	cmd = v2.handleKey(runeKey('s'))
+	require.NotNil(t, cmd, "s should return a cmd")
+
+	msg = cmd()
+	result, ok = msg.(subscribeResultMsg)
+	require.True(t, ok, "cmd should produce subscribeResultMsg")
+	assert.False(t, result.subscribed, "should request unsubscribe when currently subscribed")
+	assert.Error(t, result.err)
+}
+
+func TestDetail_FetchSubscriptionState(t *testing.T) {
+	// Directly exercises the fallback logic extracted from fetchDetail() line 834.
+	// fetchSubscriptionState(sub, err) returns false on error or nil response.
+
+	t.Run("error returns false", func(t *testing.T) {
+		got := fetchSubscriptionState(nil, assert.AnError)
+		assert.False(t, got)
+	})
+
+	t.Run("nil subscription returns false", func(t *testing.T) {
+		got := fetchSubscriptionState(nil, nil)
+		assert.False(t, got)
+	})
+
+	t.Run("subscribed true returns true", func(t *testing.T) {
+		got := fetchSubscriptionState(&basecamp.Subscription{Subscribed: true}, nil)
+		assert.True(t, got)
+	})
+
+	t.Run("subscribed false returns false", func(t *testing.T) {
+		got := fetchSubscriptionState(&basecamp.Subscription{Subscribed: false}, nil)
+		assert.False(t, got)
+	})
 }

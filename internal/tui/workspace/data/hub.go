@@ -826,6 +826,63 @@ func (h *Hub) TrashRecording(ctx context.Context, accountID string, projectID, r
 	return client.Recordings().Trash(ctx, projectID, recordingID)
 }
 
+// UpdateTodo updates a todo's fields.
+func (h *Hub) UpdateTodo(ctx context.Context, accountID string, projectID, todoID int64, req *basecamp.UpdateTodoRequest) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Todos().Update(ctx, projectID, todoID, req)
+	return err
+}
+
+// UpdateCard updates a card's fields.
+func (h *Hub) UpdateCard(ctx context.Context, accountID string, projectID, cardID int64, req *basecamp.UpdateCardRequest) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Cards().Update(ctx, projectID, cardID, req)
+	return err
+}
+
+// PinMessage pins a message to the top of its board.
+func (h *Hub) PinMessage(ctx context.Context, accountID string, projectID, messageID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Messages().Pin(ctx, projectID, messageID)
+}
+
+// UnpinMessage unpins a message from the board.
+func (h *Hub) UnpinMessage(ctx context.Context, accountID string, projectID, messageID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Messages().Unpin(ctx, projectID, messageID)
+}
+
+// Subscribe subscribes the current user to a recording.
+func (h *Hub) Subscribe(ctx context.Context, accountID string, projectID, recordingID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Subscriptions().Subscribe(ctx, projectID, recordingID)
+	return err
+}
+
+// Unsubscribe unsubscribes the current user from a recording.
+func (h *Hub) Unsubscribe(ctx context.Context, accountID string, projectID, recordingID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Subscriptions().Unsubscribe(ctx, projectID, recordingID)
+}
+
 // mapBoostInfo converts an SDK Boost to BoostInfo.
 func mapBoostInfo(b basecamp.Boost) BoostInfo {
 	booster := ""
