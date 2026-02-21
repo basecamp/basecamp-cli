@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -15,6 +16,17 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
+
+// Hey-local mutation result messages.
+type heyCompleteResultMsg struct {
+	itemID string
+	err    error
+}
+type heyTrashResultMsg struct {
+	itemID string
+	err    error
+}
+type heyTrashTimeoutMsg struct{}
 
 // Hey is the activity feed view showing recently updated recordings across
 // all accounts. It replaces the empty notifications stub with real data
@@ -30,6 +42,11 @@ type Hey struct {
 
 	// Entries metadata for navigation
 	entryMeta map[string]workspace.ActivityEntryInfo
+	excluded  map[string]bool // items completed/trashed, pending pool refresh
+
+	// Double-press trash confirmation
+	trashPending   bool
+	trashPendingID string
 
 	width, height int
 }
@@ -56,6 +73,7 @@ func NewHey(session *workspace.Session) *Hey {
 		spinner:   s,
 		loading:   true,
 		entryMeta: make(map[string]workspace.ActivityEntryInfo),
+		excluded:  make(map[string]bool),
 	}
 }
 
@@ -68,6 +86,8 @@ func (v *Hey) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "complete")),
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
 	}
 }
 
@@ -106,6 +126,9 @@ func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
 			snap := v.pool.Get()
+			if snap.State == data.StateFresh {
+				v.excluded = make(map[string]bool) // API response reflects mutations
+			}
 			if snap.Usable() {
 				hadEntries := v.list.Len() > 0
 				v.syncEntries(snap.Data)
@@ -124,6 +147,33 @@ func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.loading = true
 			}
 		}
+		return v, nil
+
+	case heyCompleteResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "completing todo")
+		}
+		v.excluded[msg.itemID] = true
+		snap := v.pool.Get()
+		if snap.Usable() {
+			v.syncEntries(snap.Data)
+		}
+		return v, workspace.SetStatus("Completed", false)
+
+	case heyTrashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing recording")
+		}
+		v.excluded[msg.itemID] = true
+		snap := v.pool.Get()
+		if snap.Usable() {
+			v.syncEntries(snap.Data)
+		}
+		return v, workspace.SetStatus("Trashed", false)
+
+	case heyTrashTimeoutMsg:
+		v.trashPending = false
+		v.trashPendingID = ""
 		return v, nil
 
 	case workspace.RefreshMsg:
@@ -156,6 +206,23 @@ func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.loading {
 			return v, nil
 		}
+
+		// Reset trash confirmation on non-t keys or when filtering
+		if msg.String() != "t" || v.list.Filtering() {
+			v.trashPending = false
+			v.trashPendingID = ""
+		}
+
+		// Mutation keys: blocked during filter
+		if !v.list.Filtering() {
+			switch msg.String() {
+			case "x":
+				return v, v.completeSelected()
+			case "t":
+				return v, v.trashSelected()
+			}
+		}
+
 		keys := workspace.DefaultListKeyMap()
 		switch {
 		case key.Matches(msg, keys.Open):
@@ -210,6 +277,9 @@ func (v *Hey) syncEntries(entries []workspace.ActivityEntryInfo) {
 		items = append(items, widget.ListItem{Title: label, Header: true})
 		for _, e := range group {
 			id := fmt.Sprintf("%s:%d", e.AccountID, e.ID)
+			if v.excluded[id] {
+				continue
+			}
 			v.entryMeta[id] = e
 			desc := e.Account
 			if e.Project != "" {
@@ -263,6 +333,57 @@ func (v *Hey) openSelected() tea.Cmd {
 	scope.OriginView = "Hey!"
 	scope.OriginHint = meta.Type
 	return workspace.Navigate(workspace.ViewDetail, scope)
+}
+
+func (v *Hey) completeSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	meta, ok := v.entryMeta[item.ID]
+	if !ok {
+		return nil
+	}
+	if !strings.EqualFold(meta.Type, "Todo") {
+		return workspace.SetStatus("Can only complete todos", false)
+	}
+
+	hub := v.session.Hub()
+	ctx := hub.Global().Context()
+	itemID := item.ID
+	return func() tea.Msg {
+		err := hub.CompleteTodo(ctx, meta.AccountID, meta.ProjectID, meta.ID)
+		return heyCompleteResultMsg{itemID: itemID, err: err}
+	}
+}
+
+func (v *Hey) trashSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	meta, ok := v.entryMeta[item.ID]
+	if !ok {
+		return nil
+	}
+
+	if v.trashPending && v.trashPendingID == item.ID {
+		v.trashPending = false
+		v.trashPendingID = ""
+		hub := v.session.Hub()
+		ctx := hub.Global().Context()
+		itemID := item.ID
+		return func() tea.Msg {
+			err := hub.TrashRecording(ctx, meta.AccountID, meta.ProjectID, meta.ID)
+			return heyTrashResultMsg{itemID: itemID, err: err}
+		}
+	}
+	v.trashPending = true
+	v.trashPendingID = item.ID
+	return tea.Batch(
+		workspace.SetStatus("Press t again to trash", false),
+		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return heyTrashTimeoutMsg{} }),
+	)
 }
 
 func (v *Hey) schedulePoll() tea.Cmd {

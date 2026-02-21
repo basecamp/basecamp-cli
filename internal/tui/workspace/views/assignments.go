@@ -16,6 +16,17 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
+// Assignments-local mutation result messages.
+type assignmentCompleteResultMsg struct {
+	itemID string
+	err    error
+}
+type assignmentTrashResultMsg struct {
+	itemID string
+	err    error
+}
+type assignmentTrashTimeoutMsg struct{}
+
 // Assignments shows cross-account todo assignments for the current user,
 // grouped by due date (overdue, this week, later).
 type Assignments struct {
@@ -28,6 +39,11 @@ type Assignments struct {
 	loading bool
 
 	assignmentMeta map[string]workspace.AssignmentInfo
+	excluded       map[string]bool // items completed/trashed, pending pool refresh
+
+	// Double-press trash confirmation
+	trashPending   bool
+	trashPendingID string
 
 	width, height int
 }
@@ -53,6 +69,7 @@ func NewAssignments(session *workspace.Session) *Assignments {
 		spinner:        s,
 		loading:        true,
 		assignmentMeta: make(map[string]workspace.AssignmentInfo),
+		excluded:       make(map[string]bool),
 	}
 }
 
@@ -65,6 +82,8 @@ func (v *Assignments) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "complete")),
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
 	}
 }
 
@@ -101,6 +120,9 @@ func (v *Assignments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
 			snap := v.pool.Get()
+			if snap.State == data.StateFresh {
+				v.excluded = make(map[string]bool) // API response reflects mutations
+			}
 			if snap.Usable() {
 				v.syncAssignments(snap.Data)
 				v.loading = false
@@ -113,6 +135,33 @@ func (v *Assignments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.loading = true
 			}
 		}
+		return v, nil
+
+	case assignmentCompleteResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "completing todo")
+		}
+		v.excluded[msg.itemID] = true
+		snap := v.pool.Get()
+		if snap.Usable() {
+			v.syncAssignments(snap.Data)
+		}
+		return v, workspace.SetStatus("Completed", false)
+
+	case assignmentTrashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing todo")
+		}
+		v.excluded[msg.itemID] = true
+		snap := v.pool.Get()
+		if snap.Usable() {
+			v.syncAssignments(snap.Data)
+		}
+		return v, workspace.SetStatus("Trashed", false)
+
+	case assignmentTrashTimeoutMsg:
+		v.trashPending = false
+		v.trashPendingID = ""
 		return v, nil
 
 	case workspace.RefreshMsg:
@@ -131,6 +180,23 @@ func (v *Assignments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.loading {
 			return v, nil
 		}
+
+		// Reset trash confirmation on non-t keys or when filtering
+		if msg.String() != "t" || v.list.Filtering() {
+			v.trashPending = false
+			v.trashPendingID = ""
+		}
+
+		// Mutation keys: blocked during filter
+		if !v.list.Filtering() {
+			switch msg.String() {
+			case "x":
+				return v, v.completeSelected()
+			case "t":
+				return v, v.trashSelected()
+			}
+		}
+
 		keys := workspace.DefaultListKeyMap()
 		switch {
 		case key.Matches(msg, keys.Open):
@@ -192,6 +258,9 @@ func (v *Assignments) syncAssignments(assignments []workspace.AssignmentInfo) {
 		items = append(items, widget.ListItem{Title: label, Header: true})
 		for _, a := range group {
 			id := fmt.Sprintf("%s:%d", a.AccountID, a.ID)
+			if v.excluded[id] {
+				continue
+			}
 			v.assignmentMeta[id] = a
 			desc := a.Account
 			if a.Project != "" {
@@ -244,4 +313,52 @@ func (v *Assignments) openSelected() tea.Cmd {
 	scope.RecordingID = meta.ID
 	scope.RecordingType = "Todo"
 	return workspace.Navigate(workspace.ViewDetail, scope)
+}
+
+func (v *Assignments) completeSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	meta, ok := v.assignmentMeta[item.ID]
+	if !ok {
+		return nil
+	}
+
+	hub := v.session.Hub()
+	ctx := hub.Global().Context()
+	itemID := item.ID
+	return func() tea.Msg {
+		err := hub.CompleteTodo(ctx, meta.AccountID, meta.ProjectID, meta.ID)
+		return assignmentCompleteResultMsg{itemID: itemID, err: err}
+	}
+}
+
+func (v *Assignments) trashSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	meta, ok := v.assignmentMeta[item.ID]
+	if !ok {
+		return nil
+	}
+
+	if v.trashPending && v.trashPendingID == item.ID {
+		v.trashPending = false
+		v.trashPendingID = ""
+		hub := v.session.Hub()
+		ctx := hub.Global().Context()
+		itemID := item.ID
+		return func() tea.Msg {
+			err := hub.TrashRecording(ctx, meta.AccountID, meta.ProjectID, meta.ID)
+			return assignmentTrashResultMsg{itemID: itemID, err: err}
+		}
+	}
+	v.trashPending = true
+	v.trashPendingID = item.ID
+	return tea.Batch(
+		workspace.SetStatus("Press t again to trash", false),
+		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return assignmentTrashTimeoutMsg{} }),
+	)
 }
