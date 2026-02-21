@@ -268,13 +268,9 @@ func DefaultActions() *Registry {
 			scope := session.Scope()
 			hub := session.Hub()
 			ctx := hub.ProjectContext()
-			return func() tea.Msg {
-				err := hub.CompleteTodo(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
-				if err != nil {
-					return ErrorMsg{Err: err, Context: "completing todo"}
-				}
-				return StatusMsg{Text: "Completed"}
-			}
+			return completeCmd(func() error {
+				return hub.CompleteTodo(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+			})
 		},
 	})
 	r.Register(Action{
@@ -290,17 +286,36 @@ func DefaultActions() *Registry {
 			scope := session.Scope()
 			hub := session.Hub()
 			ctx := hub.ProjectContext()
-			return func() tea.Msg {
-				err := hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
-				if err != nil {
-					return ErrorMsg{Err: err, Context: "trashing recording"}
-				}
-				return StatusMsg{Text: "Trashed"}
-			}
+			return trashCmd(func() error {
+				return hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+			})
 		},
 	})
 
 	return r
+}
+
+// completeCmd builds a tea.Cmd that calls completeFn and returns a StatusMsg on success.
+func completeCmd(completeFn func() error) tea.Cmd {
+	return func() tea.Msg {
+		if err := completeFn(); err != nil {
+			return ErrorMsg{Err: err, Context: "completing todo"}
+		}
+		return StatusMsg{Text: "Completed"}
+	}
+}
+
+// trashCmd builds a tea.Cmd that calls trashFn and returns StatusMsg + NavigateBack on success.
+func trashCmd(trashFn func() error) tea.Cmd {
+	return func() tea.Msg {
+		if err := trashFn(); err != nil {
+			return ErrorMsg{Err: err, Context: "trashing recording"}
+		}
+		return tea.BatchMsg{
+			func() tea.Msg { return StatusMsg{Text: "Trashed"} },
+			func() tea.Msg { return NavigateBackMsg{} },
+		}
+	}
 }
 
 // openInBrowser builds a Basecamp URL from scope and opens it in the default browser.

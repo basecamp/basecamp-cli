@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -243,34 +244,46 @@ func TestAction_Available_RefinesScope_DoesNotBypass(t *testing.T) {
 	assert.Empty(t, results, "Available should not bypass scope check")
 }
 
-func TestAction_Trash_ProducesStatusMsg_NotNavigateBack(t *testing.T) {
-	r := DefaultActions()
-	scope := Scope{
-		AccountID:     "1",
-		ProjectID:     42,
-		RecordingID:   100,
-		RecordingType: "Todo",
-	}
-	actions := r.ForScope(scope)
-	var trashAction *Action
-	for _, a := range actions {
-		if a.Name == ":trash" {
-			a := a
-			trashAction = &a
-			break
-		}
-	}
-	require.NotNil(t, trashAction, ":trash should be in scope")
-
-	// Execute with a test session that has Hub
-	session := NewTestSessionWithScope(scope)
-	cmd := trashAction.Execute(session)
-	require.NotNil(t, cmd)
-
+func TestCompleteCmd_Success(t *testing.T) {
+	cmd := completeCmd(func() error { return nil })
 	msg := cmd()
-	// Hub.TrashRecording will fail (nil SDK), so we get ErrorMsg
-	_, isError := msg.(ErrorMsg)
-	assert.True(t, isError, "palette trash should produce ErrorMsg (nil SDK), not NavigateBackMsg")
+	status, ok := msg.(StatusMsg)
+	require.True(t, ok, "success should produce StatusMsg")
+	assert.Equal(t, "Completed", status.Text)
+}
+
+func TestCompleteCmd_Error(t *testing.T) {
+	cmd := completeCmd(func() error { return fmt.Errorf("boom") })
+	msg := cmd()
+	errMsg, ok := msg.(ErrorMsg)
+	require.True(t, ok, "error should produce ErrorMsg")
+	assert.Equal(t, "completing todo", errMsg.Context)
+}
+
+func TestTrashCmd_Success_ProducesStatusAndNavigateBack(t *testing.T) {
+	cmd := trashCmd(func() error { return nil })
+	msg := cmd()
+
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "success should produce BatchMsg")
+	require.Len(t, batch, 2)
+
+	msg0 := batch[0]()
+	status, ok := msg0.(StatusMsg)
+	require.True(t, ok, "first msg should be StatusMsg")
+	assert.Equal(t, "Trashed", status.Text)
+
+	msg1 := batch[1]()
+	_, ok = msg1.(NavigateBackMsg)
+	assert.True(t, ok, "second msg should be NavigateBackMsg")
+}
+
+func TestTrashCmd_Error(t *testing.T) {
+	cmd := trashCmd(func() error { return fmt.Errorf("boom") })
+	msg := cmd()
+	errMsg, ok := msg.(ErrorMsg)
+	require.True(t, ok, "error should produce ErrorMsg")
+	assert.Equal(t, "trashing recording", errMsg.Context)
 }
 
 // -- helpers --
