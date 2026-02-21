@@ -43,8 +43,9 @@ type Workspace struct {
 
 	// Sidebar
 	sidebarView    View
-	sidebarTarget  ViewTarget
-	sidebarRatio   float64 // left panel ratio (0.30 default)
+	sidebarTargets []ViewTarget // cycle order
+	sidebarIndex   int          // current position in cycle (-1 = closed)
+	sidebarRatio   float64      // left panel ratio (0.30 default)
 	showSidebar    bool
 	sidebarFocused bool
 
@@ -84,7 +85,8 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		quickJump:       chrome.NewQuickJump(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
-		sidebarTarget:   ViewActivity,
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
 	}
 
@@ -767,20 +769,49 @@ func (w *Workspace) openAccountSwitcher() tea.Cmd {
 
 func (w *Workspace) toggleSidebar() tea.Cmd {
 	if w.showSidebar && w.sidebarView != nil {
-		// Close sidebar
+		// Blur outgoing sidebar
 		w.sidebarView.Update(BlurMsg{})
-		w.showSidebar = false
+
+		// Advance to next panel, or close if at end
+		w.sidebarIndex++
+		if w.sidebarIndex >= len(w.sidebarTargets) {
+			// Close
+			w.sidebarView = nil
+			w.showSidebar = false
+			w.sidebarFocused = false
+			w.sidebarIndex = -1
+			w.relayout()
+			// Refocus main view
+			if view := w.router.Current(); view != nil {
+				updated, cmd := view.Update(FocusMsg{})
+				w.replaceCurrentView(updated)
+				return w.stampCmd(cmd)
+			}
+			return nil
+		}
+		// Switch to next panel — reset focus to main
 		w.sidebarFocused = false
-		w.relayout()
-		return nil
+		return w.openSidebarPanel(w.sidebarTargets[w.sidebarIndex])
 	}
-	// Open sidebar
+	// Open from closed
+	w.sidebarIndex = 0
 	w.showSidebar = true
 	w.sidebarFocused = false
+	return w.openSidebarPanel(w.sidebarTargets[0])
+}
+
+func (w *Workspace) openSidebarPanel(target ViewTarget) tea.Cmd {
 	scope := w.session.Scope()
-	w.sidebarView = w.viewFactory(w.sidebarTarget, w.session, scope)
+	w.sidebarView = w.viewFactory(target, w.session, scope)
 	w.relayout()
-	return tea.Batch(w.stampCmd(w.sidebarView.Init()), func() tea.Msg { return FocusMsg{} })
+	// Init new sidebar; refocus main view
+	cmds := []tea.Cmd{w.stampCmd(w.sidebarView.Init())}
+	if view := w.router.Current(); view != nil {
+		updated, cmd := view.Update(FocusMsg{})
+		w.replaceCurrentView(updated)
+		cmds = append(cmds, w.stampCmd(cmd))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (w *Workspace) switchSidebarFocus() {

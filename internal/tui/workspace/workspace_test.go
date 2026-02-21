@@ -71,6 +71,8 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		viewFactory:     factory,
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
 	}
@@ -94,6 +96,7 @@ func targetName(t ViewTarget) string {
 		ViewPings:       "Pings",
 		ViewActivity:    "Activity",
 		ViewTimeline:    "Project Activity",
+		ViewHome:        "Home",
 	}
 	if n, ok := names[t]; ok {
 		return n
@@ -441,8 +444,10 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
-		width:  120,
-		height: 40,
+		sidebarTargets: []ViewTarget{ViewActivity, ViewHome},
+		sidebarIndex:   -1,
+		width:          120,
+		height:         40,
 	}
 }
 
@@ -471,8 +476,8 @@ func TestWorkspace_AccountSwitchIsolation(t *testing.T) {
 	w.switchAccount("new-account", "New")
 
 	newView := w.router.Current().(*testView)
-	require.NotEqual(t, oldView, newView,
-		"switch should create a fresh view")
+	require.False(t, oldView == newView,
+		"switch should create a fresh view (pointer identity)")
 
 	// 3. Execute the stale Cmd — returns EpochMsg{Epoch: 0, Inner: ...}.
 	staleMsg := staleCmd()
@@ -1026,7 +1031,8 @@ func TestWorkspace_Navigate_ViewScopeRetainsOrigin(t *testing.T) {
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		viewFactory:     factory,
-		sidebarTarget:   ViewActivity,
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
 	}
@@ -1068,7 +1074,8 @@ func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		viewFactory:     factory,
-		sidebarTarget:   ViewActivity,
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
 	}
@@ -1092,4 +1099,77 @@ func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
 		"second navigation must not inherit stale OriginView")
 	assert.Empty(t, capturedScopes[1].OriginHint,
 		"second navigation must not inherit stale OriginHint")
+}
+
+// --- Sidebar cycling tests ---
+
+func TestWorkspace_SidebarCyclesActivityHomeClosed(t *testing.T) {
+	w, viewLog := testWorkspace()
+	pushTestView(w, "Home")
+
+	// 1st ctrl+b: opens Activity
+	w.toggleSidebar()
+	require.True(t, w.showSidebar)
+	require.NotNil(t, w.sidebarView)
+	assert.Equal(t, "Activity", w.sidebarView.Title())
+
+	// 2nd ctrl+b: cycles to Home
+	w.toggleSidebar()
+	require.True(t, w.showSidebar)
+	require.NotNil(t, w.sidebarView)
+	assert.Equal(t, "Home", w.sidebarView.Title())
+
+	// 3rd ctrl+b: closes
+	w.toggleSidebar()
+	assert.False(t, w.showSidebar)
+	assert.Nil(t, w.sidebarView)
+	assert.Equal(t, -1, w.sidebarIndex)
+
+	_ = viewLog
+}
+
+func TestWorkspace_SidebarCycleResetOnClose(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Home")
+
+	// Open → cycle → close
+	w.toggleSidebar()
+	w.toggleSidebar()
+	w.toggleSidebar()
+	assert.False(t, w.showSidebar)
+
+	// Reopen — should start at index 0 (Activity) again
+	w.toggleSidebar()
+	require.True(t, w.showSidebar)
+	require.NotNil(t, w.sidebarView)
+	assert.Equal(t, "Activity", w.sidebarView.Title())
+}
+
+func TestWorkspace_SidebarCycleNarrowTerminal(t *testing.T) {
+	w, _ := testWorkspace()
+	w.width = 80 // below sidebarMinWidth (100)
+	pushTestView(w, "Home")
+
+	w.toggleSidebar()
+
+	// Sidebar is logically open but not rendered
+	assert.True(t, w.showSidebar, "sidebar should be logically open")
+	assert.NotNil(t, w.sidebarView, "sidebar view should be created")
+	assert.False(t, w.sidebarActive(), "sidebar should not be rendered at narrow width")
+}
+
+func TestWorkspace_SidebarCycleWhileFocused(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Home")
+
+	// Open sidebar and focus it
+	w.toggleSidebar()
+	require.True(t, w.sidebarActive())
+	w.switchSidebarFocus()
+	require.True(t, w.sidebarFocused)
+
+	// ctrl+b should cycle AND reset focus to main
+	w.toggleSidebar()
+	assert.False(t, w.sidebarFocused, "cycling should reset sidebar focus to main")
+	assert.True(t, w.showSidebar, "should still be showing sidebar (Home panel)")
 }
