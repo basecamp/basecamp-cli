@@ -48,6 +48,81 @@ func TestKanban_SetColumns_ClampsFocus(t *testing.T) {
 	assert.Equal(t, 0, k.cardIdx, "cardIdx should clamp to 0 for deferred column")
 }
 
+func TestKanban_SetColumns_PreservesIdentity(t *testing.T) {
+	k := testKanban()
+	k.SetColumns(sampleColumns())
+
+	// Focus on Card B (col 0, card 1)
+	k.cardIdx = 1
+	assert.Equal(t, "11", k.FocusedCard().ID)
+
+	// Reorder: swap columns 0 and 1, Card B stays in Triage
+	reordered := []KanbanColumn{
+		{
+			ID: "2", Title: "In Progress", Color: "green", Count: 1,
+			Items: []KanbanCard{{ID: "20", Title: "Card C"}},
+		},
+		{
+			ID: "1", Title: "Triage", Color: "blue", Count: 2,
+			Items: []KanbanCard{
+				{ID: "10", Title: "Card A"},
+				{ID: "11", Title: "Card B"},
+			},
+		},
+		{ID: "3", Title: "Done", Deferred: true, Count: 47},
+	}
+	k.SetColumns(reordered)
+
+	// Cursor should follow Triage (now at index 1) and Card B (still at index 1)
+	assert.Equal(t, 1, k.colIdx, "colIdx should follow Triage column by ID")
+	card := k.FocusedCard()
+	require.NotNil(t, card)
+	assert.Equal(t, "11", card.ID, "cursor should follow Card B by ID")
+}
+
+func TestKanban_EmptyColumnRoundTrip(t *testing.T) {
+	k := testKanban()
+	cols := []KanbanColumn{
+		{
+			ID: "1", Title: "Left", Count: 3,
+			Items: []KanbanCard{
+				{ID: "10", Title: "A"},
+				{ID: "11", Title: "B"},
+				{ID: "12", Title: "C"},
+			},
+		},
+		{ID: "2", Title: "Empty", Count: 0, Items: nil},
+		{
+			ID: "3", Title: "Right", Count: 2,
+			Items: []KanbanCard{
+				{ID: "30", Title: "X"},
+				{ID: "31", Title: "Y"},
+			},
+		},
+	}
+	k.SetColumns(cols)
+
+	// Focus card C (index 2) in Left
+	k.cardIdx = 2
+	assert.Equal(t, "12", k.FocusedCard().ID)
+
+	// Move right through empty column to Right
+	k.MoveRight() // now on Empty
+	assert.Equal(t, 1, k.colIdx)
+	k.MoveRight() // now on Right
+	assert.Equal(t, 2, k.colIdx)
+
+	// Move left back through empty column to Left
+	k.MoveLeft() // back on Empty
+	assert.Equal(t, 1, k.colIdx)
+	k.MoveLeft() // back on Left
+	assert.Equal(t, 0, k.colIdx)
+
+	// cardIdx should be restored to 2 (Card C)
+	assert.Equal(t, 2, k.cardIdx, "cardIdx should be restored after round-trip through empty column")
+	assert.Equal(t, "12", k.FocusedCard().ID)
+}
+
 func TestKanban_Navigation(t *testing.T) {
 	k := testKanban()
 	k.SetColumns(sampleColumns())

@@ -321,6 +321,8 @@ func (v *Cards) confirmMove() tea.Cmd {
 
 	targetColumnID := v.columns[v.moveTargetCol].ID
 
+	targetDeferred := v.columns[v.moveTargetCol].Deferred
+
 	cmd := v.pool.Apply(v.session.Hub().ProjectContext(), data.CardMoveMutation{
 		CardID:         v.moveSourceCard,
 		SourceColIdx:   v.moveSourceCol,
@@ -335,6 +337,12 @@ func (v *Cards) confirmMove() tea.Cmd {
 	if snap.Usable() {
 		v.columns = snap.Data
 		v.syncKanban()
+	}
+
+	// If moved to a deferred column (renders as count-only placeholder),
+	// keep kanban focus on the source column's next card.
+	if targetDeferred {
+		v.kanban.FocusColumn(v.moveSourceCol)
 	}
 
 	return cmd

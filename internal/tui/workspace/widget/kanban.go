@@ -43,6 +43,9 @@ type Kanban struct {
 	cardIdx int // focused card index within column
 	focused bool
 
+	// Per-column cardIdx memory, keyed by column ID (survives reordering)
+	cardIdxPerCol map[string]int
+
 	// Per-column scroll offsets (first visible card index)
 	scrolls []int
 }
@@ -50,26 +53,62 @@ type Kanban struct {
 // NewKanban creates a new kanban board widget.
 func NewKanban(styles *tui.Styles) *Kanban {
 	return &Kanban{
-		styles:  styles,
-		focused: true,
+		styles:        styles,
+		focused:       true,
+		cardIdxPerCol: make(map[string]int),
 	}
 }
 
-// SetColumns replaces all columns.
+// SetColumns replaces all columns, preserving cursor by identity.
 func (k *Kanban) SetColumns(cols []KanbanColumn) {
+	// Snapshot focused IDs before replacing data
+	var focusedColID, focusedCardID string
+	if k.colIdx < len(k.columns) {
+		focusedColID = k.columns[k.colIdx].ID
+		if k.cardIdx < len(k.columns[k.colIdx].Items) {
+			focusedCardID = k.columns[k.colIdx].Items[k.cardIdx].ID
+		}
+	}
+
 	k.columns = cols
 
-	// Resize scroll offsets
+	// Resize scroll offsets, preserving existing values
 	if len(k.scrolls) != len(cols) {
-		k.scrolls = make([]int, len(cols))
+		newScrolls := make([]int, len(cols))
+		copy(newScrolls, k.scrolls)
+		k.scrolls = newScrolls
 	}
 
-	// Clamp focus
-	if k.colIdx >= len(cols) {
-		k.colIdx = max(0, len(cols)-1)
+	// Restore focus by identity, falling back to clamped index
+	restored := false
+	if focusedColID != "" {
+		for ci, col := range cols {
+			if col.ID == focusedColID {
+				k.colIdx = ci
+				if focusedCardID != "" {
+					for cardi, card := range col.Items {
+						if card.ID == focusedCardID {
+							k.cardIdx = cardi
+							restored = true
+							break
+						}
+					}
+				}
+				if !restored {
+					k.clampCardIdx()
+				}
+				restored = true
+				break
+			}
+		}
 	}
-	if k.colIdx < len(cols) && k.cardIdx >= len(cols[k.colIdx].Items) {
-		k.cardIdx = max(0, len(cols[k.colIdx].Items)-1)
+
+	if !restored {
+		// Fall back to clamped index
+		if k.colIdx >= len(cols) {
+			k.colIdx = max(0, len(cols)-1)
+		}
+		k.clampCardIdx()
 	}
 }
 
@@ -89,6 +128,15 @@ func (k *Kanban) FocusedColumn() int {
 	return k.colIdx
 }
 
+// FocusColumn sets focus to the given column index and clamps cardIdx.
+func (k *Kanban) FocusColumn(colIdx int) {
+	if colIdx < 0 || colIdx >= len(k.columns) {
+		return
+	}
+	k.colIdx = colIdx
+	k.clampCardIdx()
+}
+
 // FocusedCard returns the focused card, or nil.
 func (k *Kanban) FocusedCard() *KanbanCard {
 	if k.colIdx >= len(k.columns) {
@@ -102,18 +150,34 @@ func (k *Kanban) FocusedCard() *KanbanCard {
 	return &card
 }
 
-// MoveLeft moves focus to the previous column.
+// MoveLeft moves focus to the previous column, saving/restoring per-column cardIdx.
 func (k *Kanban) MoveLeft() {
 	if k.colIdx > 0 {
+		// Save cardIdx for current column
+		if k.colIdx < len(k.columns) {
+			k.cardIdxPerCol[k.columns[k.colIdx].ID] = k.cardIdx
+		}
 		k.colIdx--
+		// Restore cardIdx for target column
+		if saved, ok := k.cardIdxPerCol[k.columns[k.colIdx].ID]; ok {
+			k.cardIdx = saved
+		}
 		k.clampCardIdx()
 	}
 }
 
-// MoveRight moves focus to the next column.
+// MoveRight moves focus to the next column, saving/restoring per-column cardIdx.
 func (k *Kanban) MoveRight() {
 	if k.colIdx < len(k.columns)-1 {
+		// Save cardIdx for current column
+		if k.colIdx < len(k.columns) {
+			k.cardIdxPerCol[k.columns[k.colIdx].ID] = k.cardIdx
+		}
 		k.colIdx++
+		// Restore cardIdx for target column
+		if saved, ok := k.cardIdxPerCol[k.columns[k.colIdx].ID]; ok {
+			k.cardIdx = saved
+		}
 		k.clampCardIdx()
 	}
 }
@@ -376,38 +440,45 @@ func (k *Kanban) adjustScroll(col KanbanColumn, colIndex, areaHeight int) {
 		return
 	}
 
-	scroll := k.scrolls[colIndex]
+	for {
+		scroll := k.scrolls[colIndex]
 
-	// If focused card is above viewport, scroll up
-	if k.cardIdx < scroll {
-		k.scrolls[colIndex] = k.cardIdx
-		return
-	}
-
-	// Walk from scroll offset to see if focused card fits
-	usedLines := 0
-	for i := scroll; i < len(col.Items); i++ {
-		cardLines := 1
-		if i == k.cardIdx {
-			cardLines = focusedCardHeight(col.Items[i])
+		// If focused card is above viewport, scroll up
+		if k.cardIdx < scroll {
+			k.scrolls[colIndex] = k.cardIdx
+			return
 		}
 
-		// Reserve lines for scroll indicators
-		available := areaHeight
-		if scroll > 0 {
-			available--
-		}
-		if i < len(col.Items)-1 {
-			available-- // potential scroll-down indicator
-		}
-
-		usedLines += cardLines
-		if i == k.cardIdx {
-			if usedLines > available {
-				// Focused card doesn't fit — scroll down
-				k.scrolls[colIndex] = scroll + 1
-				k.adjustScroll(col, colIndex, areaHeight) // recurse to converge
+		// Walk from scroll offset to see if focused card fits
+		usedLines := 0
+		fits := true
+		for i := scroll; i < len(col.Items); i++ {
+			cardLines := 1
+			if i == k.cardIdx {
+				cardLines = focusedCardHeight(col.Items[i])
 			}
+
+			// Reserve lines for scroll indicators
+			available := areaHeight
+			if scroll > 0 {
+				available--
+			}
+			if i < len(col.Items)-1 {
+				available-- // potential scroll-down indicator
+			}
+
+			usedLines += cardLines
+			if i == k.cardIdx {
+				if usedLines > available {
+					// Focused card doesn't fit — scroll down and retry
+					k.scrolls[colIndex] = scroll + 1
+					fits = false
+				}
+				break
+			}
+		}
+
+		if fits {
 			return
 		}
 	}
