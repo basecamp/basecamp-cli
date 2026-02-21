@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
@@ -25,11 +26,12 @@ func testDockView() *Dock {
 	})
 
 	return &Dock{
-		styles: styles,
-		list:   list,
-		keys:   defaultDockKeyMap(),
-		width:  80,
-		height: 24,
+		session: workspace.NewTestSession(),
+		styles:  styles,
+		list:    list,
+		keys:    defaultDockKeyMap(),
+		width:   80,
+		height:  24,
 	}
 }
 
@@ -40,8 +42,34 @@ func TestDock_FilterDelegatesAllKeys(t *testing.T) {
 	require.True(t, v.list.Filtering())
 
 	// Each hotkey letter should be absorbed by the filter, not trigger navigation
-	for _, r := range []rune{'t', 'c', 'm', 'k', 's'} {
+	for _, r := range []rune{'t', 'c', 'm', 'k', 's', 'a'} {
 		v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		assert.True(t, v.list.Filtering(), "filter should still be active after %q", string(r))
 	}
+}
+
+func TestDock_ShortHelp_IncludesActivity(t *testing.T) {
+	v := testDockView()
+	hints := v.ShortHelp()
+
+	found := false
+	for _, h := range hints {
+		if h.Help().Desc == "activity" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "ShortHelp should include activity binding")
+}
+
+func TestDock_ActivityHotkey_ProducesNavigateMsg(t *testing.T) {
+	v := testDockView()
+
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	require.NotNil(t, cmd, "'a' key should produce a command")
+
+	msg := cmd()
+	nav, isNav := msg.(workspace.NavigateMsg)
+	require.True(t, isNav, "should produce NavigateMsg")
+	assert.Equal(t, workspace.ViewTimeline, nav.Target, "should navigate to ViewTimeline")
 }

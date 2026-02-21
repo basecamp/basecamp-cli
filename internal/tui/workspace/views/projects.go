@@ -109,6 +109,7 @@ func (v *Projects) ShortHelp() []key.Binding {
 			v.dockKeys.Campfire,
 			v.dockKeys.Messages,
 			v.dockKeys.Cards,
+			key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "activity")),
 		}
 	}
 	return []key.Binding{
@@ -279,6 +280,13 @@ func (v *Projects) handleToolKey(msg tea.KeyMsg) tea.Cmd {
 		return v.navigateToTool("kanban_board", workspace.ViewCards)
 	case key.Matches(msg, dk.Schedule):
 		return v.navigateToTool("schedule", workspace.ViewSchedule)
+	case msg.String() == "a":
+		if v.selectedProject == nil {
+			return nil
+		}
+		scope := v.projectScope()
+		v.recordProjectVisit(scope)
+		return workspace.Navigate(workspace.ViewTimeline, scope)
 	case key.Matches(msg, listKeys.Open):
 		return v.openTool()
 	default:

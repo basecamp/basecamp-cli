@@ -23,6 +23,7 @@ type dockKeyMap struct {
 	Messages key.Binding
 	Cards    key.Binding
 	Schedule key.Binding
+	Activity key.Binding
 }
 
 func defaultDockKeyMap() dockKeyMap {
@@ -46,6 +47,10 @@ func defaultDockKeyMap() dockKeyMap {
 		Schedule: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "schedule"),
+		),
+		Activity: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "activity"),
 		),
 	}
 }
@@ -120,6 +125,7 @@ func (v *Dock) ShortHelp() []key.Binding {
 		v.keys.Campfire,
 		v.keys.Messages,
 		v.keys.Cards,
+		v.keys.Activity,
 	}
 }
 
@@ -230,6 +236,9 @@ func (v *Dock) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return v.navigateToTool("kanban_board", workspace.ViewCards)
 	case key.Matches(msg, dk.Schedule):
 		return v.navigateToTool("schedule", workspace.ViewSchedule)
+	case key.Matches(msg, dk.Activity):
+		scope := v.session.Scope()
+		return workspace.Navigate(workspace.ViewTimeline, scope)
 	case key.Matches(msg, listKeys.Open):
 		return v.openSelectedTool()
 	default:

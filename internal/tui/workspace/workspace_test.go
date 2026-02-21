@@ -93,6 +93,7 @@ func targetName(t ViewTarget) string {
 		ViewAssignments: "Assignments",
 		ViewPings:       "Pings",
 		ViewActivity:    "Activity",
+		ViewTimeline:    "Project Activity",
 	}
 	if n, ok := names[t]; ok {
 		return n
@@ -827,7 +828,7 @@ func TestViewTarget_IsGlobal(t *testing.T) {
 
 	scoped := []ViewTarget{ViewDock, ViewTodos, ViewCampfire, ViewCards,
 		ViewMessages, ViewMyStuff, ViewPeople, ViewDetail, ViewSchedule,
-		ViewDocsFiles, ViewCheckins, ViewForwards, ViewCompose}
+		ViewDocsFiles, ViewCheckins, ViewForwards, ViewCompose, ViewTimeline}
 	for _, vt := range scoped {
 		assert.False(t, vt.IsGlobal(), "ViewTarget %d should not be global", vt)
 	}

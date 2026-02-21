@@ -328,11 +328,12 @@ func TestProjects_ShortHelp_RightPanel(t *testing.T) {
 	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	hints := v.ShortHelp()
-	require.Len(t, hints, 6)
+	require.Len(t, hints, 7)
 	assert.Equal(t, "open", hints[0].Help().Desc)
 	assert.Equal(t, "back", hints[1].Help().Desc)
 	assert.Equal(t, "todos", hints[2].Help().Desc)
 	assert.Equal(t, "campfire", hints[3].Help().Desc)
+	assert.Equal(t, "activity", hints[6].Help().Desc)
 }
 
 // --- Collapsed mode ---
@@ -352,6 +353,22 @@ func TestProjects_CollapsedMode_FocusRightShowsToolList(t *testing.T) {
 	// View should render without panic and contain the tool list
 	view := v.View()
 	assert.NotEmpty(t, view)
+}
+
+// --- Activity hotkey ---
+
+func TestProjects_ActivityHotkey_NilGuard(t *testing.T) {
+	v := testProjectsView(sampleProjects())
+
+	// Enter dock, then leave (so selectedProject is cleared via leaveDock)
+	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.leaveDock()
+	v.selectedProject = nil
+
+	// focusRight = true but selectedProject = nil — should not panic
+	v.focusRight = true
+	cmd := v.handleToolKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	assert.Nil(t, cmd, "pressing 'a' with nil selectedProject should return nil")
 }
 
 // --- testPool helper ---

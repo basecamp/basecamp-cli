@@ -50,6 +50,7 @@ const (
 	ViewCompose
 	ViewHome
 	ViewActivity
+	ViewTimeline // project-scoped timeline
 )
 
 // IsGlobal returns true for view targets that aggregate across all accounts.
