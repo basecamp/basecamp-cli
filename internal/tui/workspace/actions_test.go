@@ -165,3 +165,120 @@ func TestDefaultActions_ProjectScopeActions(t *testing.T) {
 	assert.True(t, names[":messages"])
 	assert.True(t, names[":cards"])
 }
+
+// -- :complete action tests --
+
+func TestAction_Complete_AvailableForTodo(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{
+		AccountID:     "1",
+		ProjectID:     42,
+		RecordingID:   100,
+		RecordingType: "Todo",
+	}
+	names := actionNames(r.ForScope(scope))
+	assert.True(t, names[":complete"], ":complete should be available for a Todo recording")
+}
+
+func TestAction_Complete_UnavailableForMessage(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{
+		AccountID:     "1",
+		ProjectID:     42,
+		RecordingID:   100,
+		RecordingType: "Message",
+	}
+	names := actionNames(r.ForScope(scope))
+	assert.False(t, names[":complete"], ":complete should not be available for a Message")
+}
+
+func TestAction_Complete_UnavailableWithoutRecording(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{AccountID: "1", ProjectID: 42}
+	names := actionNames(r.ForScope(scope))
+	assert.False(t, names[":complete"], ":complete should not be available without RecordingID")
+}
+
+func TestAction_Complete_UnavailableWithoutProject(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{AccountID: "1", RecordingID: 100, RecordingType: "Todo"}
+	names := actionNames(r.ForScope(scope))
+	assert.False(t, names[":complete"], ":complete should not be available without ProjectID")
+}
+
+// -- :trash action tests --
+
+func TestAction_Trash_AvailableForAnyRecording(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{
+		AccountID:     "1",
+		ProjectID:     42,
+		RecordingID:   100,
+		RecordingType: "Message",
+	}
+	names := actionNames(r.ForScope(scope))
+	assert.True(t, names[":trash"], ":trash should be available for any recording")
+}
+
+func TestAction_Trash_UnavailableWithoutRecording(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{AccountID: "1", ProjectID: 42}
+	names := actionNames(r.ForScope(scope))
+	assert.False(t, names[":trash"], ":trash should not be available without RecordingID")
+}
+
+func TestAction_Available_RefinesScope_DoesNotBypass(t *testing.T) {
+	r := NewRegistry()
+	r.Register(Action{
+		Name:  ":test",
+		Scope: ScopeProject,
+		Available: func(s Scope) bool {
+			return true // always says yes
+		},
+		Execute: func(_ *Session) tea.Cmd { return nil },
+	})
+
+	// ProjectID=0 means scope check fails even though Available returns true
+	results := r.ForScope(Scope{AccountID: "1"})
+	assert.Empty(t, results, "Available should not bypass scope check")
+}
+
+func TestAction_Trash_ProducesStatusMsg_NotNavigateBack(t *testing.T) {
+	r := DefaultActions()
+	scope := Scope{
+		AccountID:     "1",
+		ProjectID:     42,
+		RecordingID:   100,
+		RecordingType: "Todo",
+	}
+	actions := r.ForScope(scope)
+	var trashAction *Action
+	for _, a := range actions {
+		if a.Name == ":trash" {
+			a := a
+			trashAction = &a
+			break
+		}
+	}
+	require.NotNil(t, trashAction, ":trash should be in scope")
+
+	// Execute with a test session that has Hub
+	session := NewTestSessionWithScope(scope)
+	cmd := trashAction.Execute(session)
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	// Hub.TrashRecording will fail (nil SDK), so we get ErrorMsg
+	_, isError := msg.(ErrorMsg)
+	assert.True(t, isError, "palette trash should produce ErrorMsg (nil SDK), not NavigateBackMsg")
+}
+
+// -- helpers --
+
+func actionNames(actions []Action) map[string]bool {
+	m := make(map[string]bool, len(actions))
+	for _, a := range actions {
+		m[a.Name] = true
+	}
+	return m
+}

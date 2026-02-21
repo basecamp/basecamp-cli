@@ -27,6 +27,7 @@ type Action struct {
 	Description string
 	Category    string           // "navigation", "project", "mutation", etc.
 	Scope       ScopeRequirement // what scope context is needed
+	Available   func(Scope) bool // optional; narrows scope check further
 	Execute     func(session *Session) tea.Cmd
 }
 
@@ -69,12 +70,17 @@ func (r *Registry) Search(query string) []Action {
 }
 
 // ForScope returns actions available for the given scope.
+// Available refines the scope check but does not bypass it.
 func (r *Registry) ForScope(scope Scope) []Action {
 	var matches []Action
 	for _, a := range r.actions {
-		if scopeSatisfied(a.Scope, scope) {
-			matches = append(matches, a)
+		if !scopeSatisfied(a.Scope, scope) {
+			continue
 		}
+		if a.Available != nil && !a.Available(scope) {
+			continue
+		}
+		matches = append(matches, a)
 	}
 	return matches
 }
@@ -247,6 +253,50 @@ func DefaultActions() *Registry {
 		Scope:       ScopeAny,
 		Execute: func(_ *Session) tea.Cmd {
 			return tea.Quit
+		},
+	})
+	r.Register(Action{
+		Name:        ":complete",
+		Aliases:     []string{"done", "finish", "check"},
+		Description: "Complete the current todo",
+		Category:    "mutation",
+		Scope:       ScopeProject,
+		Available: func(s Scope) bool {
+			return s.RecordingID != 0 && strings.EqualFold(s.RecordingType, "Todo")
+		},
+		Execute: func(session *Session) tea.Cmd {
+			scope := session.Scope()
+			hub := session.Hub()
+			ctx := hub.ProjectContext()
+			return func() tea.Msg {
+				err := hub.CompleteTodo(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+				if err != nil {
+					return ErrorMsg{Err: err, Context: "completing todo"}
+				}
+				return StatusMsg{Text: "Completed"}
+			}
+		},
+	})
+	r.Register(Action{
+		Name:        ":trash",
+		Aliases:     []string{"delete", "remove"},
+		Description: "Trash the current recording",
+		Category:    "mutation",
+		Scope:       ScopeProject,
+		Available: func(s Scope) bool {
+			return s.RecordingID != 0
+		},
+		Execute: func(session *Session) tea.Cmd {
+			scope := session.Scope()
+			hub := session.Hub()
+			ctx := hub.ProjectContext()
+			return func() tea.Msg {
+				err := hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+				if err != nil {
+					return ErrorMsg{Err: err, Context: "trashing recording"}
+				}
+				return StatusMsg{Text: "Trashed"}
+			}
 		},
 	})
 
