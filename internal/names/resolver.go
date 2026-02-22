@@ -154,7 +154,7 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 			}
 			return userID, "me", nil
 		}
-		return "", "", output.ErrAuth("User ID not available. Run: bcq auth login")
+		return "", "", output.ErrAuth("User ID not available. Run: basecamp auth login")
 	}
 
 	// Numeric ID passthrough

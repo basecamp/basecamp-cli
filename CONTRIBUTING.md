@@ -1,4 +1,4 @@
-# Contributing to bcq
+# Contributing to Basecamp CLI
 
 ## Development Setup
 
@@ -30,7 +30,7 @@ When developing against a local copy of [basecamp-sdk](https://github.com/baseca
 go work init .
 go work use ../basecamp-sdk/go
 
-# Now bcq will use your local SDK automatically
+# Now basecamp will use your local SDK automatically
 go build ./...
 ```
 
@@ -66,7 +66,7 @@ The `go.work` file is gitignored - your local setup won't affect the repo.
 
 ```
 basecamp-cli/
-├── cmd/bcq/          # Main entrypoint
+├── cmd/basecamp/     # Main entrypoint
 ├── internal/
 │   ├── auth/         # OAuth authentication
 │   ├── commands/     # CLI command implementations
@@ -96,7 +96,7 @@ make test-e2e
 ### Running Against Go Binary
 
 ```bash
-BCQ_BIN=./bin/bcq bats e2e/
+BASECAMP_BIN=./bin/basecamp bats e2e/
 ```
 
 ## Questions?

@@ -19,7 +19,7 @@ func NewConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage configuration",
-		Long: `Manage bcq configuration.
+		Long: `Manage basecamp configuration.
 
 Configuration is loaded from multiple sources with the following precedence:
   flags > env > local > repo > global > system > defaults
@@ -94,12 +94,12 @@ func runConfigShow(cmd *cobra.Command) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "set",
-				Cmd:         "bcq config set <key> <value>",
+				Cmd:         "basecamp config set <key> <value>",
 				Description: "Set config value",
 			},
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         "bcq config project",
+				Cmd:         "basecamp config project",
 				Description: "Select project",
 			},
 		),
@@ -143,7 +143,7 @@ func newConfigInitCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "set",
-						Cmd:         "bcq config set project_id <id>",
+						Cmd:         "basecamp config set project_id <id>",
 						Description: "Set project",
 					},
 				),
@@ -256,7 +256,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         "bcq config show",
+						Cmd:         "basecamp config show",
 						Description: "View config",
 					},
 				),
@@ -346,7 +346,7 @@ func newConfigUnsetCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         "bcq config show",
+						Cmd:         "basecamp config show",
 						Description: "View config",
 					},
 				),
@@ -441,12 +441,12 @@ func newConfigProjectCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         "bcq config show",
+						Cmd:         "basecamp config show",
 						Description: "View config",
 					},
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq projects show %d", selected.ID),
+						Cmd:         fmt.Sprintf("basecamp projects show %d", selected.ID),
 						Description: "View project",
 					},
 				),

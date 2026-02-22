@@ -30,7 +30,7 @@ type Store struct {
 }
 
 // NewStore creates a new resilience state store.
-// If dir is empty, it uses the default location (~/.cache/bcq/resilience/).
+// If dir is empty, it uses the default location (~/.cache/basecamp/resilience/).
 func NewStore(dir string) *Store {
 	if dir == "" {
 		dir = defaultStateDir()
@@ -43,7 +43,7 @@ func NewStore(dir string) *Store {
 func defaultStateDir() string {
 	// First, check XDG_CACHE_HOME (Linux/BSD convention)
 	if cacheDir := os.Getenv("XDG_CACHE_HOME"); cacheDir != "" {
-		return filepath.Join(cacheDir, "bcq", DefaultDirName)
+		return filepath.Join(cacheDir, "basecamp", DefaultDirName)
 	}
 
 	// Use os.UserCacheDir() which handles platform-specific paths:
@@ -51,16 +51,16 @@ func defaultStateDir() string {
 	// - Linux: ~/.cache (respects XDG_CACHE_HOME)
 	// - Windows: %LocalAppData%
 	if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
-		return filepath.Join(cacheDir, "bcq", DefaultDirName)
+		return filepath.Join(cacheDir, "basecamp", DefaultDirName)
 	}
 
 	// Fall back to home directory
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".cache", "bcq", DefaultDirName)
+		return filepath.Join(home, ".cache", "basecamp", DefaultDirName)
 	}
 
 	// Last resort: use temp directory to avoid relative paths
-	return filepath.Join(os.TempDir(), "bcq", DefaultDirName)
+	return filepath.Join(os.TempDir(), "basecamp", DefaultDirName)
 }
 
 // Dir returns the state directory path.

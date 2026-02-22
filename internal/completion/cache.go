@@ -1,4 +1,4 @@
-// Package completion provides tab completion support for the bcq CLI.
+// Package completion provides tab completion support for the basecamp CLI.
 // It implements a file-based cache for projects, people, and accounts data
 // that enables fast, offline-capable shell completions without requiring API calls.
 package completion
@@ -65,7 +65,7 @@ type Store struct {
 }
 
 // NewStore creates a new cache store.
-// If dir is empty, it uses the default location (~/.cache/bcq/).
+// If dir is empty, it uses the default location (~/.cache/basecamp/).
 func NewStore(dir string) *Store {
 	if dir == "" {
 		dir = defaultCacheDir()
@@ -81,7 +81,7 @@ func defaultCacheDir() string {
 		home, _ := os.UserHomeDir()
 		cacheDir = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(cacheDir, "bcq")
+	return filepath.Join(cacheDir, "basecamp")
 }
 
 // Dir returns the cache directory path.
@@ -205,7 +205,7 @@ func (s *Store) UpdatePeople(people []CachedPerson) error {
 // UpdateAccounts updates just the accounts in the cache.
 // Only updates AccountsUpdatedAt, preserving other timestamps.
 // Note: Accounts are user-level (not account-scoped like projects/people),
-// so they're refreshed separately via `bcq me`.
+// so they're refreshed separately via `basecamp me`.
 func (s *Store) UpdateAccounts(accounts []CachedAccount) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

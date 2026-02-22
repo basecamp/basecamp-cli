@@ -50,7 +50,7 @@ func NewQuickStartCmd() *cobra.Command {
 	return cmd
 }
 
-// RunQuickStartDefault is called when bcq is run with no args.
+// RunQuickStartDefault is called when basecamp is run with no args.
 // If this is a first run (unauthenticated, interactive TTY, no BASECAMP_TOKEN),
 // it runs the setup wizard. Otherwise, it falls through to the quick-start output.
 func RunQuickStartDefault(cmd *cobra.Command, args []string) error {
@@ -91,8 +91,8 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 
 	// Commands info
 	commandsInfo := CommandsInfo{
-		QuickStart: []string{"bcq projects", "bcq todos", "bcq search \"query\""},
-		Common:     []string{"bcq todo \"content\"", "bcq done <id>", "bcq comment \"text\" <id>"},
+		QuickStart: []string{"basecamp projects", "basecamp todos", "basecamp search \"query\""},
+		Common:     []string{"basecamp todo \"content\"", "basecamp done <id>", "basecamp comment \"text\" <id>"},
 	}
 
 	// Build response
@@ -113,22 +113,22 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	var summary string
 	if authInfo.Status == "authenticated" {
 		if authInfo.Account != "" {
-			summary = fmt.Sprintf("bcq v%s - logged in @ %s", version.Version, authInfo.Account)
+			summary = fmt.Sprintf("basecamp v%s - logged in @ %s", version.Version, authInfo.Account)
 		} else {
-			summary = fmt.Sprintf("bcq v%s - logged in", version.Version)
+			summary = fmt.Sprintf("basecamp v%s - logged in", version.Version)
 		}
 	} else {
-		summary = fmt.Sprintf("bcq v%s - not logged in", version.Version)
+		summary = fmt.Sprintf("basecamp v%s - not logged in", version.Version)
 	}
 
 	// Build breadcrumbs
 	breadcrumbs := []output.Breadcrumb{
-		{Action: "list_projects", Cmd: "bcq projects", Description: "List projects"},
-		{Action: "list_todos", Cmd: "bcq todos", Description: "List todos"},
+		{Action: "list_projects", Cmd: "basecamp projects", Description: "List projects"},
+		{Action: "list_todos", Cmd: "basecamp todos", Description: "List todos"},
 	}
 	if authInfo.Status == "unauthenticated" {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
-			Action: "authenticate", Cmd: "bcq auth login", Description: "Login",
+			Action: "authenticate", Cmd: "basecamp auth login", Description: "Login",
 		})
 	}
 

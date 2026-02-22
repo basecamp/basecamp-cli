@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messageboards
+  run basecamp messageboards
   assert_failure
   assert_output_contains "project"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messageboards show
+  run basecamp messageboards show
   assert_failure
   assert_output_contains "project"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq messageboards --project
+  run basecamp messageboards --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq messageboards --board
+  run basecamp messageboards --board
   assert_failure
   assert_output_contains "--board requires a value"
 }
@@ -52,7 +52,7 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq messageboards foobar
+  run basecamp messageboards foobar
   # Command may show help or require project - just verify it runs
 }
 
@@ -63,9 +63,9 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq messageboards --help
+  run basecamp messageboards --help
   assert_success
-  assert_output_contains "bcq messageboards"
+  assert_output_contains "basecamp messageboards"
   assert_output_contains "message board"
   assert_output_contains "--project"
 }

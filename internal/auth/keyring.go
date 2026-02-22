@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	serviceName = "bcq"
+	serviceName = "basecamp"
 )
 
 // Credentials holds OAuth tokens and metadata.
@@ -33,12 +33,12 @@ type Store struct {
 // NewStore creates a credential store.
 func NewStore(fallbackDir string) *Store {
 	// Skip keyring for tests or when explicitly disabled
-	if os.Getenv("BCQ_NO_KEYRING") != "" {
+	if os.Getenv("BASECAMP_NO_KEYRING") != "" {
 		return &Store{useKeyring: false, fallbackDir: fallbackDir}
 	}
 
 	// Test if keyring is available
-	testKey := "bcq::test"
+	testKey := "basecamp::test"
 	err := keyring.Set(serviceName, testKey, "test")
 	if err == nil {
 		_ = keyring.Delete(serviceName, testKey) // Best-effort cleanup
@@ -49,7 +49,7 @@ func NewStore(fallbackDir string) *Store {
 
 // key returns the keyring key for an origin.
 func key(origin string) string {
-	return fmt.Sprintf("bcq::%s", origin)
+	return fmt.Sprintf("basecamp::%s", origin)
 }
 
 // Load retrieves credentials for the given origin.

@@ -268,7 +268,7 @@ func TestResolveTheme(t *testing.T) {
 		assert.Empty(t, theme.Primary.Dark)
 	})
 
-	t.Run("BCQ_THEME loads custom file", func(t *testing.T) {
+	t.Run("BASECAMP_THEME loads custom file", func(t *testing.T) {
 		unsetenvForTest(t, "NO_COLOR")
 
 		tmpDir := t.TempDir()
@@ -280,27 +280,27 @@ foreground = "#ffffff"
 		err := os.WriteFile(testFile, []byte(content), 0644)
 		require.NoError(t, err, "Failed to write test file")
 
-		t.Setenv("BCQ_THEME", testFile)
+		t.Setenv("BASECAMP_THEME", testFile)
 
 		theme := ResolveTheme()
 
 		assert.Equal(t, "#ff0000", theme.Primary.Dark)
 	})
 
-	t.Run("BCQ_THEME invalid file falls back", func(t *testing.T) {
+	t.Run("BASECAMP_THEME invalid file falls back", func(t *testing.T) {
 		unsetenvForTest(t, "NO_COLOR")
-		t.Setenv("BCQ_THEME", "/nonexistent/theme.toml")
+		t.Setenv("BASECAMP_THEME", "/nonexistent/theme.toml")
 
 		theme := ResolveTheme()
 
 		// Should fall back to Omarchy or default - just check it's not empty
 		assert.False(t, theme.Primary.Dark == "" && theme.Primary.Light == "",
-			"With invalid BCQ_THEME, should fall back to a valid theme")
+			"With invalid BASECAMP_THEME, should fall back to a valid theme")
 	})
 
 	t.Run("default theme when no env vars", func(t *testing.T) {
 		unsetenvForTest(t, "NO_COLOR")
-		unsetenvForTest(t, "BCQ_THEME")
+		unsetenvForTest(t, "BASECAMP_THEME")
 
 		theme := ResolveTheme()
 
@@ -313,9 +313,11 @@ foreground = "#ffffff"
 
 func TestLoadUserTheme(t *testing.T) {
 	t.Run("loads theme from user config dir", func(t *testing.T) {
+		unsetenvForTest(t, "NO_COLOR")
+
 		// Create a temporary home directory structure
 		tmpHome := t.TempDir()
-		themeDir := filepath.Join(tmpHome, ".config", "bcq", "theme")
+		themeDir := filepath.Join(tmpHome, ".config", "basecamp", "theme")
 		err := os.MkdirAll(themeDir, 0755)
 		require.NoError(t, err, "Failed to create theme dir")
 
@@ -326,9 +328,9 @@ foreground = "#eeeeee"
 		err = os.WriteFile(themeFile, []byte(content), 0644)
 		require.NoError(t, err, "Failed to write theme file")
 
-		// LoadUserTheme uses os.UserHomeDir, so we test via BCQ_THEME instead
+		// LoadUserTheme uses os.UserHomeDir, so we test via BASECAMP_THEME instead
 		// since we can't easily mock the home directory
-		t.Setenv("BCQ_THEME", themeFile)
+		t.Setenv("BASECAMP_THEME", themeFile)
 		theme := ResolveTheme()
 
 		assert.Equal(t, "#00ff00", theme.Primary.Dark)

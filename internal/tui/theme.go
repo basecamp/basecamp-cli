@@ -11,21 +11,21 @@ import (
 
 // ResolveTheme loads a theme with the following precedence:
 //  1. NO_COLOR env var set → returns NoColorTheme (industry standard)
-//  2. BCQ_THEME env var → parse custom colors.toml file
-//  3. User theme from ~/.config/bcq/theme/colors.toml
-//  4. Default bcq theme
+//  2. BASECAMP_THEME env var → parse custom colors.toml file
+//  3. User theme from ~/.config/basecamp/theme/colors.toml
+//  4. Default basecamp theme
 //
 // On systems like Omarchy, users can symlink to their system theme:
 //
-//	ln -s ~/.config/omarchy/current/theme ~/.config/bcq/theme
+//	ln -s ~/.config/omarchy/current/theme ~/.config/basecamp/theme
 func ResolveTheme() Theme {
 	// NO_COLOR support (industry standard for disabling colors)
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return NoColorTheme()
 	}
 
-	// BCQ_THEME allows custom theme file path
-	if path := os.Getenv("BCQ_THEME"); path != "" {
+	// BASECAMP_THEME allows custom theme file path
+	if path := os.Getenv("BASECAMP_THEME"); path != "" {
 		if theme, err := LoadThemeFromFile(path); err == nil {
 			return theme
 		}
@@ -58,7 +58,7 @@ func NoColorTheme() Theme {
 	}
 }
 
-// LoadUserTheme attempts to load a theme from the user's bcq config.
+// LoadUserTheme attempts to load a theme from the user's basecamp config.
 // The theme directory can be a symlink to another theme system.
 func LoadUserTheme() (Theme, error) {
 	home, err := os.UserHomeDir()
@@ -66,7 +66,7 @@ func LoadUserTheme() (Theme, error) {
 		return Theme{}, err
 	}
 
-	path := filepath.Join(home, ".config", "bcq", "theme", "colors.toml")
+	path := filepath.Join(home, ".config", "basecamp", "theme", "colors.toml")
 	return LoadThemeFromFile(path)
 }
 
@@ -165,7 +165,7 @@ func isValidHexColor(s string) bool {
 	return true
 }
 
-// mapColorsToTheme maps colors.toml color names to bcq Theme semantics.
+// mapColorsToTheme maps colors.toml color names to basecamp Theme semantics.
 //
 // Supported color keys (compatible with terminal theme formats):
 //

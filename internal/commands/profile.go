@@ -27,11 +27,11 @@ Profiles allow you to switch between multiple Basecamp identities on the same se
 or maintain separate configurations for different environments.
 
 Examples:
-  bcq profile list                    # List all profiles
-  bcq profile show                    # Show active profile details
-  bcq profile create personal         # Create a new profile
-  bcq profile delete old-profile      # Remove a profile
-  bcq profile set-default personal    # Set default profile`,
+  basecamp profile list                    # List all profiles
+  basecamp profile show                    # Show active profile details
+  basecamp profile create personal         # Create a new profile
+  basecamp profile delete old-profile      # Remove a profile
+  basecamp profile set-default personal    # Set default profile`,
 	}
 
 	cmd.AddCommand(
@@ -185,9 +185,9 @@ func newProfileCreateCmd() *cobra.Command {
 		Long: `Create a new named profile and optionally authenticate.
 
 Examples:
-  bcq profile create personal
-  bcq profile create staging --base-url https://staging.example.com
-  bcq profile create triage-bot --scope full`,
+  basecamp profile create personal
+  basecamp profile create staging --base-url https://staging.example.com
+  basecamp profile create triage-bot --scope full`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

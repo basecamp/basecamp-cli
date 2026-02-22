@@ -107,7 +107,7 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "questions",
-				Cmd:         fmt.Sprintf("bcq checkins questions --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", resolvedProjectID),
 				Description: "View questions",
 			},
 		),
@@ -201,12 +201,12 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "question",
-						Cmd:         fmt.Sprintf("bcq checkins question <id> --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins question <id> --in %s", resolvedProjectID),
 						Description: "View question details",
 					},
 					output.Breadcrumb{
 						Action:      "answers",
-						Cmd:         fmt.Sprintf("bcq checkins answers <question_id> --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins answers <question_id> --in %s", resolvedProjectID),
 						Description: "View answers",
 					},
 				),
@@ -250,8 +250,8 @@ func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
 		Long: `Display details of a check-in question.
 
 You can pass either a question ID or a Basecamp URL:
-  bcq checkins question show 789 --in my-project
-  bcq checkins question show https://3.basecamp.com/123/buckets/456/questionnaires/questions/789`,
+  basecamp checkins question show 789 --in my-project
+  basecamp checkins question show https://3.basecamp.com/123/buckets/456/questionnaires/questions/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCheckinsQuestionShow(cmd, *project, args[0])
@@ -314,12 +314,12 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "answers",
-				Cmd:         fmt.Sprintf("bcq checkins answers %s --in %s", questionIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionIDStr, resolvedProjectID),
 				Description: "View answers",
 			},
 			output.Breadcrumb{
 				Action:      "questions",
-				Cmd:         fmt.Sprintf("bcq checkins questions --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", resolvedProjectID),
 				Description: "View all questions",
 			},
 		),
@@ -442,12 +442,12 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "question",
-						Cmd:         fmt.Sprintf("bcq checkins question %d --in %s", question.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins question %d --in %s", question.ID, resolvedProjectID),
 						Description: "View question",
 					},
 					output.Breadcrumb{
 						Action:      "questions",
-						Cmd:         fmt.Sprintf("bcq checkins questions --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", resolvedProjectID),
 						Description: "View all questions",
 					},
 				),
@@ -477,8 +477,8 @@ func newCheckinsQuestionUpdateCmd(project *string) *cobra.Command {
 		Long: `Update a check-in question's title or schedule.
 
 You can pass either a question ID or a Basecamp URL:
-  bcq checkins question update 789 --title "new question" --in my-project
-  bcq checkins question update https://3.basecamp.com/123/buckets/456/questionnaires/questions/789 --title "new question"`,
+  basecamp checkins question update 789 --title "new question" --in my-project
+  basecamp checkins question update https://3.basecamp.com/123/buckets/456/questionnaires/questions/789 --title "new question"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -574,7 +574,7 @@ You can pass either a question ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "question",
-						Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins question %s --in %s", questionIDStr, resolvedProjectID),
 						Description: "View question",
 					},
 				),
@@ -601,8 +601,8 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 		Long: `List answers for a check-in question.
 
 You can pass either a question ID or a Basecamp URL:
-  bcq checkins answers 789 --in my-project
-  bcq checkins answers https://3.basecamp.com/123/buckets/456/questions/789`,
+  basecamp checkins answers 789 --in my-project
+  basecamp checkins answers https://3.basecamp.com/123/buckets/456/questions/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -680,12 +680,12 @@ You can pass either a question ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "answer",
-						Cmd:         fmt.Sprintf("bcq checkins answer <id> --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins answer <id> --in %s", resolvedProjectID),
 						Description: "View answer details",
 					},
 					output.Breadcrumb{
 						Action:      "question",
-						Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins question %s --in %s", questionIDStr, resolvedProjectID),
 						Description: "View question",
 					},
 				),
@@ -729,8 +729,8 @@ func newCheckinsAnswerShowCmd(project *string) *cobra.Command {
 		Long: `Display details of a check-in answer.
 
 You can pass either an answer ID or a Basecamp URL:
-  bcq checkins answer show 789 --in my-project
-  bcq checkins answer show https://3.basecamp.com/123/buckets/456/question_answers/789`,
+  basecamp checkins answer show 789 --in my-project
+  basecamp checkins answer show https://3.basecamp.com/123/buckets/456/question_answers/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCheckinsAnswerShow(cmd, *project, args[0])
@@ -806,12 +806,12 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "question",
-				Cmd:         fmt.Sprintf("bcq checkins question %s --in %s", questionID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins question %s --in %s", questionID, resolvedProjectID),
 				Description: "View question",
 			},
 			output.Breadcrumb{
 				Action:      "answers",
-				Cmd:         fmt.Sprintf("bcq checkins answers %s --in %s", questionID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionID, resolvedProjectID),
 				Description: "View all answers",
 			},
 		),
@@ -895,12 +895,12 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "answer",
-						Cmd:         fmt.Sprintf("bcq checkins answer %d --in %s", answer.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins answer %d --in %s", answer.ID, resolvedProjectID),
 						Description: "View answer",
 					},
 					output.Breadcrumb{
 						Action:      "answers",
-						Cmd:         fmt.Sprintf("bcq checkins answers %s --in %s", questionID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionID, resolvedProjectID),
 						Description: "View all answers",
 					},
 				),
@@ -925,8 +925,8 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing check-in answer.
 
 You can pass either an answer ID or a Basecamp URL:
-  bcq checkins answer update 789 --content "updated answer" --in my-project
-  bcq checkins answer update https://3.basecamp.com/123/buckets/456/question_answers/789 --content "updated answer"`,
+  basecamp checkins answer update 789 --content "updated answer" --in my-project
+  basecamp checkins answer update https://3.basecamp.com/123/buckets/456/question_answers/789 --content "updated answer"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1000,12 +1000,12 @@ You can pass either an answer ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "answer",
-						Cmd:         fmt.Sprintf("bcq checkins answer %s --in %s", answerIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins answer %s --in %s", answerIDStr, resolvedProjectID),
 						Description: "View answer",
 					},
 					output.Breadcrumb{
 						Action:      "answers",
-						Cmd:         fmt.Sprintf("bcq checkins answers %s --in %s", questionID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionID, resolvedProjectID),
 						Description: "View all answers",
 					},
 				),

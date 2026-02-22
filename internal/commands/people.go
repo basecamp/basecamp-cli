@@ -43,9 +43,9 @@ func NewMeCmd() *cobra.Command {
 const defaultLaunchpadBaseURL = "https://launchpad.37signals.com"
 
 // getLaunchpadBaseURL returns the Launchpad base URL.
-// Can be overridden via BCQ_LAUNCHPAD_URL for testing.
+// Can be overridden via BASECAMP_LAUNCHPAD_URL for testing.
 func getLaunchpadBaseURL() string {
-	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
+	if url := os.Getenv("BASECAMP_LAUNCHPAD_URL"); url != "" {
 		return url
 	}
 	return defaultLaunchpadBaseURL
@@ -55,7 +55,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if !app.Auth.IsAuthenticated() {
-		return output.ErrAuth("Not authenticated. Run: bcq auth login")
+		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
 	// Determine authorization endpoint based on OAuth type
@@ -124,17 +124,17 @@ func runMe(cmd *cobra.Command, args []string) error {
 		// No account configured yet - suggest setup
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "setup",
-			Cmd:         fmt.Sprintf("bcq config set account %d", accounts[0].ID),
+			Cmd:         fmt.Sprintf("basecamp config set account %d", accounts[0].ID),
 			Description: "Configure your Basecamp account",
 		})
 	} else {
 		// Account configured - show next steps
 		breadcrumbs = append(breadcrumbs,
-			output.Breadcrumb{Action: "projects", Cmd: "bcq projects", Description: "List your projects"},
-			output.Breadcrumb{Action: "todos", Cmd: "bcq todos --assignee me", Description: "Your assigned todos"},
+			output.Breadcrumb{Action: "projects", Cmd: "basecamp projects", Description: "List your projects"},
+			output.Breadcrumb{Action: "todos", Cmd: "basecamp todos --assignee me", Description: "Your assigned todos"},
 		)
 	}
-	breadcrumbs = append(breadcrumbs, output.Breadcrumb{Action: "auth", Cmd: "bcq auth status", Description: "Auth status"})
+	breadcrumbs = append(breadcrumbs, output.Breadcrumb{Action: "auth", Cmd: "basecamp auth status", Description: "Auth status"})
 
 	// Opportunistically update accounts cache for tab completion.
 	// Done synchronously to ensure write completes before process exits.
@@ -258,7 +258,7 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 
 	summary := fmt.Sprintf("%d people", len(people))
 	breadcrumbs := []output.Breadcrumb{
-		{Action: "show", Cmd: "bcq people show <id>", Description: "Show person details"},
+		{Action: "show", Cmd: "basecamp people show <id>", Description: "Show person details"},
 	}
 
 	respOpts := []output.ResponseOption{
@@ -416,7 +416,7 @@ func runPeopleAdd(cmd *cobra.Command, personIDs []string, projectID string) erro
 
 	summary := fmt.Sprintf("Added %d person(s) to project #%s", len(ids), resolvedProjectID)
 	breadcrumbs := []output.Breadcrumb{
-		{Action: "list", Cmd: fmt.Sprintf("bcq people list --project %s", resolvedProjectID), Description: "List project members"},
+		{Action: "list", Cmd: fmt.Sprintf("basecamp people list --project %s", resolvedProjectID), Description: "List project members"},
 	}
 
 	return app.OK(result,
@@ -488,7 +488,7 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 
 	summary := fmt.Sprintf("Removed %d person(s) from project #%s", len(ids), resolvedProjectID)
 	breadcrumbs := []output.Breadcrumb{
-		{Action: "list", Cmd: fmt.Sprintf("bcq people list --project %s", resolvedProjectID), Description: "List project members"},
+		{Action: "list", Cmd: fmt.Sprintf("basecamp people list --project %s", resolvedProjectID), Description: "List project members"},
 	}
 
 	return app.OK(result,

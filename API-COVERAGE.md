@@ -1,4 +1,4 @@
-# bcq API Coverage Matrix
+# Basecamp CLI API Coverage Matrix
 
 Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.com/basecamp/bc3-api).
 
@@ -16,7 +16,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 ## Coverage by Section
 
-| Section | Endpoints | bcq Command | Status | Priority | Notes |
+| Section | Endpoints | CLI Command | Status | Priority | Notes |
 |---------|-----------|-------------|--------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | - | list, show, create, update, delete |
@@ -106,14 +106,14 @@ These endpoints are for the **legacy "Clientside"** feature (the dedicated clien
 - Requires projects with specific client portal configuration
 - Unlikely to be needed in typical developer/agent workflows
 
-**Note:** The `client_visibility` endpoint IS implemented (via `bcq recordings visibility`) because it's part of the **modern** clients setup for controlling what client participants can see on any recording.
+**Note:** The `client_visibility` endpoint IS implemented (via `basecamp recordings visibility`) because it's part of the **modern** clients setup for controlling what client participants can see on any recording.
 
 ### Chatbots
 
 The chatbots API uses a **chatbot key** for authentication rather than OAuth tokens. This is a fundamentally different auth model:
 - Chatbot keys are per-integration, not per-user
 - They're designed for automated integrations (Slack bots, etc.)
-- bcq uses OAuth for user-scoped access
+- The CLI uses OAuth for user-scoped access
 
 Supporting chatbot auth would require a separate configuration path. If chatbot functionality is needed, a dedicated chatbot-specific tool would be more appropriate.
 
@@ -136,16 +136,16 @@ Plus action endpoints:
 - `DELETE /.../:id/pin` - Unpin
 - `PUT /.../:id/status/:status` - Change status (trash/archive/restore)
 
-### bcq Command Patterns
+### CLI Command Patterns
 
 ```bash
-bcq <resource>                    # List (default)
-bcq <resource> list               # List (explicit)
-bcq <resource> show <id>          # Show details
-bcq <resource> <id>               # Show (shorthand)
-bcq <resource> create "..."       # Create new
-bcq <resource> update <id>        # Update existing
-bcq <singular> "..."              # Create (shorthand)
+basecamp <resource>                    # List (default)
+basecamp <resource> list               # List (explicit)
+basecamp <resource> show <id>          # Show details
+basecamp <resource> <id>               # Show (shorthand)
+basecamp <resource> create "..."       # Create new
+basecamp <resource> update <id>        # Update existing
+basecamp <singular> "..."              # Create (shorthand)
 ```
 
 ## Verification

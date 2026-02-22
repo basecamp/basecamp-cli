@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire list --project
+  run basecamp campfire list --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq campfire messages --limit
+  run basecamp campfire messages --limit
   assert_failure
   assert_output_contains "--limit requires a value"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire list
+  run basecamp campfire list
   assert_failure
   assert_output_contains "project"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire messages
+  run basecamp campfire messages
   assert_failure
   assert_output_contains "project"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq campfire post
+  run basecamp campfire post
   assert_failure
   assert_output_contains "Message content required"
 }
@@ -61,7 +61,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq campfire line
+  run basecamp campfire line
   assert_failure
   assert_output_contains "ID required"
 }
@@ -70,7 +70,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq campfire delete
+  run basecamp campfire delete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -82,9 +82,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire --help
+  run basecamp campfire --help
   assert_success
-  assert_output_contains "bcq campfire"
+  assert_output_contains "basecamp campfire"
   assert_output_contains "Campfire"
 }
 
@@ -92,16 +92,16 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire -h
+  run basecamp campfire -h
   assert_success
-  assert_output_contains "bcq campfire"
+  assert_output_contains "basecamp campfire"
 }
 
 @test "campfire post help documents --content-type flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire post --help
+  run basecamp campfire post --help
   assert_success
   assert_output_contains "--content-type"
   assert_output_contains "rich text"
@@ -111,7 +111,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire --help
+  run basecamp campfire --help
   assert_success
   assert_output_contains "--content-type"
 }
@@ -120,7 +120,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire list --help
+  run basecamp campfire list --help
   assert_success
   assert_output_contains "--all"
   assert_output_contains "account"
@@ -133,7 +133,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire foobar
+  run basecamp campfire foobar
   # Cobra doesn't have a distinct "unknown subcommand" error for this pattern
   # It falls through to the default behavior which requires a project
   assert_failure
@@ -146,7 +146,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire list
+  run basecamp campfire list
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'

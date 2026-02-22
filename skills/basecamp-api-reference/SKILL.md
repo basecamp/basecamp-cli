@@ -17,7 +17,7 @@ Fetch the API README (cached locally):
 
 ```bash
 DOCS_URL="https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md"
-CACHE_DIR="${HOME}/.cache/bcq/api-docs"
+CACHE_DIR="${HOME}/.cache/basecamp/api-docs"
 README="$CACHE_DIR/README.md"
 
 mkdir -p "$CACHE_DIR"
@@ -88,4 +88,4 @@ Authorization: Bearer {access_token}
 Content-Type: application/json
 ```
 
-Use `bcq auth status` to check current token, or `bcq auth login` to authenticate.
+Use `basecamp auth status` to check current token, or `basecamp auth login` to authenticate.

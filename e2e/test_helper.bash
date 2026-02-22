@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# test_helper.bash - Common test utilities for bcq tests
+# test_helper.bash - Common test utilities for basecamp tests
 
 
 # Setup/Teardown
 
 setup() {
   # Disable keyring for headless testing (Go binary)
-  export BCQ_NO_KEYRING=1
+  export BASECAMP_NO_KEYRING=1
 
   # Store original environment
   _ORIG_HOME="$HOME"
@@ -22,16 +22,16 @@ setup() {
 
   # Set up test environment
   export HOME="$TEST_HOME"
-  export BCQ_ROOT="${BATS_TEST_DIRNAME}/.."
-  export PATH="$BCQ_ROOT/bin:$PATH"
+  export BASECAMP_ROOT="${BATS_TEST_DIRNAME}/.."
+  export PATH="$BASECAMP_ROOT/bin:$PATH"
 
   # Clear environment variables that might interfere with tests
   # Tests can set these as needed
   unset BASECAMP_TOKEN
   unset BASECAMP_ACCOUNT_ID
   unset BASECAMP_PROJECT_ID
-  unset BCQ_ACCOUNT
-  unset BCQ_PROJECT
+  unset BASECAMP_ACCOUNT
+  unset BASECAMP_PROJECT
   unset XDG_CONFIG_HOME  # Ensure tests use $HOME/.config
 
   cd "$TEST_PROJECT"
@@ -146,7 +146,7 @@ create_credentials() {
   local scope="${3:-}"
   local oauth_type="${4:-}"
   local token_endpoint="${5:-}"
-  local base_url="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+  local base_url="${BASECAMP_BASE_URL:-https://3.basecampapi.com}"
   # Remove trailing slash for consistent keys
   base_url="${base_url%/}"
 
@@ -181,7 +181,7 @@ EOF
 }
 
 create_accounts() {
-  local base_url="${BCQ_BASE_URL:-https://3.basecampapi.com}"
+  local base_url="${BASECAMP_BASE_URL:-https://3.basecampapi.com}"
   cat > "$TEST_HOME/.config/basecamp/accounts.json" << EOF
 {
   "$base_url": [
@@ -214,7 +214,7 @@ init_git_repo() {
 
 mock_api_response() {
   local response="$1"
-  export BCQ_MOCK_RESPONSE="$response"
+  export BASECAMP_MOCK_RESPONSE="$response"
 }
 
 

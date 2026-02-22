@@ -141,12 +141,12 @@ Person can be:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("bcq show todo %s --project %s", todoID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp show todo %s --project %s", todoID, resolvedProjectID),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
 						Action:      "unassign",
-						Cmd:         fmt.Sprintf("bcq unassign %s --from %s --project %s", todoID, assigneeID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp unassign %s --from %s --project %s", todoID, assigneeID, resolvedProjectID),
 						Description: "Remove assignee",
 					},
 				),
@@ -271,12 +271,12 @@ Person can be:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("bcq show todo %s --project %s", todoID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp show todo %s --project %s", todoID, resolvedProjectID),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
 						Action:      "assign",
-						Cmd:         fmt.Sprintf("bcq assign %s --to <person> --project %s", todoID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp assign %s --to <person> --project %s", todoID, resolvedProjectID),
 						Description: "Add assignee",
 					},
 				),

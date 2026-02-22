@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq files --project
+  run basecamp files --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq vaults --project
+  run basecamp vaults --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -28,7 +28,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq uploads --project
+  run basecamp uploads --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -37,7 +37,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq docs --project
+  run basecamp docs --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq files
+  run basecamp files
   assert_failure
   assert_output_contains "project"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq vaults
+  run basecamp vaults
   assert_failure
   assert_output_contains "project"
 }
@@ -67,7 +67,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq uploads
+  run basecamp uploads
   assert_failure
   assert_output_contains "project"
 }
@@ -76,7 +76,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq docs
+  run basecamp docs
   assert_failure
   assert_output_contains "project"
 }
@@ -88,7 +88,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq files show
+  run basecamp files show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -97,7 +97,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq files show 456 --type foobar
+  run basecamp files show 456 --type foobar
   # May return validation error or API error depending on implementation
   assert_failure
 }
@@ -109,7 +109,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq files folder
+  run basecamp files folder
   # May return validation error or API error depending on implementation
   assert_failure
 }
@@ -121,7 +121,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq files upload
+  run basecamp files upload
   # May return validation error or API error depending on implementation
   assert_failure
 }
@@ -130,7 +130,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq files upload /nonexistent/file.txt
+  run basecamp files upload /nonexistent/file.txt
   # May return validation error or API error depending on implementation
   assert_failure
 }
@@ -142,9 +142,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq files --help
+  run basecamp files --help
   assert_success
-  assert_output_contains "bcq files"
+  assert_output_contains "basecamp files"
   assert_output_contains "Docs & Files"
 }
 
@@ -152,9 +152,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq files -h
+  run basecamp files -h
   assert_success
-  assert_output_contains "bcq files"
+  assert_output_contains "basecamp files"
 }
 
 
@@ -164,7 +164,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq files foobar
+  run basecamp files foobar
   # Command may show help or require project - just verify it runs
 }
 
@@ -175,7 +175,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq files
+  run basecamp files
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'
@@ -189,7 +189,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq vaults --help
+  run basecamp vaults --help
   assert_success
   assert_output_contains "Docs & Files"
 }
@@ -198,7 +198,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq uploads --help
+  run basecamp uploads --help
   assert_success
   assert_output_contains "Docs & Files"
 }
@@ -207,7 +207,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq docs --help
+  run basecamp docs --help
   assert_success
   assert_output_contains "Docs & Files"
 }

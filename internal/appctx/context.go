@@ -91,7 +91,7 @@ func NewApp(cfg *config.Config) *App {
 
 	// Create resilience components for cross-process state coordination
 	// State is stored in <cacheDir>/resilience/state.json
-	// If CacheDir is empty, NewStore uses the default (~/.cache/bcq/resilience/)
+	// If CacheDir is empty, NewStore uses the default (~/.cache/basecamp/resilience/)
 	var resilienceDir string
 	if cfg.CacheDir != "" {
 		resilienceDir = filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
@@ -186,10 +186,10 @@ func (a *App) ApplyFlags() {
 		})
 	}
 
-	// Determine verbosity level from flags and BCQ_DEBUG env var
+	// Determine verbosity level from flags and BASECAMP_DEBUG env var
 	verboseLevel := a.Flags.Verbose
-	if debugEnv := os.Getenv("BCQ_DEBUG"); debugEnv != "" {
-		// BCQ_DEBUG can be "1", "2", or "true" (treated as 2 for full debug)
+	if debugEnv := os.Getenv("BASECAMP_DEBUG"); debugEnv != "" {
+		// BASECAMP_DEBUG can be "1", "2", or "true" (treated as 2 for full debug)
 		if level, err := strconv.Atoi(debugEnv); err == nil {
 			if level > verboseLevel {
 				verboseLevel = level
@@ -350,7 +350,7 @@ func (a *App) Account() *basecamp.AccountClient {
 // match exactly - only ASCII digits 0-9 are allowed (no signs, spaces, etc.).
 func (a *App) RequireAccount() error {
 	if a.Config == nil || a.Config.AccountID == "" {
-		return output.ErrUsage("Account ID required. Set via --account flag, BCQ_ACCOUNT env, or config file.")
+		return output.ErrUsage("Account ID required. Set via --account flag, BASECAMP_ACCOUNT_ID env, or config file.")
 	}
 
 	// Validate that account ID contains only digits (matches ForAccount requirements)

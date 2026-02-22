@@ -23,9 +23,9 @@ func NewCampfireCmd() *cobra.Command {
 		Short:   "Interact with Campfire chat",
 		Long: `Interact with Campfire (real-time chat).
 
-Use 'bcq campfire list' to see campfires in a project.
-Use 'bcq campfire messages' to view recent messages.
-Use 'bcq campfire post "message"' to post a message.`,
+Use 'basecamp campfire list' to see campfires in a project.
+Use 'basecamp campfire messages' to view recent messages.
+Use 'basecamp campfire post "message"' to post a message.`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -33,7 +33,7 @@ Use 'bcq campfire post "message"' to post a message.`,
 				return err
 			}
 
-			// Handle numeric ID as first arg: bcq campfire 123 messages
+			// Handle numeric ID as first arg: basecamp campfire 123 messages
 			if len(args) > 0 && isNumeric(args[0]) {
 				campfireID = args[0]
 				if len(args) > 1 {
@@ -111,12 +111,12 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "messages",
-					Cmd:         "bcq campfire <id> messages --in <project>",
+					Cmd:         "basecamp campfire <id> messages --in <project>",
 					Description: "View messages",
 				},
 				output.Breadcrumb{
 					Action:      "post",
-					Cmd:         "bcq campfire <id> post \"message\" --in <project>",
+					Cmd:         "basecamp campfire <id> post \"message\" --in <project>",
 					Description: "Post message",
 				},
 			),
@@ -178,12 +178,12 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("bcq campfire %s messages --in %s", campfireIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", campfireIDStr, resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("bcq campfire %s post \"message\" --in %s", campfireIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire %s post \"message\" --in %s", campfireIDStr, resolvedProjectID),
 				Description: "Post message",
 			},
 		),
@@ -268,12 +268,12 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("bcq campfire %s post \"message\" --in %s", campfireID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire %s post \"message\" --in %s", campfireID, resolvedProjectID),
 				Description: "Post message",
 			},
 			output.Breadcrumb{
 				Action:      "more",
-				Cmd:         fmt.Sprintf("bcq campfire %s messages --limit 50 --in %s", campfireID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire %s messages --limit 50 --in %s", campfireID, resolvedProjectID),
 				Description: "Load more",
 			},
 		),
@@ -372,12 +372,12 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("bcq campfire %s messages --in %s", campfireID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", campfireID, resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("bcq campfire %s post \"reply\" --in %s", campfireID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire %s post \"reply\" --in %s", campfireID, resolvedProjectID),
 				Description: "Post another",
 			},
 		),
@@ -392,8 +392,8 @@ func newCampfireLineShowCmd(project, campfireID *string) *cobra.Command {
 		Long: `Show details of a specific message line.
 
 You can pass either a line ID or a Basecamp line URL:
-  bcq campfire line 789 --in my-project
-  bcq campfire line https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
+  basecamp campfire line 789 --in my-project
+  basecamp campfire line https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -466,12 +466,12 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq campfire delete %s --campfire %s --in %s", lineID, effectiveCampfireID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp campfire delete %s --campfire %s --in %s", lineID, effectiveCampfireID, resolvedProjectID),
 						Description: "Delete line",
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("bcq campfire %s messages --in %s", effectiveCampfireID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", effectiveCampfireID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
@@ -488,8 +488,8 @@ func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
 		Long: `Delete a message line from a Campfire.
 
 You can pass either a line ID or a Basecamp line URL:
-  bcq campfire delete 789 --in my-project
-  bcq campfire delete https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
+  basecamp campfire delete 789 --in my-project
+  basecamp campfire delete https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -558,7 +558,7 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("bcq campfire %s messages --in %s", effectiveCampfireID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", effectiveCampfireID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),

@@ -308,7 +308,7 @@ func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, err
 }
 
 func (m *Manager) launchpadURL() string {
-	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
+	if url := os.Getenv("BASECAMP_LAUNCHPAD_URL"); url != "" {
 		return url
 	}
 	return "https://launchpad.37signals.com"
@@ -331,8 +331,8 @@ func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Con
 
 	// Launchpad: Check environment variables, then use built-in defaults
 	// Priority: env vars > built-in defaults
-	clientID := os.Getenv("BCQ_CLIENT_ID")
-	clientSecret := os.Getenv("BCQ_CLIENT_SECRET")
+	clientID := os.Getenv("BASECAMP_CLIENT_ID")
+	clientSecret := os.Getenv("BASECAMP_CLIENT_SECRET")
 
 	if clientID != "" && clientSecret != "" {
 		return &ClientCredentials{
@@ -370,7 +370,7 @@ func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
 	redirectURI := "http://" + opts.CallbackAddr + "/callback"
 	regReq := map[string]any{
-		"client_name":                "bcq",
+		"client_name":                "basecamp-cli",
 		"client_uri":                 "https://github.com/basecamp/basecamp-cli",
 		"redirect_uris":              []string{redirectURI},
 		"grant_types":                []string{"authorization_code"},

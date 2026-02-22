@@ -37,7 +37,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 			if len(args) > 0 {
 				return output.ErrUsageHint(
 					"Unknown webhooks action: "+args[0],
-					"Run 'bcq webhooks -h' for available commands",
+					"Run 'basecamp webhooks -h' for available commands",
 				)
 			}
 			// Default to list when called without subcommand
@@ -115,12 +115,12 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq webhooks show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp webhooks show <id> --in %s", resolvedProjectID),
 				Description: "Show webhook details",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq webhooks create --url <url> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp webhooks create --url <url> --in %s", resolvedProjectID),
 				Description: "Create webhook",
 			},
 		),
@@ -182,17 +182,17 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq webhooks update %s --in %s", webhookIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks update %s --in %s", webhookIDStr, resolvedProjectID),
 						Description: "Update webhook",
 					},
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq webhooks delete %s --in %s", webhookIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks delete %s --in %s", webhookIDStr, resolvedProjectID),
 						Description: "Delete webhook",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq webhooks --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
 						Description: "Back to webhooks",
 					},
 				),
@@ -277,12 +277,12 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq webhooks show %d --in %s", webhook.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks show %d --in %s", webhook.ID, resolvedProjectID),
 						Description: "View webhook",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq webhooks --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
 						Description: "List webhooks",
 					},
 				),
@@ -391,12 +391,12 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq webhooks show %s --in %s", webhookIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks show %s --in %s", webhookIDStr, resolvedProjectID),
 						Description: "View webhook",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq webhooks --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
 						Description: "List webhooks",
 					},
 				),
@@ -470,7 +470,7 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq webhooks --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
 						Description: "List webhooks",
 					},
 				),

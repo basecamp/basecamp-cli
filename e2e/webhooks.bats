@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq webhooks --project
+  run basecamp webhooks --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks create --url
+  run basecamp webhooks create --url
   assert_failure
   assert_output_contains "--url requires a value"
 }
@@ -28,7 +28,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks create --url https://example.com/hook --types
+  run basecamp webhooks create --url https://example.com/hook --types
   assert_failure
   assert_output_contains "--types requires a value"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq webhooks
+  run basecamp webhooks
   assert_failure
   assert_output_contains "project"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks show
+  run basecamp webhooks show
   assert_failure
   # Go returns generic "ID required", Bash returned "ID required"
   assert_output_contains "ID required"
@@ -59,7 +59,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks create
+  run basecamp webhooks create
   assert_failure
   # Go returns "url required", Bash returned "Webhook URL required"
   assert_output_contains "url required"
@@ -69,7 +69,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks update --url https://example.com/hook
+  run basecamp webhooks update --url https://example.com/hook
   assert_failure
   # Go returns generic "ID required", Bash returned "ID required"
   assert_output_contains "ID required"
@@ -79,7 +79,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks delete
+  run basecamp webhooks delete
   assert_failure
   # Go returns generic "ID required", Bash returned "ID required"
   assert_output_contains "ID required"
@@ -92,9 +92,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq webhooks --help
+  run basecamp webhooks --help
   assert_success
-  assert_output_contains "bcq webhooks"
+  assert_output_contains "basecamp webhooks"
   # Go shows subcommand list instead of flag details
   assert_output_contains "create"
   assert_output_contains "delete"
@@ -104,9 +104,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq webhooks -h
+  run basecamp webhooks -h
   assert_success
-  assert_output_contains "bcq webhooks"
+  assert_output_contains "basecamp webhooks"
 }
 
 
@@ -116,7 +116,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq webhooks foobar
+  run basecamp webhooks foobar
   # Command may show help or require project - just verify it runs
 }
 
@@ -127,7 +127,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq webhooks
+  run basecamp webhooks
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'

@@ -1,7 +1,7 @@
-# GoReleaser configuration for bcq
+# GoReleaser configuration for basecamp
 # Docs: https://goreleaser.com
 version: 2
-project_name: bcq
+project_name: basecamp
 
 before:
   hooks:
@@ -10,9 +10,9 @@ before:
     - sh -c 'if [ -f default.pgo ]; then echo "PGO profile found ($(du -h default.pgo | cut -f1))"; else echo "No PGO profile - build will use standard optimization"; fi'
 
 builds:
-  - id: bcq
-    main: ./cmd/bcq
-    binary: bcq
+  - id: basecamp
+    main: ./cmd/basecamp
+    binary: basecamp
     env:
       - CGO_ENABLED=0
     goos:
@@ -98,12 +98,12 @@ release:
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
-    ## bcq v{{.Version}}
+    ## basecamp v{{.Version}}
 
     CLI for Basecamp. See the [README](https://github.com/basecamp/basecamp-cli) for installation and usage.
 
 homebrew_casks:
-  - name: bcq
+  - name: basecamp
     repository:
       owner: basecamp
       name: homebrew-tap
@@ -112,15 +112,15 @@ homebrew_casks:
     homepage: "https://github.com/basecamp/basecamp-cli"
     description: "Command-line interface for Basecamp"
     binaries:
-      - bcq
+      - basecamp
     skip_upload: auto
 
 # Windows package manager (shares homebrew-tap repo)
 # Users install with:
 #   scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-#   scoop install bcq
+#   scoop install basecamp
 scoops:
-  - name: bcq
+  - name: basecamp
     repository:
       owner: basecamp
       name: homebrew-tap
@@ -134,11 +134,11 @@ scoops:
 # Docker multi-arch images
 # Uses Dockerfile.goreleaser which copies the pre-built binary (avoids private SDK auth issues)
 dockers_v2:
-  - id: bcq
-    ids: [bcq]
+  - id: basecamp
+    ids: [basecamp]
     dockerfile: Dockerfile.goreleaser
     images:
-      - "ghcr.io/basecamp/bcq"
+      - "ghcr.io/basecamp/cli"
     tags:
       - "{{ .Version }}"
       - latest
@@ -146,7 +146,7 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     labels:
-      "org.opencontainers.image.title": "bcq"
+      "org.opencontainers.image.title": "basecamp"
       "org.opencontainers.image.description": "Command-line interface for Basecamp"
       "org.opencontainers.image.url": "https://github.com/basecamp/basecamp-cli"
       "org.opencontainers.image.source": "https://github.com/basecamp/basecamp-cli"

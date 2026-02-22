@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todosets
+  run basecamp todosets
   assert_failure
   assert_output_contains "project"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todosets show
+  run basecamp todosets show
   assert_failure
   assert_output_contains "project"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq todosets --project
+  run basecamp todosets --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq todosets --todoset
+  run basecamp todosets --todoset
   assert_failure
   assert_output_contains "--todoset requires a value"
 }
@@ -52,7 +52,7 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq todosets foobar
+  run basecamp todosets foobar
   # Command may show help or require project - just verify it runs
 }
 
@@ -63,9 +63,9 @@ load test_helper
   create_credentials
   create_global_config '{}'
 
-  run bcq todosets --help
+  run basecamp todosets --help
   assert_success
-  assert_output_contains "bcq todosets"
+  assert_output_contains "basecamp todosets"
   assert_output_contains "todoset"
   assert_output_contains "--project"
 }

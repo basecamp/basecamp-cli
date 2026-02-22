@@ -104,12 +104,12 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         "bcq timeline --in <project>",
+				Cmd:         "basecamp timeline --in <project>",
 				Description: "View project timeline",
 			},
 			output.Breadcrumb{
 				Action:      "person",
-				Cmd:         "bcq timeline me",
+				Cmd:         "basecamp timeline me",
 				Description: "View your activity",
 			},
 		),
@@ -145,12 +145,12 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "account",
-				Cmd:         "bcq timeline",
+				Cmd:         "basecamp timeline",
 				Description: "View account-wide timeline",
 			},
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         fmt.Sprintf("bcq project show %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp project show %s", resolvedProjectID),
 				Description: "View project details",
 			},
 		),
@@ -192,12 +192,12 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "account",
-				Cmd:         "bcq timeline",
+				Cmd:         "basecamp timeline",
 				Description: "View account-wide timeline",
 			},
 			output.Breadcrumb{
 				Action:      "person",
-				Cmd:         fmt.Sprintf("bcq people show %s", resolvedPersonID),
+				Cmd:         fmt.Sprintf("basecamp people show %s", resolvedPersonID),
 				Description: "View person details",
 			},
 		),

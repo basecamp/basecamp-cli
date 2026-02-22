@@ -23,10 +23,10 @@ Lineup markers are account-wide date markers that appear in the Lineup
 view across all projects. They're useful for marking milestones, deadlines,
 or other important dates visible to the entire team.
 
-Unlike most bcq commands, lineup markers are not scoped to a project.
+Unlike most basecamp commands, lineup markers are not scoped to a project.
 They apply to the entire Basecamp account.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return output.ErrUsageHint("Action required", "Run: bcq lineup --help")
+			return output.ErrUsageHint("Action required", "Run: basecamp lineup --help")
 		},
 	}
 
@@ -101,7 +101,7 @@ The --date flag accepts natural language dates:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "bcq lineup",
+						Cmd:         "basecamp lineup",
 						Description: "View all markers",
 					},
 				),
@@ -125,8 +125,8 @@ func newLineupUpdateCmd() *cobra.Command {
 		Long: `Update an existing lineup marker's name or date.
 
 You can pass either a marker ID or a Basecamp URL:
-  bcq lineup update 789 --name "new name"
-  bcq lineup update https://3.basecamp.com/123/my/lineup/markers/789`,
+  basecamp lineup update 789 --name "new name"
+  basecamp lineup update https://3.basecamp.com/123/my/lineup/markers/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -180,7 +180,7 @@ You can pass either a marker ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq lineup delete %d", markerID),
+						Cmd:         fmt.Sprintf("basecamp lineup delete %d", markerID),
 						Description: "Delete marker",
 					},
 				),
@@ -201,8 +201,8 @@ func newLineupDeleteCmd() *cobra.Command {
 		Long: `Delete an existing lineup marker.
 
 You can pass either a marker ID or a Basecamp URL:
-  bcq lineup delete 789
-  bcq lineup delete https://3.basecamp.com/123/my/lineup/markers/789`,
+  basecamp lineup delete 789
+  basecamp lineup delete https://3.basecamp.com/123/my/lineup/markers/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -226,7 +226,7 @@ You can pass either a marker ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         "bcq lineup create <name> <date>",
+						Cmd:         "basecamp lineup create <name> <date>",
 						Description: "Create new marker",
 					},
 				),

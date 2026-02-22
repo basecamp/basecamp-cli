@@ -25,8 +25,8 @@ func NewEventsCmd() *cobra.Command {
 		Long: `View the event history (audit trail) for any recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq events 789 --in my-project
-  bcq events https://3.basecamp.com/123/buckets/456/todos/789
+  basecamp events 789 --in my-project
+  basecamp events https://3.basecamp.com/123/buckets/456/todos/789
 
 Events track all changes to a recording. Common event actions:
 - created - Recording was created
@@ -112,7 +112,7 @@ Events track all changes to a recording. Common event actions:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "recording",
-						Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp show %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "View the recording",
 					},
 				),

@@ -10,7 +10,7 @@ We will acknowledge receipt within 48 hours and aim to provide a fix within 90 d
 
 ## Credential Storage
 
-bcq stores OAuth tokens securely using your operating system's native credential storage:
+The Basecamp CLI stores OAuth tokens securely using your operating system's native credential storage:
 
 | Platform | Storage |
 |----------|---------|
@@ -23,7 +23,7 @@ bcq stores OAuth tokens securely using your operating system's native credential
 If system keyring is unavailable (headless servers, containers), set:
 
 ```bash
-export BCQ_NO_KEYRING=1
+export BASECAMP_NO_KEYRING=1
 ```
 
 Credentials will be stored in `~/.config/basecamp/credentials.json` with `0600` permissions.

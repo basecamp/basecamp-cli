@@ -20,10 +20,10 @@ func NewBoostsCmd() *cobra.Command {
 		Short:   "Manage boosts (reactions)",
 		Long: `Manage boosts (emoji reactions) on recordings.
 
-Use 'bcq boost list <recording-id>' to see boosts on a recording.
-Use 'bcq boost show <boost-id>' to view a specific boost.
-Use 'bcq boost create <recording-id> "emoji"' to boost a recording.
-Use 'bcq boost delete <boost-id>' to remove a boost.`,
+Use 'basecamp boost list <recording-id>' to see boosts on a recording.
+Use 'basecamp boost show <boost-id>' to view a specific boost.
+Use 'basecamp boost create <recording-id> "emoji"' to boost a recording.
+Use 'basecamp boost delete <boost-id>' to remove a boost.`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -52,8 +52,8 @@ func newBoostListCmd(project *string) *cobra.Command {
 		Long: `List boosts on a recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq boost list 789 --project my-project
-  bcq boost list https://3.basecamp.com/123/buckets/456/todos/789
+  basecamp boost list 789 --project my-project
+  basecamp boost list https://3.basecamp.com/123/buckets/456/todos/789
 
 Use --event to list boosts on a specific event within the recording.`,
 		Args: cobra.ExactArgs(1),
@@ -120,7 +120,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
-					Cmd:         fmt.Sprintf("bcq boost create %s \"emoji\" --event %s --project %s", recordingID, eventID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --event %s --project %s", recordingID, eventID, resolvedProjectID),
 					Description: "Boost this event",
 				},
 			),
@@ -139,7 +139,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq boost create %s \"emoji\" --project %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --project %s", recordingID, resolvedProjectID),
 				Description: "Boost this recording",
 			},
 		),
@@ -153,8 +153,8 @@ func newBoostShowCmd(project *string) *cobra.Command {
 		Long: `Show details of a specific boost.
 
 You can pass either a boost ID or a Basecamp URL:
-  bcq boost show 789 --project my-project
-  bcq boost show https://3.basecamp.com/123/buckets/456/boosts/789`,
+  basecamp boost show 789 --project my-project
+  basecamp boost show https://3.basecamp.com/123/buckets/456/boosts/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -211,7 +211,7 @@ You can pass either a boost ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq boost delete %s --project %s", boostID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp boost delete %s --project %s", boostID, resolvedProjectID),
 						Description: "Delete boost",
 					},
 				),
@@ -230,8 +230,8 @@ func newBoostCreateCmd(project *string) *cobra.Command {
 		Long: `Boost a recording with an emoji reaction.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq boost create 789 "🎉" --project my-project
-  bcq boost create https://3.basecamp.com/123/buckets/456/todos/789 "👍"
+  basecamp boost create 789 "🎉" --project my-project
+  basecamp boost create https://3.basecamp.com/123/buckets/456/todos/789 "👍"
 
 Use --event to boost a specific event within the recording.`,
 		Args: cobra.ExactArgs(2),
@@ -298,7 +298,7 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "list",
-					Cmd:         fmt.Sprintf("bcq boost list %s --event %s --project %s", recordingID, eventID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp boost list %s --event %s --project %s", recordingID, eventID, resolvedProjectID),
 					Description: "View boosts",
 				},
 			),
@@ -317,12 +317,12 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq boost show %d --project %s", boost.ID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp boost show %d --project %s", boost.ID, resolvedProjectID),
 				Description: "View boost",
 			},
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq boost list %s --project %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp boost list %s --project %s", recordingID, resolvedProjectID),
 				Description: "View all boosts",
 			},
 		),
@@ -336,8 +336,8 @@ func newBoostDeleteCmd(project *string) *cobra.Command {
 		Long: `Delete a boost from a recording.
 
 You can pass either a boost ID or a Basecamp URL:
-  bcq boost delete 789 --project my-project
-  bcq boost delete https://3.basecamp.com/123/buckets/456/boosts/789`,
+  basecamp boost delete 789 --project my-project
+  basecamp boost delete https://3.basecamp.com/123/buckets/456/boosts/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -390,7 +390,7 @@ You can pass either a boost ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "bcq boost list <recording-id> --project <project>",
+						Cmd:         "basecamp boost list <recording-id> --project <project>",
 						Description: "View boosts",
 					},
 				),
@@ -412,8 +412,8 @@ func NewBoostShortcutCmd() *cobra.Command {
 		Long: `Boost a recording with an emoji reaction (shortcut for boost create).
 
 Content as positional argument, --on for the recording:
-  bcq react "🎉" --on 789 --project my-project
-  bcq react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp react "🎉" --on 789 --project my-project
+  basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			content := args[0]

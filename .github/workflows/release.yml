@@ -15,7 +15,7 @@ jobs:
     name: Test before release
     runs-on: ubuntu-latest
     env:
-      BCQ_NO_KEYRING: "1"
+      BASECAMP_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@v6
@@ -72,7 +72,7 @@ jobs:
 
       - name: Collect PGO profile
         env:
-          BCQ_NO_KEYRING: "1"
+          BASECAMP_NO_KEYRING: "1"
         run: |
           echo "Collecting PGO profile from benchmarks..."
           mkdir -p profiles

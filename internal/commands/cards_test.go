@@ -73,7 +73,7 @@ func setupTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
 	// Disable keyring access during tests
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{
@@ -152,7 +152,7 @@ func TestCardsStepsRequiresCardID(t *testing.T) {
 	// Check error type
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Card ID required (bcq cards steps <card_id>)", e.Message)
+		assert.Equal(t, "Card ID required (basecamp cards steps <card_id>)", e.Message)
 	}
 }
 

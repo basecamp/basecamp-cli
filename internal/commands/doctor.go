@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zalando/go-keyring"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
@@ -81,9 +82,9 @@ The doctor command helps troubleshoot common issues by checking:
   - Shell completion status
 
 Examples:
-  bcq doctor              # Run all diagnostic checks
-  bcq doctor --json       # Output results as JSON
-  bcq doctor --verbose    # Show additional debug information`,
+  basecamp doctor              # Run all diagnostic checks
+  basecamp doctor --json       # Output results as JSON
+  basecamp doctor --verbose    # Show additional debug information`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -151,7 +152,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 			Name:    "Authentication",
 			Status:  "skip",
 			Message: "Skipped (no credentials)",
-			Hint:    "Run: bcq auth login",
+			Hint:    "Run: basecamp auth login",
 		})
 	}
 
@@ -189,6 +190,11 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 
 	// 10. Shell completion
 	checks = append(checks, checkShellCompletion(verbose))
+
+	// 11. Legacy bcq detection
+	if legacyCheck := checkLegacyInstall(); legacyCheck != nil {
+		checks = append(checks, *legacyCheck)
+	}
 
 	return checks
 }
@@ -526,7 +532,7 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 	if !app.Auth.IsAuthenticated() {
 		check.Status = "fail"
 		check.Message = "No credentials found"
-		check.Hint = "Run: bcq auth login"
+		check.Hint = "Run: basecamp auth login"
 		return check
 	}
 
@@ -579,7 +585,7 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 	if err != nil {
 		check.Status = "fail"
 		check.Message = "Cannot load credentials"
-		check.Hint = "Run: bcq auth login"
+		check.Hint = "Run: basecamp auth login"
 		return check
 	}
 
@@ -592,7 +598,7 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 			if err := app.Auth.Refresh(ctx); err != nil {
 				check.Status = "fail"
 				check.Message = "Token expired and refresh failed"
-				check.Hint = "Run: bcq auth login"
+				check.Hint = "Run: basecamp auth login"
 				return check
 			}
 			check.Status = "pass"
@@ -768,10 +774,10 @@ func checkShellCompletion(verbose bool) Check {
 	case "bash":
 		// Check common bash completion paths
 		paths := []string{
-			"/opt/homebrew/etc/bash_completion.d/bcq",
-			"/usr/local/etc/bash_completion.d/bcq",
-			"/etc/bash_completion.d/bcq",
-			filepath.Join(os.Getenv("HOME"), ".local/share/bash-completion/completions/bcq"),
+			"/opt/homebrew/etc/bash_completion.d/basecamp",
+			"/usr/local/etc/bash_completion.d/basecamp",
+			"/etc/bash_completion.d/basecamp",
+			filepath.Join(os.Getenv("HOME"), ".local/share/bash-completion/completions/basecamp"),
 		}
 		for _, p := range paths {
 			if _, err := os.Stat(p); err == nil {
@@ -783,9 +789,9 @@ func checkShellCompletion(verbose bool) Check {
 	case "zsh":
 		// Check common zsh completion paths
 		paths := []string{
-			"/opt/homebrew/share/zsh/site-functions/_bcq",
-			"/usr/local/share/zsh/site-functions/_bcq",
-			filepath.Join(os.Getenv("HOME"), ".zsh/completions/_bcq"),
+			"/opt/homebrew/share/zsh/site-functions/_basecamp",
+			"/usr/local/share/zsh/site-functions/_basecamp",
+			filepath.Join(os.Getenv("HOME"), ".zsh/completions/_basecamp"),
 		}
 		for _, p := range paths {
 			if _, err := os.Stat(p); err == nil {
@@ -795,7 +801,7 @@ func checkShellCompletion(verbose bool) Check {
 			}
 		}
 	case "fish":
-		completionPath = filepath.Join(os.Getenv("HOME"), ".config/fish/completions/bcq.fish")
+		completionPath = filepath.Join(os.Getenv("HOME"), ".config/fish/completions/basecamp.fish")
 		if _, err := os.Stat(completionPath); err == nil {
 			completionInstalled = true
 		}
@@ -811,7 +817,7 @@ func checkShellCompletion(verbose bool) Check {
 	} else {
 		check.Status = "warn"
 		check.Message = fmt.Sprintf("%s (not installed)", shell)
-		check.Hint = fmt.Sprintf("Run: bcq completion %s --help", shell)
+		check.Hint = fmt.Sprintf("Run: basecamp completion %s --help", shell)
 	}
 
 	return check
@@ -862,19 +868,19 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 		case "Credentials", "Authentication":
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "login",
-				Cmd:         "bcq auth login",
+				Cmd:         "basecamp auth login",
 				Description: "Authenticate with Basecamp",
 			})
 		case "API Connectivity":
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "status",
-				Cmd:         "bcq auth status",
+				Cmd:         "basecamp auth status",
 				Description: "Check authentication status",
 			})
 		case "Account Access":
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "config",
-				Cmd:         "bcq config show",
+				Cmd:         "basecamp config show",
 				Description: "Review configuration",
 			})
 		}
@@ -971,4 +977,66 @@ func renderDoctorStyled(w io.Writer, result *DoctorResult) {
 
 	fmt.Fprintf(w, "  %s\n", strings.Join(summaryParts, "  "))
 	fmt.Fprintln(w)
+}
+
+// checkLegacyInstall detects stale bcq artifacts and suggests migration.
+// Returns nil if no legacy artifacts are found (to avoid noisy output).
+func checkLegacyInstall() *Check {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	// Check marker first — if already migrated, skip
+	configBase := os.Getenv("XDG_CONFIG_HOME")
+	if configBase == "" {
+		configBase = filepath.Join(home, ".config")
+	}
+	markerPath := filepath.Join(configBase, "basecamp", ".migrated")
+	if _, err := os.Stat(markerPath); err == nil {
+		return nil // Already migrated
+	}
+
+	cacheBase := os.Getenv("XDG_CACHE_HOME")
+	if cacheBase == "" {
+		cacheBase = filepath.Join(home, ".cache")
+	}
+
+	var found []string
+
+	// Check for legacy cache dir
+	legacyCache := filepath.Join(cacheBase, "bcq")
+	if info, err := os.Stat(legacyCache); err == nil && info.IsDir() {
+		found = append(found, legacyCache)
+	}
+
+	// Check for legacy theme dir
+	legacyTheme := filepath.Join(configBase, "bcq", "theme")
+	if info, err := os.Stat(legacyTheme); err == nil && info.IsDir() {
+		found = append(found, legacyTheme)
+	}
+
+	// Check for legacy keyring entries (best-effort, probe all known origins)
+	// Skip when BASECAMP_NO_KEYRING is set (headless/CI environments)
+	if os.Getenv("BASECAMP_NO_KEYRING") == "" {
+		configDir := filepath.Join(configBase, "basecamp")
+		for _, origin := range collectKnownOrigins(configDir) {
+			legacyKey := fmt.Sprintf("bcq::%s", origin)
+			if _, err := keyring.Get("bcq", legacyKey); err == nil {
+				found = append(found, "keyring(bcq::*)")
+				break
+			}
+		}
+	}
+
+	if len(found) == 0 {
+		return nil
+	}
+
+	return &Check{
+		Name:    "Legacy Install",
+		Status:  "warn",
+		Message: fmt.Sprintf("Found legacy bcq data: %s", strings.Join(found, ", ")),
+		Hint:    "Run: basecamp migrate",
+	}
 }

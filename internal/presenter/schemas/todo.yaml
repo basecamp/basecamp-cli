@@ -81,13 +81,13 @@ relationships:
 
 affordances:
   - action: complete
-    cmd: "bcq done {{.id}}"
+    cmd: "basecamp done {{.id}}"
     label: "Mark done"
     when: "{{not .completed}}"
   - action: reopen
-    cmd: "bcq reopen {{.id}}"
+    cmd: "basecamp reopen {{.id}}"
     label: "Reopen"
     when: "{{.completed}}"
   - action: comment
-    cmd: "bcq comment --on {{.id}} --content <text>"
+    cmd: "basecamp comment --on {{.id}} --content <text>"
     label: "Add comment"

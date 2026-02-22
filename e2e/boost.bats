@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq react "👍"
+  run basecamp react "👍"
   assert_failure
   assert_output_contains "--on or --recording required"
 }
@@ -22,16 +22,16 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq boost --help
+  run basecamp boost --help
   assert_success
-  assert_output_contains "bcq boost"
+  assert_output_contains "basecamp boost"
 }
 
 @test "react --help shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq react --help
+  run basecamp react --help
   assert_success
   assert_output_contains "--on"
   assert_output_contains "--recording"

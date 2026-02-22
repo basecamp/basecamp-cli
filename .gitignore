@@ -6,9 +6,9 @@ go.work
 go.work.sum
 
 # Built binaries
-bin/bcq
-bin/bcq-*
-/bcq
+bin/basecamp
+bin/basecamp-*
+/basecamp
 
 # GoReleaser output
 dist/

@@ -110,6 +110,7 @@ func commandCategories() []CommandCategory {
 				{Name: "setup", Category: "auth", Description: "Interactive first-time setup"},
 				{Name: "quick-start", Category: "auth", Description: "Show getting started guide"},
 				{Name: "doctor", Category: "auth", Description: "Check CLI health and diagnose issues"},
+				{Name: "migrate", Category: "auth", Description: "Migrate data from legacy bcq installation"},
 			},
 		},
 		{
@@ -151,16 +152,16 @@ func NewCommandsCmd() *cobra.Command {
 		Use:     "commands",
 		Aliases: []string{"cmds"},
 		Short:   "List all available commands",
-		Long:    "List all available bcq commands organized by category.",
+		Long:    "List all available basecamp commands organized by category.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
 			return app.OK(commandCategories(),
-				output.WithSummary("All available bcq commands"),
+				output.WithSummary("All available basecamp commands"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "help",
-						Cmd:         "bcq --help",
+						Cmd:         "basecamp --help",
 						Description: "View help",
 					},
 				),

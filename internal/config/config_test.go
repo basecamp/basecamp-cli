@@ -86,15 +86,12 @@ func TestLoadFromFileSkipsMissingFile(t *testing.T) {
 func TestLoadFromEnv(t *testing.T) {
 	// Save and clear env vars
 	originalEnvVars := map[string]string{
-		"BCQ_BASE_URL":         os.Getenv("BCQ_BASE_URL"),
-		"BASECAMP_BASE_URL":    os.Getenv("BASECAMP_BASE_URL"),
-		"BCQ_ACCOUNT":          os.Getenv("BCQ_ACCOUNT"),
-		"BASECAMP_ACCOUNT_ID":  os.Getenv("BASECAMP_ACCOUNT_ID"),
-		"BCQ_PROJECT":          os.Getenv("BCQ_PROJECT"),
-		"BASECAMP_PROJECT_ID":  os.Getenv("BASECAMP_PROJECT_ID"),
-		"BASECAMP_TODOLIST_ID": os.Getenv("BASECAMP_TODOLIST_ID"),
-		"BCQ_CACHE_DIR":        os.Getenv("BCQ_CACHE_DIR"),
-		"BCQ_CACHE_ENABLED":    os.Getenv("BCQ_CACHE_ENABLED"),
+		"BASECAMP_BASE_URL":      os.Getenv("BASECAMP_BASE_URL"),
+		"BASECAMP_ACCOUNT_ID":    os.Getenv("BASECAMP_ACCOUNT_ID"),
+		"BASECAMP_PROJECT_ID":    os.Getenv("BASECAMP_PROJECT_ID"),
+		"BASECAMP_TODOLIST_ID":   os.Getenv("BASECAMP_TODOLIST_ID"),
+		"BASECAMP_CACHE_DIR":     os.Getenv("BASECAMP_CACHE_DIR"),
+		"BASECAMP_CACHE_ENABLED": os.Getenv("BASECAMP_CACHE_ENABLED"),
 	}
 	defer func() {
 		for k, v := range originalEnvVars {
@@ -112,12 +109,12 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 
 	// Set test values
-	os.Setenv("BCQ_BASE_URL", "http://env.example.com")
-	os.Setenv("BCQ_ACCOUNT", "env-account")
-	os.Setenv("BCQ_PROJECT", "env-project")
+	os.Setenv("BASECAMP_BASE_URL", "http://env.example.com")
+	os.Setenv("BASECAMP_ACCOUNT_ID", "env-account")
+	os.Setenv("BASECAMP_PROJECT_ID", "env-project")
 	os.Setenv("BASECAMP_TODOLIST_ID", "env-todolist")
-	os.Setenv("BCQ_CACHE_DIR", "/env/cache")
-	os.Setenv("BCQ_CACHE_ENABLED", "false")
+	os.Setenv("BASECAMP_CACHE_DIR", "/env/cache")
+	os.Setenv("BASECAMP_CACHE_ENABLED", "false")
 
 	cfg := Default()
 	LoadFromEnv(cfg)
@@ -135,9 +132,8 @@ func TestLoadFromEnv(t *testing.T) {
 }
 
 func TestLoadFromEnvPrecedence(t *testing.T) {
-	// BCQ_* should override BASECAMP_*
+	// BASECAMP_* env vars are the canonical names
 	originalEnvVars := map[string]string{
-		"BCQ_BASE_URL":      os.Getenv("BCQ_BASE_URL"),
 		"BASECAMP_BASE_URL": os.Getenv("BASECAMP_BASE_URL"),
 	}
 	defer func() {
@@ -151,13 +147,11 @@ func TestLoadFromEnvPrecedence(t *testing.T) {
 	}()
 
 	os.Setenv("BASECAMP_BASE_URL", "http://basecamp.example.com")
-	os.Setenv("BCQ_BASE_URL", "http://bcq.example.com")
 
 	cfg := Default()
 	LoadFromEnv(cfg)
 
-	// BCQ_BASE_URL should win (it's loaded last)
-	assert.Equal(t, "http://bcq.example.com", cfg.BaseURL)
+	assert.Equal(t, "http://basecamp.example.com", cfg.BaseURL)
 }
 
 func TestApplyOverrides(t *testing.T) {
@@ -250,12 +244,12 @@ func TestFullLayeringPrecedence(t *testing.T) {
 	// Test: flags > env > local > repo > global > system > defaults
 
 	// Save original env
-	originalAccountID := os.Getenv("BCQ_ACCOUNT")
+	originalAccountID := os.Getenv("BASECAMP_ACCOUNT_ID")
 	defer func() {
 		if originalAccountID == "" {
-			os.Unsetenv("BCQ_ACCOUNT")
+			os.Unsetenv("BASECAMP_ACCOUNT_ID")
 		} else {
-			os.Setenv("BCQ_ACCOUNT", originalAccountID)
+			os.Setenv("BASECAMP_ACCOUNT_ID", originalAccountID)
 		}
 	}()
 
@@ -375,16 +369,16 @@ func TestCacheEnabledEnvParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.envValue, func(t *testing.T) {
 			// Save and restore
-			original := os.Getenv("BCQ_CACHE_ENABLED")
+			original := os.Getenv("BASECAMP_CACHE_ENABLED")
 			defer func() {
 				if original == "" {
-					os.Unsetenv("BCQ_CACHE_ENABLED")
+					os.Unsetenv("BASECAMP_CACHE_ENABLED")
 				} else {
-					os.Setenv("BCQ_CACHE_ENABLED", original)
+					os.Setenv("BASECAMP_CACHE_ENABLED", original)
 				}
 			}()
 
-			os.Setenv("BCQ_CACHE_ENABLED", tt.envValue)
+			os.Setenv("BASECAMP_CACHE_ENABLED", tt.envValue)
 
 			cfg := Default()
 			cfg.CacheEnabled = tt.startValue
@@ -397,16 +391,16 @@ func TestCacheEnabledEnvParsing(t *testing.T) {
 
 func TestCacheEnabledEnvEmpty(t *testing.T) {
 	// Empty env var should not change the value
-	original := os.Getenv("BCQ_CACHE_ENABLED")
+	original := os.Getenv("BASECAMP_CACHE_ENABLED")
 	defer func() {
 		if original == "" {
-			os.Unsetenv("BCQ_CACHE_ENABLED")
+			os.Unsetenv("BASECAMP_CACHE_ENABLED")
 		} else {
-			os.Setenv("BCQ_CACHE_ENABLED", original)
+			os.Setenv("BASECAMP_CACHE_ENABLED", original)
 		}
 	}()
 
-	os.Unsetenv("BCQ_CACHE_ENABLED")
+	os.Unsetenv("BASECAMP_CACHE_ENABLED")
 
 	cfg := Default()
 	cfg.CacheEnabled = true

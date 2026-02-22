@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq forwards
+  run basecamp forwards
   assert_failure
   assert_output_contains "project"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq forwards show
+  run basecamp forwards show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq forwards replies
+  run basecamp forwards replies
   assert_failure
   assert_output_contains "ID required"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq forwards reply
+  run basecamp forwards reply
   assert_failure
   assert_output_contains "ID required"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq forwards reply 456
+  run basecamp forwards reply 456
   # Cobra returns "accepts 2 arg(s)" error
   assert_failure
 }
@@ -61,7 +61,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq forwards --project
+  run basecamp forwards --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -70,7 +70,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq forwards --inbox
+  run basecamp forwards --inbox
   assert_failure
   assert_output_contains "--inbox requires a value"
 }
@@ -82,9 +82,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq forwards --help
+  run basecamp forwards --help
   assert_success
-  assert_output_contains "bcq forwards"
+  assert_output_contains "basecamp forwards"
   assert_output_contains "replies"
   assert_output_contains "inbox"
 }
@@ -96,6 +96,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq forwards foobar
+  run basecamp forwards foobar
   # Command may show help or require project - just verify it runs
 }

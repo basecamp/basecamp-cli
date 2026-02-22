@@ -37,7 +37,7 @@ func (t *quickstartTestTokenProvider) AccessToken(_ context.Context) (string, er
 func setupQuickstartTestApp(t *testing.T, accountID, projectID string) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{

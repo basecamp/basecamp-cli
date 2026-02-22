@@ -154,12 +154,12 @@ func runCommentsList(cmd *cobra.Command, project, recordingID string, limit, pag
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
-				Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s --in %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s --in %s", recordingID, resolvedProjectID),
 				Description: "Add comment",
 			},
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq comments show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp comments show <id> --in %s", resolvedProjectID),
 				Description: "Show comment",
 			},
 		),
@@ -180,8 +180,8 @@ func newCommentsShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about a comment.
 
 You can pass either a comment ID or a Basecamp URL:
-  bcq comments show 789 --in my-project
-  bcq comments show https://3.basecamp.com/123/buckets/456/todos/111#__recording_789`,
+  basecamp comments show 789 --in my-project
+  basecamp comments show https://3.basecamp.com/123/buckets/456/todos/111#__recording_789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -241,7 +241,7 @@ You can pass either a comment ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq comments update %s --content <text> --in %s", commentIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp comments update %s --content <text> --in %s", commentIDStr, resolvedProjectID),
 						Description: "Update comment",
 					},
 				),
@@ -260,8 +260,8 @@ func newCommentsUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing comment's content.
 
 You can pass either a comment ID or a Basecamp URL:
-  bcq comments update 789 --content "new text" --in my-project
-  bcq comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 --content "new text"`,
+  basecamp comments update 789 --content "new text" --in my-project
+  basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 --content "new text"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -325,7 +325,7 @@ You can pass either a comment ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq comments show %s --in %s", commentIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp comments show %s --in %s", commentIDStr, resolvedProjectID),
 						Description: "View comment",
 					},
 				),
@@ -491,7 +491,7 @@ Supports batch commenting on multiple recordings at once.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProjectID),
 						Description: "List todos",
 					},
 				),

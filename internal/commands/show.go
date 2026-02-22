@@ -27,8 +27,8 @@ Types: todo, todolist, message, comment, card, card-table, document
 If no type specified, uses generic recording lookup.
 
 You can also pass a Basecamp URL directly:
-  bcq show https://3.basecamp.com/123/buckets/456/todos/789
-  bcq show todo 789 --in my-project`,
+  basecamp show https://3.basecamp.com/123/buckets/456/todos/789
+  basecamp show todo 789 --in my-project`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -127,7 +127,7 @@ You can also pass a Basecamp URL directly:
 				if recordType == "" || recordType == "recording" || recordType == "recordings" {
 					return output.ErrUsageHint(
 						fmt.Sprintf("Recording %s not found or type required", id),
-						"Specify a type: bcq show todo|todolist|message|comment|card|document <id>",
+						"Specify a type: basecamp show todo|todolist|message|comment|card|document <id>",
 					)
 				}
 				return output.ErrNotFound("recording", id)
@@ -160,7 +160,7 @@ You can also pass a Basecamp URL directly:
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "comment",
-					Cmd:         fmt.Sprintf("bcq comment --on %s --content \"text\"", id),
+					Cmd:         fmt.Sprintf("basecamp comment --on %s --content \"text\"", id),
 					Description: "Add comment",
 				},
 			}

@@ -18,7 +18,7 @@ type Theme struct {
 	Border     lipgloss.AdaptiveColor
 }
 
-// DefaultTheme returns the default bcq theme.
+// DefaultTheme returns the default basecamp theme.
 func DefaultTheme() Theme {
 	return Theme{
 		Primary:    lipgloss.AdaptiveColor{Light: "#1a73e8", Dark: "#8ab4f8"},

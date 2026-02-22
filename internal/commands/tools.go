@@ -21,12 +21,12 @@ func NewToolsCmd() *cobra.Command {
 
 Every project has a "dock" with tools like Message Board, To-dos, Docs & Files,
 Campfire, Schedule, etc. Tool IDs can be found in the project's dock array
-(see 'bcq projects show <id>').
+(see 'basecamp projects show <id>').
 
 Tools can be created by cloning existing ones (e.g., create a second Campfire).
 Disabling a tool hides it from the dock but preserves its content.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return output.ErrUsageHint("Action required", "Run: bcq tools --help")
+			return output.ErrUsageHint("Action required", "Run: basecamp tools --help")
 		},
 	}
 
@@ -105,17 +105,17 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "rename",
-						Cmd:         fmt.Sprintf("bcq tools update %d --title \"New Name\" --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools update %d --title \"New Name\" --in %s", toolID, resolvedProjectID),
 						Description: "Rename tool",
 					},
 					output.Breadcrumb{
 						Action:      "reposition",
-						Cmd:         fmt.Sprintf("bcq tools reposition %d --position 1 --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools reposition %d --position 1 --in %s", toolID, resolvedProjectID),
 						Description: "Move tool",
 					},
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 						Description: "View project",
 					},
 				),
@@ -193,12 +193,12 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", created.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", created.ID, resolvedProjectID),
 						Description: "View tool",
 					},
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 						Description: "View project",
 					},
 				),
@@ -274,12 +274,12 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", toolID, resolvedProjectID),
 						Description: "View tool",
 					},
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 						Description: "View project",
 					},
 				),
@@ -349,7 +349,7 @@ WARNING: This permanently removes the tool and all its content.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 						Description: "View project",
 					},
 				),
@@ -413,7 +413,7 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", toolID, resolvedProjectID),
 						Description: "View tool",
 					},
 				),
@@ -428,7 +428,7 @@ func newToolsDisableCmd(project *string) *cobra.Command {
 		Short: "Disable a tool (hide from dock)",
 		Long: `Disable a tool to hide it from the project dock.
 
-The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
+The tool is not deleted - just hidden. Use 'basecamp tools enable' to restore.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -477,7 +477,7 @@ The tool is not deleted - just hidden. Use 'bcq tools enable' to restore.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "enable",
-						Cmd:         fmt.Sprintf("bcq tools enable %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools enable %d --in %s", toolID, resolvedProjectID),
 						Description: "Re-enable tool",
 					},
 				),
@@ -546,7 +546,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("bcq tools show %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", toolID, resolvedProjectID),
 						Description: "View tool",
 					},
 				),

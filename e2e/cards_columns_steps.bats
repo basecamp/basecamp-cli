@@ -10,9 +10,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq card --help
+  run basecamp card --help
   assert_success
-  assert_output_contains "bcq card"
+  assert_output_contains "basecamp card"
   assert_output_contains "--content"
   assert_output_contains "--title"
 }
@@ -21,7 +21,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq card --title "Test" --content
+  run basecamp card --title "Test" --content
   assert_failure
   assert_output_contains "--content requires a value"
 }
@@ -30,7 +30,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq card --title "Test" --foo
+  run basecamp card --title "Test" --foo
   assert_failure
   assert_output_contains "Unknown option: --foo"
 }
@@ -39,7 +39,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq card --content "Body only"
+  run basecamp card --content "Body only"
   assert_failure
   assert_output_contains "title required"
 }
@@ -51,7 +51,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column show
+  run basecamp cards column show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -60,7 +60,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq cards column show 456
+  run basecamp cards column show 456
   assert_failure
   assert_output_contains "project"
 }
@@ -72,7 +72,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column create
+  run basecamp cards column create
   assert_failure
   assert_output_contains "title required"
 }
@@ -84,7 +84,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column update
+  run basecamp cards column update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -93,7 +93,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column update 456
+  run basecamp cards column update 456
   assert_failure
   assert_output_contains "update"
 }
@@ -105,7 +105,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column move
+  run basecamp cards column move
   assert_failure
   assert_output_contains "ID required"
 }
@@ -114,7 +114,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column move 456
+  run basecamp cards column move 456
   assert_failure
   assert_output_contains "--position required"
 }
@@ -126,7 +126,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column watch
+  run basecamp cards column watch
   assert_failure
   assert_output_contains "ID required"
 }
@@ -135,7 +135,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column unwatch
+  run basecamp cards column unwatch
   assert_failure
   assert_output_contains "ID required"
 }
@@ -147,7 +147,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column on-hold
+  run basecamp cards column on-hold
   assert_failure
   assert_output_contains "ID required"
 }
@@ -156,7 +156,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column no-on-hold
+  run basecamp cards column no-on-hold
   assert_failure
   assert_output_contains "ID required"
 }
@@ -168,7 +168,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column color
+  run basecamp cards column color
   assert_failure
   assert_output_contains "ID required"
 }
@@ -177,7 +177,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column color 456
+  run basecamp cards column color 456
   assert_failure
   assert_output_contains "--color is required"
 }
@@ -189,7 +189,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq cards column foobar
+  run basecamp cards column foobar
   # Cobra doesn't error on unknown args, shows help
   assert_success
   assert_output_contains "Available Commands"
@@ -202,7 +202,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards columns --card-table
+  run basecamp cards columns --card-table
   assert_failure
   assert_output_contains "--card-table requires a value"
 }
@@ -211,7 +211,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column create "Test" --card-table
+  run basecamp cards column create "Test" --card-table
   assert_failure
   assert_output_contains "--card-table requires a value"
 }
@@ -220,7 +220,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards column move 456 --position 1 --card-table
+  run basecamp cards column move 456 --position 1 --card-table
   assert_failure
   assert_output_contains "--card-table requires a value"
 }
@@ -232,7 +232,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards steps
+  run basecamp cards steps
   assert_failure
   assert_output_contains "ID required"
 }
@@ -241,7 +241,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq cards steps 456
+  run basecamp cards steps 456
   assert_failure
   assert_output_contains "project"
 }
@@ -253,7 +253,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step create --card 456
+  run basecamp cards step create --card 456
   assert_failure
   assert_output_contains "title required"
 }
@@ -262,7 +262,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step create "My step"
+  run basecamp cards step create "My step"
   assert_failure
   # Cobra shows required flag(s) not set message
   assert_output_contains "card"
@@ -275,7 +275,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step update
+  run basecamp cards step update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -284,7 +284,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step update 456
+  run basecamp cards step update 456
   assert_failure
   assert_output_contains "update"
 }
@@ -296,7 +296,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step complete
+  run basecamp cards step complete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -305,7 +305,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step uncomplete
+  run basecamp cards step uncomplete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -317,7 +317,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step move
+  run basecamp cards step move
   assert_failure
   assert_output_contains "ID required"
 }
@@ -326,7 +326,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step move 456 --position 1
+  run basecamp cards step move 456 --position 1
   assert_failure
   assert_output_contains "--card is required"
 }
@@ -335,7 +335,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step move 456 --card 789
+  run basecamp cards step move 456 --card 789
   assert_failure
   assert_output_contains "--position is required"
 }
@@ -347,7 +347,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq cards step delete
+  run basecamp cards step delete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -359,7 +359,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq cards step foobar
+  run basecamp cards step foobar
   # Cobra doesn't error on unknown args, shows help
   assert_success
   assert_output_contains "Available Commands"

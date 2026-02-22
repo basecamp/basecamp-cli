@@ -43,7 +43,7 @@ func setupTodosTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
 	// Disable keyring access during tests
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{
@@ -362,7 +362,7 @@ func (t *mockTodoCreateTransport) RoundTrip(req *http.Request) (*http.Response, 
 // not wrapped in HTML tags. The Basecamp API expects plain text for the todo "content"
 // field (which is the todo title), not HTML.
 func TestTodosCreateContentIsPlainText(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockTodoCreateTransport{}
 	buf := &bytes.Buffer{}

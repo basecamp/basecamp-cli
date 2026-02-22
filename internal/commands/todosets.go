@@ -117,12 +117,12 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "todolists",
-				Cmd:         fmt.Sprintf("bcq todolists --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp todolists --in %s", resolvedProjectID),
 				Description: "List all todolists",
 			},
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 				Description: "View project details",
 			},
 		),

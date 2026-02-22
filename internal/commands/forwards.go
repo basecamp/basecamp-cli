@@ -160,12 +160,12 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq forwards show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp forwards show <id> --in %s", resolvedProjectID),
 				Description: "View a forward",
 			},
 			output.Breadcrumb{
 				Action:      "inbox",
-				Cmd:         fmt.Sprintf("bcq forwards inbox --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp forwards inbox --in %s", resolvedProjectID),
 				Description: "View inbox details",
 			},
 		),
@@ -181,8 +181,8 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about an email forward.
 
 You can pass either a forward ID or a Basecamp URL:
-  bcq forwards show 789 --in my-project
-  bcq forwards show https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
+  basecamp forwards show 789 --in my-project
+  basecamp forwards show https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -242,12 +242,12 @@ You can pass either a forward ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "replies",
-						Cmd:         fmt.Sprintf("bcq forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View replies",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq forwards --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards --in %s", resolvedProjectID),
 						Description: "List all forwards",
 					},
 				),
@@ -319,7 +319,7 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forwards",
-						Cmd:         fmt.Sprintf("bcq forwards --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards --in %s", resolvedProjectID),
 						Description: "List forwards",
 					},
 				),
@@ -339,8 +339,8 @@ func newForwardsRepliesCmd(project *string) *cobra.Command {
 		Long: `List all replies to an email forward.
 
 You can pass either a forward ID or a Basecamp URL:
-  bcq forwards replies 789 --in my-project
-  bcq forwards replies https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
+  basecamp forwards replies 789 --in my-project
+  basecamp forwards replies https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -426,12 +426,12 @@ You can pass either a forward ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forward",
-						Cmd:         fmt.Sprintf("bcq forwards show %s --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards show %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View the forward",
 					},
 					output.Breadcrumb{
 						Action:      "reply",
-						Cmd:         fmt.Sprintf("bcq forwards reply %s <reply_id> --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards reply %s <reply_id> --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View a reply",
 					},
 				),
@@ -455,8 +455,8 @@ func newForwardsReplyCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about a reply to an email forward.
 
 You can pass either IDs or Basecamp URLs:
-  bcq forwards reply 789 456 --in my-project
-  bcq forwards reply https://3.basecamp.com/123/buckets/456/inbox_forwards/789 456`,
+  basecamp forwards reply 789 456 --in my-project
+  basecamp forwards reply https://3.basecamp.com/123/buckets/456/inbox_forwards/789 456`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -517,12 +517,12 @@ You can pass either IDs or Basecamp URLs:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "forward",
-						Cmd:         fmt.Sprintf("bcq forwards show %s --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards show %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "View the forward",
 					},
 					output.Breadcrumb{
 						Action:      "replies",
-						Cmd:         fmt.Sprintf("bcq forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
 						Description: "List all replies",
 					},
 				),

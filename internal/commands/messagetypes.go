@@ -96,12 +96,12 @@ func runMessagetypesList(cmd *cobra.Command, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq messagetypes show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp messagetypes show <id> --in %s", resolvedProjectID),
 				Description: "View message type",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq messagetypes create \"Name\" --icon \"emoji\" --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp messagetypes create \"Name\" --icon \"emoji\" --in %s", resolvedProjectID),
 				Description: "Create message type",
 			},
 		),
@@ -162,17 +162,17 @@ func newMessagetypesShowCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq messagetypes update %s --name \"New Name\" --in %s", typeIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes update %s --name \"New Name\" --in %s", typeIDStr, resolvedProjectID),
 						Description: "Update message type",
 					},
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("bcq messagetypes delete %s --in %s", typeIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes delete %s --in %s", typeIDStr, resolvedProjectID),
 						Description: "Delete message type",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq messagetypes --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes --in %s", resolvedProjectID),
 						Description: "List message types",
 					},
 				),
@@ -250,12 +250,12 @@ func newMessagetypesCreateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messagetypes show %d --in %s", msgType.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes show %d --in %s", msgType.ID, resolvedProjectID),
 						Description: "View message type",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq messagetypes --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes --in %s", resolvedProjectID),
 						Description: "List message types",
 					},
 				),
@@ -335,7 +335,7 @@ func newMessagetypesUpdateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messagetypes show %s --in %s", typeIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes show %s --in %s", typeIDStr, resolvedProjectID),
 						Description: "View message type",
 					},
 				),
@@ -403,7 +403,7 @@ func newMessagetypesDeleteCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq messagetypes --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messagetypes --in %s", resolvedProjectID),
 						Description: "List message types",
 					},
 				),

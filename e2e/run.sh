@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Test runner for bcq
+# Test runner for basecamp
 # Runs the bats test suite
 
 set -euo pipefail
 
 # Disable keyring for headless testing (Go binary)
-export BCQ_NO_KEYRING=1
+export BASECAMP_NO_KEYRING=1
 
 cd "$(dirname "$0")"
 

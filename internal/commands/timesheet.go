@@ -105,17 +105,17 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
-					Cmd:         "bcq timesheet entry create --recording <id> --hours <hours> --date <date> --project <project>",
+					Cmd:         "basecamp timesheet entry create --recording <id> --hours <hours> --date <date> --project <project>",
 					Description: "Log time",
 				},
 				output.Breadcrumb{
 					Action:      "project",
-					Cmd:         "bcq timesheet project <id>",
+					Cmd:         "basecamp timesheet project <id>",
 					Description: "View project timesheet",
 				},
 				output.Breadcrumb{
 					Action:      "recording",
-					Cmd:         "bcq timesheet recording <id> --project <project>",
+					Cmd:         "basecamp timesheet recording <id> --project <project>",
 					Description: "View recording timesheet",
 				},
 			),
@@ -134,17 +134,17 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID, bucket
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         "bcq timesheet entry create --recording <id> --hours <hours> --date <date>",
+				Cmd:         "basecamp timesheet entry create --recording <id> --hours <hours> --date <date>",
 				Description: "Log time",
 			},
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         "bcq timesheet project <id>",
+				Cmd:         "basecamp timesheet project <id>",
 				Description: "View project timesheet",
 			},
 			output.Breadcrumb{
 				Action:      "recording",
-				Cmd:         "bcq timesheet recording <id> --project <project>",
+				Cmd:         "basecamp timesheet recording <id> --project <project>",
 				Description: "View recording timesheet",
 			},
 		),
@@ -218,17 +218,17 @@ func newTimesheetProjectCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("bcq timesheet entry create --recording <id> --hours <hours> --date <date> --project %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet entry create --recording <id> --hours <hours> --date <date> --project %s", resolvedProjectID),
 						Description: "Log time",
 					},
 					output.Breadcrumb{
 						Action:      "report",
-						Cmd:         "bcq timesheet report",
+						Cmd:         "basecamp timesheet report",
 						Description: "View account-wide report",
 					},
 					output.Breadcrumb{
 						Action:      "recording",
-						Cmd:         fmt.Sprintf("bcq timesheet recording <id> --project %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet recording <id> --project %s", resolvedProjectID),
 						Description: "View recording timesheet",
 					},
 				),
@@ -300,17 +300,17 @@ func newTimesheetRecordingCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("bcq timesheet entry create --recording %s --hours <hours> --date <date> --project %s", recordingIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet entry create --recording %s --hours <hours> --date <date> --project %s", recordingIDStr, resolvedProjectID),
 						Description: "Log time",
 					},
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq timesheet project %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet project %s", resolvedProjectID),
 						Description: "View project timesheet",
 					},
 					output.Breadcrumb{
 						Action:      "report",
-						Cmd:         "bcq timesheet report",
+						Cmd:         "basecamp timesheet report",
 						Description: "View account-wide report",
 					},
 				),
@@ -352,8 +352,8 @@ func newTimesheetEntryShowCmd() *cobra.Command {
 		Long: `Show details for a timesheet entry.
 
 You can pass either an entry ID or a Basecamp URL:
-  bcq timesheet entry show 789 --project my-project
-  bcq timesheet entry show https://3.basecamp.com/123/buckets/456/timesheet_entries/789`,
+  basecamp timesheet entry show 789 --project my-project
+  basecamp timesheet entry show https://3.basecamp.com/123/buckets/456/timesheet_entries/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -401,12 +401,12 @@ You can pass either an entry ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq timesheet entry update %s --project %s", entryID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet entry update %s --project %s", entryID, resolvedProjectID),
 						Description: "Update entry",
 					},
 					output.Breadcrumb{
 						Action:      "trash",
-						Cmd:         fmt.Sprintf("bcq timesheet entry trash %s --project %s", entryID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet entry trash %s --project %s", entryID, resolvedProjectID),
 						Description: "Trash entry",
 					},
 				),
@@ -434,8 +434,8 @@ func newTimesheetEntryCreateCmd() *cobra.Command {
 		Long: `Create a new timesheet entry on a recording.
 
 Log time against any recording (todo, message, document, etc.):
-  bcq timesheet entry create --recording 789 --hours 1.5 --date today --project my-project
-  bcq timesheet entry create -r https://3.basecamp.com/123/buckets/456/todos/789 --hours 2:30 --date 2024-01-15
+  basecamp timesheet entry create --recording 789 --hours 1.5 --date today --project my-project
+  basecamp timesheet entry create -r https://3.basecamp.com/123/buckets/456/todos/789 --hours 2:30 --date 2024-01-15
 
 Hours can be decimal (1.5) or time format (1:30).
 Dates support natural language: today, tomorrow, yesterday, monday, etc.`,
@@ -532,17 +532,17 @@ func runTimesheetCreate(cmd *cobra.Command, project, recording, hours, date, des
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq timesheet entry show %d --project %s", entry.ID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp timesheet entry show %d --project %s", entry.ID, resolvedProjectID),
 				Description: "View entry",
 			},
 			output.Breadcrumb{
 				Action:      "update",
-				Cmd:         fmt.Sprintf("bcq timesheet entry update %d --project %s", entry.ID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp timesheet entry update %d --project %s", entry.ID, resolvedProjectID),
 				Description: "Update entry",
 			},
 			output.Breadcrumb{
 				Action:      "trash",
-				Cmd:         fmt.Sprintf("bcq timesheet entry trash %d --project %s", entry.ID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp timesheet entry trash %d --project %s", entry.ID, resolvedProjectID),
 				Description: "Trash entry",
 			},
 		),
@@ -562,8 +562,8 @@ func newTimesheetEntryUpdateCmd() *cobra.Command {
 		Long: `Update an existing timesheet entry.
 
 You can pass either an entry ID or a Basecamp URL:
-  bcq timesheet entry update 789 --hours 2.0 --project my-project
-  bcq timesheet entry update https://3.basecamp.com/123/buckets/456/timesheet_entries/789 --date tomorrow`,
+  basecamp timesheet entry update 789 --hours 2.0 --project my-project
+  basecamp timesheet entry update https://3.basecamp.com/123/buckets/456/timesheet_entries/789 --date tomorrow`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -639,12 +639,12 @@ You can pass either an entry ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq timesheet entry show %s --project %s", entryID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet entry show %s --project %s", entryID, resolvedProjectID),
 						Description: "View entry",
 					},
 					output.Breadcrumb{
 						Action:      "trash",
-						Cmd:         fmt.Sprintf("bcq timesheet entry trash %s --project %s", entryID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp timesheet entry trash %s --project %s", entryID, resolvedProjectID),
 						Description: "Trash entry",
 					},
 				),
@@ -672,8 +672,8 @@ func newTimesheetEntryTrashCmd() *cobra.Command {
 		Long: `Move a timesheet entry to the trash.
 
 You can pass either an entry ID or a Basecamp URL:
-  bcq timesheet entry trash 789 --project my-project
-  bcq timesheet entry trash https://3.basecamp.com/123/buckets/456/timesheet_entries/789`,
+  basecamp timesheet entry trash 789 --project my-project
+  basecamp timesheet entry trash https://3.basecamp.com/123/buckets/456/timesheet_entries/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -726,12 +726,12 @@ You can pass either an entry ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "report",
-						Cmd:         "bcq timesheet report",
+						Cmd:         "basecamp timesheet report",
 						Description: "View timesheet report",
 					},
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         "bcq timesheet entry create --recording <id> --hours <hours> --date <date>",
+						Cmd:         "basecamp timesheet entry create --recording <id> --hours <hours> --date <date>",
 						Description: "Log time",
 					},
 				),
@@ -761,8 +761,8 @@ func NewClockCmd() *cobra.Command {
 		Long: `Log time against a recording (shortcut for timesheet entry create).
 
 Hours as positional argument, --date defaults to today:
-  bcq clock 1.5 --on 789 --project my-project
-  bcq clock 2:30 --on https://3.basecamp.com/123/buckets/456/todos/789 --date yesterday
+  basecamp clock 1.5 --on 789 --project my-project
+  basecamp clock 2:30 --on https://3.basecamp.com/123/buckets/456/todos/789 --date yesterday
 
 Hours can be decimal (1.5) or time format (1:30).`,
 		Args: cobra.ExactArgs(1),

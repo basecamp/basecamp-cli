@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup
+  run basecamp lineup
   assert_failure
   assert_output_contains "Action required"
 }
@@ -22,7 +22,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup create
+  run basecamp lineup create
   assert_failure
   assert_output_contains "Marker name"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup create "Alpha Release"
+  run basecamp lineup create "Alpha Release"
   assert_failure
   assert_output_contains "Marker date"
 }
@@ -43,7 +43,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup update
+  run basecamp lineup update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -52,7 +52,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup update 123
+  run basecamp lineup update 123
   assert_failure
   assert_output_contains "Provide --name"
 }
@@ -64,7 +64,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup delete
+  run basecamp lineup delete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -76,7 +76,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup create --name
+  run basecamp lineup create --name
   assert_failure
   assert_output_contains "--name requires a value"
 }
@@ -85,7 +85,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup create "Alpha" --date
+  run basecamp lineup create "Alpha" --date
   assert_failure
   assert_output_contains "--date requires a value"
 }
@@ -97,9 +97,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup --help
+  run basecamp lineup --help
   assert_success
-  assert_output_contains "bcq lineup"
+  assert_output_contains "basecamp lineup"
   assert_output_contains "create"
   assert_output_contains "update"
   assert_output_contains "delete"
@@ -113,6 +113,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq lineup foobar
+  run basecamp lineup foobar
   # Command may show help or require project - just verify it runs
 }

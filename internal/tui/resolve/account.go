@@ -15,9 +15,9 @@ import (
 const defaultLaunchpadBaseURL = "https://launchpad.37signals.com"
 
 // getLaunchpadBaseURL returns the Launchpad base URL.
-// Can be overridden via BCQ_LAUNCHPAD_URL for testing.
+// Can be overridden via BASECAMP_LAUNCHPAD_URL for testing.
 func getLaunchpadBaseURL() string {
-	if url := os.Getenv("BCQ_LAUNCHPAD_URL"); url != "" {
+	if url := os.Getenv("BASECAMP_LAUNCHPAD_URL"); url != "" {
 		return url
 	}
 	return defaultLaunchpadBaseURL
@@ -115,7 +115,7 @@ func (r *Resolver) AccountWithPersist(ctx context.Context) (*ResolvedValue, erro
 func (r *Resolver) fetchAccounts(ctx context.Context) ([]basecamp.AuthorizedAccount, error) {
 	// Check authentication
 	if !r.auth.IsAuthenticated() {
-		return nil, output.ErrAuth("Not authenticated. Run: bcq auth login")
+		return nil, output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
 	// Determine authorization endpoint based on OAuth type

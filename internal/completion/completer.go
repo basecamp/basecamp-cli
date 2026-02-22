@@ -18,9 +18,8 @@ type CacheDirFunc func(cmd *cobra.Command) string
 // DefaultCacheDirFunc returns the cache directory by checking (in order):
 // 1. --cache-dir flag on the root command
 // 2. App config from context (set by PersistentPreRunE)
-// 3. BCQ_CACHE_DIR environment variable (takes precedence)
-// 4. BASECAMP_CACHE_DIR environment variable
-// 5. Default cache directory
+// 3. BASECAMP_CACHE_DIR environment variable
+// 4. Default cache directory
 //
 // This is the standard CacheDirFunc that all commands should use.
 //
@@ -28,7 +27,7 @@ type CacheDirFunc func(cmd *cobra.Command) string
 // set and config files are not loaded. This means cache_dir set in config files
 // is NOT honored during completion—only --cache-dir flag and env vars work.
 // This is intentional: loading config files adds latency that defeats fast completions.
-// Users who set cache_dir in config should also set BCQ_CACHE_DIR or BASECAMP_CACHE_DIR.
+// Users who set cache_dir in config should also set BASECAMP_CACHE_DIR.
 func DefaultCacheDirFunc(cmd *cobra.Command) string {
 	// Check --cache-dir flag on root command
 	if root := cmd.Root(); root != nil {
@@ -40,11 +39,7 @@ func DefaultCacheDirFunc(cmd *cobra.Command) string {
 	if app := appctx.FromContext(cmd.Context()); app != nil {
 		return app.Config.CacheDir
 	}
-	// Check env vars (for completions where appctx isn't set)
-	// BCQ_CACHE_DIR takes precedence over BASECAMP_CACHE_DIR, matching config.go
-	if v := os.Getenv("BCQ_CACHE_DIR"); v != "" {
-		return v
-	}
+	// Check env var (for completions where appctx isn't set)
 	if v := os.Getenv("BASECAMP_CACHE_DIR"); v != "" {
 		return v
 	}
@@ -52,7 +47,7 @@ func DefaultCacheDirFunc(cmd *cobra.Command) string {
 	return ""
 }
 
-// Completer provides tab completion functions for bcq CLI.
+// Completer provides tab completion functions for the basecamp CLI.
 // It reads from a file-based cache and does NOT initialize the full App or SDK.
 type Completer struct {
 	getCacheDir CacheDirFunc

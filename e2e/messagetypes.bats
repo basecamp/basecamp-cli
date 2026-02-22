@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messagetypes
+  run basecamp messagetypes
   assert_failure
   assert_output_contains "project"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes show
+  run basecamp messagetypes show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes create --icon "test"
+  run basecamp messagetypes create --icon "test"
   assert_failure
   assert_output_contains "Name is required"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes create "Test Type"
+  run basecamp messagetypes create "Test Type"
   assert_failure
   assert_output_contains "--icon is required"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes create --name
+  run basecamp messagetypes create --name
   assert_failure
   assert_output_contains "--name requires a value"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes create "Test" --icon
+  run basecamp messagetypes create "Test" --icon
   assert_failure
   assert_output_contains "--icon requires a value"
 }
@@ -70,7 +70,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes update
+  run basecamp messagetypes update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -79,7 +79,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes update 456
+  run basecamp messagetypes update 456
   assert_failure
   assert_output_contains "Use --name"
 }
@@ -91,7 +91,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq messagetypes delete
+  run basecamp messagetypes delete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -103,7 +103,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messagetypes --project
+  run basecamp messagetypes --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -115,9 +115,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messagetypes --help
+  run basecamp messagetypes --help
   assert_success
-  assert_output_contains "bcq messagetypes"
+  assert_output_contains "basecamp messagetypes"
   assert_output_contains "create"
   assert_output_contains "update"
 }
@@ -129,6 +129,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messagetypes foobar
+  run basecamp messagetypes foobar
   # Command may show help or require project - just verify it runs
 }

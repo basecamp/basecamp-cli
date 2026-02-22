@@ -7,4 +7,4 @@ services:
     volumes:
       - .:/app
     environment:
-      - BCQ_NO_KEYRING=1
+      - BASECAMP_NO_KEYRING=1

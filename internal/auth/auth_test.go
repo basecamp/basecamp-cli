@@ -119,9 +119,9 @@ func TestKeyFunction(t *testing.T) {
 		origin   string
 		expected string
 	}{
-		{"https://3.basecampapi.com", "bcq::https://3.basecampapi.com"},
-		{"http://localhost:3000", "bcq::http://localhost:3000"},
-		{"https://custom.example.com", "bcq::https://custom.example.com"},
+		{"https://3.basecampapi.com", "basecamp::https://3.basecampapi.com"},
+		{"http://localhost:3000", "basecamp::http://localhost:3000"},
+		{"https://custom.example.com", "basecamp::https://custom.example.com"},
 	}
 
 	for _, tt := range tests {
