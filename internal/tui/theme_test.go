@@ -249,6 +249,15 @@ func TestNoColorTheme(t *testing.T) {
 	assert.Empty(t, theme.Foreground.Dark)
 }
 
+func unsetenvForTest(t *testing.T, key string) {
+	t.Helper()
+	prev, existed := os.LookupEnv(key)
+	os.Unsetenv(key)
+	if existed {
+		t.Cleanup(func() { os.Setenv(key, prev) })
+	}
+}
+
 func TestResolveTheme(t *testing.T) {
 	t.Run("NO_COLOR returns empty theme", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
@@ -260,6 +269,8 @@ func TestResolveTheme(t *testing.T) {
 	})
 
 	t.Run("BCQ_THEME loads custom file", func(t *testing.T) {
+		unsetenvForTest(t, "NO_COLOR")
+
 		tmpDir := t.TempDir()
 		testFile := filepath.Join(tmpDir, "custom.toml")
 
@@ -277,6 +288,7 @@ foreground = "#ffffff"
 	})
 
 	t.Run("BCQ_THEME invalid file falls back", func(t *testing.T) {
+		unsetenvForTest(t, "NO_COLOR")
 		t.Setenv("BCQ_THEME", "/nonexistent/theme.toml")
 
 		theme := ResolveTheme()
@@ -287,10 +299,8 @@ foreground = "#ffffff"
 	})
 
 	t.Run("default theme when no env vars", func(t *testing.T) {
-		// Ensure these env vars are not set for this test
-		// Note: t.Setenv in other subtests auto-cleans up, providing isolation
-		os.Unsetenv("NO_COLOR")
-		os.Unsetenv("BCQ_THEME")
+		unsetenvForTest(t, "NO_COLOR")
+		unsetenvForTest(t, "BCQ_THEME")
 
 		theme := ResolveTheme()
 
