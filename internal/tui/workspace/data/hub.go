@@ -978,6 +978,16 @@ func (h *Hub) TrashTodolist(ctx context.Context, accountID string, projectID, to
 	return client.Recordings().Trash(ctx, projectID, todolistID)
 }
 
+// CreateScheduleEntry creates a new schedule entry.
+func (h *Hub) CreateScheduleEntry(ctx context.Context, accountID string, projectID, scheduleID int64, req *basecamp.CreateScheduleEntryRequest) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Schedules().CreateEntry(ctx, projectID, scheduleID, req)
+	return err
+}
+
 // mapBoostInfo converts an SDK Boost to BoostInfo.
 func mapBoostInfo(b basecamp.Boost) BoostInfo {
 	booster := ""
