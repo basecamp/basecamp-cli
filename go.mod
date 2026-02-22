@@ -1,6 +1,6 @@
 module github.com/basecamp/basecamp-cli
 
-go 1.25.7
+go 1.26
 
 require (
 	github.com/basecamp/basecamp-sdk/go v0.0.0-20260208085410-18d534da6770

@@ -95,7 +95,7 @@ jobs:
         with:
           sarif_file: 'gosec-results.sarif'
 
-  # NOTE: govulncheck runs in test.yml (pinned to v1.1.4) - not duplicated here
+  # NOTE: govulncheck runs in test.yml - not duplicated here
 
   # TODO: Restore dependency-review job when repo goes public
   # Requires GitHub Advanced Security, noisy during private dev

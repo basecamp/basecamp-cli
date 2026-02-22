@@ -54,7 +54,7 @@ make test-e2e         # Run BATS end-to-end tests
 make check            # All checks (fmt-check, vet, lint, test, test-e2e)
 ```
 
-Requirements: Go 1.25.7+, [bats-core](https://github.com/bats-core/bats-core) for e2e tests.
+Requirements: Go 1.26+, [bats-core](https://github.com/bats-core/bats-core) for e2e tests.
 
 ## OAuth Development
 
