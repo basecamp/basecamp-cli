@@ -196,3 +196,46 @@ func TestMessages_UnpinResult_Error(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, errMsg.Context, "unpinning")
 }
+
+// -- Trash tests --
+
+func TestMessages_Trash_DoublePress(t *testing.T) {
+	v := testMessagesViewWithSession()
+
+	// First press arms trash
+	cmd := v.trashSelected()
+	require.NotNil(t, cmd)
+	assert.True(t, v.trashPending)
+	assert.Equal(t, "1", v.trashPendingID)
+
+	// Second press fires
+	cmd = v.trashSelected()
+	require.NotNil(t, cmd)
+	assert.False(t, v.trashPending)
+
+	msg := cmd()
+	result, ok := msg.(messageTrashResultMsg)
+	require.True(t, ok)
+	assert.Equal(t, "1", result.itemID)
+}
+
+func TestMessages_Trash_OtherKeyResets(t *testing.T) {
+	v := testMessagesViewWithSession()
+	v.trashPending = true
+	v.trashPendingID = "1"
+
+	// Send a non-t key — use 'P' which doesn't trigger message detail fetch
+	v.handleKey(runeKey('P'))
+	assert.False(t, v.trashPending)
+	assert.Empty(t, v.trashPendingID)
+}
+
+func TestMessages_Trash_Timeout(t *testing.T) {
+	v := testMessagesViewWithSession()
+	v.trashPending = true
+	v.trashPendingID = "1"
+
+	v.Update(messageTrashTimeoutMsg{})
+	assert.False(t, v.trashPending)
+	assert.Empty(t, v.trashPendingID)
+}

@@ -363,3 +363,51 @@ func TestCards_MoveMode_SameColumn_EscReverts(t *testing.T) {
 	v.handleMoveKey(tea.KeyMsg{Type: tea.KeyEsc})
 	assert.False(t, v.moving, "esc should exit move mode")
 }
+
+// -- Trash tests --
+
+func TestCards_Trash_DoublePress(t *testing.T) {
+	v := testCardsView()
+
+	// Focus on first card ("Fix bug", ID "100")
+	card := v.kanban.FocusedCard()
+	require.NotNil(t, card)
+	assert.Equal(t, "100", card.ID)
+
+	// First press arms trash
+	cmd := v.trashFocusedCard()
+	require.NotNil(t, cmd)
+	assert.True(t, v.trashPending)
+	assert.Equal(t, "100", v.trashPendingID)
+
+	// Second press fires
+	cmd = v.trashFocusedCard()
+	require.NotNil(t, cmd)
+	assert.False(t, v.trashPending)
+
+	msg := cmd()
+	result, ok := msg.(cardTrashResultMsg)
+	require.True(t, ok)
+	assert.Equal(t, "100", result.itemID)
+}
+
+func TestCards_Trash_OtherKeyResets(t *testing.T) {
+	v := testCardsView()
+	v.trashPending = true
+	v.trashPendingID = "100"
+
+	// Send a non-t key
+	v.handleKey(runeKey('j'))
+	assert.False(t, v.trashPending)
+	assert.Empty(t, v.trashPendingID)
+}
+
+func TestCards_Trash_Timeout(t *testing.T) {
+	v := testCardsView()
+	v.trashPending = true
+	v.trashPendingID = "100"
+
+	v.Update(cardTrashTimeoutMsg{})
+	assert.False(t, v.trashPending)
+	assert.Empty(t, v.trashPendingID)
+}

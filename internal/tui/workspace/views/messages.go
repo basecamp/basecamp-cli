@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -21,6 +22,15 @@ type pinResultMsg struct {
 	pinned bool
 	err    error
 }
+
+// messageTrashResultMsg is sent after a trash operation on a message.
+type messageTrashResultMsg struct {
+	itemID string
+	err    error
+}
+
+// messageTrashTimeoutMsg resets the double-press trash confirmation.
+type messageTrashTimeoutMsg struct{}
 
 // Messages is the split-pane view for a project's message board.
 type Messages struct {
@@ -43,6 +53,10 @@ type Messages struct {
 	messages      []workspace.MessageInfo
 	cachedDetail  map[int64]*workspace.MessageDetailLoadedMsg
 	selectedMsgID int64
+
+	// Double-press trash confirmation
+	trashPending   bool
+	trashPendingID string
 }
 
 // NewMessages creates the split-pane messages view.
@@ -92,6 +106,7 @@ func (v *Messages) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new message")),
 		key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "pin")),
 		key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "unpin")),
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
 		key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 	}
 }
@@ -192,6 +207,21 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.pool.Fetch(v.session.Hub().ProjectContext()),
 		)
 
+	case messageTrashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing message")
+		}
+		v.pool.Invalidate()
+		return v, tea.Batch(
+			workspace.SetStatus("Trashed", false),
+			v.pool.Fetch(v.session.Hub().ProjectContext()),
+		)
+
+	case messageTrashTimeoutMsg:
+		v.trashPending = false
+		v.trashPendingID = ""
+		return v, nil
+
 	case workspace.MessageCreatedMsg:
 		// A message was created from the compose view — refresh the list
 		if msg.Err == nil {
@@ -239,11 +269,22 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (v *Messages) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.list.Filtering() {
+		v.trashPending = false
+		v.trashPendingID = ""
 		return v.list.Update(msg)
 	}
+
+	// Reset trash confirmation on non-t keys
+	if msg.String() != "t" {
+		v.trashPending = false
+		v.trashPendingID = ""
+	}
+
 	keys := workspace.DefaultListKeyMap()
 
 	switch {
+	case msg.String() == "t":
+		return v.trashSelected()
 	case msg.String() == "b" || msg.String() == "B":
 		return v.boostSelectedMessage()
 	case msg.String() == "P":
@@ -451,6 +492,35 @@ func (v *Messages) unpinSelectedMessage() tea.Cmd {
 		err := hub.UnpinMessage(ctx, scope.AccountID, scope.ProjectID, msgID)
 		return pinResultMsg{pinned: false, err: err}
 	}
+}
+
+func (v *Messages) trashSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+
+	var msgID int64
+	fmt.Sscanf(item.ID, "%d", &msgID)
+
+	if v.trashPending && v.trashPendingID == item.ID {
+		v.trashPending = false
+		v.trashPendingID = ""
+		scope := v.session.Scope()
+		hub := v.session.Hub()
+		ctx := hub.ProjectContext()
+		itemID := item.ID
+		return func() tea.Msg {
+			err := hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, msgID)
+			return messageTrashResultMsg{itemID: itemID, err: err}
+		}
+	}
+	v.trashPending = true
+	v.trashPendingID = item.ID
+	return tea.Batch(
+		workspace.SetStatus("Press t again to trash", false),
+		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return messageTrashTimeoutMsg{} }),
+	)
 }
 
 func (v *Messages) boostSelectedMessage() tea.Cmd {

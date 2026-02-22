@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -16,6 +17,15 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
+
+// cardTrashResultMsg is sent after a trash operation on a card.
+type cardTrashResultMsg struct {
+	itemID string
+	err    error
+}
+
+// cardTrashTimeoutMsg resets the double-press trash confirmation.
+type cardTrashTimeoutMsg struct{}
 
 // cardsKeyMap defines card-specific keybindings.
 type cardsKeyMap struct {
@@ -83,6 +93,10 @@ type Cards struct {
 
 	// Data (local copy from pool for rendering)
 	columns []workspace.CardColumnInfo
+
+	// Double-press trash confirmation
+	trashPending   bool
+	trashPendingID string
 }
 
 // NewCards creates the kanban board cards view.
@@ -149,6 +163,7 @@ func (v *Cards) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		v.keys.Move,
 		v.keys.New,
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
 		key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
 	}
 }
@@ -212,6 +227,21 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case cardTrashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing card")
+		}
+		v.pool.Invalidate()
+		return v, tea.Batch(
+			workspace.SetStatus("Trashed", false),
+			v.pool.Fetch(v.session.Hub().ProjectContext()),
+		)
+
+	case cardTrashTimeoutMsg:
+		v.trashPending = false
+		v.trashPendingID = ""
+		return v, nil
+
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true
@@ -256,9 +286,17 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *Cards) handleKey(msg tea.KeyMsg) tea.Cmd {
+	// Reset trash confirmation on non-t keys
+	if msg.String() != "t" {
+		v.trashPending = false
+		v.trashPendingID = ""
+	}
+
 	listKeys := workspace.DefaultListKeyMap()
 
 	switch {
+	case msg.String() == "t":
+		return v.trashFocusedCard()
 	case msg.String() == "b" || msg.String() == "B":
 		return v.boostFocusedCard()
 
@@ -538,6 +576,35 @@ func (v *Cards) syncKanban() {
 		})
 	}
 	v.kanban.SetColumns(cols)
+}
+
+func (v *Cards) trashFocusedCard() tea.Cmd {
+	card := v.kanban.FocusedCard()
+	if card == nil {
+		return nil
+	}
+
+	var cardID int64
+	fmt.Sscanf(card.ID, "%d", &cardID)
+
+	if v.trashPending && v.trashPendingID == card.ID {
+		v.trashPending = false
+		v.trashPendingID = ""
+		scope := v.session.Scope()
+		hub := v.session.Hub()
+		ctx := hub.ProjectContext()
+		itemID := card.ID
+		return func() tea.Msg {
+			err := hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, cardID)
+			return cardTrashResultMsg{itemID: itemID, err: err}
+		}
+	}
+	v.trashPending = true
+	v.trashPendingID = card.ID
+	return tea.Batch(
+		workspace.SetStatus("Press t again to trash", false),
+		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return cardTrashTimeoutMsg{} }),
+	)
 }
 
 func (v *Cards) boostFocusedCard() tea.Cmd {
