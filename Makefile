@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 # basecamp Makefile
 
 # Binary name
@@ -239,7 +241,28 @@ install:
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e
+check: fmt-check vet lint test test-e2e check-naming
+
+# Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
+.PHONY: check-naming
+check-naming:
+	@HITS=$$(rg -n --hidden --type-add 'bats:*.bats' -t go -t sh -t yaml -t json -t md -t bats -t toml 'bcq|BCQ' -g '!.git/' . 2>/dev/null) || true; \
+	if [ -n "$$HITS" ]; then \
+		while IFS= read -r line; do \
+			line=$${line%%\#*}; \
+			line=$$(echo "$$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//'); \
+			[ -z "$$line" ] && continue; \
+			HITS=$$(echo "$$HITS" | grep -v -F "$$line" || true); \
+		done < .naming-allowlist; \
+	fi; \
+	if [ -n "$$HITS" ]; then \
+		echo "ERROR: Legacy bcq/BCQ references found outside allowlist:"; \
+		echo "$$HITS"; \
+		echo ""; \
+		echo "Either rename the reference or add the path to .naming-allowlist"; \
+		exit 1; \
+	fi; \
+	echo "Naming check passed (no stale bcq/BCQ references)"
 
 # Development: build and run
 .PHONY: run
@@ -336,6 +359,7 @@ help:
 	@echo "  clean-all      Remove all artifacts (including PGO)"
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  check          Run all checks (local CI gate)"
+	@echo "  check-naming   Guard against stale bcq/BCQ references"
 	@echo "  run            Build and run"
 	@echo ""
 	@echo "Security:"
