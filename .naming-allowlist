@@ -7,6 +7,8 @@
 internal/commands/migrate.go:
 # migrate_test.go — tests for legacy migration
 internal/commands/migrate_test.go:
+# doctor_test.go — tests for checkLegacyInstall
+internal/commands/doctor_test.go:
 # doctor.go — checkLegacyInstall function only
 checkLegacyInstall
 legacyCache
