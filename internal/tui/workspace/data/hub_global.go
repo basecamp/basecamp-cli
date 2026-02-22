@@ -146,7 +146,7 @@ func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
 				// FreshTTL will expire and the next FetchIfStale will retry.
 				return nil, nil
 			}
-			myName := identity.FirstName + " " + identity.LastName
+			personID := identity.ID
 
 			accounts := h.multi.Accounts()
 			if len(accounts) == 0 {
@@ -155,12 +155,12 @@ func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
 					return nil, nil
 				}
 				client := h.multi.ClientFor(acct.ID)
-				return fetchAccountAssignments(ctx, client, acct, myName), nil
+				return fetchAccountAssignments(ctx, client, acct, personID), nil
 			}
 
 			results := FanOut[[]AssignmentInfo](ctx, h.multi,
 				func(acct AccountInfo, client *basecamp.AccountClient) ([]AssignmentInfo, error) {
-					return fetchAccountAssignments(ctx, client, acct, myName), nil
+					return fetchAccountAssignments(ctx, client, acct, personID), nil
 				})
 
 			var all []AssignmentInfo
@@ -384,37 +384,39 @@ func fetchRecordingsAsActivity(ctx context.Context, client *basecamp.AccountClie
 	return entries
 }
 
-// fetchAccountAssignments fetches active todos from a single account.
+// fetchAccountAssignments fetches todos assigned to the current user via the
+// Reports API which returns only the user's assignments with richer data
+// (DueOn, Completed, Parent todolist, Assignees).
 func fetchAccountAssignments(ctx context.Context, client *basecamp.AccountClient,
-	acct AccountInfo, myName string,
+	acct AccountInfo, personID int64,
 ) []AssignmentInfo {
-	result, err := client.Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
-		Status:    "active",
-		Sort:      "updated_at",
-		Direction: "desc",
-		Limit:     50,
-		Page:      1,
-	})
+	result, err := client.Reports().AssignedTodos(ctx, personID, nil)
 	if err != nil {
 		return nil
 	}
 
 	var assignments []AssignmentInfo
-	for _, rec := range result.Recordings {
+	for _, todo := range result.Todos {
 		project := ""
 		var projectID int64
-		if rec.Bucket != nil {
-			project = rec.Bucket.Name
-			projectID = rec.Bucket.ID
+		if todo.Bucket != nil {
+			project = todo.Bucket.Name
+			projectID = todo.Bucket.ID
 		}
-		_ = myName // TODO: filter by assignee when SDK supports it
+		todolist := ""
+		if todo.Parent != nil {
+			todolist = todo.Parent.Title
+		}
 		assignments = append(assignments, AssignmentInfo{
-			ID:        rec.ID,
-			Content:   rec.Title,
+			ID:        todo.ID,
+			Content:   todo.Content,
+			DueOn:     todo.DueOn,
+			Completed: todo.Completed,
 			Account:   acct.Name,
 			AccountID: acct.ID,
 			Project:   project,
 			ProjectID: projectID,
+			Todolist:  todolist,
 		})
 	}
 	return assignments

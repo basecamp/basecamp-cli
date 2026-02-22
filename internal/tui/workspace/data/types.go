@@ -174,6 +174,7 @@ type AssignmentInfo struct {
 	AccountID string
 	Project   string
 	ProjectID int64
+	Todolist  string
 	Overdue   bool
 }
 

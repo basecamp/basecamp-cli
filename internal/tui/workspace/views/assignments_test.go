@@ -36,8 +36,8 @@ func testAssignments(entries []data.AssignmentInfo) *Assignments {
 }
 
 var testAssignmentEntries = []data.AssignmentInfo{
-	{ID: 1, Content: "Fix bug", AccountID: "acct1", ProjectID: 10},
-	{ID: 2, Content: "Write tests", AccountID: "acct1", ProjectID: 10},
+	{ID: 1, Content: "Fix bug", AccountID: "acct1", ProjectID: 10, Todolist: "Sprint 1"},
+	{ID: 2, Content: "Write tests", AccountID: "acct1", ProjectID: 10, Todolist: "Backlog"},
 }
 
 func TestAssignments_CompleteSelected(t *testing.T) {

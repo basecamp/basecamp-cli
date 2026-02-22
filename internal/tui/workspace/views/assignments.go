@@ -266,6 +266,9 @@ func (v *Assignments) syncAssignments(assignments []workspace.AssignmentInfo) {
 			if a.Project != "" {
 				desc += " > " + a.Project
 			}
+			if a.Todolist != "" {
+				desc += " · " + a.Todolist
+			}
 			extra := accountExtra(accounts, a.AccountID, a.DueOn)
 			items = append(items, widget.ListItem{
 				ID:          id,
