@@ -20,7 +20,7 @@ Right-aligned in the existing status bar. One line, unobtrusive.
 - **Connectivity indicator**: `●` green (all pools responding), `◐` yellow
   (fetching), `○` red (errors/offline)
 - **Pool summary**: `4 fresh` / `2 stale` / `1 fetching`
-- **Latency**: rolling p50 of recent fetches (last 20)
+- **Latency**: rolling average of recent fetches (last 20)
 
 ### Color semantics
 
@@ -50,14 +50,14 @@ This is the number the entire SWR/realm architecture optimizes for.
 
 ## Tier 2: Expanded Metrics Bar (toggle, 2-3 lines)
 
-Activated by a key (e.g., `ctrl+m` for metrics). Expands the status bar
-area to show per-pool detail.
+Activated by the `` ` `` key. Expands the status bar area to show per-pool
+detail.
 
 ```
  ─── pools ────────────────────────────────────────────────────────────────
-  hey:activity    Fresh  1.2s ago  poll:30s  hits:4 miss:0  │  p50:820ms
-  assignments     Fresh  0.3s ago  poll:—    hits:1 miss:0  │  p50:1.1s
-  projects        Stale  45s ago   poll:—    hits:2 miss:1  │  p50:340ms
+  hey:activity    Fresh  1.2s ago  poll:30s  hits:4 miss:0  │  avg:820ms
+  assignments     Fresh  0.3s ago  poll:—    hits:1 miss:0  │  avg:1.1s
+  projects        Stale  45s ago   poll:—    hits:2 miss:1  │  avg:340ms
  ─── navigations ──────────────────────────────────────────────── 87% instant
 ```
 
@@ -68,7 +68,7 @@ area to show per-pool detail.
 - **Age**: time since FetchedAt
 - **Poll**: current adaptive interval (or `—` if not polling)
 - **Hits/Misses**: polling effectiveness (resets on focus)
-- **p50**: median fetch duration for this pool
+- **avg**: mean fetch duration for this pool
 
 ### Navigation quality line
 
@@ -91,7 +91,7 @@ tab equivalent.
  │ 10:23:42  GET /2914079/projects.json            200  277ms  [projects]│
  │ 10:23:42  GET /2919105/recordings.json?type=d   200   84ms  [hey]     │
  │                                                                        │
- │ 6 requests · 1.2s total · 3 accounts · p50: 163ms                     │
+ │ 6 requests · 1.2s total · 3 accounts · avg: 163ms                     │
  └────────────────────────────────────────────────────────────────────────┘
 ```
 

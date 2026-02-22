@@ -49,6 +49,10 @@ type Workspace struct {
 	showSidebar    bool
 	sidebarFocused bool
 
+	// Metrics panel
+	metricsPanel chrome.MetricsPanel
+	showMetrics  bool
+
 	// State
 	showHelp            bool
 	showPalette         bool
@@ -88,6 +92,12 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
+	}
+
+	// Metrics panel reads live stats from the Hub's metrics collector.
+	if hub := session.Hub(); hub != nil {
+		m := hub.Metrics()
+		w.metricsPanel = chrome.NewMetricsPanel(styles, m.PoolStatsList, m.Apdex)
 	}
 
 	return w
@@ -503,6 +513,11 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, w.keys.Jump):
 		return w.openQuickJump()
+
+	case key.Matches(msg, w.keys.Metrics):
+		w.showMetrics = !w.showMetrics
+		w.relayout()
+		return nil
 	}
 
 	// Number keys for breadcrumb jumping (1-9)
@@ -966,6 +981,7 @@ func (w *Workspace) relayout() {
 	w.breadcrumb.SetWidth(w.width)
 	w.statusBar.SetWidth(w.width)
 	w.toast.SetWidth(w.width)
+	w.metricsPanel.SetWidth(w.width)
 	w.help.SetSize(w.width, w.viewHeight())
 	w.palette.SetSize(w.width, w.viewHeight())
 	w.accountSwitcher.SetSize(w.width, w.viewHeight())
@@ -990,6 +1006,9 @@ func (w *Workspace) sidebarActive() bool {
 
 func (w *Workspace) viewHeight() int {
 	h := w.height - chromeHeight
+	if w.showMetrics {
+		h -= chrome.MetricsPanelHeight
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -1043,6 +1062,11 @@ func (w *Workspace) View() string {
 	// Toast (if visible, overlays the bottom of the view)
 	if w.toast.Visible() {
 		sections = append(sections, w.toast.View())
+	}
+
+	// Metrics panel (above status bar when active)
+	if w.showMetrics {
+		sections = append(sections, w.metricsPanel.View())
 	}
 
 	// Status bar

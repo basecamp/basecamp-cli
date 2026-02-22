@@ -18,6 +18,7 @@ type GlobalKeyMap struct {
 	Refresh       key.Binding
 	Open          key.Binding
 	Jump          key.Binding
+	Metrics       key.Binding
 }
 
 // DefaultGlobalKeyMap returns the default global keybindings.
@@ -78,6 +79,10 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 		Jump: key.NewBinding(
 			key.WithKeys("ctrl+j"),
 			key.WithHelp("ctrl+j", "jump to"),
+		),
+		Metrics: key.NewBinding(
+			key.WithKeys("`"),
+			key.WithHelp("`", "metrics"),
 		),
 	}
 }
@@ -143,6 +148,6 @@ func (k GlobalKeyMap) FullHelp() [][]key.Binding {
 		{k.Back, k.Quit},
 		{k.Search, k.Palette},
 		{k.AccountSwitch, k.Hey, k.MyStuff, k.Activity},
-		{k.Help, k.Refresh, k.Open, k.Jump, k.Sidebar},
+		{k.Help, k.Refresh, k.Open, k.Jump, k.Sidebar, k.Metrics},
 	}
 }

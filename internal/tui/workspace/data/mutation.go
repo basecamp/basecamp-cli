@@ -151,11 +151,16 @@ func (mp *MutatingPool[T]) FetchIfStale(ctx context.Context) tea.Cmd {
 // Clear overrides Pool.Clear to also reset mutation state.
 func (mp *MutatingPool[T]) Clear() {
 	mp.mu.Lock()
-	defer mp.mu.Unlock()
+	m := mp.metrics
 	mp.clearLocked()
 	mp.pendingMutations = nil
 	mp.lastRemoteData = nil
 	mp.hasRemoteData = false
+	mp.mu.Unlock()
+	// Unregister outside pool lock to avoid lock-order inversion.
+	if m != nil {
+		m.UnregisterPool(mp.key)
+	}
 }
 
 // reconcile rebuilds local state from remote data, re-applying any

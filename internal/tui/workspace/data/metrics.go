@@ -47,18 +47,34 @@ type MetricsSummary struct {
 	Apdex       float64
 }
 
+// PoolStatus is a live status snapshot from a registered pool.
+type PoolStatus struct {
+	Key          string
+	State        SnapshotState
+	FetchedAt    time.Time
+	PollInterval time.Duration
+	HitCount     int
+	MissCount    int
+	FetchCount   int
+	ErrorCount   int
+	AvgLatency   time.Duration
+}
+
 // PoolMetrics collects pool fetch telemetry for status bar display.
 type PoolMetrics struct {
 	mu     sync.RWMutex
 	events []PoolEvent // ring buffer, last 100
 	stats  map[string]*PoolStats
 	navLog []NavigationEvent // last 20 navigations
+
+	reporters map[string]func() PoolStatus // registered pool reporters
 }
 
 // NewPoolMetrics creates an empty metrics collector.
 func NewPoolMetrics() *PoolMetrics {
 	return &PoolMetrics{
-		stats: make(map[string]*PoolStats),
+		stats:     make(map[string]*PoolStats),
+		reporters: make(map[string]func() PoolStatus),
 	}
 }
 
@@ -115,10 +131,11 @@ func (m *PoolMetrics) Summary() MetricsSummary {
 	var total int
 	for i := len(m.events) - 1; i >= 0 && len(latencies) < 50; i-- {
 		e := m.events[i]
-		if e.EventType == FetchComplete {
+		switch e.EventType {
+		case FetchComplete:
 			latencies = append(latencies, e.Duration)
 			total++
-		} else if e.EventType == FetchError {
+		case FetchError:
 			errors++
 			total++
 		}
@@ -153,6 +170,53 @@ func (m *PoolMetrics) apdex() float64 {
 		sum += n.Quality
 	}
 	return sum / float64(len(m.navLog))
+}
+
+// RegisterPool adds a live status reporter for a pool.
+func (m *PoolMetrics) RegisterPool(key string, reporter func() PoolStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reporters[key] = reporter
+}
+
+// UnregisterPool removes a pool's status reporter.
+func (m *PoolMetrics) UnregisterPool(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.reporters, key)
+}
+
+// PoolStatsList returns live status from all registered pools.
+// Copies the reporter slice under lock, then invokes reporters
+// without holding the metrics lock to avoid lock-order inversion
+// with pool mutexes.
+func (m *PoolMetrics) PoolStatsList() []PoolStatus {
+	m.mu.RLock()
+	reporters := make([]func() PoolStatus, 0, len(m.reporters))
+	for _, r := range m.reporters {
+		reporters = append(reporters, r)
+	}
+	m.mu.RUnlock()
+
+	statuses := make([]PoolStatus, 0, len(reporters))
+	for _, r := range reporters {
+		ps := r()
+		if ps.FetchedAt.IsZero() {
+			continue // registered but never fetched
+		}
+		statuses = append(statuses, ps)
+	}
+	sortPoolStatuses(statuses)
+	return statuses
+}
+
+// sortPoolStatuses sorts by Key for stable table ordering.
+func sortPoolStatuses(s []PoolStatus) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j].Key < s[j-1].Key; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
 
 // sortDurations sorts a slice of durations in ascending order.

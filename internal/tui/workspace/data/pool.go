@@ -54,6 +54,10 @@ type Pool[T any] struct {
 	missCount  int
 	focused    bool
 	metrics    *PoolMetrics
+
+	// Cumulative counters for observability (separate from missCount backoff state).
+	cumulativeHits   int
+	cumulativeMisses int
 }
 
 // NewPool creates a Pool with the given key, config, and fetch function.
@@ -72,8 +76,12 @@ func (p *Pool[T]) Key() string { return p.key }
 // SetMetrics sets the metrics collector for this pool.
 func (p *Pool[T]) SetMetrics(m *PoolMetrics) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.metrics = m
+	p.mu.Unlock()
+	// Register outside pool lock to avoid lock-order inversion.
+	if m != nil {
+		m.RegisterPool(p.key, p.Status)
+	}
 }
 
 // Get returns the current snapshot. Never blocks.
@@ -218,8 +226,13 @@ func (p *Pool[T]) Set(data T) {
 // Clear resets the pool to its initial empty state.
 func (p *Pool[T]) Clear() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	m := p.metrics
 	p.clearLocked()
+	p.mu.Unlock()
+	// Unregister outside pool lock to avoid lock-order inversion.
+	if m != nil {
+		m.UnregisterPool(p.key)
+	}
 }
 
 func (p *Pool[T]) clearLocked() {
@@ -243,6 +256,7 @@ func (p *Pool[T]) RecordHit() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.missCount = 0
+	p.cumulativeHits++
 }
 
 // RecordMiss increments the miss counter for adaptive backoff.
@@ -250,6 +264,7 @@ func (p *Pool[T]) RecordMiss() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.missCount++
+	p.cumulativeMisses++
 }
 
 // SetFocused marks whether the view consuming this pool has focus.
@@ -268,6 +283,38 @@ func (p *Pool[T]) PollInterval() time.Duration {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.pollInterval()
+}
+
+// Status returns a live status snapshot for the metrics panel.
+func (p *Pool[T]) Status() PoolStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var fetchCount, errorCount int
+	var avgLatency time.Duration
+	if p.metrics != nil {
+		p.metrics.mu.RLock()
+		if s, ok := p.metrics.stats[p.key]; ok {
+			fetchCount = s.FetchCount
+			errorCount = s.ErrorCount
+			if s.FetchCount > 0 {
+				avgLatency = time.Duration(s.TotalTimeMs/int64(s.FetchCount)) * time.Millisecond
+			}
+		}
+		p.metrics.mu.RUnlock()
+	}
+
+	return PoolStatus{
+		Key:          p.key,
+		State:        p.snapshot.State,
+		FetchedAt:    p.snapshot.FetchedAt,
+		PollInterval: p.pollInterval(),
+		HitCount:     p.cumulativeHits,
+		MissCount:    p.cumulativeMisses,
+		FetchCount:   fetchCount,
+		ErrorCount:   errorCount,
+		AvgLatency:   avgLatency,
+	}
 }
 
 func (p *Pool[T]) pollInterval() time.Duration {
