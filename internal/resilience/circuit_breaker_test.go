@@ -41,7 +41,7 @@ func TestCircuitBreakerOpensAfterFailures(t *testing.T) {
 	})
 
 	// Record failures up to threshold
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		err := cb.RecordFailure()
 		require.NoError(t, err)
 	}
@@ -68,7 +68,7 @@ func TestCircuitBreakerClosesAfterSuccesses(t *testing.T) {
 	})
 
 	// Open the circuit
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cb.RecordFailure()
 	}
 
@@ -80,7 +80,7 @@ func TestCircuitBreakerClosesAfterSuccesses(t *testing.T) {
 	assert.True(t, allowed, "expected request to be allowed in half-open state")
 
 	// Record successes to close the circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		err := cb.RecordSuccess()
 		require.NoError(t, err)
 	}
@@ -102,7 +102,7 @@ func TestCircuitBreakerFailureInHalfOpenOpens(t *testing.T) {
 	})
 
 	// Open the circuit
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cb.RecordFailure()
 	}
 
@@ -164,7 +164,7 @@ func TestCircuitBreakerReset(t *testing.T) {
 	})
 
 	// Open the circuit
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cb.RecordFailure()
 	}
 

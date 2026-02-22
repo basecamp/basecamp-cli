@@ -58,14 +58,14 @@ func FuzzURLPathParsing(f *testing.F) {
 		// Extract path (same logic as runURLParse)
 		var fragment string
 		urlPath := url
-		if idx := strings.Index(url, "#"); idx != -1 {
-			fragment = url[idx+1:]
-			urlPath = url[:idx]
+		if before, after, ok := strings.Cut(url, "#"); ok {
+			fragment = after
+			urlPath = before
 		}
 
 		pathOnly := urlPath
-		if idx := strings.Index(urlPath, "://"); idx != -1 {
-			pathOnly = urlPath[idx+3:]
+		if _, after, ok := strings.Cut(urlPath, "://"); ok {
+			pathOnly = after
 			if slashIdx := strings.Index(pathOnly, "/"); slashIdx != -1 {
 				pathOnly = pathOnly[slashIdx:]
 			}

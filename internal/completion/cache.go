@@ -5,6 +5,7 @@ package completion
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,7 +19,7 @@ type CachedProject struct {
 	Name       string    `json:"name"`
 	Purpose    string    `json:"purpose,omitempty"` // "hq", "team", or empty
 	Bookmarked bool      `json:"bookmarked,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // CachedPerson holds person data for tab completion.
@@ -39,9 +40,9 @@ type Cache struct {
 	Projects          []CachedProject `json:"projects,omitempty"`
 	People            []CachedPerson  `json:"people,omitempty"`
 	Accounts          []CachedAccount `json:"accounts,omitempty"`
-	ProjectsUpdatedAt time.Time       `json:"projects_updated_at,omitempty"`
-	PeopleUpdatedAt   time.Time       `json:"people_updated_at,omitempty"`
-	AccountsUpdatedAt time.Time       `json:"accounts_updated_at,omitempty"`
+	ProjectsUpdatedAt time.Time       `json:"projects_updated_at"`
+	PeopleUpdatedAt   time.Time       `json:"people_updated_at"`
+	AccountsUpdatedAt time.Time       `json:"accounts_updated_at"`
 	UpdatedAt         time.Time       `json:"updated_at"` // Legacy, kept for backwards compat
 	Version           int             `json:"version"`    // Schema version for future migrations
 }
@@ -394,7 +395,5 @@ func loadProfilesFromFile(cfg *configForCompletion, path string) {
 		return
 	}
 
-	for name, profileCfg := range fileCfg.Profiles {
-		cfg.Profiles[name] = profileCfg
-	}
+	maps.Copy(cfg.Profiles, fileCfg.Profiles)
 }

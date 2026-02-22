@@ -103,10 +103,7 @@ func (b *Bulkhead) Available() (int, error) {
 
 	bhState := state.Bulkhead
 	b.cleanupStaleSlots(&bhState)
-	available := b.config.MaxConcurrent - bhState.Count()
-	if available < 0 {
-		available = 0
-	}
+	available := max(b.config.MaxConcurrent-bhState.Count(), 0)
 	return available, nil
 }
 

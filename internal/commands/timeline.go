@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -301,28 +302,25 @@ func (m watchModel) View() string {
 	}
 
 	// Build output
-	var output string
-	output += status + "\n"
+	var output strings.Builder
+	output.WriteString(status + "\n")
 
 	if len(m.events) > 0 {
-		output += "\n"
+		output.WriteString("\n")
 		// Show latest 10 events
-		count := len(m.events)
-		if count > 10 {
-			count = 10
-		}
+		count := min(len(m.events), 10)
 		for i := 0; i < count; i++ {
 			e := m.events[i]
 			line := formatEvent(e)
-			output += line + "\n"
+			output.WriteString(line + "\n")
 		}
 		if len(m.events) > 10 {
 			muted := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-			output += muted.Render(fmt.Sprintf("... and %d more", len(m.events)-10)) + "\n"
+			output.WriteString(muted.Render(fmt.Sprintf("... and %d more", len(m.events)-10)) + "\n")
 		}
 	}
 
-	return output
+	return output.String()
 }
 
 func formatEvent(e basecamp.TimelineEvent) string {

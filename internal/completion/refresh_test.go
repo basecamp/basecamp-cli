@@ -74,7 +74,7 @@ func TestRefresher_RefreshIfStale_Stale_TriggersRefresh(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Wait for completion (it will fail due to no network, but should complete)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if !refresher.IsRefreshing() {
 			break
 		}
@@ -93,12 +93,12 @@ func TestRefresher_RefreshIfStale_DoesNotBlockConcurrent(t *testing.T) {
 	refresher := NewRefresher(store, client)
 
 	// Trigger multiple refreshes concurrently - only one should run
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		refresher.RefreshIfStale(time.Nanosecond)
 	}
 
 	// Wait for completion
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if !refresher.IsRefreshing() {
 			break
 		}

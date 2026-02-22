@@ -386,7 +386,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 
 	// Parse comma-separated IDs into array
 	var ids []int64
-	for _, idStr := range strings.Split(peopleIDs, ",") {
+	for idStr := range strings.SplitSeq(peopleIDs, ",") {
 		idStr = strings.TrimSpace(idStr)
 		if idStr == "" {
 			continue

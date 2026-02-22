@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -146,19 +147,19 @@ func (r *Resolver) promptForDockTool(tools []DockTool, friendlyName string) (*Do
 
 // multiToolError creates an error message listing available tools.
 func (r *Resolver) multiToolError(tools []DockTool, friendlyName string) error {
-	var toolList string
+	var toolList strings.Builder
 	for _, tool := range tools {
 		title := tool.Title
 		if title == "" {
 			title = friendlyName
 		}
-		toolList += fmt.Sprintf("\n  - %s (ID: %d)", title, tool.ID)
+		toolList.WriteString(fmt.Sprintf("\n  - %s (ID: %d)", title, tool.ID))
 	}
 
 	return &output.Error{
 		Code:    output.CodeAmbiguous,
 		Message: fmt.Sprintf("Project has %d %ss", len(tools), friendlyName),
-		Hint:    fmt.Sprintf("Specify ID directly. Available:%s", toolList),
+		Hint:    fmt.Sprintf("Specify ID directly. Available:%s", toolList.String()),
 	}
 }
 

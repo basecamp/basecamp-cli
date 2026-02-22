@@ -473,8 +473,8 @@ func suggest[T any](input string, items []T, getName func(T) string) []string {
 
 // containsWord checks if haystack contains any word from needle.
 func containsWord(haystack, needle string) bool {
-	words := strings.Fields(needle)
-	for _, word := range words {
+	words := strings.FieldsSeq(needle)
+	for word := range words {
 		if len(word) >= 2 && strings.Contains(haystack, word) {
 			return true
 		}

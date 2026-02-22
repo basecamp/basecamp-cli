@@ -410,8 +410,8 @@ Supports batch commenting on multiple recordings at once.`,
 			// Expand comma-separated IDs and extract from URLs
 			var expandedIDs []string
 			for _, id := range recordingIDs {
-				parts := strings.Split(id, ",")
-				for _, p := range parts {
+				parts := strings.SplitSeq(id, ",")
+				for p := range parts {
 					p = strings.TrimSpace(p)
 					if p != "" {
 						expandedIDs = append(expandedIDs, extractID(p))

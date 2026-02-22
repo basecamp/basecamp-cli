@@ -172,10 +172,9 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 		errorTitle := errorIcon + " Error"
 
 		// Wrap error message to fit in box (accounting for border and padding)
-		maxWidth := r.width - 4 // border (2) + padding (2)
-		if maxWidth < 40 {
-			maxWidth = 40
-		}
+		maxWidth := max(
+			// border (2) + padding (2)
+			r.width-4, 40)
 
 		errorMsg := wrapText(resp.Error, maxWidth)
 
@@ -183,7 +182,7 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 		var contentLines []string
 		contentLines = append(contentLines, r.Error.Bold(true).Render(errorTitle))
 		contentLines = append(contentLines, "")
-		for _, line := range strings.Split(errorMsg, "\n") {
+		for line := range strings.SplitSeq(errorMsg, "\n") {
 			contentLines = append(contentLines, r.Data.Render(line))
 		}
 

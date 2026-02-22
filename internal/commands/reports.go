@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -186,7 +187,8 @@ Todos are grouped into categories:
 				len(result.OverAMonthLate) +
 				len(result.OverThreeMonthsLate)
 
-			summary := fmt.Sprintf("%d overdue todos", total)
+			var summary strings.Builder
+			summary.WriteString(fmt.Sprintf("%d overdue todos", total))
 			if total > 0 {
 				var parts []string
 				if n := len(result.UnderAWeekLate); n > 0 {
@@ -202,19 +204,19 @@ Todos are grouped into categories:
 					parts = append(parts, fmt.Sprintf("%d >3 months", n))
 				}
 				if len(parts) > 0 {
-					summary += " ("
+					summary.WriteString(" (")
 					for i, p := range parts {
 						if i > 0 {
-							summary += ", "
+							summary.WriteString(", ")
 						}
-						summary += p
+						summary.WriteString(p)
 					}
-					summary += ")"
+					summary.WriteString(")")
 				}
 			}
 
 			return app.OK(result,
-				output.WithSummary(summary),
+				output.WithSummary(summary.String()),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "assigned",
@@ -278,20 +280,21 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 				parts = append(parts, fmt.Sprintf("%d assignables", assignableCount))
 			}
 
-			summary := fmt.Sprintf("%d upcoming items", total)
+			var summary strings.Builder
+			summary.WriteString(fmt.Sprintf("%d upcoming items", total))
 			if len(parts) > 0 {
-				summary += " ("
+				summary.WriteString(" (")
 				for i, p := range parts {
 					if i > 0 {
-						summary += ", "
+						summary.WriteString(", ")
 					}
-					summary += p
+					summary.WriteString(p)
 				}
-				summary += ")"
+				summary.WriteString(")")
 			}
 
 			return app.OK(result,
-				output.WithSummary(summary),
+				output.WithSummary(summary.String()),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "overdue",

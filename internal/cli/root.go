@@ -355,8 +355,8 @@ func transformCobraError(err error) error {
 
 	// Transform "flag needs an argument: --FLAG" → "--FLAG requires a value"
 	// This matches the Bash CLI's error format
-	if strings.HasPrefix(msg, "flag needs an argument: ") {
-		flag := strings.TrimPrefix(msg, "flag needs an argument: ")
+	if after, ok := strings.CutPrefix(msg, "flag needs an argument: "); ok {
+		flag := after
 		// Special cases for flags with custom error messages
 		if flag == "--on" {
 			return output.ErrUsage("--on requires a recording ID")
@@ -365,8 +365,8 @@ func transformCobraError(err error) error {
 	}
 
 	// Transform "unknown flag: --FLAG" → "Unknown option: --FLAG"
-	if strings.HasPrefix(msg, "unknown flag: ") {
-		flag := strings.TrimPrefix(msg, "unknown flag: ")
+	if after, ok := strings.CutPrefix(msg, "unknown flag: "); ok {
+		flag := after
 		return output.ErrUsage("Unknown option: " + flag)
 	}
 

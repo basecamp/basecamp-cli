@@ -140,7 +140,7 @@ func TestBoostCreateSendsContent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, transport.capturedBody)
 
-	var requestBody map[string]interface{}
+	var requestBody map[string]any
 	err = json.Unmarshal(transport.capturedBody, &requestBody)
 	require.NoError(t, err)
 
@@ -178,7 +178,7 @@ func TestBoostShowNilBoosterSummary(t *testing.T) {
 	require.NoError(t, err)
 
 	// Parse the JSON output to check the summary
-	var envelope map[string]interface{}
+	var envelope map[string]any
 	err = json.Unmarshal(buf.Bytes(), &envelope)
 	require.NoError(t, err)
 

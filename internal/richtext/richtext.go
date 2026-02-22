@@ -56,11 +56,11 @@ func MarkdownToHTML(md string) string {
 		}
 	}
 
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		line := lines[i]
 
 		// Handle code blocks
-		if strings.HasPrefix(line, "```") {
+		if after, ok := strings.CutPrefix(line, "```"); ok {
 			if inCodeBlock {
 				// End code block
 				code := strings.Join(codeLines, "\n")
@@ -79,7 +79,7 @@ func MarkdownToHTML(md string) string {
 				// Start code block
 				flushList()
 				inCodeBlock = true
-				codeBlockLang = strings.TrimPrefix(line, "```")
+				codeBlockLang = after
 			}
 			continue
 		}
@@ -122,34 +122,34 @@ func MarkdownToHTML(md string) string {
 		}
 
 		// Headings
-		if strings.HasPrefix(line, "######") {
-			result.WriteString("<h6>" + convertInline(strings.TrimSpace(strings.TrimPrefix(line, "######"))) + "</h6>\n")
+		if after, ok := strings.CutPrefix(line, "######"); ok {
+			result.WriteString("<h6>" + convertInline(strings.TrimSpace(after)) + "</h6>\n")
 			continue
 		}
-		if strings.HasPrefix(line, "#####") {
-			result.WriteString("<h5>" + convertInline(strings.TrimSpace(strings.TrimPrefix(line, "#####"))) + "</h5>\n")
+		if after, ok := strings.CutPrefix(line, "#####"); ok {
+			result.WriteString("<h5>" + convertInline(strings.TrimSpace(after)) + "</h5>\n")
 			continue
 		}
-		if strings.HasPrefix(line, "####") {
-			result.WriteString("<h4>" + convertInline(strings.TrimSpace(strings.TrimPrefix(line, "####"))) + "</h4>\n")
+		if after, ok := strings.CutPrefix(line, "####"); ok {
+			result.WriteString("<h4>" + convertInline(strings.TrimSpace(after)) + "</h4>\n")
 			continue
 		}
-		if strings.HasPrefix(line, "###") {
-			result.WriteString("<h3>" + convertInline(strings.TrimSpace(strings.TrimPrefix(line, "###"))) + "</h3>\n")
+		if after, ok := strings.CutPrefix(line, "###"); ok {
+			result.WriteString("<h3>" + convertInline(strings.TrimSpace(after)) + "</h3>\n")
 			continue
 		}
-		if strings.HasPrefix(line, "##") {
-			result.WriteString("<h2>" + convertInline(strings.TrimSpace(strings.TrimPrefix(line, "##"))) + "</h2>\n")
+		if after, ok := strings.CutPrefix(line, "##"); ok {
+			result.WriteString("<h2>" + convertInline(strings.TrimSpace(after)) + "</h2>\n")
 			continue
 		}
-		if strings.HasPrefix(line, "#") {
-			result.WriteString("<h1>" + convertInline(strings.TrimSpace(strings.TrimPrefix(line, "#"))) + "</h1>\n")
+		if after, ok := strings.CutPrefix(line, "#"); ok {
+			result.WriteString("<h1>" + convertInline(strings.TrimSpace(after)) + "</h1>\n")
 			continue
 		}
 
 		// Blockquote
-		if strings.HasPrefix(line, ">") {
-			quote := strings.TrimSpace(strings.TrimPrefix(line, ">"))
+		if after, ok := strings.CutPrefix(line, ">"); ok {
+			quote := strings.TrimSpace(after)
 			result.WriteString("<blockquote>" + convertInline(quote) + "</blockquote>\n")
 			continue
 		}
