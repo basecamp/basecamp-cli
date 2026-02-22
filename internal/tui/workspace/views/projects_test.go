@@ -371,12 +371,6 @@ func TestProjects_ActivityHotkey_NilGuard(t *testing.T) {
 	assert.Nil(t, cmd, "pressing 'a' with nil selectedProject should return nil")
 }
 
-// --- testPool helper ---
-
-func testProjectPool(projects []data.ProjectInfo) *data.Pool[[]data.ProjectInfo] {
-	return testPool("projects", projects, true)
-}
-
 // --- Utility ---
 
 func TestToolHotkey(t *testing.T) {
