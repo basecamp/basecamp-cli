@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -27,14 +28,17 @@ import (
 
 // todosKeyMap defines todo-specific keybindings.
 type todosKeyMap struct {
-	Toggle    key.Binding
-	New       key.Binding
-	SwitchTab key.Binding
-	EditDesc  key.Binding
-	Boost     key.Binding
-	DueDate   key.Binding
-	Assign    key.Binding
-	Unassign  key.Binding
+	Toggle     key.Binding
+	New        key.Binding
+	SwitchTab  key.Binding
+	EditDesc   key.Binding
+	Boost      key.Binding
+	DueDate    key.Binding
+	Assign     key.Binding
+	Unassign   key.Binding
+	NewList    key.Binding
+	RenameList key.Binding
+	TrashList  key.Binding
 }
 
 func defaultTodosKeyMap() todosKeyMap {
@@ -67,6 +71,18 @@ func defaultTodosKeyMap() todosKeyMap {
 		Unassign: key.NewBinding(
 			key.WithKeys("A"),
 			key.WithHelp("A", "unassign"),
+		),
+		NewList: key.NewBinding(
+			key.WithKeys("N"),
+			key.WithHelp("N", "new list"),
+		),
+		RenameList: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "rename list"),
+		),
+		TrashList: key.NewBinding(
+			key.WithKeys("T"),
+			key.WithHelp("T", "trash list"),
 		),
 	}
 }
@@ -115,6 +131,13 @@ type Todos struct {
 	// Assigning
 	assigning   bool
 	assignInput textinput.Model
+
+	// Todolist management
+	creatingList       bool
+	renamingList       bool
+	listInput          textinput.Model
+	trashListPending   bool
+	trashListPendingID string
 }
 
 // todoDescUpdatedMsg is sent after a todo description is updated.
@@ -135,6 +158,23 @@ type todoAssignResultMsg struct {
 	todolistID int64
 	err        error
 }
+
+type todolistCreatedMsg struct {
+	todosetID int64
+	err       error
+}
+
+type todolistRenamedMsg struct {
+	todolistID int64
+	err        error
+}
+
+type todolistTrashResultMsg struct {
+	todolistID int64
+	err        error
+}
+
+type todolistTrashTimeoutMsg struct{}
 
 // NewTodos creates the split-pane todos view.
 func NewTodos(session *workspace.Session) *Todos {
@@ -206,7 +246,9 @@ func (v *Todos) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Todos) InputActive() bool {
-	return v.creating || v.editingDesc || v.settingDue || v.assigning || v.listLists.Filtering() || v.listTodos.Filtering()
+	return v.creating || v.editingDesc || v.settingDue || v.assigning ||
+		v.creatingList || v.renamingList ||
+		v.listLists.Filtering() || v.listTodos.Filtering()
 }
 
 // StartFilter implements workspace.Filterable.
@@ -220,7 +262,7 @@ func (v *Todos) StartFilter() {
 
 // IsModal implements workspace.ModalActive.
 func (v *Todos) IsModal() bool {
-	return v.editingDesc || v.settingDue || v.assigning
+	return v.editingDesc || v.settingDue || v.assigning || v.creatingList || v.renamingList
 }
 
 // ShortHelp implements View.
@@ -233,6 +275,15 @@ func (v *Todos) ShortHelp() []key.Binding {
 			key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "save")),
 			key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "$EDITOR")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	}
+	if v.focus == todosPaneLeft {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			v.keys.SwitchTab,
+			v.keys.NewList,
+			v.keys.RenameList,
+			v.keys.TrashList,
 		}
 	}
 	return []key.Binding{
@@ -374,6 +425,51 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			workspace.SetStatus("Assignee updated", false),
 		)
 
+	case todolistCreatedMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "creating todolist")
+		}
+		v.todolistPool.Invalidate()
+		v.loadingLists = true
+		return v, tea.Batch(
+			v.spinner.Tick,
+			v.todolistPool.Fetch(v.session.Hub().ProjectContext()),
+			workspace.SetStatus("Todolist created", false),
+		)
+
+	case todolistRenamedMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "renaming todolist")
+		}
+		v.todolistPool.Invalidate()
+		v.loadingLists = true
+		return v, tea.Batch(
+			v.spinner.Tick,
+			v.todolistPool.Fetch(v.session.Hub().ProjectContext()),
+			workspace.SetStatus("Todolist renamed", false),
+		)
+
+	case todolistTrashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing todolist")
+		}
+		if msg.todolistID == v.selectedListID {
+			v.selectedListID = 0
+			v.listTodos.SetItems(nil)
+		}
+		v.todolistPool.Invalidate()
+		v.loadingLists = true
+		return v, tea.Batch(
+			v.spinner.Tick,
+			v.todolistPool.Fetch(v.session.Hub().ProjectContext()),
+			workspace.SetStatus("Todolist trashed", false),
+		)
+
+	case todolistTrashTimeoutMsg:
+		v.trashListPending = false
+		v.trashListPendingID = ""
+		return v, nil
+
 	case widget.ComposerSubmitMsg:
 		if msg.Err != nil {
 			return v, workspace.ReportError(msg.Err, "composing description")
@@ -413,6 +509,9 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.assigning {
 			return v, v.handleAssigningKey(msg)
 		}
+		if v.creatingList || v.renamingList {
+			return v, v.handleListInputKey(msg)
+		}
 		if v.creating {
 			return v, v.handleCreatingKey(msg)
 		}
@@ -433,9 +532,50 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *Todos) handleKey(msg tea.KeyMsg) tea.Cmd {
+	if v.listLists.Filtering() || v.listTodos.Filtering() {
+		v.trashListPending = false
+		v.trashListPendingID = ""
+		return v.updateFocusedList(msg)
+	}
+
+	// Reset trash list confirmation on non-T keys (when left pane focused)
+	if v.focus == todosPaneLeft && msg.String() != "T" {
+		v.trashListPending = false
+		v.trashListPendingID = ""
+	}
+
 	listKeys := workspace.DefaultListKeyMap()
 
 	switch {
+	case key.Matches(msg, v.keys.NewList):
+		if v.focus == todosPaneLeft {
+			v.creatingList = true
+			v.listInput = textinput.New()
+			v.listInput.Placeholder = "New todolist name..."
+			v.listInput.CharLimit = 256
+			v.listInput.Focus()
+			return textinput.Blink
+		}
+
+	case key.Matches(msg, v.keys.RenameList):
+		if v.focus == todosPaneLeft {
+			item := v.listLists.Selected()
+			if item == nil {
+				return nil
+			}
+			v.renamingList = true
+			v.listInput = textinput.New()
+			v.listInput.SetValue(item.Title)
+			v.listInput.CharLimit = 256
+			v.listInput.Focus()
+			return textinput.Blink
+		}
+
+	case key.Matches(msg, v.keys.TrashList):
+		if v.focus == todosPaneLeft {
+			return v.trashSelectedList()
+		}
+
 	case key.Matches(msg, v.keys.SwitchTab):
 		v.toggleFocus()
 		return nil
@@ -536,6 +676,90 @@ func (v *Todos) handleCreatingKey(msg tea.KeyMsg) tea.Cmd {
 		v.textInput, cmd = v.textInput.Update(msg)
 		return cmd
 	}
+}
+
+func (v *Todos) handleListInputKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		val := strings.TrimSpace(v.listInput.Value())
+		if val == "" {
+			v.creatingList = false
+			v.renamingList = false
+			return nil
+		}
+		if v.creatingList {
+			v.creatingList = false
+			return v.createTodolist(val)
+		}
+		if v.renamingList {
+			v.renamingList = false
+			return v.renameTodolist(val)
+		}
+		return nil
+	case "esc":
+		v.creatingList = false
+		v.renamingList = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.listInput, cmd = v.listInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Todos) createTodolist(name string) tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	todosetID := scope.ToolID
+	return func() tea.Msg {
+		err := hub.CreateTodolist(ctx, scope.AccountID, scope.ProjectID, todosetID, name)
+		return todolistCreatedMsg{todosetID: todosetID, err: err}
+	}
+}
+
+func (v *Todos) renameTodolist(name string) tea.Cmd {
+	item := v.listLists.Selected()
+	if item == nil {
+		return nil
+	}
+	var todolistID int64
+	fmt.Sscanf(item.ID, "%d", &todolistID)
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	return func() tea.Msg {
+		err := hub.UpdateTodolist(ctx, scope.AccountID, scope.ProjectID, todolistID, name)
+		return todolistRenamedMsg{todolistID: todolistID, err: err}
+	}
+}
+
+func (v *Todos) trashSelectedList() tea.Cmd {
+	item := v.listLists.Selected()
+	if item == nil {
+		return nil
+	}
+	var todolistID int64
+	fmt.Sscanf(item.ID, "%d", &todolistID)
+
+	if v.trashListPending && v.trashListPendingID == item.ID {
+		v.trashListPending = false
+		v.trashListPendingID = ""
+		scope := v.session.Scope()
+		hub := v.session.Hub()
+		ctx := hub.ProjectContext()
+		listID := todolistID
+		return func() tea.Msg {
+			err := hub.TrashTodolist(ctx, scope.AccountID, scope.ProjectID, listID)
+			return todolistTrashResultMsg{todolistID: listID, err: err}
+		}
+	}
+	v.trashListPending = true
+	v.trashListPendingID = item.ID
+	return tea.Batch(
+		workspace.SetStatus("Press T again to trash list", false),
+		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return todolistTrashTimeoutMsg{} }),
+	)
 }
 
 func (v *Todos) toggleFocus() {
@@ -715,6 +939,14 @@ func (v *Todos) View() string {
 
 	// Left panel: todolist list
 	left := v.listLists.View()
+	if v.creatingList || v.renamingList {
+		theme := v.styles.Theme()
+		prefix := "  + "
+		if v.renamingList {
+			prefix = "  ~ "
+		}
+		left += "\n" + lipgloss.NewStyle().Foreground(theme.Muted).Render(prefix) + v.listInput.View()
+	}
 
 	// Right panel: todos or loading
 	var right string

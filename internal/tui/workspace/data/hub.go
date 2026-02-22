@@ -949,6 +949,35 @@ func (h *Hub) TrashComment(ctx context.Context, accountID string, projectID, com
 	return client.Comments().Trash(ctx, projectID, commentID)
 }
 
+// CreateTodolist creates a new todolist in a todoset.
+func (h *Hub) CreateTodolist(ctx context.Context, accountID string, projectID, todosetID int64, name string) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Todolists().Create(ctx, projectID, todosetID, &basecamp.CreateTodolistRequest{Name: name})
+	return err
+}
+
+// UpdateTodolist renames a todolist.
+func (h *Hub) UpdateTodolist(ctx context.Context, accountID string, projectID, todolistID int64, name string) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Todolists().Update(ctx, projectID, todolistID, &basecamp.UpdateTodolistRequest{Name: name})
+	return err
+}
+
+// TrashTodolist moves a todolist to the trash.
+func (h *Hub) TrashTodolist(ctx context.Context, accountID string, projectID, todolistID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Recordings().Trash(ctx, projectID, todolistID)
+}
+
 // mapBoostInfo converts an SDK Boost to BoostInfo.
 func mapBoostInfo(b basecamp.Boost) BoostInfo {
 	booster := ""

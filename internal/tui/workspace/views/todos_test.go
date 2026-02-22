@@ -405,7 +405,7 @@ func TestTodos_Unassign_Dispatches(t *testing.T) {
 // --- ShortHelp ---
 
 func TestTodos_ShortHelp_IncludesDueAndAssign(t *testing.T) {
-	v := testTodosView()
+	v := testTodosViewWithTodos() // right pane focused
 	hints := v.ShortHelp()
 
 	keys := make(map[string]string)
@@ -421,6 +421,191 @@ func TestTodos_ShortHelp_IncludesDueAndAssign(t *testing.T) {
 func TestTodos_Title(t *testing.T) {
 	v := testTodosView()
 	assert.Equal(t, "Todos", v.Title())
+}
+
+// --- Filter guard fix ---
+
+func TestTodos_FilterGuard_XDuringLeftFilter(t *testing.T) {
+	v := testTodosView()
+	v.listLists.StartFilter()
+	require.True(t, v.listLists.Filtering())
+
+	// x during left-pane filter should NOT trigger toggle
+	v.handleKey(runeKey('x'))
+	assert.True(t, v.listLists.Filtering(), "filter should still be active")
+}
+
+func TestTodos_FilterGuard_NDuringFilter(t *testing.T) {
+	v := testTodosView()
+	v.listLists.StartFilter()
+
+	v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	assert.False(t, v.creatingList, "N during filter should NOT enter create mode")
+}
+
+// --- Todolist create ---
+
+func TestTodos_NewList_LeftPane(t *testing.T) {
+	v := testTodosView()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	require.NotNil(t, cmd, "N should return blink cmd")
+	assert.True(t, v.creatingList)
+	assert.True(t, v.InputActive())
+}
+
+func TestTodos_NewList_RightPane_Noop(t *testing.T) {
+	v := testTodosViewWithTodos()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	assert.Nil(t, cmd, "N on right pane should return nil")
+	assert.False(t, v.creatingList)
+}
+
+func TestTodos_NewList_EscCancels(t *testing.T) {
+	v := testTodosView()
+	v.creatingList = true
+	cmd := v.handleListInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd)
+	assert.False(t, v.creatingList)
+}
+
+func TestTodos_NewList_EnterDispatches(t *testing.T) {
+	v := testTodosView()
+	v.creatingList = true
+	v.listInput = newTextInputWithValue("My New List")
+
+	cmd := v.handleListInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	assert.False(t, v.creatingList)
+
+	msg := cmd()
+	result, ok := msg.(todolistCreatedMsg)
+	require.True(t, ok)
+	assert.Equal(t, int64(10), result.todosetID) // scope.ToolID
+	assert.Error(t, result.err)                   // nil SDK
+}
+
+func TestTodos_NewList_SuccessHandler(t *testing.T) {
+	v := testTodosView()
+	v.todolistPool.Set(sampleTodolists())
+
+	_, cmd := v.Update(todolistCreatedMsg{todosetID: 10, err: nil})
+	require.NotNil(t, cmd)
+	assert.True(t, v.loadingLists)
+}
+
+// --- Todolist rename ---
+
+func TestTodos_RenameList_LeftPane(t *testing.T) {
+	v := testTodosView()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	require.NotNil(t, cmd, "R should return blink cmd")
+	assert.True(t, v.renamingList)
+	assert.Contains(t, v.listInput.Value(), "Launch") // pre-filled
+}
+
+func TestTodos_RenameList_EnterDispatches(t *testing.T) {
+	v := testTodosView()
+	v.renamingList = true
+	v.listInput = newTextInputWithValue("Renamed List")
+
+	cmd := v.handleListInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	assert.False(t, v.renamingList)
+
+	msg := cmd()
+	result, ok := msg.(todolistRenamedMsg)
+	require.True(t, ok)
+	assert.Equal(t, int64(10), result.todolistID)
+	assert.Error(t, result.err) // nil SDK
+}
+
+func TestTodos_RenameList_SuccessHandler(t *testing.T) {
+	v := testTodosView()
+	v.todolistPool.Set(sampleTodolists())
+
+	_, cmd := v.Update(todolistRenamedMsg{todolistID: 10, err: nil})
+	require.NotNil(t, cmd)
+	assert.True(t, v.loadingLists)
+}
+
+// --- Todolist trash ---
+
+func TestTodos_TrashList_LeftPane_Arms(t *testing.T) {
+	v := testTodosView()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	require.NotNil(t, cmd)
+	assert.True(t, v.trashListPending)
+	assert.Equal(t, "10", v.trashListPendingID)
+}
+
+func TestTodos_TrashList_DoublePress(t *testing.T) {
+	v := testTodosView()
+	// First press
+	v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	require.True(t, v.trashListPending)
+
+	// Second press
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	require.NotNil(t, cmd)
+	assert.False(t, v.trashListPending)
+
+	msg := cmd()
+	result, ok := msg.(todolistTrashResultMsg)
+	require.True(t, ok)
+	assert.Equal(t, int64(10), result.todolistID)
+}
+
+func TestTodos_TrashList_RightPane_Noop(t *testing.T) {
+	v := testTodosViewWithTodos()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	assert.Nil(t, cmd, "T on right pane should return nil")
+	assert.False(t, v.trashListPending)
+}
+
+func TestTodos_TrashList_OtherKeyResets(t *testing.T) {
+	v := testTodosView()
+	v.trashListPending = true
+	v.trashListPendingID = "10"
+
+	v.handleKey(runeKey('j'))
+	assert.False(t, v.trashListPending)
+	assert.Empty(t, v.trashListPendingID)
+}
+
+func TestTodos_TrashList_SuccessHandler_ClearsRightPanel(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.todolistPool.Set(sampleTodolists())
+
+	_, cmd := v.Update(todolistTrashResultMsg{todolistID: 10, err: nil})
+	require.NotNil(t, cmd)
+	assert.True(t, v.loadingLists)
+	assert.Equal(t, int64(0), v.selectedListID, "should clear selectedListID")
+	assert.Empty(t, v.listTodos.Items(), "should clear right panel")
+}
+
+func TestTodos_TrashList_Timeout(t *testing.T) {
+	v := testTodosView()
+	v.trashListPending = true
+	v.trashListPendingID = "10"
+
+	v.Update(todolistTrashTimeoutMsg{})
+	assert.False(t, v.trashListPending)
+	assert.Empty(t, v.trashListPendingID)
+}
+
+// --- ShortHelp: left pane shows list management ---
+
+func TestTodos_ShortHelp_LeftPaneShowsListKeys(t *testing.T) {
+	v := testTodosView()
+	hints := v.ShortHelp()
+
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "new list", keys["N"])
+	assert.Equal(t, "rename list", keys["R"])
+	assert.Equal(t, "trash list", keys["T"])
 }
 
 // newTextInputWithValue creates a textinput with a preset value for testing.
