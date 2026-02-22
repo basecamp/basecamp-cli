@@ -118,6 +118,47 @@ func (l *List) Len() int {
 	return len(l.filtered)
 }
 
+// SelectByID scans filtered items for a matching ID, sets cursor + adjusts offset.
+// Returns true if found, false if not.
+func (l *List) SelectByID(id string) bool {
+	for i, item := range l.filtered {
+		if item.ID == id {
+			l.cursor = i
+			l.skipHeaders(1)
+			l.clampOffset()
+			return true
+		}
+	}
+	return false
+}
+
+// SelectIndex sets the cursor to the given index (clamped to bounds).
+func (l *List) SelectIndex(idx int) {
+	if len(l.filtered) == 0 {
+		return
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(l.filtered) {
+		idx = len(l.filtered) - 1
+	}
+	l.cursor = idx
+	l.skipHeaders(1)
+	l.clampOffset()
+}
+
+// clampOffset ensures the cursor is visible within the viewport.
+func (l *List) clampOffset() {
+	visibleHeight := l.visibleHeight()
+	if l.cursor < l.offset {
+		l.offset = l.cursor
+	}
+	if l.cursor >= l.offset+visibleHeight {
+		l.offset = l.cursor - visibleHeight + 1
+	}
+}
+
 // StartFilter enters interactive filter mode.
 func (l *List) StartFilter() {
 	l.filtering = true

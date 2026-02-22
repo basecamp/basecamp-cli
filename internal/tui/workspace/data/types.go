@@ -25,11 +25,14 @@ type CheckinQuestionInfo struct {
 
 // DocsFilesItemInfo is a lightweight representation of a vault item.
 type DocsFilesItemInfo struct {
-	ID        int64
-	Title     string
-	Type      string // "Folder", "Document", "Upload"
-	CreatedAt string
-	Creator   string
+	ID           int64
+	Title        string
+	Type         string // "Folder", "Document", "Upload"
+	CreatedAt    string
+	Creator      string
+	VaultsCount  int // sub-folders (Type=="Folder" only)
+	DocsCount    int // documents (Type=="Folder" only)
+	UploadsCount int // uploads (Type=="Folder" only)
 }
 
 // PersonInfo is a lightweight representation of a person for the view.

@@ -291,11 +291,14 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 				for _, f := range foldersResult.Vaults {
 					creator := personName(f.Creator)
 					allItems = append(allItems, DocsFilesItemInfo{
-						ID:        f.ID,
-						Title:     f.Title,
-						Type:      "Folder",
-						CreatedAt: f.CreatedAt.Format("Jan 2, 2006"),
-						Creator:   creator,
+						ID:           f.ID,
+						Title:        f.Title,
+						Type:         "Folder",
+						CreatedAt:    f.CreatedAt.Format("Jan 2, 2006"),
+						Creator:      creator,
+						VaultsCount:  f.VaultsCount,
+						DocsCount:    f.DocumentsCount,
+						UploadsCount: f.UploadsCount,
 					})
 				}
 			}
@@ -824,6 +827,26 @@ func (h *Hub) TrashRecording(ctx context.Context, accountID string, projectID, r
 		return fmt.Errorf("no client for account %s", accountID)
 	}
 	return client.Recordings().Trash(ctx, projectID, recordingID)
+}
+
+// CreateDocument creates a new document in a vault.
+func (h *Hub) CreateDocument(ctx context.Context, accountID string, projectID, vaultID int64, title string) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Documents().Create(ctx, projectID, vaultID, &basecamp.CreateDocumentRequest{Title: title})
+	return err
+}
+
+// CreateVault creates a new sub-folder in a vault.
+func (h *Hub) CreateVault(ctx context.Context, accountID string, projectID, parentVaultID int64, title string) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Vaults().Create(ctx, projectID, parentVaultID, &basecamp.CreateVaultRequest{Title: title})
+	return err
 }
 
 // UpdateTodo updates a todo's fields.

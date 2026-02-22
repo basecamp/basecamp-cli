@@ -1158,6 +1158,36 @@ func TestWorkspace_SidebarCycleNarrowTerminal(t *testing.T) {
 	assert.False(t, w.sidebarActive(), "sidebar should not be rendered at narrow width")
 }
 
+// dynamicTitleView is a test view whose Title() changes.
+type dynamicTitleView struct {
+	title string
+	testView
+}
+
+func (v *dynamicTitleView) Title() string { return v.title }
+
+func TestWorkspace_ChromeSyncMsg_UpdatesBreadcrumb(t *testing.T) {
+	w, _ := testWorkspace()
+	w.relayout() // set width on chrome components
+	dv := &dynamicTitleView{title: "Docs & Files"}
+	dv.testView.title = "Docs & Files"
+	w.router.Push(dv, Scope{}, 0)
+	w.syncChrome()
+
+	// Assert rendered breadcrumb contains the initial title
+	view := w.breadcrumb.View()
+	assert.Contains(t, view, "Docs & Files", "breadcrumb should render initial title")
+
+	// Change title dynamically and send ChromeSyncMsg
+	dv.title = "Design Assets"
+	w.Update(ChromeSyncMsg{})
+
+	// Assert rendered breadcrumb now reflects the new title
+	view = w.breadcrumb.View()
+	assert.Contains(t, view, "Design Assets", "breadcrumb should render updated title after ChromeSyncMsg")
+	assert.NotContains(t, view, "Docs & Files", "old title should no longer appear in breadcrumb")
+}
+
 func TestWorkspace_SidebarCycleWhileFocused(t *testing.T) {
 	w, _ := testWorkspace()
 	pushTestView(w, "Home")

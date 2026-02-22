@@ -291,6 +291,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return w, w.stampCmd(cmd)
 		}
 
+	case ChromeSyncMsg:
+		w.syncChrome()
+		return w, nil
+
 	case chrome.PaletteCloseMsg:
 		w.showPalette = false
 		w.palette.Blur()

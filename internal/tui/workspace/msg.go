@@ -262,6 +262,10 @@ type TogglePaletteMsg struct{}
 // RefreshMsg requests a data refresh for the current view.
 type RefreshMsg struct{}
 
+// ChromeSyncMsg signals the workspace to re-sync chrome (breadcrumb, hints).
+// Emitted by views when their Title() changes dynamically (e.g., folder navigation).
+type ChromeSyncMsg struct{}
+
 // FocusMsg indicates a view gained focus.
 type FocusMsg struct{}
 
