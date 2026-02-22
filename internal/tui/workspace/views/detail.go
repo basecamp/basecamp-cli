@@ -26,6 +26,7 @@ import (
 
 // detailComment holds a single comment's display data.
 type detailComment struct {
+	id        int64
 	creator   string
 	createdAt time.Time
 	content   string // HTML body
@@ -73,6 +74,10 @@ type detailAssignResultMsg struct{ err error }
 type trashTimeoutMsg struct{}
 type trashResultMsg struct{ err error }
 
+type commentEditResultMsg struct{ err error }
+type commentTrashResultMsg struct{ err error }
+type commentTrashTimeoutMsg struct{}
+
 // Detail shows a single recording with its content and metadata.
 type Detail struct {
 	session *workspace.Session
@@ -104,6 +109,12 @@ type Detail struct {
 
 	// Double-press trash confirmation
 	trashPending bool
+
+	// Comment focus and editing
+	focusedComment      int // index into data.comments, -1 means none
+	editingComment      bool
+	commentEditInput    textinput.Model
+	commentTrashPending bool
 
 	width, height int
 }
@@ -140,16 +151,17 @@ func NewDetail(session *workspace.Session, recordingID int64, recordingType, ori
 	)
 
 	return &Detail{
-		session:       session,
-		styles:        styles,
-		recordingID:   recordingID,
-		recordingType: recordingType,
-		originView:    originView,
-		originHint:    originHint,
-		preview:       widget.NewPreview(styles),
-		spinner:       s,
-		loading:       true,
-		composer:      comp,
+		session:        session,
+		styles:         styles,
+		recordingID:    recordingID,
+		recordingType:  recordingType,
+		originView:     originView,
+		originHint:     originHint,
+		preview:        widget.NewPreview(styles),
+		spinner:        s,
+		loading:        true,
+		composer:       comp,
+		focusedComment: -1,
 	}
 }
 
@@ -162,16 +174,16 @@ func (v *Detail) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Detail) InputActive() bool {
-	return v.composing || v.editing || v.settingDue || v.assigning
+	return v.composing || v.editing || v.editingComment || v.settingDue || v.assigning
 }
 
 // IsModal implements workspace.ModalActive.
 func (v *Detail) IsModal() bool {
-	return v.composing || v.editing || v.settingDue || v.assigning
+	return v.composing || v.editing || v.editingComment || v.settingDue || v.assigning
 }
 
 func (v *Detail) ShortHelp() []key.Binding {
-	if v.editing {
+	if v.editing || v.editingComment {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
@@ -198,6 +210,13 @@ func (v *Detail) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
 		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
 	)
+	if v.data != nil && len(v.data.comments) > 0 {
+		hints = append(hints,
+			key.NewBinding(key.WithKeys("]/["), key.WithHelp("]/[", "comment nav")),
+			key.NewBinding(key.WithKeys("E"), key.WithHelp("E", "edit comment")),
+			key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "trash comment")),
+		)
+	}
 	if v.session != nil && v.session.Scope().ProjectID != 0 {
 		hints = append(hints, key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "project")))
 	}
@@ -356,6 +375,26 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.trashPending = false
 		return v, nil
 
+	case commentEditResultMsg:
+		v.editingComment = false
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "editing comment")
+		}
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Comment updated", false))
+
+	case commentTrashResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "trashing comment")
+		}
+		v.focusedComment = -1
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Comment trashed", false))
+
+	case commentTrashTimeoutMsg:
+		v.commentTrashPending = false
+		return v, nil
+
 	case tea.KeyMsg:
 		if v.loading {
 			return v, nil
@@ -377,6 +416,9 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.editing {
 		return v.handleEditingKey(msg)
 	}
+	if v.editingComment {
+		return v.handleCommentEditingKey(msg)
+	}
 	if v.settingDue {
 		return v.handleDetailSettingDueKey(msg)
 	}
@@ -387,9 +429,12 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return v.handleComposingKey(msg)
 	}
 
-	// Any non-t key resets trash confirmation
+	// Any non-t key resets trash confirmation; non-T resets comment trash
 	if msg.String() != "t" {
 		v.trashPending = false
+	}
+	if msg.String() != "T" {
+		v.commentTrashPending = false
 	}
 
 	isTodo := v.data != nil && strings.EqualFold(v.data.recordType, "Todo")
@@ -444,6 +489,14 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 			workspace.SetStatus("Press t again to trash", false),
 			v.trashConfirmTimeout(),
 		)
+	case "]":
+		return v.nextComment()
+	case "[":
+		return v.prevComment()
+	case "E":
+		return v.startCommentEdit()
+	case "T":
+		return v.handleCommentTrash()
 	case "g":
 		return v.goToProject()
 	case "j", "down":
@@ -499,6 +552,119 @@ func (v *Detail) goToProject() tea.Cmd {
 		return workspace.SetStatus("No project context", false)
 	}
 	return workspace.Navigate(workspace.ViewDock, scope)
+}
+
+// -- Comment focus navigation --
+
+func (v *Detail) nextComment() tea.Cmd {
+	if v.data == nil || len(v.data.comments) == 0 {
+		return nil
+	}
+	if v.focusedComment < len(v.data.comments)-1 {
+		v.focusedComment++
+	}
+	return v.commentFocusStatus()
+}
+
+func (v *Detail) prevComment() tea.Cmd {
+	if v.data == nil || len(v.data.comments) == 0 {
+		return nil
+	}
+	if v.focusedComment > -1 {
+		v.focusedComment--
+	}
+	if v.focusedComment == -1 {
+		return workspace.SetStatus("No comment selected", false)
+	}
+	return v.commentFocusStatus()
+}
+
+func (v *Detail) commentFocusStatus() tea.Cmd {
+	c := v.data.comments[v.focusedComment]
+	return workspace.SetStatus(
+		fmt.Sprintf("Comment %d/%d by %s", v.focusedComment+1, len(v.data.comments), c.creator),
+		false,
+	)
+}
+
+// -- Comment edit --
+
+func (v *Detail) startCommentEdit() tea.Cmd {
+	if v.data == nil || v.focusedComment < 0 || v.focusedComment >= len(v.data.comments) {
+		return nil
+	}
+	c := v.data.comments[v.focusedComment]
+	v.editingComment = true
+	v.commentEditInput = textinput.New()
+	v.commentEditInput.SetValue(richtext.HTMLToMarkdown(c.content))
+	v.commentEditInput.CharLimit = 0 // unlimited
+	v.commentEditInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Detail) handleCommentEditingKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		content := strings.TrimSpace(v.commentEditInput.Value())
+		if content == "" {
+			v.editingComment = false
+			return nil
+		}
+		return v.submitCommentEdit(content)
+	case "esc":
+		v.editingComment = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.commentEditInput, cmd = v.commentEditInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Detail) submitCommentEdit(content string) tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	commentID := v.data.comments[v.focusedComment].id
+	html := richtext.MarkdownToHTML(content)
+	return func() tea.Msg {
+		err := hub.UpdateComment(ctx, scope.AccountID, scope.ProjectID, commentID, html)
+		return commentEditResultMsg{err: err}
+	}
+}
+
+// -- Comment trash --
+
+func (v *Detail) handleCommentTrash() tea.Cmd {
+	if v.data == nil || v.focusedComment < 0 || v.focusedComment >= len(v.data.comments) {
+		return nil
+	}
+	if v.commentTrashPending {
+		v.commentTrashPending = false
+		return v.trashComment()
+	}
+	v.commentTrashPending = true
+	return tea.Batch(
+		workspace.SetStatus("Press T again to trash comment", false),
+		v.commentTrashConfirmTimeout(),
+	)
+}
+
+func (v *Detail) commentTrashConfirmTimeout() tea.Cmd {
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return commentTrashTimeoutMsg{}
+	})
+}
+
+func (v *Detail) trashComment() tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	commentID := v.data.comments[v.focusedComment].id
+	return func() tea.Msg {
+		err := hub.TrashComment(ctx, scope.AccountID, scope.ProjectID, commentID)
+		return commentTrashResultMsg{err: err}
+	}
 }
 
 // -- Due date (Detail) --
@@ -815,6 +981,11 @@ func (v *Detail) View() string {
 		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Assign: ")
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.assignInput.View())
 	}
+	if v.editingComment {
+		theme := v.styles.Theme()
+		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Edit comment: ")
+		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.commentEditInput.View())
+	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(view)
 }
 
@@ -1031,6 +1202,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 					creator = c.Creator.Name
 				}
 				data.comments = append(data.comments, detailComment{
+					id:        c.ID,
 					creator:   creator,
 					createdAt: c.CreatedAt,
 					content:   c.Content,

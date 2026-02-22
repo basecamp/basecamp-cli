@@ -907,6 +907,25 @@ func (h *Hub) Unsubscribe(ctx context.Context, accountID string, projectID, reco
 	return client.Subscriptions().Unsubscribe(ctx, projectID, recordingID)
 }
 
+// UpdateComment updates a comment's content.
+func (h *Hub) UpdateComment(ctx context.Context, accountID string, projectID, commentID int64, content string) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Comments().Update(ctx, projectID, commentID, &basecamp.UpdateCommentRequest{Content: content})
+	return err
+}
+
+// TrashComment moves a comment to the trash.
+func (h *Hub) TrashComment(ctx context.Context, accountID string, projectID, commentID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	return client.Comments().Trash(ctx, projectID, commentID)
+}
+
 // mapBoostInfo converts an SDK Boost to BoostInfo.
 func mapBoostInfo(b basecamp.Boost) BoostInfo {
 	booster := ""

@@ -515,3 +515,127 @@ func TestDetail_FetchSubscriptionState(t *testing.T) {
 		assert.False(t, got)
 	})
 }
+
+// -- Comment focus navigation tests --
+
+func detailWithComments() *Detail {
+	v := testDetailWithSession("Todo", false)
+	v.data.comments = []detailComment{
+		{id: 1, creator: "Alice", content: "<p>First comment</p>"},
+		{id: 2, creator: "Bob", content: "<p>Second comment</p>"},
+	}
+	v.focusedComment = -1
+	return v
+}
+
+func TestDetail_CommentFocus_Navigation(t *testing.T) {
+	v := detailWithComments()
+
+	// ] moves to first comment
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	require.NotNil(t, cmd)
+	assert.Equal(t, 0, v.focusedComment)
+
+	// ] again moves to second comment
+	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	require.NotNil(t, cmd)
+	assert.Equal(t, 1, v.focusedComment)
+
+	// ] clamps at last comment
+	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	require.NotNil(t, cmd)
+	assert.Equal(t, 1, v.focusedComment, "should clamp at last comment")
+
+	// [ moves back
+	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	require.NotNil(t, cmd)
+	assert.Equal(t, 0, v.focusedComment)
+
+	// [ again unfocuses
+	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	require.NotNil(t, cmd)
+	assert.Equal(t, -1, v.focusedComment, "should unfocus when going past first")
+}
+
+func TestDetail_CommentEdit_OpensInput(t *testing.T) {
+	v := detailWithComments()
+	v.focusedComment = 0
+
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'E'}})
+	require.NotNil(t, cmd, "E should return blink cmd")
+	assert.True(t, v.editingComment, "should be in comment editing mode")
+	assert.True(t, v.InputActive(), "input should be active during comment edit")
+	assert.True(t, v.IsModal(), "should be modal during comment edit")
+}
+
+func TestDetail_CommentEdit_Ignored_WhenNoFocus(t *testing.T) {
+	v := detailWithComments()
+	assert.Equal(t, -1, v.focusedComment)
+
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'E'}})
+	assert.Nil(t, cmd, "E should do nothing when no comment focused")
+	assert.False(t, v.editingComment)
+}
+
+func TestDetail_CommentTrash_DoublePress(t *testing.T) {
+	v := detailWithComments()
+	v.focusedComment = 1
+
+	// First T arms
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	require.NotNil(t, cmd)
+	assert.True(t, v.commentTrashPending, "first T should arm comment trash")
+
+	// Second T fires
+	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	require.NotNil(t, cmd, "second T should return trash cmd")
+	assert.False(t, v.commentTrashPending, "should be cleared after confirm")
+
+	msg := cmd()
+	result, ok := msg.(commentTrashResultMsg)
+	require.True(t, ok, "cmd should produce commentTrashResultMsg")
+	// Error expected since test session has nil SDK
+	assert.Error(t, result.err)
+}
+
+func TestDetail_CommentTrash_Ignored_WhenNoFocus(t *testing.T) {
+	v := detailWithComments()
+	assert.Equal(t, -1, v.focusedComment)
+
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	assert.Nil(t, cmd, "T should do nothing when no comment focused")
+	assert.False(t, v.commentTrashPending)
+}
+
+func TestDetail_CommentTrash_Timeout(t *testing.T) {
+	v := detailWithComments()
+	v.commentTrashPending = true
+
+	v.Update(commentTrashTimeoutMsg{})
+	assert.False(t, v.commentTrashPending, "timeout should reset commentTrashPending")
+}
+
+func TestDetail_ShortHelp_ShowsCommentKeys(t *testing.T) {
+	v := detailWithComments()
+	hints := v.ShortHelp()
+
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "comment nav", keys["]/["])
+	assert.Equal(t, "edit comment", keys["E"])
+	assert.Equal(t, "trash comment", keys["T"])
+}
+
+func TestDetail_ShortHelp_HidesCommentKeys_WhenNoComments(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	// No comments set
+	hints := v.ShortHelp()
+
+	for _, h := range hints {
+		assert.NotEqual(t, "]/[", h.Help().Key, "should not show comment nav without comments")
+		assert.NotEqual(t, "E", h.Help().Key, "should not show edit comment without comments")
+		assert.NotEqual(t, "T", h.Help().Key, "should not show trash comment without comments")
+	}
+}
