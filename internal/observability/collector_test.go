@@ -131,7 +131,7 @@ func TestSessionCollector_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Simulate concurrent access
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(3)
 		go func(n int) {
 			defer wg.Done()

@@ -467,7 +467,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 
 	if participants != "" {
 		var ids []int64
-		for _, idStr := range strings.Split(participants, ",") {
+		for idStr := range strings.SplitSeq(participants, ",") {
 			idStr = strings.TrimSpace(idStr)
 			if id, err := strconv.ParseInt(idStr, 10, 64); err == nil {
 				ids = append(ids, id)
@@ -585,7 +585,7 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 			if participants != "" {
 				var ids []int64
-				for _, idStr := range strings.Split(participants, ",") {
+				for idStr := range strings.SplitSeq(participants, ",") {
 					idStr = strings.TrimSpace(idStr)
 					if id, err := strconv.ParseInt(idStr, 10, 64); err == nil {
 						ids = append(ids, id)

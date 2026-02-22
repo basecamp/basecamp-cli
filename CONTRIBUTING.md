@@ -38,7 +38,7 @@ The `go.work` file is gitignored - your local setup won't affect the repo.
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26+
 - [bats-core](https://github.com/bats-core/bats-core) for integration tests
 - [golangci-lint](https://golangci-lint.run/) for linting
 

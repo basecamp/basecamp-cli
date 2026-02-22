@@ -32,7 +32,7 @@ func TestRateLimiterAllowsRequests(t *testing.T) {
 	})
 
 	// Should allow up to max tokens requests
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		allowed, err := rl.Allow()
 		require.NoError(t, err)
 		assert.True(t, allowed, "expected request %d to be allowed", i+1)
@@ -54,7 +54,7 @@ func TestRateLimiterRefillsOverTime(t *testing.T) {
 	})
 
 	// Exhaust all tokens
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		rl.Allow()
 	}
 
@@ -167,7 +167,7 @@ func TestRateLimiterReset(t *testing.T) {
 	})
 
 	// Exhaust all tokens
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		rl.Allow()
 	}
 
@@ -198,7 +198,7 @@ func TestRateLimiterPersistence(t *testing.T) {
 	})
 
 	// Use 3 tokens
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		rl1.Allow()
 	}
 
@@ -250,7 +250,7 @@ func TestRateLimiterTokensPerRequest(t *testing.T) {
 	})
 
 	// Should allow 2 requests (10 tokens / 5 per request)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		allowed, err := rl.Allow()
 		require.NoError(t, err)
 		assert.True(t, allowed, "expected request %d to be allowed", i+1)

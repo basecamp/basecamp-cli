@@ -1,6 +1,7 @@
 package resilience
 
 import (
+	"slices"
 	"time"
 )
 
@@ -52,13 +53,13 @@ type CircuitBreakerState struct {
 
 	// HalfOpenLastAttemptAt is when the last half-open attempt was reserved.
 	// Used to detect stale attempts from crashed processes that never completed.
-	HalfOpenLastAttemptAt time.Time `json:"half_open_last_attempt_at,omitempty"`
+	HalfOpenLastAttemptAt time.Time `json:"half_open_last_attempt_at"`
 
 	// LastFailureAt is when the most recent failure occurred.
-	LastFailureAt time.Time `json:"last_failure_at,omitempty"`
+	LastFailureAt time.Time `json:"last_failure_at"`
 
 	// OpenedAt is when the circuit transitioned to open state.
-	OpenedAt time.Time `json:"opened_at,omitempty"`
+	OpenedAt time.Time `json:"opened_at"`
 }
 
 // Circuit breaker state constants.
@@ -94,7 +95,7 @@ type RateLimiterState struct {
 
 	// RetryAfterUntil is set when we receive a 429 with Retry-After header.
 	// No requests should be made until this time passes.
-	RetryAfterUntil time.Time `json:"retry_after_until,omitempty"`
+	RetryAfterUntil time.Time `json:"retry_after_until"`
 }
 
 // IsBlocked returns true if we're within a Retry-After window.
@@ -133,12 +134,7 @@ func (b *BulkheadState) Count() int {
 
 // HasPID returns true if the given PID holds a permit.
 func (b *BulkheadState) HasPID(pid int) bool {
-	for _, p := range b.ActivePIDs {
-		if p == pid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(b.ActivePIDs, pid)
 }
 
 // AddPID adds a PID to the active list if not already present.

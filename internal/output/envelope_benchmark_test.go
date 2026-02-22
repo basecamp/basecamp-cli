@@ -57,7 +57,7 @@ func BenchmarkNormalizeData(b *testing.B) {
 
 	b.Run("large_array", func(b *testing.B) {
 		items := make([]map[string]any, 50)
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			items[i] = map[string]any{"id": i, "name": "Item"}
 		}
 		data, _ := json.Marshal(items)
@@ -165,7 +165,7 @@ func BenchmarkWriteJSON(b *testing.B) {
 		buf := &bytes.Buffer{}
 		w := New(Options{Writer: buf, Format: FormatJSON})
 		items := make([]map[string]any, 100)
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			items[i] = map[string]any{
 				"id":          i + 1,
 				"title":       "A reasonably long todo item title for realistic benchmarking",

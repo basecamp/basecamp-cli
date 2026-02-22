@@ -90,7 +90,7 @@ func LoadThemeFromFile(path string) (Theme, error) {
 func parseSimpleTOML(data []byte) (map[string]string, error) { //nolint:unparam // error return for future extensibility
 	result := make(map[string]string)
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 
 		// Skip empty lines and comments

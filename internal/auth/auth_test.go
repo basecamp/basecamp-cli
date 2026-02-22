@@ -135,7 +135,7 @@ func TestKeyFunction(t *testing.T) {
 func TestGenerateCodeVerifier(t *testing.T) {
 	// Generate multiple verifiers to check they're unique
 	verifiers := make(map[string]bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		v := generateCodeVerifier()
 
 		// Should be base64url encoded (no padding)
@@ -165,7 +165,7 @@ func TestGenerateCodeChallenge(t *testing.T) {
 func TestGenerateState(t *testing.T) {
 	// Generate multiple states to check they're unique
 	states := make(map[string]bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		s := generateState()
 
 		assert.NotEmpty(t, s, "generateState returned empty string")

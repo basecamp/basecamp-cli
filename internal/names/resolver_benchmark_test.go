@@ -9,7 +9,7 @@ import (
 
 func generateProjects(n int) []Project {
 	projects := make([]Project, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		projects[i] = Project{ID: int64(i + 1), Name: fmt.Sprintf("Project %d", i+1)}
 	}
 	return projects

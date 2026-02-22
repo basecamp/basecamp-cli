@@ -767,7 +767,7 @@ func TestRenderAllFieldsIsDeterministic(t *testing.T) {
 
 	// Render multiple times and verify output is stable
 	var firstOutput string
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		var buf strings.Builder
 		if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
 			t.Fatalf("RenderDetail failed on iteration %d: %v", i, err)

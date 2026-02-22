@@ -398,7 +398,7 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 	require.NoError(t, err, "command should succeed with mock transport")
 	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
 
-	var requestBody map[string]interface{}
+	var requestBody map[string]any
 	err = json.Unmarshal(transport.capturedBody, &requestBody)
 	require.NoError(t, err, "expected valid JSON in request body")
 

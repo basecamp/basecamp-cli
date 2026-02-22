@@ -46,7 +46,7 @@ type Message struct {
 	Subject   string `json:"subject"`
 	Content   string `json:"content,omitempty"`
 	CreatedAt string `json:"created_at"`
-	Creator   Person `json:"creator,omitempty"`
+	Creator   Person `json:"creator"`
 }
 
 // Card represents a Basecamp card table card.
@@ -78,7 +78,7 @@ type Comment struct {
 	ID        int64  `json:"id"`
 	Content   string `json:"content"`
 	CreatedAt string `json:"created_at"`
-	Creator   Person `json:"creator,omitempty"`
+	Creator   Person `json:"creator"`
 }
 
 // Recording represents a generic Basecamp recording.
@@ -89,7 +89,7 @@ type Recording struct {
 	Title     string `json:"title,omitempty"`
 	Content   string `json:"content,omitempty"`
 	CreatedAt string `json:"created_at"`
-	Creator   Person `json:"creator,omitempty"`
+	Creator   Person `json:"creator"`
 }
 
 // CampfireLine represents a campfire chat line.
@@ -97,7 +97,7 @@ type CampfireLine struct {
 	ID        int64  `json:"id"`
 	Content   string `json:"content"`
 	CreatedAt string `json:"created_at"`
-	Creator   Person `json:"creator,omitempty"`
+	Creator   Person `json:"creator"`
 }
 
 // ScheduleEntry represents a schedule entry.

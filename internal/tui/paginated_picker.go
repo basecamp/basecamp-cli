@@ -317,10 +317,7 @@ func (m paginatedPickerModel) View() string {
 	} else {
 		// Calculate visible range
 		start := m.scrollOffset
-		end := start + m.maxVisible
-		if end > len(m.filtered) {
-			end = len(m.filtered)
-		}
+		end := min(start+m.maxVisible, len(m.filtered))
 
 		for i := start; i < end; i++ {
 			item := m.filtered[i]

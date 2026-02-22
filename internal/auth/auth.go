@@ -369,7 +369,7 @@ func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 
 func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
 	redirectURI := "http://" + opts.CallbackAddr + "/callback"
-	regReq := map[string]interface{}{
+	regReq := map[string]any{
 		"client_name":                "bcq",
 		"client_uri":                 "https://github.com/basecamp/basecamp-cli",
 		"redirect_uris":              []string{redirectURI},

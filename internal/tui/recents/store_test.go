@@ -114,7 +114,7 @@ func TestStore_MaxItems(t *testing.T) {
 	store := NewStore(tmpDir)
 
 	// Add more than max items (default is 10)
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		store.Add(Item{ID: string(rune('A' + i)), Title: "Item", Type: TypeProject})
 	}
 
