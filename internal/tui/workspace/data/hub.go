@@ -463,6 +463,45 @@ func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 	return mp
 }
 
+// CompletedTodos returns a project-scoped Pool of completed todos for a specific todolist.
+// Unlike Todos(), this is a plain Pool (not MutatingPool) since un-completing uses
+// invalidate+refetch rather than optimistic mutation.
+func (h *Hub) CompletedTodos(projectID, todolistID int64) *Pool[[]TodoInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("todos-completed:%d:%d", projectID, todolistID)
+	p := RealmPool(realm, key, func() *Pool[[]TodoInfo] {
+		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]TodoInfo, error) {
+			client := h.accountClient()
+			result, err := client.Todos().List(ctx, projectID, todolistID, &basecamp.TodoListOptions{Status: "completed"})
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]TodoInfo, 0, len(result.Todos))
+			for _, t := range result.Todos {
+				names := make([]string, 0, len(t.Assignees))
+				for _, a := range t.Assignees {
+					names = append(names, a.Name)
+				}
+				infos = append(infos, TodoInfo{
+					ID:          t.ID,
+					Content:     t.Content,
+					Description: t.Description,
+					Completed:   t.Completed,
+					DueOn:       t.DueOn,
+					Assignees:   names,
+					Position:    t.Position,
+					BoostEmbed: BoostEmbed{
+						BoostsSummary: BoostSummary{Count: t.BoostsCount},
+					},
+				})
+			}
+			return infos, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
 // Cards returns a project-scoped MutatingPool of card columns with their cards.
 // The MutatingPool supports optimistic card moves via CardMoveMutation.
 // Done and Not Now columns are deferred: metadata only, no card fetching.

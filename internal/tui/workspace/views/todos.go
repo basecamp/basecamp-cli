@@ -28,17 +28,18 @@ import (
 
 // todosKeyMap defines todo-specific keybindings.
 type todosKeyMap struct {
-	Toggle     key.Binding
-	New        key.Binding
-	SwitchTab  key.Binding
-	EditDesc   key.Binding
-	Boost      key.Binding
-	DueDate    key.Binding
-	Assign     key.Binding
-	Unassign   key.Binding
-	NewList    key.Binding
-	RenameList key.Binding
-	TrashList  key.Binding
+	Toggle        key.Binding
+	New           key.Binding
+	SwitchTab     key.Binding
+	EditDesc      key.Binding
+	Boost         key.Binding
+	DueDate       key.Binding
+	Assign        key.Binding
+	Unassign      key.Binding
+	NewList       key.Binding
+	RenameList    key.Binding
+	TrashList     key.Binding
+	ShowCompleted key.Binding
 }
 
 func defaultTodosKeyMap() todosKeyMap {
@@ -83,6 +84,10 @@ func defaultTodosKeyMap() todosKeyMap {
 		TrashList: key.NewBinding(
 			key.WithKeys("T"),
 			key.WithHelp("T", "trash list"),
+		),
+		ShowCompleted: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "completed"),
 		),
 	}
 }
@@ -138,6 +143,9 @@ type Todos struct {
 	listInput          textinput.Model
 	trashListPending   bool
 	trashListPendingID string
+
+	// Completed filter
+	showCompleted bool
 }
 
 // todoDescUpdatedMsg is sent after a todo description is updated.
@@ -175,6 +183,12 @@ type todolistTrashResultMsg struct {
 }
 
 type todolistTrashTimeoutMsg struct{}
+
+// todoUncompletedMsg is sent after un-completing a todo from completed mode.
+type todoUncompletedMsg struct {
+	todolistID int64
+	err        error
+}
 
 // NewTodos creates the split-pane todos view.
 func NewTodos(session *workspace.Session) *Todos {
@@ -278,12 +292,24 @@ func (v *Todos) ShortHelp() []key.Binding {
 		}
 	}
 	if v.focus == todosPaneLeft {
+		completedHint := key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "completed"))
+		if v.showCompleted {
+			completedHint = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "pending"))
+		}
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 			v.keys.SwitchTab,
+			completedHint,
 			v.keys.NewList,
 			v.keys.RenameList,
 			v.keys.TrashList,
+		}
+	}
+	if v.showCompleted {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			v.keys.SwitchTab,
+			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "uncomplete")),
 		}
 	}
 	return []key.Binding{
@@ -348,18 +374,34 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return v, workspace.ReportError(snap.Err, "loading todolists")
 			}
 		} else {
-			// Check if this is a todos pool update for the currently selected list
+			// Check if this is a todos pool update for the currently selected list.
+			// Route to the active pool based on showCompleted mode.
 			if v.selectedListID != 0 {
-				todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
-				if msg.Key == todosPool.Key() {
-					snap := todosPool.Get()
-					if snap.Usable() {
-						v.loadingTodos = false
-						v.syncTodos(v.selectedListID, snap.Data)
+				if v.showCompleted {
+					completedPool := v.session.Hub().CompletedTodos(v.session.Scope().ProjectID, v.selectedListID)
+					if msg.Key == completedPool.Key() {
+						snap := completedPool.Get()
+						if snap.Usable() {
+							v.loadingTodos = false
+							v.syncTodos(v.selectedListID, snap.Data)
+						}
+						if snap.State == data.StateError {
+							v.loadingTodos = false
+							return v, workspace.ReportError(snap.Err, "loading completed todos")
+						}
 					}
-					if snap.State == data.StateError {
-						v.loadingTodos = false
-						return v, workspace.ReportError(snap.Err, "loading todos")
+				} else {
+					todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
+					if msg.Key == todosPool.Key() {
+						snap := todosPool.Get()
+						if snap.Usable() {
+							v.loadingTodos = false
+							v.syncTodos(v.selectedListID, snap.Data)
+						}
+						if snap.State == data.StateError {
+							v.loadingTodos = false
+							return v, workspace.ReportError(snap.Err, "loading todos")
+						}
 					}
 				}
 			}
@@ -470,6 +512,25 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.trashListPendingID = ""
 		return v, nil
 
+	case todoUncompletedMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "uncompleting todo")
+		}
+		// Invalidate both pools — the item moves between them
+		completedPool := v.session.Hub().CompletedTodos(v.session.Scope().ProjectID, msg.todolistID)
+		completedPool.Invalidate()
+		pendingPool := v.session.Hub().Todos(v.session.Scope().ProjectID, msg.todolistID)
+		pendingPool.Invalidate()
+		// Refetch whichever pool is currently active (user may have toggled mid-flight)
+		ctx := v.session.Hub().ProjectContext()
+		var fetchCmd tea.Cmd
+		if v.showCompleted {
+			fetchCmd = completedPool.Fetch(ctx)
+		} else {
+			fetchCmd = pendingPool.Fetch(ctx)
+		}
+		return v, tea.Batch(fetchCmd, workspace.SetStatus("Todo uncompleted", false))
+
 	case widget.ComposerSubmitMsg:
 		if msg.Err != nil {
 			return v, workspace.ReportError(msg.Err, "composing description")
@@ -576,17 +637,25 @@ func (v *Todos) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return v.trashSelectedList()
 		}
 
+	case key.Matches(msg, v.keys.ShowCompleted):
+		if v.focus == todosPaneLeft {
+			return v.toggleShowCompleted()
+		}
+
 	case key.Matches(msg, v.keys.SwitchTab):
 		v.toggleFocus()
 		return nil
 
 	case key.Matches(msg, v.keys.Toggle):
 		if v.focus == todosPaneRight {
+			if v.showCompleted {
+				return v.uncompleteSelected()
+			}
 			return v.toggleSelected()
 		}
 
 	case key.Matches(msg, v.keys.New):
-		if v.focus == todosPaneRight && v.selectedListID != 0 {
+		if v.focus == todosPaneRight && v.selectedListID != 0 && !v.showCompleted {
 			v.creating = true
 			v.textInput.Reset()
 			v.textInput.Focus()
@@ -594,27 +663,27 @@ func (v *Todos) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 
 	case key.Matches(msg, v.keys.EditDesc):
-		if v.focus == todosPaneRight {
+		if v.focus == todosPaneRight && !v.showCompleted {
 			return v.startEditDescription()
 		}
 
 	case key.Matches(msg, v.keys.DueDate):
-		if v.focus == todosPaneRight {
+		if v.focus == todosPaneRight && !v.showCompleted {
 			return v.startSettingDue()
 		}
 
 	case key.Matches(msg, v.keys.Assign):
-		if v.focus == todosPaneRight && v.selectedListID != 0 {
+		if v.focus == todosPaneRight && v.selectedListID != 0 && !v.showCompleted {
 			return v.startAssigning()
 		}
 
 	case key.Matches(msg, v.keys.Unassign):
-		if v.focus == todosPaneRight {
+		if v.focus == todosPaneRight && !v.showCompleted {
 			return v.clearAssignees()
 		}
 
 	case key.Matches(msg, v.keys.Boost):
-		if v.focus == todosPaneRight {
+		if v.focus == todosPaneRight && !v.showCompleted {
 			return v.boostSelectedTodo()
 		}
 
@@ -796,6 +865,13 @@ func (v *Todos) selectTodolist(id string) tea.Cmd {
 	}
 	v.selectedListID = listID
 
+	if v.showCompleted {
+		return v.loadCompletedTodos(listID)
+	}
+	return v.loadPendingTodos(listID)
+}
+
+func (v *Todos) loadPendingTodos(listID int64) tea.Cmd {
 	todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, listID)
 	snap := todosPool.Get()
 	if snap.Usable() {
@@ -809,6 +885,22 @@ func (v *Todos) selectTodolist(id string) tea.Cmd {
 	v.loadingTodos = true
 	v.listTodos.SetItems(nil)
 	return tea.Batch(v.spinner.Tick, todosPool.FetchIfStale(v.session.Hub().ProjectContext()))
+}
+
+func (v *Todos) loadCompletedTodos(listID int64) tea.Cmd {
+	completedPool := v.session.Hub().CompletedTodos(v.session.Scope().ProjectID, listID)
+	snap := completedPool.Get()
+	if snap.Usable() {
+		v.loadingTodos = false
+		v.syncTodos(listID, snap.Data)
+		if snap.Fresh() {
+			return nil
+		}
+	}
+
+	v.loadingTodos = true
+	v.listTodos.SetItems(nil)
+	return tea.Batch(v.spinner.Tick, completedPool.FetchIfStale(v.session.Hub().ProjectContext()))
 }
 
 func (v *Todos) toggleSelected() tea.Cmd {
@@ -848,6 +940,37 @@ func (v *Todos) toggleSelected() tea.Cmd {
 	}
 
 	return cmd
+}
+
+func (v *Todos) toggleShowCompleted() tea.Cmd {
+	v.showCompleted = !v.showCompleted
+	if v.selectedListID != 0 {
+		// Reload the right pane from the appropriate pool.
+		// selectedListID stays stable — only the data source changes.
+		if v.showCompleted {
+			return v.loadCompletedTodos(v.selectedListID)
+		}
+		return v.loadPendingTodos(v.selectedListID)
+	}
+	return nil
+}
+
+func (v *Todos) uncompleteSelected() tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	var todoID int64
+	fmt.Sscanf(item.ID, "%d", &todoID)
+
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	todolistID := v.selectedListID
+	return func() tea.Msg {
+		err := hub.UncompleteTodo(ctx, scope.AccountID, scope.ProjectID, todoID)
+		return todoUncompletedMsg{todolistID: todolistID, err: err}
+	}
 }
 
 func (v *Todos) startEditDescription() tea.Cmd {

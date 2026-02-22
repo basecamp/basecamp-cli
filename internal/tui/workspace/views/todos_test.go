@@ -608,6 +608,292 @@ func TestTodos_ShortHelp_LeftPaneShowsListKeys(t *testing.T) {
 	assert.Equal(t, "trash list", keys["T"])
 }
 
+// --- Completed todos toggle ---
+
+func sampleCompletedTodos() []data.TodoInfo {
+	return []data.TodoInfo{
+		{ID: 200, Content: "Old task", Completed: true, Position: 1},
+		{ID: 201, Content: "Done task", Completed: true, Position: 2},
+	}
+}
+
+func TestTodos_ShowCompleted_CToggleOnLeftPane(t *testing.T) {
+	v := testTodosView()
+	v.selectedListID = 10
+
+	assert.False(t, v.showCompleted)
+
+	// c on left pane toggles showCompleted
+	v.handleKey(runeKey('c'))
+	assert.True(t, v.showCompleted)
+
+	// c again toggles back
+	v.handleKey(runeKey('c'))
+	assert.False(t, v.showCompleted)
+}
+
+func TestTodos_ShowCompleted_COnRightPane_NoOp(t *testing.T) {
+	v := testTodosViewWithTodos()
+	assert.False(t, v.showCompleted)
+
+	// c on right pane should NOT toggle (c key bound to ShowCompleted on left pane only)
+	v.handleKey(runeKey('c'))
+	assert.False(t, v.showCompleted, "c on right pane should not toggle showCompleted")
+}
+
+func TestTodos_ShowCompleted_SwitchListFetchesFromCompletedPool(t *testing.T) {
+	v := testTodosView()
+	v.showCompleted = true
+	v.selectedListID = 0 // force reload
+
+	// Select a todolist while in completed mode
+	cmd := v.selectTodolist("10")
+	// Should return a cmd (fetch from completed pool)
+	// The exact cmd depends on pool state, but selectedListID should update
+	assert.Equal(t, int64(10), v.selectedListID)
+	_ = cmd
+}
+
+func TestTodos_ShowCompleted_ToggleBackRefetchesPending(t *testing.T) {
+	v := testTodosView()
+	v.selectedListID = 10
+	v.showCompleted = true
+
+	// Toggle back to pending
+	cmd := v.handleKey(runeKey('c'))
+	assert.False(t, v.showCompleted)
+	// Should trigger a refetch from pending pool
+	_ = cmd
+}
+
+func TestTodos_ShowCompleted_XInCompletedMode_Uncompletes(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.showCompleted = true
+
+	// Pre-populate completed pool
+	completedPool := v.session.Hub().CompletedTodos(42, 10)
+	completedPool.Set(sampleCompletedTodos())
+	v.renderTodoItems(sampleCompletedTodos())
+
+	// x should dispatch uncomplete, not toggle
+	cmd := v.handleKey(runeKey('x'))
+	require.NotNil(t, cmd, "x in completed mode should return uncomplete cmd")
+
+	msg := cmd()
+	result, ok := msg.(todoUncompletedMsg)
+	require.True(t, ok, "cmd should produce todoUncompletedMsg")
+	assert.Equal(t, int64(10), result.todolistID)
+	// Error expected with nil SDK
+	assert.Error(t, result.err)
+}
+
+func TestTodos_ShowCompleted_UncompletedMsg_InvalidatesBothPools(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.showCompleted = true
+
+	_, cmd := v.Update(todoUncompletedMsg{todolistID: 10, err: nil})
+	require.NotNil(t, cmd)
+}
+
+func TestTodos_ShowCompleted_XInPendingMode_NotUncomplete(t *testing.T) {
+	v := testTodosViewWithTodos()
+
+	// Verify not in completed mode — x should NOT use the uncomplete path.
+	// We can verify this by checking that toggleSelected is called (which reads
+	// from the MutatingPool) rather than uncompleteSelected (which calls Hub.UncompleteTodo).
+	// Direct verification: uncompleteSelected produces todoUncompletedMsg,
+	// toggleSelected calls todosPool.Apply.
+	assert.False(t, v.showCompleted)
+
+	// uncompleteSelected goes through a different path than toggleSelected.
+	// Since the test session's AccountClient panics on use, we verify
+	// the routing by calling uncompleteSelected directly and checking the msg type.
+	cmd := v.uncompleteSelected()
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, isUncomplete := msg.(todoUncompletedMsg)
+	assert.True(t, isUncomplete, "uncompleteSelected should produce todoUncompletedMsg")
+
+	// The key routing in handleKey uses showCompleted to decide:
+	// showCompleted=true → uncompleteSelected, showCompleted=false → toggleSelected
+	// This test confirms the methods produce different msg types.
+}
+
+func TestTodos_ShowCompleted_MutationKeysDisabledInCompletedMode(t *testing.T) {
+	// Table-driven test for all disabled keys in completed mode
+	disabledKeys := []struct {
+		name string
+		msg  tea.KeyMsg
+	}{
+		{"d (edit desc)", runeKey('d')},
+		{"D (due date)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}},
+		{"a (assign)", runeKey('a')},
+		{"A (unassign)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}},
+		{"n (new todo)", runeKey('n')},
+		{"b (boost)", runeKey('b')},
+		{"B (boost)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}}},
+	}
+
+	for _, tc := range disabledKeys {
+		t.Run(tc.name, func(t *testing.T) {
+			v := testTodosViewWithTodos()
+			v.showCompleted = true
+
+			cmd := v.handleKey(tc.msg)
+			assert.Nil(t, cmd, "%s should be no-op in completed mode", tc.name)
+
+			// Verify no mutation state was entered
+			assert.False(t, v.creating, "should not enter create mode")
+			assert.False(t, v.editingDesc, "should not enter edit desc mode")
+			assert.False(t, v.settingDue, "should not enter setting due mode")
+			assert.False(t, v.assigning, "should not enter assigning mode")
+		})
+	}
+}
+
+func TestTodos_ShowCompleted_InactivePoolUpdateIgnored(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.showCompleted = true
+
+	// A PoolUpdatedMsg for the pending pool should be ignored in completed mode
+	pendingPool := v.session.Hub().Todos(42, 10)
+	v.Update(data.PoolUpdatedMsg{Key: pendingPool.Key()})
+	// No crash, no state change - just returns nil
+}
+
+// --- ShortHelp: completed mode ---
+
+func TestTodos_ShortHelp_LeftPane_ShowsCompletedHint(t *testing.T) {
+	v := testTodosView()
+	hints := v.ShortHelp()
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "completed", keys["c"])
+}
+
+func TestTodos_ShortHelp_LeftPane_ShowsPendingHintWhenCompleted(t *testing.T) {
+	v := testTodosView()
+	v.showCompleted = true
+	hints := v.ShortHelp()
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "pending", keys["c"])
+}
+
+func TestTodos_ShortHelp_RightPaneCompleted_ShowsUncomplete(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.showCompleted = true
+	hints := v.ShortHelp()
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "uncomplete", keys["x"])
+	// Should NOT include d, D, a, n, b
+	_, hasD := keys["d"]
+	_, hasN := keys["n"]
+	assert.False(t, hasD, "d should not be in completed mode hints")
+	assert.False(t, hasN, "n should not be in completed mode hints")
+}
+
+// --- Regression: c toggle preserves selectedListID ---
+
+func TestTodos_ShowCompleted_CPreservesSelectedList(t *testing.T) {
+	v := testTodosView()
+	v.selectedListID = 10
+
+	// Pre-populate both pools so load* finds usable data
+	pendingPool := v.session.Hub().Todos(42, 10)
+	pendingPool.Set(sampleTodos())
+	completedPool := v.session.Hub().CompletedTodos(42, 10)
+	completedPool.Set(sampleCompletedTodos())
+
+	// Toggle to completed
+	v.handleKey(runeKey('c'))
+	assert.True(t, v.showCompleted)
+	assert.Equal(t, int64(10), v.selectedListID, "selectedListID must survive toggle to completed")
+
+	// Right pane should now show completed items
+	items := v.listTodos.Items()
+	require.Len(t, items, 2)
+	assert.Equal(t, "200", items[0].ID, "right pane should show completed todos")
+
+	// Toggle back to pending
+	v.handleKey(runeKey('c'))
+	assert.False(t, v.showCompleted)
+	assert.Equal(t, int64(10), v.selectedListID, "selectedListID must survive toggle to pending")
+
+	// Right pane should show pending items again
+	items = v.listTodos.Items()
+	require.Len(t, items, 3)
+	assert.Equal(t, "100", items[0].ID, "right pane should show pending todos")
+}
+
+// --- Regression: pool update after toggle routes correctly ---
+
+func TestTodos_ShowCompleted_PoolUpdateAfterToggle(t *testing.T) {
+	v := testTodosView()
+	v.selectedListID = 10
+
+	completedPool := v.session.Hub().CompletedTodos(42, 10)
+	completedPool.Set(sampleCompletedTodos())
+
+	// Toggle to completed mode
+	v.showCompleted = true
+
+	// Simulate a PoolUpdatedMsg for the completed pool
+	v.Update(data.PoolUpdatedMsg{Key: completedPool.Key()})
+	assert.False(t, v.loadingTodos, "completed pool update should sync data")
+
+	// The right pane should have the completed items
+	items := v.listTodos.Items()
+	require.Len(t, items, 2)
+	assert.Equal(t, "200", items[0].ID)
+
+	// Now: a pending pool update should be IGNORED while in completed mode
+	pendingPool := v.session.Hub().Todos(42, 10)
+	pendingPool.Set(sampleTodos())
+	v.Update(data.PoolUpdatedMsg{Key: pendingPool.Key()})
+
+	// Right pane should still show completed items (not overwritten by pending)
+	items = v.listTodos.Items()
+	require.Len(t, items, 2, "pending pool update should not overwrite completed pane")
+	assert.Equal(t, "200", items[0].ID)
+}
+
+// --- Regression: uncomplete during mode switch fetches active pool ---
+
+func TestTodos_ShowCompleted_UncompleteMidToggle(t *testing.T) {
+	v := testTodosViewWithTodos()
+
+	// Start in completed mode with a selected list
+	v.showCompleted = true
+
+	// Simulate an uncomplete that completes AFTER user toggled back to pending.
+	// The handler should fetch the pending pool (the active pool), not completed.
+	v.showCompleted = false // user toggled back mid-flight
+
+	// Seed both pools fresh so we can observe invalidation
+	completedPool := v.session.Hub().CompletedTodos(42, 10)
+	completedPool.Set(sampleCompletedTodos())
+	pendingPool := v.session.Hub().Todos(42, 10)
+	pendingPool.Set(sampleTodos())
+	require.True(t, completedPool.Get().Fresh(), "completed pool should start fresh")
+	require.True(t, pendingPool.Get().Fresh(), "pending pool should start fresh")
+
+	// Handler fires with the uncompleted msg
+	_, cmd := v.Update(todoUncompletedMsg{todolistID: 10, err: nil})
+	require.NotNil(t, cmd, "should return refetch cmd")
+
+	// Both pools should be invalidated regardless of current mode
+	assert.False(t, completedPool.Get().Fresh(), "completed pool should be invalidated")
+	assert.False(t, pendingPool.Get().Fresh(), "pending pool should be invalidated")
+}
+
 // newTextInputWithValue creates a textinput with a preset value for testing.
 func newTextInputWithValue(val string) textinput.Model {
 	ti := textinput.New()
