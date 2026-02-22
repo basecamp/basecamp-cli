@@ -229,20 +229,20 @@ If BASECAMP_TOKEN env is set, it is returned directly (no refresh).
 Otherwise, stored OAuth credentials are used and auto-refreshed if near expiry.
 
 Examples:
-  export BASECAMP_TOKEN=$(bcq auth token)
-  curl -H "Authorization: Bearer $(bcq auth token)" ...
+  export BASECAMP_TOKEN=$(basecamp auth token)
+  curl -H "Authorization: Bearer $(basecamp auth token)" ...
 
 Get tokens for different profiles:
-  bcq --profile personal auth token
-  bcq --profile staging auth token
+  basecamp --profile personal auth token
+  basecamp --profile staging auth token
 
 The --stored flag ignores BASECAMP_TOKEN and uses stored OAuth credentials:
-  bcq auth token --stored
+  basecamp auth token --stored
 
 Output modes:
-  bcq auth token           # Raw token (default, for shell substitution)
-  bcq auth token --json    # JSON envelope with token in data field
-  bcq auth token --stats   # Raw token + stats on stderr`,
+  basecamp auth token           # Raw token (default, for shell substitution)
+  basecamp auth token --json    # JSON envelope with token in data field
+  basecamp auth token --stats   # Raw token + stats on stderr`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {

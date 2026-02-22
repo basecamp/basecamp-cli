@@ -81,7 +81,7 @@ func Default() *Config {
 	return &Config{
 		BaseURL:      "https://3.basecampapi.com",
 		Scope:        "read",
-		CacheDir:     filepath.Join(cacheDir, "bcq"),
+		CacheDir:     filepath.Join(cacheDir, "basecamp"),
 		CacheEnabled: true,
 		Format:       "auto",
 		Sources:      make(map[string]string),
@@ -207,23 +207,11 @@ func LoadFromEnv(cfg *Config) {
 		cfg.BaseURL = v
 		cfg.Sources["base_url"] = string(SourceEnv)
 	}
-	if v := os.Getenv("BCQ_BASE_URL"); v != "" {
-		cfg.BaseURL = v
-		cfg.Sources["base_url"] = string(SourceEnv)
-	}
 	if v := os.Getenv("BASECAMP_ACCOUNT_ID"); v != "" {
 		cfg.AccountID = v
 		cfg.Sources["account_id"] = string(SourceEnv)
 	}
-	if v := os.Getenv("BCQ_ACCOUNT"); v != "" {
-		cfg.AccountID = v
-		cfg.Sources["account_id"] = string(SourceEnv)
-	}
 	if v := os.Getenv("BASECAMP_PROJECT_ID"); v != "" {
-		cfg.ProjectID = v
-		cfg.Sources["project_id"] = string(SourceEnv)
-	}
-	if v := os.Getenv("BCQ_PROJECT"); v != "" {
 		cfg.ProjectID = v
 		cfg.Sources["project_id"] = string(SourceEnv)
 	}
@@ -235,11 +223,7 @@ func LoadFromEnv(cfg *Config) {
 		cfg.CacheDir = v
 		cfg.Sources["cache_dir"] = string(SourceEnv)
 	}
-	if v := os.Getenv("BCQ_CACHE_DIR"); v != "" {
-		cfg.CacheDir = v
-		cfg.Sources["cache_dir"] = string(SourceEnv)
-	}
-	if v := os.Getenv("BCQ_CACHE_ENABLED"); v != "" {
+	if v := os.Getenv("BASECAMP_CACHE_ENABLED"); v != "" {
 		cfg.CacheEnabled = strings.ToLower(v) == "true" || v == "1"
 		cfg.Sources["cache_enabled"] = string(SourceEnv)
 	}

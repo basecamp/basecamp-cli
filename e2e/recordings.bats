@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq recordings visibility
+  run basecamp recordings visibility
   assert_failure
   assert_output_contains "ID required"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq recordings visibility 456
+  run basecamp recordings visibility 456
   assert_failure
   assert_output_contains "--visible or --hidden"
 }
@@ -28,7 +28,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings visibility 456 --visible
+  run basecamp recordings visibility 456 --visible
   assert_failure
   assert_output_contains "project"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq recordings trash
+  run basecamp recordings trash
   assert_failure
   assert_output_contains "ID required"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq recordings archive
+  run basecamp recordings archive
   assert_failure
   assert_output_contains "ID required"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq recordings restore
+  run basecamp recordings restore
   assert_failure
   assert_output_contains "ID required"
 }
@@ -70,7 +70,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings list
+  run basecamp recordings list
   assert_failure
   assert_output_contains "Type required"
 }
@@ -82,9 +82,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings --help
+  run basecamp recordings --help
   assert_success
-  assert_output_contains "bcq recordings"
+  assert_output_contains "basecamp recordings"
   assert_output_contains "visibility"
   assert_output_contains "trash"
   assert_output_contains "archive"
@@ -97,6 +97,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings foobar
+  run basecamp recordings foobar
   # Command may show help or require project - just verify it runs
 }

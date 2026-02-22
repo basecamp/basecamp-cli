@@ -88,17 +88,17 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         "bcq templates show <id>",
+				Cmd:         "basecamp templates show <id>",
 				Description: "View template details",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         "bcq templates create \"Name\"",
+				Cmd:         "basecamp templates create \"Name\"",
 				Description: "Create new template",
 			},
 			output.Breadcrumb{
 				Action:      "construct",
-				Cmd:         "bcq templates construct <id> --name \"Project Name\"",
+				Cmd:         "basecamp templates construct <id> --name \"Project Name\"",
 				Description: "Create project from template",
 			},
 		),
@@ -133,17 +133,17 @@ func newTemplatesShowCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "construct",
-						Cmd:         fmt.Sprintf("bcq templates construct %d --name \"Project Name\"", templateID),
+						Cmd:         fmt.Sprintf("basecamp templates construct %d --name \"Project Name\"", templateID),
 						Description: "Create project from template",
 					},
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq templates update %d --name \"New Name\"", templateID),
+						Cmd:         fmt.Sprintf("basecamp templates update %d --name \"New Name\"", templateID),
 						Description: "Update template",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "bcq templates",
+						Cmd:         "basecamp templates",
 						Description: "List all templates",
 					},
 				),
@@ -192,12 +192,12 @@ func newTemplatesCreateCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq templates show %d", template.ID),
+						Cmd:         fmt.Sprintf("basecamp templates show %d", template.ID),
 						Description: "View template",
 					},
 					output.Breadcrumb{
 						Action:      "construct",
-						Cmd:         fmt.Sprintf("bcq templates construct %d --name \"Project Name\"", template.ID),
+						Cmd:         fmt.Sprintf("basecamp templates construct %d --name \"Project Name\"", template.ID),
 						Description: "Create project from template",
 					},
 				),
@@ -262,7 +262,7 @@ func newTemplatesUpdateCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq templates show %d", templateID),
+						Cmd:         fmt.Sprintf("basecamp templates show %d", templateID),
 						Description: "View template",
 					},
 				),
@@ -305,12 +305,12 @@ func newTemplatesDeleteCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "bcq templates",
+						Cmd:         "basecamp templates",
 						Description: "List templates",
 					},
 					output.Breadcrumb{
 						Action:      "trashed",
-						Cmd:         "bcq templates --status trashed",
+						Cmd:         "basecamp templates --status trashed",
 						Description: "View trashed templates",
 					},
 				),
@@ -357,7 +357,7 @@ which can be polled via 'templates construction' until the status is "completed"
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "status",
-						Cmd:         fmt.Sprintf("bcq templates construction %d %d", templateID, construction.ID),
+						Cmd:         fmt.Sprintf("basecamp templates construction %d %d", templateID, construction.ID),
 						Description: "Check construction status",
 					},
 				),
@@ -412,7 +412,7 @@ the response includes the newly created project.`,
 				breadcrumbs = []output.Breadcrumb{
 					{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("bcq projects show %d", construction.Project.ID),
+						Cmd:         fmt.Sprintf("basecamp projects show %d", construction.Project.ID),
 						Description: "View created project",
 					},
 				}
@@ -421,7 +421,7 @@ the response includes the newly created project.`,
 				breadcrumbs = []output.Breadcrumb{
 					{
 						Action:      "poll",
-						Cmd:         fmt.Sprintf("bcq templates construction %d %d", templateID, constructionID),
+						Cmd:         fmt.Sprintf("basecamp templates construction %d %d", templateID, constructionID),
 						Description: "Check again",
 					},
 				}

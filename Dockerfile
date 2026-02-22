@@ -1,4 +1,4 @@
-# Development Dockerfile for bcq
+# Development Dockerfile for basecamp
 #
 # NOTE: This Dockerfile requires vendored dependencies or BuildKit secrets
 # for the private basecamp-sdk. For local builds, either:
@@ -25,20 +25,20 @@ RUN if [ -d vendor ]; then \
         CGO_ENABLED=0 GOOS=linux go build -mod=vendor \
             -trimpath \
             -ldflags="-s -w -X github.com/basecamp/basecamp-cli/internal/version.Version=${VERSION} -X github.com/basecamp/basecamp-cli/internal/version.Commit=${COMMIT} -X github.com/basecamp/basecamp-cli/internal/version.Date=${BUILD_DATE}" \
-            -o /bcq ./cmd/bcq; \
+            -o /basecamp ./cmd/basecamp; \
     else \
         go mod download && \
         CGO_ENABLED=0 GOOS=linux go build \
             -trimpath \
             -ldflags="-s -w -X github.com/basecamp/basecamp-cli/internal/version.Version=${VERSION} -X github.com/basecamp/basecamp-cli/internal/version.Commit=${COMMIT} -X github.com/basecamp/basecamp-cli/internal/version.Date=${BUILD_DATE}" \
-            -o /bcq ./cmd/bcq; \
+            -o /basecamp ./cmd/basecamp; \
     fi
 
 # Runtime stage using distroless for minimal attack surface
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=builder /bcq /bcq
+COPY --from=builder /basecamp /basecamp
 
 USER nonroot:nonroot
 
-ENTRYPOINT ["/bcq"]
+ENTRYPOINT ["/basecamp"]

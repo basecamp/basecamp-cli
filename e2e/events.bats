@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq events
+  run basecamp events
   assert_failure
   assert_output_contains "ID required"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq events 12345
+  run basecamp events 12345
   assert_failure
   assert_output_contains "project"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq events 12345 --project
+  run basecamp events 12345 --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -43,9 +43,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq events --help
+  run basecamp events --help
   assert_success
-  assert_output_contains "bcq events"
+  assert_output_contains "basecamp events"
   assert_output_contains "recording_id"
   assert_output_contains "audit"
 }

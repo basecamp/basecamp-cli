@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# install.sh - Install bcq CLI
+# install.sh - Install basecamp CLI
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 #
 # Options (via environment):
-#   BCQ_BIN_DIR       Where to install binary (default: ~/.local/bin)
-#   BCQ_VERSION       Specific version to install (default: latest)
+#   BASECAMP_BIN_DIR  Where to install binary (default: ~/.local/bin)
+#   BASECAMP_VERSION  Specific version to install (default: latest)
 
 set -euo pipefail
 
 REPO="basecamp/basecamp-cli"
-BIN_DIR="${BCQ_BIN_DIR:-$HOME/.local/bin}"
-VERSION="${BCQ_VERSION:-}"
+BIN_DIR="${BASECAMP_BIN_DIR:-$HOME/.local/bin}"
+VERSION="${BASECAMP_VERSION:-}"
 
 info() { echo "==> $1"; }
 error() { echo "ERROR: $1" >&2; exit 1; }
@@ -61,10 +61,10 @@ download_binary() {
     ext="tar.gz"
   fi
 
-  archive_name="bcq_${version}_${platform}.${ext}"
+  archive_name="basecamp_${version}_${platform}.${ext}"
   url="https://github.com/${REPO}/releases/download/v${version}/${archive_name}"
 
-  info "Downloading bcq v${version} for ${platform}..."
+  info "Downloading basecamp v${version} for ${platform}..."
 
   local tmp_dir
   tmp_dir=$(mktemp -d)
@@ -84,9 +84,9 @@ download_binary() {
   fi
 
   # Find and install binary
-  local binary_name="bcq"
+  local binary_name="basecamp"
   if [[ "$platform" == windows_* ]]; then
-    binary_name="bcq.exe"
+    binary_name="basecamp.exe"
   fi
 
   if [[ ! -f "$binary_name" ]]; then
@@ -97,7 +97,7 @@ download_binary() {
   mv "$binary_name" "$BIN_DIR/"
   chmod +x "$BIN_DIR/$binary_name"
 
-  info "Installed bcq to $BIN_DIR/$binary_name"
+  info "Installed basecamp to $BIN_DIR/$binary_name"
 }
 
 setup_path() {
@@ -121,7 +121,7 @@ setup_path() {
     info "PATH already configured in $shell_rc"
   else
     echo "" >> "$shell_rc"
-    echo "# Added by bcq installer" >> "$shell_rc"
+    echo "# Added by basecamp installer" >> "$shell_rc"
     echo "$path_line" >> "$shell_rc"
     info "Added to $shell_rc"
     info "Run: source $shell_rc"
@@ -129,36 +129,36 @@ setup_path() {
 }
 
 verify_install() {
-  if "$BIN_DIR/bcq" --version &>/dev/null; then
+  if "$BIN_DIR/basecamp" --version &>/dev/null; then
     info "Installation verified!"
-    "$BIN_DIR/bcq" --version
+    "$BIN_DIR/basecamp" --version
     return 0
   fi
 
-  error "Installation failed - bcq not working"
+  error "Installation failed - basecamp not working"
 }
 
 setup_theme() {
-  local bcq_theme_dir="$HOME/.config/bcq/theme"
+  local basecamp_theme_dir="$HOME/.config/basecamp/theme"
   local omarchy_theme_dir="$HOME/.config/omarchy/current/theme"
 
-  # Skip if bcq theme already configured
-  if [[ -e "$bcq_theme_dir" ]]; then
+  # Skip if basecamp theme already configured
+  if [[ -e "$basecamp_theme_dir" ]]; then
     return 0
   fi
 
   # Link to Omarchy theme if available
   if [[ -d "$omarchy_theme_dir" ]]; then
-    info "Linking bcq theme to system theme"
-    mkdir -p "$HOME/.config/bcq"
-    ln -s "$omarchy_theme_dir" "$bcq_theme_dir" || info "Note: Could not link theme (continuing anyway)"
+    info "Linking basecamp theme to system theme"
+    mkdir -p "$HOME/.config/basecamp"
+    ln -s "$omarchy_theme_dir" "$basecamp_theme_dir" || info "Note: Could not link theme (continuing anyway)"
   fi
 }
 
 main() {
   echo ""
-  echo "bcq (Basecamp Query) - Installer"
-  echo "================================="
+  echo "Basecamp CLI - Installer"
+  echo "========================"
   echo ""
 
   # Check for curl
@@ -183,8 +183,8 @@ main() {
   echo ""
   echo "Next steps:"
   echo "  1. Reload your shell: source ~/.bashrc (or ~/.zshrc)"
-  echo "  2. Authenticate: bcq auth login"
-  echo "  3. Test: bcq projects"
+  echo "  2. Authenticate: basecamp auth login"
+  echo "  3. Test: basecamp projects"
   echo ""
 }
 

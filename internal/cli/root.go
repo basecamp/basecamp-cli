@@ -24,9 +24,9 @@ func NewRootCmd() *cobra.Command {
 	var flags appctx.GlobalFlags
 
 	cmd := &cobra.Command{
-		Use:                        "bcq",
+		Use:                        "basecamp",
 		Short:                      "Command-line interface for Basecamp",
-		Long:                       "bcq is a CLI tool for interacting with Basecamp projects, todos, messages, and more.",
+		Long:                       "basecamp is a CLI tool for interacting with Basecamp projects, todos, messages, and more.",
 		Version:                    version.Version,
 		SilenceUsage:               true,
 		SilenceErrors:              true,
@@ -67,7 +67,7 @@ func NewRootCmd() *cobra.Command {
 					CacheDir: flags.CacheDir,
 				})
 				// Profile-scoped cache (only if cache dir was not explicitly set via flag or env)
-				if flags.CacheDir == "" && os.Getenv("BCQ_CACHE_DIR") == "" {
+				if flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
 					cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 				}
 			}
@@ -177,6 +177,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewCompletionCmd())
 	cmd.AddCommand(commands.NewSetupCmd())
 	cmd.AddCommand(commands.NewDoctorCmd())
+	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
@@ -232,7 +233,7 @@ func Execute() {
 // resolveProfile determines which profile to use.
 // Resolution order:
 // 1. --profile / -P flag
-// 2. BCQ_PROFILE env var
+// 2. BASECAMP_PROFILE env var
 // 3. default_profile in config
 // 4. Single profile → auto-use
 // 5. Multiple profiles → interactive picker (if TTY)
@@ -241,7 +242,7 @@ func resolveProfile(cfg *config.Config, flags appctx.GlobalFlags) (string, error
 	// 1. --profile flag
 	if flags.Profile != "" {
 		if len(cfg.Profiles) == 0 {
-			return "", fmt.Errorf("profile %q specified via --profile but no profiles are configured; create one with: bcq profile create", flags.Profile)
+			return "", fmt.Errorf("profile %q specified via --profile but no profiles are configured; create one with: basecamp profile create", flags.Profile)
 		}
 		if _, ok := cfg.Profiles[flags.Profile]; !ok {
 			return "", fmt.Errorf("unknown profile %q (available: %s)", flags.Profile, profileNames(cfg))
@@ -249,13 +250,13 @@ func resolveProfile(cfg *config.Config, flags appctx.GlobalFlags) (string, error
 		return flags.Profile, nil
 	}
 
-	// 2. BCQ_PROFILE env var
-	if profile := os.Getenv("BCQ_PROFILE"); profile != "" {
+	// 2. BASECAMP_PROFILE env var
+	if profile := os.Getenv("BASECAMP_PROFILE"); profile != "" {
 		if len(cfg.Profiles) == 0 {
-			return "", fmt.Errorf("profile %q specified via BCQ_PROFILE but no profiles are configured; create one with: bcq profile create", profile)
+			return "", fmt.Errorf("profile %q specified via BASECAMP_PROFILE but no profiles are configured; create one with: basecamp profile create", profile)
 		}
 		if _, ok := cfg.Profiles[profile]; !ok {
-			return "", fmt.Errorf("unknown profile %q from BCQ_PROFILE (available: %s)", profile, profileNames(cfg))
+			return "", fmt.Errorf("unknown profile %q from BASECAMP_PROFILE (available: %s)", profile, profileNames(cfg))
 		}
 		return profile, nil
 	}

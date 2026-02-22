@@ -17,21 +17,21 @@ func NewCompletionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "completion [shell]",
 		Short: "Generate shell completion scripts",
-		Long: `Generate shell completion scripts for bcq.
+		Long: `Generate shell completion scripts for basecamp.
 
 To load completions:
 
 Bash:
-  $ source <(bcq completion bash)
+  $ source <(basecamp completion bash)
 
   # To load completions for every new session, add to ~/.bashrc:
-  eval "$(bcq completion bash)"
+  eval "$(basecamp completion bash)"
 
   # Or install system-wide (requires root):
   # Linux:
-  $ bcq completion bash | sudo tee /etc/bash_completion.d/bcq > /dev/null
+  $ basecamp completion bash | sudo tee /etc/bash_completion.d/basecamp > /dev/null
   # macOS:
-  $ bcq completion bash > $(brew --prefix)/etc/bash_completion.d/bcq
+  $ basecamp completion bash > $(brew --prefix)/etc/bash_completion.d/basecamp
 
 Zsh:
   # If shell completion is not already enabled in your environment,
@@ -39,29 +39,29 @@ Zsh:
   $ echo "autoload -U compinit; compinit" >> ~/.zshrc
 
   # To load completions in your current session:
-  $ source <(bcq completion zsh)
+  $ source <(basecamp completion zsh)
 
   # To load completions for every new session, add AFTER compinit in ~/.zshrc:
-  eval "$(bcq completion zsh)"
+  eval "$(basecamp completion zsh)"
 
   # Or install to a directory in your fpath (add BEFORE compinit in ~/.zshrc):
   $ mkdir -p ~/.zsh/completions
-  $ bcq completion zsh > ~/.zsh/completions/_bcq
+  $ basecamp completion zsh > ~/.zsh/completions/_basecamp
   # Then add to ~/.zshrc:
   #   fpath=(~/.zsh/completions $fpath)
   #   autoload -U compinit; compinit
 
 Fish:
-  $ bcq completion fish | source
+  $ basecamp completion fish | source
 
   # To load completions for each session, execute once:
-  $ bcq completion fish > ~/.config/fish/completions/bcq.fish
+  $ basecamp completion fish > ~/.config/fish/completions/basecamp.fish
 
 PowerShell:
-  PS> bcq completion powershell | Out-String | Invoke-Expression
+  PS> basecamp completion powershell | Out-String | Invoke-Expression
 
   # To load completions for every new session, run:
-  PS> bcq completion powershell > bcq.ps1
+  PS> basecamp completion powershell > basecamp.ps1
   # and source this file from your PowerShell profile.
 `,
 		DisableFlagsInUseLine: true,
@@ -110,18 +110,18 @@ This script depends on the 'bash-completion' package.
 If it is not installed already, you can install it via your OS's package manager.
 
 To load completions in your current shell session:
-  $ source <(bcq completion bash)
+  $ source <(basecamp completion bash)
 
 To load completions for every new session, add to ~/.bashrc:
-  eval "$(bcq completion bash)"
+  eval "$(basecamp completion bash)"
 
 Or install system-wide (requires root):
 
 Linux:
-  $ bcq completion bash | sudo tee /etc/bash_completion.d/bcq > /dev/null
+  $ basecamp completion bash | sudo tee /etc/bash_completion.d/basecamp > /dev/null
 
 macOS:
-  $ bcq completion bash > $(brew --prefix)/etc/bash_completion.d/bcq
+  $ basecamp completion bash > $(brew --prefix)/etc/bash_completion.d/basecamp
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -141,14 +141,14 @@ to enable it. You can execute the following once:
   $ echo "autoload -U compinit; compinit" >> ~/.zshrc
 
 To load completions in your current shell session:
-  $ source <(bcq completion zsh)
+  $ source <(basecamp completion zsh)
 
 To load completions for every new session, add AFTER compinit in ~/.zshrc:
-  eval "$(bcq completion zsh)"
+  eval "$(basecamp completion zsh)"
 
 Or install to a directory in your fpath (add BEFORE compinit in ~/.zshrc):
   $ mkdir -p ~/.zsh/completions
-  $ bcq completion zsh > ~/.zsh/completions/_bcq
+  $ basecamp completion zsh > ~/.zsh/completions/_basecamp
   # Then add to ~/.zshrc:
   #   fpath=(~/.zsh/completions $fpath)
   #   autoload -U compinit; compinit
@@ -167,10 +167,10 @@ func newCompletionFishCmd() *cobra.Command {
 		Long: `Generate the autocompletion script for fish.
 
 To load completions in your current shell session:
-  $ bcq completion fish | source
+  $ basecamp completion fish | source
 
 To load completions for every new session, execute once:
-  $ bcq completion fish > ~/.config/fish/completions/bcq.fish
+  $ basecamp completion fish > ~/.config/fish/completions/basecamp.fish
 
 You will need to start a new shell for this setup to take effect.
 `,
@@ -188,7 +188,7 @@ func newCompletionPowershellCmd() *cobra.Command {
 		Long: `Generate the autocompletion script for powershell.
 
 To load completions in your current shell session:
-  PS> bcq completion powershell | Out-String | Invoke-Expression
+  PS> basecamp completion powershell | Out-String | Invoke-Expression
 
 To load completions for every new session, add the output of the above command
 to your powershell profile.
@@ -210,12 +210,12 @@ This command fetches the current list of projects and people from Basecamp
 and updates the local cache used for tab completion. Requires authentication.
 
 The cache is also updated automatically when you run commands like:
-  bcq projects
-  bcq people list
-  bcq me
+  basecamp projects
+  basecamp people list
+  basecamp me
 
 Note: If you set cache_dir in a config file, completions won't find it.
-Set BCQ_CACHE_DIR or BASECAMP_CACHE_DIR in your environment instead.
+Set BASECAMP_CACHE_DIR in your environment instead.
 `,
 		RunE: runCompletionRefresh,
 	}
@@ -229,7 +229,7 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 
 	// Check authentication first for friendly error message
 	if !app.Auth.IsAuthenticated() {
-		return output.ErrAuth("Not authenticated. Run: bcq auth login")
+		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
 	// Then check account is configured
@@ -305,7 +305,7 @@ Displays information about the cached completion data including:
 - Cache file location
 
 Note: If you set cache_dir in a config file, completions won't find it.
-Set BCQ_CACHE_DIR or BASECAMP_CACHE_DIR in your environment instead.
+Set BASECAMP_CACHE_DIR in your environment instead.
 `,
 		RunE: runCompletionStatus,
 	}
@@ -324,11 +324,11 @@ func runCompletionStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine staleness for projects/people (refreshed together via `completion refresh`)
-	// Accounts are refreshed separately via `bcq me`, so not included in staleness check
+	// Accounts are refreshed separately via `basecamp me`, so not included in staleness check
 	isStale := store.IsStale(completion.DefaultMaxAge)
 
 	// Find oldest timestamp across projects/people for age calculation
-	// (accounts are separate - refreshed via `bcq me`)
+	// (accounts are separate - refreshed via `basecamp me`)
 	oldest := cache.ProjectsUpdatedAt
 	if !cache.PeopleUpdatedAt.IsZero() && (oldest.IsZero() || cache.PeopleUpdatedAt.Before(oldest)) {
 		oldest = cache.PeopleUpdatedAt

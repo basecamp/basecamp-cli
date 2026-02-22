@@ -202,17 +202,17 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq files show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files show <id> --in %s", resolvedProjectID),
 				Description: "Show item details",
 			},
 			output.Breadcrumb{
 				Action:      "folder",
-				Cmd:         fmt.Sprintf("bcq files folder create --name <name> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files folder create --name <name> --in %s", resolvedProjectID),
 				Description: "Create folder",
 			},
 			output.Breadcrumb{
 				Action:      "doc",
-				Cmd:         fmt.Sprintf("bcq files doc create --title <title> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files doc create --title <title> --in %s", resolvedProjectID),
 				Description: "Create document",
 			},
 		),
@@ -222,7 +222,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	total := len(folders) + len(uploads) + len(documents)
 	if total > 50 {
 		respOpts = append(respOpts, output.WithNotice(
-			"For pagination control, use: bcq files folders, bcq files uploads, or bcq files documents",
+			"For pagination control, use: basecamp files folders, basecamp files uploads, or basecamp files documents",
 		))
 	}
 
@@ -355,12 +355,12 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq files folder create --name <name> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files folder create --name <name> --in %s", resolvedProjectID),
 				Description: "Create folder",
 			},
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq files --vault <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files --vault <id> --in %s", resolvedProjectID),
 				Description: "List folder contents",
 			},
 		),
@@ -438,7 +438,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq files --vault %d --in %s", folder.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files --vault %d --in %s", folder.ID, resolvedProjectID),
 						Description: "List folder contents",
 					},
 				),
@@ -577,7 +577,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq files show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files show <id> --in %s", resolvedProjectID),
 				Description: "Show file details",
 			},
 		),
@@ -710,12 +710,12 @@ func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, a
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq files doc create --title <title> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files doc create --title <title> --in %s", resolvedProjectID),
 				Description: "Create document",
 			},
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq files show <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp files show <id> --in %s", resolvedProjectID),
 				Description: "Show document",
 			},
 		),
@@ -801,12 +801,12 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq files show %d --in %s", doc.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files show %d --in %s", doc.ID, resolvedProjectID),
 						Description: "View document",
 					},
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq files update %d --content <text> --in %s", doc.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files update %d --content <text> --in %s", doc.ID, resolvedProjectID),
 						Description: "Update document",
 					},
 				),
@@ -831,8 +831,8 @@ func newFilesShowCmd(project *string) *cobra.Command {
 		Long: `Show details for a vault, document, or upload.
 
 You can pass either an item ID or a Basecamp URL:
-  bcq files show 789 --in my-project
-  bcq files show https://3.basecamp.com/123/buckets/456/documents/789`,
+  basecamp files show 789 --in my-project
+  basecamp files show https://3.basecamp.com/123/buckets/456/documents/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -969,7 +969,7 @@ You can pass either an item ID or a Basecamp URL:
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "update",
-					Cmd:         fmt.Sprintf("bcq files update %s --in %s", itemIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, resolvedProjectID),
 					Description: "Update item",
 				},
 			}
@@ -977,7 +977,7 @@ You can pass either an item ID or a Basecamp URL:
 			if detectedType == "vault" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "contents",
-					Cmd:         fmt.Sprintf("bcq files --vault %s --in %s", itemIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp files --vault %s --in %s", itemIDStr, resolvedProjectID),
 					Description: "List contents",
 				})
 			}
@@ -1005,8 +1005,8 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 		Long: `Update a document, vault, or upload.
 
 You can pass either an item ID or a Basecamp URL:
-  bcq files update 789 --title "new title" --in my-project
-  bcq files update https://3.basecamp.com/123/buckets/456/documents/789 --title "new title"`,
+  basecamp files update 789 --title "new title" --in my-project
+  basecamp files update https://3.basecamp.com/123/buckets/456/documents/789 --title "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1156,7 +1156,7 @@ You can pass either an item ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq files show %s --in %s", itemIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files show %s --in %s", itemIDStr, resolvedProjectID),
 						Description: "View item",
 					},
 				),
@@ -1180,9 +1180,9 @@ func newFilesDownloadCmd(project *string) *cobra.Command {
 		Long: `Download an uploaded file to the local filesystem.
 
 You can pass either an upload ID or a Basecamp URL:
-  bcq files download 789 --in my-project
-  bcq files download https://3.basecamp.com/123/buckets/456/uploads/789
-  bcq files download 789 --out ./downloads --in my-project`,
+  basecamp files download 789 --in my-project
+  basecamp files download https://3.basecamp.com/123/buckets/456/uploads/789
+  basecamp files download 789 --out ./downloads --in my-project`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1289,7 +1289,7 @@ You can pass either an upload ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq files show %d --in %s", uploadID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files show %d --in %s", uploadID, resolvedProjectID),
 						Description: "View upload details",
 					},
 				),

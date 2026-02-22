@@ -36,7 +36,7 @@ for pkg in $PACKAGES; do
     pkg_name=$(basename "$pkg")
     profile_file="$PROFILE_DIR/bench_${pkg_name}.pprof"
     echo "    Profiling $pkg_name..."
-    BCQ_NO_KEYRING=1 go test -cpuprofile="$profile_file" \
+    BASECAMP_NO_KEYRING=1 go test -cpuprofile="$profile_file" \
         -bench=. \
         -benchtime=3s \
         -count=1 \
@@ -69,6 +69,6 @@ echo "==> Profile saved to: $PROJECT_ROOT/default.pgo"
 echo "    Size: $(du -h "$PROJECT_ROOT/default.pgo" | cut -f1)"
 echo ""
 echo "Build with PGO:"
-echo "    go build -pgo=auto ./cmd/bcq"
+echo "    go build -pgo=auto ./cmd/basecamp"
 echo "    # or"
 echo "    make build-pgo"

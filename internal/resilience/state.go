@@ -12,7 +12,7 @@ const (
 
 // State represents the persisted resilience state shared across CLI processes.
 // This enables circuit breaker, rate limiter, and bulkhead patterns to
-// coordinate across concurrent bcq invocations.
+// coordinate across concurrent basecamp invocations.
 type State struct {
 	// Version is the schema version for future migrations.
 	Version int `json:"version"`

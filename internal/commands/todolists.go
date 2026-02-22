@@ -155,12 +155,12 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "todos",
-				Cmd:         fmt.Sprintf("bcq todos --list <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp todos --list <id> --in %s", resolvedProjectID),
 				Description: "List todos in list",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq todolists create --name <name> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp todolists create --name <name> --in %s", resolvedProjectID),
 				Description: "Create todolist",
 			},
 		),
@@ -181,8 +181,8 @@ func newTodolistsShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about a todolist.
 
 You can pass either a todolist ID or a Basecamp URL:
-  bcq todolists show 789 --in my-project
-  bcq todolists show https://3.basecamp.com/123/buckets/456/todolists/789`,
+  basecamp todolists show 789 --in my-project
+  basecamp todolists show https://3.basecamp.com/123/buckets/456/todolists/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -241,12 +241,12 @@ You can pass either a todolist ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         fmt.Sprintf("bcq todos --list %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todos --list %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "List todos",
 					},
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("bcq todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "Create todo",
 					},
 				),
@@ -333,12 +333,12 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todolists show %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "View todolist",
 					},
 					output.Breadcrumb{
 						Action:      "add_todo",
-						Cmd:         fmt.Sprintf("bcq todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "Add todo",
 					},
 				),
@@ -363,8 +363,8 @@ func newTodolistsUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing todolist's name or description.
 
 You can pass either a todolist ID or a Basecamp URL:
-  bcq todolists update 789 --name "new name" --in my-project
-  bcq todolists update https://3.basecamp.com/123/buckets/456/todolists/789 --name "new name"`,
+  basecamp todolists update 789 --name "new name" --in my-project
+  basecamp todolists update https://3.basecamp.com/123/buckets/456/todolists/789 --name "new name"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -433,7 +433,7 @@ You can pass either a todolist ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todolists show %s --in %s", todolistIDStr, resolvedProjectID),
 						Description: "View todolist",
 					},
 				),

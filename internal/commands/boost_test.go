@@ -130,7 +130,7 @@ func executeBoostCommand(cmd *cobra.Command, app *appctx.App, args ...string) er
 // TestBoostCreateSendsContent verifies that boost create sends the emoji content
 // in the request body via the SDK.
 func TestBoostCreateSendsContent(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockBoostTransport{}
 	app, _ := newBoostTestApp(transport)
@@ -151,7 +151,7 @@ func TestBoostCreateSendsContent(t *testing.T) {
 
 // TestBoostDeleteCallsDelete verifies that boost delete issues a DELETE request.
 func TestBoostDeleteCallsDelete(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockBoostTransport{}
 	app, _ := newBoostTestApp(transport)
@@ -167,7 +167,7 @@ func TestBoostDeleteCallsDelete(t *testing.T) {
 // TestBoostShowNilBoosterSummary verifies that the summary handles a nil booster
 // without producing a trailing "by ".
 func TestBoostShowNilBoosterSummary(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	// Custom transport that returns a boost with no booster
 	transport := &mockBoostNilBoosterTransport{}

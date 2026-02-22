@@ -6,16 +6,16 @@
 
 set -euo pipefail
 
-# Find bcq - prefer PATH, fall back to plugin's bin directory
-if command -v bcq &>/dev/null; then
-  BCQ="bcq"
+# Find basecamp - prefer PATH, fall back to plugin's bin directory
+if command -v basecamp &>/dev/null; then
+  BASECAMP_BIN="basecamp"
 else
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  BCQ="${SCRIPT_DIR}/../../bin/bcq"
-  if [[ ! -x "$BCQ" ]]; then
+  BASECAMP_BIN="${SCRIPT_DIR}/../../bin/basecamp"
+  if [[ ! -x "$BASECAMP_BIN" ]]; then
     cat << 'EOF'
 <hook-output>
-Basecamp plugin: bcq CLI not found.
+Basecamp plugin: basecamp CLI not found.
 Install: https://github.com/basecamp/basecamp-cli#installation
 </hook-output>
 EOF
@@ -24,7 +24,7 @@ EOF
 fi
 
 # Check if we have any Basecamp configuration
-config_output=$("$BCQ" config show --json 2>/dev/null || echo '{}')
+config_output=$("$BASECAMP_BIN" config show --json 2>/dev/null || echo '{}')
 has_config=$(echo "$config_output" | jq -r '.data // empty' 2>/dev/null)
 
 if [[ -z "$has_config" ]] || [[ "$has_config" == "{}" ]]; then
@@ -54,20 +54,20 @@ if [[ -n "$todolist_id" ]]; then
 fi
 
 # Check if authenticated
-auth_status=$("$BCQ" auth status --json 2>/dev/null || echo '{}')
+auth_status=$("$BASECAMP_BIN" auth status --json 2>/dev/null || echo '{}')
 is_auth=$(echo "$auth_status" | jq -r '.data.authenticated // false')
 
 if [[ "$is_auth" != "true" ]]; then
-  context+="\n  Auth: Not authenticated (run: bcq auth login)"
+  context+="\n  Auth: Not authenticated (run: basecamp auth login)"
 fi
 
 cat << EOF
 <hook-output>
 $(echo -e "$context")
 
-Use \`bcq\` commands to interact with Basecamp:
-  bcq todos list          # List todos in current project
-  bcq search "query"      # Search across projects
-  bcq comment "msg" --on ID  # Comment on a recording
+Use \`basecamp\` commands to interact with Basecamp:
+  basecamp todos list          # List todos in current project
+  basecamp search "query"      # Search across projects
+  basecamp comment "msg" --on ID  # Comment on a recording
 </hook-output>
 EOF

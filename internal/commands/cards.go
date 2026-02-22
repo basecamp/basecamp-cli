@@ -171,12 +171,12 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
-					Cmd:         fmt.Sprintf("bcq card --title <title> --in %s", resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp card --title <title> --in %s", resolvedProjectID),
 					Description: "Create card",
 				},
 				output.Breadcrumb{
 					Action:      "show",
-					Cmd:         "bcq cards show <id>",
+					Cmd:         "basecamp cards show <id>",
 					Description: "Show card details",
 				},
 			),
@@ -232,17 +232,17 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq card --title <title> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp card --title <title> --in %s", resolvedProjectID),
 				Description: "Create card",
 			},
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         "bcq cards show <id>",
+				Cmd:         "basecamp cards show <id>",
 				Description: "Show card details",
 			},
 			output.Breadcrumb{
 				Action:      "columns",
-				Cmd:         fmt.Sprintf("bcq cards columns --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp cards columns --in %s", resolvedProjectID),
 				Description: "List columns with IDs",
 			},
 		),
@@ -256,8 +256,8 @@ func newCardsShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about a card.
 
 You can pass either a card ID or a Basecamp URL:
-  bcq cards show 789 --in my-project
-  bcq cards show https://3.basecamp.com/123/buckets/456/card_tables/cards/789`,
+  basecamp cards show 789 --in my-project
+  basecamp cards show https://3.basecamp.com/123/buckets/456/card_tables/cards/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -312,12 +312,12 @@ You can pass either a card ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s", cardIDStr),
+						Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s", cardIDStr),
 						Description: "Add comment",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq cards --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
 						Description: "List cards",
 					},
 				),
@@ -438,27 +438,27 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
-					Cmd:         fmt.Sprintf("bcq cards show %d --in %s", card.ID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards show %d --in %s", card.ID, resolvedProjectID),
 					Description: "View card",
 				},
 			}
 			if cardTableIDVal != "" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "move",
-					Cmd:         fmt.Sprintf("bcq cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableIDVal, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableIDVal, resolvedProjectID),
 					Description: "Move card",
 				})
 			} else {
 				// When using numeric column ID, move command can also use numeric column ID
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "move",
-					Cmd:         fmt.Sprintf("bcq cards move %d --to <column-id> --in %s", card.ID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards move %d --to <column-id> --in %s", card.ID, resolvedProjectID),
 					Description: "Move card",
 				})
 			}
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq cards --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
 				Description: "List cards",
 			})
 
@@ -490,8 +490,8 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing card.
 
 You can pass either a card ID or a Basecamp URL:
-  bcq cards update 789 --title "new title" --in my-project
-  bcq cards update https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --title "new title"`,
+  basecamp cards update 789 --title "new title" --in my-project
+  basecamp cards update https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --title "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -569,12 +569,12 @@ You can pass either a card ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards show %s --in %s", cardIDStr, resolvedProjectID),
 						Description: "View card",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq cards --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
 						Description: "List cards",
 					},
 				),
@@ -604,8 +604,8 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 		Long: `Move a card to a different column in the card table.
 
 You can pass either a card ID or a Basecamp URL:
-  bcq cards move 789 --to "Done" --in my-project
-  bcq cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"`,
+  basecamp cards move 789 --to "Done" --in my-project
+  basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -710,14 +710,14 @@ You can pass either a card ID or a Basecamp URL:
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
-					Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards show %s --in %s", cardIDStr, resolvedProjectID),
 					Description: "View card",
 				},
 			}
 			if cardTableIDVal != "" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "list",
-					Cmd:         fmt.Sprintf("bcq cards --in %s --card-table %s --column \"%s\"", resolvedProjectID, cardTableIDVal, targetColumn),
+					Cmd:         fmt.Sprintf("basecamp cards --in %s --card-table %s --column \"%s\"", resolvedProjectID, cardTableIDVal, targetColumn),
 					Description: "List cards in column",
 				})
 			}
@@ -798,12 +798,12 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "cards",
-						Cmd:         fmt.Sprintf("bcq cards --in %s --card-table %s --column <id>", resolvedProjectID, cardTableID),
+						Cmd:         fmt.Sprintf("basecamp cards --in %s --card-table %s --column <id>", resolvedProjectID, cardTableID),
 						Description: "List cards in column",
 					},
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("bcq card --title <title> --in %s --card-table %s --column <id>", resolvedProjectID, cardTableID),
+						Cmd:         fmt.Sprintf("basecamp card --title <title> --in %s --card-table %s --column <id>", resolvedProjectID, cardTableID),
 						Description: "Create card in column",
 					},
 				),
@@ -824,7 +824,7 @@ func NewCardCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "card",
 		Short: "Create a new card",
-		Long:  "Create a card in a project's card table. Shortcut for 'bcq cards create'.",
+		Long:  "Create a card in a project's card table. Shortcut for 'basecamp cards create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -927,26 +927,26 @@ func NewCardCmd() *cobra.Command {
 			cardBreadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
-					Cmd:         fmt.Sprintf("bcq cards show %d --in %s", card.ID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards show %d --in %s", card.ID, resolvedProjectID),
 					Description: "View card",
 				},
 			}
 			if cardTableIDVal != "" {
 				cardBreadcrumbs = append(cardBreadcrumbs, output.Breadcrumb{
 					Action:      "move",
-					Cmd:         fmt.Sprintf("bcq cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableIDVal, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableIDVal, resolvedProjectID),
 					Description: "Move card",
 				})
 			} else {
 				cardBreadcrumbs = append(cardBreadcrumbs, output.Breadcrumb{
 					Action:      "move",
-					Cmd:         fmt.Sprintf("bcq cards move %d --to <column-id> --in %s", card.ID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards move %d --to <column-id> --in %s", card.ID, resolvedProjectID),
 					Description: "Move card",
 				})
 			}
 			cardBreadcrumbs = append(cardBreadcrumbs, output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq cards --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
 				Description: "List cards",
 			})
 
@@ -1004,8 +1004,8 @@ func newCardsColumnShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about a column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column show 789 --in my-project
-  bcq cards column show https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+  basecamp cards column show 789 --in my-project
+  basecamp cards column show https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1059,12 +1059,12 @@ You can pass either a column ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq cards column update %s --in %s", columnIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards column update %s --in %s", columnIDStr, resolvedProjectID),
 						Description: "Update column",
 					},
 					output.Breadcrumb{
 						Action:      "columns",
-						Cmd:         fmt.Sprintf("bcq cards columns --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards columns --in %s", resolvedProjectID),
 						Description: "List all columns",
 					},
 				),
@@ -1144,12 +1144,12 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "column",
-						Cmd:         fmt.Sprintf("bcq cards column show %d --in %s", col.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards column show %d --in %s", col.ID, resolvedProjectID),
 						Description: "View column",
 					},
 					output.Breadcrumb{
 						Action:      "columns",
-						Cmd:         fmt.Sprintf("bcq cards columns --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards columns --in %s", resolvedProjectID),
 						Description: "List columns",
 					},
 				),
@@ -1174,8 +1174,8 @@ func newCardsColumnUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing card table column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column update 789 --title "new name" --in my-project
-  bcq cards column update https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --title "new name"`,
+  basecamp cards column update 789 --title "new name" --in my-project
+  basecamp cards column update https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --title "new name"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1254,8 +1254,8 @@ func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 		Long: `Reposition a column within the card table.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column move 789 --position 2 --in my-project
-  bcq cards column move https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --position 2`,
+  basecamp cards column move 789 --position 2 --in my-project
+  basecamp cards column move https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --position 2`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1346,8 +1346,8 @@ func newCardsColumnWatchCmd(project *string) *cobra.Command {
 		Long: `Subscribe to updates for a column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column watch 789 --in my-project
-  bcq cards column watch https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+  basecamp cards column watch 789 --in my-project
+  basecamp cards column watch https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1412,8 +1412,8 @@ func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
 		Long: `Unsubscribe from updates for a column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column unwatch 789 --in my-project
-  bcq cards column unwatch https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+  basecamp cards column unwatch 789 --in my-project
+  basecamp cards column unwatch https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1478,8 +1478,8 @@ func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 		Long: `Enable on-hold section for a column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column on-hold 789 --in my-project
-  bcq cards column on-hold https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+  basecamp cards column on-hold 789 --in my-project
+  basecamp cards column on-hold https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1543,8 +1543,8 @@ func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 		Long: `Disable on-hold section for a column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column no-on-hold 789 --in my-project
-  bcq cards column no-on-hold https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
+  basecamp cards column no-on-hold 789 --in my-project
+  basecamp cards column no-on-hold https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1610,8 +1610,8 @@ func newCardsColumnColorCmd(project *string) *cobra.Command {
 		Long: `Set the color for a column.
 
 You can pass either a column ID or a Basecamp URL:
-  bcq cards column color 789 --color blue --in my-project
-  bcq cards column color https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --color blue`,
+  basecamp cards column color 789 --color blue --in my-project
+  basecamp cards column color https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --color blue`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1695,7 +1695,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				cardID = args[0]
 			}
 			if cardID == "" {
-				return output.ErrUsage("Card ID required (bcq cards steps <card_id>)")
+				return output.ErrUsage("Card ID required (basecamp cards steps <card_id>)")
 			}
 
 			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)
@@ -1739,12 +1739,12 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("bcq cards step create --title <title> --card %s --in %s", cardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards step create --title <title> --card %s --in %s", cardID, resolvedProjectID),
 						Description: "Add step",
 					},
 					output.Breadcrumb{
 						Action:      "card",
-						Cmd:         fmt.Sprintf("bcq cards show %s --in %s", cardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards show %s --in %s", cardID, resolvedProjectID),
 						Description: "View card",
 					},
 				),
@@ -1855,12 +1855,12 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("bcq cards step complete %d --in %s", step.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards step complete %d --in %s", step.ID, resolvedProjectID),
 						Description: "Complete step",
 					},
 					output.Breadcrumb{
 						Action:      "steps",
-						Cmd:         fmt.Sprintf("bcq cards steps %s --in %s", cardID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards steps %s --in %s", cardID, resolvedProjectID),
 						Description: "List steps",
 					},
 				),
@@ -1889,8 +1889,8 @@ func newCardsStepUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing step on a card.
 
 You can pass either a step ID or a Basecamp URL:
-  bcq cards step update 789 --title "new title" --in my-project
-  bcq cards step update https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --title "new title"`,
+  basecamp cards step update 789 --title "new title" --in my-project
+  basecamp cards step update https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --title "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1978,8 +1978,8 @@ func newCardsStepCompleteCmd(project *string) *cobra.Command {
 		Long: `Mark a step as completed.
 
 You can pass either a step ID or a Basecamp URL:
-  bcq cards step complete 789 --in my-project
-  bcq cards step complete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
+  basecamp cards step complete 789 --in my-project
+  basecamp cards step complete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -2043,8 +2043,8 @@ func newCardsStepUncompleteCmd(project *string) *cobra.Command {
 		Long: `Mark a step as not completed.
 
 You can pass either a step ID or a Basecamp URL:
-  bcq cards step uncomplete 789 --in my-project
-  bcq cards step uncomplete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
+  basecamp cards step uncomplete 789 --in my-project
+  basecamp cards step uncomplete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -2111,8 +2111,8 @@ func newCardsStepMoveCmd(project *string) *cobra.Command {
 		Long: `Reposition a step within a card (0-indexed).
 
 You can pass either a step ID or a Basecamp URL:
-  bcq cards step move 789 --card 456 --position 0 --in my-project
-  bcq cards step move https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --card 456 --position 0`,
+  basecamp cards step move 789 --card 456 --position 0 --in my-project
+  basecamp cards step move https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --card 456 --position 0`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -2195,8 +2195,8 @@ func newCardsStepDeleteCmd(project *string) *cobra.Command {
 		Long: `Permanently delete a step from a card.
 
 You can pass either a step ID or a Basecamp URL:
-  bcq cards step delete 789 --in my-project
-  bcq cards step delete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
+  basecamp cards step delete 789 --in my-project
+  basecamp cards step delete https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

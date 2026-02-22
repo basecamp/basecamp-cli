@@ -40,7 +40,7 @@ func setupMessagesTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
 	// Disable keyring access during tests
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{

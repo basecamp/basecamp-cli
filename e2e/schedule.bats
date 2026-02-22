@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq schedule entries --project
+  run basecamp schedule entries --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq schedule --schedule
+  run basecamp schedule --schedule
   assert_failure
   assert_output_contains "--schedule requires a value"
 }
@@ -28,7 +28,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule show 456 --date
+  run basecamp schedule show 456 --date
   assert_failure
   assert_output_contains "--date requires a value"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq schedule
+  run basecamp schedule
   assert_failure
   assert_output_contains "project"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq schedule entries
+  run basecamp schedule entries
   assert_failure
   assert_output_contains "project"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule show
+  run basecamp schedule show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -67,7 +67,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule update
+  run basecamp schedule update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -79,7 +79,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule create --starts-at "2024-01-15T10:00:00Z" --ends-at "2024-01-15T11:00:00Z"
+  run basecamp schedule create --starts-at "2024-01-15T10:00:00Z" --ends-at "2024-01-15T11:00:00Z"
   assert_failure
   assert_output_contains "Summary required"
 }
@@ -88,7 +88,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule create "Test Event" --ends-at "2024-01-15T11:00:00Z"
+  run basecamp schedule create "Test Event" --ends-at "2024-01-15T11:00:00Z"
   assert_failure
   assert_output_contains "--starts-at required"
 }
@@ -97,7 +97,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule create "Test Event" --starts-at "2024-01-15T10:00:00Z"
+  run basecamp schedule create "Test Event" --starts-at "2024-01-15T10:00:00Z"
   assert_failure
   assert_output_contains "--ends-at required"
 }
@@ -109,7 +109,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule settings
+  run basecamp schedule settings
   assert_failure
   assert_output_contains "--include-due required"
 }
@@ -121,7 +121,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq schedule update 456
+  run basecamp schedule update 456
   # May return validation error or API error depending on implementation
   assert_failure
 }
@@ -133,9 +133,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq schedule --help
+  run basecamp schedule --help
   assert_success
-  assert_output_contains "bcq schedule"
+  assert_output_contains "basecamp schedule"
   assert_output_contains "entries"
   assert_output_contains "create"
   assert_output_contains "update"
@@ -148,6 +148,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq schedule foobar
+  run basecamp schedule foobar
   # Command may show help or require project - just verify it runs
 }

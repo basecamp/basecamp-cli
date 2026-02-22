@@ -25,13 +25,13 @@ import (
 
 // setupProfileTestApp creates a minimal test app for profile command tests.
 // It sets XDG_CONFIG_HOME to a temp dir so config operations are isolated,
-// and disables the system keyring via BCQ_NO_KEYRING.
+// and disables the system keyring via BASECAMP_NO_KEYRING.
 func setupProfileTestApp(t *testing.T, cfg *config.Config) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	if cfg == nil {
 		cfg = &config.Config{
@@ -166,7 +166,7 @@ func TestIsValidProfileName(t *testing.T) {
 // --- Profile create command tests ---
 
 func TestProfileCreateRequiresExactlyOneArg(t *testing.T) {
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -188,7 +188,7 @@ func TestProfileCreateRejectsInvalidNames(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			app, _ := setupProfileTestApp(t, nil)
 
-			root := &cobra.Command{Use: "bcq"}
+			root := &cobra.Command{Use: "basecamp"}
 			profileCmd := NewProfileCmd()
 			root.AddCommand(profileCmd)
 
@@ -226,7 +226,7 @@ func TestProfileCreateRejectsDuplicateName(t *testing.T) {
 	}
 	app, _ := setupProfileTestApp(t, cfg)
 
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -244,7 +244,7 @@ func TestProfileCreateRejectsDuplicateName(t *testing.T) {
 // --- Profile delete command tests ---
 
 func TestProfileDeleteRequiresExactlyOneArg(t *testing.T) {
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -260,7 +260,7 @@ func TestProfileDeleteRequiresExactlyOneArg(t *testing.T) {
 func TestProfileDeleteNonexistentProfile(t *testing.T) {
 	app, _ := setupProfileTestApp(t, nil)
 
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -278,7 +278,7 @@ func TestProfileDeleteNonexistentProfile(t *testing.T) {
 // --- Profile set-default command tests ---
 
 func TestProfileSetDefaultRequiresExactlyOneArg(t *testing.T) {
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -294,7 +294,7 @@ func TestProfileSetDefaultRequiresExactlyOneArg(t *testing.T) {
 func TestProfileSetDefaultNonexistentProfile(t *testing.T) {
 	app, _ := setupProfileTestApp(t, nil)
 
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -317,7 +317,7 @@ func TestProfileShowAcceptsZeroOrOneArgs(t *testing.T) {
 
 	// Verify MaximumNArgs(1) — 0 args should not produce an arg validation error
 	// (though it may fail for other reasons like missing profile)
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -433,7 +433,7 @@ func TestProfileShowNonexistent(t *testing.T) {
 // --- Profile list command tests ---
 
 func TestProfileListAcceptsZeroArgs(t *testing.T) {
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 
@@ -630,7 +630,7 @@ func TestProfileCreateDefaultValues(t *testing.T) {
 func TestProfileCreateRejectsInvalidScope(t *testing.T) {
 	app, _ := setupProfileTestApp(t, nil)
 
-	root := &cobra.Command{Use: "bcq"}
+	root := &cobra.Command{Use: "basecamp"}
 	profileCmd := NewProfileCmd()
 	root.AddCommand(profileCmd)
 

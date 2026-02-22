@@ -6,23 +6,23 @@ load test_helper
 
 # Version
 
-@test "bcq shows version" {
-  run bcq --version
+@test "basecamp shows version" {
+  run basecamp --version
   assert_success
-  assert_output_contains "bcq"
+  assert_output_contains "basecamp"
 }
 
 
 # Quick start
 
-@test "bcq with no args shows quick start" {
-  run bcq
+@test "basecamp with no args shows quick start" {
+  run basecamp
   assert_success
-  assert_output_contains "bcq"
+  assert_output_contains "basecamp"
 }
 
-@test "bcq --json with no args outputs JSON" {
-  run bcq --json
+@test "basecamp --json with no args outputs JSON" {
+  run basecamp --json
   assert_success
   is_valid_json
   assert_json_not_null ".data.version"
@@ -31,24 +31,24 @@ load test_helper
 
 # Help
 
-@test "bcq --help shows help" {
-  run bcq --help
+@test "basecamp --help shows help" {
+  run basecamp --help
   assert_success
   assert_output_contains "Available Commands"
-  assert_output_contains "bcq"
+  assert_output_contains "basecamp"
 }
 
-@test "bcq help shows main help" {
-  run bcq help
+@test "basecamp help shows main help" {
+  run basecamp help
   assert_success
-  assert_output_contains "bcq"
+  assert_output_contains "basecamp"
 }
 
 
 # Output format detection
 
-@test "bcq --json forces JSON output" {
-  run bcq --json
+@test "basecamp --json forces JSON output" {
+  run basecamp --json
   assert_success
   is_valid_json
 }
@@ -56,21 +56,21 @@ load test_helper
 
 # Global flags
 
-@test "bcq respects --quiet flag" {
-  run bcq --quiet --help
+@test "basecamp respects --quiet flag" {
+  run basecamp --quiet --help
   assert_success
 }
 
-@test "bcq respects --verbose flag" {
-  run bcq --verbose --help
+@test "basecamp respects --verbose flag" {
+  run basecamp --verbose --help
   assert_success
 }
 
 
 # Error handling
 
-@test "bcq unknown command shows error" {
-  run bcq notacommand
+@test "basecamp unknown command shows error" {
+  run basecamp notacommand
   assert_failure
 }
 
@@ -78,7 +78,7 @@ load test_helper
 # JSON envelope structure
 
 @test "JSON output has correct envelope structure" {
-  run bcq --json
+  run basecamp --json
   assert_success
   is_valid_json
 
@@ -96,7 +96,7 @@ load test_helper
   create_global_config '{"account_id": 99999}'
 
   # Run with verbose and capture stderr
-  run bash -c "bcq -v projects 2>&1"
+  run bash -c "basecamp -v projects 2>&1"
 
   # Check for SDK operation tracing output (format: [timestamp] Calling/Failed <Service>.<Method>)
   assert_output_contains "Calling"

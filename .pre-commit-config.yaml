@@ -1,4 +1,4 @@
-# Pre-commit hooks for bcq
+# Pre-commit hooks for Basecamp CLI
 # Install: pip install pre-commit && pre-commit install
 # https://pre-commit.com
 

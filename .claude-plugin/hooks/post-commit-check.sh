@@ -46,10 +46,10 @@ if [[ -n "$found_in_branch" ]] || [[ -n "$found_in_msg" ]]; then
 Detected Basecamp todo reference: $ref
 
 To link this commit to Basecamp:
-  bcq comment "Commit $(git rev-parse --short HEAD 2>/dev/null): $last_commit_msg" --on $todo_id
+  basecamp comment "Commit $(git rev-parse --short HEAD 2>/dev/null): $last_commit_msg" --on $todo_id
 
 Or complete the todo:
-  bcq done $todo_id
+  basecamp done $todo_id
 </hook-output>
 EOF
 fi

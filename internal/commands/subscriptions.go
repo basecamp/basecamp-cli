@@ -57,8 +57,8 @@ func newSubscriptionsShowCmd(project *string) *cobra.Command {
 		Long: `Display all current subscribers for a recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq subscriptions show 789 --in my-project
-  bcq subscriptions show https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp subscriptions show 789 --in my-project
+  basecamp subscriptions show https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsShow(cmd, *project, args[0])
@@ -124,12 +124,12 @@ func runSubscriptionsShow(cmd *cobra.Command, project, recordingIDStr string) er
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "subscribe",
-				Cmd:         fmt.Sprintf("bcq subscriptions subscribe %s --in %s", recordingIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp subscriptions subscribe %s --in %s", recordingIDStr, resolvedProjectID),
 				Description: "Subscribe yourself",
 			},
 			output.Breadcrumb{
 				Action:      "unsubscribe",
-				Cmd:         fmt.Sprintf("bcq subscriptions unsubscribe %s --in %s", recordingIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp subscriptions unsubscribe %s --in %s", recordingIDStr, resolvedProjectID),
 				Description: "Unsubscribe yourself",
 			},
 		),
@@ -143,8 +143,8 @@ func newSubscriptionsSubscribeCmd(project *string) *cobra.Command {
 		Long: `Subscribe yourself to receive notifications for a recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq subscriptions subscribe 789 --in my-project
-  bcq subscriptions subscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp subscriptions subscribe 789 --in my-project
+  basecamp subscriptions subscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -199,12 +199,12 @@ You can pass either a recording ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "View subscribers",
 					},
 					output.Breadcrumb{
 						Action:      "unsubscribe",
-						Cmd:         fmt.Sprintf("bcq subscriptions unsubscribe %s --in %s", recordingIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp subscriptions unsubscribe %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "Unsubscribe",
 					},
 				),
@@ -220,8 +220,8 @@ func newSubscriptionsUnsubscribeCmd(project *string) *cobra.Command {
 		Long: `Unsubscribe yourself from notifications for a recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq subscriptions unsubscribe 789 --in my-project
-  bcq subscriptions unsubscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp subscriptions unsubscribe 789 --in my-project
+  basecamp subscriptions unsubscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -274,12 +274,12 @@ You can pass either a recording ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "View subscribers",
 					},
 					output.Breadcrumb{
 						Action:      "subscribe",
-						Cmd:         fmt.Sprintf("bcq subscriptions subscribe %s --in %s", recordingIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp subscriptions subscribe %s --in %s", recordingIDStr, resolvedProjectID),
 						Description: "Re-subscribe",
 					},
 				),
@@ -297,8 +297,8 @@ func newSubscriptionsAddCmd(project *string) *cobra.Command {
 		Long: `Add people to the subscribers list for a recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq subscriptions add 789 --people 1,2,3 --in my-project
-  bcq subscriptions add https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
+  basecamp subscriptions add 789 --people 1,2,3 --in my-project
+  basecamp subscriptions add https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsUpdate(cmd, *project, args, peopleIDs, "add")
@@ -319,8 +319,8 @@ func newSubscriptionsRemoveCmd(project *string) *cobra.Command {
 		Long: `Remove people from the subscribers list for a recording.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq subscriptions remove 789 --people 1,2,3 --in my-project
-  bcq subscriptions remove https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
+  basecamp subscriptions remove 789 --people 1,2,3 --in my-project
+  basecamp subscriptions remove https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSubscriptionsUpdate(cmd, *project, args, peopleIDs, "remove")
@@ -421,7 +421,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, project string, args []string, p
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp subscriptions %s --in %s", recordingIDStr, resolvedProjectID),
 				Description: "View subscribers",
 			},
 		),

@@ -249,12 +249,12 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "details",
-				Cmd:         "bcq api get /projects/<id>.json",
+				Cmd:         "basecamp api get /projects/<id>.json",
 				Description: "Get project details",
 			},
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         "bcq projects",
+				Cmd:         "basecamp projects",
 				Description: "List projects with formatting",
 			},
 		)
@@ -267,12 +267,12 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "cards",
-				Cmd:         fmt.Sprintf("bcq cards --in %s", bucket),
+				Cmd:         fmt.Sprintf("basecamp cards --in %s", bucket),
 				Description: "List cards",
 			},
 			output.Breadcrumb{
 				Action:      "columns",
-				Cmd:         fmt.Sprintf("bcq cards columns --in %s", bucket),
+				Cmd:         fmt.Sprintf("basecamp cards columns --in %s", bucket),
 				Description: "List columns",
 			},
 		)
@@ -286,12 +286,12 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         fmt.Sprintf("bcq api get /projects/%s.json", bucket),
+				Cmd:         fmt.Sprintf("basecamp api get /projects/%s.json", bucket),
 				Description: "Get project details",
 			},
 			output.Breadcrumb{
 				Action:      "todos",
-				Cmd:         fmt.Sprintf("bcq todos --in %s", bucket),
+				Cmd:         fmt.Sprintf("basecamp todos --in %s", bucket),
 				Description: "List todos",
 			},
 		)

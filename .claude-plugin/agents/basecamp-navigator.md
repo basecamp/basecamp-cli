@@ -25,48 +25,48 @@ You help users find and navigate Basecamp items across their workspace.
 
 ### Discovery
 ```bash
-bcq projects                    # All projects
-bcq people                      # All people
-bcq people --project <id>       # People on project
+basecamp projects                    # All projects
+basecamp people                      # All people
+basecamp people --project <id>       # People on project
 ```
 
 ### Cross-Project Search
 ```bash
 # Find todos across all projects
-bcq recordings todos
+basecamp recordings todos
 
 # Find in specific project
-bcq recordings todos --project <id>
+basecamp recordings todos --project <id>
 
 # Find by status
-bcq recordings todos --status active
-bcq recordings todos --status archived
+basecamp recordings todos --status active
+basecamp recordings todos --status archived
 
 # Recent activity
-bcq recordings comments --sort updated_at --limit 20
+basecamp recordings comments --sort updated_at --limit 20
 ```
 
 ### Project Deep Dive
 ```bash
-bcq todos --in <project_id>
-bcq todos --in <project_id> --assignee me
-bcq cards --in <project_id>
-bcq campfire messages --in <project_id>
+basecamp todos --in <project_id>
+basecamp todos --in <project_id> --assignee me
+basecamp cards --in <project_id>
+basecamp campfire messages --in <project_id>
 ```
 
 ## Search Strategy
 
 1. **Use full-text search for content queries**
    ```bash
-   bcq search "keyword"                    # Search all types
-   bcq search "keyword" --type Todo        # Search only todos
-   bcq search "keyword" --project <id>     # Limit to project
+   basecamp search "keyword"                    # Search all types
+   basecamp search "keyword" --type Todo        # Search only todos
+   basecamp search "keyword" --project <id>     # Limit to project
    ```
 
 2. **Use recordings for browsing by type/status**
    ```bash
-   bcq recordings todos --limit 20         # Recent todos
-   bcq recordings comments --project <id>  # Comments in project
+   basecamp recordings todos --limit 20         # Recent todos
+   basecamp recordings comments --project <id>  # Comments in project
    ```
 
 3. **Narrow by known context**
@@ -77,11 +77,11 @@ bcq campfire messages --in <project_id>
 
 | User Request | Approach |
 |--------------|----------|
-| "Find todos about auth" | `bcq search "auth" --type Todo` |
-| "What's assigned to me?" | `bcq todos --assignee me` (per project) |
-| "Recent comments" | `bcq recordings comments --limit 20` |
-| "What projects exist?" | `bcq projects` |
-| "Who's on project X?" | `bcq people --project <id>` |
+| "Find todos about auth" | `basecamp search "auth" --type Todo` |
+| "What's assigned to me?" | `basecamp todos --assignee me` (per project) |
+| "Recent comments" | `basecamp recordings comments --limit 20` |
+| "What projects exist?" | `basecamp projects` |
+| "Who's on project X?" | `basecamp people --project <id>` |
 
 ## Output
 
@@ -96,7 +96,7 @@ User: "Find todos about the API refactor"
 
 1. Search across projects:
    ```bash
-   bcq recordings todos --json -q
+   basecamp recordings todos --json -q
    ```
 
 2. Filter results:

@@ -330,7 +330,7 @@ func TestErrorResponseJSON(t *testing.T) {
 func TestBreadcrumb(t *testing.T) {
 	bc := Breadcrumb{
 		Action:      "show",
-		Cmd:         "bcq projects show 123",
+		Cmd:         "basecamp projects show 123",
 		Description: "View project details",
 	}
 
@@ -341,7 +341,7 @@ func TestBreadcrumb(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &decoded), "Failed to unmarshal")
 
 	assert.Equal(t, "show", decoded["action"])
-	assert.Equal(t, "bcq projects show 123", decoded["cmd"])
+	assert.Equal(t, "basecamp projects show 123", decoded["cmd"])
 }
 
 // =============================================================================
@@ -502,8 +502,8 @@ func TestWithSummary(t *testing.T) {
 
 func TestWithBreadcrumbs(t *testing.T) {
 	resp := &Response{}
-	bc1 := Breadcrumb{Action: "list", Cmd: "bcq list", Description: "List items"}
-	bc2 := Breadcrumb{Action: "show", Cmd: "bcq show 1", Description: "Show item"}
+	bc1 := Breadcrumb{Action: "list", Cmd: "basecamp list", Description: "List items"}
+	bc2 := Breadcrumb{Action: "show", Cmd: "basecamp show 1", Description: "Show item"}
 
 	WithBreadcrumbs(bc1, bc2)(resp)
 
@@ -793,14 +793,14 @@ func TestWriterMarkdownFormatBreadcrumbs(t *testing.T) {
 
 	data := map[string]any{"id": 1}
 	err := w.OK(data, WithBreadcrumbs(
-		Breadcrumb{Action: "show", Cmd: "bcq show 1", Description: "View details"},
+		Breadcrumb{Action: "show", Cmd: "basecamp show 1", Description: "View details"},
 	))
 	require.NoError(t, err, "OK() failed")
 
 	output := buf.String()
 	// Should contain breadcrumb (literal Markdown uses "### Next" heading)
 	assert.Contains(t, output, "Next")
-	assert.Contains(t, output, "bcq show 1")
+	assert.Contains(t, output, "basecamp show 1")
 }
 
 func TestWriterMarkdownNoANSIWhenNotTTY(t *testing.T) {
@@ -1480,7 +1480,7 @@ func TestWithEntityMarkdownOutput(t *testing.T) {
 		WithEntity("todo"),
 		WithSummary("Todo details"),
 		WithBreadcrumbs(
-			Breadcrumb{Action: "done", Cmd: "bcq done 12345", Description: "Mark done"},
+			Breadcrumb{Action: "done", Cmd: "basecamp done 12345", Description: "Mark done"},
 		),
 	)
 	if err != nil {
@@ -1505,7 +1505,7 @@ func TestWithEntityMarkdownOutput(t *testing.T) {
 	}
 
 	// Breadcrumb should be a Markdown list item with backtick-quoted command
-	if !strings.Contains(output, "- `bcq done 12345`") {
+	if !strings.Contains(output, "- `basecamp done 12345`") {
 		t.Errorf("Markdown breadcrumb should use code formatting, got:\n%s", output)
 	}
 }
@@ -1861,7 +1861,7 @@ func TestWriterStyledErrorWithHint(t *testing.T) {
 		Writer: &buf,
 	})
 
-	err := ErrNotFoundHint("Project", "my-project", "Use 'bcq projects' to list available projects")
+	err := ErrNotFoundHint("Project", "my-project", "Use 'basecamp projects' to list available projects")
 	writeErr := w.Err(err)
 	require.NoError(t, writeErr, "Err() failed")
 
@@ -1869,7 +1869,7 @@ func TestWriterStyledErrorWithHint(t *testing.T) {
 	// Should contain the error message
 	assert.Contains(t, output, "Project not found")
 	// Should contain the hint
-	assert.Contains(t, output, "bcq projects")
+	assert.Contains(t, output, "basecamp projects")
 	// Should have ANSI codes (styled output)
 	assert.Contains(t, output, "\x1b[", "Expected ANSI escape codes in styled output")
 }

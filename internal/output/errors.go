@@ -60,7 +60,7 @@ func ErrAuth(msg string) *Error {
 	return &Error{
 		Code:    CodeAuth,
 		Message: msg,
-		Hint:    "Run: bcq auth login",
+		Hint:    "Run: basecamp auth login",
 	}
 }
 
@@ -76,7 +76,7 @@ func ErrForbiddenScope() *Error {
 	return &Error{
 		Code:       CodeForbidden,
 		Message:    "Access denied: insufficient scope",
-		Hint:       "Run: bcq auth login --scope full",
+		Hint:       "Run: basecamp auth login --scope full",
 		HTTPStatus: 403,
 	}
 }

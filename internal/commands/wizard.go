@@ -94,7 +94,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 
 // showWelcome displays the welcome screen.
 func showWelcome(styles *tui.Styles) error {
-	title := styles.Title.Render("Welcome to bcq")
+	title := styles.Title.Render("Welcome to basecamp")
 	body := fmt.Sprintf(
 		"%s\n\n%s\n\n%s",
 		styles.Body.Render(fmt.Sprintf("The command-line interface for Basecamp (v%s).", version.Version)),
@@ -184,7 +184,7 @@ func wizardProject(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (str
 		return "", nil //nolint:nilerr // Treat confirm error as skip (user canceled)
 	}
 	if !wantProject {
-		fmt.Println(styles.Muted.Render("  Skipped. Use --project or run: bcq config project"))
+		fmt.Println(styles.Muted.Render("  Skipped. Use --project or run: basecamp config project"))
 		fmt.Println()
 		return "", nil
 	}
@@ -277,10 +277,10 @@ func showSuccess(styles *tui.Styles, result WizardResult) {
 	descStyle := styles.Muted
 
 	examples := []struct{ cmd, desc string }{
-		{"bcq projects", "List your projects"},
-		{"bcq todos", "List to-dos"},
-		{"bcq todo -c \"Buy milk\"", "Create a to-do"},
-		{"bcq search \"quarterly\"", "Search across Basecamp"},
+		{"basecamp projects", "List your projects"},
+		{"basecamp todos", "List to-dos"},
+		{"basecamp todo -c \"Buy milk\"", "Create a to-do"},
+		{"basecamp search \"quarterly\"", "Search across Basecamp"},
 	}
 	for _, ex := range examples {
 		fmt.Printf("    %s  %s\n", cmdStyle.Render(ex.cmd), descStyle.Render(ex.desc))
@@ -328,16 +328,16 @@ func wizardSummaryLine(result WizardResult) string {
 // wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
 func wizardBreadcrumbs(result WizardResult) []output.Breadcrumb {
 	crumbs := []output.Breadcrumb{
-		{Action: "list_projects", Cmd: "bcq projects", Description: "List projects"},
+		{Action: "list_projects", Cmd: "basecamp projects", Description: "List projects"},
 	}
 	if result.ProjectID != "" {
 		crumbs = append(crumbs,
-			output.Breadcrumb{Action: "list_todos", Cmd: "bcq todos", Description: "List to-dos"},
-			output.Breadcrumb{Action: "search", Cmd: "bcq search \"query\"", Description: "Search Basecamp"},
+			output.Breadcrumb{Action: "list_todos", Cmd: "basecamp todos", Description: "List to-dos"},
+			output.Breadcrumb{Action: "search", Cmd: "basecamp search \"query\"", Description: "Search Basecamp"},
 		)
 	} else {
 		crumbs = append(crumbs,
-			output.Breadcrumb{Action: "set_project", Cmd: "bcq config project", Description: "Set default project"},
+			output.Breadcrumb{Action: "set_project", Cmd: "basecamp config project", Description: "Set default project"},
 		)
 	}
 	return crumbs

@@ -57,9 +57,9 @@ func GetSDKProvenance() *SDKProvenance {
 // Full returns the full version string for display.
 func Full() string {
 	if Version == "dev" {
-		return "bcq version dev (built from source)"
+		return "basecamp version dev (built from source)"
 	}
-	return "bcq version " + Version
+	return "basecamp version " + Version
 }
 
 // UserAgent returns the user agent string for API requests.
@@ -68,7 +68,7 @@ func UserAgent() string {
 	if v == "dev" {
 		v = "dev"
 	}
-	return "bcq/" + v + " (https://github.com/basecamp/basecamp-cli)"
+	return "basecamp-cli/" + v + " (https://github.com/basecamp/basecamp-cli)"
 }
 
 // IsDev returns true if this is a development build.

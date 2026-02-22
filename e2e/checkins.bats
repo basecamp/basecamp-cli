@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq checkins --project
+  run basecamp checkins --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq checkins --questionnaire
+  run basecamp checkins --questionnaire
   assert_failure
   assert_output_contains "--questionnaire requires a value"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq checkins
+  run basecamp checkins
   assert_failure
   assert_output_contains "project"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq checkins questions
+  run basecamp checkins questions
   assert_failure
   assert_output_contains "project"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq checkins question
+  run basecamp checkins question
   assert_failure
   assert_output_contains "ID required"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq checkins answers
+  run basecamp checkins answers
   assert_failure
   assert_output_contains "ID required"
 }
@@ -67,7 +67,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq checkins answer
+  run basecamp checkins answer
   assert_failure
   assert_output_contains "Answer ID required"
 }
@@ -79,9 +79,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq checkins --help
+  run basecamp checkins --help
   assert_success
-  assert_output_contains "bcq checkins"
+  assert_output_contains "basecamp checkins"
   assert_output_contains "questions"
   assert_output_contains "answers"
 }
@@ -93,6 +93,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq checkins foobar
+  run basecamp checkins foobar
   # Command may show help or require project - just verify it runs
 }

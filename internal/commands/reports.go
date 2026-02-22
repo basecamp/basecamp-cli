@@ -57,12 +57,12 @@ func newReportsAssignableCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "assigned",
-						Cmd:         "bcq reports assigned <person>",
+						Cmd:         "basecamp reports assigned <person>",
 						Description: "View todos assigned to a person",
 					},
 					output.Breadcrumb{
 						Action:      "people",
-						Cmd:         "bcq people list",
+						Cmd:         "basecamp people list",
 						Description: "List all people",
 					},
 				),
@@ -140,12 +140,12 @@ Results can be grouped by bucket (project) or date.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "overdue",
-						Cmd:         "bcq reports overdue",
+						Cmd:         "basecamp reports overdue",
 						Description: "View overdue todos",
 					},
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         "bcq todos --in <project> --assignee " + personIDStr,
+						Cmd:         "basecamp todos --in <project> --assignee " + personIDStr,
 						Description: "List todos in a specific project",
 					},
 				),
@@ -220,12 +220,12 @@ Todos are grouped into categories:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "assigned",
-						Cmd:         "bcq reports assigned",
+						Cmd:         "basecamp reports assigned",
 						Description: "View your assigned todos",
 					},
 					output.Breadcrumb{
 						Action:      "schedule",
-						Cmd:         "bcq reports schedule",
+						Cmd:         "basecamp reports schedule",
 						Description: "View upcoming schedule",
 					},
 				),
@@ -298,12 +298,12 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "overdue",
-						Cmd:         "bcq reports overdue",
+						Cmd:         "basecamp reports overdue",
 						Description: "View overdue todos",
 					},
 					output.Breadcrumb{
 						Action:      "schedule",
-						Cmd:         "bcq schedule entries --project <project>",
+						Cmd:         "basecamp schedule entries --project <project>",
 						Description: "View project schedule",
 					},
 				),

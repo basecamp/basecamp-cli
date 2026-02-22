@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-skills.sh - Install bcq skills for any agent
+# install-skills.sh - Install basecamp skills for any agent
 #
 # Usage:
 #   ./scripts/install-skills.sh                    # Install to default location
@@ -7,12 +7,12 @@
 #   ./scripts/install-skills.sh --update           # Update existing installation
 #
 # Environment:
-#   BCQ_DIR   Target directory (default: ~/.local/share/bcq)
+#   BASECAMP_DIR   Target directory (default: ~/.local/share/basecamp)
 
 set -euo pipefail
 
 REPO_URL="https://github.com/basecamp/basecamp-cli"
-DEFAULT_DIR="${BCQ_DIR:-$HOME/.local/share/bcq}"
+DEFAULT_DIR="${BASECAMP_DIR:-$HOME/.local/share/basecamp}"
 
 info() { echo "==> $1"; }
 error() { echo "ERROR: $1" >&2; exit 1; }
@@ -21,22 +21,22 @@ usage() {
   cat <<EOF
 Usage: install-skills.sh [OPTIONS]
 
-Install bcq skills for any AI agent.
+Install basecamp skills for any AI agent.
 
 Options:
-  --dir DIR     Install to DIR (default: ~/.local/share/bcq)
+  --dir DIR     Install to DIR (default: ~/.local/share/basecamp)
   --update      Update existing installation
   --help        Show this help
 
 Environment:
-  BCQ_DIR   Default target directory
+  BASECAMP_DIR   Default target directory
 
 Examples:
   # Install to default location
   ./install-skills.sh
 
   # Install to custom directory
-  ./install-skills.sh --dir ~/agent-skills/bcq
+  ./install-skills.sh --dir ~/agent-skills/basecamp
 
   # Update existing installation
   ./install-skills.sh --update
@@ -69,7 +69,7 @@ done
 install_dir="${install_dir:-$DEFAULT_DIR}"
 
 install_skills() {
-  info "Installing bcq skills to $install_dir"
+  info "Installing basecamp skills to $install_dir"
 
   if [[ -d "$install_dir/.git" ]]; then
     if [[ "$update_mode" == "true" ]]; then
@@ -84,7 +84,7 @@ install_skills() {
       error "Directory $install_dir exists and is not empty. Remove it first or use a different --dir."
     fi
 
-    info "Cloning bcq repository..."
+    info "Cloning basecamp repository..."
     git clone --depth 1 "$REPO_URL" "$install_dir"
   fi
 
@@ -106,9 +106,9 @@ print_usage_instructions() {
   echo "1. Point your agent at the skill files:"
   echo "   $install_dir/skills/<skill-name>/SKILL.md"
   echo ""
-  echo "2. Ensure bcq CLI is installed and authenticated:"
+  echo "2. Ensure basecamp CLI is installed and authenticated:"
   echo "   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash"
-  echo "   bcq auth login"
+  echo "   basecamp auth login"
   echo ""
   echo "3. To update skills:"
   echo "   $0 --update --dir $install_dir"
@@ -118,8 +118,8 @@ print_usage_instructions() {
 
 main() {
   echo ""
-  echo "bcq Skills Installer"
-  echo "===================="
+  echo "Basecamp Skills Installer"
+  echo "========================="
   echo ""
 
   install_skills

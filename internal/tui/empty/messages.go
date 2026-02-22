@@ -47,7 +47,7 @@ func NoTodos(context string) Message {
 	default:
 		msg.Body = "No todos in this project."
 		msg.Hints = []string{
-			"Create a todo with: bcq todo --content <text>",
+			"Create a todo with: basecamp todo --content <text>",
 		}
 	}
 	return msg
@@ -91,7 +91,7 @@ func NoComments() Message {
 		Title: "No comments",
 		Body:  "This item has no comments yet.",
 		Hints: []string{
-			"Add a comment with: bcq comment --on <id> --content <text>",
+			"Add a comment with: basecamp comment --on <id> --content <text>",
 		},
 	}
 }
@@ -134,8 +134,8 @@ func AuthRequired() Message {
 		Title: "Authentication required",
 		Body:  "You need to log in to Basecamp.",
 		Hints: []string{
-			"Run: bcq auth login",
+			"Run: basecamp auth login",
 		},
-		Command: "bcq auth login",
+		Command: "basecamp auth login",
 	}
 }

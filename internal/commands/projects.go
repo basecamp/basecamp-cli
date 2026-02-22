@@ -141,12 +141,12 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         "bcq projects show <id>",
+				Cmd:         "basecamp projects show <id>",
 				Description: "Show project details",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         "bcq projects create --name <name>",
+				Cmd:         "basecamp projects create --name <name>",
 				Description: "Create a new project",
 			},
 		),
@@ -209,12 +209,12 @@ func newProjectsShowCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         fmt.Sprintf("bcq todos --project %d", projectID),
+						Cmd:         fmt.Sprintf("basecamp todos --project %d", projectID),
 						Description: "List todos in this project",
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("bcq messages --project %d", projectID),
+						Cmd:         fmt.Sprintf("basecamp messages --project %d", projectID),
 						Description: "List messages in this project",
 					},
 				),

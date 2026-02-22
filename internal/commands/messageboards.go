@@ -110,12 +110,12 @@ func runMessageboardShow(cmd *cobra.Command, project, boardIDStr string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("bcq messages --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp messages --in %s", resolvedProjectID),
 				Description: "List all messages",
 			},
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         fmt.Sprintf("bcq projects show %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 				Description: "View project details",
 			},
 		),

@@ -130,12 +130,12 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq todolistgroups create \"name\" --list %s --in %s", todolist, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp todolistgroups create \"name\" --list %s --in %s", todolist, resolvedProjectID),
 				Description: "Create group",
 			},
 			output.Breadcrumb{
 				Action:      "todolist",
-				Cmd:         fmt.Sprintf("bcq todolists show %s --in %s", todolist, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp todolists show %s --in %s", todolist, resolvedProjectID),
 				Description: "View parent todolist",
 			},
 		),
@@ -200,7 +200,7 @@ func newTodolistgroupsShowCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("bcq todolistgroups update %s --name \"New Name\" --in %s", groupIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todolistgroups update %s --name \"New Name\" --in %s", groupIDStr, resolvedProjectID),
 						Description: "Rename group",
 					},
 				),
@@ -293,7 +293,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "group",
-						Cmd:         fmt.Sprintf("bcq todolistgroups show %d --in %s", group.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todolistgroups show %d --in %s", group.ID, resolvedProjectID),
 						Description: "View group",
 					},
 				),

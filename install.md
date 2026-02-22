@@ -1,38 +1,38 @@
-# bcq Installation Guide
+# Basecamp CLI Installation Guide
 
-Install bcq CLI and connect it to your AI agent. Execute all steps autonomously.
+Install the Basecamp CLI and connect it to your AI agent. Execute all steps autonomously.
 
-**DONE WHEN:** `bcq --version && bcq auth status` both succeed.
+**DONE WHEN:** `basecamp --version && basecamp auth status` both succeed.
 
 ---
 
 ## TODO
 
-- [ ] Install bcq CLI
+- [ ] Install Basecamp CLI
 - [ ] Authenticate with Basecamp
 - [ ] Install skills (optional)
 - [ ] Connect agent (optional)
 
 ---
 
-## Step 1: Install bcq CLI
+## Step 1: Install Basecamp CLI
 
 Choose ONE installation method:
 
 ### Option A: Homebrew (macOS/Linux) - Recommended
 ```bash
-brew install basecamp/tap/bcq
+brew install --cask basecamp/tap/basecamp
 ```
 
 ### Option B: Scoop (Windows)
 ```bash
 scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install bcq
+scoop install basecamp
 ```
 
 ### Option C: Go install
 ```bash
-go install github.com/basecamp/basecamp-cli/cmd/bcq@latest
+go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
 ### Option D: Shell script
@@ -42,11 +42,11 @@ curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/
 
 **Verify:**
 ```bash
-bcq --version
-# Expected: bcq version X.Y.Z
+basecamp --version
+# Expected: basecamp version X.Y.Z
 ```
 
-If `bcq: command not found`, add to PATH:
+If `basecamp: command not found`, add to PATH:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 # or for go install:
@@ -58,14 +58,14 @@ export PATH="$HOME/go/bin:$PATH"
 ## Step 2: Authenticate
 
 ```bash
-bcq auth login
+basecamp auth login
 ```
 
 Opens browser for OAuth. Grant access when prompted.
 
 **Verify:**
 ```bash
-bcq auth status
+basecamp auth status
 # Expected: Authenticated as your@email.com
 ```
 
@@ -81,13 +81,13 @@ curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/
 
 **Verify:**
 ```bash
-ls ${BCQ_DIR:-$HOME/.local/share/bcq}/skills/*/SKILL.md
+ls ${BASECAMP_DIR:-$HOME/.local/share/basecamp}/skills/*/SKILL.md
 # Expected: List of SKILL.md files
 ```
 
 ---
 
-EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `bcq --version && bcq auth status` both succeed.
+EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `basecamp --version && basecamp auth status` both succeed.
 
 ---
 
@@ -103,7 +103,7 @@ The `.claude-plugin/` is discovered automatically when you clone the repo. No ex
 
 Point your agent at the skill file for full Basecamp workflow coverage:
 ```
-~/.local/share/bcq/skills/basecamp/SKILL.md
+~/.local/share/basecamp/skills/basecamp/SKILL.md
 ```
 
 Or if you cloned the repo:
@@ -116,8 +116,8 @@ skills/basecamp/SKILL.md
 ## Quick Test
 
 ```bash
-bcq projects --json
-bcq search "meeting" --json
+basecamp projects --json
+basecamp search "meeting" --json
 ```
 
 ---
@@ -126,16 +126,16 @@ bcq search "meeting" --json
 
 **Not authenticated:**
 ```bash
-bcq auth login
+basecamp auth login
 ```
 
 **Wrong account:**
 ```bash
 cat ~/.config/basecamp/config.json
-bcq auth logout && bcq auth login
+basecamp auth logout && basecamp auth login
 ```
 
 **Permission denied (read-only):**
 ```bash
-bcq auth login --scope full
+basecamp auth login --scope full
 ```

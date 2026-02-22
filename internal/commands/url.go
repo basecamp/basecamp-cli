@@ -35,7 +35,7 @@ from Basecamp URLs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Handle "bcq url parse <url>" or "bcq url <url>"
+			// Handle "basecamp url parse <url>" or "basecamp url <url>"
 			var url string
 			if args[0] == "parse" {
 				if len(args) < 2 {
@@ -175,12 +175,12 @@ func runURLParse(app *appctx.App, url string) error {
 			breadcrumbs = append(breadcrumbs,
 				output.Breadcrumb{
 					Action:      "show",
-					Cmd:         fmt.Sprintf("bcq cards column show %s --in %s", recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp cards column show %s --in %s", recordingID, bucketID),
 					Description: "View the column",
 				},
 				output.Breadcrumb{
 					Action:      "columns",
-					Cmd:         fmt.Sprintf("bcq cards columns --in %s", bucketID),
+					Cmd:         fmt.Sprintf("basecamp cards columns --in %s", bucketID),
 					Description: "List all columns",
 				},
 			)
@@ -188,12 +188,12 @@ func runURLParse(app *appctx.App, url string) error {
 			breadcrumbs = append(breadcrumbs,
 				output.Breadcrumb{
 					Action:      "complete",
-					Cmd:         fmt.Sprintf("bcq cards step complete %s --in %s", recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp cards step complete %s --in %s", recordingID, bucketID),
 					Description: "Complete the step",
 				},
 				output.Breadcrumb{
 					Action:      "uncomplete",
-					Cmd:         fmt.Sprintf("bcq cards step uncomplete %s --in %s", recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp cards step uncomplete %s --in %s", recordingID, bucketID),
 					Description: "Uncomplete the step",
 				},
 			)
@@ -202,17 +202,17 @@ func runURLParse(app *appctx.App, url string) error {
 			breadcrumbs = append(breadcrumbs,
 				output.Breadcrumb{
 					Action:      "show",
-					Cmd:         fmt.Sprintf("bcq show %s %s --in %s", typeSingular, recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp show %s %s --in %s", typeSingular, recordingID, bucketID),
 					Description: fmt.Sprintf("View the %s", typeSingular),
 				},
 				output.Breadcrumb{
 					Action:      "comment",
-					Cmd:         fmt.Sprintf("bcq comment --content \"text\" --on %s --in %s", recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp comment --content \"text\" --on %s --in %s", recordingID, bucketID),
 					Description: "Add a comment",
 				},
 				output.Breadcrumb{
 					Action:      "comments",
-					Cmd:         fmt.Sprintf("bcq comments --on %s --in %s", recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp comments --on %s --in %s", recordingID, bucketID),
 					Description: "List comments",
 				},
 			)
@@ -221,7 +221,7 @@ func runURLParse(app *appctx.App, url string) error {
 				breadcrumbs = append(breadcrumbs,
 					output.Breadcrumb{
 						Action:      "show-comment",
-						Cmd:         fmt.Sprintf("bcq comments show %s --in %s", commentID, bucketID),
+						Cmd:         fmt.Sprintf("basecamp comments show %s --in %s", commentID, bucketID),
 						Description: "View the comment",
 					},
 				)

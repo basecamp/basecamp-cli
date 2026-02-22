@@ -22,7 +22,7 @@ func NewSearchCmd() *cobra.Command {
 		Long: `Search across all Basecamp content.
 
 Uses the Basecamp search API to find content matching your query.
-Use 'bcq search metadata' to see available search scopes.`,
+Use 'basecamp search metadata' to see available search scopes.`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -67,7 +67,7 @@ Use 'bcq search metadata' to see available search scopes.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         "bcq show <id> --project <bucket.id>",
+						Cmd:         "basecamp show <id> --project <bucket.id>",
 						Description: "Show result details",
 					},
 				),
@@ -121,7 +121,7 @@ func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "search",
-				Cmd:         "bcq search <query>",
+				Cmd:         "basecamp search <query>",
 				Description: "Search content",
 			},
 		),

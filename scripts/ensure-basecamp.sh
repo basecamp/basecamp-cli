@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Verify bcq is installed and meets minimum version requirements.
-# Used by Claude Code skills before executing bcq commands.
+# Verify basecamp is installed and meets minimum version requirements.
+# Used by Claude Code skills before executing basecamp commands.
 #
 # Usage:
-#   source ensure-bcq.sh              # Exits on failure
-#   ensure-bcq.sh --check             # Returns 0/1, prints status
-#   ensure-bcq.sh --install           # Attempts install if missing
+#   source ensure-basecamp.sh              # Exits on failure
+#   ensure-basecamp.sh --check             # Returns 0/1, prints status
+#   ensure-basecamp.sh --install           # Attempts install if missing
 
 set -euo pipefail
 
-MIN_VERSION="${BCQ_MIN_VERSION:-0.1.0}"
+MIN_VERSION="${BASECAMP_MIN_VERSION:-0.1.0}"
 INSTALL_URL="https://github.com/basecamp/basecamp-cli"
-BIN_DIR="${BCQ_BIN_DIR:-$HOME/.local/bin}"
+BIN_DIR="${BASECAMP_BIN_DIR:-$HOME/.local/bin}"
 
 # Parse semver: returns 0 if $1 >= $2
 version_gte() {
@@ -19,21 +19,21 @@ version_gte() {
   printf '%s\n%s\n' "$v2" "$v1" | sort -V | head -1 | grep -qx "$v2"
 }
 
-check_bcq() {
-  if ! command -v bcq &>/dev/null; then
-    echo "bcq not found in PATH"
+check_basecamp() {
+  if ! command -v basecamp &>/dev/null; then
+    echo "basecamp not found in PATH"
     return 1
   fi
 
   local version
-  version=$(bcq --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "0.0.0")
+  version=$(basecamp --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "0.0.0")
 
   if ! version_gte "$version" "$MIN_VERSION"; then
-    echo "bcq version $version < required $MIN_VERSION"
+    echo "basecamp version $version < required $MIN_VERSION"
     return 1
   fi
 
-  echo "bcq $version OK (>= $MIN_VERSION)"
+  echo "basecamp $version OK (>= $MIN_VERSION)"
   return 0
 }
 
@@ -60,8 +60,8 @@ detect_platform() {
   echo "${os}_${arch}"
 }
 
-install_bcq() {
-  echo "Installing bcq..."
+install_basecamp() {
+  echo "Installing basecamp..."
 
   local platform version url archive_name ext tmp_dir
 
@@ -82,10 +82,10 @@ install_bcq() {
     ext="tar.gz"
   fi
 
-  archive_name="bcq_${version}_${platform}.${ext}"
+  archive_name="basecamp_${version}_${platform}.${ext}"
   url="https://github.com/basecamp/basecamp-cli/releases/download/v${version}/${archive_name}"
 
-  echo "Downloading bcq v${version} for ${platform}..."
+  echo "Downloading basecamp v${version} for ${platform}..."
 
   tmp_dir=$(mktemp -d)
   trap 'rm -rf "$tmp_dir"' EXIT
@@ -104,16 +104,16 @@ install_bcq() {
   fi
 
   # Install binary
-  local binary_name="bcq"
+  local binary_name="basecamp"
   if [[ "$platform" == windows_* ]]; then
-    binary_name="bcq.exe"
+    binary_name="basecamp.exe"
   fi
 
   mkdir -p "$BIN_DIR"
   mv "$binary_name" "$BIN_DIR/"
   chmod +x "$BIN_DIR/$binary_name"
 
-  echo "Installed bcq to $BIN_DIR/$binary_name"
+  echo "Installed basecamp to $BIN_DIR/$binary_name"
 
   # Check if in PATH
   if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -126,32 +126,32 @@ install_bcq() {
 main() {
   case "${1:-}" in
     --check)
-      check_bcq
+      check_basecamp
       ;;
     --install)
-      if ! check_bcq 2>/dev/null; then
-        install_bcq
-        check_bcq
+      if ! check_basecamp 2>/dev/null; then
+        install_basecamp
+        check_basecamp
       fi
       ;;
     --help|-h)
       cat <<EOF
-ensure-bcq.sh - Verify bcq installation
+ensure-basecamp.sh - Verify basecamp installation
 
 Usage:
-  ensure-bcq.sh --check     Check if bcq is installed and meets version requirements
-  ensure-bcq.sh --install   Install or update bcq if needed
+  ensure-basecamp.sh --check     Check if basecamp is installed and meets version requirements
+  ensure-basecamp.sh --install   Install or update basecamp if needed
 
 Environment:
-  BCQ_MIN_VERSION   Minimum required version (default: $MIN_VERSION)
-  BCQ_BIN_DIR       Binary directory (default: ~/.local/bin)
+  BASECAMP_MIN_VERSION   Minimum required version (default: $MIN_VERSION)
+  BASECAMP_BIN_DIR       Binary directory (default: ~/.local/bin)
 EOF
       ;;
     *)
       # Default: check and exit on failure
-      if ! check_bcq; then
+      if ! check_basecamp; then
         echo ""
-        echo "Install bcq: $INSTALL_URL"
+        echo "Install basecamp: $INSTALL_URL"
         echo "Or run: $0 --install"
         exit 1
       fi

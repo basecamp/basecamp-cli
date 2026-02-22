@@ -23,16 +23,16 @@ func NewScheduleCmd() *cobra.Command {
 		Short: "Manage schedules and entries",
 		Long: `Manage project schedules and schedule entries.
 
-Use 'bcq schedule' to view the project schedule.
-Use 'bcq schedule entries' to list schedule entries.
-Use 'bcq schedule create' to create new entries.`,
+Use 'basecamp schedule' to view the project schedule.
+Use 'basecamp schedule entries' to list schedule entries.
+Use 'basecamp schedule create' to create new entries.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Handle numeric ID as first arg: bcq schedule 123
+			// Handle numeric ID as first arg: basecamp schedule 123
 			if len(args) > 0 && isNumeric(args[0]) {
 				return runScheduleEntryShow(cmd, app, args[0], project, "")
 			}
@@ -120,12 +120,12 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "entries",
-				Cmd:         fmt.Sprintf("bcq schedule entries --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
 				Description: "View schedule entries",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq schedule create \"Event\" --starts-at <datetime> --ends-at <datetime> --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule create \"Event\" --starts-at <datetime> --ends-at <datetime> --project %s", resolvedProjectID),
 				Description: "Create entry",
 			},
 		),
@@ -232,12 +232,12 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq schedule show <id> --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule show <id> --project %s", resolvedProjectID),
 				Description: "View entry details",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq schedule create \"Event\" --starts-at <datetime> --ends-at <datetime> --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule create \"Event\" --starts-at <datetime> --ends-at <datetime> --project %s", resolvedProjectID),
 				Description: "Create entry",
 			},
 		),
@@ -253,8 +253,8 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 		Long: `Display details of a schedule entry.
 
 You can pass either an entry ID or a Basecamp URL:
-  bcq schedule show 789 --in my-project
-  bcq schedule show https://3.basecamp.com/123/buckets/456/schedule_entries/789`,
+  basecamp schedule show 789 --in my-project
+  basecamp schedule show https://3.basecamp.com/123/buckets/456/schedule_entries/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -324,12 +324,12 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "update",
-					Cmd:         fmt.Sprintf("bcq schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
 					Description: "Update entry",
 				},
 				output.Breadcrumb{
 					Action:      "entries",
-					Cmd:         fmt.Sprintf("bcq schedule entries --project %s", resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
 					Description: "View all entries",
 				},
 			),
@@ -356,12 +356,12 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "update",
-				Cmd:         fmt.Sprintf("bcq schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
 				Description: "Update entry",
 			},
 			output.Breadcrumb{
 				Action:      "entries",
-				Cmd:         fmt.Sprintf("bcq schedule entries --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
 				Description: "View all entries",
 			},
 		),
@@ -490,12 +490,12 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq schedule show %d --project %s", entry.ID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule show %d --project %s", entry.ID, resolvedProjectID),
 				Description: "View entry",
 			},
 			output.Breadcrumb{
 				Action:      "entries",
-				Cmd:         fmt.Sprintf("bcq schedule entries --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
 				Description: "View all entries",
 			},
 		),
@@ -517,8 +517,8 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing schedule entry.
 
 You can pass either an entry ID or a Basecamp URL:
-  bcq schedule update 789 --summary "new title" --in my-project
-  bcq schedule update https://3.basecamp.com/123/buckets/456/schedule_entries/789 --summary "new title"`,
+  basecamp schedule update 789 --summary "new title" --in my-project
+  basecamp schedule update https://3.basecamp.com/123/buckets/456/schedule_entries/789 --summary "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -613,7 +613,7 @@ You can pass either an entry ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq schedule show %s --project %s", entryID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp schedule show %s --project %s", entryID, resolvedProjectID),
 						Description: "View entry",
 					},
 				),
@@ -702,7 +702,7 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq schedule --project %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp schedule --project %s", resolvedProjectID),
 						Description: "View schedule",
 					},
 				),

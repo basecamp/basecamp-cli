@@ -24,12 +24,12 @@ SKIP_SECTIONS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare bcq API usage to bc3-api documentation coverage."
+        description="Compare basecamp API usage to bc3-api documentation coverage."
     )
     parser.add_argument(
-        "--bcq-root",
+        "--basecamp-root",
         default=str(Path(__file__).resolve().parents[1]),
-        help="Path to bcq repo root (default: repo root).",
+        help="Path to basecamp repo root (default: repo root).",
     )
     parser.add_argument(
         "--bc3-api",
@@ -44,10 +44,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_bc3_api_root(bcq_root: Path, provided: str) -> Path:
+def resolve_bc3_api_root(basecamp_root: Path, provided: str) -> Path:
     if provided:
         return Path(provided).expanduser().resolve()
-    candidate = (bcq_root.parent / "bc3-api").resolve()
+    candidate = (basecamp_root.parent / "bc3-api").resolve()
     return candidate
 
 
@@ -70,7 +70,7 @@ def load_doc_endpoints(sections_dir: Path) -> dict[str, list[tuple[str, str]]]:
     return sections
 
 
-def load_bcq_endpoints(commands_dir: Path) -> set[tuple[str, str]]:
+def load_basecamp_endpoints(commands_dir: Path) -> set[tuple[str, str]]:
     endpoints: set[tuple[str, str]] = set()
 
     for script in commands_dir.rglob("*.sh"):
@@ -130,27 +130,27 @@ def segmentize(path: str, wildcard_vars: bool, wildcard_numbers: bool) -> list[s
     return segments
 
 
-def endpoints_match(doc_endpoint: tuple[str, str], bcq_endpoint: tuple[str, str]) -> bool:
+def endpoints_match(doc_endpoint: tuple[str, str], basecamp_endpoint: tuple[str, str]) -> bool:
     doc_method, doc_path = doc_endpoint
-    bcq_method, bcq_path = bcq_endpoint
-    if doc_method != bcq_method:
+    basecamp_method, basecamp_path = basecamp_endpoint
+    if doc_method != basecamp_method:
         return False
     doc_segs = segmentize(doc_path, wildcard_vars=True, wildcard_numbers=True)
-    bcq_segs = segmentize(bcq_path, wildcard_vars=True, wildcard_numbers=False)
-    if len(doc_segs) != len(bcq_segs):
+    basecamp_segs = segmentize(basecamp_path, wildcard_vars=True, wildcard_numbers=False)
+    if len(doc_segs) != len(basecamp_segs):
         return False
-    for doc_seg, bcq_seg in zip(doc_segs, bcq_segs):
-        if doc_seg == "*" or bcq_seg == "*":
+    for doc_seg, basecamp_seg in zip(doc_segs, basecamp_segs):
+        if doc_seg == "*" or basecamp_seg == "*":
             continue
-        if doc_seg != bcq_seg:
+        if doc_seg != basecamp_seg:
             return False
     return True
 
 
 def main() -> int:
     args = parse_args()
-    bcq_root = Path(args.bcq_root).resolve()
-    bc3_api_root = resolve_bc3_api_root(bcq_root, args.bc3_api)
+    basecamp_root = Path(args.basecamp_root).resolve()
+    bc3_api_root = resolve_bc3_api_root(basecamp_root, args.bc3_api)
     sections_dir = bc3_api_root / "sections"
 
     if not sections_dir.exists():
@@ -161,7 +161,7 @@ def main() -> int:
     skipped_sections = {name: endpoints for name, endpoints in doc_sections.items() if name in SKIP_SECTIONS}
     if skipped_sections:
         doc_sections = {name: endpoints for name, endpoints in doc_sections.items() if name not in SKIP_SECTIONS}
-    bcq_endpoints = load_bcq_endpoints(bcq_root / "lib" / "commands")
+    basecamp_endpoints = load_basecamp_endpoints(basecamp_root / "lib" / "commands")
 
     unique_docs = []
     doc_seen = set()
@@ -180,7 +180,7 @@ def main() -> int:
         section_matched = 0
         missing = []
         for endpoint in endpoints:
-            if any(endpoints_match(endpoint, bcq_ep) for bcq_ep in bcq_endpoints):
+            if any(endpoints_match(endpoint, basecamp_ep) for basecamp_ep in basecamp_endpoints):
                 section_matched += 1
             else:
                 missing.append(f"{endpoint[0]} {endpoint[1]}")
@@ -189,7 +189,7 @@ def main() -> int:
             section_missing[section_name] = missing
 
     for endpoint in unique_docs:
-        if any(endpoints_match(endpoint, bcq_ep) for bcq_ep in bcq_endpoints):
+        if any(endpoints_match(endpoint, basecamp_ep) for basecamp_ep in basecamp_endpoints):
             matched += 1
 
     total = len(unique_docs)

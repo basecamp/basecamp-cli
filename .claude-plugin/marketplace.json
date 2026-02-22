@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "bcq",
+  "name": "basecamp",
   "metadata": {
     "description": "Basecamp CLI and Claude Code integration",
     "version": "0.1.0"

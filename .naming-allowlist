@@ -1,0 +1,19 @@
+# Allowed bcq/BCQ references — legacy migration code only.
+# Each line is a grep -F fixed-string pattern matched against rg output.
+# File-prefix patterns (path:) allowlist entire files.
+# Content patterns match distinctive substrings within specific functions.
+#
+# migrate.go — entire file is legacy migration code
+internal/commands/migrate.go:
+# migrate_test.go — tests for legacy migration
+internal/commands/migrate_test.go:
+# doctor.go — checkLegacyInstall function only
+checkLegacyInstall
+legacyCache
+legacyTheme
+legacyKey
+Legacy bcq
+keyring.Get("bcq"
+keyring(bcq
+# commands.go — catalog description for migrate command
+legacy bcq

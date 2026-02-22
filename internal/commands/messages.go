@@ -151,12 +151,12 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq show message <id> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp show message <id> --in %s", resolvedProjectID),
 				Description: "Show message details",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("bcq message --subject <text> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp message --subject <text> --in %s", resolvedProjectID),
 				Description: "Post new message",
 			},
 		),
@@ -177,8 +177,8 @@ func newMessagesShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about a message.
 
 You can pass either a message ID or a Basecamp URL:
-  bcq messages show 789 --in my-project
-  bcq messages show https://3.basecamp.com/123/buckets/456/messages/789`,
+  basecamp messages show 789 --in my-project
+  basecamp messages show https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -233,12 +233,12 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("bcq comment --content <text> --on %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "Add comment",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq messages --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages --in %s", resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
@@ -328,12 +328,12 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("bcq show message %d --in %s", message.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp show message %d --in %s", message.ID, resolvedProjectID),
 						Description: "View message",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq messages --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages --in %s", resolvedProjectID),
 						Description: "List messages",
 					},
 				),
@@ -360,8 +360,8 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing message's subject or content.
 
 You can pass either a message ID or a Basecamp URL:
-  bcq messages update 789 --subject "new title" --in my-project
-  bcq messages update https://3.basecamp.com/123/buckets/456/messages/789 --subject "new title"`,
+  basecamp messages update 789 --subject "new title" --in my-project
+  basecamp messages update https://3.basecamp.com/123/buckets/456/messages/789 --subject "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -427,7 +427,7 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages show %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "View message",
 					},
 				),
@@ -449,8 +449,8 @@ func newMessagesPinCmd(project *string) *cobra.Command {
 		Long: `Pin a message to the top of the message board.
 
 You can pass either a message ID or a Basecamp URL:
-  bcq messages pin 789 --in my-project
-  bcq messages pin https://3.basecamp.com/123/buckets/456/messages/789`,
+  basecamp messages pin 789 --in my-project
+  basecamp messages pin https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -508,12 +508,12 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "unpin",
-						Cmd:         fmt.Sprintf("bcq messages unpin %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages unpin %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "Unpin message",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages show %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "View message",
 					},
 				),
@@ -530,8 +530,8 @@ func newMessagesUnpinCmd(project *string) *cobra.Command {
 		Long: `Remove a message from the pinned position.
 
 You can pass either a message ID or a Basecamp URL:
-  bcq messages unpin 789 --in my-project
-  bcq messages unpin https://3.basecamp.com/123/buckets/456/messages/789`,
+  basecamp messages unpin 789 --in my-project
+  basecamp messages unpin https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -589,12 +589,12 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "pin",
-						Cmd:         fmt.Sprintf("bcq messages pin %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages pin %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "Pin message",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq messages show %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages show %s --in %s", messageIDStr, resolvedProjectID),
 						Description: "View message",
 					},
 				),
@@ -615,7 +615,7 @@ func NewMessageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "message",
 		Short: "Post a new message",
-		Long:  "Post a message to a project's message board. Shortcut for 'bcq messages create'.",
+		Long:  "Post a message to a project's message board. Shortcut for 'basecamp messages create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -685,12 +685,12 @@ func NewMessageCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("bcq show message %d --in %s", message.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp show message %d --in %s", message.ID, resolvedProjectID),
 						Description: "View message",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq messages --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages --in %s", resolvedProjectID),
 						Description: "List messages",
 					},
 				),

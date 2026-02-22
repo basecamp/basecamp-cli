@@ -46,7 +46,7 @@ func setupPeopleTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	t.Helper()
 
 	// Disable keyring access during tests
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{
@@ -89,7 +89,7 @@ func executePeopleCommand(cmd *cobra.Command, app *appctx.App, args ...string) e
 	return cmd.Execute()
 }
 
-// TestMeRequiresAuth tests that bcq me returns auth error when not authenticated.
+// TestMeRequiresAuth tests that basecamp me returns auth error when not authenticated.
 func TestMeRequiresAuth(t *testing.T) {
 	app, _ := setupPeopleTestApp(t)
 
@@ -128,10 +128,10 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 	t.Cleanup(server.Close)
 
 	// Override Launchpad URL to use mock server (base URL, not full path)
-	t.Setenv("BCQ_LAUNCHPAD_URL", server.URL)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", server.URL)
 
 	// Disable keyring access during tests
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	// Create temp directory for credentials
 	tmpDir := t.TempDir()
@@ -185,7 +185,7 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 	return app, buf
 }
 
-// TestMeWithLaunchpadNoAccountConfigured tests that bcq me works via Launchpad
+// TestMeWithLaunchpadNoAccountConfigured tests that basecamp me works via Launchpad
 // even when no account is configured, showing available accounts with setup breadcrumbs.
 func TestMeWithLaunchpadNoAccountConfigured(t *testing.T) {
 	launchpadResponse := &basecamp.AuthorizationInfo{
@@ -247,7 +247,7 @@ func TestMeWithLaunchpadNoAccountConfigured(t *testing.T) {
 	// Verify breadcrumbs suggest account setup
 	foundSetup := false
 	for _, bc := range result.Breadcrumbs {
-		if bc.Action == "setup" && strings.Contains(bc.Cmd, "bcq config set account") {
+		if bc.Action == "setup" && strings.Contains(bc.Cmd, "basecamp config set account") {
 			foundSetup = true
 			break
 		}
@@ -255,7 +255,7 @@ func TestMeWithLaunchpadNoAccountConfigured(t *testing.T) {
 	assert.True(t, foundSetup, "expected breadcrumbs to suggest account setup, got: %+v", result.Breadcrumbs)
 }
 
-// TestMeWithAccountConfigured tests that bcq me shows the current account marker
+// TestMeWithAccountConfigured tests that basecamp me shows the current account marker
 // when an account is already configured.
 func TestMeWithAccountConfigured(t *testing.T) {
 	launchpadResponse := &basecamp.AuthorizationInfo{

@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --start
+  run basecamp timesheet --start
   assert_failure
   assert_output_contains "--start requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --end
+  run basecamp timesheet --end
   assert_failure
   assert_output_contains "--end requires a value"
 }
@@ -28,7 +28,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --person
+  run basecamp timesheet --person
   assert_failure
   assert_output_contains "--person requires a value"
 }
@@ -37,7 +37,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --project
+  run basecamp timesheet --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --start 2024-01-01
+  run basecamp timesheet --start 2024-01-01
   assert_failure
   assert_output_contains "--end required when --start is provided"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --end 2024-01-31
+  run basecamp timesheet --end 2024-01-31
   assert_failure
   assert_output_contains "--start required when --end is provided"
 }
@@ -70,7 +70,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet project
+  run basecamp timesheet project
   assert_failure
   assert_output_contains "Project ID"
 }
@@ -79,7 +79,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq timesheet recording
+  run basecamp timesheet recording
   assert_failure
   assert_output_contains "ID required"
 }
@@ -88,7 +88,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet recording 456
+  run basecamp timesheet recording 456
   assert_failure
   assert_output_contains "project"
 }
@@ -100,9 +100,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet --help
+  run basecamp timesheet --help
   assert_success
-  assert_output_contains "bcq timesheet"
+  assert_output_contains "basecamp timesheet"
   assert_output_contains "report"
   assert_output_contains "project"
   assert_output_contains "recording"
@@ -115,6 +115,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq timesheet foobar
+  run basecamp timesheet foobar
   # Command may show help or require project - just verify it runs
 }

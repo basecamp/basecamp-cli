@@ -91,7 +91,7 @@ func NewTodoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "todo",
 		Short: "Create a new todo (shortcut for 'todos create')",
-		Long:  "Create a new todo in a project. Shortcut for 'bcq todos create'.",
+		Long:  "Create a new todo in a project. Shortcut for 'basecamp todos create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -196,17 +196,17 @@ func NewTodoCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("bcq todos show %d --project %s", todo.ID, project),
+						Cmd:         fmt.Sprintf("basecamp todos show %d --project %s", todo.ID, project),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("bcq done %d", todo.ID),
+						Cmd:         fmt.Sprintf("basecamp done %d", todo.ID),
 						Description: "Complete todo",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq todos --in %s", project),
+						Cmd:         fmt.Sprintf("basecamp todos --in %s", project),
 						Description: "List todos",
 					},
 				),
@@ -376,12 +376,12 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq todos create --content <text> --in %s --list %s", project, resolvedTodolist),
+				Cmd:         fmt.Sprintf("basecamp todos create --content <text> --in %s --list %s", project, resolvedTodolist),
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
 				Action:      "complete",
-				Cmd:         "bcq done <id>",
+				Cmd:         "basecamp done <id>",
 				Description: "Complete a todo",
 			},
 		),
@@ -495,17 +495,17 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("bcq todos create --content <text> --in %s --list <list>", project),
+				Cmd:         fmt.Sprintf("basecamp todos create --content <text> --in %s --list <list>", project),
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
 				Action:      "complete",
-				Cmd:         "bcq done <id>",
+				Cmd:         "basecamp done <id>",
 				Description: "Complete a todo",
 			},
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         "bcq todos show <id>",
+				Cmd:         "basecamp todos show <id>",
 				Description: "Show todo details",
 			},
 		),
@@ -526,8 +526,8 @@ func newTodosShowCmd() *cobra.Command {
 		Long: `Display detailed information about a todo.
 
 You can pass either a todo ID or a Basecamp URL:
-  bcq todos show 789 --in my-project
-  bcq todos show https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp todos show 789 --in my-project
+  basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -585,12 +585,12 @@ You can pass either a todo ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("bcq done %d", todoID),
+						Cmd:         fmt.Sprintf("basecamp done %d", todoID),
 						Description: "Complete this todo",
 					},
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("bcq comment --on %d --content <text>", todoID),
+						Cmd:         fmt.Sprintf("basecamp comment --on %d --content <text>", todoID),
 						Description: "Add comment",
 					},
 				),
@@ -724,17 +724,17 @@ func newTodosCreateCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
-						Cmd:         fmt.Sprintf("bcq todos show %d --project %s", todo.ID, project),
+						Cmd:         fmt.Sprintf("basecamp todos show %d --project %s", todo.ID, project),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("bcq done %d", todo.ID),
+						Cmd:         fmt.Sprintf("basecamp done %d", todo.ID),
 						Description: "Complete todo",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq todos --in %s", project),
+						Cmd:         fmt.Sprintf("basecamp todos --in %s", project),
 						Description: "List todos",
 					},
 				),
@@ -769,8 +769,8 @@ func newTodosCompleteCmd() *cobra.Command {
 		Long: `Mark one or more todos as completed.
 
 You can pass either todo IDs or Basecamp URLs:
-  bcq todos complete 789 --in my-project
-  bcq todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp todos complete 789 --in my-project
+  basecamp todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return completeTodos(cmd, args, project)
@@ -797,8 +797,8 @@ func newDoneCmd() *cobra.Command {
 		Long: `Mark one or more todos as completed.
 
 You can pass either todo IDs or Basecamp URLs:
-  bcq done 789 --in my-project
-  bcq done https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp done 789 --in my-project
+  basecamp done https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return completeTodos(cmd, args, project)
@@ -894,12 +894,12 @@ func completeTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProject),
+				Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProject),
 				Description: "List remaining todos",
 			},
 			output.Breadcrumb{
 				Action:      "reopen",
-				Cmd:         fmt.Sprintf("bcq reopen %s", todoIDs[0]),
+				Cmd:         fmt.Sprintf("basecamp reopen %s", todoIDs[0]),
 				Description: "Reopen a todo",
 			},
 		),
@@ -916,8 +916,8 @@ func newTodosUncompleteCmd() *cobra.Command {
 		Long: `Reopen one or more completed todos.
 
 You can pass either todo IDs or Basecamp URLs:
-  bcq todos uncomplete 789 --in my-project
-  bcq todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp todos uncomplete 789 --in my-project
+  basecamp todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return reopenTodos(cmd, args, project)
@@ -972,13 +972,13 @@ Actions (at least one required):
 
 Examples:
   # Preview overdue todos without taking action
-  bcq todos sweep --overdue --dry-run
+  basecamp todos sweep --overdue --dry-run
 
   # Complete all overdue todos with a comment
-  bcq todos sweep --overdue --complete --comment "Cleaning up overdue items"
+  basecamp todos sweep --overdue --complete --comment "Cleaning up overdue items"
 
   # Add comment to all todos assigned to me
-  bcq todos sweep --assignee me --comment "Following up"`,
+  basecamp todos sweep --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -1098,7 +1098,7 @@ Examples:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq todos --in %s", project),
+						Cmd:         fmt.Sprintf("basecamp todos --in %s", project),
 						Description: "List todos",
 					},
 				),
@@ -1217,8 +1217,8 @@ func newReopenCmd() *cobra.Command {
 		Long: `Reopen one or more completed todos.
 
 You can pass either todo IDs or Basecamp URLs:
-  bcq reopen 789 --in my-project
-  bcq reopen https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp reopen 789 --in my-project
+  basecamp reopen https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return reopenTodos(cmd, args, project)
@@ -1314,12 +1314,12 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProject),
+				Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProject),
 				Description: "List todos",
 			},
 			output.Breadcrumb{
 				Action:      "complete",
-				Cmd:         fmt.Sprintf("bcq done %s", todoIDs[0]),
+				Cmd:         fmt.Sprintf("basecamp done %s", todoIDs[0]),
 				Description: "Complete again",
 			},
 		),
@@ -1337,8 +1337,8 @@ func newTodosPositionCmd() *cobra.Command {
 		Long: `Reorder a todo within its todolist. Position is 1-based (1 = top).
 
 You can pass either a todo ID or a Basecamp URL:
-  bcq todos position 789 --to 1 --in my-project
-  bcq todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
+  basecamp todos position 789 --to 1 --in my-project
+  basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1400,12 +1400,12 @@ You can pass either a todo ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq todos show %d --in %s", todoID, resolvedProject),
+						Cmd:         fmt.Sprintf("basecamp todos show %d --in %s", todoID, resolvedProject),
 						Description: "View todo",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("bcq todos --in %s", resolvedProject),
+						Cmd:         fmt.Sprintf("basecamp todos --in %s", resolvedProject),
 						Description: "List todos",
 					},
 				),

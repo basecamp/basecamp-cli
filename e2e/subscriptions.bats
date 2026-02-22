@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq subscriptions 123 --project
+  run basecamp subscriptions 123 --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -22,7 +22,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq subscriptions show
+  run basecamp subscriptions show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq subscriptions subscribe
+  run basecamp subscriptions subscribe
   assert_failure
   assert_output_contains "ID required"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq subscriptions unsubscribe
+  run basecamp subscriptions unsubscribe
   assert_failure
   assert_output_contains "ID required"
 }
@@ -49,7 +49,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq subscriptions add 456
+  run basecamp subscriptions add 456
   assert_failure
   assert_output_contains "Person ID(s) required"
 }
@@ -58,7 +58,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq subscriptions remove 456
+  run basecamp subscriptions remove 456
   assert_failure
   assert_output_contains "Person ID(s) required"
 }
@@ -70,9 +70,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq subscriptions --help
+  run basecamp subscriptions --help
   assert_success
-  assert_output_contains "bcq subscriptions"
+  assert_output_contains "basecamp subscriptions"
   assert_output_contains "subscribe"
   assert_output_contains "unsubscribe"
 }
@@ -84,6 +84,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq subscriptions foobar
+  run basecamp subscriptions foobar
   # Command may show help or require project - just verify it runs
 }

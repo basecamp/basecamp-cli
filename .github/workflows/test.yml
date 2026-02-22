@@ -12,7 +12,7 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     env:
-      BCQ_NO_KEYRING: "1"
+      BASECAMP_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@v6
@@ -37,16 +37,19 @@ jobs:
       - name: Check SDK provenance
         run: make provenance-check
 
+      - name: Check naming (no stale legacy references)
+        run: make check-naming
+
       - name: Run unit tests
         run: go test -v ./...
 
       - name: Build binary
-        run: go build -o bin/bcq ./cmd/bcq
+        run: go build -o bin/basecamp ./cmd/basecamp
 
       - name: Smoke test
         run: |
-          ./bin/bcq --version
-          ./bin/bcq --help | head -5
+          ./bin/basecamp --version
+          ./bin/basecamp --help | head -5
 
   lint:
     name: Lint
@@ -114,7 +117,7 @@ jobs:
     name: Race Detection
     runs-on: ubuntu-latest
     env:
-      BCQ_NO_KEYRING: "1"
+      BASECAMP_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@v6
@@ -143,7 +146,7 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     env:
-      BCQ_NO_KEYRING: "1"
+      BASECAMP_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@v6
@@ -187,7 +190,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     env:
-      BCQ_NO_KEYRING: "1"
+      BASECAMP_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@v6

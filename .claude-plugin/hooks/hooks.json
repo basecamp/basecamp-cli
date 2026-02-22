@@ -1,5 +1,5 @@
 {
-  "description": "bcq hooks for Basecamp integration",
+  "description": "basecamp hooks for Basecamp integration",
   "hooks": {
     "SessionStart": [
       {

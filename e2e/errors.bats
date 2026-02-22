@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todos --project
+  run basecamp todos --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
@@ -19,7 +19,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todos --list
+  run basecamp todos --list
   assert_failure
   assert_output_contains "--list requires a value"
 }
@@ -28,7 +28,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todos --assignee
+  run basecamp todos --assignee
   assert_failure
   assert_output_contains "--assignee requires a value"
 }
@@ -37,7 +37,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq campfire messages --campfire
+  run basecamp campfire messages --campfire
   assert_failure
   assert_output_contains "--campfire requires a value"
 }
@@ -46,7 +46,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq comment "test" --on
+  run basecamp comment "test" --on
   assert_failure
   assert_output_contains "--on requires a recording ID"
 }
@@ -55,7 +55,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq cards --column
+  run basecamp cards --column
   assert_failure
   assert_output_contains "--column requires a value"
 }
@@ -64,7 +64,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings --type
+  run basecamp recordings --type
   assert_failure
   assert_output_contains "--type requires a value"
 }
@@ -73,7 +73,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings --limit
+  run basecamp recordings --limit
   assert_failure
   assert_output_contains "--limit requires a value"
 }
@@ -81,26 +81,26 @@ load test_helper
 
 # Global flag errors
 
-@test "bcq --project without value shows error" {
+@test "basecamp --project without value shows error" {
   create_credentials
 
-  run bcq --project
+  run basecamp --project
   assert_failure
   assert_output_contains "--project requires a value"
 }
 
-@test "bcq --account without value shows error" {
+@test "basecamp --account without value shows error" {
   create_credentials
 
-  run bcq --account
+  run basecamp --account
   assert_failure
   assert_output_contains "--account requires a value"
 }
 
-@test "bcq --cache-dir without value shows error" {
+@test "basecamp --cache-dir without value shows error" {
   create_credentials
 
-  run bcq --cache-dir
+  run basecamp --cache-dir
   assert_failure
   assert_output_contains "--cache-dir requires a value"
 }
@@ -112,7 +112,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq todos create
+  run basecamp todos create
   assert_failure
   assert_output_contains "Todo content required"
 }
@@ -121,7 +121,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq comment --on 123
+  run basecamp comment --on 123
   assert_failure
   assert_output_contains "Comment content required"
 }
@@ -130,7 +130,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq campfire post
+  run basecamp campfire post
   assert_failure
   assert_output_contains "Message content required"
 }
@@ -142,7 +142,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todos
+  run basecamp todos
   assert_failure
   assert_output_contains "project"
 }
@@ -151,7 +151,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq cards
+  run basecamp cards
   assert_failure
   assert_output_contains "project"
 }
@@ -160,7 +160,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq recordings
+  run basecamp recordings
   assert_failure
   assert_output_contains "Type required"
 }
@@ -173,7 +173,7 @@ load test_helper
   create_global_config '{"account_id": 99999}'
 
   # Should not treat --project value as ID
-  run bcq show --project 123 todo 456
+  run basecamp show --project 123 todo 456
   # Will fail on API call, but should parse correctly (not "Invalid assignee")
   assert_output_not_contains "Unknown option"
 }
@@ -182,7 +182,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todolists show --in 123 456
+  run basecamp todolists show --in 123 456
   # Will fail on API call, but should parse correctly
   assert_output_not_contains "Unknown option"
 }
@@ -191,7 +191,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq show --help
+  run basecamp show --help
   assert_success
   assert_output_contains "card-table"
 }
@@ -200,7 +200,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq show foobar 456
+  run basecamp show foobar 456
   assert_failure
   assert_output_contains "Unknown type: foobar"
   assert_output_contains "card-table"
@@ -211,7 +211,7 @@ load test_helper
   create_global_config '{"account_id": 99999}'
 
   # Will fail on API call (no project), but should parse card-table type correctly
-  run bcq show card-table 456 --project 123
+  run basecamp show card-table 456 --project 123
   assert_output_not_contains "Unknown type"
 }
 
@@ -223,7 +223,7 @@ load test_helper
 
   # Email assignees are valid input and passed to ResolvePerson
   # With a fake account, this will fail on API call (not input validation)
-  run bcq todo --content "test" --assignee "john@example.com"
+  run basecamp todo --content "test" --assignee "john@example.com"
   assert_failure
   # Should NOT fail with "Invalid assignee" - emails are valid
   assert_output_not_contains "Invalid assignee"
@@ -233,7 +233,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq search
+  run basecamp search
   assert_failure
   assert_output_contains "Search query required"
 }
@@ -242,7 +242,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq reopen
+  run basecamp reopen
   assert_failure
   assert_output_contains "Todo ID(s) required"
 }
@@ -251,7 +251,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq todos position --to 1
+  run basecamp todos position --to 1
   assert_failure
   # Go returns generic "ID required", Bash returned "Todo ID required"
   assert_output_contains "ID required"
@@ -261,7 +261,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq todos position 123
+  run basecamp todos position 123
   assert_failure
   assert_output_contains "Position required"
 }
@@ -270,7 +270,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq comments
+  run basecamp comments
   assert_failure
   assert_output_contains "ID required"
 }
@@ -279,7 +279,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq comments show
+  run basecamp comments show
   assert_failure
   # Go returns generic "ID required", Bash returned "ID required"
   assert_output_contains "ID required"
@@ -291,7 +291,7 @@ load test_helper
 
   # Note: Go interprets "new content" as the ID positional arg, then fails on missing --content
   # This is a slight behavior difference from Bash but the error handling is correct
-  run bcq comments update
+  run basecamp comments update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -300,7 +300,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq comments update 123
+  run basecamp comments update 123
   assert_failure
   assert_output_contains "Content required"
 }
@@ -309,7 +309,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq messages
+  run basecamp messages
   assert_failure
   assert_output_contains "project"
 }
@@ -318,7 +318,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run bcq message
+  run basecamp message
   assert_failure
   assert_output_contains "Message subject required"
 }
@@ -330,7 +330,7 @@ load test_helper
   create_global_config '{"account_id": 99999}'
 
   # The info messages should go to stderr, stdout should be empty or JSON only
-  run bash -c "bcq search todos --json 2>/dev/null"
+  run bash -c "basecamp search todos --json 2>/dev/null"
   # If there's output, it should be valid JSON (starts with { or [)
   if [[ -n "$output" ]]; then
     assert_output_starts_with '{'
@@ -344,7 +344,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq todos --project
+  run basecamp todos --project
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'

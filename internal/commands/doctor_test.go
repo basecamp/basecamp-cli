@@ -286,7 +286,7 @@ func TestBuildDoctorBreadcrumbs(t *testing.T) {
 
 	// Should have one breadcrumb for auth login (deduplicated)
 	assert.Len(t, breadcrumbs, 1)
-	assert.Equal(t, "bcq auth login", breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp auth login", breadcrumbs[0].Cmd)
 }
 
 func TestBuildDoctorBreadcrumbsDeduplication(t *testing.T) {
@@ -315,7 +315,7 @@ func setupDoctorTestApp(t *testing.T, accountID string) (*appctx.App, *bytes.Buf
 	t.Helper()
 
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	buf := &bytes.Buffer{}
 	cfg := &config.Config{
@@ -433,4 +433,92 @@ func TestCheckCacheHealthDisabled(t *testing.T) {
 	check := checkCacheHealth(app, false)
 	assert.Equal(t, "pass", check.Status)
 	assert.Equal(t, "Disabled", check.Message)
+}
+
+func TestCheckLegacyInstall_DetectsLegacyCache(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	cacheBase := t.TempDir()
+	configBase := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	t.Setenv("XDG_CONFIG_HOME", configBase)
+
+	// Create legacy cache dir
+	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
+
+	check := checkLegacyInstall()
+	require.NotNil(t, check, "should detect legacy cache dir")
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, filepath.Join(cacheBase, "bcq"))
+	assert.Contains(t, check.Hint, "basecamp migrate")
+}
+
+func TestCheckLegacyInstall_DetectsLegacyTheme(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	cacheBase := t.TempDir()
+	configBase := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	t.Setenv("XDG_CONFIG_HOME", configBase)
+
+	// Create legacy theme dir
+	require.NoError(t, os.MkdirAll(filepath.Join(configBase, "bcq", "theme"), 0700))
+
+	check := checkLegacyInstall()
+	require.NotNil(t, check, "should detect legacy theme dir")
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, filepath.Join(configBase, "bcq", "theme"))
+}
+
+func TestCheckLegacyInstall_DetectsBothArtifacts(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	cacheBase := t.TempDir()
+	configBase := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	t.Setenv("XDG_CONFIG_HOME", configBase)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configBase, "bcq", "theme"), 0700))
+
+	check := checkLegacyInstall()
+	require.NotNil(t, check)
+	assert.Contains(t, check.Message, "bcq")
+	assert.Contains(t, check.Message, "theme")
+}
+
+func TestCheckLegacyInstall_NilWhenClean(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	check := checkLegacyInstall()
+	assert.Nil(t, check, "should return nil when no legacy artifacts exist")
+}
+
+func TestCheckLegacyInstall_NilWhenAlreadyMigrated(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	cacheBase := t.TempDir()
+	configBase := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	t.Setenv("XDG_CONFIG_HOME", configBase)
+
+	// Legacy artifacts exist
+	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
+
+	// But migration marker is present
+	markerDir := filepath.Join(configBase, "basecamp")
+	require.NoError(t, os.MkdirAll(markerDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(markerDir, ".migrated"), []byte("migrated\n"), 0600))
+
+	check := checkLegacyInstall()
+	assert.Nil(t, check, "should return nil when .migrated marker exists")
+}
+
+func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// With BASECAMP_NO_KEYRING set, even if legacy keyring entries existed,
+	// the function should not probe the keyring and should return nil
+	check := checkLegacyInstall()
+	assert.Nil(t, check)
 }

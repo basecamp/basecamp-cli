@@ -1,7 +1,9 @@
-# bcq Makefile
+SHELL := /bin/bash
+
+# basecamp Makefile
 
 # Binary name
-BINARY := bcq
+BINARY := basecamp
 
 # Build directory
 BUILD_DIR := ./bin
@@ -42,7 +44,7 @@ all: check
 # Build the binary
 .PHONY: build
 build:
-	$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/bcq
+	$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp
 
 # Build with PGO optimization (requires default.pgo)
 .PHONY: build-pgo
@@ -50,10 +52,10 @@ build-pgo:
 	@if [ ! -f $(PGO_PROFILE) ]; then \
 		echo "Warning: $(PGO_PROFILE) not found. Run 'make collect-profile' first."; \
 		echo "Building without PGO..."; \
-		$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/bcq; \
+		$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
 	else \
 		echo "Building with PGO optimization..."; \
-		$(GOBUILD) $(BUILD_FLAGS) $(PGO_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/bcq; \
+		$(GOBUILD) $(BUILD_FLAGS) $(PGO_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
 	fi
 
 # Build for all platforms
@@ -63,33 +65,33 @@ build-all: build-darwin build-linux build-windows build-bsd
 # Build for macOS
 .PHONY: build-darwin
 build-darwin:
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 ./cmd/bcq
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 ./cmd/bcq
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 ./cmd/basecamp
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 ./cmd/basecamp
 
 # Build for Linux
 .PHONY: build-linux
 build-linux:
-	GOOS=linux GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/bcq
-	GOOS=linux GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-arm64 ./cmd/bcq
+	GOOS=linux GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/basecamp
+	GOOS=linux GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-arm64 ./cmd/basecamp
 
 # Build for Windows
 .PHONY: build-windows
 build-windows:
-	GOOS=windows GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe ./cmd/bcq
-	GOOS=windows GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe ./cmd/bcq
+	GOOS=windows GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe ./cmd/basecamp
+	GOOS=windows GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe ./cmd/basecamp
 
 # Build for BSDs
 .PHONY: build-bsd
 build-bsd:
-	GOOS=freebsd GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-freebsd-amd64 ./cmd/bcq
-	GOOS=freebsd GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-freebsd-arm64 ./cmd/bcq
-	GOOS=openbsd GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-openbsd-amd64 ./cmd/bcq
-	GOOS=openbsd GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-openbsd-arm64 ./cmd/bcq
+	GOOS=freebsd GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-freebsd-amd64 ./cmd/basecamp
+	GOOS=freebsd GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-freebsd-arm64 ./cmd/basecamp
+	GOOS=openbsd GOARCH=amd64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-openbsd-amd64 ./cmd/basecamp
+	GOOS=openbsd GOARCH=arm64 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY)-openbsd-arm64 ./cmd/basecamp
 
 # Run tests
 .PHONY: test
 test:
-	BCQ_NO_KEYRING=1 $(GOTEST) -v ./...
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -v ./...
 
 # Run end-to-end tests against Go binary
 .PHONY: test-e2e
@@ -109,14 +111,14 @@ test-coverage:
 # Run all benchmarks
 .PHONY: bench
 bench:
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/...
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/...
 
 # Run benchmarks with CPU profiling (profiles first package only due to Go limitation)
 .PHONY: bench-cpu
 bench-cpu:
 	@mkdir -p profiles
 	@echo "Profiling internal/names (primary hot path)..."
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
 	@echo "CPU profile saved to profiles/cpu.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/cpu.pprof"
 	@echo ""
@@ -127,7 +129,7 @@ bench-cpu:
 bench-mem:
 	@mkdir -p profiles
 	@echo "Profiling internal/names (primary hot path)..."
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
 	@echo "Memory profile saved to profiles/mem.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/mem.pprof"
 	@echo ""
@@ -136,7 +138,7 @@ bench-mem:
 # Save current benchmarks as baseline for comparison
 .PHONY: bench-save
 bench-save:
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-baseline.txt
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-baseline.txt
 	@echo "Baseline saved to benchmarks-baseline.txt"
 
 # Compare current benchmarks against baseline
@@ -146,7 +148,7 @@ bench-compare:
 		echo "No baseline found. Run 'make bench-save' first."; \
 		exit 1; \
 	fi
-	BCQ_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-current.txt
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-current.txt
 	@command -v benchstat >/dev/null 2>&1 || go install golang.org/x/perf/cmd/benchstat@latest
 	benchstat benchmarks-baseline.txt benchmarks-current.txt
 
@@ -235,11 +237,32 @@ clean-all: clean clean-pgo
 # Install to GOPATH/bin
 .PHONY: install
 install:
-	$(GOCMD) install ./cmd/bcq
+	$(GOCMD) install ./cmd/basecamp
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e
+check: fmt-check vet lint test test-e2e check-naming
+
+# Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
+.PHONY: check-naming
+check-naming:
+	@HITS=$$(rg -n --hidden --type-add 'bats:*.bats' -t go -t sh -t yaml -t json -t md -t bats -t toml 'bcq|BCQ' -g '!.git/' . 2>/dev/null) || true; \
+	if [ -n "$$HITS" ]; then \
+		while IFS= read -r line; do \
+			line=$${line%%\#*}; \
+			line=$$(echo "$$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//'); \
+			[ -z "$$line" ] && continue; \
+			HITS=$$(echo "$$HITS" | grep -v -F "$$line" || true); \
+		done < .naming-allowlist; \
+	fi; \
+	if [ -n "$$HITS" ]; then \
+		echo "ERROR: Legacy bcq/BCQ references found outside allowlist:"; \
+		echo "$$HITS"; \
+		echo ""; \
+		echo "Either rename the reference or add the path to .naming-allowlist"; \
+		exit 1; \
+	fi; \
+	echo "Naming check passed (no stale bcq/BCQ references)"
 
 # Development: build and run
 .PHONY: run
@@ -290,7 +313,7 @@ tools:
 # Show help
 .PHONY: help
 help:
-	@echo "bcq Makefile targets:"
+	@echo "basecamp Makefile targets:"
 	@echo ""
 	@echo "Build:"
 	@echo "  build          Build the binary"
@@ -336,6 +359,7 @@ help:
 	@echo "  clean-all      Remove all artifacts (including PGO)"
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  check          Run all checks (local CI gate)"
+	@echo "  check-naming   Guard against stale bcq/BCQ references"
 	@echo "  run            Build and run"
 	@echo ""
 	@echo "Security:"

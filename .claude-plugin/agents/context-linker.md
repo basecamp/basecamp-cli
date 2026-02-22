@@ -32,13 +32,13 @@ Look for Basecamp references in:
 
 ```bash
 # Link current commit to a todo
-bcq comment "Commit $(git rev-parse --short HEAD): $(git log -1 --format=%s)" --on <todo_id>
+basecamp comment "Commit $(git rev-parse --short HEAD): $(git log -1 --format=%s)" --on <todo_id>
 
 # Link a PR
-bcq comment "PR: <pr_url>" --on <todo_id>
+basecamp comment "PR: <pr_url>" --on <todo_id>
 
 # Complete a todo
-bcq done <todo_id>
+basecamp done <todo_id>
 ```
 
 ## Workflow: On Commit
@@ -55,7 +55,7 @@ When user commits code:
    ```bash
    COMMIT=$(git rev-parse --short HEAD)
    MSG=$(git log -1 --format=%s)
-   bcq comment "Commit $COMMIT: $MSG" --on $TODO_ID
+   basecamp comment "Commit $COMMIT: $MSG" --on $TODO_ID
    ```
 
 ## Workflow: On PR Creation
@@ -73,7 +73,7 @@ When a PR is merged:
 1. Find all referenced todos
 2. Offer to mark them complete:
    ```bash
-   bcq done <todo_id>
+   basecamp done <todo_id>
    ```
 
 ## Project Context
@@ -97,7 +97,7 @@ Agent: I see you're on branch `fix/BC-42567-auth-bug`.
 
 User: yes
 
-Agent: [runs: bcq comment "Commit abc1234: Fix OAuth token refresh" --on 42567]
+Agent: [runs: basecamp comment "Commit abc1234: Fix OAuth token refresh" --on 42567]
        Done! Comment added to todo #42567.
 
        Should I mark this todo as complete?

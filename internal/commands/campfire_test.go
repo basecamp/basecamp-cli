@@ -97,7 +97,7 @@ func executeCampfireCommand(cmd *cobra.Command, app *appctx.App, args ...string)
 // not wrapped in HTML tags. The Basecamp API forces campfire lines to text-only and
 // HTML-escapes the content, so sending HTML would display literal tags.
 func TestCampfirePostContentIsPlainText(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockCampfireCreateTransport{}
 	buf := &bytes.Buffer{}
@@ -153,7 +153,7 @@ func TestCampfirePostContentIsPlainText(t *testing.T) {
 // TestCampfirePostContentTypeSentInPayload verifies that --content-type is passed through
 // to the API request body as content_type.
 func TestCampfirePostContentTypeSentInPayload(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockCampfireCreateTransport{}
 	buf := &bytes.Buffer{}
@@ -197,7 +197,7 @@ func TestCampfirePostContentTypeSentInPayload(t *testing.T) {
 // TestCampfirePostDefaultOmitsContentType verifies that content_type is not sent
 // when --content-type is not specified.
 func TestCampfirePostDefaultOmitsContentType(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockCampfireCreateTransport{}
 	buf := &bytes.Buffer{}
@@ -240,10 +240,10 @@ func TestCampfirePostDefaultOmitsContentType(t *testing.T) {
 }
 
 // TestCampfireNumericIDPostContentType exercises the numeric-ID dispatch path:
-// `bcq campfire <id> post <msg> --content-type text/html` which goes through the
+// `basecamp campfire <id> post <msg> --content-type text/html` which goes through the
 // parent command's RunE rather than the post subcommand.
 func TestCampfireNumericIDPostContentType(t *testing.T) {
-	t.Setenv("BCQ_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockCampfireCreateTransport{}
 	buf := &bytes.Buffer{}

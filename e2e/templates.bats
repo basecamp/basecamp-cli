@@ -10,7 +10,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates show
+  run basecamp templates show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -22,7 +22,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates create
+  run basecamp templates create
   assert_failure
   assert_output_contains "Template name is required"
 }
@@ -31,7 +31,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates create --name
+  run basecamp templates create --name
   assert_failure
   assert_output_contains "--name requires a value"
 }
@@ -40,7 +40,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates create "Test" --description
+  run basecamp templates create "Test" --description
   assert_failure
   assert_output_contains "--description requires a value"
 }
@@ -52,7 +52,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates update
+  run basecamp templates update
   assert_failure
   assert_output_contains "ID required"
 }
@@ -61,7 +61,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates update 123
+  run basecamp templates update 123
   assert_failure
   assert_output_contains "Use --name"
 }
@@ -73,7 +73,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates delete
+  run basecamp templates delete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -85,7 +85,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates construct
+  run basecamp templates construct
   assert_failure
   assert_output_contains "ID required"
 }
@@ -94,7 +94,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates construct 123
+  run basecamp templates construct 123
   assert_failure
   assert_output_contains "name required"
 }
@@ -106,7 +106,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates construction
+  run basecamp templates construction
   assert_failure
   assert_output_contains "ID required"
 }
@@ -115,7 +115,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates construction 123
+  run basecamp templates construction 123
   # Cobra returns "accepts 2 arg(s)" error
   assert_failure
 }
@@ -127,7 +127,7 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates --status
+  run basecamp templates --status
   assert_failure
   assert_output_contains "--status requires a value"
 }
@@ -139,9 +139,9 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates --help
+  run basecamp templates --help
   assert_success
-  assert_output_contains "bcq templates"
+  assert_output_contains "basecamp templates"
   assert_output_contains "construct"
   assert_output_contains "construction"
 }
@@ -153,6 +153,6 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bcq templates foobar
+  run basecamp templates foobar
   # Command may show help or require project - just verify it runs
 }

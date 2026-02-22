@@ -15,7 +15,7 @@ func NewMCPCmd() *cobra.Command {
 
 The MCP server allows AI assistants like Claude to interact with Basecamp.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return output.ErrUsageHint("Action required", "Run: bcq mcp --help")
+			return output.ErrUsageHint("Action required", "Run: basecamp mcp --help")
 		},
 	}
 

@@ -1,7 +1,7 @@
-# Gitleaks configuration for bcq
+# Gitleaks configuration for Basecamp CLI
 # https://github.com/gitleaks/gitleaks#configuration
 
-title = "bcq gitleaks config"
+title = "Basecamp CLI gitleaks config"
 
 # Allowlist specific false positives
 [allowlist]

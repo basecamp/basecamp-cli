@@ -195,11 +195,11 @@ func ensurePersonInProject(cmd *cobra.Command, app *appctx.App, projectID string
 //
 // This allows users to paste URLs directly:
 //
-//	bcq todos show https://3.basecamp.com/123/buckets/456/todos/789
+//	basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789
 //
 // Instead of having to manually extract the ID:
 //
-//	bcq todos show 789 --in 456
+//	basecamp todos show 789 --in 456
 func extractID(arg string) string {
 	return urlarg.ExtractID(arg)
 }

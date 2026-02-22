@@ -50,7 +50,7 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 			if effectiveType == "" {
 				return output.ErrUsageHint(
 					"Type required",
-					"Use --type or shorthand: bcq recordings todos|messages|documents|comments|cards|uploads",
+					"Use --type or shorthand: basecamp recordings todos|messages|documents|comments|cards|uploads",
 				)
 			}
 
@@ -130,7 +130,7 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 			if effectiveType == "" {
 				return output.ErrUsageHint(
 					"Type required",
-					"Use --type or shorthand: bcq recordings list todos|messages|documents|comments|cards|uploads",
+					"Use --type or shorthand: basecamp recordings list todos|messages|documents|comments|cards|uploads",
 				)
 			}
 
@@ -207,7 +207,7 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         "bcq show <id> --project <bucket.id>",
+				Cmd:         "basecamp show <id> --project <bucket.id>",
 				Description: "Show recording (use bucket.id from result)",
 			},
 		),
@@ -229,8 +229,8 @@ func newRecordingsTrashCmd(project *string) *cobra.Command {
 		Long: `Move a recording to the trash.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq recordings trash 789 --in my-project
-  bcq recordings trash https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp recordings trash 789 --in my-project
+  basecamp recordings trash https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -248,8 +248,8 @@ func newRecordingsArchiveCmd(project *string) *cobra.Command {
 		Long: `Archive a recording to remove it from active view.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq recordings archive 789 --in my-project
-  bcq recordings archive https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp recordings archive 789 --in my-project
+  basecamp recordings archive https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -267,8 +267,8 @@ func newRecordingsRestoreCmd(project *string) *cobra.Command {
 		Long: `Restore a recording from trash or archive to active status.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq recordings restore 789 --in my-project
-  bcq recordings restore https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp recordings restore 789 --in my-project
+  basecamp recordings restore https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -358,7 +358,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingIDStr, resolvedProjectIDStr),
+				Cmd:         fmt.Sprintf("basecamp show %s --in %s", recordingIDStr, resolvedProjectIDStr),
 				Description: "View recording",
 			},
 		),
@@ -376,8 +376,8 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 		Long: `Set whether a recording is visible to clients.
 
 You can pass either a recording ID or a Basecamp URL:
-  bcq recordings visibility 789 --visible --in my-project
-  bcq recordings visibility https://3.basecamp.com/123/buckets/456/recordings/789 --visible`,
+  basecamp recordings visibility 789 --visible --in my-project
+  basecamp recordings visibility https://3.basecamp.com/123/buckets/456/recordings/789 --visible`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -449,7 +449,7 @@ You can pass either a recording ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("bcq show %s --in %s", recordingIDStr, resolvedProjectIDStr),
+						Cmd:         fmt.Sprintf("basecamp show %s --in %s", recordingIDStr, resolvedProjectIDStr),
 						Description: "View recording",
 					},
 				),
