@@ -16,6 +16,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -31,6 +32,9 @@ type todosKeyMap struct {
 	SwitchTab key.Binding
 	EditDesc  key.Binding
 	Boost     key.Binding
+	DueDate   key.Binding
+	Assign    key.Binding
+	Unassign  key.Binding
 }
 
 func defaultTodosKeyMap() todosKeyMap {
@@ -51,6 +55,18 @@ func defaultTodosKeyMap() todosKeyMap {
 		EditDesc: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "edit description"),
+		),
+		DueDate: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "due date"),
+		),
+		Assign: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "assign"),
+		),
+		Unassign: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", "unassign"),
 		),
 	}
 }
@@ -91,11 +107,31 @@ type Todos struct {
 	editingDesc  bool
 	descComposer *widget.Composer
 	descTodoID   int64
+
+	// Due date setting
+	settingDue bool
+	dueInput   textinput.Model
+
+	// Assigning
+	assigning   bool
+	assignInput textinput.Model
 }
 
 // todoDescUpdatedMsg is sent after a todo description is updated.
 type todoDescUpdatedMsg struct {
 	todoID     int64
+	todolistID int64
+	err        error
+}
+
+// todoDueUpdatedMsg is sent after a todo due date is set or cleared.
+type todoDueUpdatedMsg struct {
+	todolistID int64
+	err        error
+}
+
+// todoAssignResultMsg is sent after a todo assignee is set or cleared.
+type todoAssignResultMsg struct {
 	todolistID int64
 	err        error
 }
@@ -170,7 +206,7 @@ func (v *Todos) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Todos) InputActive() bool {
-	return v.creating || v.editingDesc || v.listLists.Filtering() || v.listTodos.Filtering()
+	return v.creating || v.editingDesc || v.settingDue || v.assigning || v.listLists.Filtering() || v.listTodos.Filtering()
 }
 
 // StartFilter implements workspace.Filterable.
@@ -184,7 +220,7 @@ func (v *Todos) StartFilter() {
 
 // IsModal implements workspace.ModalActive.
 func (v *Todos) IsModal() bool {
-	return v.editingDesc
+	return v.editingDesc || v.settingDue || v.assigning
 }
 
 // ShortHelp implements View.
@@ -205,6 +241,8 @@ func (v *Todos) ShortHelp() []key.Binding {
 		v.keys.Toggle,
 		v.keys.New,
 		v.keys.EditDesc,
+		v.keys.DueDate,
+		v.keys.Assign,
 		v.keys.Boost,
 	}
 }
@@ -314,6 +352,28 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			workspace.SetStatus("Description updated", false),
 		)
 
+	case todoDueUpdatedMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "updating due date")
+		}
+		todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, msg.todolistID)
+		todosPool.Invalidate()
+		return v, tea.Batch(
+			todosPool.Fetch(v.session.Hub().ProjectContext()),
+			workspace.SetStatus("Due date updated", false),
+		)
+
+	case todoAssignResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "updating assignee")
+		}
+		todosPool := v.session.Hub().Todos(v.session.Scope().ProjectID, msg.todolistID)
+		todosPool.Invalidate()
+		return v, tea.Batch(
+			todosPool.Fetch(v.session.Hub().ProjectContext()),
+			workspace.SetStatus("Assignee updated", false),
+		)
+
 	case widget.ComposerSubmitMsg:
 		if msg.Err != nil {
 			return v, workspace.ReportError(msg.Err, "composing description")
@@ -346,6 +406,12 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if v.editingDesc {
 			return v, v.handleEditDescKey(msg)
+		}
+		if v.settingDue {
+			return v, v.handleSettingDueKey(msg)
+		}
+		if v.assigning {
+			return v, v.handleAssigningKey(msg)
 		}
 		if v.creating {
 			return v, v.handleCreatingKey(msg)
@@ -390,6 +456,21 @@ func (v *Todos) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, v.keys.EditDesc):
 		if v.focus == todosPaneRight {
 			return v.startEditDescription()
+		}
+
+	case key.Matches(msg, v.keys.DueDate):
+		if v.focus == todosPaneRight {
+			return v.startSettingDue()
+		}
+
+	case key.Matches(msg, v.keys.Assign):
+		if v.focus == todosPaneRight && v.selectedListID != 0 {
+			return v.startAssigning()
+		}
+
+	case key.Matches(msg, v.keys.Unassign):
+		if v.focus == todosPaneRight {
+			return v.clearAssignees()
 		}
 
 	case key.Matches(msg, v.keys.Boost):
@@ -661,6 +742,20 @@ func (v *Todos) renderRightPanel() string {
 		b.WriteString(prefix + v.textInput.View())
 	}
 
+	if v.settingDue {
+		b.WriteString("\n")
+		theme := v.styles.Theme()
+		prefix := lipgloss.NewStyle().Foreground(theme.Muted).Render("  Due: ")
+		b.WriteString(prefix + v.dueInput.View())
+	}
+
+	if v.assigning {
+		b.WriteString("\n")
+		theme := v.styles.Theme()
+		prefix := lipgloss.NewStyle().Foreground(theme.Muted).Render("  Assign: ")
+		b.WriteString(prefix + v.assignInput.View())
+	}
+
 	if v.editingDesc {
 		b.WriteString("\n")
 		theme := v.styles.Theme()
@@ -763,5 +858,183 @@ func (v *Todos) boostSelectedTodo() tea.Cmd {
 				Title:       item.Title,
 			},
 		}
+	}
+}
+
+// -- Due date --
+
+func (v *Todos) startSettingDue() tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	v.settingDue = true
+	v.dueInput = textinput.New()
+	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
+	v.dueInput.CharLimit = 64
+	v.dueInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Todos) handleSettingDueKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		input := strings.TrimSpace(v.dueInput.Value())
+		v.settingDue = false
+		if input == "" {
+			return v.clearDueDate()
+		}
+		parsed := dateparse.Parse(input)
+		if !dateparse.IsValid(input) {
+			return workspace.SetStatus("Unrecognized date: "+input, true)
+		}
+		return v.setDueDate(parsed)
+	case "esc":
+		v.settingDue = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.dueInput, cmd = v.dueInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Todos) setDueDate(dueOn string) tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	var todoID int64
+	fmt.Sscanf(item.ID, "%d", &todoID)
+
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	todolistID := v.selectedListID
+	return func() tea.Msg {
+		err := hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, todoID,
+			&basecamp.UpdateTodoRequest{DueOn: dueOn})
+		return todoDueUpdatedMsg{todolistID: todolistID, err: err}
+	}
+}
+
+func (v *Todos) clearDueDate() tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	var todoID int64
+	fmt.Sscanf(item.ID, "%d", &todoID)
+
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	todolistID := v.selectedListID
+	return func() tea.Msg {
+		err := hub.ClearTodoDueOn(ctx, scope.AccountID, scope.ProjectID, todoID)
+		return todoDueUpdatedMsg{todolistID: todolistID, err: err}
+	}
+}
+
+// -- Assign --
+
+func (v *Todos) startAssigning() tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	v.assigning = true
+	v.assignInput = textinput.New()
+	v.assignInput.Placeholder = "assign to (name)..."
+	v.assignInput.CharLimit = 128
+	v.assignInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Todos) handleAssigningKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		input := strings.TrimSpace(v.assignInput.Value())
+		v.assigning = false
+		if input == "" {
+			return nil
+		}
+		return v.assignTodo(input)
+	case "esc":
+		v.assigning = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.assignInput, cmd = v.assignInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Todos) assignTodo(nameQuery string) tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	var todoID int64
+	fmt.Sscanf(item.ID, "%d", &todoID)
+
+	// Resolve name from People pool
+	peoplePool := v.session.Hub().People()
+	snap := peoplePool.Get()
+	if !snap.Usable() {
+		return workspace.SetStatus("People not loaded yet — try again", true)
+	}
+
+	q := strings.ToLower(nameQuery)
+	var matches []data.PersonInfo
+	for _, p := range snap.Data {
+		if strings.Contains(strings.ToLower(p.Name), q) {
+			matches = append(matches, p)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return workspace.SetStatus("No one found matching \""+nameQuery+"\"", true)
+	case 1:
+		// exact match
+	default:
+		names := make([]string, 0, len(matches))
+		for _, m := range matches {
+			names = append(names, m.Name)
+		}
+		if len(names) > 4 {
+			names = append(names[:4], "...")
+		}
+		return workspace.SetStatus("Multiple matches: "+strings.Join(names, ", ")+" — be more specific", true)
+	}
+
+	matched := matches[0]
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	todolistID := v.selectedListID
+	return func() tea.Msg {
+		err := hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, todoID,
+			&basecamp.UpdateTodoRequest{AssigneeIDs: []int64{matched.ID}})
+		return todoAssignResultMsg{todolistID: todolistID, err: err}
+	}
+}
+
+func (v *Todos) clearAssignees() tea.Cmd {
+	item := v.listTodos.Selected()
+	if item == nil {
+		return nil
+	}
+	var todoID int64
+	fmt.Sscanf(item.ID, "%d", &todoID)
+
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := hub.ProjectContext()
+	todolistID := v.selectedListID
+	return func() tea.Msg {
+		err := hub.ClearTodoAssignees(ctx, scope.AccountID, scope.ProjectID, todoID)
+		return todoAssignResultMsg{todolistID: todolistID, err: err}
 	}
 }

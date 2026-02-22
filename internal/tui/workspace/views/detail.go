@@ -16,9 +16,11 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
@@ -65,6 +67,9 @@ type subscribeResultMsg struct {
 	err        error
 }
 
+type detailDueUpdatedMsg struct{ err error }
+type detailAssignResultMsg struct{ err error }
+
 type trashTimeoutMsg struct{}
 type trashResultMsg struct{ err error }
 
@@ -90,6 +95,12 @@ type Detail struct {
 	// Inline title editing
 	editing   bool
 	editInput textinput.Model
+
+	// Due date / assign inline inputs
+	settingDue  bool
+	dueInput    textinput.Model
+	assigning   bool
+	assignInput textinput.Model
 
 	// Double-press trash confirmation
 	trashPending bool
@@ -151,12 +162,12 @@ func (v *Detail) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Detail) InputActive() bool {
-	return v.composing || v.editing
+	return v.composing || v.editing || v.settingDue || v.assigning
 }
 
 // IsModal implements workspace.ModalActive.
 func (v *Detail) IsModal() bool {
-	return v.composing || v.editing
+	return v.composing || v.editing || v.settingDue || v.assigning
 }
 
 func (v *Detail) ShortHelp() []key.Binding {
@@ -174,7 +185,11 @@ func (v *Detail) ShortHelp() []key.Binding {
 		if v.data.completed {
 			verb = "reopen"
 		}
-		hints = append(hints, key.NewBinding(key.WithKeys("x"), key.WithHelp("x", verb)))
+		hints = append(hints,
+			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", verb)),
+			key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "due date")),
+			key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "assign")),
+		)
 	}
 	hints = append(hints,
 		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit title")),
@@ -315,6 +330,22 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, workspace.SetStatus(verb, false)
 
+	case detailDueUpdatedMsg:
+		v.settingDue = false
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "updating due date")
+		}
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Due date updated", false))
+
+	case detailAssignResultMsg:
+		v.assigning = false
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "updating assignee")
+		}
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Assignee updated", false))
+
 	case trashResultMsg:
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "trashing recording")
@@ -346,6 +377,12 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.editing {
 		return v.handleEditingKey(msg)
 	}
+	if v.settingDue {
+		return v.handleDetailSettingDueKey(msg)
+	}
+	if v.assigning {
+		return v.handleDetailAssigningKey(msg)
+	}
 	if v.composing {
 		return v.handleComposingKey(msg)
 	}
@@ -355,7 +392,21 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.trashPending = false
 	}
 
+	isTodo := v.data != nil && strings.EqualFold(v.data.recordType, "Todo")
+
 	switch msg.String() {
+	case "D":
+		if isTodo {
+			return v.startDetailSettingDue()
+		}
+	case "a":
+		if isTodo {
+			return v.startDetailAssigning()
+		}
+	case "A":
+		if isTodo {
+			return v.clearDetailAssignees()
+		}
 	case "e":
 		return v.startEditTitle()
 	case "s":
@@ -448,6 +499,152 @@ func (v *Detail) goToProject() tea.Cmd {
 		return workspace.SetStatus("No project context", false)
 	}
 	return workspace.Navigate(workspace.ViewDock, scope)
+}
+
+// -- Due date (Detail) --
+
+func (v *Detail) startDetailSettingDue() tea.Cmd {
+	if v.data == nil {
+		return nil
+	}
+	v.settingDue = true
+	v.dueInput = textinput.New()
+	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
+	v.dueInput.CharLimit = 64
+	v.dueInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Detail) handleDetailSettingDueKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		input := strings.TrimSpace(v.dueInput.Value())
+		v.settingDue = false
+		if input == "" {
+			return v.clearDetailDueDate()
+		}
+		if !dateparse.IsValid(input) {
+			return workspace.SetStatus("Unrecognized date: "+input, true)
+		}
+		return v.setDetailDueDate(dateparse.Parse(input))
+	case "esc":
+		v.settingDue = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.dueInput, cmd = v.dueInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Detail) setDetailDueDate(dueOn string) tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	recordingID := v.recordingID
+	return func() tea.Msg {
+		err := hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
+			&basecamp.UpdateTodoRequest{DueOn: dueOn})
+		return detailDueUpdatedMsg{err: err}
+	}
+}
+
+func (v *Detail) clearDetailDueDate() tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	recordingID := v.recordingID
+	return func() tea.Msg {
+		err := hub.ClearTodoDueOn(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		return detailDueUpdatedMsg{err: err}
+	}
+}
+
+// -- Assign (Detail) --
+
+func (v *Detail) startDetailAssigning() tea.Cmd {
+	if v.data == nil {
+		return nil
+	}
+	v.assigning = true
+	v.assignInput = textinput.New()
+	v.assignInput.Placeholder = "assign to (name)..."
+	v.assignInput.CharLimit = 128
+	v.assignInput.Focus()
+	return textinput.Blink
+}
+
+func (v *Detail) handleDetailAssigningKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		input := strings.TrimSpace(v.assignInput.Value())
+		v.assigning = false
+		if input == "" {
+			return nil
+		}
+		return v.assignDetailTodo(input)
+	case "esc":
+		v.assigning = false
+		return nil
+	default:
+		var cmd tea.Cmd
+		v.assignInput, cmd = v.assignInput.Update(msg)
+		return cmd
+	}
+}
+
+func (v *Detail) assignDetailTodo(nameQuery string) tea.Cmd {
+	peoplePool := v.session.Hub().People()
+	snap := peoplePool.Get()
+	if !snap.Usable() {
+		return workspace.SetStatus("People not loaded yet — try again", true)
+	}
+
+	q := strings.ToLower(nameQuery)
+	var matches []data.PersonInfo
+	for _, p := range snap.Data {
+		if strings.Contains(strings.ToLower(p.Name), q) {
+			matches = append(matches, p)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return workspace.SetStatus("No one found matching \""+nameQuery+"\"", true)
+	case 1:
+		// exact match
+	default:
+		names := make([]string, 0, len(matches))
+		for _, m := range matches {
+			names = append(names, m.Name)
+		}
+		if len(names) > 4 {
+			names = append(names[:4], "...")
+		}
+		return workspace.SetStatus("Multiple matches: "+strings.Join(names, ", ")+" — be more specific", true)
+	}
+
+	matched := matches[0]
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	recordingID := v.recordingID
+	return func() tea.Msg {
+		err := hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
+			&basecamp.UpdateTodoRequest{AssigneeIDs: []int64{matched.ID}})
+		return detailAssignResultMsg{err: err}
+	}
+}
+
+func (v *Detail) clearDetailAssignees() tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	recordingID := v.recordingID
+	return func() tea.Msg {
+		err := hub.ClearTodoAssignees(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		return detailAssignResultMsg{err: err}
+	}
 }
 
 func (v *Detail) startEditTitle() tea.Cmd {
@@ -607,6 +804,16 @@ func (v *Detail) View() string {
 		theme := v.styles.Theme()
 		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Title: ")
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.editInput.View())
+	}
+	if v.settingDue {
+		theme := v.styles.Theme()
+		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Due: ")
+		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.dueInput.View())
+	}
+	if v.assigning {
+		theme := v.styles.Theme()
+		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Assign: ")
+		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.assignInput.View())
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(view)
 }

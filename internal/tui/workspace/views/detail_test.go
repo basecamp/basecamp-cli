@@ -3,6 +3,7 @@ package views
 import (
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -345,6 +346,149 @@ func TestDetail_Subscribe_Toggle(t *testing.T) {
 	require.True(t, ok, "cmd should produce subscribeResultMsg")
 	assert.False(t, result.subscribed, "should request unsubscribe when currently subscribed")
 	assert.Error(t, result.err)
+}
+
+// -- Due date tests --
+
+func TestDetail_DueDate_OpensInput_ForTodo(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	require.NotNil(t, cmd, "D should return blink cmd")
+	assert.True(t, v.settingDue)
+	assert.True(t, v.InputActive())
+	assert.True(t, v.IsModal())
+}
+
+func TestDetail_DueDate_Ignored_ForMessage(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	assert.Nil(t, cmd, "D on Message should do nothing")
+	assert.False(t, v.settingDue)
+}
+
+func TestDetail_DueDate_EscCancels(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.settingDue = true
+
+	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd)
+	assert.False(t, v.settingDue)
+}
+
+func TestDetail_DueDate_EnterSubmits(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.settingDue = true
+	v.dueInput = newDetailTextInput("tomorrow")
+
+	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	assert.False(t, v.settingDue)
+
+	msg := cmd()
+	result, ok := msg.(detailDueUpdatedMsg)
+	require.True(t, ok, "cmd should produce detailDueUpdatedMsg")
+	assert.Error(t, result.err) // nil SDK
+}
+
+func TestDetail_DueDate_EmptyClears(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.settingDue = true
+	v.dueInput = newDetailTextInput("")
+
+	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	result, ok := msg.(detailDueUpdatedMsg)
+	require.True(t, ok)
+	assert.Error(t, result.err) // nil SDK
+}
+
+func TestDetail_DueDate_InvalidDate(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.settingDue = true
+	v.dueInput = newDetailTextInput("not-a-date")
+
+	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	status, ok := msg.(workspace.StatusMsg)
+	require.True(t, ok, "invalid date should produce StatusMsg")
+	assert.Contains(t, status.Text, "Unrecognized date")
+}
+
+// -- Assign tests --
+
+func TestDetail_Assign_OpensInput_ForTodo(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	cmd := v.handleKey(runeKey('a'))
+	require.NotNil(t, cmd, "a should return blink cmd")
+	assert.True(t, v.assigning)
+	assert.True(t, v.InputActive())
+}
+
+func TestDetail_Assign_Ignored_ForMessage(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	cmd := v.handleKey(runeKey('a'))
+	assert.Nil(t, cmd, "a on Message should do nothing")
+	assert.False(t, v.assigning)
+}
+
+func TestDetail_Assign_EscCancels(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.assigning = true
+
+	cmd := v.handleDetailAssigningKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd)
+	assert.False(t, v.assigning)
+}
+
+func TestDetail_Unassign_Dispatches_ForTodo(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	require.NotNil(t, cmd, "A should return a cmd")
+
+	msg := cmd()
+	result, ok := msg.(detailAssignResultMsg)
+	require.True(t, ok, "cmd should produce detailAssignResultMsg")
+	assert.Error(t, result.err) // nil SDK
+}
+
+func TestDetail_Unassign_Ignored_ForMessage(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	assert.Nil(t, cmd, "A on Message should do nothing")
+}
+
+// -- ShortHelp due/assign hints --
+
+func TestDetail_ShortHelp_ShowsDueAndAssign_ForTodo(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	hints := v.ShortHelp()
+
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "due date", keys["D"])
+	assert.Equal(t, "assign", keys["a"])
+}
+
+func TestDetail_ShortHelp_HidesDueAndAssign_ForMessage(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	hints := v.ShortHelp()
+
+	for _, h := range hints {
+		assert.NotEqual(t, "D", h.Help().Key, "Message should not show D hint")
+		assert.NotEqual(t, "a", h.Help().Key, "Message should not show a hint")
+	}
+}
+
+func newDetailTextInput(val string) textinput.Model {
+	ti := textinput.New()
+	ti.SetValue(val)
+	return ti
 }
 
 func TestDetail_FetchSubscriptionState(t *testing.T) {

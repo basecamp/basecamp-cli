@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -278,9 +279,153 @@ func TestTodos_EditingDesc_MakesModal(t *testing.T) {
 	assert.True(t, v.InputActive(), "InputActive should be true when editing description")
 }
 
+// --- Due date ---
+
+func TestTodos_DueDate_RequiresRightPane(t *testing.T) {
+	v := testTodosView()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	assert.Nil(t, cmd, "D on left pane should return nil")
+	assert.False(t, v.settingDue)
+}
+
+func TestTodos_DueDate_OpensInput(t *testing.T) {
+	v := testTodosViewWithTodos()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	require.NotNil(t, cmd, "D should return blink cmd")
+	assert.True(t, v.settingDue, "should be in settingDue mode")
+	assert.True(t, v.InputActive(), "InputActive should be true")
+	assert.True(t, v.IsModal(), "IsModal should be true")
+}
+
+func TestTodos_DueDate_EnterParsesDate(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.settingDue = true
+	v.dueInput = newTextInputWithValue("tomorrow")
+
+	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd, "enter with valid date should return cmd")
+	assert.False(t, v.settingDue, "settingDue should be cleared")
+
+	msg := cmd()
+	result, ok := msg.(todoDueUpdatedMsg)
+	require.True(t, ok, "cmd should produce todoDueUpdatedMsg")
+	assert.Equal(t, int64(10), result.todolistID)
+	// Error expected with nil SDK
+	assert.Error(t, result.err)
+}
+
+func TestTodos_DueDate_EmptyClears(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.settingDue = true
+	v.dueInput = newTextInputWithValue("")
+
+	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd, "empty enter should return clear cmd")
+	assert.False(t, v.settingDue)
+
+	msg := cmd()
+	result, ok := msg.(todoDueUpdatedMsg)
+	require.True(t, ok, "cmd should produce todoDueUpdatedMsg")
+	assert.Error(t, result.err)
+}
+
+func TestTodos_DueDate_InvalidDate(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.settingDue = true
+	v.dueInput = newTextInputWithValue("not-a-date")
+
+	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	assert.False(t, v.settingDue)
+
+	msg := cmd()
+	status, ok := msg.(workspace.StatusMsg)
+	require.True(t, ok, "invalid date should produce StatusMsg")
+	assert.Contains(t, status.Text, "Unrecognized date")
+}
+
+func TestTodos_DueDate_EscCancels(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.settingDue = true
+
+	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd)
+	assert.False(t, v.settingDue)
+}
+
+// --- Assign ---
+
+func TestTodos_Assign_RequiresRightPane(t *testing.T) {
+	v := testTodosView()
+	cmd := v.handleKey(runeKey('a'))
+	assert.Nil(t, cmd, "a on left pane should return nil")
+	assert.False(t, v.assigning)
+}
+
+func TestTodos_Assign_OpensInput(t *testing.T) {
+	v := testTodosViewWithTodos()
+	cmd := v.handleKey(runeKey('a'))
+	require.NotNil(t, cmd, "a should return blink cmd")
+	assert.True(t, v.assigning)
+	assert.True(t, v.InputActive())
+	assert.True(t, v.IsModal())
+}
+
+func TestTodos_Assign_EscCancels(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.assigning = true
+
+	cmd := v.handleAssigningKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd)
+	assert.False(t, v.assigning)
+}
+
+func TestTodos_Assign_EmptyEnterDoesNothing(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.assigning = true
+	v.assignInput = newTextInputWithValue("")
+
+	cmd := v.handleAssigningKey(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Nil(t, cmd, "empty name should return nil")
+	assert.False(t, v.assigning)
+}
+
+func TestTodos_Unassign_Dispatches(t *testing.T) {
+	v := testTodosViewWithTodos()
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	require.NotNil(t, cmd, "A should return a cmd")
+
+	msg := cmd()
+	result, ok := msg.(todoAssignResultMsg)
+	require.True(t, ok, "cmd should produce todoAssignResultMsg")
+	assert.Equal(t, int64(10), result.todolistID)
+	assert.Error(t, result.err)
+}
+
+// --- ShortHelp ---
+
+func TestTodos_ShortHelp_IncludesDueAndAssign(t *testing.T) {
+	v := testTodosView()
+	hints := v.ShortHelp()
+
+	keys := make(map[string]string)
+	for _, h := range hints {
+		keys[h.Help().Key] = h.Help().Desc
+	}
+	assert.Equal(t, "due date", keys["D"])
+	assert.Equal(t, "assign", keys["a"])
+}
+
 // --- Title ---
 
 func TestTodos_Title(t *testing.T) {
 	v := testTodosView()
 	assert.Equal(t, "Todos", v.Title())
+}
+
+// newTextInputWithValue creates a textinput with a preset value for testing.
+func newTextInputWithValue(val string) textinput.Model {
+	ti := textinput.New()
+	ti.SetValue(val)
+	return ti
 }

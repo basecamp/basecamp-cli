@@ -836,6 +836,30 @@ func (h *Hub) UpdateTodo(ctx context.Context, accountID string, projectID, todoI
 	return err
 }
 
+// ClearTodoDueOn clears the due date on a todo. Uses a raw Put to bypass
+// the SDK's omitempty on DueOn which prevents sending empty strings.
+func (h *Hub) ClearTodoDueOn(ctx context.Context, accountID string, projectID, todoID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	path := fmt.Sprintf("/buckets/%d/todos/%d.json", projectID, todoID)
+	_, err := client.Put(ctx, path, map[string]any{"due_on": nil})
+	return err
+}
+
+// ClearTodoAssignees clears all assignees on a todo. Uses a raw Put to bypass
+// the SDK's omitempty on AssigneeIDs which prevents sending empty slices.
+func (h *Hub) ClearTodoAssignees(ctx context.Context, accountID string, projectID, todoID int64) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	path := fmt.Sprintf("/buckets/%d/todos/%d.json", projectID, todoID)
+	_, err := client.Put(ctx, path, map[string]any{"assignee_ids": []int64{}})
+	return err
+}
+
 // UpdateCard updates a card's fields.
 func (h *Hub) UpdateCard(ctx context.Context, accountID string, projectID, cardID int64, req *basecamp.UpdateCardRequest) error {
 	client := h.multi.ClientFor(accountID)
