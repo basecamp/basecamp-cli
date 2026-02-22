@@ -165,6 +165,44 @@ func TestDefaultActions_ProjectScopeActions(t *testing.T) {
 	assert.True(t, names[":campfire"])
 	assert.True(t, names[":messages"])
 	assert.True(t, names[":cards"])
+	assert.True(t, names[":schedule"])
+	assert.True(t, names[":timeline"])
+	assert.True(t, names[":checkins"])
+	assert.True(t, names[":docs"])
+	assert.True(t, names[":forwards"])
+	assert.True(t, names[":compose"])
+}
+
+func TestDefaultActions_NewNavigationActions(t *testing.T) {
+	r := DefaultActions()
+
+	expected := []struct {
+		name     string
+		category string
+	}{
+		{":schedule", "project"},
+		{":timeline", "project"},
+		{":checkins", "project"},
+		{":docs", "project"},
+		{":forwards", "project"},
+		{":compose", "mutation"},
+	}
+
+	all := r.All()
+	nameMap := make(map[string]Action, len(all))
+	for _, a := range all {
+		nameMap[a.Name] = a
+	}
+
+	for _, exp := range expected {
+		a, ok := nameMap[exp.name]
+		require.True(t, ok, "action %s should exist in DefaultActions", exp.name)
+		assert.Equal(t, exp.category, a.Category, "action %s category", exp.name)
+		assert.Equal(t, ScopeProject, a.Scope, "action %s should require ScopeProject", exp.name)
+		assert.NotEmpty(t, a.Description, "action %s should have a description", exp.name)
+		assert.NotEmpty(t, a.Aliases, "action %s should have aliases", exp.name)
+		assert.NotNil(t, a.Execute, "action %s should have Execute", exp.name)
+	}
 }
 
 // -- :complete action tests --

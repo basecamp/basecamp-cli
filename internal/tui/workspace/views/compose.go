@@ -154,7 +154,34 @@ func (v *Compose) SetSize(w, h int) {
 
 // Init implements tea.Model.
 func (v *Compose) Init() tea.Cmd {
+	if v.boardID == 0 {
+		if id := v.findMessageBoardID(); id != 0 {
+			v.boardID = id
+		} else {
+			return workspace.SetStatus("No message board in this project", true)
+		}
+	}
 	return textinput.Blink
+}
+
+// findMessageBoardID scans the projects pool for the current project's dock
+// tools and returns the ID of the message_board tool, or 0 if not found.
+func (v *Compose) findMessageBoardID() int64 {
+	snap := v.session.Hub().Projects().Get()
+	if !snap.Usable() {
+		return 0
+	}
+	for _, p := range snap.Data {
+		if p.ID == v.projectID {
+			for _, tool := range p.Dock {
+				if tool.Name == "message_board" {
+					return tool.ID
+				}
+			}
+			return 0
+		}
+	}
+	return 0
 }
 
 // Update implements tea.Model.

@@ -236,6 +236,66 @@ func DefaultActions() *Registry {
 		},
 	})
 	r.Register(Action{
+		Name:        ":schedule",
+		Aliases:     []string{"calendar", "events"},
+		Description: "Open schedule",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewSchedule, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":timeline",
+		Aliases:     []string{"history", "log"},
+		Description: "Open timeline",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewTimeline, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":checkins",
+		Aliases:     []string{"check-ins", "automatic check-ins", "questions"},
+		Description: "Open automatic check-ins",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewCheckins, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":docs",
+		Aliases:     []string{"files", "documents", "vault"},
+		Description: "Open docs & files",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewDocsFiles, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":forwards",
+		Aliases:     []string{"email forwards", "emailforwards"},
+		Description: "Open forwards",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewForwards, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":compose",
+		Aliases:     []string{"new message", "post"},
+		Description: "Compose a message",
+		Category:    "mutation",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewCompose, s.Scope())
+		},
+	})
+	r.Register(Action{
 		Name:        ":open",
 		Aliases:     []string{"browser", "web"},
 		Description: "Open in browser",
