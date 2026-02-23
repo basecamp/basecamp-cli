@@ -121,6 +121,7 @@ func (v *Dock) ShortHelp() []key.Binding {
 		return filterHints()
 	}
 	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		v.keys.Todos,
 		v.keys.Campfire,
 		v.keys.Messages,

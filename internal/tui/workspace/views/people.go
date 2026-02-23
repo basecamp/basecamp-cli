@@ -61,6 +61,7 @@ func (v *People) ShortHelp() []key.Binding {
 		return filterHints()
 	}
 	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 	}
 }
@@ -132,7 +133,13 @@ func (v *People) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.loading {
 			return v, nil
 		}
-		return v, v.list.Update(msg)
+		keys := workspace.DefaultListKeyMap()
+		switch {
+		case key.Matches(msg, keys.Open):
+			return v, v.openSelectedPerson()
+		default:
+			return v, v.list.Update(msg)
+		}
 	}
 	return v, nil
 }
@@ -147,6 +154,16 @@ func (v *People) View() string {
 			Render(v.spinner.View() + " Loading people...")
 	}
 	return v.list.View()
+}
+
+func (v *People) openSelectedPerson() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	url := fmt.Sprintf("https://3.basecamp.com/%s/people/%s",
+		v.session.Scope().AccountID, item.ID)
+	return workspace.OpenURL(url)
 }
 
 // -- Data sync

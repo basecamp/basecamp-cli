@@ -378,6 +378,16 @@ func trashCmd(trashFn func() error) tea.Cmd {
 	}
 }
 
+// OpenURL opens the given URL in the default browser.
+func OpenURL(url string) tea.Cmd {
+	return func() tea.Msg {
+		if err := exec.Command("open", url).Start(); err != nil { //nolint:gosec,noctx
+			return ErrorMsg{Context: "open", Err: err}
+		}
+		return StatusMsg{Text: "Opened in browser"}
+	}
+}
+
 // openInBrowser builds a Basecamp URL from scope and opens it in the default browser.
 func openInBrowser(scope Scope) tea.Cmd {
 	var url string
