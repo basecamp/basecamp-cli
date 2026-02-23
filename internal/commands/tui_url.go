@@ -28,8 +28,9 @@ var urlPathToRecordingType = map[string]string{
 
 // bucketOnlyPattern matches project-level bucket URLs without a recording path.
 // urlarg.Parse doesn't match these since the SDK router expects a resource type.
+// Only accepts /buckets/{id} with optional trailing slash, query string, or fragment.
 var bucketOnlyPattern = regexp.MustCompile(
-	`^https?://(?:3\.)?basecamp\.com/(\d+)/buckets/(\d+)(?:/?\??[^/]*)?$`,
+	`^https?://(?:3\.)?basecamp\.com/(\d+)/buckets/(\d+)/?(?:\?[^/]*)?(?:#.*)?$`,
 )
 
 // parseBasecampURL extracts a ViewTarget and Scope from a Basecamp URL.
@@ -56,8 +57,11 @@ func parseBasecampURL(raw string) (workspace.ViewTarget, workspace.Scope, error)
 			return workspace.ViewDetail, scope, nil
 		}
 
-		// Project URL (/projects/{id})
-		return workspace.ViewDock, scope, nil
+		// Project URL (/projects/{id}) — but only if the router didn't extract
+		// an unrecognized type segment (e.g. /buckets/42/foobar).
+		if parsed.Type == "" || parsed.Type == "project" {
+			return workspace.ViewDock, scope, nil
+		}
 	}
 
 	// Fall back to bucket-only pattern (/buckets/{id} without recording)

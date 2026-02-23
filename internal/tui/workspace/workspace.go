@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -1183,9 +1184,11 @@ func (w *Workspace) View() string {
 }
 
 // isAuthError returns true if the error indicates an expired or invalid auth token.
-// Checks typed SDK errors first (HTTP 401), falling back to string matching.
+// Checks the typed SDK error code first, falling back to string matching for
+// errors that don't go through the SDK error path.
 func isAuthError(err error) bool {
-	if sdkErr := basecamp.AsError(err); sdkErr != nil && sdkErr.HTTPStatus == 401 {
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeAuth {
 		return true
 	}
 	s := err.Error()
