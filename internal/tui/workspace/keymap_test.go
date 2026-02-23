@@ -95,3 +95,18 @@ func TestApplyOverrides_BindingKeysUpdated(t *testing.T) {
 	require.Len(t, keys, 1)
 	assert.Equal(t, "ctrl+k", keys[0])
 }
+
+func TestShortHelp_IncludesHeyAndJump(t *testing.T) {
+	km := DefaultGlobalKeyMap()
+	hints := km.ShortHelp()
+
+	helpKeys := make([]string, 0, len(hints))
+	for _, b := range hints {
+		helpKeys = append(helpKeys, b.Help().Key)
+	}
+
+	assert.Contains(t, helpKeys, "ctrl+y", "ShortHelp should include Hey")
+	assert.Contains(t, helpKeys, "ctrl+j", "ShortHelp should include Jump")
+	assert.NotContains(t, helpKeys, "q", "ShortHelp should not include Quit")
+	assert.NotContains(t, helpKeys, "esc", "ShortHelp should not include Back")
+}

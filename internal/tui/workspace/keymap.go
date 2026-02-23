@@ -144,8 +144,9 @@ func DefaultListKeyMap() ListKeyMap {
 }
 
 // ShortHelp returns the global key bindings for the status bar.
+// The budget-aware renderer in the status bar shows as many as fit.
 func (k GlobalKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Back, k.Palette, k.Quit}
+	return []key.Binding{k.Help, k.Palette, k.Hey, k.Jump, k.AccountSwitch}
 }
 
 // FullHelp returns all global key bindings for the help overlay.
@@ -208,7 +209,10 @@ func ApplyOverrides(km *GlobalKeyMap, overrides map[string]string) {
 		if !field.IsValid() {
 			continue
 		}
-		binding := field.Interface().(key.Binding)
+		binding, ok := field.Interface().(key.Binding)
+		if !ok {
+			continue
+		}
 		helpInfo := binding.Help()
 		field.Set(reflect.ValueOf(key.NewBinding(
 			key.WithKeys(keyStr),
