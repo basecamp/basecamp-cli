@@ -541,6 +541,16 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, w.keys.SidebarFocus):
 		if w.sidebarActive() {
+			// If the view has a split pane, route tab to the view instead
+			// so it can cycle its internal panes. The sidebar is reachable
+			// via ctrl+b (which also cycles focus when already open).
+			if view := w.router.Current(); view != nil {
+				if sp, ok := view.(SplitPaneFocuser); ok && sp.HasSplitPane() {
+					updated, cmd := view.Update(msg)
+					w.replaceCurrentView(updated)
+					return w.stampCmd(cmd)
+				}
+			}
 			w.switchSidebarFocus()
 			return nil
 		}

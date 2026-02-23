@@ -95,6 +95,9 @@ func (v *Messages) Title() string {
 	return "Message Board"
 }
 
+// HasSplitPane implements workspace.SplitPaneFocuser.
+func (v *Messages) HasSplitPane() bool { return true }
+
 // ShortHelp implements View.
 func (v *Messages) ShortHelp() []key.Binding {
 	if v.list.Filtering() {

@@ -259,6 +259,9 @@ func (v *Todos) Title() string {
 	return "Todos"
 }
 
+// HasSplitPane implements workspace.SplitPaneFocuser.
+func (v *Todos) HasSplitPane() bool { return true }
+
 // InputActive implements workspace.InputCapturer.
 func (v *Todos) InputActive() bool {
 	return v.creating || v.editingDesc || v.settingDue || v.assigning ||

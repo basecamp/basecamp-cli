@@ -126,6 +126,9 @@ func (v *Checkins) Title() string {
 	return "Check-ins"
 }
 
+// HasSplitPane implements workspace.SplitPaneFocuser.
+func (v *Checkins) HasSplitPane() bool { return true }
+
 // ShortHelp implements View.
 func (v *Checkins) ShortHelp() []key.Binding {
 	if v.listQuestions.Filtering() || v.listAnswers.Filtering() {

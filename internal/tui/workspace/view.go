@@ -44,3 +44,10 @@ type ModalActive interface {
 type Filterable interface {
 	StartFilter()
 }
+
+// SplitPaneFocuser is an optional interface for views that use a split-pane
+// layout with internal tab-cycling. When the sidebar is open, the workspace
+// routes tab to the view instead of consuming it for sidebar focus switching.
+type SplitPaneFocuser interface {
+	HasSplitPane() bool
+}

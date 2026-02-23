@@ -97,6 +97,9 @@ func (v *Projects) Title() string {
 	return "Projects"
 }
 
+// HasSplitPane implements workspace.SplitPaneFocuser.
+func (v *Projects) HasSplitPane() bool { return true }
+
 // ShortHelp implements View.
 func (v *Projects) ShortHelp() []key.Binding {
 	if v.list.Filtering() || v.toolList.Filtering() {
