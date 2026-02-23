@@ -21,6 +21,10 @@ type Session struct {
 	multiStore *data.MultiStore
 	hub        *data.Hub
 
+	// Deep-link: initial navigation target set via CLI args.
+	initialTarget *ViewTarget
+	initialScope  *Scope
+
 	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -172,6 +176,26 @@ func NewTestSessionWithRecents(r *recents.Store) *Session {
 	s := NewTestSession()
 	s.recents = r
 	return s
+}
+
+// SetInitialView configures a deep-link target to navigate to on startup
+// instead of Home. Called from the tui command when a URL argument is provided.
+func (s *Session) SetInitialView(target ViewTarget, scope Scope) {
+	s.initialTarget = &target
+	s.initialScope = &scope
+}
+
+// ConsumeInitialView returns and clears the deep-link target, if any.
+// Returns (target, scope, true) when a deep-link was set, or (0, {}, false) otherwise.
+func (s *Session) ConsumeInitialView() (ViewTarget, Scope, bool) {
+	if s.initialTarget == nil {
+		return 0, Scope{}, false
+	}
+	target := *s.initialTarget
+	scope := *s.initialScope
+	s.initialTarget = nil
+	s.initialScope = nil
+	return target, scope, true
 }
 
 // Shutdown cancels the session context and tears down all Hub realms.

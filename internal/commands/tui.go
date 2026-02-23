@@ -15,9 +15,10 @@ import (
 // NewTUICmd creates the tui command for the persistent workspace.
 func NewTUICmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tui",
+		Use:   "tui [url]",
 		Short: "Launch the Basecamp workspace",
-		Long:  "Launch a persistent, full-screen terminal workspace for Basecamp.",
+		Long:  "Launch a persistent, full-screen terminal workspace for Basecamp.\nOptionally pass a Basecamp URL to jump directly to a project or recording.",
+		Args:  cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -33,6 +34,16 @@ func NewTUICmd() *cobra.Command {
 
 			session := workspace.NewSession(app)
 			defer session.Shutdown()
+
+			// Deep-link: parse URL argument and set initial navigation target.
+			if len(args) > 0 {
+				target, scope, err := parseBasecampURL(args[0])
+				if err != nil {
+					return err
+				}
+				session.SetInitialView(target, scope)
+			}
+
 			model := workspace.New(session, viewFactory)
 
 			p := tea.NewProgram(

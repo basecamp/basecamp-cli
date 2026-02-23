@@ -133,6 +133,15 @@ func (w *Workspace) Init() tea.Cmd {
 
 	cmds := []tea.Cmd{w.stampCmd(view.Init()), chrome.SetTerminalTitle("basecamp")}
 
+	// Deep-link: if a URL was passed via CLI args, navigate there after Home init.
+	if target, deepScope, ok := w.session.ConsumeInitialView(); ok {
+		// Merge account from session scope when the deep-link scope carries one.
+		if deepScope.AccountID == "" {
+			deepScope.AccountID = scope.AccountID
+		}
+		cmds = append(cmds, Navigate(target, deepScope))
+	}
+
 	// Fetch account name asynchronously
 	if w.session.HasAccount() {
 		cmds = append(cmds, w.stampCmd(w.fetchAccountName()))
