@@ -12,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/chrome"
@@ -322,7 +324,9 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w, sidebarCmd
 
 	case RefreshMsg:
-		w.statusBar.ClearStatus()
+		if w.statusBar.HasPersistentError() {
+			w.statusBar.ClearStatus()
+		}
 		if view := w.router.Current(); view != nil {
 			updated, cmd := view.Update(msg)
 			w.replaceCurrentView(updated)
@@ -1050,13 +1054,17 @@ func (w *Workspace) syncChrome() {
 	w.breadcrumb.SetCrumbs(w.router.Breadcrumbs())
 	w.help.SetGlobalKeys(w.keys.FullHelp())
 
-	globalHints := []key.Binding{
-		key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "cmds")),
-	}
-	if len(w.accountList) > 1 {
-		globalHints = append(globalHints,
-			key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "switch")))
+	globalHints := w.keys.ShortHelp()
+	if len(w.accountList) <= 1 {
+		// Remove AccountSwitch hint when only one account
+		filtered := make([]key.Binding, 0, len(globalHints))
+		for _, b := range globalHints {
+			if keys := b.Keys(); len(keys) > 0 && keys[0] == w.keys.AccountSwitch.Keys()[0] {
+				continue
+			}
+			filtered = append(filtered, b)
+		}
+		globalHints = filtered
 	}
 	w.statusBar.SetGlobalHints(globalHints)
 	if view := w.router.Current(); view != nil {
@@ -1175,7 +1183,11 @@ func (w *Workspace) View() string {
 }
 
 // isAuthError returns true if the error indicates an expired or invalid auth token.
+// Checks typed SDK errors first (HTTP 401), falling back to string matching.
 func isAuthError(err error) bool {
+	if sdkErr := basecamp.AsError(err); sdkErr != nil && sdkErr.HTTPStatus == 401 {
+		return true
+	}
 	s := err.Error()
 	return strings.Contains(s, "401") || strings.Contains(s, "Unauthorized") || strings.Contains(s, "unauthorized")
 }

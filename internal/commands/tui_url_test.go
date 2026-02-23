@@ -25,7 +25,7 @@ func TestParseBasecampURL_WithRecording(t *testing.T) {
 	assert.Equal(t, "12345", scope.AccountID)
 	assert.Equal(t, int64(67890), scope.ProjectID)
 	assert.Equal(t, int64(11111), scope.RecordingID)
-	assert.Equal(t, "todos", scope.RecordingType)
+	assert.Equal(t, "Todo", scope.RecordingType, "should canonicalize todos → Todo")
 }
 
 func TestParseBasecampURL_Messages(t *testing.T) {
@@ -35,7 +35,16 @@ func TestParseBasecampURL_Messages(t *testing.T) {
 	assert.Equal(t, "99", scope.AccountID)
 	assert.Equal(t, int64(42), scope.ProjectID)
 	assert.Equal(t, int64(7), scope.RecordingID)
-	assert.Equal(t, "messages", scope.RecordingType)
+	assert.Equal(t, "Message", scope.RecordingType, "should canonicalize messages → Message")
+}
+
+func TestParseBasecampURL_Cards(t *testing.T) {
+	target, scope, err := parseBasecampURL("https://3.basecamp.com/99/buckets/42/card_tables/cards/7")
+	require.NoError(t, err)
+	assert.Equal(t, workspace.ViewDetail, target)
+	assert.Equal(t, "Card", scope.RecordingType, "should canonicalize cards → Card")
+	assert.Equal(t, int64(7), scope.RecordingID)
+	_ = target
 }
 
 func TestParseBasecampURL_InvalidURL(t *testing.T) {
@@ -54,4 +63,13 @@ func TestParseBasecampURL_WithoutSubdomain(t *testing.T) {
 	assert.Equal(t, workspace.ViewDock, target)
 	assert.Equal(t, "12345", scope.AccountID)
 	assert.Equal(t, int64(67890), scope.ProjectID)
+}
+
+func TestParseBasecampURL_UnknownType_PassesThrough(t *testing.T) {
+	// URL types not in the canonicalization map pass through as-is
+	target, scope, err := parseBasecampURL("https://3.basecamp.com/99/buckets/42/uploads/7")
+	require.NoError(t, err)
+	assert.Equal(t, workspace.ViewDetail, target)
+	assert.Equal(t, "Upload", scope.RecordingType)
+	_ = target
 }

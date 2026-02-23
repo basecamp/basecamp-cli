@@ -772,7 +772,7 @@ func TestWorkspace_SyncChromeSetGlobalHints(t *testing.T) {
 	// by rendering the status bar and checking for the hint text.
 	view := w.statusBar.View()
 	assert.Contains(t, view, "help", "status bar should contain global '? help' hint")
-	assert.Contains(t, view, "cmds", "status bar should contain global 'ctrl+p cmds' hint")
+	assert.Contains(t, view, "ctrl+p", "status bar should contain global ctrl+p hint")
 }
 
 func TestWorkspace_ViewHintRefreshOnUpdate(t *testing.T) {
