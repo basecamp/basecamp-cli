@@ -74,6 +74,18 @@ func (b Breadcrumb) Update(msg tea.Msg) (Breadcrumb, tea.Cmd) {
 	return b, nil
 }
 
+// truncateText shortens plain text to fit within maxWidth runes, appending "…".
+func truncateText(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return "…"
+	}
+	runes := []rune(s)
+	if len(runes) <= maxWidth {
+		return s
+	}
+	return string(runes[:maxWidth]) + "…"
+}
+
 // View renders the breadcrumb trail.
 func (b Breadcrumb) View() string {
 	if len(b.crumbs) == 0 || b.width <= 0 {
@@ -127,11 +139,45 @@ func (b Breadcrumb) View() string {
 
 	// Truncate if needed
 	if lipgloss.Width(line) > b.width {
-		// Show last two segments with ellipsis
 		if len(b.crumbs) > 2 {
+			// 3+ segments: show ellipsis + last segment
 			ellipsis := lipgloss.NewStyle().Foreground(theme.Muted).Render("... > ")
 			last := parts[len(parts)-1]
 			line = ellipsis + last
+			// If still too long, rebuild with truncated crumb text
+			if lipgloss.Width(line) > b.width {
+				numStr := fmt.Sprintf("%d:", len(b.crumbs))
+				num := lipgloss.NewStyle().
+					Foreground(theme.Muted).
+					Render(numStr)
+				avail := b.width - lipgloss.Width(ellipsis) - len(numStr) - 1 // 1 for "…"
+				lastCrumb := truncateText(b.crumbs[len(b.crumbs)-1], avail)
+				name := lipgloss.NewStyle().
+					Foreground(theme.Foreground).
+					Bold(true).
+					Render(lastCrumb)
+				line = ellipsis + num + name
+			}
+		} else {
+			// 1-2 segments: truncate the last crumb text and rebuild
+			lastIdx := len(b.crumbs) - 1
+			// Measure everything except the last crumb name
+			prefix := ""
+			if len(parts) > 1 {
+				prefix = strings.Join(parts[:len(parts)-1], sep) + sep
+			}
+			numStr := fmt.Sprintf("%d:", lastIdx+1)
+			num := lipgloss.NewStyle().
+				Foreground(theme.Muted).
+				Render(numStr)
+			prefixWidth := lipgloss.Width(prefix) + lipgloss.Width(num)
+			avail := b.width - prefixWidth - 1 // 1 for "…"
+			lastCrumb := truncateText(b.crumbs[lastIdx], avail)
+			name := lipgloss.NewStyle().
+				Foreground(theme.Foreground).
+				Bold(true).
+				Render(lastCrumb)
+			line = prefix + num + name
 		}
 	}
 
