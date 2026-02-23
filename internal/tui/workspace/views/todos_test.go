@@ -481,7 +481,7 @@ func TestTodos_NewList_EnterDispatches(t *testing.T) {
 	result, ok := msg.(todolistCreatedMsg)
 	require.True(t, ok)
 	assert.Equal(t, int64(10), result.todosetID) // scope.ToolID
-	assert.Error(t, result.err)                   // nil SDK
+	assert.Error(t, result.err)                  // nil SDK
 }
 
 func TestTodos_NewList_SuccessHandler(t *testing.T) {
