@@ -449,6 +449,23 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 	}
 
 	title := item.Title
+
+	// Truncate title if it would overflow available width
+	cursorWidth := lipgloss.Width(cursor)
+	maxTitleWidth := l.width - cursorWidth
+	if item.Marked {
+		maxTitleWidth -= 2 // "* " prefix
+	}
+	if item.Boosts > 0 {
+		maxTitleWidth -= lipgloss.Width(fmt.Sprintf(" [♥ %d]", item.Boosts))
+	}
+	if item.Extra != "" {
+		maxTitleWidth -= lipgloss.Width(item.Extra) + 2 // extra + gap
+	}
+	if maxTitleWidth > 0 {
+		title = Truncate(title, maxTitleWidth)
+	}
+
 	if item.Marked {
 		title = lipgloss.NewStyle().Foreground(theme.Warning).Render("* ") + title
 	}

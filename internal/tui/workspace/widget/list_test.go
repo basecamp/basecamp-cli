@@ -214,3 +214,30 @@ func TestList_AllHeaders(t *testing.T) {
 	require.NotNil(t, sel)
 	assert.True(t, sel.Header)
 }
+
+func TestList_LongTitle_Truncated(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(30, 10)
+	l.SetFocused(true)
+	l.SetItems([]ListItem{
+		{ID: "1", Title: "This is a very long title that should be truncated"},
+	})
+
+	view := l.View()
+	assert.Contains(t, view, "...")
+	// The full title should NOT appear since the width is only 30
+	assert.NotContains(t, view, "truncated")
+}
+
+func TestList_LongTitle_WithExtra_Truncated(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(40, 10)
+	l.SetFocused(true)
+	l.SetItems([]ListItem{
+		{ID: "1", Title: "This is a very long title that overflows", Extra: "5 items"},
+	})
+
+	view := l.View()
+	assert.Contains(t, view, "...")
+	assert.Contains(t, view, "5 items", "extra should still be visible")
+}

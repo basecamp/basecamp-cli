@@ -495,7 +495,7 @@ func (k *Kanban) renderCompactCard(card KanbanCard, width int, focused bool, the
 
 func (k *Kanban) renderFocusedCard(card KanbanCard, width int, theme tui.Theme) string {
 	// Line 1: ▸ Full card title
-	title := truncate(card.Title, width-4) // 2 for "▸ " + 2 padding
+	title := Truncate(card.Title, width-4) // 2 for "▸ " + 2 padding
 	titleStyle := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
 	line1 := titleStyle.Render("▸ " + title)
 	result := lipgloss.NewStyle().Width(width).Render(line1)
@@ -515,7 +515,7 @@ func (k *Kanban) renderUnfocusedCard(card KanbanCard, width int, theme tui.Theme
 		boostStr = fmt.Sprintf(" [♥ %d]", card.Boosts)
 	}
 	availWidth := width - 2 - len(boostStr) // 2 for "  " prefix
-	title := truncate(card.Title, availWidth)
+	title := Truncate(card.Title, availWidth)
 	style := lipgloss.NewStyle().Width(width)
 	if card.Completed {
 		style = style.Foreground(theme.Muted).Strikethrough(true)
@@ -529,20 +529,6 @@ func focusedCardHeight(card KanbanCard) int {
 		return 2
 	}
 	return 1
-}
-
-// truncate shortens s to fit within maxLen characters, appending "..." if needed.
-func truncate(s string, maxLen int) string {
-	if maxLen <= 0 {
-		return ""
-	}
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
 }
 
 // buildDetailLine assembles the second line of a focused card loupe.
