@@ -67,6 +67,8 @@ type QuickJumpSource struct {
 	NavigateProject func(projectID int64, accountID string) tea.Cmd
 	// NavigateRecording is called with (recordingID, projectID, accountID) to produce a nav command.
 	NavigateRecording func(recordingID, projectID int64, accountID string) tea.Cmd
+	// NavigateTool is called with (toolName, toolID, projectID, accountID) to produce a nav command.
+	NavigateTool func(toolName string, toolID, projectID int64, accountID string) tea.Cmd
 }
 
 // Focus activates the text input and populates items from the given source.
@@ -227,6 +229,84 @@ func (q *QuickJump) populateItems(src QuickJumpSource) {
 			Category: "project",
 			Navigate: func() tea.Cmd { return nav(projectID, acctID) },
 		})
+	}
+
+	// 5. Tool entries for recent projects (up to 5 projects)
+	if src.NavigateTool != nil {
+		toolProjects := recentProjectInfos(src)
+		for _, p := range toolProjects {
+			for _, tool := range p.Dock {
+				if !tool.Enabled {
+					continue
+				}
+				displayName := toolDisplayName(tool.Name)
+				if displayName == "" {
+					continue
+				}
+				id := fmt.Sprintf("tool:%d:%d", p.ID, tool.ID)
+				projectID := p.ID
+				acctID := p.AccountID
+				toolName := tool.Name
+				toolID := tool.ID
+				nav := src.NavigateTool
+				q.items = append(q.items, quickJumpItem{
+					ID:       id,
+					Title:    p.Name + " > " + displayName,
+					Category: "tool",
+					Navigate: func() tea.Cmd { return nav(toolName, toolID, projectID, acctID) },
+				})
+			}
+		}
+	}
+}
+
+// recentProjectInfos returns ProjectInfo for the most recent projects (up to 5),
+// matched by ID from recent projects to the full project list.
+func recentProjectInfos(src QuickJumpSource) []data.ProjectInfo {
+	const maxToolProjects = 5
+	projectByID := make(map[string]data.ProjectInfo, len(src.Projects))
+	for _, p := range src.Projects {
+		projectByID[fmt.Sprintf("%d", p.ID)] = p
+	}
+
+	var result []data.ProjectInfo
+	seen := make(map[string]bool)
+	for _, r := range src.RecentProjects {
+		if seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		if p, ok := projectByID[r.ID]; ok {
+			result = append(result, p)
+			if len(result) >= maxToolProjects {
+				break
+			}
+		}
+	}
+	return result
+}
+
+// toolDisplayName maps dock tool API names to human-readable titles.
+func toolDisplayName(name string) string {
+	switch name {
+	case "todoset":
+		return "Todos"
+	case "message_board":
+		return "Message Board"
+	case "chat":
+		return "Campfire"
+	case "schedule":
+		return "Schedule"
+	case "questionnaire":
+		return "Check-ins"
+	case "vault":
+		return "Docs & Files"
+	case "kanban_board":
+		return "Card Table"
+	case "inbox":
+		return "Forwards"
+	default:
+		return ""
 	}
 }
 

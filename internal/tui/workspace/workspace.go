@@ -717,6 +717,30 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 	return nil
 }
 
+// toolNameToViewTarget maps dock tool API names to ViewTarget constants.
+func toolNameToViewTarget(name string) (ViewTarget, bool) {
+	switch name {
+	case "todoset":
+		return ViewTodos, true
+	case "chat":
+		return ViewCampfire, true
+	case "message_board":
+		return ViewMessages, true
+	case "kanban_board":
+		return ViewCards, true
+	case "schedule":
+		return ViewSchedule, true
+	case "vault":
+		return ViewDocsFiles, true
+	case "questionnaire":
+		return ViewCheckins, true
+	case "inbox":
+		return ViewForwards, true
+	default:
+		return 0, false
+	}
+}
+
 // hubProjects returns the current projects from the Hub's global pool,
 // or nil if no data is available yet. Used by quickJump.
 func (w *Workspace) hubProjects() []data.ProjectInfo {
@@ -819,6 +843,18 @@ func (w *Workspace) openQuickJump() tea.Cmd {
 				AccountID:   accountID,
 				ProjectID:   projectID,
 				RecordingID: recordingID,
+			})
+		},
+		NavigateTool: func(toolName string, toolID, projectID int64, accountID string) tea.Cmd {
+			target, ok := toolNameToViewTarget(toolName)
+			if !ok {
+				return nil
+			}
+			return Navigate(target, Scope{
+				AccountID: accountID,
+				ProjectID: projectID,
+				ToolType:  toolName,
+				ToolID:    toolID,
 			})
 		},
 	}
