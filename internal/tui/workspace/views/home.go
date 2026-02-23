@@ -278,7 +278,40 @@ func (v *Home) View() string {
 			Padding(1, 2).
 			Render(v.spinner.View() + " Loading...")
 	}
+	// Show welcome panel when all sections are empty and pools have resolved
+	if v.list.Len() == 0 && !v.anyLoading() {
+		return v.renderWelcome()
+	}
 	return v.list.View()
+}
+
+func (v *Home) renderWelcome() string {
+	theme := v.styles.Theme()
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(theme.Primary).Render("Welcome to Basecamp")
+	blank := ""
+
+	keyStyle := lipgloss.NewStyle().Foreground(theme.Primary).Width(8)
+	descStyle := lipgloss.NewStyle().Foreground(theme.Foreground)
+
+	shortcuts := []string{
+		keyStyle.Render("p") + descStyle.Render("Browse projects"),
+		keyStyle.Render("/") + descStyle.Render("Search across everything"),
+		keyStyle.Render("?") + descStyle.Render("View keyboard shortcuts"),
+	}
+
+	tip := lipgloss.NewStyle().Foreground(theme.Muted).Render("Tip: Use ctrl+p to open the command palette at any time.")
+
+	lines := make([]string, 0, 2+len(shortcuts)+2)
+	lines = append(lines, title, blank)
+	lines = append(lines, shortcuts...)
+	lines = append(lines, blank, tip)
+
+	return lipgloss.NewStyle().
+		Width(v.width).
+		Height(v.height).
+		Padding(1, 2).
+		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 // poolPending returns true if a pool has not yet resolved (no data, no error).
@@ -288,6 +321,9 @@ func poolPending[T any](snap data.Snapshot[T]) bool {
 }
 
 func (v *Home) anyLoading() bool {
+	if v.heyPool == nil || v.assignPool == nil || v.projectPool == nil {
+		return false
+	}
 	return poolPending(v.heyPool.Get()) || poolPending(v.assignPool.Get()) || poolPending(v.projectPool.Get())
 }
 

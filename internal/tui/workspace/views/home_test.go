@@ -32,6 +32,36 @@ func testHomeView() *Home {
 	}
 }
 
+func TestHome_EmptyState_ShowsWelcome(t *testing.T) {
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetEmptyText("Welcome to Basecamp.")
+	list.SetFocused(true)
+	list.SetSize(80, 24)
+	// No items — simulates empty state with resolved pools
+
+	v := &Home{
+		styles:   styles,
+		list:     list,
+		itemMeta: make(map[string]homeItemMeta),
+		width:    80,
+		height:   24,
+	}
+
+	output := v.View()
+	assert.Contains(t, output, "Welcome to Basecamp")
+	assert.Contains(t, output, "Browse projects")
+	assert.Contains(t, output, "Search across everything")
+	assert.Contains(t, output, "ctrl+p")
+}
+
+func TestHome_WithData_HidesWelcome(t *testing.T) {
+	v := testHomeView() // has items
+	output := v.View()
+	assert.NotContains(t, output, "Browse projects")
+	assert.Contains(t, output, "Project Alpha")
+}
+
 func TestHome_FilterDelegatesAllKeys(t *testing.T) {
 	v := testHomeView()
 
