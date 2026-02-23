@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 )
 
 func testList() *List {
@@ -240,4 +241,33 @@ func TestList_LongTitle_WithExtra_Truncated(t *testing.T) {
 	view := l.View()
 	assert.Contains(t, view, "...")
 	assert.Contains(t, view, "5 items", "extra should still be visible")
+}
+
+func TestList_EmptyMessage_RendersHints(t *testing.T) {
+	l := testList()
+	l.SetEmptyMessage(empty.Message{
+		Title: "No projects found",
+		Body:  "You don't have access to any Basecamp projects.",
+		Hints: []string{
+			"Ask your administrator",
+			"Create a new project",
+		},
+	})
+	l.SetItems(nil)
+
+	view := l.View()
+	assert.Contains(t, view, "No projects found")
+	assert.Contains(t, view, "You don't have access")
+	assert.Contains(t, view, "Ask your administrator")
+	assert.Contains(t, view, "Create a new project")
+}
+
+func TestList_EmptyText_FallbackWhenNoMessage(t *testing.T) {
+	l := testList()
+	l.SetEmptyText("Custom fallback text")
+	l.SetItems(nil)
+
+	view := l.View()
+	assert.Contains(t, view, "Custom fallback text")
+	assert.NotContains(t, view, "No projects found")
 }

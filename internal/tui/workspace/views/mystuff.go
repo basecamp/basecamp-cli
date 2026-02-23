@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
@@ -33,7 +34,7 @@ func NewMyStuff(session *workspace.Session) *MyStuff {
 	styles := session.Styles()
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No recent items yet. Navigate to a project to get started.")
+	list.SetEmptyMessage(empty.NoRecentItems("item"))
 	list.SetFocused(true)
 
 	v := &MyStuff{

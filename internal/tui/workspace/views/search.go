@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -90,7 +91,7 @@ func NewSearch(session *workspace.Session) *Search {
 	ti.Focus()
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("Type a query and press Enter to search.")
+	list.SetEmptyMessage(empty.NoSearchResults(""))
 	list.SetFocused(false)
 
 	s := spinner.New()
@@ -229,7 +230,7 @@ func (v *Search) handleResults(msg workspace.SearchResultsMsg) tea.Cmd {
 	v.list.SetItems(items)
 
 	if len(items) == 0 {
-		v.list.SetEmptyText(fmt.Sprintf("No results for %q", msg.Query))
+		v.list.SetEmptyMessage(empty.NoSearchResults(msg.Query))
 	}
 	return nil
 }

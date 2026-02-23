@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 )
 
@@ -49,6 +50,7 @@ type List struct {
 
 	// Callbacks
 	emptyText string
+	emptyMsg  *empty.Message
 }
 
 // NewList creates a new list widget.
@@ -81,6 +83,11 @@ func (l *List) SetLoading(loading bool) {
 // SetEmptyText sets the message shown when no items exist.
 func (l *List) SetEmptyText(text string) {
 	l.emptyText = text
+}
+
+// SetEmptyMessage sets a structured empty state with title, body, and hints.
+func (l *List) SetEmptyMessage(msg empty.Message) {
+	l.emptyMsg = &msg
 }
 
 // SetSize updates dimensions.
@@ -392,14 +399,21 @@ func (l *List) View() string {
 	}
 
 	if len(l.filtered) == 0 {
-		emptyMsg := l.emptyText
 		if l.filter != "" {
-			emptyMsg = "No matches"
+			b.WriteString(lipgloss.NewStyle().
+				Width(l.width).
+				Foreground(theme.Muted).
+				Render("No matches"))
+			return b.String()
+		}
+		if l.emptyMsg != nil {
+			b.WriteString(l.renderEmptyMessage(theme))
+			return b.String()
 		}
 		b.WriteString(lipgloss.NewStyle().
 			Width(l.width).
 			Foreground(theme.Muted).
-			Render(emptyMsg))
+			Render(l.emptyText))
 		return b.String()
 	}
 
@@ -429,6 +443,25 @@ func (l *List) View() string {
 	}
 
 	return b.String()
+}
+
+func (l *List) renderEmptyMessage(theme tui.Theme) string {
+	var lines []string
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Foreground)
+	bodyStyle := lipgloss.NewStyle().Foreground(theme.Muted)
+	hintStyle := lipgloss.NewStyle().Foreground(theme.Secondary)
+
+	lines = append(lines, titleStyle.Render(l.emptyMsg.Title))
+	if l.emptyMsg.Body != "" {
+		lines = append(lines, bodyStyle.Render(l.emptyMsg.Body))
+	}
+	if len(l.emptyMsg.Hints) > 0 {
+		lines = append(lines, "")
+		for _, hint := range l.emptyMsg.Hints {
+			lines = append(lines, hintStyle.Render("  "+hint))
+		}
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string {

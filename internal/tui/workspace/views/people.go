@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
@@ -38,7 +39,7 @@ func NewPeople(session *workspace.Session) *People {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No people found.")
+	list.SetEmptyMessage(empty.NoPeople())
 	list.SetFocused(true)
 
 	return &People{

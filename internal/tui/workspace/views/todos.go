@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -202,11 +203,11 @@ func NewTodos(session *workspace.Session) *Todos {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	listLists := widget.NewList(styles)
-	listLists.SetEmptyText("No todolists found.")
+	listLists.SetEmptyMessage(empty.NoTodolists(""))
 	listLists.SetFocused(true)
 
 	listTodos := widget.NewList(styles)
-	listTodos.SetEmptyText("Select a todolist to view todos.")
+	listTodos.SetEmptyMessage(empty.NoTodos(""))
 	listTodos.SetFocused(false)
 
 	ti := textinput.New()
