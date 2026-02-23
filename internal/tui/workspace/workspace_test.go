@@ -1101,6 +1101,54 @@ func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
 		"second navigation must not inherit stale OriginHint")
 }
 
+// --- Auth error detection tests ---
+
+func TestIsAuthError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"401 status code", fmt.Errorf("GET /projects.json: 401"), true},
+		{"Unauthorized capitalized", fmt.Errorf("Unauthorized"), true},
+		{"unauthorized lowercase", fmt.Errorf("unauthorized"), true},
+		{"401 Unauthorized full", fmt.Errorf("401 Unauthorized"), true},
+		{"normal error", fmt.Errorf("network timeout"), false},
+		{"403 forbidden", fmt.Errorf("403 Forbidden"), false},
+		{"500 server error", fmt.Errorf("500 Internal Server Error"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAuthError(tt.err))
+		})
+	}
+}
+
+func TestWorkspace_ErrorMsg_AuthExpiry_SetsStatus(t *testing.T) {
+	w, _ := testWorkspace()
+	w.relayout()
+	pushTestView(w, "Home")
+
+	_, cmd := w.Update(ErrorMsg{Err: fmt.Errorf("401 Unauthorized"), Context: "fetching todos"})
+
+	// Auth errors should NOT produce a toast command — they set persistent status instead.
+	assert.Nil(t, cmd, "auth error should not return a toast command")
+
+	// Status bar should show the auth guidance.
+	view := w.statusBar.View()
+	assert.Contains(t, view, "Session expired", "status bar should show auth expiry guidance")
+}
+
+func TestWorkspace_ErrorMsg_NonAuth_ShowsToast(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Home")
+
+	_, cmd := w.Update(ErrorMsg{Err: fmt.Errorf("network timeout"), Context: "fetching todos"})
+
+	// Non-auth errors should produce a toast command.
+	assert.NotNil(t, cmd, "non-auth error should produce a toast command")
+}
+
 // --- Sidebar cycling tests ---
 
 func TestWorkspace_SidebarCyclesActivityHomeClosed(t *testing.T) {

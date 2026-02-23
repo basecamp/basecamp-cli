@@ -2,6 +2,9 @@ package workspace
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,11 +77,22 @@ func New(session *Session, factory ViewFactory) *Workspace {
 	styles := session.Styles()
 	registry := DefaultActions()
 
+	keys := DefaultGlobalKeyMap()
+	if configDir, err := os.UserConfigDir(); err == nil {
+		overrides, err := LoadKeyOverrides(filepath.Join(configDir, "basecamp", "keybindings.json"))
+		if err != nil {
+			log.Printf("keybindings: %v", err)
+		}
+		if len(overrides) > 0 {
+			ApplyOverrides(&keys, overrides)
+		}
+	}
+
 	w := &Workspace{
 		session:         session,
 		router:          NewRouter(),
 		styles:          styles,
-		keys:            DefaultGlobalKeyMap(),
+		keys:            keys,
 		registry:        registry,
 		statusBar:       chrome.NewStatusBar(styles),
 		breadcrumb:      chrome.NewBreadcrumb(styles),
@@ -249,9 +263,22 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StatusMsg:
 		w.statusBar.SetStatus(msg.Text, msg.IsError)
+		gen := w.statusBar.StatusGen()
+		return w, tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+			return StatusClearMsg{Gen: gen}
+		})
+
+	case StatusClearMsg:
+		if msg.Gen == w.statusBar.StatusGen() {
+			w.statusBar.ClearStatus()
+		}
 		return w, nil
 
 	case ErrorMsg:
+		if isAuthError(msg.Err) {
+			w.statusBar.SetStatus("Session expired — run: basecamp auth login", true)
+			return w, nil
+		}
 		return w, w.toast.Show(msg.Context+": "+msg.Err.Error(), true)
 
 	case data.PoolUpdatedMsg:
@@ -382,8 +409,12 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	if w.showHelp {
-		w.showHelp = false
-		return nil
+		shouldClose, cmd := w.help.Update(msg)
+		if shouldClose {
+			w.showHelp = false
+			w.help.ResetScroll()
+		}
+		return cmd
 	}
 
 	// Command palette consumes keys when active
@@ -402,7 +433,7 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// When a view is capturing text input, only allow ctrl-chord globals
-	// (ctrl+p, ctrl+a, ctrl+h, ctrl+s). Skip single-key globals (q, r, ?, /, 1-9)
+	// (ctrl+p, ctrl+a, ctrl+y, ctrl+s). Skip single-key globals (q, r, ?, /, 1-9)
 	// so they reach the view's text input.
 	inputActive := false
 	if view := w.router.Current(); view != nil {
@@ -1084,6 +1115,12 @@ func (w *Workspace) View() string {
 	}
 
 	return ui
+}
+
+// isAuthError returns true if the error indicates an expired or invalid auth token.
+func isAuthError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "401") || strings.Contains(s, "Unauthorized") || strings.Contains(s, "unauthorized")
 }
 
 func (w *Workspace) createBoost(target BoostTarget, emoji string) tea.Cmd {
