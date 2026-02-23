@@ -63,7 +63,7 @@ func TestRegistry_SearchByAlias(t *testing.T) {
 func TestRegistry_SearchByDescription(t *testing.T) {
 	r := NewRegistry()
 	r.Register(Action{Name: ":hey", Description: "Open Hey! inbox"})
-	r.Register(Action{Name: ":quit", Description: "Quit bcq"})
+	r.Register(Action{Name: ":quit", Description: "Quit Basecamp"})
 
 	results := r.Search("inbox")
 	require.Len(t, results, 1)

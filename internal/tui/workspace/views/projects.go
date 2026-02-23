@@ -58,7 +58,7 @@ func NewProjects(session *workspace.Session) *Projects {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No projects found. Try 'bcq projects list' to verify access.")
+	list.SetEmptyText("No projects found. Try 'basecamp projects list' to verify access.")
 	list.SetFocused(true)
 
 	toolList := widget.NewList(styles)

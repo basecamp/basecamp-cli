@@ -117,7 +117,7 @@ func (w *Workspace) Init() tea.Cmd {
 	w.router.Push(view, scope, ViewHome)
 	w.syncChrome()
 
-	cmds := []tea.Cmd{w.stampCmd(view.Init()), chrome.SetTerminalTitle("bcq")}
+	cmds := []tea.Cmd{w.stampCmd(view.Init()), chrome.SetTerminalTitle("basecamp")}
 
 	// Fetch account name asynchronously
 	if w.session.HasAccount() {
@@ -607,7 +607,7 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 	// Forward navigations start at quality 0 (data not yet loaded).
 	w.recordNavigation(view.Title(), 0.0)
 
-	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("bcq - "+view.Title()))
+	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("basecamp - "+view.Title()))
 }
 
 func (w *Workspace) goBack() tea.Cmd {
@@ -633,7 +633,7 @@ func (w *Workspace) goBack() tea.Cmd {
 		view.Update(FocusMsg{})
 		// Back navigation returns to a view with cached data — quality 1.0.
 		w.recordNavigation(view.Title(), 1.0)
-		return chrome.SetTerminalTitle("bcq - " + view.Title())
+		return chrome.SetTerminalTitle("basecamp - " + view.Title())
 	}
 	return nil
 }
@@ -660,7 +660,7 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 		view.SetSize(w.width, w.viewHeight())
 		view.Update(FocusMsg{})
 		w.recordNavigation(view.Title(), 1.0)
-		return chrome.SetTerminalTitle("bcq - " + view.Title())
+		return chrome.SetTerminalTitle("basecamp - " + view.Title())
 	}
 	return nil
 }
@@ -876,7 +876,7 @@ func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {
 	w.syncAccountBadge(ViewHome)
 	w.syncChrome()
 
-	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("bcq"))
+	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("basecamp"))
 }
 
 func (w *Workspace) syncPaletteActions() {

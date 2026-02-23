@@ -308,7 +308,7 @@ func DefaultActions() *Registry {
 	r.Register(Action{
 		Name:        ":quit",
 		Aliases:     []string{"exit", "close"},
-		Description: "Quit bcq",
+		Description: "Quit Basecamp",
 		Category:    "navigation",
 		Scope:       ScopeAny,
 		Execute: func(_ *Session) tea.Cmd {

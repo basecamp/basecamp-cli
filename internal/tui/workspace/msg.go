@@ -1,4 +1,4 @@
-// Package workspace provides the persistent TUI application for bcq.
+// Package workspace provides the persistent TUI application.
 package workspace
 
 import (
