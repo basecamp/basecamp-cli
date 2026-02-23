@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/chrome"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -1109,6 +1111,8 @@ func TestIsAuthError(t *testing.T) {
 		err  error
 		want bool
 	}{
+		{"SDK ErrAuth", basecamp.ErrAuth("Authentication failed"), true},
+		{"SDK ErrAuth wrapped", fmt.Errorf("fetching: %w", basecamp.ErrAuth("token expired")), true},
 		{"401 status code", fmt.Errorf("GET /projects.json: 401"), true},
 		{"Unauthorized capitalized", fmt.Errorf("Unauthorized"), true},
 		{"unauthorized lowercase", fmt.Errorf("unauthorized"), true},
@@ -1116,6 +1120,8 @@ func TestIsAuthError(t *testing.T) {
 		{"normal error", fmt.Errorf("network timeout"), false},
 		{"403 forbidden", fmt.Errorf("403 Forbidden"), false},
 		{"500 server error", fmt.Errorf("500 Internal Server Error"), false},
+		{"SDK ErrNotFound", basecamp.ErrNotFound("Project", "123"), false},
+		{"SDK ErrForbidden", basecamp.ErrForbidden("Access denied"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

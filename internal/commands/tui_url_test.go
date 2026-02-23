@@ -106,11 +106,17 @@ func TestParseBasecampURL_BucketWithUnknownSegment_Rejected(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestParseBasecampURL_UnknownType_PassesThrough(t *testing.T) {
-	// URL types not in the canonicalization map pass through as-is
+func TestParseBasecampURL_CanonicalizesUpload(t *testing.T) {
 	target, scope, err := parseBasecampURL("https://3.basecamp.com/99/buckets/42/uploads/7")
 	require.NoError(t, err)
 	assert.Equal(t, workspace.ViewDetail, target)
-	assert.Equal(t, "Upload", scope.RecordingType)
-	_ = target
+	assert.Equal(t, "Upload", scope.RecordingType, "should canonicalize uploads → Upload")
+}
+
+func TestParseBasecampURL_UnknownType_PassesThrough(t *testing.T) {
+	// URL types not in the canonicalization map pass through as-is
+	target, scope, err := parseBasecampURL("https://3.basecamp.com/99/buckets/42/chats/7")
+	require.NoError(t, err)
+	assert.Equal(t, workspace.ViewDetail, target)
+	assert.Equal(t, "chats", scope.RecordingType, "unknown types pass through verbatim")
 }
