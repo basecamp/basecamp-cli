@@ -279,6 +279,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			w.statusBar.SetStatus("Session expired — run: basecamp auth login", true)
 			return w, nil
 		}
+		w.statusBar.SetStatus("Error: "+msg.Context, true)
 		return w, w.toast.Show(msg.Context+": "+msg.Err.Error(), true)
 
 	case data.PoolUpdatedMsg:
@@ -312,6 +313,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w, sidebarCmd
 
 	case RefreshMsg:
+		w.statusBar.ClearStatus()
 		if view := w.router.Current(); view != nil {
 			updated, cmd := view.Update(msg)
 			w.replaceCurrentView(updated)

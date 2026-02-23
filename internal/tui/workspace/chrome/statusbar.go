@@ -22,15 +22,16 @@ type PoolMetricsSummary struct {
 
 // StatusBar renders the bottom status bar with key hints and status info.
 type StatusBar struct {
-	styles      *tui.Styles
-	width       int
-	accountName string
-	status      string
-	isError     bool
-	statusGen   uint64
-	keyHints    []key.Binding
-	globalHints []key.Binding
-	metrics     *PoolMetricsSummary
+	styles          *tui.Styles
+	width           int
+	accountName     string
+	status          string
+	isError         bool
+	persistentError bool
+	statusGen       uint64
+	keyHints        []key.Binding
+	globalHints     []key.Binding
+	metrics         *PoolMetricsSummary
 }
 
 // NewStatusBar creates a new status bar.
@@ -50,12 +51,21 @@ func (s *StatusBar) SetStatus(text string, isError bool) {
 	s.statusGen++
 	s.status = text
 	s.isError = isError
+	if isError {
+		s.persistentError = true
+	}
 }
 
 // ClearStatus clears the status message.
 func (s *StatusBar) ClearStatus() {
 	s.status = ""
 	s.isError = false
+	s.persistentError = false
+}
+
+// HasPersistentError returns whether an error is being displayed.
+func (s *StatusBar) HasPersistentError() bool {
+	return s.persistentError
 }
 
 // StatusGen returns the current status generation counter.
@@ -184,6 +194,15 @@ func (s StatusBar) renderGlobalHints(theme tui.Theme, leftWidth int) string {
 
 	var parts []string
 	used := 0
+
+	if s.persistentError {
+		hint := keyStyle.Render("r") + descStyle.Render(" retry")
+		plain := "r retry"
+		w := lipgloss.Width(plain)
+		parts = append(parts, hint)
+		used += w
+	}
+
 	for _, k := range s.globalHints {
 		if !k.Enabled() {
 			continue

@@ -125,6 +125,37 @@ func TestStatusBar_ClearStatus_Resets(t *testing.T) {
 	assert.NotContains(t, stripAnsi(s.View()), "Saved!")
 }
 
+func TestStatusBar_ErrorStatus_ShowsRetryHint(t *testing.T) {
+	s := testStatusBar(80)
+	s.SetGlobalHints([]key.Binding{helpBinding(), paletteBinding()})
+	s.SetStatus("Error: loading todos", true)
+	// Status text is shown directly, but once cleared the retry hint should appear
+	s.ClearStatus()
+	// persistentError was cleared by ClearStatus — set error again then clear only status text
+	s.SetStatus("Error: loading todos", true)
+	s.status = "" // simulate status text cleared but persistentError still set
+
+	view := stripAnsi(s.View())
+	assert.Contains(t, view, "r")
+	assert.Contains(t, view, "retry")
+}
+
+func TestStatusBar_ClearStatus_ClearsPersistentError(t *testing.T) {
+	s := testStatusBar(80)
+	s.SetStatus("Error: network", true)
+	assert.True(t, s.HasPersistentError())
+
+	s.ClearStatus()
+	assert.False(t, s.HasPersistentError())
+	assert.Equal(t, "", s.status)
+}
+
+func TestStatusBar_NonErrorStatus_NoPersistentError(t *testing.T) {
+	s := testStatusBar(80)
+	s.SetStatus("Saved!", false)
+	assert.False(t, s.HasPersistentError())
+}
+
 // stripAnsi removes ANSI escape sequences for content assertions.
 func stripAnsi(s string) string {
 	var result strings.Builder
