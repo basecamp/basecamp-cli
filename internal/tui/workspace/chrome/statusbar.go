@@ -27,6 +27,7 @@ type StatusBar struct {
 	accountName string
 	status      string
 	isError     bool
+	statusGen   uint64
 	keyHints    []key.Binding
 	globalHints []key.Binding
 	metrics     *PoolMetricsSummary
@@ -46,6 +47,7 @@ func (s *StatusBar) SetAccount(name string) {
 
 // SetStatus sets a temporary status message.
 func (s *StatusBar) SetStatus(text string, isError bool) {
+	s.statusGen++
 	s.status = text
 	s.isError = isError
 }
@@ -54,6 +56,11 @@ func (s *StatusBar) SetStatus(text string, isError bool) {
 func (s *StatusBar) ClearStatus() {
 	s.status = ""
 	s.isError = false
+}
+
+// StatusGen returns the current status generation counter.
+func (s *StatusBar) StatusGen() uint64 {
+	return s.statusGen
 }
 
 // SetKeyHints sets the key bindings shown as hints.

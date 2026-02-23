@@ -240,6 +240,11 @@ type StatusMsg struct {
 	IsError bool
 }
 
+// StatusClearMsg clears an expired status message.
+type StatusClearMsg struct {
+	Gen uint64
+}
+
 // Epoch guard
 
 // EpochMsg wraps an async result with the session epoch at Cmd creation time.

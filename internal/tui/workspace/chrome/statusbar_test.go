@@ -105,6 +105,26 @@ func TestStatusBar_DisabledGlobalHintsSkipped(t *testing.T) {
 	assert.Contains(t, view, "help")
 }
 
+func TestStatusBar_SetStatus_IncrementsGen(t *testing.T) {
+	s := testStatusBar(80)
+	assert.Equal(t, uint64(0), s.StatusGen())
+
+	s.SetStatus("Completed", false)
+	assert.Equal(t, uint64(1), s.StatusGen())
+
+	s.SetStatus("Trashed", false)
+	assert.Equal(t, uint64(2), s.StatusGen())
+}
+
+func TestStatusBar_ClearStatus_Resets(t *testing.T) {
+	s := testStatusBar(80)
+	s.SetStatus("Saved!", false)
+	assert.Contains(t, s.View(), "Saved!")
+
+	s.ClearStatus()
+	assert.NotContains(t, stripAnsi(s.View()), "Saved!")
+}
+
 // stripAnsi removes ANSI escape sequences for content assertions.
 func stripAnsi(s string) string {
 	var result strings.Builder
