@@ -276,6 +276,35 @@ func (h *Hub) Checkins(projectID, questionnaireID int64) *Pool[[]CheckinQuestion
 	return p
 }
 
+// CheckinAnswers returns a project-scoped pool of answers for a specific check-in question.
+func (h *Hub) CheckinAnswers(projectID, questionID int64) *Pool[[]CheckinAnswerInfo] {
+	realm := h.EnsureProject(projectID)
+	key := fmt.Sprintf("checkin-answers:%d:%d", projectID, questionID)
+	p := RealmPool(realm, key, func() *Pool[[]CheckinAnswerInfo] {
+		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]CheckinAnswerInfo, error) {
+			client := h.accountClient()
+			result, err := client.Checkins().ListAnswers(ctx, projectID, questionID, nil)
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]CheckinAnswerInfo, 0, len(result.Answers))
+			for _, a := range result.Answers {
+				infos = append(infos, CheckinAnswerInfo{
+					ID:            a.ID,
+					Creator:       personName(a.Creator),
+					CreatedAt:     a.CreatedAt,
+					Content:       a.Content,
+					GroupOn:       a.GroupOn,
+					CommentsCount: a.CommentsCount,
+				})
+			}
+			return infos, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
 // DocsFiles returns a project-scoped pool of vault items (folders, documents, uploads).
 func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 	realm := h.EnsureProject(projectID)
@@ -1024,6 +1053,16 @@ func (h *Hub) CreateScheduleEntry(ctx context.Context, accountID string, project
 		return fmt.Errorf("no client for account %s", accountID)
 	}
 	_, err := client.Schedules().CreateEntry(ctx, projectID, scheduleID, req)
+	return err
+}
+
+// CreateCheckinAnswer posts a new answer to a check-in question.
+func (h *Hub) CreateCheckinAnswer(ctx context.Context, accountID string, projectID, questionID int64, content string) error {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return fmt.Errorf("no client for account %s", accountID)
+	}
+	_, err := client.Checkins().CreateAnswer(ctx, projectID, questionID, &basecamp.CreateAnswerRequest{Content: content})
 	return err
 }
 

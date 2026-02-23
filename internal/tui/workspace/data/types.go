@@ -1,5 +1,7 @@
 package data
 
+import "time"
+
 // Data transfer types for Hub pool accessors.
 // Migrated from workspace/msg.go to break the workspace→data import direction
 // and allow Hub FetchFuncs to return typed data without import cycles.
@@ -21,6 +23,16 @@ type CheckinQuestionInfo struct {
 	Paused       bool
 	AnswersCount int
 	Frequency    string
+}
+
+// CheckinAnswerInfo is a lightweight representation of a check-in answer.
+type CheckinAnswerInfo struct {
+	ID            int64
+	Creator       string
+	CreatedAt     time.Time
+	Content       string // HTML
+	GroupOn       string // YYYY-MM-DD or empty
+	CommentsCount int
 }
 
 // DocsFilesItemInfo is a lightweight representation of a vault item.
