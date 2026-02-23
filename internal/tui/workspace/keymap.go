@@ -1,6 +1,12 @@
 package workspace
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"encoding/json"
+	"os"
+	"reflect"
+
+	"github.com/charmbracelet/bubbles/key"
+)
 
 // GlobalKeyMap defines keybindings that work in every context.
 type GlobalKeyMap struct {
@@ -49,8 +55,8 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 			key.WithHelp("ctrl+a", "switch account"),
 		),
 		Hey: key.NewBinding(
-			key.WithKeys("ctrl+h"),
-			key.WithHelp("ctrl+h", "hey! inbox"),
+			key.WithKeys("ctrl+y"),
+			key.WithHelp("ctrl+y", "hey! inbox"),
 		),
 		MyStuff: key.NewBinding(
 			key.WithKeys("ctrl+s"),
@@ -149,5 +155,64 @@ func (k GlobalKeyMap) FullHelp() [][]key.Binding {
 		{k.Search, k.Palette},
 		{k.AccountSwitch, k.Hey, k.MyStuff, k.Activity},
 		{k.Help, k.Refresh, k.Open, k.Jump, k.Sidebar, k.Metrics},
+	}
+}
+
+// actionFieldMap maps action names (from keybindings.json) to GlobalKeyMap field names.
+var actionFieldMap = map[string]string{
+	"quit":           "Quit",
+	"help":           "Help",
+	"back":           "Back",
+	"search":         "Search",
+	"palette":        "Palette",
+	"account_switch": "AccountSwitch",
+	"hey":            "Hey",
+	"my_stuff":       "MyStuff",
+	"activity":       "Activity",
+	"sidebar":        "Sidebar",
+	"sidebar_focus":  "SidebarFocus",
+	"refresh":        "Refresh",
+	"open":           "Open",
+	"jump":           "Jump",
+	"metrics":        "Metrics",
+}
+
+// LoadKeyOverrides reads keybinding overrides from a JSON file.
+// Returns an empty map (not an error) if the file doesn't exist.
+func LoadKeyOverrides(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var overrides map[string]string
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		return nil, err
+	}
+	return overrides, nil
+}
+
+// ApplyOverrides remaps keybindings in km according to the overrides map.
+// Keys are action names (e.g. "hey"), values are key strings (e.g. "ctrl+h").
+// Unknown actions are silently ignored.
+func ApplyOverrides(km *GlobalKeyMap, overrides map[string]string) {
+	v := reflect.ValueOf(km).Elem()
+	for action, keyStr := range overrides {
+		fieldName, ok := actionFieldMap[action]
+		if !ok {
+			continue
+		}
+		field := v.FieldByName(fieldName)
+		if !field.IsValid() {
+			continue
+		}
+		binding := field.Interface().(key.Binding)
+		helpInfo := binding.Help()
+		field.Set(reflect.ValueOf(key.NewBinding(
+			key.WithKeys(keyStr),
+			key.WithHelp(keyStr, helpInfo.Desc),
+		)))
 	}
 }
