@@ -1,0 +1,26 @@
+#!/bin/bash
+set -e
+
+# Ensure mise is available
+if ! command -v mise >/dev/null 2>&1; then
+  echo "mise not found. Install: https://mise.jdx.dev/getting-started.html"
+  exit 1
+fi
+
+# Install Go via mise (reads .mise.toml)
+mise install
+
+# Install dev tools (golangci-lint, govulncheck, etc.)
+make tools
+
+# Build and install the binary
+make install
+
+# Verify
+if command -v basecamp >/dev/null 2>&1; then
+  echo "✓ basecamp CLI installed: $(basecamp --version)"
+else
+  echo "✗ basecamp installed to $(go env GOPATH)/bin/ but that's not on PATH"
+  echo "  Add to shell config: export PATH=\"\$(go env GOPATH)/bin:\$PATH\""
+  exit 1
+fi
