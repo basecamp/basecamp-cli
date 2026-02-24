@@ -605,21 +605,53 @@ func (v *Campfire) renderMessages() {
 		b.WriteString("\n\n")
 	}
 
+	dateStyle := lipgloss.NewStyle().Foreground(theme.Muted).Align(lipgloss.Center).Width(bodyWidth)
+
 	for i, line := range v.lines {
-		if i > 0 {
+		// Date separator when the day changes
+		dayChanged := false
+		if i == 0 || !sameDay(v.lines[i-1].CreatedAtTS, line.CreatedAtTS) {
+			if !line.CreatedAtTS.IsZero() {
+				dayChanged = true
+				if i > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(dateStyle.Render("── " + formatMessageDate(line.CreatedAtTS) + " ──"))
+				b.WriteString("\n")
+			}
+		}
+
+		// Group consecutive messages from same sender within 5 minutes,
+		// but always show header after a date boundary.
+		showHeader := true
+		if i > 0 && !dayChanged {
+			prev := v.lines[i-1]
+			if prev.Creator == line.Creator && sameTimeGroup(prev.CreatedAtTS, line.CreatedAtTS) {
+				showHeader = false
+			}
+		}
+
+		if showHeader {
+			// Add spacing before header, unless a date separator was just written
+			if i > 0 && !dayChanged {
+				b.WriteString("\n")
+			}
+			b.WriteString(nameStyle.Render(line.Creator))
+			b.WriteString("  ")
+			b.WriteString(timeStyle.Render(line.CreatedAt))
+			if line.GetBoosts().Count > 0 {
+				b.WriteString(lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf("  [♥ %d]", line.GetBoosts().Count)))
+			}
 			b.WriteString("\n")
 		}
-		b.WriteString(nameStyle.Render(line.Creator))
-		b.WriteString("  ")
-		b.WriteString(timeStyle.Render(line.CreatedAt))
-		if line.GetBoosts().Count > 0 {
-			b.WriteString(lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf("  [♥ %d]", line.GetBoosts().Count)))
-		}
-		b.WriteString("\n")
 
 		body := richtext.HTMLToMarkdown(line.Body)
 		rendered := wrapText(body, bodyWidth)
 		b.WriteString(rendered)
+		// Show boosts inline for grouped (non-header) messages
+		if !showHeader && line.GetBoosts().Count > 0 {
+			b.WriteString(lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf("  [♥ %d]", line.GetBoosts().Count)))
+		}
 		b.WriteString("\n")
 	}
 
@@ -641,6 +673,40 @@ func (v *Campfire) renderMessages() {
 		v.viewport.GotoBottom()
 	}
 	v.lastRenderedWidth = v.width
+}
+
+// sameTimeGroup returns true when b is within 5 minutes after a (both non-zero).
+func sameTimeGroup(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return false
+	}
+	delta := b.Sub(a)
+	return delta >= 0 && delta <= 5*time.Minute
+}
+
+// sameDay returns true when two timestamps fall on the same local calendar day.
+func sameDay(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return a.IsZero() && b.IsZero()
+	}
+	ya, ma, da := a.Local().Date()
+	yb, mb, db := b.Local().Date()
+	return ya == yb && ma == mb && da == db
+}
+
+// formatMessageDate formats a timestamp for the campfire date separator.
+func formatMessageDate(t time.Time) string {
+	now := time.Now()
+	local := t.In(now.Location())
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	switch {
+	case sameDay(local, now):
+		return "Today"
+	case sameDay(local, today.AddDate(0, 0, -1)):
+		return "Yesterday"
+	default:
+		return local.Format("Mon, Jan 2")
+	}
 }
 
 // wrapText soft-wraps text to fit within the given width.
@@ -809,10 +875,11 @@ func (v *Campfire) fetchOlderLines() tea.Cmd {
 				creator = line.Creator.Name
 			}
 			infos = append(infos, workspace.CampfireLineInfo{
-				ID:        line.ID,
-				Body:      line.Content,
-				Creator:   creator,
-				CreatedAt: line.CreatedAt.Format("3:04pm"),
+				ID:          line.ID,
+				Body:        line.Content,
+				Creator:     creator,
+				CreatedAt:   line.CreatedAt.Format("3:04pm"),
+				CreatedAtTS: line.CreatedAt,
 			})
 		}
 
