@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"strings"
@@ -255,7 +256,11 @@ func (v *Detail) relayout() {
 		v.preview.SetSize(max(0, v.width-2), previewHeight)
 		v.composer.SetSize(max(0, v.width-2), composerHeight)
 	} else {
-		v.preview.SetSize(max(0, v.width-2), v.height)
+		inputLines := 0
+		if v.editing || v.settingDue || v.assigning || v.editingComment {
+			inputLines = 1
+		}
+		v.preview.SetSize(max(0, v.width-2), max(1, v.height-inputLines))
 	}
 }
 
@@ -347,6 +352,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, workspace.ReportError(msg.err, "editing title")
 		}
 		v.editing = false
+		v.relayout()
 		v.data.title = msg.title
 		v.syncPreview()
 		if realm := v.session.Hub().Project(); realm != nil {
@@ -370,6 +376,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, workspace.ReportError(msg.err, "updating due date")
 		}
 		v.settingDue = false
+		v.relayout()
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Due date updated", false))
 
@@ -378,6 +385,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, workspace.ReportError(msg.err, "updating assignee")
 		}
 		v.assigning = false
+		v.relayout()
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Assignee updated", false))
 
@@ -396,6 +404,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, workspace.ReportError(msg.err, "editing comment")
 		}
 		v.editingComment = false
+		v.relayout()
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Comment updated", false))
 
@@ -618,6 +627,7 @@ func (v *Detail) startCommentEdit() tea.Cmd {
 	}
 	c := v.data.comments[v.focusedComment]
 	v.editingComment = true
+	v.relayout()
 	v.commentEditInput = textinput.New()
 	v.commentEditInput.SetValue(richtext.HTMLToMarkdown(c.content))
 	v.commentEditInput.CharLimit = 0 // unlimited
@@ -631,11 +641,13 @@ func (v *Detail) handleCommentEditingKey(msg tea.KeyMsg) tea.Cmd {
 		content := strings.TrimSpace(v.commentEditInput.Value())
 		if content == "" {
 			v.editingComment = false
+			v.relayout()
 			return nil
 		}
 		return v.submitCommentEdit(content)
 	case "esc":
 		v.editingComment = false
+		v.relayout()
 		return nil
 	default:
 		var cmd tea.Cmd
@@ -697,6 +709,7 @@ func (v *Detail) startDetailSettingDue() tea.Cmd {
 		return nil
 	}
 	v.settingDue = true
+	v.relayout()
 	v.dueInput = textinput.New()
 	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
 	v.dueInput.CharLimit = 64
@@ -709,6 +722,7 @@ func (v *Detail) handleDetailSettingDueKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		input := strings.TrimSpace(v.dueInput.Value())
 		v.settingDue = false
+		v.relayout()
 		if input == "" {
 			return v.clearDetailDueDate()
 		}
@@ -718,6 +732,7 @@ func (v *Detail) handleDetailSettingDueKey(msg tea.KeyMsg) tea.Cmd {
 		return v.setDetailDueDate(dateparse.Parse(input))
 	case "esc":
 		v.settingDue = false
+		v.relayout()
 		return nil
 	default:
 		var cmd tea.Cmd
@@ -756,6 +771,7 @@ func (v *Detail) startDetailAssigning() tea.Cmd {
 		return nil
 	}
 	v.assigning = true
+	v.relayout()
 	v.assignInput = textinput.New()
 	v.assignInput.Placeholder = "assign to (name)..."
 	v.assignInput.CharLimit = 128
@@ -768,12 +784,14 @@ func (v *Detail) handleDetailAssigningKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		input := strings.TrimSpace(v.assignInput.Value())
 		v.assigning = false
+		v.relayout()
 		if input == "" {
 			return nil
 		}
 		return v.assignDetailTodo(input)
 	case "esc":
 		v.assigning = false
+		v.relayout()
 		return nil
 	default:
 		var cmd tea.Cmd
@@ -841,6 +859,7 @@ func (v *Detail) startEditTitle() tea.Cmd {
 		return nil
 	}
 	v.editing = true
+	v.relayout()
 	v.editInput = textinput.New()
 	v.editInput.SetValue(v.data.title)
 	v.editInput.CharLimit = 256
@@ -854,11 +873,13 @@ func (v *Detail) handleEditingKey(msg tea.KeyMsg) tea.Cmd {
 		title := strings.TrimSpace(v.editInput.Value())
 		if title == "" || title == v.data.title {
 			v.editing = false
+			v.relayout()
 			return nil
 		}
 		return v.submitEditTitle(title)
 	case "esc":
 		v.editing = false
+		v.relayout()
 		return nil
 	default:
 		var cmd tea.Cmd
@@ -1081,7 +1102,7 @@ func (v *Detail) buildCommentsHTML() string {
 	b.WriteString("<hr><h3>Comments</h3>")
 	for _, c := range v.data.comments {
 		b.WriteString("<p><strong>")
-		b.WriteString(c.creator)
+		b.WriteString(html.EscapeString(c.creator))
 		b.WriteString("</strong> <em>")
 		b.WriteString(c.createdAt.Format("Jan 2, 2006 3:04 PM"))
 		b.WriteString("</em></p>")

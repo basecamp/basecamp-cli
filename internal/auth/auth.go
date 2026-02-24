@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -585,24 +584,7 @@ func generateState() string {
 
 // openBrowser opens the specified URL in the default browser.
 func openBrowser(url string) error {
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-		args = []string{url}
-	case "linux":
-		cmd = "xdg-open"
-		args = []string{url}
-	case "windows":
-		cmd = "rundll32"
-		args = []string{"url.dll,FileProtocolHandler", url}
-	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
-	}
-
-	return exec.Command(cmd, args...).Start() //nolint:gosec,noctx // G204: cmd is hardcoded per-platform; fire-and-forget
+	return hostutil.OpenBrowser(url)
 }
 
 // GetOAuthType returns the OAuth type for the current credential key ("bc3" or "launchpad").

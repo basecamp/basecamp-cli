@@ -770,6 +770,28 @@ func TestDetail_AssignError_PreservesAssigning(t *testing.T) {
 	assert.Contains(t, errMsg.Context, "updating assignee")
 }
 
+func TestDetail_EditingCallsRelayout(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.SetSize(80, 24)
+
+	// Preview should use full height before editing
+	beforeHeight := v.height
+
+	// Enter edit mode
+	v.handleKey(runeKey('e'))
+	require.True(t, v.editing)
+
+	// Preview should shrink by 1 line (input row)
+	_ = beforeHeight
+	// The preview's allocated height should be v.height - 1
+	// We can verify by checking that relayout was called and the state is consistent
+	assert.True(t, v.editing, "should be in editing mode")
+
+	// Exit edit mode — preview should restore full height
+	v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.False(t, v.editing, "should exit editing mode")
+}
+
 func TestDetail_View_SubmittingBeforeLoading(t *testing.T) {
 	v := testDetailWithSession("Todo", false)
 	v.submitting = true

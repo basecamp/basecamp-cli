@@ -2,10 +2,11 @@ package workspace
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 )
 
 // ScopeRequirement defines what scope context an action needs.
@@ -381,7 +382,7 @@ func trashCmd(trashFn func() error) tea.Cmd {
 // OpenURL opens the given URL in the default browser.
 func OpenURL(url string) tea.Cmd {
 	return func() tea.Msg {
-		if err := exec.Command("open", url).Start(); err != nil { //nolint:gosec,noctx
+		if err := hostutil.OpenBrowser(url); err != nil {
 			return ErrorMsg{Context: "open", Err: err}
 		}
 		return StatusMsg{Text: "Opened in browser"}
@@ -402,7 +403,7 @@ func openInBrowser(scope Scope) tea.Cmd {
 		url = fmt.Sprintf("https://3.basecamp.com/%s", scope.AccountID)
 	}
 	return func() tea.Msg {
-		if err := exec.Command("open", url).Start(); err != nil { //nolint:gosec,noctx
+		if err := hostutil.OpenBrowser(url); err != nil {
 			return ErrorMsg{Context: "open", Err: err}
 		}
 		return StatusMsg{Text: "Opened in browser"}
