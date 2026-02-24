@@ -1,0 +1,224 @@
+// Package chrome provides always-visible shell components for the workspace.
+package chrome
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/basecamp/basecamp-cli/internal/tui"
+)
+
+// PoolMetricsSummary is the status bar's view of pool health.
+type PoolMetricsSummary struct {
+	ActivePools int
+	P50Latency  time.Duration
+	ErrorRate   float64
+}
+
+// StatusBar renders the bottom status bar with key hints and status info.
+type StatusBar struct {
+	styles          *tui.Styles
+	width           int
+	accountName     string
+	status          string
+	isError         bool
+	persistentError bool
+	statusGen       uint64
+	keyHints        []key.Binding
+	globalHints     []key.Binding
+	metrics         *PoolMetricsSummary
+}
+
+// NewStatusBar creates a new status bar.
+func NewStatusBar(styles *tui.Styles) StatusBar {
+	return StatusBar{
+		styles: styles,
+	}
+}
+
+// SetAccount sets the displayed account name.
+func (s *StatusBar) SetAccount(name string) {
+	s.accountName = name
+}
+
+// SetStatus sets a temporary status message.
+func (s *StatusBar) SetStatus(text string, isError bool) {
+	s.statusGen++
+	s.status = text
+	s.isError = isError
+	if isError {
+		s.persistentError = true
+	}
+}
+
+// ClearStatus clears the status message.
+func (s *StatusBar) ClearStatus() {
+	s.status = ""
+	s.isError = false
+	s.persistentError = false
+}
+
+// HasPersistentError returns whether an error is being displayed.
+func (s *StatusBar) HasPersistentError() bool {
+	return s.persistentError
+}
+
+// StatusGen returns the current status generation counter.
+func (s *StatusBar) StatusGen() uint64 {
+	return s.statusGen
+}
+
+// SetKeyHints sets the key bindings shown as hints.
+func (s *StatusBar) SetKeyHints(hints []key.Binding) {
+	s.keyHints = hints
+}
+
+// SetGlobalHints sets the always-visible global key hints shown on the right.
+func (s *StatusBar) SetGlobalHints(hints []key.Binding) {
+	s.globalHints = hints
+}
+
+// SetMetrics updates the pool health metrics display.
+func (s *StatusBar) SetMetrics(summary *PoolMetricsSummary) {
+	s.metrics = summary
+}
+
+// SetWidth sets the available width.
+func (s *StatusBar) SetWidth(w int) {
+	s.width = w
+}
+
+// Init implements tea.Model.
+func (s StatusBar) Init() tea.Cmd {
+	return nil
+}
+
+// Update implements tea.Model.
+func (s StatusBar) Update(msg tea.Msg) (StatusBar, tea.Cmd) {
+	return s, nil
+}
+
+// View renders the status bar.
+func (s StatusBar) View() string {
+	if s.width <= 0 {
+		return ""
+	}
+
+	theme := s.styles.Theme()
+
+	barStyle := lipgloss.NewStyle().
+		Width(s.width).
+		Foreground(theme.Secondary).
+		Background(theme.Background)
+
+	// Build left side: key hints
+	var hints []string
+	for _, k := range s.keyHints {
+		if k.Enabled() {
+			help := k.Help()
+			hint := lipgloss.NewStyle().
+				Foreground(theme.Primary).
+				Render(help.Key) +
+				lipgloss.NewStyle().
+					Foreground(theme.Muted).
+					Render(" "+help.Desc)
+			hints = append(hints, hint)
+		}
+	}
+	left := strings.Join(hints, "  ")
+
+	// Build right side: metrics + status/hints
+	metricsStr := s.renderMetrics(theme)
+
+	var right string
+	if s.status != "" {
+		style := lipgloss.NewStyle().Foreground(theme.Success)
+		if s.isError {
+			style = lipgloss.NewStyle().Foreground(theme.Error)
+		}
+		right = style.Render(s.status)
+	} else if len(s.globalHints) > 0 {
+		right = s.renderGlobalHints(theme, lipgloss.Width(left)+lipgloss.Width(metricsStr))
+	} else if s.accountName != "" {
+		right = lipgloss.NewStyle().
+			Foreground(theme.Muted).
+			Render("[" + s.accountName + "]")
+	}
+	if metricsStr != "" {
+		if right != "" {
+			right = metricsStr + "  " + right
+		} else {
+			right = metricsStr
+		}
+	}
+
+	// Lay out: left-align hints, right-align status
+	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+
+	return barStyle.MaxWidth(s.width).Render(left + strings.Repeat(" ", gap) + right)
+}
+
+// renderMetrics renders the pool health indicator: ● 4 pools · 180ms
+func (s StatusBar) renderMetrics(theme tui.Theme) string {
+	if s.metrics == nil || s.metrics.ActivePools == 0 {
+		return ""
+	}
+	indicator := "●"
+	color := theme.Success
+	if s.metrics.ErrorRate > 0.1 {
+		indicator = "○"
+		color = theme.Error
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(indicator) +
+		lipgloss.NewStyle().Foreground(theme.Muted).Render(
+			fmt.Sprintf(" %d pools · %dms", s.metrics.ActivePools, s.metrics.P50Latency.Milliseconds()))
+}
+
+// renderGlobalHints renders as many global hints as fit given the left zone width.
+// Hints are rendered in a dimmer color pair (Border/Muted) so they visually
+// recede behind the context-specific view hints on the left.
+func (s StatusBar) renderGlobalHints(theme tui.Theme, leftWidth int) string {
+	const minGap = 2 // minimum space between left and right zones
+	budget := s.width - leftWidth - minGap
+
+	keyStyle := lipgloss.NewStyle().Foreground(theme.Border)
+	descStyle := lipgloss.NewStyle().Foreground(theme.Muted)
+
+	var parts []string
+	used := 0
+
+	if s.persistentError {
+		hint := keyStyle.Render("r") + descStyle.Render(" retry")
+		plain := "r retry"
+		w := lipgloss.Width(plain)
+		parts = append(parts, hint)
+		used += w
+	}
+
+	for _, k := range s.globalHints {
+		if !k.Enabled() {
+			continue
+		}
+		help := k.Help()
+		plain := help.Key + " " + help.Desc
+		w := lipgloss.Width(plain)
+		need := w
+		if len(parts) > 0 {
+			need += 2 // separator
+		}
+		if used+need > budget {
+			break
+		}
+		parts = append(parts, keyStyle.Render(help.Key)+descStyle.Render(" "+help.Desc))
+		used += need
+	}
+	return strings.Join(parts, "  ")
+}

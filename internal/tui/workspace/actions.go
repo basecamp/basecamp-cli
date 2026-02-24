@@ -1,0 +1,411 @@
+package workspace
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
+)
+
+// ScopeRequirement defines what scope context an action needs.
+type ScopeRequirement int
+
+const (
+	// ScopeAny means the action works anywhere.
+	ScopeAny ScopeRequirement = iota
+	// ScopeAccount means the action needs an account selected.
+	ScopeAccount
+	// ScopeProject means the action needs a project selected.
+	ScopeProject
+)
+
+// Action represents a registered command/action in the workspace.
+type Action struct {
+	Name        string
+	Aliases     []string
+	Description string
+	Category    string           // "navigation", "project", "mutation", etc.
+	Scope       ScopeRequirement // what scope context is needed
+	Available   func(Scope) bool // optional; narrows scope check further
+	Execute     func(session *Session) tea.Cmd
+}
+
+// Registry holds all registered actions.
+type Registry struct {
+	actions []Action
+}
+
+// NewRegistry creates an empty action registry.
+func NewRegistry() *Registry {
+	return &Registry{}
+}
+
+// Register adds an action to the registry.
+func (r *Registry) Register(action Action) {
+	r.actions = append(r.actions, action)
+}
+
+// All returns every registered action.
+func (r *Registry) All() []Action {
+	out := make([]Action, len(r.actions))
+	copy(out, r.actions)
+	return out
+}
+
+// Search returns actions whose name, aliases, or description match the query.
+// An empty query returns all actions.
+func (r *Registry) Search(query string) []Action {
+	if query == "" {
+		return r.All()
+	}
+	q := strings.ToLower(query)
+	var matches []Action
+	for _, a := range r.actions {
+		if fuzzyMatch(q, a) {
+			matches = append(matches, a)
+		}
+	}
+	return matches
+}
+
+// ForScope returns actions available for the given scope.
+// Available refines the scope check but does not bypass it.
+func (r *Registry) ForScope(scope Scope) []Action {
+	var matches []Action
+	for _, a := range r.actions {
+		if !scopeSatisfied(a.Scope, scope) {
+			continue
+		}
+		if a.Available != nil && !a.Available(scope) {
+			continue
+		}
+		matches = append(matches, a)
+	}
+	return matches
+}
+
+// fuzzyMatch checks whether query appears as a substring in any of the
+// action's searchable fields (name, aliases, description).
+func fuzzyMatch(query string, a Action) bool {
+	if strings.Contains(strings.ToLower(a.Name), query) {
+		return true
+	}
+	for _, alias := range a.Aliases {
+		if strings.Contains(strings.ToLower(alias), query) {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(a.Description), query)
+}
+
+// scopeSatisfied returns true when the given scope meets the requirement.
+func scopeSatisfied(req ScopeRequirement, scope Scope) bool {
+	switch req {
+	case ScopeAccount:
+		return scope.AccountID != ""
+	case ScopeProject:
+		return scope.ProjectID != 0
+	default:
+		return true
+	}
+}
+
+// DefaultActions returns a registry pre-populated with the standard navigation actions.
+func DefaultActions() *Registry {
+	r := NewRegistry()
+
+	r.Register(Action{
+		Name:        ":projects",
+		Aliases:     []string{"home", "dashboard"},
+		Description: "Navigate to projects",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewProjects, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":todos",
+		Aliases:     []string{"todolists", "tasks"},
+		Description: "Navigate to to-dos",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewTodos, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":campfire",
+		Aliases:     []string{"chat", "fire"},
+		Description: "Navigate to campfire",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewCampfire, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":messages",
+		Aliases:     []string{"message board", "posts"},
+		Description: "Navigate to message board",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewMessages, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":cards",
+		Aliases:     []string{"card table", "kanban"},
+		Description: "Navigate to card table",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewCards, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":search",
+		Aliases:     []string{"find", "lookup"},
+		Description: "Open search",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewSearch, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":hey",
+		Aliases:     []string{"inbox", "notifications"},
+		Description: "Open Hey! inbox",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewHey, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":me",
+		Aliases:     []string{"mystuff", "my stuff"},
+		Description: "Open My Stuff",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewMyStuff, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":people",
+		Aliases:     []string{"team", "users"},
+		Description: "Open people list",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewPeople, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":pulse",
+		Aliases:     []string{"activity", "recent"},
+		Description: "Activity across all accounts",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewPulse, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":assignments",
+		Aliases:     []string{"assigned", "my todos"},
+		Description: "My todo assignments",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewAssignments, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":pings",
+		Aliases:     []string{"dm", "direct messages"},
+		Description: "Direct messages (pings)",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewPings, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":schedule",
+		Aliases:     []string{"calendar", "events"},
+		Description: "Open schedule",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewSchedule, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":timeline",
+		Aliases:     []string{"history", "log"},
+		Description: "Open timeline",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewTimeline, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":checkins",
+		Aliases:     []string{"check-ins", "automatic check-ins", "questions"},
+		Description: "Open automatic check-ins",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewCheckins, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":docs",
+		Aliases:     []string{"files", "documents", "vault"},
+		Description: "Open docs & files",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewDocsFiles, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":forwards",
+		Aliases:     []string{"email forwards", "emailforwards"},
+		Description: "Open forwards",
+		Category:    "project",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewForwards, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":compose",
+		Aliases:     []string{"new message", "post"},
+		Description: "Compose a message",
+		Category:    "mutation",
+		Scope:       ScopeProject,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewCompose, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":open",
+		Aliases:     []string{"browser", "web"},
+		Description: "Open in browser",
+		Category:    "navigation",
+		Scope:       ScopeAccount,
+		Execute: func(s *Session) tea.Cmd {
+			return openInBrowser(s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":quit",
+		Aliases:     []string{"exit", "close"},
+		Description: "Quit Basecamp",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(_ *Session) tea.Cmd {
+			return tea.Quit
+		},
+	})
+	r.Register(Action{
+		Name:        ":complete",
+		Aliases:     []string{"done", "finish", "check"},
+		Description: "Complete the current todo",
+		Category:    "mutation",
+		Scope:       ScopeProject,
+		Available: func(s Scope) bool {
+			return s.RecordingID != 0 && strings.EqualFold(s.RecordingType, "Todo")
+		},
+		Execute: func(session *Session) tea.Cmd {
+			scope := session.Scope()
+			hub := session.Hub()
+			ctx := hub.ProjectContext()
+			return completeCmd(func() error {
+				return hub.CompleteTodo(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+			})
+		},
+	})
+	r.Register(Action{
+		Name:        ":trash",
+		Aliases:     []string{"delete", "remove"},
+		Description: "Trash the current recording",
+		Category:    "mutation",
+		Scope:       ScopeProject,
+		Available: func(s Scope) bool {
+			return s.RecordingID != 0
+		},
+		Execute: func(session *Session) tea.Cmd {
+			scope := session.Scope()
+			hub := session.Hub()
+			ctx := hub.ProjectContext()
+			return trashCmd(func() error {
+				return hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+			})
+		},
+	})
+
+	return r
+}
+
+// completeCmd builds a tea.Cmd that calls completeFn and returns a StatusMsg on success.
+func completeCmd(completeFn func() error) tea.Cmd {
+	return func() tea.Msg {
+		if err := completeFn(); err != nil {
+			return ErrorMsg{Err: err, Context: "completing todo"}
+		}
+		return StatusMsg{Text: "Completed"}
+	}
+}
+
+// trashCmd builds a tea.Cmd that calls trashFn and returns StatusMsg + NavigateBack on success.
+func trashCmd(trashFn func() error) tea.Cmd {
+	return func() tea.Msg {
+		if err := trashFn(); err != nil {
+			return ErrorMsg{Err: err, Context: "trashing recording"}
+		}
+		return tea.BatchMsg{
+			func() tea.Msg { return StatusMsg{Text: "Trashed"} },
+			func() tea.Msg { return NavigateBackMsg{} },
+		}
+	}
+}
+
+// OpenURL opens the given URL in the default browser.
+func OpenURL(url string) tea.Cmd {
+	return func() tea.Msg {
+		if err := hostutil.OpenBrowser(url); err != nil {
+			return ErrorMsg{Context: "open", Err: err}
+		}
+		return StatusMsg{Text: "Opened in browser"}
+	}
+}
+
+// openInBrowser builds a Basecamp URL from scope and opens it in the default browser.
+func openInBrowser(scope Scope) tea.Cmd {
+	var url string
+	switch {
+	case scope.RecordingID != 0 && scope.ProjectID != 0:
+		url = fmt.Sprintf("https://3.basecamp.com/%s/buckets/%d/recordings/%d",
+			scope.AccountID, scope.ProjectID, scope.RecordingID)
+	case scope.ProjectID != 0:
+		url = fmt.Sprintf("https://3.basecamp.com/%s/projects/%d",
+			scope.AccountID, scope.ProjectID)
+	default:
+		url = fmt.Sprintf("https://3.basecamp.com/%s", scope.AccountID)
+	}
+	return func() tea.Msg {
+		if err := hostutil.OpenBrowser(url); err != nil {
+			return ErrorMsg{Context: "open", Err: err}
+		}
+		return StatusMsg{Text: "Opened in browser"}
+	}
+}

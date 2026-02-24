@@ -139,3 +139,84 @@ func AuthRequired() Message {
 		Command: "basecamp auth login",
 	}
 }
+
+// NoMessages returns the empty state for no messages.
+func NoMessages() Message {
+	return Message{
+		Title: "No messages",
+		Body:  "This project doesn't have any messages yet.",
+		Hints: []string{"Press n to write a new message"},
+	}
+}
+
+// NoScheduleEntries returns the empty state for no schedule entries.
+func NoScheduleEntries() Message {
+	return Message{
+		Title: "No schedule entries",
+		Body:  "This project doesn't have any schedule entries yet.",
+	}
+}
+
+// NoDocsFiles returns the empty state for no documents or files.
+func NoDocsFiles() Message {
+	return Message{
+		Title: "No documents or files",
+		Body:  "This project doesn't have any documents or files yet.",
+	}
+}
+
+// NoPings returns the empty state for no ping threads.
+func NoPings() Message {
+	return Message{
+		Title: "No ping threads",
+		Body:  "No active ping conversations.",
+	}
+}
+
+// NoCheckins returns the empty state for no check-in questions.
+func NoCheckins() Message {
+	return Message{
+		Title: "No check-in questions",
+		Body:  "This project doesn't have any automatic check-ins.",
+	}
+}
+
+// NoForwards returns the empty state for no email forwards.
+func NoForwards() Message {
+	return Message{
+		Title: "No email forwards",
+		Body:  "No emails have been forwarded to this project.",
+	}
+}
+
+// NoAssignments returns the empty state for no assignments.
+func NoAssignments() Message {
+	return Message{
+		Title: "No assignments",
+		Body:  "You don't have any assignments right now.",
+	}
+}
+
+// NoTimeline returns the empty state for no timeline activity.
+func NoTimeline() Message {
+	return Message{
+		Title: "No recent activity",
+		Body:  "No recent activity for this project.",
+	}
+}
+
+// NoColumns returns the empty state for no card table columns.
+func NoColumns() Message {
+	return Message{
+		Title: "No columns",
+		Body:  "This card table doesn't have any columns yet.",
+	}
+}
+
+// NoDockTools returns the empty state for no dock tools.
+func NoDockTools() Message {
+	return Message{
+		Title: "No tools enabled",
+		Body:  "This project doesn't have any tools enabled.",
+	}
+}

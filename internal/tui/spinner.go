@@ -74,7 +74,7 @@ func WithSpinnerColor(color lipgloss.TerminalColor) SpinnerOption {
 func newSpinnerModel(message string, opts ...SpinnerOption) spinnerModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = lipgloss.NewStyle().Foreground(DefaultTheme().Primary)
 
 	m := spinnerModel{
 		spinner: s,

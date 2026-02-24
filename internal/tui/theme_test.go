@@ -269,6 +269,7 @@ func TestResolveTheme(t *testing.T) {
 	})
 
 	t.Run("BASECAMP_THEME loads custom file", func(t *testing.T) {
+		// Clear NO_COLOR to allow theme loading
 		unsetenvForTest(t, "NO_COLOR")
 
 		tmpDir := t.TempDir()
@@ -288,6 +289,7 @@ foreground = "#ffffff"
 	})
 
 	t.Run("BASECAMP_THEME invalid file falls back", func(t *testing.T) {
+		// Clear NO_COLOR to allow theme loading
 		unsetenvForTest(t, "NO_COLOR")
 		t.Setenv("BASECAMP_THEME", "/nonexistent/theme.toml")
 

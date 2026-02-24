@@ -131,7 +131,7 @@ func NewStylesWithTheme(theme Theme) *Styles {
 
 	s.Selected = lipgloss.NewStyle().
 		Background(theme.Primary).
-		Foreground(lipgloss.Color("#ffffff")).
+		Foreground(theme.Background).
 		Padding(0, 1)
 
 	s.Cursor = lipgloss.NewStyle().

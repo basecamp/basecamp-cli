@@ -525,6 +525,80 @@ func TestMarkdownToHTMLListVariants(t *testing.T) {
 	}
 }
 
+func TestAttachmentToHTML(t *testing.T) {
+	got := AttachmentToHTML("BAh123==", "report.pdf", "application/pdf")
+	want := `<bc-attachment sgid="BAh123==" content-type="application/pdf" filename="report.pdf"></bc-attachment>`
+	if got != want {
+		t.Errorf("AttachmentToHTML\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestAttachmentToHTMLEscapes(t *testing.T) {
+	got := AttachmentToHTML(`bad"sgid`, `file"name.pdf`, `type"bad`)
+	if !strings.Contains(got, "&quot;") {
+		t.Errorf("AttachmentToHTML should escape quotes, got: %s", got)
+	}
+}
+
+func TestEmbedAttachments(t *testing.T) {
+	html := "<p>Hello</p>"
+	refs := []AttachmentRef{
+		{SGID: "abc", Filename: "doc.pdf", ContentType: "application/pdf"},
+		{SGID: "def", Filename: "img.png", ContentType: "image/png"},
+	}
+	got := EmbedAttachments(html, refs)
+	if !strings.Contains(got, "<p>Hello</p>") {
+		t.Error("EmbedAttachments should preserve original HTML")
+	}
+	if !strings.Contains(got, `filename="doc.pdf"`) {
+		t.Error("EmbedAttachments should include first attachment")
+	}
+	if !strings.Contains(got, `filename="img.png"`) {
+		t.Error("EmbedAttachments should include second attachment")
+	}
+}
+
+func TestEmbedAttachmentsEmpty(t *testing.T) {
+	html := "<p>Hello</p>"
+	got := EmbedAttachments(html, nil)
+	if got != html {
+		t.Errorf("EmbedAttachments(nil) should return input unchanged, got: %s", got)
+	}
+}
+
+func TestHTMLToMarkdownBcAttachment(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains string
+	}{
+		{
+			name:     "attachment with filename",
+			input:    `<p>Here's the doc</p><bc-attachment sgid="BAh" content-type="application/pdf" filename="report.pdf"></bc-attachment>`,
+			contains: "📎 report.pdf",
+		},
+		{
+			name:     "attachment self-closing",
+			input:    `<bc-attachment sgid="x" filename="img.png" content-type="image/png"/>`,
+			contains: "📎 img.png",
+		},
+		{
+			name:     "multiple attachments",
+			input:    `<bc-attachment sgid="a" filename="one.pdf" content-type="application/pdf"></bc-attachment><bc-attachment sgid="b" filename="two.zip" content-type="application/zip"></bc-attachment>`,
+			contains: "📎 one.pdf",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nmissing: %q", tt.input, result, tt.contains)
+			}
+		})
+	}
+}
+
 func TestHTMLToMarkdownPreservesContent(t *testing.T) {
 	// Test that complex HTML structures are handled
 	input := `<h1>Main Title</h1>

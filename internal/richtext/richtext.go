@@ -6,16 +6,85 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/charmbracelet/glamour"
 )
 
-// Precompiled regexes for performance
+// Pre-compiled regexes for MarkdownToHTML list detection
 var (
 	ulPattern = regexp.MustCompile(`^(\s*)[-*+]\s+(.*)$`)
 	olPattern = regexp.MustCompile(`^(\s*)\d+\.\s+(.*)$`)
 )
+
+// Pre-compiled regexes for convertInline (Markdown → HTML inline elements)
+var (
+	reCodeSpan      = regexp.MustCompile("`([^`]+)`")
+	reBoldStar      = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	reBoldUnder     = regexp.MustCompile(`__([^_]+)__`)
+	reItalicStar    = regexp.MustCompile(`\*([^*]+)\*`)
+	reItalicUnder   = regexp.MustCompile(`(?:^|[^a-zA-Z0-9])_([^_]+)_(?:[^a-zA-Z0-9]|$)`)
+	reItalicInner   = regexp.MustCompile(`_([^_]+)_`)
+	reImage         = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+	reLink          = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	reStrikethrough = regexp.MustCompile(`~~([^~]+)~~`)
+)
+
+// Pre-compiled regexes for HTMLToMarkdown (HTML → Markdown block elements)
+var (
+	reH1         = regexp.MustCompile(`(?i)<h1[^>]*>(.*?)</h1>`)
+	reH2         = regexp.MustCompile(`(?i)<h2[^>]*>(.*?)</h2>`)
+	reH3         = regexp.MustCompile(`(?i)<h3[^>]*>(.*?)</h3>`)
+	reH4         = regexp.MustCompile(`(?i)<h4[^>]*>(.*?)</h4>`)
+	reH5         = regexp.MustCompile(`(?i)<h5[^>]*>(.*?)</h5>`)
+	reH6         = regexp.MustCompile(`(?i)<h6[^>]*>(.*?)</h6>`)
+	reBlockquote = regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`)
+	reCodeBlock  = regexp.MustCompile(`(?is)<pre[^>]*><code[^>]*(?:class="language-([^"]*)")?[^>]*>(.*?)</code></pre>`)
+	reCodeLang   = regexp.MustCompile(`class="language-([^"]*)"`)
+	reCodeInner  = regexp.MustCompile(`(?is)<code[^>]*>([\s\S]*?)</code>`)
+	reUL         = regexp.MustCompile(`(?is)<ul[^>]*>(.*?)</ul>`)
+	reOL         = regexp.MustCompile(`(?is)<ol[^>]*>(.*?)</ol>`)
+	reLI         = regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`)
+	reP          = regexp.MustCompile(`(?i)<p[^>]*>(.*?)</p>`)
+	reBR         = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
+	reHR         = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
+)
+
+// Pre-compiled regexes for HTMLToMarkdown inline elements
+var (
+	reHTMLStrong   = regexp.MustCompile(`(?i)<strong[^>]*>(.*?)</strong>`)
+	reHTMLB        = regexp.MustCompile(`(?i)<b[^>]*>(.*?)</b>`)
+	reHTMLEm       = regexp.MustCompile(`(?i)<em[^>]*>(.*?)</em>`)
+	reHTMLI        = regexp.MustCompile(`(?i)<i[^>]*>(.*?)</i>`)
+	reHTMLCode     = regexp.MustCompile(`(?i)<code[^>]*>(.*?)</code>`)
+	reHTMLLink     = regexp.MustCompile(`(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
+	reHTMLImgSA    = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?\s*>`)
+	reHTMLImgAS    = regexp.MustCompile(`(?i)<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*/?\s*>`)
+	reHTMLImgS     = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*/?\s*>`)
+	reHTMLDel      = regexp.MustCompile(`(?i)<del[^>]*>(.*?)</del>`)
+	reHTMLS        = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`)
+	reHTMLStrike   = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`)
+	reAttachment   = regexp.MustCompile(`(?i)<bc-attachment[^>]*filename="([^"]*)"[^>]*/?\s*>`)
+	reAttachClose  = regexp.MustCompile(`(?i)</bc-attachment>`)
+	reStripTags    = regexp.MustCompile(`<[^>]+>`)
+	reMultiNewline = regexp.MustCompile(`\n{3,}`)
+)
+
+// Pre-compiled regexes for IsHTML detection
+var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img)\b[^>]*>`)
+
+// Pre-compiled regexes for IsMarkdown detection
+var reMarkdownPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^#{1,6}\s`),
+	regexp.MustCompile(`\*\*[^*]+\*\*`),
+	regexp.MustCompile(`\*[^*]+\*`),
+	regexp.MustCompile(`\[[^\]]+\]\([^)]+\)`),
+	regexp.MustCompile("```"),
+	regexp.MustCompile(`^[-*+]\s`),
+	regexp.MustCompile(`^\d+\.\s`),
+	regexp.MustCompile(`^>\s`),
+}
 
 // MarkdownToHTML converts Markdown text to HTML suitable for Basecamp's rich text fields.
 // It handles common Markdown syntax: headings, bold, italic, links, lists, code blocks, and blockquotes.
@@ -186,9 +255,8 @@ func convertInline(text string) string {
 
 	// Extract code spans and replace with placeholders to protect them
 	var codeSpans []string
-	codePattern := regexp.MustCompile("`([^`]+)`")
-	text = codePattern.ReplaceAllStringFunc(text, func(match string) string {
-		inner := codePattern.FindStringSubmatch(match)
+	text = reCodeSpan.ReplaceAllStringFunc(text, func(match string) string {
+		inner := reCodeSpan.FindStringSubmatch(match)
 		if len(inner) >= 2 {
 			idx := len(codeSpans)
 			codeSpans = append(codeSpans, inner[1])
@@ -198,13 +266,13 @@ func convertInline(text string) string {
 	})
 
 	// Bold with ** or __
-	text = regexp.MustCompile(`\*\*([^*]+)\*\*`).ReplaceAllString(text, "<strong>$1</strong>")
-	text = regexp.MustCompile(`__([^_]+)__`).ReplaceAllString(text, "<strong>$1</strong>")
+	text = reBoldStar.ReplaceAllString(text, "<strong>$1</strong>")
+	text = reBoldUnder.ReplaceAllString(text, "<strong>$1</strong>")
 
 	// Italic with * or _ (but not inside words for _)
-	text = regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllString(text, "<em>$1</em>")
-	text = regexp.MustCompile(`(?:^|[^a-zA-Z0-9])_([^_]+)_(?:[^a-zA-Z0-9]|$)`).ReplaceAllStringFunc(text, func(s string) string {
-		inner := regexp.MustCompile(`_([^_]+)_`).FindStringSubmatch(s)
+	text = reItalicStar.ReplaceAllString(text, "<em>$1</em>")
+	text = reItalicUnder.ReplaceAllStringFunc(text, func(s string) string {
+		inner := reItalicInner.FindStringSubmatch(s)
 		if len(inner) >= 2 {
 			prefix := ""
 			suffix := ""
@@ -220,9 +288,8 @@ func convertInline(text string) string {
 	})
 
 	// Images ![alt](url) - MUST come before links since image syntax contains link syntax
-	text = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`).ReplaceAllStringFunc(text, func(match string) string {
-		re := regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
-		parts := re.FindStringSubmatch(match)
+	text = reImage.ReplaceAllStringFunc(text, func(match string) string {
+		parts := reImage.FindStringSubmatch(match)
 		if len(parts) >= 3 {
 			alt := escapeAttr(parts[1])
 			src := escapeAttr(parts[2])
@@ -232,9 +299,8 @@ func convertInline(text string) string {
 	})
 
 	// Links [text](url)
-	text = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`).ReplaceAllStringFunc(text, func(match string) string {
-		re := regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-		parts := re.FindStringSubmatch(match)
+	text = reLink.ReplaceAllStringFunc(text, func(match string) string {
+		parts := reLink.FindStringSubmatch(match)
 		if len(parts) >= 3 {
 			linkText := parts[1]
 			href := escapeAttr(parts[2])
@@ -244,7 +310,7 @@ func convertInline(text string) string {
 	})
 
 	// Strikethrough ~~text~~
-	text = regexp.MustCompile(`~~([^~]+)~~`).ReplaceAllString(text, "<del>$1</del>")
+	text = reStrikethrough.ReplaceAllString(text, "<del>$1</del>")
 
 	// Restore code spans
 	for i, code := range codeSpans {
@@ -293,6 +359,30 @@ func allChars(s string, c byte) bool {
 	return true
 }
 
+// glamourCache caches glamour renderers by width to avoid repeated construction.
+var (
+	glamourMu    sync.Mutex
+	glamourCache = make(map[int]*glamour.TermRenderer)
+)
+
+func cachedRenderer(width int) (*glamour.TermRenderer, error) {
+	glamourMu.Lock()
+	defer glamourMu.Unlock()
+
+	if r, ok := glamourCache[width]; ok {
+		return r, nil
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return nil, err
+	}
+	glamourCache[width] = r
+	return r, nil
+}
+
 // RenderMarkdown renders Markdown for terminal display using glamour.
 // It returns styled output suitable for CLI display.
 func RenderMarkdown(md string) (string, error) {
@@ -300,10 +390,7 @@ func RenderMarkdown(md string) (string, error) {
 		return "", nil
 	}
 
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(80),
-	)
+	r, err := cachedRenderer(80)
 	if err != nil {
 		return "", err
 	}
@@ -322,10 +409,7 @@ func RenderMarkdownWithWidth(md string, width int) (string, error) {
 		return "", nil
 	}
 
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-	)
+	r, err := cachedRenderer(width)
 	if err != nil {
 		return "", err
 	}
@@ -350,16 +434,16 @@ func HTMLToMarkdown(html string) string {
 
 	// Handle block elements first (order matters)
 	// Headings
-	html = regexp.MustCompile(`(?i)<h1[^>]*>(.*?)</h1>`).ReplaceAllString(html, "# $1\n\n")
-	html = regexp.MustCompile(`(?i)<h2[^>]*>(.*?)</h2>`).ReplaceAllString(html, "## $1\n\n")
-	html = regexp.MustCompile(`(?i)<h3[^>]*>(.*?)</h3>`).ReplaceAllString(html, "### $1\n\n")
-	html = regexp.MustCompile(`(?i)<h4[^>]*>(.*?)</h4>`).ReplaceAllString(html, "#### $1\n\n")
-	html = regexp.MustCompile(`(?i)<h5[^>]*>(.*?)</h5>`).ReplaceAllString(html, "##### $1\n\n")
-	html = regexp.MustCompile(`(?i)<h6[^>]*>(.*?)</h6>`).ReplaceAllString(html, "###### $1\n\n")
+	html = reH1.ReplaceAllString(html, "# $1\n\n")
+	html = reH2.ReplaceAllString(html, "## $1\n\n")
+	html = reH3.ReplaceAllString(html, "### $1\n\n")
+	html = reH4.ReplaceAllString(html, "#### $1\n\n")
+	html = reH5.ReplaceAllString(html, "##### $1\n\n")
+	html = reH6.ReplaceAllString(html, "###### $1\n\n")
 
 	// Blockquotes
-	html = regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`).ReplaceAllStringFunc(html, func(s string) string {
-		inner := regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`).FindStringSubmatch(s)
+	html = reBlockquote.ReplaceAllStringFunc(html, func(s string) string {
+		inner := reBlockquote.FindStringSubmatch(s)
 		if len(inner) >= 2 {
 			lines := strings.Split(strings.TrimSpace(inner[1]), "\n")
 			result := make([]string, 0, len(lines))
@@ -372,13 +456,13 @@ func HTMLToMarkdown(html string) string {
 	})
 
 	// Code blocks (use (?is) for case-insensitive and dotall mode to match multi-line content)
-	html = regexp.MustCompile(`(?is)<pre[^>]*><code[^>]*(?:class="language-([^"]*)")?[^>]*>(.*?)</code></pre>`).ReplaceAllStringFunc(html, func(s string) string {
-		langMatch := regexp.MustCompile(`class="language-([^"]*)"`).FindStringSubmatch(s)
+	html = reCodeBlock.ReplaceAllStringFunc(html, func(s string) string {
+		langMatch := reCodeLang.FindStringSubmatch(s)
 		lang := ""
 		if len(langMatch) >= 2 {
 			lang = langMatch[1]
 		}
-		codeMatch := regexp.MustCompile(`(?is)<code[^>]*>([\s\S]*?)</code>`).FindStringSubmatch(s)
+		codeMatch := reCodeInner.FindStringSubmatch(s)
 		if len(codeMatch) >= 2 {
 			code := unescapeHTML(codeMatch[1])
 			return "```" + lang + "\n" + code + "\n```\n\n"
@@ -387,10 +471,10 @@ func HTMLToMarkdown(html string) string {
 	})
 
 	// Unordered lists
-	html = regexp.MustCompile(`(?is)<ul[^>]*>(.*?)</ul>`).ReplaceAllStringFunc(html, func(s string) string {
-		inner := regexp.MustCompile(`(?is)<ul[^>]*>(.*?)</ul>`).FindStringSubmatch(s)
+	html = reUL.ReplaceAllStringFunc(html, func(s string) string {
+		inner := reUL.FindStringSubmatch(s)
 		if len(inner) >= 2 {
-			items := regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`).FindAllStringSubmatch(inner[1], -1)
+			items := reLI.FindAllStringSubmatch(inner[1], -1)
 			var result []string
 			for _, item := range items {
 				if len(item) >= 2 {
@@ -403,10 +487,10 @@ func HTMLToMarkdown(html string) string {
 	})
 
 	// Ordered lists
-	html = regexp.MustCompile(`(?is)<ol[^>]*>(.*?)</ol>`).ReplaceAllStringFunc(html, func(s string) string {
-		inner := regexp.MustCompile(`(?is)<ol[^>]*>(.*?)</ol>`).FindStringSubmatch(s)
+	html = reOL.ReplaceAllStringFunc(html, func(s string) string {
+		inner := reOL.FindStringSubmatch(s)
 		if len(inner) >= 2 {
-			items := regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`).FindAllStringSubmatch(inner[1], -1)
+			items := reLI.FindAllStringSubmatch(inner[1], -1)
 			var result []string
 			for i, item := range items {
 				if len(item) >= 2 {
@@ -419,47 +503,52 @@ func HTMLToMarkdown(html string) string {
 	})
 
 	// Paragraphs
-	html = regexp.MustCompile(`(?i)<p[^>]*>(.*?)</p>`).ReplaceAllString(html, "$1\n\n")
+	html = reP.ReplaceAllString(html, "$1\n\n")
 
 	// Line breaks
-	html = regexp.MustCompile(`(?i)<br\s*/?\s*>`).ReplaceAllString(html, "\n")
+	html = reBR.ReplaceAllString(html, "\n")
 
 	// Horizontal rules
-	html = regexp.MustCompile(`(?i)<hr\s*/?\s*>`).ReplaceAllString(html, "\n---\n\n")
+	html = reHR.ReplaceAllString(html, "\n---\n\n")
 
 	// Inline elements
 	// Bold
-	html = regexp.MustCompile(`(?i)<strong[^>]*>(.*?)</strong>`).ReplaceAllString(html, "**$1**")
-	html = regexp.MustCompile(`(?i)<b[^>]*>(.*?)</b>`).ReplaceAllString(html, "**$1**")
+	html = reHTMLStrong.ReplaceAllString(html, "**$1**")
+	html = reHTMLB.ReplaceAllString(html, "**$1**")
 
 	// Italic
-	html = regexp.MustCompile(`(?i)<em[^>]*>(.*?)</em>`).ReplaceAllString(html, "*$1*")
-	html = regexp.MustCompile(`(?i)<i[^>]*>(.*?)</i>`).ReplaceAllString(html, "*$1*")
+	html = reHTMLEm.ReplaceAllString(html, "*$1*")
+	html = reHTMLI.ReplaceAllString(html, "*$1*")
 
 	// Inline code
-	html = regexp.MustCompile(`(?i)<code[^>]*>(.*?)</code>`).ReplaceAllString(html, "`$1`")
+	html = reHTMLCode.ReplaceAllString(html, "`$1`")
 
 	// Links
-	html = regexp.MustCompile(`(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>`).ReplaceAllString(html, "[$2]($1)")
+	html = reHTMLLink.ReplaceAllString(html, "[$2]($1)")
 
 	// Images
-	html = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?\s*>`).ReplaceAllString(html, "![$2]($1)")
-	html = regexp.MustCompile(`(?i)<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*/?\s*>`).ReplaceAllString(html, "![$1]($2)")
-	html = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*/?\s*>`).ReplaceAllString(html, "![]($1)")
+	html = reHTMLImgSA.ReplaceAllString(html, "![$2]($1)")
+	html = reHTMLImgAS.ReplaceAllString(html, "![$1]($2)")
+	html = reHTMLImgS.ReplaceAllString(html, "![]($1)")
 
 	// Strikethrough
-	html = regexp.MustCompile(`(?i)<del[^>]*>(.*?)</del>`).ReplaceAllString(html, "~~$1~~")
-	html = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`).ReplaceAllString(html, "~~$1~~")
-	html = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`).ReplaceAllString(html, "~~$1~~")
+	html = reHTMLDel.ReplaceAllString(html, "~~$1~~")
+	html = reHTMLS.ReplaceAllString(html, "~~$1~~")
+	html = reHTMLStrike.ReplaceAllString(html, "~~$1~~")
+
+	// Basecamp attachments: <bc-attachment ... filename="report.pdf"> → 📎 report.pdf
+	html = reAttachment.ReplaceAllString(html, "\n📎 $1\n")
+	// Self-closing bc-attachment end tags
+	html = reAttachClose.ReplaceAllString(html, "")
 
 	// Remove remaining HTML tags
-	html = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(html, "")
+	html = reStripTags.ReplaceAllString(html, "")
 
 	// Unescape HTML entities
 	html = unescapeHTML(html)
 
 	// Clean up multiple newlines
-	html = regexp.MustCompile(`\n{3,}`).ReplaceAllString(html, "\n\n")
+	html = reMultiNewline.ReplaceAllString(html, "\n\n")
 
 	return strings.TrimSpace(html)
 }
@@ -483,25 +572,43 @@ func IsMarkdown(s string) bool {
 		return false
 	}
 
-	// Check for common Markdown patterns
-	patterns := []string{
-		`^#{1,6}\s`,           // Headings
-		`\*\*[^*]+\*\*`,       // Bold
-		`\*[^*]+\*`,           // Italic
-		`\[[^\]]+\]\([^)]+\)`, // Links
-		"```",                 // Code blocks
-		`^[-*+]\s`,            // Unordered list
-		`^\d+\.\s`,            // Ordered list
-		`^>\s`,                // Blockquote
-	}
-
-	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, s); matched {
+	for _, re := range reMarkdownPatterns {
+		if re.MatchString(s) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// AttachmentRef holds the metadata needed to embed a <bc-attachment> in HTML.
+type AttachmentRef struct {
+	SGID        string
+	Filename    string
+	ContentType string
+}
+
+// AttachmentToHTML builds a <bc-attachment> tag for embedding in Trix-compatible HTML.
+func AttachmentToHTML(sgid, filename, contentType string) string {
+	return `<bc-attachment sgid="` + escapeAttr(sgid) +
+		`" content-type="` + escapeAttr(contentType) +
+		`" filename="` + escapeAttr(filename) +
+		`"></bc-attachment>`
+}
+
+// EmbedAttachments appends <bc-attachment> tags to HTML content.
+// Each attachment is added as a separate block after the main content.
+func EmbedAttachments(html string, attachments []AttachmentRef) string {
+	if len(attachments) == 0 {
+		return html
+	}
+	var b strings.Builder
+	b.WriteString(html)
+	for _, a := range attachments {
+		b.WriteString("\n")
+		b.WriteString(AttachmentToHTML(a.SGID, a.Filename, a.ContentType))
+	}
+	return b.String()
 }
 
 // IsHTML attempts to detect if the input string contains HTML.
@@ -514,6 +621,5 @@ func IsHTML(s string) bool {
 
 	// Check for common safe HTML content tags (opening and closing)
 	// This list intentionally excludes script, style, and other potentially dangerous tags
-	safeTagPattern := regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img)\b[^>]*>`)
-	return safeTagPattern.MatchString(s)
+	return reSafeTag.MatchString(s)
 }
