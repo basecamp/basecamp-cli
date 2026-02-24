@@ -394,9 +394,16 @@ func (l *List) View() string {
 		counts := lipgloss.NewStyle().Foreground(theme.Muted).
 			Render(fmt.Sprintf("%d/%d", len(l.filtered), len(l.items)))
 
+		countsWidth := lipgloss.Width(counts)
+		prefixWidth := lipgloss.Width(prefix)
+		cursorWidth := lipgloss.Width(cursor)
+		maxFilterWidth := l.width - countsWidth - prefixWidth - cursorWidth - 2
+		if maxFilterWidth > 0 && lipgloss.Width(filterText) > maxFilterWidth {
+			filterText = Truncate(filterText, maxFilterWidth)
+		}
+
 		left := prefix + filterText + cursor
 		leftWidth := lipgloss.Width(left)
-		countsWidth := lipgloss.Width(counts)
 		gap := l.width - leftWidth - countsWidth
 		if gap < 1 {
 			gap = 1

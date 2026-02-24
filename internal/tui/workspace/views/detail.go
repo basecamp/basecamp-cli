@@ -1235,7 +1235,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				}
 				data = detailData{
 					title:      title,
-					recordType: strings.Title(recordingType), //nolint:staticcheck
+					recordType: titleCase(recordingType),
 					content:    generic.Content,
 					creator:    creator,
 					createdAt:  generic.CreatedAt,
@@ -1276,4 +1276,13 @@ func fetchSubscriptionState(sub *basecamp.Subscription, err error) bool {
 		return false
 	}
 	return sub.Subscribed
+}
+
+// titleCase uppercases the first letter of s. Recording types are always ASCII
+// (todo, message, card, etc.) so this simple approach is sufficient.
+func titleCase(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

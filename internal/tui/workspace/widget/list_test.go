@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -281,4 +282,25 @@ func TestList_ScrollIndicator_NoOverflow(t *testing.T) {
 	view := l.View()
 	lines := strings.Split(view, "\n")
 	assert.LessOrEqual(t, len(lines), 10, "list view should not exceed widget height")
+}
+
+func TestList_LongFilter_NoOverflow(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(40, 20)
+	l.SetFocused(true)
+	l.SetItems(sampleItems(5))
+
+	// Start filter and type a very long string
+	l.StartFilter()
+	require.True(t, l.Filtering())
+	for _, r := range strings.Repeat("abcdefghij", 10) {
+		l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		assert.LessOrEqual(t, w, 40, "list line %d overflows: width %d > 40", i, w)
+	}
 }

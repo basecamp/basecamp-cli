@@ -163,7 +163,7 @@ func (s StatusBar) View() string {
 		gap = 1
 	}
 
-	return barStyle.Render(left + strings.Repeat(" ", gap) + right)
+	return barStyle.MaxWidth(s.width).Render(left + strings.Repeat(" ", gap) + right)
 }
 
 // renderMetrics renders the pool health indicator: ● 4 pools · 180ms
