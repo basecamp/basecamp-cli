@@ -284,6 +284,33 @@ func TestList_ScrollIndicator_NoOverflow(t *testing.T) {
 	assert.LessOrEqual(t, len(lines), 10, "list view should not exceed widget height")
 }
 
+func TestList_DescriptionWithExtra_BothVisible(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(80, 10)
+	l.SetFocused(true)
+	l.SetItems([]ListItem{
+		{ID: "1", Title: "Fix login bug", Description: "The login form crashes", Extra: "Todo"},
+	})
+
+	view := l.View()
+	assert.Contains(t, view, "Fix login bug")
+	assert.Contains(t, view, "Todo", "Extra badge should be visible")
+	assert.Contains(t, view, "login form", "Description should be visible alongside Extra")
+}
+
+func TestList_DescriptionWithExtra_NarrowWidth(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(30, 10)
+	l.SetFocused(true)
+	l.SetItems([]ListItem{
+		{ID: "1", Title: "Short", Description: "Long description text here", Extra: "Badge"},
+	})
+
+	view := l.View()
+	assert.Contains(t, view, "Short")
+	assert.Contains(t, view, "Badge", "Extra should render even at narrow width")
+}
+
 func TestList_LongFilter_NoOverflow(t *testing.T) {
 	l := NewList(tui.NewStyles())
 	l.SetSize(40, 20)

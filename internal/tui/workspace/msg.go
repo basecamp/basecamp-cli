@@ -175,9 +175,10 @@ type MessageDetailLoadedMsg struct {
 
 // SearchResultsMsg is sent when search results arrive.
 type SearchResultsMsg struct {
-	Results []SearchResultInfo
-	Query   string
-	Err     error
+	Results    []SearchResultInfo
+	Query      string
+	Err        error
+	PartialErr error // non-nil when some accounts failed but results exist
 }
 
 // SearchResultInfo is a type alias for data.SearchResultInfo.

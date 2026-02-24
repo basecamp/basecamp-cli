@@ -21,7 +21,7 @@ type Recording struct {
 func (r Recording) ToPickerTitle() string {
 	title := r.Title
 	if title == "" {
-		title = truncate(stripHTML(r.Content), 50)
+		title = truncate(StripHTML(r.Content), 50)
 	}
 	if title == "" {
 		title = fmt.Sprintf("%s #%d", r.Type, r.ID)
@@ -114,8 +114,8 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// stripHTML removes HTML tags from a string (basic implementation).
-func stripHTML(s string) string {
+// StripHTML removes HTML tags from a string and normalizes whitespace.
+func StripHTML(s string) string {
 	var result strings.Builder
 	inTag := false
 	for _, c := range s {

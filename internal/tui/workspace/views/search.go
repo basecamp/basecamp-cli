@@ -17,6 +17,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
+	"github.com/basecamp/basecamp-cli/internal/tui/format"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -215,10 +216,12 @@ func (v *Search) handleResults(msg workspace.SearchResultsMsg) tea.Cmd {
 	for _, r := range msg.Results {
 		id := fmt.Sprintf("%d", r.ID)
 		v.resultMeta[id] = r
-		desc := r.Project
-		// Show account badge when cross-account results are present
-		if r.Account != "" {
-			desc = r.Account + " > " + desc
+		desc := r.Excerpt
+		if desc == "" {
+			desc = r.Project
+			if r.Account != "" {
+				desc = r.Account + " > " + desc
+			}
 		}
 		items = append(items, widget.ListItem{
 			ID:          id,
@@ -231,6 +234,10 @@ func (v *Search) handleResults(msg workspace.SearchResultsMsg) tea.Cmd {
 
 	if len(items) == 0 {
 		v.list.SetEmptyMessage(empty.NoSearchResults(msg.Query))
+	}
+
+	if msg.PartialErr != nil {
+		return workspace.SetStatus(msg.PartialErr.Error(), true)
 	}
 	return nil
 }
@@ -412,10 +419,14 @@ func (v *Search) fetchMultiAccountResults(ctx context.Context, ms *data.MultiSto
 	})
 
 	var allResults []workspace.SearchResultInfo
+	var failedAccounts []string
+	succeeded := 0
 	for _, r := range results {
 		if r.Err != nil {
+			failedAccounts = append(failedAccounts, r.Account.Name)
 			continue
 		}
+		succeeded++
 		if infos, ok := r.Data.([]workspace.SearchResultInfo); ok {
 			allResults = append(allResults, infos...)
 		}
@@ -431,7 +442,13 @@ func (v *Search) fetchMultiAccountResults(ctx context.Context, ms *data.MultiSto
 		allResults = allResults[:50]
 	}
 
-	return workspace.SearchResultsMsg{Results: allResults, Query: query}
+	msg := workspace.SearchResultsMsg{Results: allResults, Query: query}
+	if len(failedAccounts) > 0 && succeeded > 0 {
+		msg.PartialErr = fmt.Errorf("could not search: %s", strings.Join(failedAccounts, ", "))
+	} else if len(failedAccounts) > 0 {
+		msg.Err = fmt.Errorf("could not search: %s", strings.Join(failedAccounts, ", "))
+	}
+	return msg
 }
 
 func (v *Search) fetchSingleAccountResults(ctx context.Context, client *basecamp.AccountClient, accountID, query string) workspace.SearchResultsMsg {
@@ -460,9 +477,15 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		title = r.Subject
 	}
 
+	excerpt := r.Description
+	if excerpt == "" && r.Content != "" {
+		excerpt = truncateExcerpt(r.Content, 120)
+	}
+
 	return workspace.SearchResultInfo{
 		ID:          r.ID,
 		Title:       title,
+		Excerpt:     excerpt,
 		Type:        r.Type,
 		Project:     project,
 		ProjectID:   projectID,
@@ -471,4 +494,14 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		CreatedAt:   r.CreatedAt.Format("Jan 2"),
 		CreatedAtTS: r.CreatedAt.Unix(),
 	}
+}
+
+// truncateExcerpt truncates s to maxLen runes, appending "..." if truncated.
+func truncateExcerpt(s string, maxLen int) string {
+	s = strings.TrimSpace(format.StripHTML(s))
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }

@@ -201,6 +201,77 @@ func TestSearch_DuplicateQuerySkipsSearch(t *testing.T) {
 	assert.Nil(t, cmd, "submitting the same query again should be a no-op")
 }
 
+// --- Partial failure surfacing ---
+
+func TestSearch_PartialFailure_ShowsStatus(t *testing.T) {
+	v := testSearchView()
+	v.query = "widgets"
+
+	msg := workspace.SearchResultsMsg{
+		Results: []workspace.SearchResultInfo{
+			{ID: 1, Title: "Found", AccountID: "a1"},
+		},
+		Query:      "widgets",
+		PartialErr: fmt.Errorf("could not search: Acme Corp"),
+	}
+
+	cmd := v.handleResults(msg)
+	require.NotNil(t, cmd, "partial failure should return a cmd")
+
+	result := cmd()
+	status, ok := result.(workspace.StatusMsg)
+	require.True(t, ok, "cmd should produce StatusMsg")
+	assert.Contains(t, status.Text, "Acme Corp")
+	assert.True(t, status.IsError)
+}
+
+func TestSearch_PartialFailure_NoResults_ReportsFullError(t *testing.T) {
+	v := testSearchView()
+	v.query = "widgets"
+
+	// When PartialErr is nil but Err is set, it's a full failure
+	msg := workspace.SearchResultsMsg{
+		Query: "widgets",
+		Err:   fmt.Errorf("could not search: Acme Corp"),
+	}
+
+	cmd := v.handleResults(msg)
+	require.NotNil(t, cmd, "full failure should return an error cmd")
+
+	result := cmd()
+	errMsg, ok := result.(workspace.ErrorMsg)
+	require.True(t, ok, "cmd should produce ErrorMsg")
+	assert.Contains(t, errMsg.Context, "searching")
+}
+
+// --- Excerpts ---
+
+func TestSearch_HandleResults_ExcerptAsDescription(t *testing.T) {
+	v := testSearchView()
+	v.query = "login"
+
+	msg := workspace.SearchResultsMsg{
+		Results: []workspace.SearchResultInfo{
+			{ID: 1, Title: "Fix login bug", Excerpt: "The login form crashes when...", Project: "Alpha", AccountID: "a1"},
+			{ID: 2, Title: "Deploy notes", Project: "Beta", AccountID: "a1"},
+		},
+		Query: "login",
+	}
+
+	v.handleResults(msg)
+
+	items := v.list.Items()
+	require.Len(t, items, 2)
+	assert.Equal(t, "The login form crashes when...", items[0].Description, "result with excerpt should use it as description")
+	assert.Equal(t, "Beta", items[1].Description, "result without excerpt should fall back to project")
+}
+
+func TestTruncateExcerpt(t *testing.T) {
+	assert.Equal(t, "hello", truncateExcerpt("hello", 10))
+	assert.Equal(t, "hello worl...", truncateExcerpt("hello world here", 10))
+	assert.Equal(t, "clean text", truncateExcerpt("<b>clean</b> text", 20))
+}
+
 // --- Narrow width ---
 
 func TestSearch_NarrowWidth_NoNegative(t *testing.T) {
