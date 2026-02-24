@@ -428,6 +428,20 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.loadingLists = true
 		return v, tea.Batch(v.spinner.Tick, v.todolistPool.Fetch(v.session.Hub().ProjectContext()))
 
+	case workspace.FocusMsg:
+		ctx := v.session.Hub().ProjectContext()
+		cmds := []tea.Cmd{v.todolistPool.FetchIfStale(ctx)}
+		if v.selectedListID != 0 {
+			if v.showCompleted {
+				pool := v.session.Hub().CompletedTodos(v.session.Scope().ProjectID, v.selectedListID)
+				cmds = append(cmds, pool.FetchIfStale(ctx))
+			} else {
+				pool := v.session.Hub().Todos(v.session.Scope().ProjectID, v.selectedListID)
+				cmds = append(cmds, pool.FetchIfStale(ctx))
+			}
+		}
+		return v, tea.Batch(cmds...)
+
 	case spinner.TickMsg:
 		if v.loadingLists || v.loadingTodos {
 			var cmd tea.Cmd

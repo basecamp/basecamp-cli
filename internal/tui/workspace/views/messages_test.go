@@ -239,3 +239,17 @@ func TestMessages_Trash_Timeout(t *testing.T) {
 	assert.False(t, v.trashPending)
 	assert.Empty(t, v.trashPendingID)
 }
+
+// --- FocusMsg triggers FetchIfStale ---
+
+func TestMessages_FocusMsg_RefreshesPool(t *testing.T) {
+	v := testMessagesViewWithSession()
+
+	// Pre-populate and invalidate to make stale.
+	v.pool.Set([]data.MessageInfo{{ID: 1, Subject: "Welcome"}})
+	v.pool.Invalidate()
+	require.Equal(t, data.StateStale, v.pool.Get().State)
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.NotNil(t, cmd, "FocusMsg with stale pool should return a fetch cmd")
+}

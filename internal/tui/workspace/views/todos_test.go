@@ -894,6 +894,39 @@ func TestTodos_ShowCompleted_UncompleteMidToggle(t *testing.T) {
 	assert.False(t, pendingPool.Get().Fresh(), "pending pool should be invalidated")
 }
 
+// --- FocusMsg triggers FetchIfStale ---
+
+func TestTodos_FocusMsg_FetchesBothPools(t *testing.T) {
+	v := testTodosView()
+	v.selectedListID = 10
+
+	// Pre-populate pools and invalidate to make them stale.
+	v.todolistPool.Set(sampleTodolists())
+	v.todolistPool.Invalidate()
+
+	todosPool := v.session.Hub().Todos(42, 10)
+	todosPool.Set(sampleTodos())
+	todosPool.Invalidate()
+
+	require.Equal(t, data.StateStale, v.todolistPool.Get().State)
+	require.Equal(t, data.StateStale, todosPool.Get().State)
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.NotNil(t, cmd, "FocusMsg with stale pools should return a batch cmd")
+}
+
+func TestTodos_FocusMsg_NothingSelected(t *testing.T) {
+	v := testTodosView()
+	v.selectedListID = 0
+
+	// Only the todolist pool is fetched — no active todos pool.
+	v.todolistPool.Set(sampleTodolists())
+	v.todolistPool.Invalidate()
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.NotNil(t, cmd, "FocusMsg should still fetch todolistPool")
+}
+
 // newTextInputWithValue creates a textinput with a preset value for testing.
 func newTextInputWithValue(val string) textinput.Model {
 	ti := textinput.New()

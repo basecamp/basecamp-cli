@@ -412,6 +412,20 @@ func TestCards_Trash_Timeout(t *testing.T) {
 	assert.Empty(t, v.trashPendingID)
 }
 
+// --- FocusMsg triggers FetchIfStale ---
+
+func TestCards_FocusMsg_RefreshesPool(t *testing.T) {
+	v := testCardsView()
+
+	// Pre-populate and invalidate to make stale.
+	v.pool.Set(sampleColumns())
+	v.pool.Invalidate()
+	require.Equal(t, data.StateStale, v.pool.Get().State)
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.NotNil(t, cmd, "FocusMsg with stale pool should return a fetch cmd")
+}
+
 // --- InputActive includes moving ---
 
 func TestCards_InputActive_IncludesMoving(t *testing.T) {

@@ -235,6 +235,9 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.cachedDetail = make(map[int64]*workspace.MessageDetailLoadedMsg)
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().ProjectContext())
+
 	case workspace.BoostCreatedMsg:
 		// Optimistically update the boost count in the message list
 		if msg.Target.RecordingID != 0 {

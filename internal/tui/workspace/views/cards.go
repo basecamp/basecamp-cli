@@ -247,6 +247,9 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().ProjectContext()))
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().ProjectContext())
+
 	case workspace.BoostCreatedMsg:
 		// Optimistically update the boost count in the card
 		if msg.Target.RecordingID != 0 {
