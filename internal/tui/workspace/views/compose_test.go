@@ -176,3 +176,20 @@ func TestCompose_SendingBlocksKeys(t *testing.T) {
 	_, cmd := v.Update(tea.KeyMsg{Type: tea.KeyTab})
 	assert.Nil(t, cmd, "keys should be blocked while sending")
 }
+
+// --- ComposerSubmitMsg error clears sending lock ---
+
+func TestCompose_SubmitError_ClearsSending(t *testing.T) {
+	v := testComposeView()
+	v.sending = true
+
+	// Simulate a ComposerSubmitMsg with an error (e.g. upload failure)
+	_, cmd := v.Update(widget.ComposerSubmitMsg{Err: assert.AnError})
+	require.NotNil(t, cmd, "error should produce an error report cmd")
+	assert.False(t, v.sending, "sending should be cleared on ComposerSubmitMsg error")
+
+	// Keys should be unblocked — tab should switch focus
+	_, cmd = v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	assert.NotNil(t, cmd, "keys should be unblocked after error clears sending")
+	assert.Equal(t, composeFocusBody, v.focus, "tab should switch focus when not sending")
+}

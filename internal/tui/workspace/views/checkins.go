@@ -282,7 +282,7 @@ func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, workspace.ReportError(msg.Err, "composing answer")
 		}
 		v.submitting = true
-		return v, v.createAnswer(msg.Content)
+		return v, tea.Batch(v.spinner.Tick, v.createAnswer(msg.Content))
 
 	case widget.EditorReturnMsg:
 		if v.answering {
@@ -295,7 +295,7 @@ func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case spinner.TickMsg:
-		if v.loading || v.loadingAnswers {
+		if v.loading || v.loadingAnswers || v.submitting {
 			var cmd tea.Cmd
 			v.spinner, cmd = v.spinner.Update(msg)
 			return v, cmd
@@ -527,7 +527,11 @@ func (v *Checkins) renderRightPanel() string {
 		theme := v.styles.Theme()
 		sep := lipgloss.NewStyle().Foreground(theme.Border).Render("─ New Answer ─")
 		b.WriteString(sep + "\n")
-		b.WriteString(v.composer.View())
+		if v.submitting {
+			b.WriteString(v.spinner.View() + " Posting answer...")
+		} else {
+			b.WriteString(v.composer.View())
+		}
 	}
 
 	return b.String()

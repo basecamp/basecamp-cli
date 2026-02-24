@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -65,6 +66,7 @@ type Compose struct {
 	projectID   int64
 	boardID     int64
 
+	spinner       spinner.Model
 	width, height int
 	sending       bool
 }
@@ -101,6 +103,10 @@ func NewCompose(session *workspace.Session) *Compose {
 		widget.WithPlaceholder("Message body (Markdown supported)..."),
 	)
 
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
+
 	return &Compose{
 		session:     session,
 		styles:      styles,
@@ -111,6 +117,7 @@ func NewCompose(session *workspace.Session) *Compose {
 		composeType: workspace.ComposeMessage,
 		projectID:   scope.ProjectID,
 		boardID:     scope.ToolID,
+		spinner:     s,
 	}
 }
 
@@ -161,7 +168,7 @@ func (v *Compose) Init() tea.Cmd {
 			return workspace.SetStatus("No message board in this project", true)
 		}
 	}
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, v.spinner.Tick)
 }
 
 // findMessageBoardID scans the projects pool for the current project's dock
@@ -200,6 +207,7 @@ func (v *Compose) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case widget.ComposerSubmitMsg:
 		if msg.Err != nil {
+			v.sending = false
 			return v, workspace.ReportError(msg.Err, "composing message")
 		}
 		return v, v.postMessage(msg.Content)
@@ -209,6 +217,13 @@ func (v *Compose) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case widget.AttachFileRequestMsg:
 		return v, workspace.SetStatus("Paste a file path or drag a file into the terminal", false)
+
+	case spinner.TickMsg:
+		if v.sending {
+			var cmd tea.Cmd
+			v.spinner, cmd = v.spinner.Update(msg)
+			return v, cmd
+		}
 
 	case tea.KeyMsg:
 		if v.sending {
@@ -274,7 +289,7 @@ func (v *Compose) submit() tea.Cmd {
 		return workspace.SetStatus("Message body is required", true)
 	}
 	v.sending = true
-	return cmd
+	return tea.Batch(v.spinner.Tick, cmd)
 }
 
 func (v *Compose) postMessage(content widget.ComposerContent) tea.Cmd {
@@ -335,7 +350,7 @@ func (v *Compose) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render("Posting message...")
+			Render(v.spinner.View() + " Posting message...")
 	}
 
 	theme := v.styles.Theme()

@@ -289,7 +289,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, workspace.ReportError(msg.Err, "composing comment")
 		}
 		v.submitting = true
-		return v, v.postComment(msg.Content)
+		return v, tea.Batch(v.spinner.Tick, v.postComment(msg.Content))
 
 	case widget.EditorReturnMsg:
 		return v, v.composer.HandleEditorReturn(msg)
@@ -300,7 +300,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case spinner.TickMsg:
-		if v.loading {
+		if v.loading || v.submitting {
 			var cmd tea.Cmd
 			v.spinner, cmd = v.spinner.Update(msg)
 			return v, cmd
@@ -947,7 +947,7 @@ func (v *Detail) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render("Posting comment...")
+			Render(v.spinner.View() + " Posting comment...")
 	}
 
 	if v.composing {
