@@ -23,7 +23,7 @@ func sessionAccounts(session *workspace.Session) []data.AccountInfo {
 // accountExtra prefixes extra with a 1-based account index when multi-account.
 // Returns extra unchanged when len(accounts) <= 1, accountID is not found,
 // or extra is empty. Never creates Extra where none existed — the list widget
-// suppresses Description whenever Extra is non-empty.
+// truncates Description to fit when Extra is also present.
 func accountExtra(accounts []data.AccountInfo, accountID, extra string) string {
 	if extra == "" || len(accounts) <= 1 {
 		return extra

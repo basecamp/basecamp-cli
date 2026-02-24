@@ -530,11 +530,21 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 		extraWidth := lipgloss.Width(extra)
 		gap := l.width - titleWidth - extraWidth
 		if gap > 1 {
-			line += strings.Repeat(" ", gap) + extra
+			// Fit description between title and extra when both are present.
+			// Reserve at least 2 chars of gap so extra always renders.
+			if item.Description != "" && gap > 4 {
+				maxDesc := gap - 3 // 1 leading space + 2 minimum gap
+				desc := " " + Truncate(item.Description, maxDesc)
+				line += descStyle.Render(desc)
+			}
+			gap = l.width - lipgloss.Width(line) - extraWidth
+			if gap > 0 {
+				line += strings.Repeat(" ", gap) + extra
+			}
 		}
 	}
 
-	// Add description inline (after title) to maintain 1-row-per-item invariant
+	// Add description inline (after title) when no extra badge
 	if item.Description != "" && item.Extra == "" {
 		desc := descStyle.Render(" " + item.Description)
 		if lipgloss.Width(line)+lipgloss.Width(desc) <= l.width {
