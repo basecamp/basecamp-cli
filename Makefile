@@ -304,10 +304,10 @@ fuzz-quick:
 # Install development tools
 .PHONY: tools
 tools:
-	$(GOCMD) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
-	$(GOCMD) install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-	$(GOCMD) install golang.org/x/perf/cmd/benchstat@v0.0.0-20250106171221-62ad9bd2d39e
-	$(GOCMD) install github.com/zricethezav/gitleaks/v8@v8.21.2
+	$(GOCMD) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	$(GOCMD) install golang.org/x/vuln/cmd/govulncheck@latest
+	$(GOCMD) install golang.org/x/perf/cmd/benchstat@latest
+	$(GOCMD) install github.com/zricethezav/gitleaks/v8@latest
 
 
 # Show help
