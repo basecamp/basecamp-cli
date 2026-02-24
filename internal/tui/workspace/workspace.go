@@ -605,9 +605,14 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
+	var cmds []tea.Cmd
+
 	// Blur the outgoing view
 	if outgoing := w.router.Current(); outgoing != nil {
-		outgoing.Update(BlurMsg{})
+		_, cmd := outgoing.Update(BlurMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 	}
 
 	// Capture ephemeral origin context, then clear from scope.
@@ -662,7 +667,8 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 	// Forward navigations start at quality 0 (data not yet loaded).
 	w.recordNavigation(view.Title(), 0.0)
 
-	return tea.Batch(w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("basecamp - "+view.Title()))
+	cmds = append(cmds, w.stampCmd(view.Init()), func() tea.Msg { return FocusMsg{} }, chrome.SetTerminalTitle("basecamp - "+view.Title()))
+	return tea.Batch(cmds...)
 }
 
 func (w *Workspace) goBack() tea.Cmd {

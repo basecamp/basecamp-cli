@@ -115,6 +115,14 @@ func (v *Pulse) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case workspace.FocusMsg:
+		v.pool.SetFocused(true)
+		return v, v.pool.FetchIfStale(v.session.Hub().Global().Context())
+
+	case workspace.BlurMsg:
+		v.pool.SetFocused(false)
+		return v, nil
+
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true

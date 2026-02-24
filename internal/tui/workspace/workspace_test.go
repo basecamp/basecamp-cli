@@ -1328,6 +1328,47 @@ func executeBatch(cmd tea.Cmd) []tea.Msg {
 	return []tea.Msg{msg}
 }
 
+// blurCmdView returns a tea.Cmd from BlurMsg so we can verify navigate() captures it.
+type blurCmdView struct {
+	testView
+	blurCmd tea.Cmd
+}
+
+func (v *blurCmdView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	v.msgs = append(v.msgs, msg)
+	if _, ok := msg.(BlurMsg); ok && v.blurCmd != nil {
+		return v, v.blurCmd
+	}
+	return v, nil
+}
+
+type navigateBlurSentinel struct{}
+
+func TestWorkspace_Navigate_CapturesBlurCmd(t *testing.T) {
+	w, _ := testWorkspace()
+
+	// Push a view that returns a cmd on BlurMsg
+	sentinel := func() tea.Msg { return navigateBlurSentinel{} }
+	outgoing := &blurCmdView{
+		testView: testView{title: "Outgoing"},
+		blurCmd:  sentinel,
+	}
+	w.router.Push(outgoing, Scope{}, 0)
+
+	// Navigate to a new view — should capture BlurMsg cmd from outgoing
+	cmd := w.navigate(ViewTodos, Scope{})
+	require.NotNil(t, cmd, "navigate should return batched cmd including BlurMsg result")
+
+	msgs := executeBatch(cmd)
+	found := false
+	for _, m := range msgs {
+		if _, ok := m.(navigateBlurSentinel); ok {
+			found = true
+		}
+	}
+	assert.True(t, found, "navigate should propagate the BlurMsg cmd from the outgoing view")
+}
+
 func TestWorkspace_MutationErrorMsg_ForwardedToActiveView(t *testing.T) {
 	w, _ := testWorkspace()
 	view := pushTestView(w, "ActiveView")

@@ -207,6 +207,9 @@ func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.pool.Invalidate()
 		return v, workspace.SetStatus("Bookmark updated", false)
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().Global().Context())
+
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true

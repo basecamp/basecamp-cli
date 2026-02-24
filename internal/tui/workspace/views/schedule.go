@@ -163,6 +163,9 @@ func (v *Schedule) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().ProjectContext())
+
 	case scheduleEntryCreatedMsg:
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "creating schedule entry")

@@ -174,6 +174,9 @@ func (v *DocsFiles) Init() tea.Cmd {
 // Update implements tea.Model.
 func (v *DocsFiles) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().ProjectContext())
+
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
 			snap := v.pool.Get()

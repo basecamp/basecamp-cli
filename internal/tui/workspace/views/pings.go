@@ -115,6 +115,9 @@ func (v *Pings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().Global().Context())
+
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true

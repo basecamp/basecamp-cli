@@ -138,6 +138,9 @@ func (v *Assignments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().Global().Context())
+
 	case assignmentCompleteResultMsg:
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "completing todo")

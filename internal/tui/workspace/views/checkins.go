@@ -213,6 +213,14 @@ func (v *Checkins) Init() tea.Cmd {
 // Update implements tea.Model.
 func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case workspace.FocusMsg:
+		cmds := []tea.Cmd{v.pool.FetchIfStale(v.session.Hub().ProjectContext())}
+		if v.selectedQuestionID != 0 {
+			answersPool := v.session.Hub().CheckinAnswers(v.session.Scope().ProjectID, v.selectedQuestionID)
+			cmds = append(cmds, answersPool.FetchIfStale(v.session.Hub().ProjectContext()))
+		}
+		return v, tea.Batch(cmds...)
+
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
 			snap := v.pool.Get()

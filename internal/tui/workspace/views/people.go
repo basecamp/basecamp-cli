@@ -117,6 +117,9 @@ func (v *People) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
+	case workspace.FocusMsg:
+		return v, v.pool.FetchIfStale(v.session.Hub().AccountContext())
+
 	case workspace.RefreshMsg:
 		v.pool.Invalidate()
 		v.loading = true
