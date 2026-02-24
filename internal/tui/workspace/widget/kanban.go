@@ -239,7 +239,15 @@ func (k *Kanban) View() string {
 	visibleCols := endCol - startCol
 	dividers := visibleCols - 1
 
-	colWidth := (k.width - dividers) / visibleCols
+	// Count overflow indicators to reserve their width
+	indicators := 0
+	if startCol > 0 {
+		indicators++
+	}
+	if endCol < numCols {
+		indicators++
+	}
+	colWidth := (k.width - dividers - indicators) / visibleCols
 
 	var rendered []string
 
@@ -251,7 +259,6 @@ func (k *Kanban) View() string {
 			Height(k.height).
 			Render("◂")
 		rendered = append(rendered, indicator)
-		colWidth = (k.width - dividers - 2) / visibleCols // account for indicators
 	}
 
 	// Hard floor: avoid zero/negative widths that cause panics
@@ -267,7 +274,7 @@ func (k *Kanban) View() string {
 			divider := lipgloss.NewStyle().
 				Foreground(theme.Border).
 				Height(k.height).
-				Render(strings.Repeat("│\n", k.height))
+				Render(strings.TrimRight(strings.Repeat("│\n", k.height), "\n"))
 			rendered = append(rendered, divider)
 		}
 	}
@@ -358,9 +365,10 @@ func (k *Kanban) renderColumn(col KanbanColumn, colIndex, width int, isFocused b
 func (k *Kanban) renderCardArea(col KanbanColumn, colIndex, width, areaHeight int, isFocused bool, theme tui.Theme) string {
 	numCards := len(col.Items)
 
-	// Ensure scroll offset array is large enough
-	for len(k.scrolls) <= colIndex {
-		k.scrolls = append(k.scrolls, 0)
+	// Safety: ensure scroll offset array is large enough.
+	// Primary initialization happens in SetColumns; this is a fallback.
+	if colIndex >= len(k.scrolls) {
+		return ""
 	}
 
 	// Calculate how many lines each card takes:
@@ -514,7 +522,7 @@ func (k *Kanban) renderUnfocusedCard(card KanbanCard, width int, theme tui.Theme
 	if card.Boosts > 0 {
 		boostStr = fmt.Sprintf(" [♥ %d]", card.Boosts)
 	}
-	availWidth := width - 2 - len(boostStr) // 2 for "  " prefix
+	availWidth := width - 2 - lipgloss.Width(boostStr) // 2 for "  " prefix
 	title := Truncate(card.Title, availWidth)
 	style := lipgloss.NewStyle().Width(width)
 	if card.Completed {

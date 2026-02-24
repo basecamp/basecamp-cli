@@ -398,3 +398,29 @@ func TestColumnColor_ValidNames(t *testing.T) {
 	// Unknown falls back to foreground
 	assert.Equal(t, theme.Foreground, columnColor("neon", theme))
 }
+
+func TestKanban_RightOverflow_Width(t *testing.T) {
+	k := NewKanban(tui.NewStyles())
+	// 5 columns at narrow width so only ~2-3 fit, forcing right overflow without left overflow
+	k.SetSize(60, 10)
+	k.SetFocused(true)
+	cols := make([]KanbanColumn, 5)
+	for i := range cols {
+		cols[i] = KanbanColumn{
+			ID:    string(rune('A' + i)),
+			Title: "Col " + string(rune('A'+i)),
+			Count: 1,
+			Items: []KanbanCard{{ID: string(rune('a' + i)), Title: "Card"}},
+		}
+	}
+	k.SetColumns(cols)
+	// Focus on first column so startCol=0 (no left indicator) but right overflow exists
+	k.FocusColumn(0)
+
+	view := k.View()
+	lines := strings.Split(view, "\n")
+	for _, line := range lines {
+		// lipgloss.Width accounts for ANSI escape codes
+		assert.LessOrEqual(t, len([]rune(line)), 62, "rendered line should not significantly exceed widget width")
+	}
+}

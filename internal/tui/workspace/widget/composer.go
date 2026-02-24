@@ -671,7 +671,7 @@ func (c *Composer) renderChip(idx int, att Attachment, theme tui.Theme) string {
 
 func (c *Composer) renderPreview() string {
 	content := c.textArea.Value()
-	rendered, err := richtext.RenderMarkdownWithWidth(content, c.width-4)
+	rendered, err := richtext.RenderMarkdownWithWidth(content, max(10, c.width-4))
 	if err != nil {
 		rendered = content
 	}

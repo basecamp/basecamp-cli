@@ -1161,7 +1161,7 @@ func (w *Workspace) View() string {
 	divider := lipgloss.NewStyle().
 		Width(w.width).
 		Foreground(theme.Border).
-		Render(lipgloss.NewStyle().Width(w.width).Render("─"))
+		Render(strings.Repeat("─", max(1, w.width)))
 	sections = append(sections, divider)
 
 	// Main view
@@ -1177,7 +1177,7 @@ func (w *Workspace) View() string {
 		vDivider := lipgloss.NewStyle().
 			Foreground(theme.Border).
 			Height(w.viewHeight()).
-			Render(strings.Repeat("│\n", w.viewHeight()))
+			Render(strings.TrimRight(strings.Repeat("│\n", w.viewHeight()), "\n"))
 		mainContent := ""
 		if view := w.router.Current(); view != nil {
 			mainContent = view.View()

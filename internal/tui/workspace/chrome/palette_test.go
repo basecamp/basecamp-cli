@@ -83,3 +83,33 @@ func TestPalette_FilterNarrows(t *testing.T) {
 	assert.Len(t, p.filtered, 1, "filter should narrow to matching action")
 	assert.Equal(t, "Search", p.filtered[0].Name)
 }
+
+func TestPalette_CursorScroll(t *testing.T) {
+	// Build a palette with more actions than maxVisibleItems.
+	n := maxVisibleItems + 5
+	names := make([]string, n)
+	descs := make([]string, n)
+	cats := make([]string, n)
+	execs := make([]func() tea.Cmd, n)
+	for i := range n {
+		names[i] = "Action" + string(rune('A'+i))
+		descs[i] = "Desc"
+		cats[i] = "cat"
+		execs[i] = func() tea.Cmd { return nil }
+	}
+
+	p := NewPalette(tui.NewStyles())
+	p.SetSize(80, 30)
+	p.SetActions(names, descs, cats, execs)
+	p.Focus()
+
+	// Move cursor past maxVisibleItems
+	for range maxVisibleItems + 2 {
+		p.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	assert.Greater(t, p.cursor, maxVisibleItems-1, "cursor should be past visible window")
+
+	// View should still render without panic and contain the focused action
+	view := p.View()
+	assert.Contains(t, view, names[p.cursor], "scrolled palette should show focused action")
+}

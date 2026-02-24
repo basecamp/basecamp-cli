@@ -271,3 +271,14 @@ func TestList_EmptyText_FallbackWhenNoMessage(t *testing.T) {
 	assert.Contains(t, view, "Custom fallback text")
 	assert.NotContains(t, view, "No projects found")
 }
+
+func TestList_ScrollIndicator_NoOverflow(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(80, 10)
+	l.SetFocused(true)
+	l.SetItems(sampleItems(15))
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	assert.LessOrEqual(t, len(lines), 10, "list view should not exceed widget height")
+}

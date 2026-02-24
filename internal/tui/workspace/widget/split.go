@@ -91,7 +91,7 @@ func (s *SplitPane) View() string {
 	divider := lipgloss.NewStyle().
 		Foreground(theme.Border).
 		Height(s.height).
-		Render(strings.Repeat("│\n", s.height))
+		Render(strings.TrimRight(strings.Repeat("│\n", s.height), "\n"))
 
 	right := lipgloss.NewStyle().
 		Width(rightW).

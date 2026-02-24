@@ -188,18 +188,23 @@ func (p Palette) View() string {
 		Width(boxWidth - 4). // account for box padding
 		Render(strings.Repeat("─", boxWidth-4))
 
-	// Action list
+	// Action list — scroll window keeps cursor visible
 	var rows []string
-	visible := p.filtered
-	if len(visible) > maxVisibleItems {
-		visible = visible[:maxVisibleItems]
+	start := 0
+	if p.cursor >= maxVisibleItems {
+		start = p.cursor - maxVisibleItems + 1
 	}
+	end := start + maxVisibleItems
+	if end > len(p.filtered) {
+		end = len(p.filtered)
+	}
+	visible := p.filtered[start:end]
 	for i, a := range visible {
 		name := lipgloss.NewStyle().Foreground(theme.Primary).Render(a.Name)
 		desc := lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + a.Description)
 		line := name + desc
 
-		if i == p.cursor {
+		if i+start == p.cursor {
 			line = lipgloss.NewStyle().
 				Background(theme.Border).
 				Width(boxWidth - 4).

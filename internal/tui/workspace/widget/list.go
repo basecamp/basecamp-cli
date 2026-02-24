@@ -327,6 +327,10 @@ func (l *List) visibleHeight() int {
 	if l.filtering || l.filter != "" {
 		h--
 	}
+	// Reserve 1 line for scroll indicator when items exceed viewport
+	if len(l.filtered) > h {
+		h--
+	}
 	if h < 1 {
 		h = 1
 	}
