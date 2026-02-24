@@ -403,14 +403,19 @@ func TestWorkspace_AccountsDiscoveredMultiNonProjectsNoRefresh(t *testing.T) {
 	assert.Nil(t, cmd, "non-Projects view should not be refreshed")
 }
 
-func TestWorkspace_AccountsDiscoveredErrorSilent(t *testing.T) {
+func TestWorkspace_AccountsDiscoveredError_SurfacesStatus(t *testing.T) {
 	w, _ := testWorkspace()
 	pushTestView(w, "Projects")
 
 	_, cmd := w.Update(AccountsDiscoveredMsg{
 		Err: fmt.Errorf("network error"),
 	})
-	assert.Nil(t, cmd, "discovery errors should be silent")
+	require.NotNil(t, cmd, "discovery errors should produce a status cmd")
+	msg := cmd()
+	status, ok := msg.(StatusMsg)
+	require.True(t, ok, "should produce StatusMsg")
+	assert.Equal(t, "Account discovery failed", status.Text)
+	assert.True(t, status.IsError)
 }
 
 // testSessionWithContext returns a Session with full context + scope lifecycle,

@@ -741,3 +741,31 @@ func TestDetail_SyncPreview_ClearsBody(t *testing.T) {
 	output := v.preview.View()
 	assert.NotContains(t, output, "old content", "stale body should be cleared")
 }
+
+func TestDetail_DueError_PreservesSettingDue(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.settingDue = true
+
+	_, cmd := v.Update(detailDueUpdatedMsg{err: assert.AnError})
+	assert.True(t, v.settingDue, "settingDue should be preserved on error so user can retry")
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	errMsg, ok := msg.(workspace.ErrorMsg)
+	require.True(t, ok)
+	assert.Contains(t, errMsg.Context, "updating due date")
+}
+
+func TestDetail_AssignError_PreservesAssigning(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.assigning = true
+
+	_, cmd := v.Update(detailAssignResultMsg{err: assert.AnError})
+	assert.True(t, v.assigning, "assigning should be preserved on error so user can retry")
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	errMsg, ok := msg.(workspace.ErrorMsg)
+	require.True(t, ok)
+	assert.Contains(t, errMsg.Context, "updating assignee")
+}

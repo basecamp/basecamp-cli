@@ -179,6 +179,7 @@ func (v *Messages) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workspace.MessageDetailLoadedMsg:
 		if msg.Err != nil {
+			v.fetching = 0
 			return v, workspace.ReportError(msg.Err, "loading message detail")
 		}
 		v.cachedDetail[msg.MessageID] = &msg

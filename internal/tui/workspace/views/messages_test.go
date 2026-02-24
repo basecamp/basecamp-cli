@@ -253,3 +253,20 @@ func TestMessages_FocusMsg_RefreshesPool(t *testing.T) {
 	_, cmd := v.Update(workspace.FocusMsg{})
 	assert.NotNil(t, cmd, "FocusMsg with stale pool should return a fetch cmd")
 }
+
+func TestMessages_PreviewFetchError_ClearsSpinner(t *testing.T) {
+	v := testMessagesView()
+	v.fetching = 42
+
+	_, cmd := v.Update(workspace.MessageDetailLoadedMsg{
+		MessageID: 42,
+		Err:       assert.AnError,
+	})
+	assert.Equal(t, int64(0), v.fetching, "fetching should be cleared on error")
+	require.NotNil(t, cmd, "error should produce an error report cmd")
+
+	msg := cmd()
+	errMsg, ok := msg.(workspace.ErrorMsg)
+	require.True(t, ok, "should produce ErrorMsg")
+	assert.Contains(t, errMsg.Context, "loading message detail")
+}

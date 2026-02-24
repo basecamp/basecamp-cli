@@ -366,18 +366,18 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, workspace.SetStatus(verb, false)
 
 	case detailDueUpdatedMsg:
-		v.settingDue = false
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "updating due date")
 		}
+		v.settingDue = false
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Due date updated", false))
 
 	case detailAssignResultMsg:
-		v.assigning = false
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "updating assignee")
 		}
+		v.assigning = false
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Assignee updated", false))
 

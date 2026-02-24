@@ -231,10 +231,12 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return w, nil
 
+	case data.MutationErrorMsg:
+		return w, ReportError(msg.Err, "applying change")
+
 	case AccountsDiscoveredMsg:
-		// Account discovery is best-effort — errors are silent.
 		if msg.Err != nil {
-			return w, nil
+			return w, SetStatus("Account discovery failed", true)
 		}
 		w.accountList = msg.Accounts
 		w.syncAccountBadge(w.router.CurrentTarget())
