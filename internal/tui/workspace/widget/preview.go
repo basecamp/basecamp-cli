@@ -104,7 +104,8 @@ func (p *Preview) View() string {
 		keyStyle := lipgloss.NewStyle().Foreground(theme.Muted)
 		valStyle := lipgloss.NewStyle().Foreground(theme.Foreground)
 		for _, f := range p.fields {
-			fieldLines = append(fieldLines, keyStyle.Render(f.Key+": ")+valStyle.Render(f.Value))
+			line := keyStyle.Render(f.Key+": ") + valStyle.Render(f.Value)
+			fieldLines = append(fieldLines, lipgloss.NewStyle().MaxWidth(p.width).Render(line))
 		}
 		sections = append(sections, strings.Join(fieldLines, "\n"))
 	}

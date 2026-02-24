@@ -769,3 +769,15 @@ func TestDetail_AssignError_PreservesAssigning(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, errMsg.Context, "updating assignee")
 }
+
+func TestDetail_View_SubmittingBeforeLoading(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.submitting = true
+	v.loading = true
+	v.width = 80
+	v.height = 24
+
+	output := v.View()
+	assert.Contains(t, output, "Posting comment", "submitting should take priority over loading")
+	assert.NotContains(t, output, "Loading...", "loading should not appear while submitting")
+}

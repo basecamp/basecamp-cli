@@ -248,7 +248,12 @@ func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.FocusMsg:
 		v.syncRecents()
 		v.rebuildList()
-		return v, nil
+		globalCtx := v.session.Hub().Global().Context()
+		return v, tea.Batch(
+			v.heyPool.FetchIfStale(globalCtx),
+			v.assignPool.FetchIfStale(globalCtx),
+			v.projectPool.FetchIfStale(globalCtx),
+		)
 
 	case spinner.TickMsg:
 		if v.anyLoading() {

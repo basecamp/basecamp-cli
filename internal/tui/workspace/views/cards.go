@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -490,12 +491,16 @@ func (v *Cards) View() string {
 	}
 
 	if len(v.columns) == 0 {
+		msg := empty.NoColumns()
+		theme := v.styles.Theme()
+		title := lipgloss.NewStyle().Bold(true).Foreground(theme.Foreground).Render(msg.Title)
+		body := lipgloss.NewStyle().Foreground(theme.Muted).Render(msg.Body)
+		content := lipgloss.JoinVertical(lipgloss.Left, title, body)
 		return lipgloss.NewStyle().
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Foreground(v.styles.Theme().Muted).
-			Render("No columns found in this card table.")
+			Render(content)
 	}
 
 	if v.moving {

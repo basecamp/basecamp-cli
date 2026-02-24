@@ -198,6 +198,15 @@ func (v *Dock) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Dock:        dock,
 		}
 		v.syncTools()
+		// Record project visit in recents (cold-load path)
+		if r := v.session.Recents(); r != nil {
+			r.Add(recents.Item{
+				ID:        fmt.Sprintf("%d", v.projectInfo.ID),
+				Title:     v.projectInfo.Name,
+				Type:      recents.TypeProject,
+				AccountID: v.session.Scope().AccountID,
+			})
+		}
 		return v, nil
 
 	case workspace.RefreshMsg:

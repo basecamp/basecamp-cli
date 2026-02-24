@@ -406,11 +406,14 @@ func (v *DocsFiles) goBackFolder() tea.Cmd {
 		v.loading = true
 	}
 
-	return tea.Batch(
-		v.spinner.Tick,
+	cmds := []tea.Cmd{
 		v.pool.FetchIfStale(v.session.Hub().ProjectContext()),
 		func() tea.Msg { return workspace.ChromeSyncMsg{} },
-	)
+	}
+	if v.loading {
+		cmds = append(cmds, v.spinner.Tick)
+	}
+	return tea.Batch(cmds...)
 }
 
 // -- Create
@@ -529,7 +532,11 @@ func (v *DocsFiles) View() string {
 		inputLine := lipgloss.NewStyle().
 			Foreground(v.styles.Theme().Primary).Bold(true).
 			Render(label) + v.createInput.View()
-		return inputLine + "\n" + v.list.View()
+		// Temporarily shrink list to avoid overflowing by 1 line
+		v.list.SetSize(v.width, v.height-1)
+		result := inputLine + "\n" + v.list.View()
+		v.list.SetSize(v.width, v.height)
+		return result
 	}
 
 	return v.list.View()

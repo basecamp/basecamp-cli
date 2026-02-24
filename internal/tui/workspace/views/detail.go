@@ -961,20 +961,20 @@ func (v *Detail) postComment(content widget.ComposerContent) tea.Cmd {
 }
 
 func (v *Detail) View() string {
-	if v.loading {
-		return lipgloss.NewStyle().
-			Width(v.width).
-			Height(v.height).
-			Padding(1, 2).
-			Render(v.spinner.View() + " Loading...")
-	}
-
 	if v.submitting {
 		return lipgloss.NewStyle().
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
 			Render(v.spinner.View() + " Posting comment...")
+	}
+
+	if v.loading {
+		return lipgloss.NewStyle().
+			Width(v.width).
+			Height(v.height).
+			Padding(1, 2).
+			Render(v.spinner.View() + " Loading...")
 	}
 
 	if v.composing {

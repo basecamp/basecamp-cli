@@ -7,7 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
@@ -72,4 +75,38 @@ func TestDock_ActivityHotkey_ProducesNavigateMsg(t *testing.T) {
 	nav, isNav := msg.(workspace.NavigateMsg)
 	require.True(t, isNav, "should produce NavigateMsg")
 	assert.Equal(t, workspace.ViewTimeline, nav.Target, "should navigate to ViewTimeline")
+}
+
+func TestDock_ColdLoad_RecordsRecents(t *testing.T) {
+	store := recents.NewStore(t.TempDir())
+	session := workspace.NewTestSessionWithRecents(store)
+	session.SetScope(workspace.Scope{AccountID: "acct1", ProjectID: 99})
+
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetSize(80, 24)
+
+	v := &Dock{
+		session: session,
+		styles:  styles,
+		list:    list,
+		keys:    defaultDockKeyMap(),
+		loading: true,
+		width:   80,
+		height:  24,
+	}
+
+	v.Update(workspace.DockLoadedMsg{
+		Project: basecamp.Project{
+			ID:   99,
+			Name: "Test Project",
+			Dock: []basecamp.DockItem{},
+		},
+	})
+
+	items := store.Get(recents.TypeProject, "acct1", "")
+	require.Len(t, items, 1, "recents should contain the loaded project")
+	assert.Equal(t, "99", items[0].ID)
+	assert.Equal(t, "Test Project", items[0].Title)
+	assert.Equal(t, recents.TypeProject, items[0].Type)
 }

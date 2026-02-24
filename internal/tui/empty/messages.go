@@ -205,6 +205,14 @@ func NoTimeline() Message {
 	}
 }
 
+// NoColumns returns the empty state for no card table columns.
+func NoColumns() Message {
+	return Message{
+		Title: "No columns",
+		Body:  "This card table doesn't have any columns yet.",
+	}
+}
+
 // NoDockTools returns the empty state for no dock tools.
 func NoDockTools() Message {
 	return Message{
