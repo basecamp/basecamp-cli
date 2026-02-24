@@ -152,6 +152,24 @@ func (v *Projects) SetSize(w, h int) {
 	v.height = h
 	v.split.SetSize(w, h)
 	v.list.SetSize(v.split.LeftWidth(), h)
+	v.resizeToolList()
+}
+
+// resizeToolList computes and applies the correct size for the right-panel tool list.
+// Called from SetSize() and after project selection changes — never from View().
+func (v *Projects) resizeToolList() {
+	if v.selectedProject == nil {
+		return
+	}
+	var w int
+	if v.split.IsCollapsed() {
+		w = max(0, v.width-2)
+	} else {
+		w = max(0, v.split.RightWidth()-2)
+	}
+	header := v.renderToolHeader(w)
+	headerLines := strings.Count(header, "\n") + 2
+	v.toolList.SetSize(w, max(1, v.height-headerLines))
 }
 
 // Init implements tea.Model.
@@ -312,6 +330,7 @@ func (v *Projects) enterDock(itemID string) {
 	v.list.SetFocused(false)
 	v.toolList.SetFocused(true)
 	v.syncToolList()
+	v.resizeToolList()
 }
 
 // leaveDock returns focus to the left panel (project list).
@@ -336,8 +355,6 @@ func (v *Projects) View() string {
 	if v.split.IsCollapsed() && v.focusRight {
 		w := max(0, v.width-2) // padding
 		header := v.renderToolHeader(w)
-		headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
-		v.toolList.SetSize(w, max(1, v.height-headerLines))
 		return lipgloss.NewStyle().
 			Width(v.width).
 			Height(v.height).
@@ -367,8 +384,6 @@ func (v *Projects) renderRightPanel() string {
 
 	w := max(0, v.split.RightWidth()-2) // padding
 	header := v.renderToolHeader(w)
-	headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
-	v.toolList.SetSize(w, max(1, v.height-headerLines))
 
 	return lipgloss.NewStyle().Padding(0, 1).Render(
 		header + "\n\n" + v.toolList.View(),
@@ -520,6 +535,7 @@ func (v *Projects) updateSelectedProject() {
 	fmt.Sscanf(item.ID, "%d", &projectID)
 	v.selectedProject = v.findProject(projectID)
 	v.syncToolList()
+	v.resizeToolList()
 }
 
 // afterPoolUpdate handles right-panel state after a data refresh.

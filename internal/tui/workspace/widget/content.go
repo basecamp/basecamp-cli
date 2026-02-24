@@ -103,6 +103,10 @@ func (c *Content) render() {
 
 	c.rendered = rendered
 	c.lines = strings.Split(rendered, "\n")
+	// Glamour appends a trailing newline; remove the empty last element
+	if len(c.lines) > 0 && c.lines[len(c.lines)-1] == "" {
+		c.lines = c.lines[:len(c.lines)-1]
+	}
 
 	// Clamp offset after render — if new content is shorter, stale offset
 	// would produce an empty or incorrect view window.

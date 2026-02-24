@@ -545,9 +545,7 @@ func (v *Cards) renderMoveMode() string {
 	if boardHeight < 1 {
 		boardHeight = 1
 	}
-	v.kanban.SetSize(v.width, boardHeight)
-	board := v.kanban.View()
-	v.kanban.SetSize(v.width, v.height) // restore
+	board := lipgloss.NewStyle().MaxHeight(boardHeight).Render(v.kanban.View())
 
 	return header.String() + board
 }

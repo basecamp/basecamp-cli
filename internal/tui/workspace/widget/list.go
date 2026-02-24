@@ -474,7 +474,7 @@ func (l *List) renderEmptyMessage(theme tui.Theme) string {
 func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string {
 	// Section headers render as non-selectable dividers
 	if item.Header {
-		headerStyle := lipgloss.NewStyle().Foreground(theme.Muted).Bold(true)
+		headerStyle := lipgloss.NewStyle().Foreground(theme.Muted).Bold(true).MaxWidth(l.width)
 		line := "── " + item.Title + " ──"
 		return headerStyle.Render(line)
 	}

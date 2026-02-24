@@ -103,7 +103,7 @@ func (q *QuickJump) Update(msg tea.Msg) tea.Cmd {
 
 func (q *QuickJump) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
-	case "esc", "ctrl+j":
+	case "esc":
 		return func() tea.Msg { return QuickJumpCloseMsg{} }
 
 	case "enter":
