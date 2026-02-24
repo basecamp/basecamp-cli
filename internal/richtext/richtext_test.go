@@ -599,6 +599,25 @@ func TestHTMLToMarkdownBcAttachment(t *testing.T) {
 	}
 }
 
+func TestHTMLToMarkdown_Mention(t *testing.T) {
+	input := `<p>Hey <bc-attachment sgid="BAh7CEkiCG" content-type="application/vnd.basecamp.mention">@Alice</bc-attachment> check this</p>`
+	result := HTMLToMarkdown(input)
+	if !strings.Contains(result, "**@Alice**") {
+		t.Errorf("mention not rendered as bold\ngot: %q", result)
+	}
+	if strings.Contains(result, "bc-attachment") {
+		t.Errorf("bc-attachment tag leaked through\ngot: %q", result)
+	}
+}
+
+func TestHTMLToMarkdown_AttachmentNoFilename(t *testing.T) {
+	input := `<bc-attachment sgid="BAh7" content-type="image/png"></bc-attachment>`
+	result := HTMLToMarkdown(input)
+	if !strings.Contains(result, "📎 attachment") {
+		t.Errorf("attachment without filename not rendered\ngot: %q", result)
+	}
+}
+
 func TestHTMLToMarkdownPreservesContent(t *testing.T) {
 	// Test that complex HTML structures are handled
 	input := `<h1>Main Title</h1>

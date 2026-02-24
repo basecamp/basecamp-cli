@@ -65,7 +65,9 @@ var (
 	reHTMLDel      = regexp.MustCompile(`(?i)<del[^>]*>(.*?)</del>`)
 	reHTMLS        = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`)
 	reHTMLStrike   = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`)
+	reMention      = regexp.MustCompile(`(?i)<bc-attachment[^>]*content-type="application/vnd\.basecamp\.mention"[^>]*>([^<]*)</bc-attachment>`)
 	reAttachment   = regexp.MustCompile(`(?i)<bc-attachment[^>]*filename="([^"]*)"[^>]*/?\s*>`)
+	reAttachNoFile = regexp.MustCompile(`(?i)<bc-attachment[^>]*/?\s*>`)
 	reAttachClose  = regexp.MustCompile(`(?i)</bc-attachment>`)
 	reStripTags    = regexp.MustCompile(`<[^>]+>`)
 	reMultiNewline = regexp.MustCompile(`\n{3,}`)
@@ -536,10 +538,15 @@ func HTMLToMarkdown(html string) string {
 	html = reHTMLS.ReplaceAllString(html, "~~$1~~")
 	html = reHTMLStrike.ReplaceAllString(html, "~~$1~~")
 
+	// @-mentions: extract inner text, render as bold (must fire before general attachment regex)
+	html = reMention.ReplaceAllString(html, "**$1**")
+
 	// Basecamp attachments: <bc-attachment ... filename="report.pdf"> → 📎 report.pdf
 	html = reAttachment.ReplaceAllString(html, "\n📎 $1\n")
-	// Self-closing bc-attachment end tags
+	// Closing bc-attachment tags (e.g. </bc-attachment>)
 	html = reAttachClose.ReplaceAllString(html, "")
+	// Remaining bc-attachment tags without filename
+	html = reAttachNoFile.ReplaceAllString(html, "\n📎 attachment\n")
 
 	// Remove remaining HTML tags
 	html = reStripTags.ReplaceAllString(html, "")
