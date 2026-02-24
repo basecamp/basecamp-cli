@@ -13,15 +13,18 @@ import (
 const ToastDuration = 3 * time.Second
 
 // toastTickMsg is the internal tick for dismissing toasts.
-type toastTickMsg struct{}
+type toastTickMsg struct {
+	generation int
+}
 
 // Toast renders ephemeral confirmation messages.
 type Toast struct {
-	styles  *tui.Styles
-	width   int
-	message string
-	isError bool
-	visible bool
+	styles     *tui.Styles
+	width      int
+	message    string
+	isError    bool
+	visible    bool
+	generation int
 }
 
 // NewToast creates a new toast component.
@@ -31,11 +34,13 @@ func NewToast(styles *tui.Styles) Toast {
 
 // Show displays a toast message.
 func (t *Toast) Show(message string, isError bool) tea.Cmd {
+	t.generation++
+	gen := t.generation
 	t.message = message
 	t.isError = isError
 	t.visible = true
 	return tea.Tick(ToastDuration, func(time.Time) tea.Msg {
-		return toastTickMsg{}
+		return toastTickMsg{generation: gen}
 	})
 }
 
@@ -51,7 +56,7 @@ func (t *Toast) Visible() bool {
 
 // Update handles toast tick messages.
 func (t *Toast) Update(msg tea.Msg) tea.Cmd {
-	if _, ok := msg.(toastTickMsg); ok {
+	if tick, ok := msg.(toastTickMsg); ok && tick.generation == t.generation {
 		t.visible = false
 		t.message = ""
 	}
@@ -70,10 +75,27 @@ func (t Toast) View() string {
 		fg = theme.Error
 	}
 
+	msg := t.message
+	if t.width > 0 && lipgloss.Width(msg) > t.width {
+		msg = truncateToast(msg, t.width-1)
+	}
+
 	style := lipgloss.NewStyle().
 		Foreground(fg).
 		Align(lipgloss.Center).
 		Width(t.width)
 
-	return style.Render(t.message)
+	return style.Render(msg)
+}
+
+// truncateToast truncates s to maxWidth, appending "..." if truncated.
+func truncateToast(s string, maxWidth int) string {
+	if maxWidth <= 3 {
+		return string([]rune(s)[:maxWidth])
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes)) > maxWidth-3 {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "..."
 }

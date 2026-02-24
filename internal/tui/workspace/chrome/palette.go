@@ -176,17 +176,24 @@ func (p Palette) View() string {
 		boxWidth = p.width - 8
 	}
 	if boxWidth < 30 {
-		boxWidth = 30
+		boxWidth = min(30, p.width-2)
+	}
+	if boxWidth < 10 {
+		boxWidth = 10
+	}
+	if p.width > 0 && boxWidth > p.width {
+		boxWidth = p.width
 	}
 
 	// Input line
 	inputLine := p.input.View()
 
 	// Separator
+	sepWidth := max(1, boxWidth-4)
 	sep := lipgloss.NewStyle().
 		Foreground(theme.Border).
-		Width(boxWidth - 4). // account for box padding
-		Render(strings.Repeat("─", boxWidth-4))
+		Width(sepWidth).
+		Render(strings.Repeat("─", sepWidth))
 
 	// Action list — scroll window keeps cursor visible
 	var rows []string

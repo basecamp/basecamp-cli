@@ -1,14 +1,20 @@
 package chrome
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
+
+func splitLines(s string) []string {
+	return strings.Split(s, "\n")
+}
 
 func testPalette() Palette {
 	styles := tui.NewStyles()
@@ -82,6 +88,19 @@ func TestPalette_FilterNarrows(t *testing.T) {
 
 	assert.Len(t, p.filtered, 1, "filter should narrow to matching action")
 	assert.Equal(t, "Search", p.filtered[0].Name)
+}
+
+func TestPalette_NarrowTerminal_NoOverflow(t *testing.T) {
+	p := testPalette()
+	p.SetSize(20, 10)
+	p.Focus()
+
+	view := p.View()
+	lines := splitLines(view)
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		assert.LessOrEqual(t, w, 20, "palette line %d overflows: %d > 20", i, w)
+	}
 }
 
 func TestPalette_CursorScroll(t *testing.T) {

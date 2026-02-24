@@ -139,7 +139,13 @@ func (a AccountSwitcher) View() string {
 		boxWidth = a.width - 8
 	}
 	if boxWidth < 30 {
-		boxWidth = 30
+		boxWidth = min(30, a.width-2)
+	}
+	if boxWidth < 10 {
+		boxWidth = 10
+	}
+	if a.width > 0 && boxWidth > a.width {
+		boxWidth = a.width
 	}
 
 	// Title
@@ -151,8 +157,8 @@ func (a AccountSwitcher) View() string {
 	// Separator
 	sep := lipgloss.NewStyle().
 		Foreground(theme.Border).
-		Width(boxWidth - 4).
-		Render(strings.Repeat("─", boxWidth-4))
+		Width(max(1, boxWidth-4)).
+		Render(strings.Repeat("─", max(1, boxWidth-4)))
 
 	var rows []string
 
@@ -186,6 +192,7 @@ func (a AccountSwitcher) View() string {
 			if acct.ID != "" {
 				line += lipgloss.NewStyle().Foreground(theme.Muted).Render("  #" + acct.ID)
 			}
+			line = lipgloss.NewStyle().Width(boxWidth - 4).Render(line)
 
 			if i == a.cursor {
 				hlNum := lipgloss.NewStyle().Foreground(theme.Muted).Background(theme.Border).Render(numStr + "  ")

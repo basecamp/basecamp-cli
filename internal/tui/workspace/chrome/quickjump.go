@@ -356,7 +356,13 @@ func (q QuickJump) View() string {
 		boxWidth = q.width - 8
 	}
 	if boxWidth < 30 {
-		boxWidth = 30
+		boxWidth = min(30, q.width-2)
+	}
+	if boxWidth < 10 {
+		boxWidth = 10
+	}
+	if q.width > 0 && boxWidth > q.width {
+		boxWidth = q.width
 	}
 
 	// Title
@@ -368,8 +374,8 @@ func (q QuickJump) View() string {
 	// Separator
 	sep := lipgloss.NewStyle().
 		Foreground(theme.Border).
-		Width(boxWidth - 4).
-		Render(strings.Repeat("─", boxWidth-4))
+		Width(max(1, boxWidth-4)).
+		Render(strings.Repeat("─", max(1, boxWidth-4)))
 
 	// Input line
 	inputLine := q.input.View()
@@ -392,7 +398,7 @@ func (q QuickJump) View() string {
 		i := start + vi
 		badge := lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + item.Category)
 		name := lipgloss.NewStyle().Foreground(theme.Primary).Render(item.Title)
-		line := name + badge
+		line := lipgloss.NewStyle().Width(boxWidth - 4).Render(name + badge)
 
 		if i == q.cursor {
 			line = lipgloss.NewStyle().
