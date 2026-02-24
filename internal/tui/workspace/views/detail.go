@@ -312,6 +312,10 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
+	case workspace.RefreshMsg:
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail())
+
 	case workspace.BoostCreatedMsg:
 		// Refresh to get the updated boost count
 		if msg.Target.RecordingID == v.recordingID {
@@ -329,6 +333,9 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		v.data.completed = msg.completed
 		v.syncPreview()
+		if realm := v.session.Hub().Project(); realm != nil {
+			realm.Invalidate()
+		}
 		verb := "Completed"
 		if !msg.completed {
 			verb = "Reopened"
@@ -342,6 +349,9 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.editing = false
 		v.data.title = msg.title
 		v.syncPreview()
+		if realm := v.session.Hub().Project(); realm != nil {
+			realm.Invalidate()
+		}
 		return v, workspace.SetStatus("Title updated", false)
 
 	case subscribeResultMsg:
@@ -939,9 +949,10 @@ func (v *Detail) postComment(content widget.ComposerContent) tea.Cmd {
 		html = richtext.EmbedAttachments(html, refs)
 	}
 
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
+	session := v.session
 	return func() tea.Msg {
+		ctx := session.Hub().ProjectContext()
+		client := session.AccountClient()
 		_, err := client.Comments().Create(ctx, scope.ProjectID, recordingID, &basecamp.CreateCommentRequest{
 			Content: html,
 		})
@@ -1084,9 +1095,10 @@ func (v *Detail) fetchDetail() tea.Cmd {
 	recordingID := v.recordingID
 	recordingType := v.recordingType
 
-	ctx := v.session.Context()
-	client := v.session.AccountClient()
+	session := v.session
 	return func() tea.Msg {
+		ctx := session.Hub().ProjectContext()
+		client := session.AccountClient()
 
 		var data detailData
 

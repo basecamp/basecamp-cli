@@ -692,6 +692,16 @@ func TestDetail_SyncPreview_CategoryField_ForMessage(t *testing.T) {
 
 // -- Body clear on empty content --
 
+// -- RefreshMsg triggers reload --
+
+func TestDetail_RefreshMsg_Reloads(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+
+	_, cmd := v.Update(workspace.RefreshMsg{})
+	assert.True(t, v.loading, "RefreshMsg should set loading to true")
+	assert.NotNil(t, cmd, "RefreshMsg should return a batch cmd")
+}
+
 // -- Esc suppressed during submit --
 
 func TestDetail_Esc_NoOp_WhileSubmitting(t *testing.T) {
