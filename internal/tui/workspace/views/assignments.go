@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -58,7 +59,7 @@ func NewAssignments(session *workspace.Session) *Assignments {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No assignments found.")
+	list.SetEmptyMessage(empty.NoAssignments())
 	list.SetFocused(true)
 
 	return &Assignments{

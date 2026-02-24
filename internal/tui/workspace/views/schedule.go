@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -67,7 +68,7 @@ func NewSchedule(session *workspace.Session) *Schedule {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No schedule entries found.")
+	list.SetEmptyMessage(empty.NoScheduleEntries())
 	list.SetFocused(true)
 
 	pool := session.Hub().ScheduleEntries(scope.ProjectID, scope.ToolID)

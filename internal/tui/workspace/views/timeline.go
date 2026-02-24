@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -43,7 +44,7 @@ func NewTimeline(session *workspace.Session, projectID int64) *Timeline {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No recent activity for this project.")
+	list.SetEmptyMessage(empty.NoTimeline())
 	list.SetFocused(true)
 
 	pool := session.Hub().ProjectTimeline(projectID)

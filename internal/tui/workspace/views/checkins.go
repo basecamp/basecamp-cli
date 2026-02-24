@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -76,7 +77,7 @@ func NewCheckins(session *workspace.Session) *Checkins {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	listQuestions := widget.NewList(styles)
-	listQuestions.SetEmptyText("No check-in questions found.")
+	listQuestions.SetEmptyMessage(empty.NoCheckins())
 	listQuestions.SetFocused(true)
 
 	listAnswers := widget.NewList(styles)

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/empty"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -89,7 +90,7 @@ func NewDocsFiles(session *workspace.Session) *DocsFiles {
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
 	list := widget.NewList(styles)
-	list.SetEmptyText("No documents or files found.")
+	list.SetEmptyMessage(empty.NoDocsFiles())
 	list.SetFocused(true)
 
 	return &DocsFiles{

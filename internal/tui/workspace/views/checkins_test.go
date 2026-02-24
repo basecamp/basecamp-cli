@@ -357,12 +357,24 @@ func TestCheckins_ComposerSubmitMsg_DispatchesCreate(t *testing.T) {
 	assert.True(t, v.answering, "answering should remain true while submit is in-flight")
 	assert.True(t, v.submitting, "submitting should be true during in-flight")
 
-	// The cmd calls Hub.CreateCheckinAnswer which will error with nil client
+	// The cmd is a batch (spinner.Tick + createAnswer). Unwrap to find
+	// the createAnswer result among the batch messages.
 	msg := cmd()
-	result, ok := msg.(checkinAnswerCreatedMsg)
-	require.True(t, ok, "should produce checkinAnswerCreatedMsg, got %T", msg)
-	assert.Equal(t, int64(1), result.questionID)
-	assert.Error(t, result.err, "should error since test session has nil SDK")
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "should produce BatchMsg (spinner + create), got %T", msg)
+
+	var found bool
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		if result, ok := c().(checkinAnswerCreatedMsg); ok {
+			found = true
+			assert.Equal(t, int64(1), result.questionID)
+			assert.Error(t, result.err, "should error since test session has nil SDK")
+		}
+	}
+	assert.True(t, found, "batch should contain checkinAnswerCreatedMsg")
 }
 
 // --- checkinAnswerCreatedMsg ---

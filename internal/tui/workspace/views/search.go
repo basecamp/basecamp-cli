@@ -359,7 +359,7 @@ func (v *Search) View() string {
 	separator := lipgloss.NewStyle().
 		Width(v.width).
 		Foreground(theme.Border).
-		Render(strings.Repeat("~", v.width))
+		Render(strings.Repeat("─", v.width))
 
 	// Results
 	var results string

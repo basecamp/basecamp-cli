@@ -3,8 +3,6 @@ package widget
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -76,10 +74,7 @@ func (c *Content) View() string {
 	}
 
 	if len(c.lines) == 0 {
-		return lipgloss.NewStyle().
-			Width(c.width).
-			Foreground(c.styles.Theme().Muted).
-			Render("No content")
+		return ""
 	}
 
 	end := c.offset + c.height
