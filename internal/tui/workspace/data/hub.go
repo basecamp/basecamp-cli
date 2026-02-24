@@ -672,10 +672,11 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 			for _, line := range result.Lines {
 				creator := personName(line.Creator)
 				infos = append(infos, CampfireLineInfo{
-					ID:        line.ID,
-					Body:      line.Content,
-					Creator:   creator,
-					CreatedAt: line.CreatedAt.Format("3:04pm"),
+					ID:          line.ID,
+					Body:        line.Content,
+					Creator:     creator,
+					CreatedAt:   line.CreatedAt.Format("3:04pm"),
+					CreatedAtTS: line.CreatedAt,
 					BoostEmbed: BoostEmbed{
 						BoostsSummary: BoostSummary{Count: line.BoostsCount},
 					},

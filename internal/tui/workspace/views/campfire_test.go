@@ -2,7 +2,9 @@ package views
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -118,4 +120,119 @@ func TestWrapLine_Unicode(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func testCampfireWithLines(lines []workspace.CampfireLineInfo) *Campfire {
+	pool := testCampfirePool()
+	return &Campfire{
+		pool:     pool,
+		styles:   tui.NewStyles(),
+		viewport: viewport.New(80, 20),
+		lines:    lines,
+		width:    80,
+		height:   20,
+	}
+}
+
+func TestCampfire_MessageGrouping(t *testing.T) {
+	now := time.Now()
+	v := testCampfireWithLines([]workspace.CampfireLineInfo{
+		{ID: 1, Body: "hello", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: now},
+		{ID: 2, Body: "world", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: now.Add(30 * time.Second)},
+		{ID: 3, Body: "again", Creator: "Alice", CreatedAt: "9:01am", CreatedAtTS: now.Add(60 * time.Second)},
+	})
+
+	v.renderMessages()
+	content := v.viewport.View()
+
+	// "Alice" should appear exactly once — grouped header
+	assert.Equal(t, 1, strings.Count(content, "Alice"),
+		"consecutive messages from same sender within 5 min should show one header")
+}
+
+func TestCampfire_DifferentSender_BreaksGroup(t *testing.T) {
+	now := time.Now()
+	v := testCampfireWithLines([]workspace.CampfireLineInfo{
+		{ID: 1, Body: "hi", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: now},
+		{ID: 2, Body: "hey", Creator: "Bob", CreatedAt: "9:01am", CreatedAtTS: now.Add(time.Minute)},
+	})
+
+	v.renderMessages()
+	content := v.viewport.View()
+
+	assert.Contains(t, content, "Alice")
+	assert.Contains(t, content, "Bob")
+}
+
+func TestCampfire_DateSeparator(t *testing.T) {
+	// Use dates far enough in the past that neither is "Today" or "Yesterday"
+	day1 := time.Date(2025, 6, 10, 14, 0, 0, 0, time.UTC)
+	day2 := time.Date(2025, 6, 11, 9, 0, 0, 0, time.UTC)
+
+	v := testCampfireWithLines([]workspace.CampfireLineInfo{
+		{ID: 1, Body: "old msg", Creator: "Alice", CreatedAt: "2:00pm", CreatedAtTS: day1},
+		{ID: 2, Body: "new msg", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: day2},
+	})
+
+	v.renderMessages()
+	content := v.viewport.View()
+
+	// Should have two date headers (one per day)
+	assert.Contains(t, content, "Jun 10", "should show date for first day")
+	assert.Contains(t, content, "Jun 11", "should show date for second day")
+}
+
+func TestCampfire_MidnightBoundary_ForcesHeader(t *testing.T) {
+	// Same sender, within 5 minutes, but crossing local midnight — header should still appear
+	beforeMidnight := time.Date(2025, 6, 10, 23, 58, 0, 0, time.Local)
+	afterMidnight := time.Date(2025, 6, 11, 0, 1, 0, 0, time.Local)
+
+	v := testCampfireWithLines([]workspace.CampfireLineInfo{
+		{ID: 1, Body: "late night", Creator: "Alice", CreatedAt: "11:58pm", CreatedAtTS: beforeMidnight},
+		{ID: 2, Body: "early morning", Creator: "Alice", CreatedAt: "12:01am", CreatedAtTS: afterMidnight},
+	})
+
+	v.renderMessages()
+	content := v.viewport.View()
+
+	// Both messages should have sender headers (day change forces it)
+	assert.Equal(t, 2, strings.Count(content, "Alice"), "both messages should show sender header across day boundary")
+	// Both days should have date separators
+	assert.Contains(t, content, "Jun 10")
+	assert.Contains(t, content, "Jun 11")
+}
+
+func TestCampfire_UTCTimestamps_LocalDaySeparators(t *testing.T) {
+	// API timestamps arrive in UTC. Day separators should follow local-day
+	// boundaries, not UTC boundaries. Use two UTC timestamps that fall on
+	// different UTC days but the same local day when local is UTC+5 or similar.
+	// Since we can't control the test machine's timezone, we verify the simpler
+	// invariant: two UTC timestamps on the same local day produce no separator,
+	// while two on different local days do.
+	now := time.Now()
+	localNoon := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
+	// Convert to UTC — the actual hour will differ, but the local day is the same
+	utcNoon := localNoon.UTC()
+	utcNoonPlus1 := utcNoon.Add(time.Hour)
+
+	v := testCampfireWithLines([]workspace.CampfireLineInfo{
+		{ID: 1, Body: "first", Creator: "Alice", CreatedAt: "12:00pm", CreatedAtTS: utcNoon},
+		{ID: 2, Body: "second", Creator: "Bob", CreatedAt: "1:00pm", CreatedAtTS: utcNoonPlus1},
+	})
+
+	v.renderMessages()
+	content := v.viewport.View()
+
+	// Both messages are on the same local day — should see exactly one date separator
+	dateSepCount := strings.Count(content, "──")
+	assert.Equal(t, 2, dateSepCount, "same local day should produce one date separator (2 dashes)")
+}
+
+func TestSameTimeGroup(t *testing.T) {
+	now := time.Now()
+	assert.True(t, sameTimeGroup(now, now.Add(4*time.Minute)), "within 5 min should group")
+	assert.True(t, sameTimeGroup(now, now.Add(5*time.Minute)), "exactly 5 min should group")
+	assert.False(t, sameTimeGroup(now, now.Add(6*time.Minute)), "over 5 min should not group")
+	assert.False(t, sameTimeGroup(now, now.Add(-1*time.Minute)), "negative delta should not group")
+	assert.False(t, sameTimeGroup(time.Time{}, now), "zero time should not group")
 }

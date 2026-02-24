@@ -69,10 +69,11 @@ type ForwardInfo struct {
 
 // CampfireLineInfo is a lightweight representation of a campfire line.
 type CampfireLineInfo struct {
-	ID        int64
-	Body      string // HTML content
-	Creator   string
-	CreatedAt string // formatted time
+	ID          int64
+	Body        string // HTML content
+	Creator     string
+	CreatedAt   string    // formatted time
+	CreatedAtTS time.Time // raw timestamp for grouping
 	BoostEmbed
 }
 
