@@ -73,3 +73,49 @@ func TestCampfire_ScrollModeBoostHotkeyOpensPickerForSelectedLine(t *testing.T) 
 		assert.Equal(t, "Campfire line", open.Target.Title)
 	}
 }
+
+func TestWrapLine_Unicode(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		width int
+		want  string
+	}{
+		{
+			name:  "ASCII fits",
+			line:  "hello world",
+			width: 20,
+			want:  "hello world",
+		},
+		{
+			name:  "ASCII wraps",
+			line:  "hello world foo",
+			width: 11,
+			want:  "hello world\nfoo",
+		},
+		{
+			name:  "emoji rune count",
+			line:  "🎉🎊🎈 party time celebrations",
+			width: 15,
+			want:  "🎉🎊🎈 party time\ncelebrations",
+		},
+		{
+			name:  "long emoji word",
+			line:  "🎉🎊🎈🎆🎇🧨✨🎃",
+			width: 4,
+			want:  "🎉🎊🎈🎆\n🎇🧨✨🎃",
+		},
+		{
+			name:  "accented characters",
+			line:  "café résumé naïve",
+			width: 10,
+			want:  "café\nrésumé\nnaïve",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapLine(tt.line, tt.width)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

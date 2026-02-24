@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -657,16 +658,17 @@ func wrapText(text string, width int) string {
 	return result.String()
 }
 
-// wrapLine wraps a single line at word boundaries.
+// wrapLine wraps a single line at word boundaries using rune counts
+// for correct handling of multi-byte characters (emoji, CJK, etc).
 func wrapLine(line string, width int) string {
-	if len(line) <= width {
+	if utf8.RuneCountInString(line) <= width {
 		return line
 	}
 	var result strings.Builder
 	col := 0
 	words := strings.Fields(line)
 	for i, word := range words {
-		wlen := len(word)
+		wlen := utf8.RuneCountInString(word)
 		if i > 0 && col+1+wlen > width {
 			result.WriteString("\n")
 			col = 0
@@ -676,17 +678,18 @@ func wrapLine(line string, width int) string {
 		}
 		// Handle words longer than width
 		if wlen > width && col == 0 {
-			for j := 0; j < wlen; j += width {
+			runes := []rune(word)
+			for j := 0; j < len(runes); j += width {
 				if j > 0 {
 					result.WriteString("\n")
 				}
 				end := j + width
-				if end > wlen {
-					end = wlen
+				if end > len(runes) {
+					end = len(runes)
 				}
-				result.WriteString(word[j:end])
+				result.WriteString(string(runes[j:end]))
 			}
-			col = wlen % width
+			col = len(runes) % width
 			if col == 0 {
 				col = width
 			}
