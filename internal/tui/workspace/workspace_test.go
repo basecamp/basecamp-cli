@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -160,17 +161,51 @@ func TestWorkspace_BackNavigation(t *testing.T) {
 	assert.Equal(t, "Root", w.router.Current().Title())
 }
 
-func TestWorkspace_BackAtRootQuits(t *testing.T) {
+func TestWorkspace_BackAtRootRequiresDoublePress(t *testing.T) {
 	w, _ := testWorkspace()
 	pushTestView(w, "Root")
 
+	// First esc shows confirmation toast
 	cmd := w.handleKey(keyMsg("esc"))
 	require.NotNil(t, cmd)
+	assert.True(t, w.confirmQuit, "first esc should arm confirmQuit")
+	assert.False(t, w.quitting, "should not quit on first esc")
 
+	// Second esc actually quits
+	cmd = w.handleKey(keyMsg("esc"))
+	require.NotNil(t, cmd)
 	msg := cmd()
 	_, isQuit := msg.(tea.QuitMsg)
-	assert.True(t, isQuit, "Esc at root should quit")
+	assert.True(t, isQuit, "second Esc at root should quit")
 	assert.True(t, w.quitting)
+}
+
+func TestWorkspace_BackspaceAlsoQuits(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Root")
+
+	// First esc arms confirmation
+	w.handleKey(keyMsg("esc"))
+	assert.True(t, w.confirmQuit, "first esc should arm confirmQuit")
+
+	// Backspace (also a Back binding) should work as second press
+	cmd := w.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, isQuit := msg.(tea.QuitMsg)
+	assert.True(t, isQuit, "backspace after esc at root should quit")
+}
+
+func TestWorkspace_ConfirmQuit_ResetOnOtherKey(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Root")
+
+	w.handleKey(keyMsg("esc"))
+	assert.True(t, w.confirmQuit)
+
+	// Non-back key resets
+	w.handleKey(keyMsg("j"))
+	assert.False(t, w.confirmQuit, "non-back key should reset confirmQuit")
 }
 
 func TestWorkspace_BreadcrumbJump(t *testing.T) {
@@ -1390,4 +1425,39 @@ func TestWorkspace_MutationErrorMsg_ForwardedToActiveView(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "MutationErrorMsg should be forwarded to the active view, not intercepted at workspace level")
+}
+
+func TestHumanizeError_NetworkErrors(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`Get "https://x.com": dial tcp: no such host`, "Could not connect to Basecamp"},
+		{`connection refused`, "Could not connect to Basecamp"},
+		{`context deadline exceeded`, "Request timed out"},
+		{`request timeout`, "Request timed out"},
+		{`unexpected EOF`, "Connection interrupted"},
+		{`connection reset by peer`, "Connection interrupted"},
+		{`403 forbidden`, "Access denied"},
+		{`404 not found`, "Not found"},
+		{`500 internal server error`, "Basecamp is temporarily unavailable"},
+		{`502 bad gateway`, "Basecamp is temporarily unavailable"},
+		{`503 service unavailable`, "Basecamp is temporarily unavailable"},
+	}
+	for _, tt := range tests {
+		got := humanizeError(fmt.Errorf("%s", tt.input))
+		assert.Equal(t, tt.want, got, "humanizeError(%q)", tt.input)
+	}
+}
+
+func TestHumanizeError_Passthrough(t *testing.T) {
+	got := humanizeError(fmt.Errorf("something weird"))
+	assert.Equal(t, "something weird", got)
+}
+
+func TestHumanizeError_Truncation(t *testing.T) {
+	long := strings.Repeat("x", 100)
+	got := humanizeError(fmt.Errorf("%s", long))
+	assert.Len(t, got, 80, "long errors should be truncated to 80 chars")
+	assert.True(t, strings.HasSuffix(got, "..."))
 }

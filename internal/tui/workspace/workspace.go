@@ -65,6 +65,7 @@ type Workspace struct {
 	showAccountSwitcher bool
 	showQuickJump       bool
 	quitting            bool
+	confirmQuit         bool
 
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
 	viewFactory ViewFactory
@@ -291,7 +292,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return w, nil
 		}
 		w.statusBar.SetStatus("Error: "+msg.Context, true)
-		return w, w.toast.Show(msg.Context+": "+msg.Err.Error(), true)
+		return w, w.toast.Show(msg.Context+": "+humanizeError(msg.Err), true)
 
 	case data.PoolUpdatedMsg:
 		// Refresh status bar metrics on every pool update
@@ -489,6 +490,11 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
+	// Reset quit confirmation on any key that isn't a Back binding
+	if w.confirmQuit && !key.Matches(msg, w.keys.Back) {
+		w.confirmQuit = false
+	}
+
 	// Global keys (only when NOT in input mode)
 	switch {
 	case key.Matches(msg, w.keys.Quit):
@@ -511,7 +517,11 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if w.router.CanGoBack() {
 			return w.goBack()
 		}
-		// At root: quit
+		// At root: double-press esc to quit
+		if !w.confirmQuit {
+			w.confirmQuit = true
+			return w.toast.Show("Press Esc again to quit", false)
+		}
 		w.quitting = true
 		return tea.Quit
 
@@ -605,6 +615,7 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
+	w.confirmQuit = false
 	var cmds []tea.Cmd
 
 	// Blur the outgoing view
@@ -672,6 +683,7 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 }
 
 func (w *Workspace) goBack() tea.Cmd {
+	w.confirmQuit = false
 	if !w.router.CanGoBack() {
 		return nil
 	}
@@ -1218,6 +1230,38 @@ func (w *Workspace) View() string {
 // isAuthError returns true if the error indicates an expired or invalid auth token.
 // Checks the typed SDK error code first, falling back to string matching for
 // errors that don't go through the SDK error path.
+// humanizeError converts raw Go error strings into user-friendly messages.
+func humanizeError(err error) string {
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "no such host"),
+		strings.Contains(s, "dial tcp"),
+		strings.Contains(s, "connection refused"):
+		return "Could not connect to Basecamp"
+	case strings.Contains(s, "timeout"),
+		strings.Contains(s, "deadline exceeded"):
+		return "Request timed out"
+	case strings.Contains(s, "EOF"),
+		strings.Contains(s, "connection reset"):
+		return "Connection interrupted"
+	case strings.Contains(s, "403"),
+		strings.Contains(s, "forbidden"):
+		return "Access denied"
+	case strings.Contains(s, "404"),
+		strings.Contains(s, "not found"):
+		return "Not found"
+	case strings.Contains(s, "500"),
+		strings.Contains(s, "502"),
+		strings.Contains(s, "503"):
+		return "Basecamp is temporarily unavailable"
+	default:
+		if len(s) > 80 {
+			return s[:77] + "..."
+		}
+		return s
+	}
+}
+
 func isAuthError(err error) bool {
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeAuth {
