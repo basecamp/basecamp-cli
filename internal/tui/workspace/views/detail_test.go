@@ -2,6 +2,7 @@ package views
 
 import (
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -790,6 +791,49 @@ func TestDetail_EditingCallsRelayout(t *testing.T) {
 	// Exit edit mode — preview should restore full height
 	v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	assert.False(t, v.editing, "should exit editing mode")
+}
+
+func TestFormatDueDate(t *testing.T) {
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	assert.Equal(t, "Today", formatDueDate(today))
+	assert.Equal(t, "Tomorrow", formatDueDate(tomorrow))
+	assert.Equal(t, "Yesterday", formatDueDate(yesterday))
+
+	// Same year, far enough from today to avoid collisions
+	farDate := now.AddDate(0, 6, 0) // 6 months ahead
+	farISO := farDate.Format("2006-01-02")
+	result := formatDueDate(farISO)
+	assert.Contains(t, result, farDate.Format("Jan 2"))
+	assert.NotContains(t, result, farDate.Format("2006"), "same-year dates should omit year")
+
+	// Different year: includes year
+	otherYear := now.AddDate(-2, 0, 0).Format("2006-01-02")
+	result = formatDueDate(otherYear)
+	assert.Contains(t, result, now.AddDate(-2, 0, 0).Format("2006"))
+
+	// Invalid input: pass through
+	assert.Equal(t, "not-a-date", formatDueDate("not-a-date"))
+}
+
+func TestDetail_SyncPreview_DueDateFormatted(t *testing.T) {
+	v := testDetail("", "")
+	v.data.recordType = "Todo"
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	v.data.dueOn = tomorrow
+	v.syncPreview()
+
+	fields := v.preview.Fields()
+	for _, f := range fields {
+		if f.Key == "Due" {
+			assert.Equal(t, "Tomorrow", f.Value, "due date should be formatted")
+			return
+		}
+	}
+	t.Fatal("preview should contain Due field")
 }
 
 func TestDetail_View_SubmittingBeforeLoading(t *testing.T) {

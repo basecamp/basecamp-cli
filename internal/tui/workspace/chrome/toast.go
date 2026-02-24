@@ -82,6 +82,8 @@ func (t Toast) View() string {
 
 	style := lipgloss.NewStyle().
 		Foreground(fg).
+		Background(theme.Background).
+		Padding(0, 1).
 		Align(lipgloss.Center).
 		Width(t.width)
 

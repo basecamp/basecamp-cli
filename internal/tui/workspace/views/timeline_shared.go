@@ -82,11 +82,11 @@ func syncTimelineEntries(
 		}
 	}
 
-	addGroup("JUST NOW", justNow)
-	addGroup("1 HOUR AGO", hourAgo)
-	addGroup("TODAY", today)
-	addGroup("YESTERDAY", yesterday)
-	addGroup("OLDER", older)
+	addGroup("Just Now", justNow)
+	addGroup("1 Hour Ago", hourAgo)
+	addGroup("Today", today)
+	addGroup("Yesterday", yesterday)
+	addGroup("Older", older)
 
 	list.SetItems(items)
 	return entryMeta

@@ -98,13 +98,19 @@ func (p *Preview) View() string {
 			Render(p.title))
 	}
 
-	// Fields
+	// Fields — align keys by padding to the widest key
 	if len(p.fields) > 0 {
+		maxKeyWidth := 0
+		for _, f := range p.fields {
+			if w := lipgloss.Width(f.Key); w > maxKeyWidth {
+				maxKeyWidth = w
+			}
+		}
 		var fieldLines []string
-		keyStyle := lipgloss.NewStyle().Foreground(theme.Muted)
+		keyStyle := lipgloss.NewStyle().Foreground(theme.Muted).Width(maxKeyWidth + 1).Align(lipgloss.Right)
 		valStyle := lipgloss.NewStyle().Foreground(theme.Foreground)
 		for _, f := range p.fields {
-			line := keyStyle.Render(f.Key+": ") + valStyle.Render(f.Value)
+			line := keyStyle.Render(f.Key+":") + " " + valStyle.Render(f.Value)
 			fieldLines = append(fieldLines, lipgloss.NewStyle().MaxWidth(p.width).Render(line))
 		}
 		sections = append(sections, strings.Join(fieldLines, "\n"))

@@ -515,19 +515,19 @@ func (v *Home) rebuildList() {
 	var items []widget.ListItem
 
 	if len(v.recentItems) > 0 {
-		items = append(items, widget.ListItem{Title: "RECENTS", Header: true})
+		items = append(items, widget.ListItem{Title: "Recents", Header: true})
 		items = append(items, v.recentItems...)
 	}
 	if len(v.heyItems) > 0 {
-		items = append(items, widget.ListItem{Title: "HEY!", Header: true})
+		items = append(items, widget.ListItem{Title: "Hey!", Header: true})
 		items = append(items, v.heyItems...)
 	}
 	if len(v.assignItems) > 0 {
-		items = append(items, widget.ListItem{Title: "ASSIGNMENTS", Header: true})
+		items = append(items, widget.ListItem{Title: "Assignments", Header: true})
 		items = append(items, v.assignItems...)
 	}
 	if len(v.bookmarkItems) > 0 {
-		items = append(items, widget.ListItem{Title: "BOOKMARKS", Header: true})
+		items = append(items, widget.ListItem{Title: "Bookmarks", Header: true})
 		items = append(items, v.bookmarkItems...)
 	}
 
@@ -544,13 +544,13 @@ func (v *Home) openSelected() tea.Cmd {
 	// Section headers navigate to their corresponding full view
 	if item.Header {
 		switch item.Title {
-		case "RECENTS":
+		case "Recents":
 			return workspace.Navigate(workspace.ViewMyStuff, v.session.Scope())
-		case "HEY!":
+		case "Hey!":
 			return workspace.Navigate(workspace.ViewHey, v.session.Scope())
-		case "ASSIGNMENTS":
+		case "Assignments":
 			return workspace.Navigate(workspace.ViewAssignments, v.session.Scope())
-		case "BOOKMARKS":
+		case "Bookmarks":
 			return workspace.Navigate(workspace.ViewProjects, v.session.Scope())
 		}
 		return nil

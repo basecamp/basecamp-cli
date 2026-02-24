@@ -1062,7 +1062,7 @@ func (v *Detail) syncPreview() {
 		fields = append(fields, widget.PreviewField{Key: "Created", Value: v.data.createdAt.Format("Jan 2, 2006")})
 	}
 	if v.data.dueOn != "" {
-		fields = append(fields, widget.PreviewField{Key: "Due", Value: v.data.dueOn})
+		fields = append(fields, widget.PreviewField{Key: "Due", Value: formatDueDate(v.data.dueOn)})
 	}
 	if v.data.category != "" {
 		fields = append(fields, widget.PreviewField{Key: "Category", Value: v.data.category})
@@ -1276,6 +1276,28 @@ func fetchSubscriptionState(sub *basecamp.Subscription, err error) bool {
 		return false
 	}
 	return sub.Subscribed
+}
+
+// formatDueDate converts an ISO date string to a human-friendly label.
+func formatDueDate(iso string) string {
+	t, err := time.ParseInLocation("2006-01-02", iso, time.Local)
+	if err != nil {
+		return iso
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	switch {
+	case t.Equal(today):
+		return "Today"
+	case t.Equal(today.AddDate(0, 0, 1)):
+		return "Tomorrow"
+	case t.Equal(today.AddDate(0, 0, -1)):
+		return "Yesterday"
+	case t.Year() == now.Year():
+		return t.Format("Mon, Jan 2")
+	default:
+		return t.Format("Mon, Jan 2, 2006")
+	}
 }
 
 // titleCase uppercases the first letter of s. Recording types are always ASCII
