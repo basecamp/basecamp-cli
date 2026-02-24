@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -105,10 +104,7 @@ func (v *MyStuff) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Open):
 			return v, v.openSelected()
 		default:
-			cmd := v.list.Update(msg)
-			// Skip section headers: if the cursor landed on one, nudge it past
-			v.skipHeaders(msg)
-			return v, cmd
+			return v, v.list.Update(msg)
 		}
 	}
 	return v, nil
@@ -116,16 +112,6 @@ func (v *MyStuff) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (v *MyStuff) View() string {
-	if v.list.Len() == 0 {
-		theme := v.styles.Theme()
-		return lipgloss.NewStyle().
-			Width(v.width).
-			Height(v.height).
-			Padding(1, 2).
-			Foreground(theme.Muted).
-			Render("No recent items yet.\n\nNavigate to projects and tools — they'll appear here for quick access.")
-	}
-
 	return v.list.View()
 }
 
@@ -151,8 +137,9 @@ func (v *MyStuff) syncRecents() {
 
 	if len(projects) > 0 {
 		items = append(items, widget.ListItem{
-			ID:    sectionHeader + "projects",
-			Title: "Recent Projects",
+			ID:     sectionHeader + "projects",
+			Title:  "Recent Projects",
+			Header: true,
 		})
 		for _, p := range projects {
 			items = append(items, widget.ListItem{
@@ -167,12 +154,14 @@ func (v *MyStuff) syncRecents() {
 		// Add a blank separator if we have both sections
 		if len(projects) > 0 {
 			items = append(items, widget.ListItem{
-				ID: sectionHeader + "sep",
+				ID:     sectionHeader + "sep",
+				Header: true,
 			})
 		}
 		items = append(items, widget.ListItem{
-			ID:    sectionHeader + "recordings",
-			Title: "Recent Items",
+			ID:     sectionHeader + "recordings",
+			Title:  "Recent Items",
+			Header: true,
 		})
 		for _, r := range recordings {
 			desc := r.Description
@@ -195,28 +184,6 @@ func (v *MyStuff) syncRecents() {
 	}
 
 	v.list.SetItems(items)
-}
-
-// skipHeaders nudges the cursor past section header items.
-func (v *MyStuff) skipHeaders(msg tea.KeyMsg) {
-	item := v.list.Selected()
-	if item == nil {
-		return
-	}
-	if len(item.ID) < len(sectionHeader) || item.ID[:len(sectionHeader)] != sectionHeader {
-		return
-	}
-
-	// Determine direction from the key pressed
-	keys := workspace.DefaultListKeyMap()
-	switch {
-	case key.Matches(msg, keys.Down):
-		// Move one more step down
-		v.list.Update(msg)
-	case key.Matches(msg, keys.Up):
-		// Move one more step up
-		v.list.Update(msg)
-	}
 }
 
 // openSelected navigates to the selected item.

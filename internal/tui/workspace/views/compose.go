@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -370,7 +371,7 @@ func (v *Compose) View() string {
 	sep := lipgloss.NewStyle().
 		Width(v.width).
 		Foreground(theme.Border).
-		Render("─")
+		Render(strings.Repeat("─", max(1, v.width)))
 	sections = append(sections, sep)
 
 	// Body

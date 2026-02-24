@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -125,8 +126,8 @@ func (v *Home) ShortHelp() []key.Binding {
 	default:
 		if meta.recordType != "" {
 			label := strings.ToLower(meta.recordType)
-			if len(label) > 15 {
-				label = label[:15]
+			if utf8.RuneCountInString(label) > 15 {
+				label = string([]rune(label)[:15])
 			}
 			enterDesc = "open " + label
 		}
@@ -486,8 +487,8 @@ func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
 		if desc == "" {
 			desc = p.Description
 		}
-		if len(desc) > 60 {
-			desc = desc[:57] + "..."
+		if utf8.RuneCountInString(desc) > 60 {
+			desc = string([]rune(desc)[:57]) + "..."
 		}
 		items = append(items, widget.ListItem{
 			ID:          id,
