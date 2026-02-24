@@ -567,8 +567,7 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 					return w.stampCmd(cmd)
 				}
 			}
-			w.switchSidebarFocus()
-			return nil
+			return w.switchSidebarFocus()
 		}
 		// Fall through to view when sidebar is inactive
 
@@ -671,9 +670,13 @@ func (w *Workspace) goBack() tea.Cmd {
 	if !w.router.CanGoBack() {
 		return nil
 	}
+	var cmds []tea.Cmd
 	// Blur the outgoing view
 	if outgoing := w.router.Current(); outgoing != nil {
-		outgoing.Update(BlurMsg{})
+		_, cmd := outgoing.Update(BlurMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 	}
 
 	w.router.Pop()
@@ -687,21 +690,28 @@ func (w *Workspace) goBack() tea.Cmd {
 	// Refresh dimensions and focus for the restored view
 	if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
-		view.Update(FocusMsg{})
+		_, cmd := view.Update(FocusMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 		// Back navigation returns to a view with cached data — quality 1.0.
 		w.recordNavigation(view.Title(), 1.0)
-		return chrome.SetTerminalTitle("basecamp - " + view.Title())
+		cmds = append(cmds, chrome.SetTerminalTitle("basecamp - "+view.Title()))
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 func (w *Workspace) goToDepth(depth int) tea.Cmd {
 	if depth >= w.router.Depth() {
 		return nil
 	}
+	var cmds []tea.Cmd
 	// Blur the outgoing view
 	if outgoing := w.router.Current(); outgoing != nil {
-		outgoing.Update(BlurMsg{})
+		_, cmd := outgoing.Update(BlurMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 	}
 
 	w.router.PopToDepth(depth)
@@ -715,11 +725,14 @@ func (w *Workspace) goToDepth(depth int) tea.Cmd {
 	// Refresh dimensions and focus for the restored view
 	if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
-		view.Update(FocusMsg{})
+		_, cmd := view.Update(FocusMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 		w.recordNavigation(view.Title(), 1.0)
-		return chrome.SetTerminalTitle("basecamp - " + view.Title())
+		cmds = append(cmds, chrome.SetTerminalTitle("basecamp - "+view.Title()))
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 // toolNameToViewTarget maps dock tool API names to ViewTarget constants.
@@ -926,22 +939,36 @@ func (w *Workspace) openSidebarPanel(target ViewTarget) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (w *Workspace) switchSidebarFocus() {
+func (w *Workspace) switchSidebarFocus() tea.Cmd {
 	if !w.sidebarActive() {
-		return
+		return nil
 	}
+	var cmds []tea.Cmd
 	w.sidebarFocused = !w.sidebarFocused
 	if w.sidebarFocused {
 		if view := w.router.Current(); view != nil {
-			view.Update(BlurMsg{})
+			_, cmd := view.Update(BlurMsg{})
+			if cmd != nil {
+				cmds = append(cmds, w.stampCmd(cmd))
+			}
 		}
-		w.sidebarView.Update(FocusMsg{})
+		_, cmd := w.sidebarView.Update(FocusMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 	} else {
-		w.sidebarView.Update(BlurMsg{})
+		_, cmd := w.sidebarView.Update(BlurMsg{})
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
 		if view := w.router.Current(); view != nil {
-			view.Update(FocusMsg{})
+			_, cmd := view.Update(FocusMsg{})
+			if cmd != nil {
+				cmds = append(cmds, w.stampCmd(cmd))
+			}
 		}
 	}
+	return tea.Batch(cmds...)
 }
 
 func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {

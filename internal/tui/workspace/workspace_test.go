@@ -1257,3 +1257,68 @@ func TestWorkspace_SidebarCycleWhileFocused(t *testing.T) {
 	assert.False(t, w.sidebarFocused, "cycling should reset sidebar focus to main")
 	assert.True(t, w.showSidebar, "should still be showing sidebar (Home panel)")
 }
+
+// focusCmdView returns a tea.Cmd from FocusMsg so we can verify navigation captures it.
+type focusCmdView struct {
+	testView
+	focusCmd tea.Cmd
+}
+
+func (v *focusCmdView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	v.msgs = append(v.msgs, msg)
+	if _, ok := msg.(FocusMsg); ok && v.focusCmd != nil {
+		return v, v.focusCmd
+	}
+	return v, nil
+}
+
+type goBackFocusSentinel struct{}
+
+func TestWorkspace_GoBack_CapturesFocusCmd(t *testing.T) {
+	w, _ := testWorkspace()
+
+	// Push a root view that returns a cmd on FocusMsg
+	sentinel := func() tea.Msg { return goBackFocusSentinel{} }
+	root := &focusCmdView{
+		testView: testView{title: "Root"},
+		focusCmd: sentinel,
+	}
+	w.router.Push(root, Scope{}, 0)
+
+	// Push a child on top
+	pushTestView(w, "Child")
+	assert.Equal(t, 2, w.router.Depth())
+
+	cmd := w.goBack()
+	require.NotNil(t, cmd, "goBack should return batched cmd including FocusMsg result")
+
+	// Execute the batched command and collect messages
+	msgs := executeBatch(cmd)
+	found := false
+	for _, m := range msgs {
+		if _, ok := m.(goBackFocusSentinel); ok {
+			found = true
+		}
+	}
+	assert.True(t, found, "goBack should propagate the FocusMsg cmd from the restored view")
+}
+
+// executeBatch recursively executes a tea.Cmd and collects all resulting messages,
+// unwrapping EpochMsg and tea.BatchMsg along the way.
+func executeBatch(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var all []tea.Msg
+		for _, c := range batch {
+			all = append(all, executeBatch(c)...)
+		}
+		return all
+	}
+	if ep, ok := msg.(EpochMsg); ok {
+		return []tea.Msg{ep.Inner}
+	}
+	return []tea.Msg{msg}
+}
