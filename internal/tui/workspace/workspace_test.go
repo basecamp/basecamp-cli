@@ -1327,3 +1327,26 @@ func executeBatch(cmd tea.Cmd) []tea.Msg {
 	}
 	return []tea.Msg{msg}
 }
+
+func TestWorkspace_MutationErrorMsg_ForwardedToActiveView(t *testing.T) {
+	w, _ := testWorkspace()
+	view := pushTestView(w, "ActiveView")
+
+	errMsg := data.MutationErrorMsg{
+		Key: "test:pool",
+		Err: fmt.Errorf("API failure"),
+	}
+
+	w.Update(errMsg)
+
+	// The active view should receive the MutationErrorMsg so it can perform
+	// view-specific rollback (e.g., Cards re-syncs kanban, Todos re-syncs list).
+	found := false
+	for _, m := range view.msgs {
+		if me, ok := m.(data.MutationErrorMsg); ok && me.Key == "test:pool" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "MutationErrorMsg should be forwarded to the active view, not intercepted at workspace level")
+}

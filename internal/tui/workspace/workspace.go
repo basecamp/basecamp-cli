@@ -231,9 +231,6 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return w, nil
 
-	case data.MutationErrorMsg:
-		return w, ReportError(msg.Err, "applying change")
-
 	case AccountsDiscoveredMsg:
 		if msg.Err != nil {
 			return w, SetStatus("Account discovery failed", true)

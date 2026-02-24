@@ -11,13 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -658,17 +658,18 @@ func wrapText(text string, width int) string {
 	return result.String()
 }
 
-// wrapLine wraps a single line at word boundaries using rune counts
-// for correct handling of multi-byte characters (emoji, CJK, etc).
+// wrapLine wraps a single line at word boundaries using terminal display
+// widths (runewidth) so wide glyphs like emoji and CJK occupy the correct
+// number of terminal cells.
 func wrapLine(line string, width int) string {
-	if utf8.RuneCountInString(line) <= width {
+	if runewidth.StringWidth(line) <= width {
 		return line
 	}
 	var result strings.Builder
 	col := 0
 	words := strings.Fields(line)
 	for i, word := range words {
-		wlen := utf8.RuneCountInString(word)
+		wlen := runewidth.StringWidth(word)
 		if i > 0 && col+1+wlen > width {
 			result.WriteString("\n")
 			col = 0
@@ -676,23 +677,22 @@ func wrapLine(line string, width int) string {
 			result.WriteString(" ")
 			col++
 		}
-		// Handle words longer than width
+		// Handle words wider than the available width
 		if wlen > width && col == 0 {
 			runes := []rune(word)
-			for j := 0; j < len(runes); j += width {
-				if j > 0 {
+			lineWidth := 0
+			for j, r := range runes {
+				rw := runewidth.RuneWidth(r)
+				if lineWidth+rw > width && lineWidth > 0 {
 					result.WriteString("\n")
+					lineWidth = 0
 				}
-				end := j + width
-				if end > len(runes) {
-					end = len(runes)
+				if j == 0 || lineWidth > 0 || rw > 0 {
+					result.WriteRune(r)
+					lineWidth += rw
 				}
-				result.WriteString(string(runes[j:end]))
 			}
-			col = len(runes) % width
-			if col == 0 {
-				col = width
-			}
+			col = lineWidth
 		} else {
 			result.WriteString(word)
 			col += wlen

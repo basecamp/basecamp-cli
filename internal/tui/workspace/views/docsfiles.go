@@ -532,11 +532,11 @@ func (v *DocsFiles) View() string {
 		inputLine := lipgloss.NewStyle().
 			Foreground(v.styles.Theme().Primary).Bold(true).
 			Render(label) + v.createInput.View()
-		// Temporarily shrink list to avoid overflowing by 1 line
-		v.list.SetSize(v.width, v.height-1)
-		result := inputLine + "\n" + v.list.View()
-		v.list.SetSize(v.width, v.height)
-		return result
+		// Crop the list output to leave room for the input line
+		listView := lipgloss.NewStyle().
+			MaxHeight(max(1, v.height-1)).
+			Render(v.list.View())
+		return inputLine + "\n" + listView
 	}
 
 	return v.list.View()

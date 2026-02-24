@@ -94,16 +94,16 @@ func TestWrapLine_Unicode(t *testing.T) {
 			want:  "hello world\nfoo",
 		},
 		{
-			name:  "emoji rune count",
+			name:  "emoji display width",
 			line:  "🎉🎊🎈 party time celebrations",
 			width: 15,
-			want:  "🎉🎊🎈 party time\ncelebrations",
+			want:  "🎉🎊🎈 party\ntime\ncelebrations",
 		},
 		{
 			name:  "long emoji word",
 			line:  "🎉🎊🎈🎆🎇🧨✨🎃",
 			width: 4,
-			want:  "🎉🎊🎈🎆\n🎇🧨✨🎃",
+			want:  "🎉🎊\n🎈🎆\n🎇🧨\n✨🎃",
 		},
 		{
 			name:  "accented characters",
