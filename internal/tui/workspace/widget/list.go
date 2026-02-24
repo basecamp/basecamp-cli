@@ -197,7 +197,10 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	km := msg.(tea.KeyMsg) //nolint:errcheck
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return nil
+	}
 
 	if l.filtering {
 		return l.handleFilterKey(km)

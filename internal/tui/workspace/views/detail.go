@@ -246,10 +246,10 @@ func (v *Detail) relayout() {
 		if previewHeight < 3 {
 			previewHeight = 3
 		}
-		v.preview.SetSize(v.width-2, previewHeight)
-		v.composer.SetSize(v.width-2, composerHeight)
+		v.preview.SetSize(max(0, v.width-2), previewHeight)
+		v.composer.SetSize(max(0, v.width-2), composerHeight)
 	} else {
-		v.preview.SetSize(v.width-2, v.height)
+		v.preview.SetSize(max(0, v.width-2), v.height)
 	}
 }
 
@@ -953,7 +953,7 @@ func (v *Detail) View() string {
 	if v.composing {
 		theme := v.styles.Theme()
 		sep := lipgloss.NewStyle().
-			Width(v.width - 2).
+			Width(max(0, v.width-2)).
 			Foreground(theme.Border).
 			Render("─ Comment ─")
 		return lipgloss.NewStyle().Padding(0, 1).Render(

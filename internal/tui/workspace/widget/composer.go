@@ -230,8 +230,8 @@ func (c *Composer) Mode() ComposerMode {
 func (c *Composer) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	c.textInput.Width = w - 4
-	c.textArea.SetWidth(w - 2)
+	c.textInput.Width = max(0, w-4)
+	c.textArea.SetWidth(max(0, w-2))
 	if h > 2 {
 		c.textArea.SetHeight(h - c.attachBarHeight())
 	}

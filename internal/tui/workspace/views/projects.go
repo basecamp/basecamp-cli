@@ -331,7 +331,7 @@ func (v *Projects) View() string {
 
 	// Collapsed mode: show one panel at a time
 	if v.split.IsCollapsed() && v.focusRight {
-		w := v.width - 2 // padding
+		w := max(0, v.width-2) // padding
 		header := v.renderToolHeader(w)
 		headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
 		v.toolList.SetSize(w, v.height-headerLines)
@@ -362,7 +362,7 @@ func (v *Projects) renderRightPanel() string {
 		return ""
 	}
 
-	w := v.split.RightWidth() - 2 // padding
+	w := max(0, v.split.RightWidth()-2) // padding
 	header := v.renderToolHeader(w)
 	headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
 	v.toolList.SetSize(w, v.height-headerLines)

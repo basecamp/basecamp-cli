@@ -49,7 +49,7 @@ func (s *SplitPane) LeftWidth() int {
 	if s.collapsed {
 		return s.width
 	}
-	return int(float64(s.width-1) * s.ratio) // -1 for divider
+	return max(0, int(float64(s.width-1)*s.ratio))
 }
 
 // RightWidth returns the right panel width (excluding divider).
@@ -57,7 +57,7 @@ func (s *SplitPane) RightWidth() int {
 	if s.collapsed {
 		return s.width
 	}
-	return s.width - s.LeftWidth() - 1 // -1 for divider
+	return max(0, s.width-s.LeftWidth()-1)
 }
 
 // IsCollapsed returns true if the pane is showing single-panel mode.
