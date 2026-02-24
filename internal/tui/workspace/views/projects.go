@@ -334,7 +334,7 @@ func (v *Projects) View() string {
 		w := max(0, v.width-2) // padding
 		header := v.renderToolHeader(w)
 		headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
-		v.toolList.SetSize(w, v.height-headerLines)
+		v.toolList.SetSize(w, max(1, v.height-headerLines))
 		return lipgloss.NewStyle().
 			Width(v.width).
 			Height(v.height).
@@ -365,7 +365,7 @@ func (v *Projects) renderRightPanel() string {
 	w := max(0, v.split.RightWidth()-2) // padding
 	header := v.renderToolHeader(w)
 	headerLines := strings.Count(header, "\n") + 2 // +1 for the line itself, +1 for gap
-	v.toolList.SetSize(w, v.height-headerLines)
+	v.toolList.SetSize(w, max(1, v.height-headerLines))
 
 	return lipgloss.NewStyle().Padding(0, 1).Render(
 		header + "\n\n" + v.toolList.View(),
@@ -486,9 +486,7 @@ func projectInfoToListItem(p data.ProjectInfo) widget.ListItem {
 	if desc == "" {
 		desc = p.Description
 	}
-	if len(desc) > 60 {
-		desc = desc[:57] + "..."
-	}
+	desc = widget.Truncate(desc, 57)
 	return widget.ListItem{
 		ID:          fmt.Sprintf("%d", p.ID),
 		Title:       p.Name,

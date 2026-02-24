@@ -2,6 +2,7 @@ package views
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -196,12 +197,12 @@ func (v *MyStuff) openSelected() tea.Cmd {
 	id := item.ID
 
 	// Section headers are not navigable
-	if len(id) >= len(sectionHeader) && id[:len(sectionHeader)] == sectionHeader {
+	if strings.HasPrefix(id, sectionHeader) {
 		return nil
 	}
 
 	// Project items: "project:<id>"
-	if len(id) > 8 && id[:8] == "project:" {
+	if strings.HasPrefix(id, "project:") {
 		rawID := id[8:]
 		projectID, err := strconv.ParseInt(rawID, 10, 64)
 		if err != nil {
@@ -215,7 +216,7 @@ func (v *MyStuff) openSelected() tea.Cmd {
 	}
 
 	// Recording items: "recording:<id>"
-	if len(id) > 10 && id[:10] == "recording:" {
+	if strings.HasPrefix(id, "recording:") {
 		rawID := id[10:]
 		recordingID, err := strconv.ParseInt(rawID, 10, 64)
 		if err != nil {

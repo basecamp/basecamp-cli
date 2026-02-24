@@ -382,6 +382,21 @@ func TestToolHotkey(t *testing.T) {
 	assert.Equal(t, "", toolHotkey("vault"))
 }
 
+func TestProjectInfoToListItem_UnicodeDescription(t *testing.T) {
+	// 100-char emoji description must not panic (byte-slicing mid-rune)
+	emoji := "🎉🎊🎈🌟✨💫🔥🚀💡🎯🎪🎭🎨🎬🎤🎵🎶🎹🎺🎻🥁🎷🎸🪗🎼🎧🎙📻📺📷📸📹🎥📽🎞🖼🖥🖨💻⌨🖱🖲💾💿📀🔌🔋"
+	p := data.ProjectInfo{
+		ID:          42,
+		Name:        "Test",
+		Description: emoji,
+	}
+
+	item := projectInfoToListItem(p)
+	assert.NotEmpty(t, item.Description)
+	// Verify result is valid UTF-8 by round-tripping through runes
+	assert.Equal(t, item.Description, string([]rune(item.Description)))
+}
+
 func TestToolNameToView(t *testing.T) {
 	tests := []struct {
 		name string
