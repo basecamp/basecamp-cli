@@ -128,12 +128,7 @@ func TestDetail_CompleteToggle_ReopensTodo(t *testing.T) {
 func TestDetail_CompleteToggle_NonTodo(t *testing.T) {
 	v := testDetailWithSession("Message", false)
 	cmd := v.handleKey(runeKey('x'))
-	require.NotNil(t, cmd, "x on non-todo should produce status cmd")
-
-	msg := cmd()
-	status, ok := msg.(workspace.StatusMsg)
-	require.True(t, ok, "should produce StatusMsg")
-	assert.Contains(t, status.Text, "Can only complete todos")
+	assert.Nil(t, cmd, "x on non-todo should be a no-op")
 }
 
 // -- Trash tests --
@@ -638,4 +633,75 @@ func TestDetail_ShortHelp_HidesCommentKeys_WhenNoComments(t *testing.T) {
 		assert.NotEqual(t, "E", h.Help().Key, "should not show edit comment without comments")
 		assert.NotEqual(t, "T", h.Help().Key, "should not show trash comment without comments")
 	}
+}
+
+// -- Edit key guards --
+
+func TestDetail_E_NoOp_ForMessage(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	cmd := v.handleKey(runeKey('e'))
+	assert.Nil(t, cmd, "e on Message should be a no-op")
+	assert.False(t, v.editing, "should not enter editing mode for Message")
+}
+
+func TestDetail_ShortHelp_HidesEdit_ForMessage(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	hints := v.ShortHelp()
+
+	for _, h := range hints {
+		assert.NotEqual(t, "e", h.Help().Key, "Message should not show e hint")
+	}
+}
+
+func TestDetail_ShortHelp_ShowsEdit_ForTodo(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	hints := v.ShortHelp()
+
+	found := false
+	for _, h := range hints {
+		if h.Help().Key == "e" {
+			found = true
+			assert.Equal(t, "edit title", h.Help().Desc)
+		}
+	}
+	assert.True(t, found, "Todo should show e/edit title hint")
+}
+
+// -- Category field for Message --
+
+func TestDetail_SyncPreview_CategoryField_ForMessage(t *testing.T) {
+	v := testDetail("", "")
+	v.data.recordType = "Message"
+	v.data.category = "Announcement"
+	v.data.dueOn = ""
+	v.syncPreview()
+
+	fields := v.preview.Fields()
+	hasCat, hasDue := false, false
+	for _, f := range fields {
+		if f.Key == "Category" && f.Value == "Announcement" {
+			hasCat = true
+		}
+		if f.Key == "Due" {
+			hasDue = true
+		}
+	}
+	assert.True(t, hasCat, "Message should have Category field")
+	assert.False(t, hasDue, "Message should not have Due field")
+}
+
+// -- Body clear on empty content --
+
+func TestDetail_SyncPreview_ClearsBody(t *testing.T) {
+	v := testDetail("", "")
+	v.preview.SetBody("<p>old content</p>")
+	v.data.content = ""
+	v.data.comments = nil
+	v.syncPreview()
+
+	// After syncPreview with empty content and no comments, body should be cleared.
+	// We verify by checking the preview renders without "old content".
+	v.preview.SetSize(80, 24)
+	output := v.preview.View()
+	assert.NotContains(t, output, "old content", "stale body should be cleared")
 }

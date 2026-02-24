@@ -42,6 +42,7 @@ type detailData struct {
 	assignees  []string
 	completed  bool
 	dueOn      string
+	category   string // message category (distinct from dueOn)
 	comments   []detailComment
 	boosts     int
 	subscribed bool
@@ -203,8 +204,13 @@ func (v *Detail) ShortHelp() []key.Binding {
 			key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "assign")),
 		)
 	}
+	if v.data != nil {
+		rt := strings.ToLower(v.data.recordType)
+		if rt == "todo" || rt == "card" {
+			hints = append(hints, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit title")))
+		}
+	}
 	hints = append(hints,
-		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit title")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "subscribe")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
@@ -453,6 +459,13 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return v.clearDetailAssignees()
 		}
 	case "e":
+		if v.data == nil {
+			return nil
+		}
+		rt := strings.ToLower(v.data.recordType)
+		if rt != "todo" && rt != "card" {
+			return nil
+		}
 		return v.startEditTitle()
 	case "s":
 		return v.toggleSubscribe()
@@ -475,7 +488,10 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.relayout()
 		return v.composer.Focus()
 	case "x":
-		return v.toggleComplete()
+		if v.data != nil && strings.EqualFold(v.data.recordType, "Todo") {
+			return v.toggleComplete()
+		}
+		return nil
 	case "t":
 		if v.data == nil {
 			return nil
@@ -512,9 +528,6 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (v *Detail) toggleComplete() tea.Cmd {
-	if v.data == nil || !strings.EqualFold(v.data.recordType, "Todo") {
-		return workspace.SetStatus("Can only complete todos", false)
-	}
 	newState := !v.data.completed
 	scope := v.session.Scope()
 	hub := v.session.Hub()
@@ -1016,6 +1029,9 @@ func (v *Detail) syncPreview() {
 	if v.data.dueOn != "" {
 		fields = append(fields, widget.PreviewField{Key: "Due", Value: v.data.dueOn})
 	}
+	if v.data.category != "" {
+		fields = append(fields, widget.PreviewField{Key: "Category", Value: v.data.category})
+	}
 	if len(v.data.assignees) > 0 {
 		fields = append(fields, widget.PreviewField{Key: "Assigned", Value: strings.Join(v.data.assignees, ", ")})
 	}
@@ -1040,9 +1056,7 @@ func (v *Detail) syncPreview() {
 	if len(v.data.comments) > 0 {
 		body += v.buildCommentsHTML()
 	}
-	if body != "" {
-		v.preview.SetBody(body)
-	}
+	v.preview.SetBody(body)
 }
 
 // buildCommentsHTML renders comments as HTML to be appended to the body content.
@@ -1118,7 +1132,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				content:    msg.Content,
 				creator:    creator,
 				createdAt:  msg.CreatedAt,
-				dueOn:      category, // reuse field for category display
+				category:   category,
 				boosts:     msg.BoostsCount,
 			}
 
