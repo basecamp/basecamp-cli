@@ -411,3 +411,18 @@ func TestCards_Trash_Timeout(t *testing.T) {
 	assert.False(t, v.trashPending)
 	assert.Empty(t, v.trashPendingID)
 }
+
+// --- InputActive includes moving ---
+
+func TestCards_InputActive_IncludesMoving(t *testing.T) {
+	v := testCardsView()
+
+	assert.False(t, v.InputActive(), "not active in normal mode")
+
+	v.moving = true
+	assert.True(t, v.InputActive(), "should capture input during move mode")
+	v.moving = false
+
+	v.creating = true
+	assert.True(t, v.InputActive(), "should capture input during create mode")
+}

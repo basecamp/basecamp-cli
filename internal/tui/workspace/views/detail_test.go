@@ -692,6 +692,32 @@ func TestDetail_SyncPreview_CategoryField_ForMessage(t *testing.T) {
 
 // -- Body clear on empty content --
 
+// -- Esc suppressed during submit --
+
+func TestDetail_Esc_NoOp_WhileSubmitting(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.composing = true
+	v.submitting = true
+	v.composer = widget.NewComposer(v.styles, widget.WithMode(widget.ComposerRich))
+
+	cmd := v.handleComposingKey(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd, "Esc should be no-op while submitting")
+	assert.True(t, v.composing, "composing should remain true when submit is in flight")
+}
+
+// -- Comment edit error preserves editing state --
+
+func TestDetail_CommentEditError_PreservesEditing(t *testing.T) {
+	v := detailWithComments()
+	v.editingComment = true
+
+	_, cmd := v.Update(commentEditResultMsg{err: assert.AnError})
+	require.NotNil(t, cmd, "error should produce a report cmd")
+	assert.True(t, v.editingComment, "editing state should be preserved on error")
+}
+
+// -- Body clear on empty content --
+
 func TestDetail_SyncPreview_ClearsBody(t *testing.T) {
 	v := testDetail("", "")
 	v.preview.SetBody("<p>old content</p>")

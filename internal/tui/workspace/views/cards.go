@@ -134,7 +134,7 @@ func (v *Cards) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Cards) InputActive() bool {
-	return v.creating
+	return v.creating || v.moving
 }
 
 // IsModal implements workspace.ModalActive.

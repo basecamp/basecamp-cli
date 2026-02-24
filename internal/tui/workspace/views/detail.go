@@ -382,10 +382,10 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case commentEditResultMsg:
-		v.editingComment = false
 		if msg.err != nil {
 			return v, workspace.ReportError(msg.err, "editing comment")
 		}
+		v.editingComment = false
 		v.loading = true
 		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Comment updated", false))
 
@@ -904,6 +904,9 @@ func (v *Detail) toggleSubscribe() tea.Cmd {
 func (v *Detail) handleComposingKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case msg.String() == "esc":
+		if v.submitting {
+			return nil // post in flight — can't cancel
+		}
 		v.composing = false
 		v.composer.Blur()
 		v.relayout()
