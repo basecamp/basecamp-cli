@@ -151,7 +151,7 @@ func (v *Search) FullHelp() [][]key.Binding {
 func (v *Search) SetSize(w, h int) {
 	v.width = w
 	v.height = h
-	v.textInput.Width = w - 4
+	v.textInput.Width = max(0, w-4)
 	// Reserve 2 lines for the input bar + separator
 	listHeight := h - 2
 	if listHeight < 1 {

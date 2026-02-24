@@ -89,7 +89,7 @@ func (q *QuickJump) Blur() {
 func (q *QuickJump) SetSize(width, height int) {
 	q.width = width
 	q.height = height
-	q.input.Width = width - 8
+	q.input.Width = max(0, width-8)
 }
 
 // Update handles key messages while the quick-jump is active.

@@ -158,6 +158,21 @@ func TestQuickJump_NoToolsWithoutCallback(t *testing.T) {
 	}
 }
 
+func TestQuickJump_NarrowWidth_NoNegative(t *testing.T) {
+	styles := tui.NewStyles()
+	qj := NewQuickJump(styles)
+
+	// SetSize with an extremely small width — must not panic.
+	qj.SetSize(2, 10)
+	assert.GreaterOrEqual(t, qj.input.Width, 0, "input.Width should never go negative")
+
+	// Populate and render to exercise View at narrow width.
+	src := testQuickJumpSource()
+	qj.Focus(src)
+	out := qj.View()
+	assert.NotEmpty(t, out)
+}
+
 func TestQuickJump_MaxFiveRecentProjects(t *testing.T) {
 	styles := tui.NewStyles()
 	qj := NewQuickJump(styles)

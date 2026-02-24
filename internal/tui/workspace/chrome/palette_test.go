@@ -1,0 +1,85 @@
+package chrome
+
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/tui"
+)
+
+func testPalette() Palette {
+	styles := tui.NewStyles()
+	p := NewPalette(styles)
+	p.SetSize(80, 24)
+	p.SetActions(
+		[]string{"Search", "New Message"},
+		[]string{"Full-text search", "Compose a message"},
+		[]string{"nav", "compose"},
+		[]func() tea.Cmd{func() tea.Cmd { return nil }, func() tea.Cmd { return nil }},
+	)
+	return p
+}
+
+func TestPalette_NarrowWidth_NoNegative(t *testing.T) {
+	p := testPalette()
+
+	// SetSize with an extremely small width — must not panic.
+	p.SetSize(2, 10)
+	assert.GreaterOrEqual(t, p.input.Width, 0, "input.Width should never go negative")
+
+	// Exercise View at narrow width.
+	p.Focus()
+	out := p.View()
+	assert.NotEmpty(t, out)
+}
+
+func TestPalette_EscCloses(t *testing.T) {
+	p := testPalette()
+	p.Focus()
+
+	cmd := p.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	_, ok := msg.(PaletteCloseMsg)
+	assert.True(t, ok, "Esc should produce PaletteCloseMsg")
+}
+
+func TestPalette_EnterExecutesAction(t *testing.T) {
+	var executed bool
+	styles := tui.NewStyles()
+	p := NewPalette(styles)
+	p.SetSize(80, 24)
+	p.SetActions(
+		[]string{"Test Action"},
+		[]string{"A test action"},
+		[]string{"test"},
+		[]func() tea.Cmd{func() tea.Cmd { executed = true; return nil }},
+	)
+	p.Focus()
+
+	cmd := p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd, "Enter should produce a batch cmd")
+
+	// Execute the batch — it contains PaletteCloseMsg + PaletteExecMsg
+	msg := cmd()
+	_ = msg // batch msg
+	assert.True(t, executed, "Enter should execute the selected action")
+}
+
+func TestPalette_FilterNarrows(t *testing.T) {
+	p := testPalette()
+	p.Focus()
+
+	require.Len(t, p.filtered, 2, "all actions visible initially")
+
+	// Type "Search" to filter
+	p.input.SetValue("Search")
+	p.refilter()
+
+	assert.Len(t, p.filtered, 1, "filter should narrow to matching action")
+	assert.Equal(t, "Search", p.filtered[0].Name)
+}

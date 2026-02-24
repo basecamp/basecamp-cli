@@ -200,3 +200,17 @@ func TestSearch_DuplicateQuerySkipsSearch(t *testing.T) {
 	cmd := v.submitQuery()
 	assert.Nil(t, cmd, "submitting the same query again should be a no-op")
 }
+
+// --- Narrow width ---
+
+func TestSearch_NarrowWidth_NoNegative(t *testing.T) {
+	v := testSearchView()
+
+	// SetSize with an extremely small width — must not panic.
+	v.SetSize(2, 10)
+	assert.GreaterOrEqual(t, v.textInput.Width, 0, "textInput.Width should never go negative")
+
+	// Exercise View to confirm rendering doesn't panic either.
+	out := v.View()
+	assert.NotEmpty(t, out)
+}

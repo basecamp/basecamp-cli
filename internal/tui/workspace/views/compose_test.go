@@ -193,3 +193,13 @@ func TestCompose_SubmitError_ClearsSending(t *testing.T) {
 	assert.NotNil(t, cmd, "keys should be unblocked after error clears sending")
 	assert.Equal(t, composeFocusBody, v.focus, "tab should switch focus when not sending")
 }
+
+// --- Narrow width ---
+
+func TestCompose_NarrowWidth_NoNegative(t *testing.T) {
+	v := testComposeView()
+
+	// SetSize with an extremely small width — must not panic.
+	v.SetSize(2, 10)
+	assert.GreaterOrEqual(t, v.subject.Width, 0, "subject.Width should never go negative")
+}

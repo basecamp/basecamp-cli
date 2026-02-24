@@ -150,7 +150,7 @@ func (v *Compose) FullHelp() [][]key.Binding {
 func (v *Compose) SetSize(w, h int) {
 	v.width = w
 	v.height = h
-	v.subject.Width = w - 4
+	v.subject.Width = max(0, w-4)
 	// Subject takes 2 lines (label + input), body gets the rest
 	bodyHeight := h - 4 // subject label + input + separator + padding
 	if bodyHeight < 3 {

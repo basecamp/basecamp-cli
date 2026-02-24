@@ -87,7 +87,7 @@ func (p *Palette) Blur() {
 func (p *Palette) SetSize(width, height int) {
 	p.width = width
 	p.height = height
-	p.input.Width = width - 8 // account for padding + prompt
+	p.input.Width = max(0, width-8) // account for padding + prompt
 }
 
 // Update handles key messages while the palette is active.
