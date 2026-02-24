@@ -200,13 +200,15 @@ func (v *Home) Init() tea.Cmd {
 func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
+		var errCmd tea.Cmd
 		switch msg.Key {
 		case v.heyPool.Key():
 			snap := v.heyPool.Get()
 			if snap.Usable() {
 				v.syncHeyEntries(snap.Data)
 			} else if snap.State == data.StateError {
-				v.heyItems = nil // clear section, stop loading
+				v.heyItems = nil
+				errCmd = workspace.ReportError(snap.Err, "loading Hey! activity")
 			}
 		case v.assignPool.Key():
 			snap := v.assignPool.Get()
@@ -214,6 +216,7 @@ func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.syncAssignments(snap.Data)
 			} else if snap.State == data.StateError {
 				v.assignItems = nil
+				errCmd = workspace.ReportError(snap.Err, "loading assignments")
 			}
 		case v.projectPool.Key():
 			snap := v.projectPool.Get()
@@ -221,10 +224,11 @@ func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.syncBookmarks(snap.Data)
 			} else if snap.State == data.StateError {
 				v.bookmarkItems = nil
+				errCmd = workspace.ReportError(snap.Err, "loading bookmarks")
 			}
 		}
 		v.rebuildList()
-		return v, nil
+		return v, errCmd
 
 	case workspace.RefreshMsg:
 		v.heyPool.Invalidate()
