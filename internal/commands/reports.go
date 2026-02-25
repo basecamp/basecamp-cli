@@ -188,7 +188,7 @@ Todos are grouped into categories:
 				len(result.OverThreeMonthsLate)
 
 			var summary strings.Builder
-			summary.WriteString(fmt.Sprintf("%d overdue todos", total))
+			fmt.Fprintf(&summary, "%d overdue todos", total)
 			if total > 0 {
 				var parts []string
 				if n := len(result.UnderAWeekLate); n > 0 {
@@ -281,7 +281,7 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 			}
 
 			var summary strings.Builder
-			summary.WriteString(fmt.Sprintf("%d upcoming items", total))
+			fmt.Fprintf(&summary, "%d upcoming items", total)
 			if len(parts) > 0 {
 				summary.WriteString(" (")
 				for i, p := range parts {
