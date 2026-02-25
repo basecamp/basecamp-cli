@@ -61,6 +61,23 @@ func NewActivity(session *workspace.Session) *Activity {
 
 func (v *Activity) Title() string { return "Activity" }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Activity) FocusedItem() workspace.FocusedItemScope {
+	item := v.list.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	meta, ok := v.entryMeta[item.ID]
+	if !ok {
+		return workspace.FocusedItemScope{}
+	}
+	return workspace.FocusedItemScope{
+		AccountID:   meta.AccountID,
+		ProjectID:   meta.ProjectID,
+		RecordingID: meta.RecordingID,
+	}
+}
+
 func (v *Activity) ShortHelp() []key.Binding {
 	if v.list.Filtering() {
 		return filterHints()

@@ -69,6 +69,7 @@ type Workspace struct {
 
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
 	viewFactory ViewFactory
+	openFunc    func(Scope) tea.Cmd
 
 	width, height int
 }
@@ -107,6 +108,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		quickJump:       chrome.NewQuickJump(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
+		openFunc:        openInBrowser,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
@@ -559,7 +561,20 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return w.navigate(ViewActivity, w.session.Scope())
 
 	case key.Matches(msg, w.keys.Open):
-		return openInBrowser(w.session.Scope())
+		scope := w.session.Scope()
+		if fr, ok := w.router.Current().(FocusedRecording); ok {
+			fi := fr.FocusedItem()
+			if fi.RecordingID != 0 {
+				scope.RecordingID = fi.RecordingID
+			}
+			if fi.ProjectID != 0 {
+				scope.ProjectID = fi.ProjectID
+			}
+			if fi.AccountID != "" {
+				scope.AccountID = fi.AccountID
+			}
+		}
+		return w.openFunc(scope)
 
 	case key.Matches(msg, w.keys.Sidebar):
 		return w.toggleSidebar()

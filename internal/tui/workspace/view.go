@@ -45,6 +45,22 @@ type Filterable interface {
 	StartFilter()
 }
 
+// FocusedItemScope holds the account/project/recording context of the
+// currently focused list item.  Zero-valued fields mean "unknown/same as
+// the session scope".
+type FocusedItemScope struct {
+	AccountID   string
+	ProjectID   int64
+	RecordingID int64
+}
+
+// FocusedRecording is an optional interface for views that can identify the
+// scope of the currently focused item. Used by open-in-browser to route
+// through the correct account/project.
+type FocusedRecording interface {
+	FocusedItem() FocusedItemScope
+}
+
 // SplitPaneFocuser is an optional interface for views that use a split-pane
 // layout with internal tab-cycling. When the sidebar is open, the workspace
 // routes tab to the view instead of consuming it for sidebar focus switching.

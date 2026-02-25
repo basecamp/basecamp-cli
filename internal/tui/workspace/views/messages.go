@@ -96,6 +96,16 @@ func (v *Messages) Title() string {
 	return "Message Board"
 }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Messages) FocusedItem() workspace.FocusedItemScope {
+	item := v.list.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	id, _ := strconv.ParseInt(item.ID, 10, 64)
+	return workspace.FocusedItemScope{RecordingID: id}
+}
+
 // ShortHelp implements View.
 func (v *Messages) ShortHelp() []key.Binding {
 	if v.list.Filtering() {
