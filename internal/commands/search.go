@@ -2,6 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -62,7 +64,10 @@ Use 'basecamp search metadata' to see available search scopes.`,
 
 			summary := fmt.Sprintf("%d results for \"%s\"", len(results), query)
 
-			return app.OK(results,
+			// Transform results for human-readable output
+			cleaned := humanizeSearchResults(results)
+
+			return app.OK(cleaned,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -93,6 +98,74 @@ func newSearchMetadataCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			return runSearchMetadata(cmd, app)
 		},
+	}
+}
+
+// humanizeSearchResults transforms raw SDK results into clean maps for display.
+func humanizeSearchResults(results []basecamp.SearchResult) []map[string]any {
+	out := make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		title := r.Title
+		if len(title) > 60 {
+			title = title[:57] + "…"
+		}
+		project := ""
+		if r.Bucket != nil {
+			project = r.Bucket.Name
+		}
+		row := map[string]any{
+			"id":      r.ID,
+			"title":   title,
+			"type":    simplifyType(r.Type),
+			"project": project,
+			"created": relativeTime(r.CreatedAt),
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// simplifyType strips module prefixes and lowercases Basecamp type names.
+// "Chat::Lines::RichText" → "chat", "Todo" → "todo", "Message::Board" → "message"
+func simplifyType(t string) string {
+	parts := strings.Split(t, "::")
+	// Use first segment as the primary type
+	s := parts[0]
+	s = strings.ToLower(s)
+	// Normalize common variants
+	switch s {
+	case "inbox":
+		return "forward"
+	case "question":
+		return "check-in"
+	}
+	return s
+}
+
+// relativeTime formats a timestamp as a human-readable relative duration.
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		return fmt.Sprintf("%dm ago", m)
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		return fmt.Sprintf("%dh ago", h)
+	case d < 30*24*time.Hour:
+		days := int(d.Hours() / 24)
+		return fmt.Sprintf("%dd ago", days)
+	case d < 365*24*time.Hour:
+		months := int(d.Hours() / 24 / 30)
+		return fmt.Sprintf("%dmo ago", months)
+	default:
+		years := int(d.Hours() / 24 / 365)
+		return fmt.Sprintf("%dy ago", years)
 	}
 }
 
