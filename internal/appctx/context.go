@@ -64,6 +64,8 @@ type GlobalFlags struct {
 	Verbose  int // 0=off, 1=operations, 2=operations+requests (stacks with -v -v or -vv)
 	Stats    bool
 	NoStats  bool // Explicit disable (overrides --stats and dev default)
+	Hints    bool
+	NoHints  bool // Explicit disable (overrides --hints and dev default)
 	CacheDir string
 }
 
@@ -210,6 +212,9 @@ func (a *App) OK(data any, opts ...output.ResponseOption) error {
 	if a.Flags.Stats && !a.Flags.NoStats && a.Collector != nil {
 		stats := a.Collector.Summary()
 		opts = append(opts, output.WithStats(&stats))
+	}
+	if !a.Flags.Hints || a.Flags.NoHints {
+		opts = append(opts, output.WithoutBreadcrumbs())
 	}
 	return a.Output.OK(data, opts...)
 }

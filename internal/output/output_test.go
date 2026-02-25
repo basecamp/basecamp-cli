@@ -798,8 +798,8 @@ func TestWriterMarkdownFormatBreadcrumbs(t *testing.T) {
 	require.NoError(t, err, "OK() failed")
 
 	output := buf.String()
-	// Should contain breadcrumb (literal Markdown uses "### Next" heading)
-	assert.Contains(t, output, "Next")
+	// Should contain breadcrumb (literal Markdown uses "### Hints" heading)
+	assert.Contains(t, output, "Hints")
 	assert.Contains(t, output, "basecamp show 1")
 }
 
@@ -1497,9 +1497,9 @@ func TestWithEntityMarkdownOutput(t *testing.T) {
 		t.Errorf("Markdown entity output should contain '## Todo details', got:\n%s", output)
 	}
 
-	// Should contain Markdown breadcrumbs with "### Next"
-	if !strings.Contains(output, "### Next") {
-		t.Errorf("Markdown entity output should contain '### Next', got:\n%s", output)
+	// Should contain Markdown breadcrumbs with "### Hints"
+	if !strings.Contains(output, "### Hints") {
+		t.Errorf("Markdown entity output should contain '### Hints', got:\n%s", output)
 	}
 
 	// Breadcrumb should be a Markdown list item with backtick-quoted command

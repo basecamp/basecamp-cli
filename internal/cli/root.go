@@ -107,6 +107,9 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", version.IsDev(), "Show session statistics (default: on in dev builds)")
 	cmd.PersistentFlags().BoolVar(&flags.NoStats, "no-stats", false, "Disable session statistics")
 	cmd.MarkFlagsMutuallyExclusive("stats", "no-stats")
+	cmd.PersistentFlags().BoolVar(&flags.Hints, "hints", version.IsDev(), "Show follow-up hints (default: on in dev builds)")
+	cmd.PersistentFlags().BoolVar(&flags.NoHints, "no-hints", false, "Disable follow-up hints")
+	cmd.MarkFlagsMutuallyExclusive("hints", "no-hints")
 	cmd.PersistentFlags().StringVar(&flags.CacheDir, "cache-dir", "", "Cache directory")
 
 	// Register tab completion for flags.

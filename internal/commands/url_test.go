@@ -26,6 +26,7 @@ func parseURLWithOutput(t *testing.T, url string) (output.Response, error) {
 			Format: output.FormatJSON,
 			Writer: &buf,
 		}),
+		Flags: appctx.GlobalFlags{Hints: true},
 	}
 
 	err := runURLParse(app, url)

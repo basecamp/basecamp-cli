@@ -834,8 +834,8 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	}
 
 	// Affordances should use Markdown structure
-	if !strings.Contains(out, "#### Next") {
-		t.Errorf("Markdown detail should have '#### Next', got:\n%s", out)
+	if !strings.Contains(out, "#### Hints") {
+		t.Errorf("Markdown detail should have '#### Hints', got:\n%s", out)
 	}
 	if !strings.Contains(out, "- `basecamp done 12345`") {
 		t.Errorf("Markdown affordance should use backtick code, got:\n%s", out)

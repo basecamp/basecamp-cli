@@ -614,7 +614,7 @@ func (r *Renderer) renderList(b *strings.Builder, data []any) {
 }
 
 func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
-	b.WriteString(r.Subtle.Render("Next:"))
+	b.WriteString(r.Subtle.Render("Hints:"))
 	b.WriteString("\n")
 	for _, bc := range crumbs {
 		cmd := r.Subtle.Render("  " + bc.Cmd)
@@ -810,7 +810,7 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 
 	// Breadcrumbs
 	if len(resp.Breadcrumbs) > 0 {
-		b.WriteString("\n### Next\n\n")
+		b.WriteString("\n### Hints\n\n")
 		for _, bc := range resp.Breadcrumbs {
 			line := "- `" + bc.Cmd + "`"
 			if bc.Description != "" {
