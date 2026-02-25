@@ -101,6 +101,7 @@ func (v *Assignments) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "complete")),
+		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
 		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
 	}
 }
@@ -213,6 +214,8 @@ func (v *Assignments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "x":
 				return v, v.completeSelected()
+			case "b", "B":
+				return v, v.boostSelected()
 			case "t":
 				return v, v.trashSelected()
 			}
@@ -385,4 +388,25 @@ func (v *Assignments) trashSelected() tea.Cmd {
 		workspace.SetStatus("Press t again to trash", false),
 		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return assignmentTrashTimeoutMsg{} }),
 	)
+}
+
+func (v *Assignments) boostSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	meta, ok := v.assignmentMeta[item.ID]
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		return workspace.OpenBoostPickerMsg{
+			Target: workspace.BoostTarget{
+				ProjectID:   meta.ProjectID,
+				RecordingID: meta.ID,
+				AccountID:   meta.AccountID,
+				Title:       meta.Content,
+			},
+		}
+	}
 }

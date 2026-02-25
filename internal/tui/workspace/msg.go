@@ -312,6 +312,7 @@ func SetStatus(text string, isError bool) tea.Cmd {
 type BoostTarget struct {
 	ProjectID   int64
 	RecordingID int64
+	AccountID   string
 	Title       string // brief context for the picker UI
 }
 

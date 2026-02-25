@@ -74,6 +74,7 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
@@ -484,6 +485,7 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
@@ -1073,6 +1075,7 @@ func TestWorkspace_Navigate_ViewScopeRetainsOrigin(t *testing.T) {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
@@ -1116,6 +1119,7 @@ func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
@@ -1582,102 +1586,78 @@ func TestWorkspace_OpenInBrowser_PartialFocusedOverride(t *testing.T) {
 		"RecordingID should come from focused item")
 }
 
-// testFocusedView satisfies View and FocusedRecording for open-in-browser tests.
-type testFocusedView struct {
-	testView
-	focused FocusedItemScope
-}
-
-func (v *testFocusedView) FocusedItem() FocusedItemScope { return v.focused }
-
-func TestWorkspace_OpenInBrowser_UsesFocusedItemScope(t *testing.T) {
+func TestWorkspace_BoostTarget_PreservesAccountID(t *testing.T) {
 	session := testSessionWithContext("default-acct", "Default")
-	session.SetScope(Scope{AccountID: "default-acct", ProjectID: 1})
 	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Hey!")
 
-	// Capture the scope that openFunc receives.
-	var captured Scope
-	w.openFunc = func(scope Scope) tea.Cmd {
-		captured = scope
-		return func() tea.Msg { return StatusMsg{Text: "spy"} }
+	target := BoostTarget{
+		AccountID:   "cross-acct",
+		ProjectID:   42,
+		RecordingID: 100,
+		Title:       "Some todo",
 	}
 
-	// Push a view that implements FocusedRecording with cross-account context.
-	fv := &testFocusedView{
-		testView: testView{title: "Search"},
-		focused: FocusedItemScope{
-			AccountID:   "x-acct",
-			ProjectID:   42,
-			RecordingID: 100,
-		},
-	}
-	w.router.Push(fv, Scope{}, 0)
-	w.syncChrome()
+	// OpenBoostPickerMsg stores the target and arms the picker.
+	w.Update(OpenBoostPickerMsg{Target: target})
 
-	// Press 'o' to trigger open-in-browser.
-	w.handleKey(keyMsg("o"))
-
-	// The scope passed to openFunc should merge focused item values
-	// over the session scope.
-	assert.Equal(t, "x-acct", captured.AccountID,
-		"AccountID should come from FocusedItem, not session")
-	assert.Equal(t, int64(42), captured.ProjectID,
-		"ProjectID should come from FocusedItem, not session")
-	assert.Equal(t, int64(100), captured.RecordingID,
-		"RecordingID should come from FocusedItem")
+	assert.True(t, w.pickingBoost, "picker should be armed")
+	assert.Equal(t, "cross-acct", w.boostTarget.AccountID,
+		"boostTarget must preserve the cross-account AccountID")
+	assert.Equal(t, int64(42), w.boostTarget.ProjectID,
+		"boostTarget must preserve ProjectID")
+	assert.Equal(t, int64(100), w.boostTarget.RecordingID,
+		"boostTarget must preserve RecordingID")
 }
 
-func TestWorkspace_OpenInBrowser_FallsBackToSessionScope(t *testing.T) {
-	session := testSessionWithContext("sess-acct", "Session")
-	session.SetScope(Scope{AccountID: "sess-acct", ProjectID: 7})
+func TestWorkspace_BoostEmoji_PassesCrossAccountTarget(t *testing.T) {
+	session := testSessionWithContext("default-acct", "Default")
 	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Pulse")
 
-	var captured Scope
-	w.openFunc = func(scope Scope) tea.Cmd {
-		captured = scope
-		return func() tea.Msg { return StatusMsg{Text: "spy"} }
+	// Spy on createBoostFunc to capture the target and emoji.
+	var capturedTarget BoostTarget
+	var capturedEmoji string
+	w.createBoostFunc = func(target BoostTarget, emoji string) tea.Cmd {
+		capturedTarget = target
+		capturedEmoji = emoji
+		return nil
 	}
 
-	// Push a plain testView (does NOT implement FocusedRecording).
-	pushTestView(w, "Campfire")
+	// Arm the picker with a cross-account target.
+	w.Update(OpenBoostPickerMsg{Target: BoostTarget{
+		AccountID:   "other-acct",
+		ProjectID:   99,
+		RecordingID: 200,
+		Title:       "Design doc",
+	}})
+	require.True(t, w.pickingBoost)
 
-	w.handleKey(keyMsg("o"))
+	// Simulate emoji selection — this calls createBoostFunc(w.boostTarget, emoji).
+	w.Update(BoostSelectedMsg{Emoji: "🎉"})
 
-	// Without FocusedRecording, the session scope should pass through unchanged.
-	assert.Equal(t, "sess-acct", captured.AccountID,
-		"AccountID should fall back to session scope")
-	assert.Equal(t, int64(7), captured.ProjectID,
-		"ProjectID should fall back to session scope")
-	assert.Equal(t, int64(0), captured.RecordingID,
-		"RecordingID should be zero when no focused item")
+	assert.False(t, w.pickingBoost, "picker should be disarmed after selection")
+	assert.Equal(t, "🎉", capturedEmoji)
+	assert.Equal(t, "other-acct", capturedTarget.AccountID,
+		"createBoost must receive the cross-account AccountID")
+	assert.Equal(t, int64(99), capturedTarget.ProjectID)
+	assert.Equal(t, int64(200), capturedTarget.RecordingID)
 }
 
-func TestWorkspace_OpenInBrowser_PartialFocusedOverride(t *testing.T) {
-	session := testSessionWithContext("sess-acct", "Session")
-	session.SetScope(Scope{AccountID: "sess-acct", ProjectID: 7})
-	w := testWorkspaceWithSession(session)
+func TestWorkspace_BoostPickerDismiss_ClearsState(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Todos")
 
-	var captured Scope
-	w.openFunc = func(scope Scope) tea.Cmd {
-		captured = scope
-		return func() tea.Msg { return StatusMsg{Text: "spy"} }
+	target := BoostTarget{
+		AccountID:   "acct-1",
+		ProjectID:   10,
+		RecordingID: 50,
 	}
+	w.Update(OpenBoostPickerMsg{Target: target})
+	require.True(t, w.pickingBoost)
 
-	// Focused item only has RecordingID — AccountID and ProjectID stay zero,
-	// so the session values should be preserved.
-	fv := &testFocusedView{
-		testView: testView{title: "Todos"},
-		focused:  FocusedItemScope{RecordingID: 55},
-	}
-	w.router.Push(fv, Scope{}, 0)
-	w.syncChrome()
+	// Pressing Esc while the picker is open should dismiss it.
+	w.handleKey(keyMsg("esc"))
 
-	w.handleKey(keyMsg("o"))
-
-	assert.Equal(t, "sess-acct", captured.AccountID,
-		"AccountID should stay from session when focused has empty string")
-	assert.Equal(t, int64(7), captured.ProjectID,
-		"ProjectID should stay from session when focused has zero")
-	assert.Equal(t, int64(55), captured.RecordingID,
-		"RecordingID should come from focused item")
+	assert.False(t, w.pickingBoost, "Esc should dismiss the boost picker")
 }
