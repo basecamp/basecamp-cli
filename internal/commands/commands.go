@@ -1,6 +1,10 @@
 package commands
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
@@ -157,28 +161,59 @@ func NewCommandsCmd() *cobra.Command {
 		Long:    "List all available basecamp commands organized by category.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-
 			categories := commandCategories()
-			if !app.Flags.JSON {
-				for i := range categories {
-					for j := range categories[i].Commands {
-						if categories[i].Commands[j].Experimental {
-							categories[i].Commands[j].Description = "[experimental] " + categories[i].Commands[j].Description
-						}
-					}
-				}
+
+			// For styled terminal output, render grouped columns directly
+			if app.Output.EffectiveFormat() == output.FormatStyled {
+				renderCommandsStyled(categories)
+				return nil
 			}
 
 			return app.OK(categories,
 				output.WithSummary("All available basecamp commands"),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "help",
-						Cmd:         "basecamp --help",
-						Description: "View help",
-					},
-				),
 			)
 		},
+	}
+}
+
+// renderCommandsStyled prints a grouped command listing with aligned columns.
+func renderCommandsStyled(categories []CommandCategory) {
+	bold := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#666", Dark: "#888"})
+
+	// Find max command name width across all categories for alignment
+	maxName := 0
+	maxDesc := 0
+	for _, cat := range categories {
+		for _, cmd := range cat.Commands {
+			if len(cmd.Name) > maxName {
+				maxName = len(cmd.Name)
+			}
+			if len(cmd.Description) > maxDesc {
+				maxDesc = len(cmd.Description)
+			}
+		}
+	}
+
+	for i, cat := range categories {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Println(bold.Render(cat.Name))
+		for _, cmd := range cat.Commands {
+			actions := ""
+			if len(cmd.Actions) > 0 {
+				actions = strings.Join(cmd.Actions, ", ")
+			}
+			prefix := ""
+			if cmd.Experimental {
+				prefix = "[experimental] "
+			}
+			line := fmt.Sprintf("  %-*s  %s%-*s", maxName, cmd.Name, prefix, maxDesc, cmd.Description)
+			if actions != "" {
+				line += "  " + muted.Render(actions)
+			}
+			fmt.Println(line)
+		}
 	}
 }
