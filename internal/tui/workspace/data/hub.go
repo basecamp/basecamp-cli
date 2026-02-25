@@ -782,8 +782,8 @@ func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
 					pID = e.Bucket.ID
 				}
 				excerpt := e.SummaryExcerpt
-				if len(excerpt) > 100 {
-					excerpt = excerpt[:97] + "..."
+				if r := []rune(excerpt); len(r) > 100 {
+					excerpt = string(r[:97]) + "…"
 				}
 				infos = append(infos, TimelineEventInfo{
 					ID:             e.ID,

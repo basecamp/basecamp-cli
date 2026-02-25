@@ -268,8 +268,31 @@ func TestSearch_HandleResults_ExcerptAsDescription(t *testing.T) {
 
 func TestTruncateExcerpt(t *testing.T) {
 	assert.Equal(t, "hello", truncateExcerpt("hello", 10))
-	assert.Equal(t, "hello worl...", truncateExcerpt("hello world here", 10))
+	assert.Equal(t, "hello worl…", truncateExcerpt("hello world here", 10))
 	assert.Equal(t, "clean text", truncateExcerpt("<b>clean</b> text", 20))
+}
+
+// --- FocusMsg ---
+
+func TestSearch_FocusMsg_RefocusesInput(t *testing.T) {
+	v := testSearchView()
+
+	// Blur the text input to simulate navigating away
+	v.textInput.Blur()
+	require.False(t, v.textInput.Focused())
+
+	// FocusMsg should refocus the text input
+	v.Update(workspace.FocusMsg{})
+	assert.True(t, v.textInput.Focused(), "FocusMsg should refocus text input when input has focus")
+}
+
+func TestSearch_FocusMsg_ListFocused_NoOp(t *testing.T) {
+	v := testSearchView()
+	v.toggleFocus() // Switch to list focus
+	require.Equal(t, searchFocusList, v.focus)
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.Nil(t, cmd, "FocusMsg should be no-op when list is focused")
 }
 
 // --- Narrow width ---

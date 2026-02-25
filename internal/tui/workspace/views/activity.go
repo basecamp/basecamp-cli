@@ -190,7 +190,7 @@ func (v *Activity) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading timeline...")
+			Render(v.spinner.View() + " Loading timeline…")
 	}
 	return v.list.View()
 }

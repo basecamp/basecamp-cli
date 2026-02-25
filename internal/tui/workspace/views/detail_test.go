@@ -865,3 +865,34 @@ func TestDetail_ReloadKeepsContent(t *testing.T) {
 	assert.Contains(t, output, "Test Todo", "title should remain visible during reload")
 	assert.Contains(t, output, "Loading", "should show inline loading indicator")
 }
+
+func TestDetail_FocusMsg_WithData_NoSpinner(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.SetSize(80, 24)
+	v.syncPreview()
+
+	// Data already loaded — FocusMsg should not set loading to true
+	v.Update(workspace.FocusMsg{})
+
+	assert.False(t, v.loading, "FocusMsg with existing data should not show loading spinner")
+}
+
+func TestDetail_FocusMsg_NoData_ShowsSpinner(t *testing.T) {
+	styles := tui.NewStyles()
+	session := workspace.NewTestSessionWithScope(workspace.Scope{
+		AccountID: "acct1",
+		ProjectID: 42,
+	})
+	v := &Detail{
+		session:       session,
+		styles:        styles,
+		recordingID:   100,
+		recordingType: "Todo",
+		preview:       widget.NewPreview(styles),
+	}
+	v.SetSize(80, 24)
+
+	v.Update(workspace.FocusMsg{})
+
+	assert.True(t, v.loading, "FocusMsg with no data should set loading to true")
+}

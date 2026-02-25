@@ -264,7 +264,11 @@ func (v *Detail) ShortHelp() []key.Binding {
 }
 
 func (v *Detail) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	extra := []key.Binding{
+		key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "half-page down")),
+		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "half-page up")),
+	}
+	return [][]key.Binding{v.ShortHelp(), extra}
 }
 
 func (v *Detail) SetSize(w, h int) {
@@ -387,8 +391,12 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case workspace.FocusMsg:
-		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchDetail())
+		if v.data == nil {
+			v.loading = true
+			return v, tea.Batch(v.spinner.Tick, v.fetchDetail())
+		}
+		// Silently refresh without loading indicator
+		return v, v.fetchDetail()
 
 	case workspace.RefreshMsg:
 		v.loading = true
@@ -595,6 +603,7 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 				Target: workspace.BoostTarget{
 					ProjectID:   v.session.Scope().ProjectID,
 					RecordingID: v.session.Scope().RecordingID,
+					AccountID:   v.session.Scope().AccountID,
 					Title:       v.data.title,
 				},
 			}
@@ -809,7 +818,7 @@ func (v *Detail) startDetailSettingDue() tea.Cmd {
 	v.settingDue = true
 	v.relayout()
 	v.dueInput = textinput.New()
-	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
+	v.dueInput.Placeholder = "due date (tomorrow, fri, mar 15)…"
 	v.dueInput.CharLimit = 64
 	v.dueInput.Focus()
 	return textinput.Blink
@@ -939,7 +948,7 @@ func (v *Detail) assignDetailTodo(nameQuery string) tea.Cmd {
 			names = append(names, m.Name)
 		}
 		if len(names) > 4 {
-			names = append(names[:4], "...")
+			names = append(names[:4], "…")
 		}
 		return workspace.SetStatus("Multiple matches: "+strings.Join(names, ", ")+" — be more specific", true)
 	}
@@ -1165,7 +1174,7 @@ func (v *Detail) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading...")
+			Render(v.spinner.View() + " Loading detail…")
 	}
 
 	if v.editingBody && v.bodyEditComposer != nil {
@@ -1204,11 +1213,11 @@ func (v *Detail) View() string {
 	if v.submitting {
 		theme := v.styles.Theme()
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(
-			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Posting comment..."))
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Posting comment…"))
 	} else if v.loading {
 		theme := v.styles.Theme()
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(
-			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Loading..."))
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Loading…"))
 	}
 
 	if v.editing {

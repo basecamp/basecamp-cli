@@ -163,8 +163,8 @@ func TestHomeShortHelp_RecordTypeTruncatedAt15(t *testing.T) {
 	hints := v.ShortHelp()
 	require.NotNil(t, hints)
 	desc := hints[0].Help().Desc
-	// "open " + 15 chars max
-	assert.LessOrEqual(t, len(desc), 20)
+	// "open " + up to 15 runes + "…"
+	assert.LessOrEqual(t, len([]rune(desc)), 21)
 	assert.True(t, len(desc) > len("open "))
 }
 

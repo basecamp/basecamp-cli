@@ -88,8 +88,8 @@ func (m MetricsPanel) View() string {
 
 		// Truncate key
 		key := ps.Key
-		if len(key) > 28 {
-			key = key[:25] + "..."
+		if r := []rune(key); len(r) > 28 {
+			key = string(r[:25]) + "…"
 		}
 
 		// State with color

@@ -68,8 +68,8 @@ func syncTimelineEntries(
 			extra := ""
 			if e.SummaryExcerpt != "" {
 				extra = e.SummaryExcerpt
-				if len(extra) > 50 {
-					extra = extra[:47] + "..."
+				if r := []rune(extra); len(r) > 50 {
+					extra = string(r[:47]) + "…"
 				}
 			}
 

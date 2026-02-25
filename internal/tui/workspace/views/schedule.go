@@ -282,7 +282,7 @@ func (v *Schedule) advanceCreate() tea.Cmd {
 		v.createSummary = val
 		v.createStep = 1
 		v.createInput = textinput.New()
-		v.createInput.Placeholder = "Start date (tomorrow, fri, 2026-03-15)..."
+		v.createInput.Placeholder = "Start date (tomorrow, fri, mar 15)…"
 		v.createInput.CharLimit = 64
 		v.createInput.Focus()
 		return textinput.Blink
@@ -401,7 +401,7 @@ func (v *Schedule) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading schedule...")
+			Render(v.spinner.View() + " Loading schedule…")
 	}
 
 	var b strings.Builder

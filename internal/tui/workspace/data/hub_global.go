@@ -220,8 +220,8 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 								lastMsg = last.Creator.Name + ": "
 							}
 							content := last.Content
-							if len(content) > 40 {
-								content = content[:37] + "..."
+							if r := []rune(content); len(r) > 40 {
+								content = string(r[:37]) + "…"
 							}
 							lastMsg += content
 							lastAt = last.CreatedAt.Format("Jan 2 3:04pm")
@@ -323,8 +323,8 @@ func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, ac
 			projectID = e.Bucket.ID
 		}
 		excerpt := e.SummaryExcerpt
-		if len(excerpt) > 100 {
-			excerpt = excerpt[:97] + "..."
+		if r := []rune(excerpt); len(r) > 100 {
+			excerpt = string(r[:97]) + "…"
 		}
 		infos = append(infos, TimelineEventInfo{
 			ID:             e.ID,

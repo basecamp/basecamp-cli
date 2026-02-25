@@ -165,7 +165,7 @@ func (a AccountSwitcher) View() string {
 	if a.err != nil {
 		rows = append(rows, lipgloss.NewStyle().
 			Foreground(theme.Error).
-			Render("Error: "+a.err.Error()))
+			Render("Could not load accounts"))
 	} else if len(a.accounts) == 0 {
 		rows = append(rows, lipgloss.NewStyle().
 			Foreground(theme.Muted).

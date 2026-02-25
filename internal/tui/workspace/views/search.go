@@ -189,6 +189,12 @@ func (v *Search) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.SearchResultsMsg:
 		return v, v.handleResults(msg)
 
+	case workspace.FocusMsg:
+		if v.focus == searchFocusInput {
+			return v, v.textInput.Focus()
+		}
+		return v, nil
+
 	case workspace.RefreshMsg:
 		if v.query != "" {
 			v.searching = true
@@ -513,12 +519,12 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 	}
 }
 
-// truncateExcerpt truncates s to maxLen runes, appending "..." if truncated.
+// truncateExcerpt truncates s to maxLen runes, appending "…" if truncated.
 func truncateExcerpt(s string, maxLen int) string {
 	s = strings.TrimSpace(format.StripHTML(s))
 	runes := []rune(s)
 	if len(runes) <= maxLen {
 		return s
 	}
-	return string(runes[:maxLen]) + "..."
+	return string(runes[:maxLen]) + "…"
 }

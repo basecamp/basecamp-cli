@@ -261,7 +261,7 @@ func (v *Hey) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading activity...")
+			Render(v.spinner.View() + " Loading activity…")
 	}
 	return v.list.View()
 }

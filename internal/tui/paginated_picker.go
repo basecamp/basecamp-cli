@@ -107,7 +107,7 @@ func newPaginatedPickerModel(ctx context.Context, fetcher PageFetcher, opts ...P
 		hasMore:        true,
 		initialLoading: true,
 		spinner:        s,
-		loadingMsg:     "Loading...",
+		loadingMsg:     "Loading…",
 		fetchThreshold: 3, // Fetch when 3 items from bottom
 	}
 

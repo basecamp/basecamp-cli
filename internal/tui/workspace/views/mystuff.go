@@ -156,6 +156,7 @@ func (v *MyStuff) syncRecents() {
 		if len(projects) > 0 {
 			items = append(items, widget.ListItem{
 				ID:     sectionHeader + "sep",
+				Title:  "────",
 				Header: true,
 			})
 		}

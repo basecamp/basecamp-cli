@@ -106,12 +106,12 @@ func TestList_Loading(t *testing.T) {
 	l.SetLoading(true)
 
 	view := l.View()
-	assert.Contains(t, view, "Loading...")
+	assert.Contains(t, view, "Loading…")
 
 	// SetItems clears loading
 	l.SetItems(sampleItems(2))
 	view = l.View()
-	assert.NotContains(t, view, "Loading...")
+	assert.NotContains(t, view, "Loading…")
 }
 
 func TestList_UnfocusedIgnoresKeys(t *testing.T) {
@@ -226,7 +226,7 @@ func TestList_LongTitle_Truncated(t *testing.T) {
 	})
 
 	view := l.View()
-	assert.Contains(t, view, "...")
+	assert.Contains(t, view, "…")
 	// The full title should NOT appear since the width is only 30
 	assert.NotContains(t, view, "truncated")
 }
@@ -240,7 +240,7 @@ func TestList_LongTitle_WithExtra_Truncated(t *testing.T) {
 	})
 
 	view := l.View()
-	assert.Contains(t, view, "...")
+	assert.Contains(t, view, "…")
 	assert.Contains(t, view, "5 items", "extra should still be visible")
 }
 

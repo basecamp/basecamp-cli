@@ -1090,7 +1090,7 @@ func (v *Todos) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading todolists...")
+			Render(v.spinner.View() + " Loading todolists…")
 	}
 
 	// Left panel: todolist list
@@ -1109,7 +1109,9 @@ func (v *Todos) View() string {
 	if v.loadingTodos {
 		right = lipgloss.NewStyle().
 			Padding(0, 1).
-			Render(v.spinner.View() + " Loading todos...")
+			Width(v.split.RightWidth()).
+			Height(v.height).
+			Render(v.spinner.View() + " Loading todos…")
 	} else {
 		right = v.renderRightPanel()
 	}
@@ -1243,6 +1245,7 @@ func (v *Todos) boostSelectedTodo() tea.Cmd {
 			Target: workspace.BoostTarget{
 				ProjectID:   v.session.Scope().ProjectID,
 				RecordingID: id,
+				AccountID:   v.session.Scope().AccountID,
 				Title:       item.Title,
 			},
 		}
@@ -1258,7 +1261,7 @@ func (v *Todos) startSettingDue() tea.Cmd {
 	}
 	v.settingDue = true
 	v.dueInput = textinput.New()
-	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
+	v.dueInput.Placeholder = "due date (tomorrow, fri, mar 15)…"
 	v.dueInput.CharLimit = 64
 	v.dueInput.Focus()
 	return textinput.Blink
@@ -1392,7 +1395,7 @@ func (v *Todos) assignTodo(nameQuery string) tea.Cmd {
 			names = append(names, m.Name)
 		}
 		if len(names) > 4 {
-			names = append(names[:4], "...")
+			names = append(names[:4], "…")
 		}
 		return workspace.SetStatus("Multiple matches: "+strings.Join(names, ", ")+" — be more specific", true)
 	}

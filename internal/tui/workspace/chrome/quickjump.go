@@ -185,7 +185,7 @@ func (q *QuickJump) populateItems(src QuickJumpSource) {
 		nav := src.NavigateRecording
 		title := r.Title
 		if r.Description != "" {
-			title = r.Title + " (" + r.Description + ")"
+			title = r.Title + " · " + r.Description
 		}
 		q.items = append(q.items, quickJumpItem{
 			ID:       r.ID,
@@ -344,6 +344,25 @@ func quickJumpFuzzyMatch(s, query string) bool {
 	return qi == len(queryRunes)
 }
 
+// categoryLabel maps internal category keys to display labels.
+func categoryLabel(cat string) string {
+	switch cat {
+	case "bookmark":
+		return "Starred"
+	case "recent":
+		return "Recent"
+	case "project":
+		return "Project"
+	case "tool":
+		return "Tool"
+	default:
+		if cat == "" {
+			return ""
+		}
+		return strings.ToUpper(cat[:1]) + cat[1:]
+	}
+}
+
 // maxJumpVisibleItems is the maximum number of rows shown in the quick-jump overlay.
 const maxJumpVisibleItems = 12
 
@@ -396,7 +415,7 @@ func (q QuickJump) View() string {
 	visible := q.filtered[start:end]
 	for vi, item := range visible {
 		i := start + vi
-		badge := lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + item.Category)
+		badge := lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + categoryLabel(item.Category))
 		name := lipgloss.NewStyle().Foreground(theme.Primary).Render(item.Title)
 		line := lipgloss.NewStyle().Width(boxWidth - 4).Render(name + badge)
 
@@ -406,7 +425,7 @@ func (q QuickJump) View() string {
 				Width(boxWidth - 4).
 				Render(
 					lipgloss.NewStyle().Foreground(theme.Primary).Background(theme.Border).Render(item.Title) +
-						lipgloss.NewStyle().Foreground(theme.Muted).Background(theme.Border).Render("  "+item.Category),
+						lipgloss.NewStyle().Foreground(theme.Muted).Background(theme.Border).Render("  "+categoryLabel(item.Category)),
 				)
 		}
 		rows = append(rows, line)

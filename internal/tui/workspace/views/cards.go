@@ -487,7 +487,7 @@ func (v *Cards) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading card table...")
+			Render(v.spinner.View() + " Loading card table…")
 	}
 
 	if len(v.columns) == 0 {
@@ -625,6 +625,7 @@ func (v *Cards) boostFocusedCard() tea.Cmd {
 			Target: workspace.BoostTarget{
 				ProjectID:   v.session.Scope().ProjectID,
 				RecordingID: cardID,
+				AccountID:   v.session.Scope().AccountID,
 				Title:       card.Title,
 			},
 		}

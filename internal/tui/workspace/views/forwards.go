@@ -141,7 +141,7 @@ func (v *Forwards) View() string {
 	if v.loading {
 		return lipgloss.NewStyle().
 			Width(v.width).Height(v.height).Padding(1, 2).
-			Render(v.spinner.View() + " Loading email forwards...")
+			Render(v.spinner.View() + " Loading email forwards…")
 	}
 	return v.list.View()
 }

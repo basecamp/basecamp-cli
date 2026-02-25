@@ -509,7 +509,7 @@ func (v *Checkins) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading check-ins...")
+			Render(v.spinner.View() + " Loading check-ins…")
 	}
 
 	left := v.listQuestions.View()
@@ -518,7 +518,9 @@ func (v *Checkins) View() string {
 	if v.loadingAnswers {
 		right = lipgloss.NewStyle().
 			Padding(0, 1).
-			Render(v.spinner.View() + " Loading answers...")
+			Width(v.split.RightWidth()).
+			Height(v.height).
+			Render(v.spinner.View() + " Loading answers…")
 	} else {
 		right = v.renderRightPanel()
 	}
@@ -537,7 +539,7 @@ func (v *Checkins) renderRightPanel() string {
 		sep := lipgloss.NewStyle().Foreground(theme.Border).Render("─ New Answer ─")
 		b.WriteString(sep + "\n")
 		if v.submitting {
-			b.WriteString(v.spinner.View() + " Posting answer...")
+			b.WriteString(v.spinner.View() + " Posting answer…")
 		} else {
 			b.WriteString(v.composer.View())
 		}
@@ -608,8 +610,8 @@ func truncateContent(s string, maxLen int) string {
 		s = s[:idx]
 	}
 	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		s = s[:maxLen] + "..."
+	if r := []rune(s); len(r) > maxLen {
+		s = string(r[:maxLen]) + "…"
 	}
 	return s
 }
