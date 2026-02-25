@@ -39,8 +39,8 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Run tests
-        run: go test -v ./...
+      - name: Run release quality gate
+        run: make fmt-check vet test provenance-check check-naming
 
   release:
     name: Release
@@ -70,6 +70,11 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.sdk-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
+      - name: Verify tag is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
       - name: Collect PGO profile
         env:
           BASECAMP_NO_KEYRING: "1"
@@ -89,15 +94,6 @@ jobs:
           else
             echo "No PGO profiles generated - build will use standard optimization"
           fi
-
-      - name: Generate Homebrew tap token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: homebrew-tap
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
@@ -126,4 +122,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ steps.app-token.outputs.token }}
