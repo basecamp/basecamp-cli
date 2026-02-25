@@ -222,7 +222,7 @@ func checkVersion(verbose bool) Check {
 	if err == nil && latest != "" && latest != v {
 		check.Status = "warn"
 		check.Message = fmt.Sprintf("%s (update available: %s)", v, latest)
-		check.Hint = "Upgrade to the latest version"
+		check.Hint = "Run: basecamp upgrade"
 	}
 
 	return check

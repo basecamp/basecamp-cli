@@ -180,6 +180,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewCompletionCmd())
 	cmd.AddCommand(commands.NewSetupCmd())
 	cmd.AddCommand(commands.NewDoctorCmd())
+	cmd.AddCommand(commands.NewUpgradeCmd())
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
 	cmd.AddCommand(commands.NewTUICmd())
