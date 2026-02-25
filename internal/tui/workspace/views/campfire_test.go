@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -14,6 +15,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
 func testCampfirePool() *data.Pool[data.CampfireLinesResult] {
@@ -226,6 +228,63 @@ func TestCampfire_UTCTimestamps_LocalDaySeparators(t *testing.T) {
 	// Both messages are on the same local day — should see exactly one date separator
 	dateSepCount := strings.Count(content, "──")
 	assert.Equal(t, 2, dateSepCount, "same local day should produce one date separator (2 dashes)")
+}
+
+func testCampfire() *Campfire {
+	styles := tui.NewStyles()
+	comp := widget.NewComposer(styles, widget.WithMode(widget.ComposerQuick))
+	pool := testCampfirePool()
+	return &Campfire{
+		pool:     pool,
+		styles:   styles,
+		keys:     defaultCampfireKeyMap(),
+		composer: comp,
+		mode:     campfireModeInput,
+	}
+}
+
+func TestCampfire_FocusMsg_RefocusesComposer(t *testing.T) {
+	v := testCampfire()
+	v.mode = campfireModeInput
+	v.composer.Blur()
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.NotNil(t, cmd, "FocusMsg should return composer focus cmd in input mode")
+}
+
+func TestCampfire_FocusMsg_ScrollModeDoesNotFocusComposer(t *testing.T) {
+	v := testCampfire()
+	v.mode = campfireModeScroll
+	v.composer.Blur()
+
+	_, cmd := v.Update(workspace.FocusMsg{})
+	assert.Nil(t, cmd, "FocusMsg should not return composer focus cmd in scroll mode")
+}
+
+func TestCampfire_ShortHelp_ModeAware(t *testing.T) {
+	v := testCampfire()
+
+	// Input mode: should show scroll escape, not compose
+	v.mode = campfireModeInput
+	hints := v.ShortHelp()
+	keys := helpKeys(hints)
+	assert.Contains(t, keys, "esc", "input mode should show esc/scroll")
+	assert.NotContains(t, keys, "i", "input mode should not show i/compose")
+
+	// Scroll mode: should show compose, not scroll escape
+	v.mode = campfireModeScroll
+	hints = v.ShortHelp()
+	keys = helpKeys(hints)
+	assert.Contains(t, keys, "i", "scroll mode should show i/compose")
+	assert.NotContains(t, keys, "esc", "scroll mode should not show esc")
+}
+
+func helpKeys(bindings []key.Binding) []string {
+	keys := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		keys = append(keys, b.Help().Key)
+	}
+	return keys
 }
 
 func TestSameTimeGroup(t *testing.T) {

@@ -179,14 +179,18 @@ func (v *Campfire) InputActive() bool {
 
 // ShortHelp implements View.
 func (v *Campfire) ShortHelp() []key.Binding {
-	composerHelp := v.composer.ShortHelp()
-	bindings := make([]key.Binding, 0, 3+len(composerHelp))
-	bindings = append(bindings, v.keys.EnterInput, v.keys.ScrollMode)
-	bindings = append(bindings, composerHelp...)
-	// Boost is only available in scroll mode, not input mode
 	if v.mode == campfireModeScroll {
-		bindings = append(bindings, key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")))
+		return []key.Binding{
+			v.keys.EnterInput,
+			key.NewBinding(key.WithKeys("j", "k"), key.WithHelp("j/k", "scroll")),
+			key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
+		}
 	}
+	// Input mode
+	composerHelp := v.composer.ShortHelp()
+	bindings := make([]key.Binding, 0, 1+len(composerHelp))
+	bindings = append(bindings, v.keys.ScrollMode)
+	bindings = append(bindings, composerHelp...)
 	return bindings
 }
 
@@ -336,9 +340,14 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workspace.FocusMsg:
 		v.pool.SetFocused(true)
+		if v.mode == campfireModeInput {
+			return v, v.composer.Focus()
+		}
+		return v, nil
 
 	case workspace.BlurMsg:
 		v.pool.SetFocused(false)
+		v.composer.Blur()
 
 	case spinner.TickMsg:
 		if v.loading || v.loadingMore {
