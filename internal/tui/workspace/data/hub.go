@@ -829,9 +829,18 @@ func (h *Hub) Boosts(projectID, recordingID int64) *Pool[BoostSummary] {
 }
 
 // CreateBoost creates a new boost on a recording.
+// accountID selects which account's client to use; empty means the Hub's current account.
 // Returns the created BoostInfo or an error.
-func (h *Hub) CreateBoost(ctx context.Context, projectID, recordingID int64, content string) (BoostInfo, error) {
-	client := h.accountClient()
+func (h *Hub) CreateBoost(ctx context.Context, accountID string, projectID, recordingID int64, content string) (BoostInfo, error) {
+	var client *basecamp.AccountClient
+	if accountID != "" {
+		client = h.multi.ClientFor(accountID)
+		if client == nil {
+			return BoostInfo{}, fmt.Errorf("no client for account %s", accountID)
+		}
+	} else {
+		client = h.accountClient()
+	}
 	boost, err := client.Boosts().CreateRecording(ctx, projectID, recordingID, content)
 	if err != nil {
 		return BoostInfo{}, err

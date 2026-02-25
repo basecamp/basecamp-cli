@@ -82,6 +82,7 @@ func (v *Pulse) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
 	}
 }
 
@@ -155,6 +156,12 @@ func (v *Pulse) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if v.loading {
 			return v, nil
+		}
+		if !v.list.Filtering() {
+			switch msg.String() {
+			case "b", "B":
+				return v, v.boostSelected()
+			}
 		}
 		keys := workspace.DefaultListKeyMap()
 		switch {
@@ -252,4 +259,25 @@ func (v *Pulse) openSelected() tea.Cmd {
 	scope.OriginView = "Pulse"
 	scope.OriginHint = meta.Creator + " · " + meta.Type
 	return workspace.Navigate(workspace.ViewDetail, scope)
+}
+
+func (v *Pulse) boostSelected() tea.Cmd {
+	item := v.list.Selected()
+	if item == nil {
+		return nil
+	}
+	meta, ok := v.entryMeta[item.ID]
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		return workspace.OpenBoostPickerMsg{
+			Target: workspace.BoostTarget{
+				ProjectID:   meta.ProjectID,
+				RecordingID: meta.ID,
+				AccountID:   meta.AccountID,
+				Title:       meta.Title,
+			},
+		}
+	}
 }
