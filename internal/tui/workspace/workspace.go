@@ -112,13 +112,14 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		quickJump:       chrome.NewQuickJump(styles),
 		boostPicker:     NewBoostPicker(styles),
-		viewFactory:     factory,
-		openFunc:        openInBrowser,
+		viewFactory: factory,
+		openFunc:    openInBrowser,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
 	}
 	w.createBoostFunc = w.createBoost
+	w.breadcrumb.SetExperimental(true)
 
 	// Metrics panel reads live stats from the Hub's metrics collector.
 	if hub := session.Hub(); hub != nil {
