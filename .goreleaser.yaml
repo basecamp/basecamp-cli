@@ -96,8 +96,17 @@ release:
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
-    ### Install (macOS Apple Silicon)
+    ### Install
 
+    **Linux (Omarchy):**
+    ```sh
+    gh release download v{{.Version}} --repo basecamp/basecamp-cli --pattern '*linux_amd64*'
+    tar xzf basecamp_{{.Version}}_linux_amd64.tar.gz
+    sudo mv basecamp /usr/local/bin/
+    basecamp auth login
+    ```
+
+    **macOS (Apple Silicon):**
     ```sh
     gh release download v{{.Version}} --repo basecamp/basecamp-cli --pattern '*darwin_arm64*'
     tar xzf basecamp_{{.Version}}_darwin_arm64.tar.gz
