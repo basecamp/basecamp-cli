@@ -153,7 +153,7 @@ func (r *Resolver) multiToolError(tools []DockTool, friendlyName string) error {
 		if title == "" {
 			title = friendlyName
 		}
-		toolList.WriteString(fmt.Sprintf("\n  - %s (ID: %d)", title, tool.ID))
+		fmt.Fprintf(&toolList, "\n  - %s (ID: %d)", title, tool.ID)
 	}
 
 	return &output.Error{

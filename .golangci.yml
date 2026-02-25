@@ -93,3 +93,9 @@ linters:
           - bodyclose
           - errcheck
           - unparam
+      # Newer gosec rules (G117/G703/G704) that appear with updated analyzers.
+      # These are false positives for a CLI tool: field names match secret
+      # patterns, paths derive from XDG/HOME, and HTTP targets are known APIs.
+      - text: "G117:|G703:|G704:"
+        linters:
+          - gosec
