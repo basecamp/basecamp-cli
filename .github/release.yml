@@ -3,7 +3,7 @@ changelog:
     labels:
       - dependencies
     authors:
-      - dependabot
+      - dependabot[bot]
   categories:
     - title: Features
       labels:
