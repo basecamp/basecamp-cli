@@ -149,7 +149,7 @@ dockers_v2:
       - "ghcr.io/basecamp/cli"
     tags:
       - "{{ .Version }}"
-      - latest
+      - "{{ if not .Prerelease }}latest{{ end }}"
     platforms:
       - linux/amd64
       - linux/arm64

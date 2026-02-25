@@ -81,18 +81,25 @@ jobs:
         run: |
           echo "Collecting PGO profile from benchmarks..."
           mkdir -p profiles
+          failed=0
           # Go's -cpuprofile doesn't work with multiple packages, so profile each and merge
           for pkg in $(go list ./internal/...); do
             pkg_name=$(basename "$pkg")
             echo "  Profiling $pkg_name..."
-            go test -cpuprofile="profiles/${pkg_name}.pprof" -bench=. -benchtime=3s "$pkg" >/dev/null 2>&1 || true
+            if ! go test -cpuprofile="profiles/${pkg_name}.pprof" -bench=. -benchtime=3s "$pkg" >/dev/null 2>&1; then
+              echo "  WARNING: $pkg_name benchmarks failed"
+              failed=$((failed + 1))
+            fi
           done
+          if [ "$failed" -gt 0 ]; then
+            echo "WARNING: $failed package(s) failed benchmarking — PGO profile may be incomplete"
+          fi
           # Merge all profiles (skip if none were generated)
           if ls profiles/*.pprof >/dev/null 2>&1; then
             go tool pprof -proto profiles/*.pprof > default.pgo
             echo "PGO profile generated: $(du -h default.pgo | cut -f1)"
           else
-            echo "No PGO profiles generated - build will use standard optimization"
+            echo "No PGO profiles generated — build will use standard optimization"
           fi
 
       - name: Install Cosign
