@@ -86,7 +86,10 @@ func (mp *MutatingPool[T]) Apply(ctx context.Context, mutation Mutation[T]) tea.
 	return func() tea.Msg {
 		if err := mutation.ApplyRemotely(ctx); err != nil {
 			mp.rollback(gen, mid)
-			return MutationErrorMsg{Key: key, Err: err}
+			return tea.BatchMsg{
+				func() tea.Msg { return MutationErrorMsg{Key: key, Err: err} },
+				func() tea.Msg { return PoolUpdatedMsg{Key: key} },
+			}
 		}
 
 		remoteData, err := fetchFn(ctx)

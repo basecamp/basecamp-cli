@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -91,10 +92,18 @@ func TestMutatingPoolApplyRemoteFailure(t *testing.T) {
 
 	// Cmd runs remote, fails, triggers rollback.
 	msg := cmd()
-	errMsg, ok := msg.(MutationErrorMsg)
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok)
+	require.Len(t, batch, 2)
+
+	errMsg, ok := batch[0]().(MutationErrorMsg)
 	require.True(t, ok)
 	assert.Equal(t, "items", errMsg.Key)
 	assert.EqualError(t, errMsg.Err, "server error")
+
+	poolMsg, ok := batch[1]().(PoolUpdatedMsg)
+	require.True(t, ok)
+	assert.Equal(t, "items", poolMsg.Key)
 
 	// Rolled back to pre-mutation state.
 	assert.False(t, mp.Get().Data[0].Completed, "should have rolled back")
@@ -295,7 +304,11 @@ func TestMutatingPoolClearVsInflightRollback(t *testing.T) {
 
 	// Cmd runs — remote fails, rollback fires but generation mismatches.
 	msg := cmd()
-	errMsg, ok := msg.(MutationErrorMsg)
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok)
+	require.Len(t, batch, 2)
+
+	errMsg, ok := batch[0]().(MutationErrorMsg)
 	require.True(t, ok)
 	assert.EqualError(t, errMsg.Err, "fail")
 

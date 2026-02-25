@@ -42,7 +42,7 @@ func (h *Hub) HeyActivity() *Pool[[]ActivityEntryInfo] {
 		return NewPool("hey:activity", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
-			PollBase: 30 * time.Second,
+			PollBase: 45 * time.Second,
 			PollBg:   2 * time.Minute,
 			PollMax:  5 * time.Minute,
 		}, func(ctx context.Context) ([]ActivityEntryInfo, error) {
@@ -96,6 +96,7 @@ func (h *Hub) Pulse() *Pool[[]ActivityEntryInfo] {
 		return NewPool("pulse", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
+			PollBase: 60 * time.Second,
 		}, func(ctx context.Context) ([]ActivityEntryInfo, error) {
 			types := []basecamp.RecordingType{
 				basecamp.RecordingTypeMessage,
@@ -138,6 +139,7 @@ func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
 		return NewPool("assignments", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
+			PollBase: 60 * time.Second,
 		}, func(ctx context.Context) ([]AssignmentInfo, error) {
 			identity := h.multi.Identity()
 			if identity == nil {
@@ -191,6 +193,7 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 		return NewPool("ping-rooms", PoolConfig{
 			FreshTTL: 1 * time.Minute,
 			StaleTTL: 5 * time.Minute,
+			PollBase: 60 * time.Second,
 		}, func(ctx context.Context) ([]PingRoomInfo, error) {
 			accounts := h.multi.Accounts()
 			if len(accounts) == 0 {
@@ -265,7 +268,7 @@ func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
 		return NewPool("timeline", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
-			PollBase: 30 * time.Second,
+			PollBase: 45 * time.Second,
 			PollBg:   2 * time.Minute,
 			PollMax:  5 * time.Minute,
 		}, func(ctx context.Context) ([]TimelineEventInfo, error) {
@@ -430,6 +433,7 @@ func (h *Hub) Projects() *Pool[[]ProjectInfo] {
 		return NewPool("projects", PoolConfig{
 			FreshTTL: 30 * time.Second,
 			StaleTTL: 5 * time.Minute,
+			PollBase: 120 * time.Second,
 		}, func(ctx context.Context) ([]ProjectInfo, error) {
 			accounts := h.multi.Accounts()
 			if len(accounts) == 0 {
