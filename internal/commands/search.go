@@ -113,8 +113,8 @@ func humanizeSearchResults(results []basecamp.SearchResult) []map[string]any {
 		if title == "" {
 			title = r.Subject
 		}
-		if len(title) > 60 {
-			title = title[:57] + "…"
+		if runes := []rune(title); len(runes) > 60 {
+			title = string(runes[:57]) + "…"
 		}
 		project := ""
 		if r.Bucket != nil {

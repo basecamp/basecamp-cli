@@ -13,6 +13,12 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
+// versionChecker and homebrewChecker abstract external checks for testability.
+var (
+	versionChecker  = fetchLatestVersion
+	homebrewChecker = isHomebrew
+)
+
 // NewUpgradeCmd creates the upgrade command.
 func NewUpgradeCmd() *cobra.Command {
 	return &cobra.Command{
@@ -27,44 +33,46 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 	_ = app // used for output format consistency
 
+	w := cmd.OutOrStdout()
+
 	current := version.Version
 	if current == "dev" {
-		fmt.Println("Development build — upgrade not applicable (build from source)")
+		fmt.Fprintln(w, "Development build — upgrade not applicable (build from source)")
 		return nil
 	}
 
-	fmt.Printf("Current version: %s\n", current)
-	fmt.Print("Checking for updates… ")
+	fmt.Fprintf(w, "Current version: %s\n", current)
+	fmt.Fprint(w, "Checking for updates… ")
 
-	latest, err := fetchLatestVersion()
+	latest, err := versionChecker()
 	if err != nil {
-		fmt.Println("failed")
+		fmt.Fprintln(w, "failed")
 		return fmt.Errorf("could not check for updates: %w", err)
 	}
 
 	if latest == current {
-		fmt.Println("already up to date")
+		fmt.Fprintln(w, "already up to date")
 		return nil
 	}
 
-	fmt.Printf("update available: %s\n", latest)
+	fmt.Fprintf(w, "update available: %s\n", latest)
 
 	ctx := cmd.Context()
-	if isHomebrew(ctx) {
-		fmt.Println("Upgrading via Homebrew…")
+	if homebrewChecker(ctx) {
+		fmt.Fprintln(w, "Upgrading via Homebrew…")
 		upgrade := exec.CommandContext(ctx, "brew", "upgrade", "basecamp")
-		upgrade.Stdout = os.Stdout
-		upgrade.Stderr = os.Stderr
+		upgrade.Stdout = w
+		upgrade.Stderr = cmd.ErrOrStderr()
 		if err := upgrade.Run(); err != nil {
 			return fmt.Errorf("brew upgrade failed: %w", err)
 		}
-		fmt.Println("Upgrade complete!")
+		fmt.Fprintln(w, "Upgrade complete!")
 		return nil
 	}
 
-	fmt.Println()
-	fmt.Printf("Download the latest release from:\n")
-	fmt.Printf("  https://github.com/basecamp/basecamp-cli/releases/tag/v%s\n", latest)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Download the latest release from:\n")
+	fmt.Fprintf(w, "  https://github.com/basecamp/basecamp-cli/releases/tag/v%s\n", latest)
 	return nil
 }
 

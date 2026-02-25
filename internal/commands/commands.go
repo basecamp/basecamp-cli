@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -166,7 +167,7 @@ func NewCommandsCmd() *cobra.Command {
 
 			// For styled terminal output, render grouped columns directly
 			if app.Output.EffectiveFormat() == output.FormatStyled {
-				renderCommandsStyled(categories)
+				renderCommandsStyled(cmd.OutOrStdout(), categories)
 				return nil
 			}
 
@@ -177,12 +178,15 @@ func NewCommandsCmd() *cobra.Command {
 	}
 }
 
-// renderCommandsStyled prints a grouped command listing with aligned columns.
-func renderCommandsStyled(categories []CommandCategory) {
+// renderCommandsStyled writes a grouped command listing with aligned columns.
+func renderCommandsStyled(w io.Writer, categories []CommandCategory) {
 	bold := lipgloss.NewStyle().Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#666", Dark: "#888"})
 
-	// Find max command name width across all categories for alignment
+	experimentalPrefix := "[experimental] "
+
+	// Find max widths across all categories for alignment,
+	// accounting for the experimental prefix in the description column.
 	maxName := 0
 	maxDesc := 0
 	for _, cat := range categories {
@@ -190,31 +194,35 @@ func renderCommandsStyled(categories []CommandCategory) {
 			if len(cmd.Name) > maxName {
 				maxName = len(cmd.Name)
 			}
-			if len(cmd.Description) > maxDesc {
-				maxDesc = len(cmd.Description)
+			descWidth := len(cmd.Description)
+			if cmd.Experimental {
+				descWidth += len(experimentalPrefix)
+			}
+			if descWidth > maxDesc {
+				maxDesc = descWidth
 			}
 		}
 	}
 
 	for i, cat := range categories {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
-		fmt.Println(bold.Render(cat.Name))
+		fmt.Fprintln(w, bold.Render(cat.Name))
 		for _, cmd := range cat.Commands {
 			actions := ""
 			if len(cmd.Actions) > 0 {
 				actions = strings.Join(cmd.Actions, ", ")
 			}
-			prefix := ""
+			desc := cmd.Description
 			if cmd.Experimental {
-				prefix = "[experimental] "
+				desc = experimentalPrefix + desc
 			}
-			line := fmt.Sprintf("  %-*s  %s%-*s", maxName, cmd.Name, prefix, maxDesc, cmd.Description)
+			line := fmt.Sprintf("  %-*s  %-*s", maxName, cmd.Name, maxDesc, desc)
 			if actions != "" {
 				line += "  " + muted.Render(actions)
 			}
-			fmt.Println(line)
+			fmt.Fprintln(w, line)
 		}
 	}
 }
