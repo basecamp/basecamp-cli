@@ -264,7 +264,11 @@ func (v *Detail) ShortHelp() []key.Binding {
 }
 
 func (v *Detail) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	extra := []key.Binding{
+		key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "half-page down")),
+		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "half-page up")),
+	}
+	return [][]key.Binding{v.ShortHelp(), extra}
 }
 
 func (v *Detail) SetSize(w, h int) {
@@ -814,7 +818,7 @@ func (v *Detail) startDetailSettingDue() tea.Cmd {
 	v.settingDue = true
 	v.relayout()
 	v.dueInput = textinput.New()
-	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
+	v.dueInput.Placeholder = "due date (tomorrow, fri, mar 15)…"
 	v.dueInput.CharLimit = 64
 	v.dueInput.Focus()
 	return textinput.Blink

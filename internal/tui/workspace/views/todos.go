@@ -1261,7 +1261,7 @@ func (v *Todos) startSettingDue() tea.Cmd {
 	}
 	v.settingDue = true
 	v.dueInput = textinput.New()
-	v.dueInput.Placeholder = "due date (tomorrow, fri, 2026-03-15)..."
+	v.dueInput.Placeholder = "due date (tomorrow, fri, mar 15)…"
 	v.dueInput.CharLimit = 64
 	v.dueInput.Focus()
 	return textinput.Blink
