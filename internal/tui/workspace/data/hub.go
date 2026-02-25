@@ -208,7 +208,7 @@ func (h *Hub) ScheduleEntries(projectID, scheduleID int64) *Pool[[]ScheduleEntry
 	p := RealmPool(realm, key, func() *Pool[[]ScheduleEntryInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]ScheduleEntryInfo, error) {
 			client := h.accountClient()
-			result, err := client.Schedules().ListEntries(ctx, projectID, scheduleID, &basecamp.ScheduleEntryListOptions{})
+			result, err := client.Schedules().ListEntries(ctx, scheduleID, &basecamp.ScheduleEntryListOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -251,7 +251,7 @@ func (h *Hub) Checkins(projectID, questionnaireID int64) *Pool[[]CheckinQuestion
 	p := RealmPool(realm, key, func() *Pool[[]CheckinQuestionInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]CheckinQuestionInfo, error) {
 			client := h.accountClient()
-			result, err := client.Checkins().ListQuestions(ctx, projectID, questionnaireID, &basecamp.QuestionListOptions{})
+			result, err := client.Checkins().ListQuestions(ctx, questionnaireID, &basecamp.QuestionListOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -283,7 +283,7 @@ func (h *Hub) CheckinAnswers(projectID, questionID int64) *Pool[[]CheckinAnswerI
 	p := RealmPool(realm, key, func() *Pool[[]CheckinAnswerInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]CheckinAnswerInfo, error) {
 			client := h.accountClient()
-			result, err := client.Checkins().ListAnswers(ctx, projectID, questionID, nil)
+			result, err := client.Checkins().ListAnswers(ctx, questionID, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -315,7 +315,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			var allItems []DocsFilesItemInfo
 
 			// Fetch folders (sub-vaults)
-			foldersResult, err := client.Vaults().List(ctx, projectID, vaultID, nil)
+			foldersResult, err := client.Vaults().List(ctx, vaultID, nil)
 			if err == nil {
 				for _, f := range foldersResult.Vaults {
 					creator := personName(f.Creator)
@@ -333,7 +333,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			}
 
 			// Fetch documents
-			docsResult, docErr := client.Documents().List(ctx, projectID, vaultID, nil)
+			docsResult, docErr := client.Documents().List(ctx, vaultID, nil)
 			if docErr == nil {
 				for _, d := range docsResult.Documents {
 					creator := personName(d.Creator)
@@ -348,7 +348,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 			}
 
 			// Fetch uploads
-			uploadsResult, uploadErr := client.Uploads().List(ctx, projectID, vaultID, nil)
+			uploadsResult, uploadErr := client.Uploads().List(ctx, vaultID, nil)
 			if uploadErr == nil {
 				for _, u := range uploadsResult.Uploads {
 					creator := personName(u.Creator)
@@ -435,7 +435,7 @@ func (h *Hub) Todolists(projectID, todosetID int64) *Pool[[]TodolistInfo] {
 	p := RealmPool(realm, key, func() *Pool[[]TodolistInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]TodolistInfo, error) {
 			client := h.accountClient()
-			result, err := client.Todolists().List(ctx, projectID, todosetID, &basecamp.TodolistListOptions{})
+			result, err := client.Todolists().List(ctx, todosetID, &basecamp.TodolistListOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -462,7 +462,7 @@ func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 	mp := RealmPool(realm, key, func() *MutatingPool[[]TodoInfo] {
 		return NewMutatingPool(key, PoolConfig{}, func(ctx context.Context) ([]TodoInfo, error) {
 			client := h.accountClient()
-			result, err := client.Todos().List(ctx, projectID, todolistID, &basecamp.TodoListOptions{})
+			result, err := client.Todos().List(ctx, todolistID, &basecamp.TodoListOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -501,7 +501,7 @@ func (h *Hub) CompletedTodos(projectID, todolistID int64) *Pool[[]TodoInfo] {
 	p := RealmPool(realm, key, func() *Pool[[]TodoInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]TodoInfo, error) {
 			client := h.accountClient()
-			result, err := client.Todos().List(ctx, projectID, todolistID, &basecamp.TodoListOptions{Status: "completed"})
+			result, err := client.Todos().List(ctx, todolistID, &basecamp.TodoListOptions{Status: "completed"})
 			if err != nil {
 				return nil, err
 			}
@@ -540,7 +540,7 @@ func (h *Hub) Cards(projectID, tableID int64) *MutatingPool[[]CardColumnInfo] {
 	mp := RealmPool(realm, key, func() *MutatingPool[[]CardColumnInfo] {
 		return NewMutatingPool(key, PoolConfig{}, func(ctx context.Context) ([]CardColumnInfo, error) {
 			client := h.accountClient()
-			cardTable, err := client.CardTables().Get(ctx, projectID, tableID)
+			cardTable, err := client.CardTables().Get(ctx, tableID)
 			if err != nil {
 				return nil, err
 			}
@@ -556,7 +556,7 @@ func (h *Hub) Cards(projectID, tableID int64) *MutatingPool[[]CardColumnInfo] {
 			results := make(chan fetchResult, len(jobs))
 			for _, job := range jobs {
 				go func(j cardFetchJob) {
-					listResult, err := client.Cards().List(ctx, projectID, j.colID, &basecamp.CardListOptions{})
+					listResult, err := client.Cards().List(ctx, j.colID, &basecamp.CardListOptions{})
 					if err != nil {
 						results <- fetchResult{idx: j.idx, err: fmt.Errorf("loading cards for %q: %w", j.title, err)}
 						return
@@ -664,7 +664,7 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 			PollMax:  2 * time.Minute,
 		}, func(ctx context.Context) (CampfireLinesResult, error) {
 			client := h.accountClient()
-			result, err := client.Campfires().ListLines(ctx, projectID, campfireID)
+			result, err := client.Campfires().ListLines(ctx, campfireID)
 			if err != nil {
 				return CampfireLinesResult{}, err
 			}
@@ -703,7 +703,7 @@ func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
 	p := RealmPool(realm, key, func() *Pool[[]MessageInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]MessageInfo, error) {
 			client := h.accountClient()
-			result, err := client.Messages().List(ctx, projectID, boardID, &basecamp.MessageListOptions{})
+			result, err := client.Messages().List(ctx, boardID, &basecamp.MessageListOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -739,7 +739,7 @@ func (h *Hub) Forwards(projectID, inboxID int64) *Pool[[]ForwardInfo] {
 	p := RealmPool(realm, key, func() *Pool[[]ForwardInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]ForwardInfo, error) {
 			client := h.accountClient()
-			result, err := client.Forwards().List(ctx, projectID, inboxID, &basecamp.ForwardListOptions{})
+			result, err := client.Forwards().List(ctx, inboxID, &basecamp.ForwardListOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -769,7 +769,7 @@ func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
 		}, func(ctx context.Context) ([]TimelineEventInfo, error) {
 			client := h.accountClient()
 			acct := h.currentAccountInfo()
-			events, err := client.Timeline().ProjectTimeline(ctx, projectID)
+			events, err := client.Timeline().ProjectTimeline(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -817,7 +817,7 @@ func (h *Hub) Boosts(projectID, recordingID int64) *Pool[BoostSummary] {
 	p := RealmPool(realm, key, func() *Pool[BoostSummary] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) (BoostSummary, error) {
 			client := h.accountClient()
-			result, err := client.Boosts().ListRecording(ctx, projectID, recordingID)
+			result, err := client.Boosts().ListRecording(ctx, recordingID)
 			if err != nil {
 				return BoostSummary{}, err
 			}
@@ -841,7 +841,7 @@ func (h *Hub) CreateBoost(ctx context.Context, accountID string, projectID, reco
 	} else {
 		client = h.accountClient()
 	}
-	boost, err := client.Boosts().CreateRecording(ctx, projectID, recordingID, content)
+	boost, err := client.Boosts().CreateRecording(ctx, recordingID, content)
 	if err != nil {
 		return BoostInfo{}, err
 	}
@@ -851,7 +851,7 @@ func (h *Hub) CreateBoost(ctx context.Context, accountID string, projectID, reco
 // DeleteBoost deletes a boost by ID.
 func (h *Hub) DeleteBoost(ctx context.Context, projectID, boostID int64) error {
 	client := h.accountClient()
-	return client.Boosts().Delete(ctx, projectID, boostID)
+	return client.Boosts().Delete(ctx, boostID)
 }
 
 // mapBoostSummary converts SDK boosts to a BoostSummary for list display.
@@ -886,7 +886,7 @@ func (h *Hub) CompleteTodo(ctx context.Context, accountID string, projectID, tod
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Todos().Complete(ctx, projectID, todoID)
+	return client.Todos().Complete(ctx, todoID)
 }
 
 // UncompleteTodo reopens a completed todo.
@@ -895,7 +895,7 @@ func (h *Hub) UncompleteTodo(ctx context.Context, accountID string, projectID, t
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Todos().Uncomplete(ctx, projectID, todoID)
+	return client.Todos().Uncomplete(ctx, todoID)
 }
 
 // TrashRecording moves a recording to the trash.
@@ -904,7 +904,7 @@ func (h *Hub) TrashRecording(ctx context.Context, accountID string, projectID, r
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Recordings().Trash(ctx, projectID, recordingID)
+	return client.Recordings().Trash(ctx, recordingID)
 }
 
 // CreateDocument creates a new document in a vault.
@@ -913,7 +913,7 @@ func (h *Hub) CreateDocument(ctx context.Context, accountID string, projectID, v
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Documents().Create(ctx, projectID, vaultID, &basecamp.CreateDocumentRequest{Title: title})
+	_, err := client.Documents().Create(ctx, vaultID, &basecamp.CreateDocumentRequest{Title: title})
 	return err
 }
 
@@ -923,7 +923,7 @@ func (h *Hub) CreateVault(ctx context.Context, accountID string, projectID, pare
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Vaults().Create(ctx, projectID, parentVaultID, &basecamp.CreateVaultRequest{Title: title})
+	_, err := client.Vaults().Create(ctx, parentVaultID, &basecamp.CreateVaultRequest{Title: title})
 	return err
 }
 
@@ -933,7 +933,7 @@ func (h *Hub) UpdateTodo(ctx context.Context, accountID string, projectID, todoI
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Todos().Update(ctx, projectID, todoID, req)
+	_, err := client.Todos().Update(ctx, todoID, req)
 	return err
 }
 
@@ -991,7 +991,7 @@ func (h *Hub) UpdateCard(ctx context.Context, accountID string, projectID, cardI
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Cards().Update(ctx, projectID, cardID, req)
+	_, err := client.Cards().Update(ctx, cardID, req)
 	return err
 }
 
@@ -1001,7 +1001,7 @@ func (h *Hub) UpdateMessage(ctx context.Context, accountID string, projectID, me
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Messages().Update(ctx, projectID, messageID, req)
+	_, err := client.Messages().Update(ctx, messageID, req)
 	return err
 }
 
@@ -1011,7 +1011,7 @@ func (h *Hub) PinMessage(ctx context.Context, accountID string, projectID, messa
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Messages().Pin(ctx, projectID, messageID)
+	return client.Messages().Pin(ctx, messageID)
 }
 
 // UnpinMessage unpins a message from the board.
@@ -1020,7 +1020,7 @@ func (h *Hub) UnpinMessage(ctx context.Context, accountID string, projectID, mes
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Messages().Unpin(ctx, projectID, messageID)
+	return client.Messages().Unpin(ctx, messageID)
 }
 
 // Subscribe subscribes the current user to a recording.
@@ -1029,7 +1029,7 @@ func (h *Hub) Subscribe(ctx context.Context, accountID string, projectID, record
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Subscriptions().Subscribe(ctx, projectID, recordingID)
+	_, err := client.Subscriptions().Subscribe(ctx, recordingID)
 	return err
 }
 
@@ -1039,7 +1039,7 @@ func (h *Hub) Unsubscribe(ctx context.Context, accountID string, projectID, reco
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Subscriptions().Unsubscribe(ctx, projectID, recordingID)
+	return client.Subscriptions().Unsubscribe(ctx, recordingID)
 }
 
 // UpdateComment updates a comment's content.
@@ -1048,7 +1048,7 @@ func (h *Hub) UpdateComment(ctx context.Context, accountID string, projectID, co
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Comments().Update(ctx, projectID, commentID, &basecamp.UpdateCommentRequest{Content: content})
+	_, err := client.Comments().Update(ctx, commentID, &basecamp.UpdateCommentRequest{Content: content})
 	return err
 }
 
@@ -1058,7 +1058,7 @@ func (h *Hub) TrashComment(ctx context.Context, accountID string, projectID, com
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Comments().Trash(ctx, projectID, commentID)
+	return client.Comments().Trash(ctx, commentID)
 }
 
 // CreateTodolist creates a new todolist in a todoset.
@@ -1067,7 +1067,7 @@ func (h *Hub) CreateTodolist(ctx context.Context, accountID string, projectID, t
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Todolists().Create(ctx, projectID, todosetID, &basecamp.CreateTodolistRequest{Name: name})
+	_, err := client.Todolists().Create(ctx, todosetID, &basecamp.CreateTodolistRequest{Name: name})
 	return err
 }
 
@@ -1077,7 +1077,7 @@ func (h *Hub) UpdateTodolist(ctx context.Context, accountID string, projectID, t
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Todolists().Update(ctx, projectID, todolistID, &basecamp.UpdateTodolistRequest{Name: name})
+	_, err := client.Todolists().Update(ctx, todolistID, &basecamp.UpdateTodolistRequest{Name: name})
 	return err
 }
 
@@ -1087,7 +1087,7 @@ func (h *Hub) TrashTodolist(ctx context.Context, accountID string, projectID, to
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	return client.Recordings().Trash(ctx, projectID, todolistID)
+	return client.Recordings().Trash(ctx, todolistID)
 }
 
 // CreateScheduleEntry creates a new schedule entry.
@@ -1096,7 +1096,7 @@ func (h *Hub) CreateScheduleEntry(ctx context.Context, accountID string, project
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Schedules().CreateEntry(ctx, projectID, scheduleID, req)
+	_, err := client.Schedules().CreateEntry(ctx, scheduleID, req)
 	return err
 }
 
@@ -1106,7 +1106,7 @@ func (h *Hub) CreateCheckinAnswer(ctx context.Context, accountID string, project
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Checkins().CreateAnswer(ctx, projectID, questionID, &basecamp.CreateAnswerRequest{Content: content})
+	_, err := client.Checkins().CreateAnswer(ctx, questionID, &basecamp.CreateAnswerRequest{Content: content})
 	return err
 }
 

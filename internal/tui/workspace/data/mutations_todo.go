@@ -31,9 +31,9 @@ func (m TodoCompleteMutation) ApplyLocally(todos []TodoInfo) []TodoInfo {
 // ApplyRemotely calls the SDK to complete or uncomplete the todo.
 func (m TodoCompleteMutation) ApplyRemotely(ctx context.Context) error {
 	if m.Completed {
-		return m.Client.Todos().Complete(ctx, m.ProjectID, m.TodoID)
+		return m.Client.Todos().Complete(ctx, m.TodoID)
 	}
-	return m.Client.Todos().Uncomplete(ctx, m.ProjectID, m.TodoID)
+	return m.Client.Todos().Uncomplete(ctx, m.TodoID)
 }
 
 // IsReflectedIn returns true when the remote data shows the todo in the

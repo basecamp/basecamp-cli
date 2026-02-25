@@ -462,11 +462,10 @@ func (v *Messages) syncList() {
 // -- Commands (tea.Cmd factories)
 
 func (v *Messages) fetchMessageDetail(messageID int64) tea.Cmd {
-	projectID := v.session.Scope().ProjectID
 	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
-		msg, err := client.Messages().Get(ctx, projectID, messageID)
+		msg, err := client.Messages().Get(ctx, messageID)
 		if err != nil {
 			return workspace.MessageDetailLoadedMsg{MessageID: messageID, Err: err}
 		}

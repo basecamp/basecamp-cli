@@ -38,7 +38,7 @@ func (m *TodoCreateMutation) ApplyLocally(todos []TodoInfo) []TodoInfo {
 
 // ApplyRemotely calls the SDK to create the todo.
 func (m *TodoCreateMutation) ApplyRemotely(ctx context.Context) error {
-	todo, err := m.Client.Todos().Create(ctx, m.ProjectID, m.TodolistID, &basecamp.CreateTodoRequest{
+	todo, err := m.Client.Todos().Create(ctx, m.TodolistID, &basecamp.CreateTodoRequest{
 		Content: m.Content,
 	})
 	if err != nil {

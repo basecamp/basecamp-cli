@@ -213,7 +213,7 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 						}
 						var lastMsg, lastAt string
 						var lastAtTS int64
-						lines, err := client.Campfires().ListLines(ctx, 0, cf.ID)
+						lines, err := client.Campfires().ListLines(ctx, cf.ID)
 						if err == nil && len(lines.Lines) > 0 {
 							last := lines.Lines[len(lines.Lines)-1]
 							if last.Creator != nil {
