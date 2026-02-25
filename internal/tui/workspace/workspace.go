@@ -72,6 +72,10 @@ type Workspace struct {
 	viewFactory ViewFactory
 	openFunc    func(Scope) tea.Cmd
 
+	// createBoostFunc is the function called to create a boost. Defaults to
+	// createBoost; tests can replace it with a spy.
+	createBoostFunc func(BoostTarget, string) tea.Cmd
+
 	width, height int
 }
 
@@ -114,6 +118,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
 	}
+	w.createBoostFunc = w.createBoost
 
 	// Metrics panel reads live stats from the Hub's metrics collector.
 	if hub := session.Hub(); hub != nil {
@@ -259,7 +264,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BoostSelectedMsg:
 		w.pickingBoost = false
 		w.boostPicker.Blur()
-		return w, w.createBoost(w.boostTarget, msg.Emoji)
+		return w, w.createBoostFunc(w.boostTarget, msg.Emoji)
 
 	case OpenBoostPickerMsg:
 		w.pickingBoost = true
@@ -1293,7 +1298,7 @@ func isAuthError(err error) bool {
 func (w *Workspace) createBoost(target BoostTarget, emoji string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := w.session.Hub().ProjectContext()
-		_, err := w.session.Hub().CreateBoost(ctx, target.ProjectID, target.RecordingID, emoji)
+		_, err := w.session.Hub().CreateBoost(ctx, target.AccountID, target.ProjectID, target.RecordingID, emoji)
 		if err != nil {
 			return ErrorMsg{Err: err, Context: "creating boost"}
 		}

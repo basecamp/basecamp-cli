@@ -74,6 +74,7 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
@@ -484,6 +485,7 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
@@ -1073,6 +1075,7 @@ func TestWorkspace_Navigate_ViewScopeRetainsOrigin(t *testing.T) {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
@@ -1116,6 +1119,7 @@ func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
 		help:            chrome.NewHelp(styles),
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
+		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
@@ -1580,4 +1584,80 @@ func TestWorkspace_OpenInBrowser_PartialFocusedOverride(t *testing.T) {
 		"ProjectID should stay from session when focused has zero")
 	assert.Equal(t, int64(55), captured.RecordingID,
 		"RecordingID should come from focused item")
+}
+
+func TestWorkspace_BoostTarget_PreservesAccountID(t *testing.T) {
+	session := testSessionWithContext("default-acct", "Default")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Hey!")
+
+	target := BoostTarget{
+		AccountID:   "cross-acct",
+		ProjectID:   42,
+		RecordingID: 100,
+		Title:       "Some todo",
+	}
+
+	// OpenBoostPickerMsg stores the target and arms the picker.
+	w.Update(OpenBoostPickerMsg{Target: target})
+
+	assert.True(t, w.pickingBoost, "picker should be armed")
+	assert.Equal(t, "cross-acct", w.boostTarget.AccountID,
+		"boostTarget must preserve the cross-account AccountID")
+	assert.Equal(t, int64(42), w.boostTarget.ProjectID,
+		"boostTarget must preserve ProjectID")
+	assert.Equal(t, int64(100), w.boostTarget.RecordingID,
+		"boostTarget must preserve RecordingID")
+}
+
+func TestWorkspace_BoostEmoji_PassesCrossAccountTarget(t *testing.T) {
+	session := testSessionWithContext("default-acct", "Default")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Pulse")
+
+	// Spy on createBoostFunc to capture the target and emoji.
+	var capturedTarget BoostTarget
+	var capturedEmoji string
+	w.createBoostFunc = func(target BoostTarget, emoji string) tea.Cmd {
+		capturedTarget = target
+		capturedEmoji = emoji
+		return nil
+	}
+
+	// Arm the picker with a cross-account target.
+	w.Update(OpenBoostPickerMsg{Target: BoostTarget{
+		AccountID:   "other-acct",
+		ProjectID:   99,
+		RecordingID: 200,
+		Title:       "Design doc",
+	}})
+	require.True(t, w.pickingBoost)
+
+	// Simulate emoji selection — this calls createBoostFunc(w.boostTarget, emoji).
+	w.Update(BoostSelectedMsg{Emoji: "🎉"})
+
+	assert.False(t, w.pickingBoost, "picker should be disarmed after selection")
+	assert.Equal(t, "🎉", capturedEmoji)
+	assert.Equal(t, "other-acct", capturedTarget.AccountID,
+		"createBoost must receive the cross-account AccountID")
+	assert.Equal(t, int64(99), capturedTarget.ProjectID)
+	assert.Equal(t, int64(200), capturedTarget.RecordingID)
+}
+
+func TestWorkspace_BoostPickerDismiss_ClearsState(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Todos")
+
+	target := BoostTarget{
+		AccountID:   "acct-1",
+		ProjectID:   10,
+		RecordingID: 50,
+	}
+	w.Update(OpenBoostPickerMsg{Target: target})
+	require.True(t, w.pickingBoost)
+
+	// Pressing Esc while the picker is open should dismiss it.
+	w.handleKey(keyMsg("esc"))
+
+	assert.False(t, w.pickingBoost, "Esc should dismiss the boost picker")
 }
