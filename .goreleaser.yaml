@@ -68,25 +68,8 @@ signs:
     output: true
 
 changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^ci:'
-      - '^chore:'
-      - Merge pull request
-      - Merge branch
-  groups:
-    - title: Features
-      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
-      order: 0
-    - title: Bug Fixes
-      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
-      order: 1
-    - title: Other
-      order: 999
+  # Use GitHub's auto-generated release notes (categories configured in .github/release.yml)
+  use: github-native
 
 release:
   github:
