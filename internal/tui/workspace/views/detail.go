@@ -76,6 +76,7 @@ type detailAssignResultMsg struct{ err error }
 type trashTimeoutMsg struct{}
 type trashResultMsg struct{ err error }
 
+type editBodyResultMsg struct{ err error }
 type commentEditResultMsg struct{ err error }
 type commentTrashResultMsg struct{ err error }
 type commentTrashTimeoutMsg struct{}
@@ -103,6 +104,10 @@ type Detail struct {
 	editing   bool
 	editInput textinput.Model
 
+	// Body editing (messages)
+	editingBody      bool
+	bodyEditComposer *widget.Composer
+
 	// Due date / assign inline inputs
 	settingDue  bool
 	dueInput    textinput.Model
@@ -115,7 +120,7 @@ type Detail struct {
 	// Comment focus and editing
 	focusedComment      int // index into data.comments, -1 means none
 	editingComment      bool
-	commentEditInput    textinput.Model
+	commentEditComposer *widget.Composer
 	commentTrashPending bool
 
 	width, height int
@@ -176,16 +181,22 @@ func (v *Detail) Title() string {
 
 // InputActive implements workspace.InputCapturer.
 func (v *Detail) InputActive() bool {
-	return v.composing || v.editing || v.editingComment || v.settingDue || v.assigning
+	return v.composing || v.editing || v.editingComment || v.editingBody || v.settingDue || v.assigning
 }
 
 // IsModal implements workspace.ModalActive.
 func (v *Detail) IsModal() bool {
-	return v.composing || v.editing || v.editingComment || v.settingDue || v.assigning
+	return v.composing || v.editing || v.editingComment || v.editingBody || v.settingDue || v.assigning
 }
 
 func (v *Detail) ShortHelp() []key.Binding {
-	if v.editing || v.editingComment {
+	if v.editingComment || v.editingBody {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "save")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	}
+	if v.editing {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
@@ -201,14 +212,30 @@ func (v *Detail) ShortHelp() []key.Binding {
 		}
 		hints = append(hints,
 			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", verb)),
-			key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "due date")),
-			key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "assign")),
 		)
 	}
 	if v.data != nil {
 		rt := strings.ToLower(v.data.recordType)
 		if rt == "todo" || rt == "card" {
+			hints = append(hints,
+				key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "due date")),
+				key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "assign")),
+			)
+		}
+	}
+	if v.data != nil {
+		rt := strings.ToLower(v.data.recordType)
+		if (rt == "todo" || rt == "card") && len(v.data.assignees) > 0 {
+			hints = append(hints, key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "unassign")))
+		}
+	}
+	if v.data != nil {
+		rt := strings.ToLower(v.data.recordType)
+		if rt == "todo" || rt == "card" {
 			hints = append(hints, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit title")))
+		}
+		if rt == "message" {
+			hints = append(hints, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit body")))
 		}
 	}
 	hints = append(hints,
@@ -255,9 +282,25 @@ func (v *Detail) relayout() {
 		}
 		v.preview.SetSize(max(0, v.width-2), previewHeight)
 		v.composer.SetSize(max(0, v.width-2), composerHeight)
+	} else if v.editingComment && v.commentEditComposer != nil {
+		composerHeight := 6
+		previewHeight := v.height - composerHeight - 1
+		if previewHeight < 3 {
+			previewHeight = 3
+		}
+		v.preview.SetSize(max(0, v.width-2), previewHeight)
+		v.commentEditComposer.SetSize(max(0, v.width-2), composerHeight)
+	} else if v.editingBody && v.bodyEditComposer != nil {
+		composerHeight := 6
+		previewHeight := v.height - composerHeight - 1
+		if previewHeight < 3 {
+			previewHeight = 3
+		}
+		v.preview.SetSize(max(0, v.width-2), previewHeight)
+		v.bodyEditComposer.SetSize(max(0, v.width-2), composerHeight)
 	} else {
 		inputLines := 0
-		if v.editing || v.settingDue || v.assigning || v.editingComment {
+		if v.editing || v.settingDue || v.assigning {
 			inputLines = 1
 		}
 		v.preview.SetSize(max(0, v.width-2), max(1, v.height-inputLines))
@@ -297,7 +340,33 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case widget.ComposerSubmitMsg:
 		if msg.Err != nil {
-			return v, workspace.ReportError(msg.Err, "composing comment")
+			return v, workspace.ReportError(msg.Err, "composing")
+		}
+		if v.editingBody {
+			content := strings.TrimSpace(msg.Content.Markdown)
+			if content == "" {
+				v.editingBody = false
+				v.bodyEditComposer = nil
+				v.relayout()
+				return v, nil
+			}
+			v.editingBody = false
+			v.bodyEditComposer = nil
+			v.relayout()
+			return v, v.submitEditBody(content)
+		}
+		if v.editingComment {
+			content := strings.TrimSpace(msg.Content.Markdown)
+			if content == "" {
+				v.editingComment = false
+				v.commentEditComposer = nil
+				v.relayout()
+				return v, nil
+			}
+			v.editingComment = false
+			v.commentEditComposer = nil
+			v.relayout()
+			return v, v.submitCommentEdit(content)
 		}
 		v.submitting = true
 		return v, tea.Batch(v.spinner.Tick, v.postComment(msg.Content))
@@ -316,6 +385,10 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.spinner, cmd = v.spinner.Update(msg)
 			return v, cmd
 		}
+
+	case workspace.FocusMsg:
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail())
 
 	case workspace.RefreshMsg:
 		v.loading = true
@@ -359,6 +432,13 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			realm.Invalidate()
 		}
 		return v, workspace.SetStatus("Title updated", false)
+
+	case editBodyResultMsg:
+		if msg.err != nil {
+			return v, workspace.ReportError(msg.err, "editing message body")
+		}
+		v.loading = true
+		return v, tea.Batch(v.spinner.Tick, v.fetchDetail(), workspace.SetStatus("Message updated", false))
 
 	case subscribeResultMsg:
 		if msg.err != nil {
@@ -421,7 +501,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case tea.KeyMsg:
-		if v.loading {
+		if v.loading && v.data == nil {
 			return v, nil
 		}
 		return v, v.handleKey(msg)
@@ -430,6 +510,16 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Forward other messages to composer
 	if v.composing {
 		if cmd := v.composer.Update(msg); cmd != nil {
+			return v, cmd
+		}
+	}
+	if v.editingComment && v.commentEditComposer != nil {
+		if cmd := v.commentEditComposer.Update(msg); cmd != nil {
+			return v, cmd
+		}
+	}
+	if v.editingBody && v.bodyEditComposer != nil {
+		if cmd := v.bodyEditComposer.Update(msg); cmd != nil {
 			return v, cmd
 		}
 	}
@@ -443,6 +533,9 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	if v.editingComment {
 		return v.handleCommentEditingKey(msg)
+	}
+	if v.editingBody {
+		return v.handleEditingBodyKey(msg)
 	}
 	if v.settingDue {
 		return v.handleDetailSettingDueKey(msg)
@@ -466,15 +559,18 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch msg.String() {
 	case "D":
-		if isTodo {
+		isCard := v.data != nil && strings.EqualFold(v.data.recordType, "Card")
+		if isTodo || isCard {
 			return v.startDetailSettingDue()
 		}
 	case "a":
-		if isTodo {
+		isCard := v.data != nil && strings.EqualFold(v.data.recordType, "Card")
+		if isTodo || isCard {
 			return v.startDetailAssigning()
 		}
 	case "A":
-		if isTodo {
+		isCard := v.data != nil && strings.EqualFold(v.data.recordType, "Card")
+		if isTodo || isCard {
 			return v.clearDetailAssignees()
 		}
 	case "e":
@@ -482,10 +578,12 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		rt := strings.ToLower(v.data.recordType)
-		if rt != "todo" && rt != "card" {
-			return nil
+		if rt == "todo" || rt == "card" {
+			return v.startEditTitle()
 		}
-		return v.startEditTitle()
+		if rt == "message" {
+			return v.startEditBody()
+		}
 	case "s":
 		return v.toggleSubscribe()
 	case "b", "B":
@@ -627,32 +725,32 @@ func (v *Detail) startCommentEdit() tea.Cmd {
 	}
 	c := v.data.comments[v.focusedComment]
 	v.editingComment = true
+	v.commentEditComposer = widget.NewComposer(v.styles,
+		widget.WithMode(widget.ComposerRich),
+		widget.WithAutoExpand(false),
+		widget.WithPlaceholder("Edit comment..."),
+	)
+	v.commentEditComposer.SetValue(richtext.HTMLToMarkdown(c.content))
 	v.relayout()
-	v.commentEditInput = textinput.New()
-	v.commentEditInput.SetValue(richtext.HTMLToMarkdown(c.content))
-	v.commentEditInput.CharLimit = 0 // unlimited
-	v.commentEditInput.Focus()
-	return textinput.Blink
+	return v.commentEditComposer.Focus()
 }
 
 func (v *Detail) handleCommentEditingKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter":
-		content := strings.TrimSpace(v.commentEditInput.Value())
-		if content == "" {
-			v.editingComment = false
-			v.relayout()
-			return nil
-		}
-		return v.submitCommentEdit(content)
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		v.editingComment = false
+		v.commentEditComposer = nil
 		v.relayout()
 		return nil
-	default:
-		var cmd tea.Cmd
-		v.commentEditInput, cmd = v.commentEditInput.Update(msg)
+	case msg.Paste && v.commentEditComposer != nil:
+		text, cmd := v.commentEditComposer.ProcessPaste(string(msg.Runes))
+		v.commentEditComposer.InsertPaste(text)
 		return cmd
+	default:
+		if v.commentEditComposer != nil {
+			return v.commentEditComposer.Update(msg)
+		}
+		return nil
 	}
 }
 
@@ -746,9 +844,17 @@ func (v *Detail) setDetailDueDate(dueOn string) tea.Cmd {
 	hub := v.session.Hub()
 	ctx := v.session.Context()
 	recordingID := v.recordingID
+	rt := strings.ToLower(v.data.recordType)
 	return func() tea.Msg {
-		err := hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
-			&basecamp.UpdateTodoRequest{DueOn: dueOn})
+		var err error
+		switch rt {
+		case "card":
+			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
+				&basecamp.UpdateCardRequest{DueOn: dueOn})
+		default:
+			err = hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
+				&basecamp.UpdateTodoRequest{DueOn: dueOn})
+		}
 		return detailDueUpdatedMsg{err: err}
 	}
 }
@@ -758,8 +864,15 @@ func (v *Detail) clearDetailDueDate() tea.Cmd {
 	hub := v.session.Hub()
 	ctx := v.session.Context()
 	recordingID := v.recordingID
+	rt := strings.ToLower(v.data.recordType)
 	return func() tea.Msg {
-		err := hub.ClearTodoDueOn(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		var err error
+		switch rt {
+		case "card":
+			err = hub.ClearCardDueOn(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		default:
+			err = hub.ClearTodoDueOn(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		}
 		return detailDueUpdatedMsg{err: err}
 	}
 }
@@ -836,9 +949,17 @@ func (v *Detail) assignDetailTodo(nameQuery string) tea.Cmd {
 	hub := v.session.Hub()
 	ctx := v.session.Context()
 	recordingID := v.recordingID
+	rt := strings.ToLower(v.data.recordType)
 	return func() tea.Msg {
-		err := hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
-			&basecamp.UpdateTodoRequest{AssigneeIDs: []int64{matched.ID}})
+		var err error
+		switch rt {
+		case "card":
+			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
+				&basecamp.UpdateCardRequest{AssigneeIDs: []int64{matched.ID}})
+		default:
+			err = hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
+				&basecamp.UpdateTodoRequest{AssigneeIDs: []int64{matched.ID}})
+		}
 		return detailAssignResultMsg{err: err}
 	}
 }
@@ -848,8 +969,15 @@ func (v *Detail) clearDetailAssignees() tea.Cmd {
 	hub := v.session.Hub()
 	ctx := v.session.Context()
 	recordingID := v.recordingID
+	rt := strings.ToLower(v.data.recordType)
 	return func() tea.Msg {
-		err := hub.ClearTodoAssignees(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		var err error
+		switch rt {
+		case "card":
+			err = hub.ClearCardAssignees(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		default:
+			err = hub.ClearTodoAssignees(ctx, scope.AccountID, scope.ProjectID, recordingID)
+		}
 		return detailAssignResultMsg{err: err}
 	}
 }
@@ -908,6 +1036,55 @@ func (v *Detail) submitEditTitle(title string) tea.Cmd {
 			err = fmt.Errorf("editing %s titles is not supported", recordType)
 		}
 		return editTitleResultMsg{title: title, err: err}
+	}
+}
+
+// -- Body editing (messages) --
+
+func (v *Detail) startEditBody() tea.Cmd {
+	if v.data == nil {
+		return nil
+	}
+	v.editingBody = true
+	v.bodyEditComposer = widget.NewComposer(v.styles,
+		widget.WithMode(widget.ComposerRich),
+		widget.WithAutoExpand(false),
+		widget.WithPlaceholder("Edit message body..."),
+	)
+	v.bodyEditComposer.SetValue(richtext.HTMLToMarkdown(v.data.content))
+	v.relayout()
+	return v.bodyEditComposer.Focus()
+}
+
+func (v *Detail) handleEditingBodyKey(msg tea.KeyMsg) tea.Cmd {
+	switch {
+	case msg.String() == "esc":
+		v.editingBody = false
+		v.bodyEditComposer = nil
+		v.relayout()
+		return nil
+	case msg.Paste && v.bodyEditComposer != nil:
+		text, cmd := v.bodyEditComposer.ProcessPaste(string(msg.Runes))
+		v.bodyEditComposer.InsertPaste(text)
+		return cmd
+	default:
+		if v.bodyEditComposer != nil {
+			return v.bodyEditComposer.Update(msg)
+		}
+		return nil
+	}
+}
+
+func (v *Detail) submitEditBody(markdown string) tea.Cmd {
+	scope := v.session.Scope()
+	hub := v.session.Hub()
+	ctx := v.session.Context()
+	recordingID := v.recordingID
+	html := richtext.MarkdownToHTML(markdown)
+	return func() tea.Msg {
+		err := hub.UpdateMessage(ctx, scope.AccountID, scope.ProjectID, recordingID,
+			&basecamp.UpdateMessageRequest{Content: html})
+		return editBodyResultMsg{err: err}
 	}
 }
 
@@ -982,20 +1159,28 @@ func (v *Detail) postComment(content widget.ComposerContent) tea.Cmd {
 }
 
 func (v *Detail) View() string {
-	if v.submitting {
-		return lipgloss.NewStyle().
-			Width(v.width).
-			Height(v.height).
-			Padding(1, 2).
-			Render(v.spinner.View() + " Posting comment...")
-	}
-
-	if v.loading {
+	// Full-screen spinner only on first load (no data yet)
+	if v.loading && v.data == nil {
 		return lipgloss.NewStyle().
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
 			Render(v.spinner.View() + " Loading...")
+	}
+
+	if v.editingBody && v.bodyEditComposer != nil {
+		theme := v.styles.Theme()
+		sep := lipgloss.NewStyle().
+			Width(max(0, v.width-2)).
+			Foreground(theme.Border).
+			Render("─ Edit Body ─")
+		return lipgloss.NewStyle().Padding(0, 1).Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				v.preview.View(),
+				sep,
+				v.bodyEditComposer.View(),
+			),
+		)
 	}
 
 	if v.composing {
@@ -1014,6 +1199,18 @@ func (v *Detail) View() string {
 	}
 
 	view := v.preview.View()
+
+	// Inline loading/submitting indicator at bottom of existing content
+	if v.submitting {
+		theme := v.styles.Theme()
+		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Posting comment..."))
+	} else if v.loading {
+		theme := v.styles.Theme()
+		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Loading..."))
+	}
+
 	if v.editing {
 		theme := v.styles.Theme()
 		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Title: ")
@@ -1029,10 +1226,19 @@ func (v *Detail) View() string {
 		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Assign: ")
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.assignInput.View())
 	}
-	if v.editingComment {
+	if v.editingComment && v.commentEditComposer != nil {
 		theme := v.styles.Theme()
-		label := lipgloss.NewStyle().Foreground(theme.Muted).Render("Edit comment: ")
-		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(label+v.commentEditInput.View())
+		sep := lipgloss.NewStyle().
+			Width(max(0, v.width-2)).
+			Foreground(theme.Border).
+			Render("─ Edit Comment ─")
+		return lipgloss.NewStyle().Padding(0, 1).Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				view,
+				sep,
+				v.commentEditComposer.View(),
+			),
+		)
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(view)
 }

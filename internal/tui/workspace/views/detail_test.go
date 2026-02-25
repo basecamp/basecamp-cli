@@ -638,20 +638,26 @@ func TestDetail_ShortHelp_HidesCommentKeys_WhenNoComments(t *testing.T) {
 
 // -- Edit key guards --
 
-func TestDetail_E_NoOp_ForMessage(t *testing.T) {
+func TestDetail_E_StartsEditBody_ForMessage(t *testing.T) {
 	v := testDetailWithSession("Message", false)
 	cmd := v.handleKey(runeKey('e'))
-	assert.Nil(t, cmd, "e on Message should be a no-op")
-	assert.False(t, v.editing, "should not enter editing mode for Message")
+	assert.NotNil(t, cmd, "e on Message should start body editing")
+	assert.True(t, v.editingBody, "should enter editingBody mode for Message")
+	assert.NotNil(t, v.bodyEditComposer, "bodyEditComposer should be created")
 }
 
-func TestDetail_ShortHelp_HidesEdit_ForMessage(t *testing.T) {
+func TestDetail_ShortHelp_ShowsEditBody_ForMessage(t *testing.T) {
 	v := testDetailWithSession("Message", false)
 	hints := v.ShortHelp()
 
+	found := false
 	for _, h := range hints {
-		assert.NotEqual(t, "e", h.Help().Key, "Message should not show e hint")
+		if h.Help().Key == "e" {
+			found = true
+			assert.Equal(t, "edit body", h.Help().Desc)
+		}
 	}
+	assert.True(t, found, "Message should show e/edit body hint")
 }
 
 func TestDetail_ShortHelp_ShowsEdit_ForTodo(t *testing.T) {
@@ -838,12 +844,24 @@ func TestDetail_SyncPreview_DueDateFormatted(t *testing.T) {
 
 func TestDetail_View_SubmittingBeforeLoading(t *testing.T) {
 	v := testDetailWithSession("Todo", false)
+	v.SetSize(80, 24)
+	v.syncPreview()
 	v.submitting = true
 	v.loading = true
-	v.width = 80
-	v.height = 24
 
 	output := v.View()
 	assert.Contains(t, output, "Posting comment", "submitting should take priority over loading")
 	assert.NotContains(t, output, "Loading...", "loading should not appear while submitting")
+}
+
+func TestDetail_ReloadKeepsContent(t *testing.T) {
+	v := testDetailWithSession("Todo", false)
+	v.SetSize(80, 24)
+	v.syncPreview()
+
+	// Simulate a reload (data already exists)
+	v.loading = true
+	output := v.View()
+	assert.Contains(t, output, "Test Todo", "title should remain visible during reload")
+	assert.Contains(t, output, "Loading", "should show inline loading indicator")
 }
