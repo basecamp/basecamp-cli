@@ -297,7 +297,7 @@ func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
 
 	parts := stats.FormatParts()
 	if len(parts) > 0 {
-		fmt.Fprintf(os.Stderr, "\nStats: %s\n", strings.Join(parts, " | "))
+		fmt.Fprintf(os.Stderr, "\n%s\n", strings.Join(parts, " · "))
 	}
 }
 

@@ -1299,9 +1299,7 @@ func TestStyledOutputWithStats(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain Stats line
-	assert.Contains(t, output, "Stats:")
-	// Should contain request count
+	// Should contain stats info (no "Stats:" prefix)
 	assert.Contains(t, output, "5 requests")
 	// Should contain cache info
 	assert.Contains(t, output, "cached")
@@ -1331,8 +1329,8 @@ func TestMarkdownOutputWithStats(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain Stats line in markdown format
-	assert.Contains(t, output, "*Stats:")
+	// Should contain stats in markdown italic format (no "Stats:" prefix)
+	assert.Contains(t, output, "·")
 	// Should contain failed count
 	assert.Contains(t, output, "1 failed")
 }
@@ -1349,8 +1347,8 @@ func TestStyledOutputWithoutStats(t *testing.T) {
 
 	output := buf.String()
 
-	// Should NOT contain Stats line when no stats provided
-	assert.NotContains(t, output, "Stats:")
+	// Should NOT contain stats separator when no stats provided
+	assert.NotContains(t, output, "·")
 }
 
 func TestStatsRenderingSingleRequest(t *testing.T) {

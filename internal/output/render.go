@@ -630,7 +630,7 @@ func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
 	metrics := observability.SessionMetricsFromMap(stats)
 	parts := metrics.FormatParts()
 	if len(parts) > 0 {
-		line := r.Subtle.Render("Stats: " + strings.Join(parts, " | "))
+		line := r.Subtle.Render(strings.Join(parts, " · "))
 		b.WriteString(line + "\n")
 	}
 }
@@ -1007,7 +1007,7 @@ func (r *MarkdownRenderer) renderStats(b *strings.Builder, stats map[string]any)
 	metrics := observability.SessionMetricsFromMap(stats)
 	parts := metrics.FormatParts()
 	if len(parts) > 0 {
-		b.WriteString("*Stats: " + strings.Join(parts, " | ") + "*\n")
+		b.WriteString("*" + strings.Join(parts, " · ") + "*\n")
 	}
 }
 
