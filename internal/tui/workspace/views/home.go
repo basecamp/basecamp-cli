@@ -493,7 +493,7 @@ func (v *Home) syncBookmarks(projects []data.ProjectInfo) {
 			desc = p.Description
 		}
 		if utf8.RuneCountInString(desc) > 60 {
-			desc = string([]rune(desc)[:57]) + "..."
+			desc = string([]rune(desc)[:59]) + "…"
 		}
 		items = append(items, widget.ListItem{
 			ID:          id,

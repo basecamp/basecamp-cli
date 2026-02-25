@@ -809,8 +809,8 @@ func (v *Campfire) View() string {
 	var modeIndicator string
 	if v.mode == campfireModeScroll {
 		modeIndicator = lipgloss.NewStyle().
-			Foreground(theme.Warning).
-			Render("[SCROLL] ")
+			Foreground(theme.Muted).
+			Render("scroll mode ")
 	}
 
 	separator := lipgloss.NewStyle().

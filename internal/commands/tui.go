@@ -109,6 +109,6 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 	case workspace.ViewTimeline:
 		return views.NewTimeline(session, scope.ProjectID)
 	default:
-		return views.NewPlaceholder(session, target)
+		return views.NewHome(session)
 	}
 }

@@ -123,7 +123,7 @@ func (q *QuickJump) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "down", "ctrl+n":
+	case "down", "ctrl+j":
 		if q.cursor < len(q.filtered)-1 {
 			q.cursor++
 		}
@@ -417,7 +417,7 @@ func (q QuickJump) View() string {
 	}
 
 	// Footer
-	footer := lipgloss.NewStyle().Foreground(theme.Muted).Render("enter jump  esc cancel")
+	footer := lipgloss.NewStyle().Foreground(theme.Muted).Render("↑/↓ navigate  enter jump  esc cancel")
 
 	// Assemble
 	sections := make([]string, 0, 4+len(rows)+2)
