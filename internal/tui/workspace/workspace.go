@@ -119,6 +119,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		sidebarRatio:    0.30,
 	}
 	w.createBoostFunc = w.createBoost
+	w.breadcrumb.SetExperimental(true)
 
 	// Metrics panel reads live stats from the Hub's metrics collector.
 	if hub := session.Hub(); hub != nil {

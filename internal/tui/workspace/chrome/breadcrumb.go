@@ -12,12 +12,13 @@ import (
 
 // Breadcrumb renders a navigable scope trail.
 type Breadcrumb struct {
-	styles       *tui.Styles
-	crumbs       []string
-	accountBadge string
-	badgeGlobal  bool
-	badgeIndex   int // 1-based account index for scoped views, 0 for unindexed
-	width        int
+	styles            *tui.Styles
+	crumbs            []string
+	accountBadge      string
+	badgeGlobal       bool
+	badgeIndex        int // 1-based account index for scoped views, 0 for unindexed
+	experimentalBadge bool
+	width             int
 }
 
 // NewBreadcrumb creates a new breadcrumb component.
@@ -43,6 +44,11 @@ func (b *Breadcrumb) SetAccountBadgeIndexed(index int, name string) {
 	b.accountBadge = name
 	b.badgeGlobal = false
 	b.badgeIndex = index
+}
+
+// SetExperimental enables or disables the [experimental] badge.
+func (b *Breadcrumb) SetExperimental(v bool) {
+	b.experimentalBadge = v
 }
 
 // AccountBadge returns the current badge label (for testing).
@@ -95,6 +101,14 @@ func (b Breadcrumb) View() string {
 	theme := b.styles.Theme()
 
 	var parts []string
+
+	// Experimental badge
+	if b.experimentalBadge {
+		badge := lipgloss.NewStyle().
+			Foreground(theme.Warning).
+			Render("[experimental]")
+		parts = append(parts, badge)
+	}
 
 	// Account badge
 	if b.accountBadge != "" {

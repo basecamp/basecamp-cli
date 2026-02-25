@@ -2,6 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -10,20 +12,25 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/views"
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 // NewTUICmd creates the tui command for the persistent workspace.
 func NewTUICmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tui [url]",
-		Short: "Launch the Basecamp workspace",
-		Long:  "Launch a persistent, full-screen terminal workspace for Basecamp.\nOptionally pass a Basecamp URL to jump directly to a project or recording.",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Launch the Basecamp workspace [experimental]",
+		Long: "Launch a persistent, full-screen terminal workspace for Basecamp.\n" +
+			"Optionally pass a Basecamp URL to jump directly to a project or recording.\n\n" +
+			"This feature is under active development and may change between releases.",
+		Annotations: map[string]string{"experimental": "true"},
+		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
+			printExperimentalNotice(app.Config.CacheDir)
 			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -111,4 +118,28 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 	default:
 		return views.NewHome(session)
 	}
+}
+
+// printExperimentalNotice prints a one-time-per-version advisory to stderr.
+// The sentinel file resets on version upgrade so the notice resurfaces when
+// experimental features are most likely to have changed.
+func printExperimentalNotice(cacheDir string) {
+	if cacheDir == "" {
+		return
+	}
+	v := version.Version
+	sentinel := filepath.Join(cacheDir, "experimental-tui-"+v)
+
+	if _, err := os.Stat(sentinel); err == nil {
+		return // already shown for this version
+	}
+
+	_, _ = fmt.Fprintf(os.Stderr,
+		"Note: The TUI workspace is experimental in %s.\n"+
+			"Behavior may change between releases. Report issues at https://github.com/basecamp/basecamp-cli/issues\n\n",
+		v)
+
+	// Best-effort write — ignore errors (e.g. read-only filesystem).
+	_ = os.MkdirAll(cacheDir, 0o700)
+	_ = os.WriteFile(sentinel, []byte(v), 0o600)
 }

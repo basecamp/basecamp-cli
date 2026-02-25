@@ -9,10 +9,11 @@ import (
 
 // CommandInfo describes a CLI command.
 type CommandInfo struct {
-	Name        string   `json:"name"`
-	Category    string   `json:"category"`
-	Description string   `json:"description"`
-	Actions     []string `json:"actions,omitempty"`
+	Name         string   `json:"name"`
+	Category     string   `json:"category"`
+	Description  string   `json:"description"`
+	Actions      []string `json:"actions,omitempty"`
+	Experimental bool     `json:"experimental,omitempty"`
 }
 
 // CommandCategory groups commands by category.
@@ -120,7 +121,7 @@ func commandCategories() []CommandCategory {
 				{Name: "completion", Category: "additional", Description: "Generate shell completions", Actions: []string{"bash", "zsh", "fish", "powershell", "refresh", "status"}},
 				{Name: "mcp", Category: "additional", Description: "MCP server integration", Actions: []string{"server"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},
-				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace"},
+				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
 				{Name: "help", Category: "additional", Description: "Show help"},
 				{Name: "version", Category: "additional", Description: "Show version"},
@@ -157,7 +158,18 @@ func NewCommandsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			return app.OK(commandCategories(),
+			categories := commandCategories()
+			if !app.Flags.JSON {
+				for i := range categories {
+					for j := range categories[i].Commands {
+						if categories[i].Commands[j].Experimental {
+							categories[i].Commands[j].Description = "[experimental] " + categories[i].Commands[j].Description
+						}
+					}
+				}
+			}
+
+			return app.OK(categories,
 				output.WithSummary("All available basecamp commands"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
