@@ -836,6 +836,11 @@ func (v *Campfire) View() string {
 	)
 }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Campfire) FocusedItem() workspace.FocusedItemScope {
+	return workspace.FocusedItemScope{} // no single-item URL for chat stream
+}
+
 func (v *Campfire) updateLastID() {
 	for _, line := range v.lines {
 		if line.ID > v.lastID {

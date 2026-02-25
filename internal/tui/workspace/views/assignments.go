@@ -76,6 +76,23 @@ func NewAssignments(session *workspace.Session) *Assignments {
 
 func (v *Assignments) Title() string { return "Assignments" }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Assignments) FocusedItem() workspace.FocusedItemScope {
+	item := v.list.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	meta, ok := v.assignmentMeta[item.ID]
+	if !ok {
+		return workspace.FocusedItemScope{}
+	}
+	return workspace.FocusedItemScope{
+		AccountID:   meta.AccountID,
+		ProjectID:   meta.ProjectID,
+		RecordingID: meta.ID,
+	}
+}
+
 func (v *Assignments) ShortHelp() []key.Binding {
 	if v.list.Filtering() {
 		return filterHints()

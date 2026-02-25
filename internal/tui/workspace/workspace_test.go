@@ -1481,3 +1481,103 @@ func TestWorkspace_AllAccountsSwitcher_NavigatesToHome(t *testing.T) {
 	assert.Empty(t, session.Scope().AccountID,
 		"session scope AccountID must be empty after All Accounts switch")
 }
+
+// testFocusedView satisfies View and FocusedRecording for open-in-browser tests.
+type testFocusedView struct {
+	testView
+	focused FocusedItemScope
+}
+
+func (v *testFocusedView) FocusedItem() FocusedItemScope { return v.focused }
+
+func TestWorkspace_OpenInBrowser_UsesFocusedItemScope(t *testing.T) {
+	session := testSessionWithContext("default-acct", "Default")
+	session.SetScope(Scope{AccountID: "default-acct", ProjectID: 1})
+	w := testWorkspaceWithSession(session)
+
+	// Capture the scope that openFunc receives.
+	var captured Scope
+	w.openFunc = func(scope Scope) tea.Cmd {
+		captured = scope
+		return func() tea.Msg { return StatusMsg{Text: "spy"} }
+	}
+
+	// Push a view that implements FocusedRecording with cross-account context.
+	fv := &testFocusedView{
+		testView: testView{title: "Search"},
+		focused: FocusedItemScope{
+			AccountID:   "x-acct",
+			ProjectID:   42,
+			RecordingID: 100,
+		},
+	}
+	w.router.Push(fv, Scope{}, 0)
+	w.syncChrome()
+
+	// Press 'o' to trigger open-in-browser.
+	w.handleKey(keyMsg("o"))
+
+	// The scope passed to openFunc should merge focused item values
+	// over the session scope.
+	assert.Equal(t, "x-acct", captured.AccountID,
+		"AccountID should come from FocusedItem, not session")
+	assert.Equal(t, int64(42), captured.ProjectID,
+		"ProjectID should come from FocusedItem, not session")
+	assert.Equal(t, int64(100), captured.RecordingID,
+		"RecordingID should come from FocusedItem")
+}
+
+func TestWorkspace_OpenInBrowser_FallsBackToSessionScope(t *testing.T) {
+	session := testSessionWithContext("sess-acct", "Session")
+	session.SetScope(Scope{AccountID: "sess-acct", ProjectID: 7})
+	w := testWorkspaceWithSession(session)
+
+	var captured Scope
+	w.openFunc = func(scope Scope) tea.Cmd {
+		captured = scope
+		return func() tea.Msg { return StatusMsg{Text: "spy"} }
+	}
+
+	// Push a plain testView (does NOT implement FocusedRecording).
+	pushTestView(w, "Campfire")
+
+	w.handleKey(keyMsg("o"))
+
+	// Without FocusedRecording, the session scope should pass through unchanged.
+	assert.Equal(t, "sess-acct", captured.AccountID,
+		"AccountID should fall back to session scope")
+	assert.Equal(t, int64(7), captured.ProjectID,
+		"ProjectID should fall back to session scope")
+	assert.Equal(t, int64(0), captured.RecordingID,
+		"RecordingID should be zero when no focused item")
+}
+
+func TestWorkspace_OpenInBrowser_PartialFocusedOverride(t *testing.T) {
+	session := testSessionWithContext("sess-acct", "Session")
+	session.SetScope(Scope{AccountID: "sess-acct", ProjectID: 7})
+	w := testWorkspaceWithSession(session)
+
+	var captured Scope
+	w.openFunc = func(scope Scope) tea.Cmd {
+		captured = scope
+		return func() tea.Msg { return StatusMsg{Text: "spy"} }
+	}
+
+	// Focused item only has RecordingID — AccountID and ProjectID stay zero,
+	// so the session values should be preserved.
+	fv := &testFocusedView{
+		testView: testView{title: "Todos"},
+		focused:  FocusedItemScope{RecordingID: 55},
+	}
+	w.router.Push(fv, Scope{}, 0)
+	w.syncChrome()
+
+	w.handleKey(keyMsg("o"))
+
+	assert.Equal(t, "sess-acct", captured.AccountID,
+		"AccountID should stay from session when focused has empty string")
+	assert.Equal(t, int64(7), captured.ProjectID,
+		"ProjectID should stay from session when focused has zero")
+	assert.Equal(t, int64(55), captured.RecordingID,
+		"RecordingID should come from focused item")
+}

@@ -63,6 +63,23 @@ func NewTimeline(session *workspace.Session, projectID int64) *Timeline {
 
 func (v *Timeline) Title() string { return "Project Activity" }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Timeline) FocusedItem() workspace.FocusedItemScope {
+	item := v.list.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	meta, ok := v.entryMeta[item.ID]
+	if !ok {
+		return workspace.FocusedItemScope{}
+	}
+	return workspace.FocusedItemScope{
+		AccountID:   meta.AccountID,
+		ProjectID:   meta.ProjectID,
+		RecordingID: meta.RecordingID,
+	}
+}
+
 func (v *Timeline) ShortHelp() []key.Binding {
 	if v.list.Filtering() {
 		return filterHints()

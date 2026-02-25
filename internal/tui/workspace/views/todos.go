@@ -283,6 +283,20 @@ func (v *Todos) IsModal() bool {
 	return v.editingDesc || v.settingDue || v.assigning || v.creatingList || v.renamingList
 }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Todos) FocusedItem() workspace.FocusedItemScope {
+	if v.focus != todosPaneRight {
+		return workspace.FocusedItemScope{}
+	}
+	item := v.listTodos.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	var id int64
+	fmt.Sscanf(item.ID, "%d", &id)
+	return workspace.FocusedItemScope{RecordingID: id}
+}
+
 // ShortHelp implements View.
 func (v *Todos) ShortHelp() []key.Binding {
 	if v.listLists.Filtering() || v.listTodos.Filtering() {

@@ -80,6 +80,23 @@ func NewHey(session *workspace.Session) *Hey {
 
 func (v *Hey) Title() string { return "Hey!" }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Hey) FocusedItem() workspace.FocusedItemScope {
+	item := v.list.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	meta, ok := v.entryMeta[item.ID]
+	if !ok {
+		return workspace.FocusedItemScope{}
+	}
+	return workspace.FocusedItemScope{
+		AccountID:   meta.AccountID,
+		ProjectID:   meta.ProjectID,
+		RecordingID: meta.ID,
+	}
+}
+
 func (v *Hey) ShortHelp() []key.Binding {
 	if v.list.Filtering() {
 		return filterHints()

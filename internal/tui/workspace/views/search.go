@@ -131,6 +131,23 @@ func (v *Search) InputActive() bool {
 // StartFilter implements workspace.Filterable.
 func (v *Search) StartFilter() { v.list.StartFilter() }
 
+// FocusedItem implements workspace.FocusedRecording.
+func (v *Search) FocusedItem() workspace.FocusedItemScope {
+	item := v.list.Selected()
+	if item == nil {
+		return workspace.FocusedItemScope{}
+	}
+	meta, ok := v.resultMeta[item.ID]
+	if !ok {
+		return workspace.FocusedItemScope{}
+	}
+	return workspace.FocusedItemScope{
+		AccountID:   meta.AccountID,
+		ProjectID:   meta.ProjectID,
+		RecordingID: meta.ID,
+	}
+}
+
 // ShortHelp implements View.
 func (v *Search) ShortHelp() []key.Binding {
 	if v.list.Filtering() {
