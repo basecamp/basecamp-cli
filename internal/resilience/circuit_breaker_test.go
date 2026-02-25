@@ -246,7 +246,7 @@ func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold: 2,
 		SuccessThreshold: 1,
-		OpenTimeout:      1 * time.Millisecond,
+		OpenTimeout:      500 * time.Millisecond,
 	})
 
 	// Start closed
@@ -260,7 +260,7 @@ func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
 	assert.Equal(t, CircuitOpen, state)
 
 	// Wait -> half-open
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 	state, _ = cb.State()
 	assert.Equal(t, CircuitHalfOpen, state)
 
