@@ -264,7 +264,7 @@ func (v *Dock) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading project...")
+			Render(v.spinner.View() + " Loading project…")
 	}
 
 	return v.list.View()

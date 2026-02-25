@@ -268,7 +268,7 @@ func TestSearch_HandleResults_ExcerptAsDescription(t *testing.T) {
 
 func TestTruncateExcerpt(t *testing.T) {
 	assert.Equal(t, "hello", truncateExcerpt("hello", 10))
-	assert.Equal(t, "hello worl...", truncateExcerpt("hello world here", 10))
+	assert.Equal(t, "hello worl…", truncateExcerpt("hello world here", 10))
 	assert.Equal(t, "clean text", truncateExcerpt("<b>clean</b> text", 20))
 }
 

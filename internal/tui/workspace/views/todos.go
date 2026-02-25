@@ -1090,7 +1090,7 @@ func (v *Todos) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading todolists...")
+			Render(v.spinner.View() + " Loading todolists…")
 	}
 
 	// Left panel: todolist list
@@ -1109,7 +1109,9 @@ func (v *Todos) View() string {
 	if v.loadingTodos {
 		right = lipgloss.NewStyle().
 			Padding(0, 1).
-			Render(v.spinner.View() + " Loading todos...")
+			Width(v.split.RightWidth()).
+			Height(v.height).
+			Render(v.spinner.View() + " Loading todos…")
 	} else {
 		right = v.renderRightPanel()
 	}
@@ -1393,7 +1395,7 @@ func (v *Todos) assignTodo(nameQuery string) tea.Cmd {
 			names = append(names, m.Name)
 		}
 		if len(names) > 4 {
-			names = append(names[:4], "...")
+			names = append(names[:4], "…")
 		}
 		return workspace.SetStatus("Multiple matches: "+strings.Join(names, ", ")+" — be more specific", true)
 	}

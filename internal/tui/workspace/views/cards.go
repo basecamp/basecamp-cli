@@ -487,7 +487,7 @@ func (v *Cards) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading card table...")
+			Render(v.spinner.View() + " Loading card table…")
 	}
 
 	if len(v.columns) == 0 {

@@ -127,7 +127,7 @@ func (v *Home) ShortHelp() []key.Binding {
 		if meta.recordType != "" {
 			label := strings.ToLower(meta.recordType)
 			if utf8.RuneCountInString(label) > 15 {
-				label = string([]rune(label)[:15])
+				label = string([]rune(label)[:15]) + "…"
 			}
 			enterDesc = "open " + label
 		}
@@ -286,7 +286,7 @@ func (v *Home) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading...")
+			Render(v.spinner.View() + " Loading home…")
 	}
 	// Show welcome panel when all sections are empty and pools have resolved
 	if v.list.Len() == 0 && !v.anyLoading() {

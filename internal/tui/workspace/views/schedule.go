@@ -401,7 +401,7 @@ func (v *Schedule) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading schedule...")
+			Render(v.spinner.View() + " Loading schedule…")
 	}
 
 	var b strings.Builder

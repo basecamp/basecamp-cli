@@ -378,7 +378,7 @@ func (l *List) View() string {
 		return lipgloss.NewStyle().
 			Width(l.width).
 			Foreground(theme.Muted).
-			Render("Loading...")
+			Render("Loading…")
 	}
 
 	var b strings.Builder

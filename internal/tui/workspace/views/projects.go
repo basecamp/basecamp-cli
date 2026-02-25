@@ -348,7 +348,7 @@ func (v *Projects) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading projects...")
+			Render(v.spinner.View() + " Loading projects…")
 	}
 
 	// Collapsed mode: show one panel at a time

@@ -940,7 +940,7 @@ func (v *Detail) assignDetailTodo(nameQuery string) tea.Cmd {
 			names = append(names, m.Name)
 		}
 		if len(names) > 4 {
-			names = append(names[:4], "...")
+			names = append(names[:4], "…")
 		}
 		return workspace.SetStatus("Multiple matches: "+strings.Join(names, ", ")+" — be more specific", true)
 	}
@@ -1166,7 +1166,7 @@ func (v *Detail) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading...")
+			Render(v.spinner.View() + " Loading detail…")
 	}
 
 	if v.editingBody && v.bodyEditComposer != nil {
@@ -1205,11 +1205,11 @@ func (v *Detail) View() string {
 	if v.submitting {
 		theme := v.styles.Theme()
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(
-			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Posting comment..."))
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Posting comment…"))
 	} else if v.loading {
 		theme := v.styles.Theme()
 		view += "\n" + lipgloss.NewStyle().Padding(0, 1).Render(
-			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Loading..."))
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(v.spinner.View()+" Loading…"))
 	}
 
 	if v.editing {

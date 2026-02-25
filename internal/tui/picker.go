@@ -125,7 +125,7 @@ func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 		title:         "Select an item",
 		maxVisible:    10,
 		spinner:       s,
-		loadingMsg:    "Loading...",
+		loadingMsg:    "Loading…",
 		emptyMessage:  "No items found",
 		showHelp:      true,
 		originalItems: make(map[string]PickerItem),
@@ -496,7 +496,7 @@ func (p *Picker) runWithLoader() (*PickerItem, error) {
 	m := newPickerModel(nil, p.opts...)
 	if !m.loading {
 		m.loading = true
-		m.loadingMsg = "Loading..."
+		m.loadingMsg = "Loading…"
 	}
 	// Use alternate screen so picker disappears after selection
 	program := tea.NewProgram(m, tea.WithAltScreen())

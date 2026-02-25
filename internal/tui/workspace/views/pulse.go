@@ -180,7 +180,7 @@ func (v *Pulse) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading activity pulse...")
+			Render(v.spinner.View() + " Loading activity pulse…")
 	}
 	return v.list.View()
 }

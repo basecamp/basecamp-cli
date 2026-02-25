@@ -154,7 +154,7 @@ func (v *People) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading people...")
+			Render(v.spinner.View() + " Loading people…")
 	}
 	return v.list.View()
 }

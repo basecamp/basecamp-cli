@@ -513,12 +513,12 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 	}
 }
 
-// truncateExcerpt truncates s to maxLen runes, appending "..." if truncated.
+// truncateExcerpt truncates s to maxLen runes, appending "…" if truncated.
 func truncateExcerpt(s string, maxLen int) string {
 	s = strings.TrimSpace(format.StripHTML(s))
 	runes := []rune(s)
 	if len(runes) <= maxLen {
 		return s
 	}
-	return string(runes[:maxLen]) + "..."
+	return string(runes[:maxLen]) + "…"
 }

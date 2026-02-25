@@ -105,13 +105,14 @@ func RecordingTypeName(recordingType string) string {
 
 // truncate shortens a string to the specified length, adding ellipsis if needed.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	r := []rune(s)
+	if len(r) <= maxLen {
 		return s
 	}
-	if maxLen <= 3 {
-		return s[:maxLen]
+	if maxLen <= 1 {
+		return string(r[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string(r[:maxLen-1]) + "…"
 }
 
 // StripHTML removes HTML tags from a string and normalizes whitespace.

@@ -344,7 +344,7 @@ func (k *Kanban) renderColumn(col KanbanColumn, colIndex, width int, isFocused b
 
 	if col.Deferred {
 		// Deferred column: show count placeholder
-		placeholder := fmt.Sprintf("  %d cards", col.Count)
+		placeholder := fmt.Sprintf("  %d cards · scroll right to load", col.Count)
 		b.WriteString(lipgloss.NewStyle().
 			Foreground(theme.Muted).
 			Width(width).
@@ -353,7 +353,7 @@ func (k *Kanban) renderColumn(col KanbanColumn, colIndex, width int, isFocused b
 		b.WriteString(lipgloss.NewStyle().
 			Foreground(theme.Muted).
 			Width(width).
-			Render("  (empty)"))
+			Render("  No cards"))
 	} else {
 		b.WriteString(k.renderCardArea(col, colIndex, width, cardAreaHeight, isFocused, theme))
 	}

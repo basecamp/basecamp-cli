@@ -351,7 +351,7 @@ func (v *Compose) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Posting message...")
+			Render(v.spinner.View() + " Posting message…")
 	}
 
 	theme := v.styles.Theme()

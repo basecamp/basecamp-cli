@@ -382,10 +382,10 @@ func TestKanban_FocusedCardHeight(t *testing.T) {
 func TestTruncate(t *testing.T) {
 	assert.Equal(t, "", Truncate("hello", 0))
 	assert.Equal(t, "h", Truncate("hello", 1))
-	assert.Equal(t, "hel", Truncate("hello", 3))
+	assert.Equal(t, "he…", Truncate("hello", 3))
 	assert.Equal(t, "hello", Truncate("hello", 5))
 	assert.Equal(t, "hello", Truncate("hello", 10))
-	assert.Equal(t, "hell...", Truncate("hello world", 7))
+	assert.Equal(t, "hello …", Truncate("hello world", 7))
 }
 
 func TestColumnColor_ValidNames(t *testing.T) {

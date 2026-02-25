@@ -591,7 +591,19 @@ func TestCheckins_ShortHelp_RightPane_ShowsNewAnswerWithSelection(t *testing.T) 
 func TestTruncateContent(t *testing.T) {
 	assert.Equal(t, "hello", truncateContent("hello", 80))
 	assert.Equal(t, "first line", truncateContent("first line\nsecond line", 80))
-	assert.Equal(t, "abcde...", truncateContent("abcdefghij", 5))
+	assert.Equal(t, "abcde…", truncateContent("abcdefghij", 5))
 	assert.Equal(t, "", truncateContent("", 80))
 	assert.Equal(t, "trimmed", truncateContent("  trimmed  ", 80))
+}
+
+func TestTruncateContent_Unicode(t *testing.T) {
+	// Multibyte characters should not be corrupted by truncation
+	input := "日本語テスト文字列"
+	result := truncateContent(input, 5)
+	assert.Equal(t, "日本語テス…", result, "should truncate at rune boundary, not byte boundary")
+
+	// Each rune should be intact
+	for _, r := range result {
+		assert.NotEqual(t, rune(0xFFFD), r, "should not contain replacement character")
+	}
 }

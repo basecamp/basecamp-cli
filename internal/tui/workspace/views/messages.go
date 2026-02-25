@@ -404,7 +404,7 @@ func (v *Messages) View() string {
 			Width(v.width).
 			Height(v.height).
 			Padding(1, 2).
-			Render(v.spinner.View() + " Loading messages...")
+			Render(v.spinner.View() + " Loading messages…")
 	}
 
 	left := v.list.View()
@@ -413,7 +413,9 @@ func (v *Messages) View() string {
 	if v.fetching != 0 {
 		right = lipgloss.NewStyle().
 			Padding(0, 1).
-			Render(v.spinner.View() + " Loading message...")
+			Width(v.split.RightWidth()).
+			Height(v.height).
+			Render(v.spinner.View() + " Loading message…")
 	} else {
 		right = v.preview.View()
 	}
