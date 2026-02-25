@@ -1228,11 +1228,6 @@ func (w *Workspace) View() string {
 		sections = append(sections, view.View())
 	}
 
-	// Toast (if visible, overlays the bottom of the view)
-	if w.toast.Visible() {
-		sections = append(sections, w.toast.View())
-	}
-
 	// Metrics panel (above status bar when active)
 	if w.showMetrics {
 		sections = append(sections, w.metricsPanel.View())
@@ -1242,6 +1237,17 @@ func (w *Workspace) View() string {
 	sections = append(sections, w.statusBar.View())
 
 	ui := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	// Toast overlay: replace the penultimate line (above status bar) rather
+	// than adding a layout section, so the main content height stays constant.
+	if w.toast.Visible() {
+		toastStr := w.toast.View()
+		lines := strings.Split(ui, "\n")
+		if len(lines) >= 2 {
+			lines[len(lines)-2] = toastStr
+			ui = strings.Join(lines, "\n")
+		}
+	}
 
 	if w.pickingBoost {
 		pickerView := w.boostPicker.View()

@@ -1661,3 +1661,24 @@ func TestWorkspace_BoostPickerDismiss_ClearsState(t *testing.T) {
 
 	assert.False(t, w.pickingBoost, "Esc should dismiss the boost picker")
 }
+
+func TestWorkspace_ToastDoesNotChangeLayoutHeight(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Root")
+	w.width = 80
+	w.height = 24
+	w.relayout()
+
+	// Render without toast
+	outputNoToast := w.View()
+	linesNoToast := strings.Count(outputNoToast, "\n")
+
+	// Show a toast and render again
+	w.toast.Show("Todo completed!", false)
+	require.True(t, w.toast.Visible())
+
+	outputWithToast := w.View()
+	linesWithToast := strings.Count(outputWithToast, "\n")
+
+	assert.Equal(t, linesNoToast, linesWithToast, "toast overlay should not change total line count")
+}
