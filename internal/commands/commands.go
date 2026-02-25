@@ -159,10 +159,12 @@ func NewCommandsCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 
 			categories := commandCategories()
-			for i := range categories {
-				for j := range categories[i].Commands {
-					if categories[i].Commands[j].Experimental {
-						categories[i].Commands[j].Description = "[experimental] " + categories[i].Commands[j].Description
+			if !app.Flags.JSON {
+				for i := range categories {
+					for j := range categories[i].Commands {
+						if categories[i].Commands[j].Experimental {
+							categories[i].Commands[j].Description = "[experimental] " + categories[i].Commands[j].Description
+						}
 					}
 				}
 			}

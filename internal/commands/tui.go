@@ -124,6 +124,9 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 // The sentinel file resets on version upgrade so the notice resurfaces when
 // experimental features are most likely to have changed.
 func printExperimentalNotice(cacheDir string) {
+	if cacheDir == "" {
+		return
+	}
 	v := version.Version
 	sentinel := filepath.Join(cacheDir, "experimental-tui-"+v)
 
@@ -131,12 +134,12 @@ func printExperimentalNotice(cacheDir string) {
 		return // already shown for this version
 	}
 
-	fmt.Fprintf(os.Stderr,
+	_, _ = fmt.Fprintf(os.Stderr,
 		"Note: The TUI workspace is experimental in %s.\n"+
 			"Behavior may change between releases. Report issues at https://github.com/basecamp/basecamp-cli/issues\n\n",
 		v)
 
 	// Best-effort write — ignore errors (e.g. read-only filesystem).
-	_ = os.MkdirAll(cacheDir, 0o755)
-	_ = os.WriteFile(sentinel, []byte(v), 0o644)
+	_ = os.MkdirAll(cacheDir, 0o700)
+	_ = os.WriteFile(sentinel, []byte(v), 0o600)
 }
