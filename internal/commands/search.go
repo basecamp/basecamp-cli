@@ -64,10 +64,14 @@ Use 'basecamp search metadata' to see available search scopes.`,
 
 			summary := fmt.Sprintf("%d results for \"%s\"", len(results), query)
 
-			// Transform results for human-readable output
-			cleaned := humanizeSearchResults(results)
+			// Humanize for styled terminal output; preserve raw SDK structs
+			// for machine-readable formats (--json, --agent, --md)
+			var data any = results
+			if app.Output.EffectiveFormat() == output.FormatStyled {
+				data = humanizeSearchResults(results)
+			}
 
-			return app.OK(cleaned,
+			return app.OK(data,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -106,6 +110,9 @@ func humanizeSearchResults(results []basecamp.SearchResult) []map[string]any {
 	out := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		title := r.Title
+		if title == "" {
+			title = r.Subject
+		}
 		if len(title) > 60 {
 			title = title[:57] + "…"
 		}
