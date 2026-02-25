@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -291,7 +292,6 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			w.statusBar.SetStatus("Session expired — run: basecamp auth login", true)
 			return w, nil
 		}
-		w.statusBar.SetStatus("Error: "+msg.Context, true)
 		return w, w.toast.Show(msg.Context+": "+humanizeError(msg.Err), true)
 
 	case data.PoolUpdatedMsg:
@@ -352,6 +352,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chrome.AccountSwitchedMsg:
 		w.showAccountSwitcher = false
 		w.accountSwitcher.Blur()
+		if msg.AccountID == "" {
+			// "All Accounts" — navigate to Home with a clean scope
+			return w, w.navigate(ViewHome, Scope{})
+		}
 		return w, w.switchAccount(msg.AccountID, msg.AccountName)
 
 	case chrome.AccountSwitchCloseMsg:
@@ -1255,8 +1259,8 @@ func humanizeError(err error) string {
 		strings.Contains(s, "503"):
 		return "Basecamp is temporarily unavailable"
 	default:
-		if len(s) > 80 {
-			return s[:77] + "..."
+		if utf8.RuneCountInString(s) > 80 {
+			return string([]rune(s)[:79]) + "…"
 		}
 		return s
 	}

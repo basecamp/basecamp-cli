@@ -325,6 +325,7 @@ func (v *Todos) ShortHelp() []key.Binding {
 		v.keys.DueDate,
 		v.keys.Assign,
 		v.keys.Boost,
+		v.keys.Unassign,
 	}
 }
 
@@ -1171,7 +1172,7 @@ func (v *Todos) renderTodoItems(todos []data.TodoInfo) {
 
 		desc := ""
 		if t.DueOn != "" {
-			desc = t.DueOn
+			desc = formatDueDate(t.DueOn)
 		}
 		if len(t.Assignees) > 0 {
 			who := strings.Join(t.Assignees, ", ")

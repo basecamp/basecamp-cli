@@ -62,6 +62,7 @@ func (p *Preview) SetSize(w, h int) {
 	headerHeight := 1 // title
 	if len(p.fields) > 0 {
 		headerHeight += len(p.fields) + 1 // fields + blank line
+		headerHeight++                    // separator line
 	}
 	contentHeight := h - headerHeight
 	if contentHeight < 1 {
@@ -114,6 +115,12 @@ func (p *Preview) View() string {
 			fieldLines = append(fieldLines, lipgloss.NewStyle().MaxWidth(p.width).Render(line))
 		}
 		sections = append(sections, strings.Join(fieldLines, "\n"))
+	}
+
+	// Separator between fields and body
+	if len(p.fields) > 0 {
+		sections = append(sections, lipgloss.NewStyle().
+			Foreground(theme.Border).Render(strings.Repeat("─", min(p.width, 40))))
 	}
 
 	// Body

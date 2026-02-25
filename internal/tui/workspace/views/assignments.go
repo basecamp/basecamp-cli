@@ -284,10 +284,10 @@ func (v *Assignments) syncAssignments(assignments []workspace.AssignmentInfo) {
 		}
 	}
 
-	addGroup("OVERDUE", overdue)
-	addGroup("THIS WEEK", thisWeek)
-	addGroup("LATER", later)
-	addGroup("NO DUE DATE", noDue)
+	addGroup("Overdue", overdue)
+	addGroup("This Week", thisWeek)
+	addGroup("Later", later)
+	addGroup("No Due Date", noDue)
 
 	v.list.SetItems(items)
 }

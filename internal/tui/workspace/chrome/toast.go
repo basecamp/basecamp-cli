@@ -90,14 +90,14 @@ func (t Toast) View() string {
 	return style.Render(msg)
 }
 
-// truncateToast truncates s to maxWidth, appending "..." if truncated.
+// truncateToast truncates s to maxWidth, appending "…" if truncated.
 func truncateToast(s string, maxWidth int) string {
-	if maxWidth <= 3 {
+	if maxWidth <= 1 {
 		return string([]rune(s)[:maxWidth])
 	}
 	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes)) > maxWidth-3 {
+	for len(runes) > 0 && lipgloss.Width(string(runes)) > maxWidth-1 {
 		runes = runes[:len(runes)-1]
 	}
-	return string(runes) + "..."
+	return string(runes) + "…"
 }

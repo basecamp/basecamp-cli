@@ -135,7 +135,7 @@ func (v *Dock) ShortHelp() []key.Binding {
 func (v *Dock) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{v.keys.Todos, v.keys.Campfire, v.keys.Messages},
-		{v.keys.Cards, v.keys.Schedule},
+		{v.keys.Cards, v.keys.Schedule, v.keys.Activity},
 	}
 }
 

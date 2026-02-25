@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -1458,6 +1459,25 @@ func TestHumanizeError_Passthrough(t *testing.T) {
 func TestHumanizeError_Truncation(t *testing.T) {
 	long := strings.Repeat("x", 100)
 	got := humanizeError(fmt.Errorf("%s", long))
-	assert.Len(t, got, 80, "long errors should be truncated to 80 chars")
-	assert.True(t, strings.HasSuffix(got, "..."))
+	assert.Equal(t, 80, utf8.RuneCountInString(got), "long errors should be truncated to 80 chars")
+	assert.True(t, strings.HasSuffix(got, "…"))
+}
+
+func TestWorkspace_AllAccountsSwitcher_NavigatesToHome(t *testing.T) {
+	session := testSessionWithContext("acct-1", "Alpha")
+	w := testWorkspaceWithSession(session)
+	pushTestView(w, "Home")
+
+	// Simulate "All Accounts" selection from the account switcher.
+	_, cmd := w.Update(chrome.AccountSwitchedMsg{AccountID: "", AccountName: "All Accounts"})
+	require.NotNil(t, cmd, "All-Accounts switch should return a navigate cmd")
+
+	// navigate() pushes a new Home view onto the stack (does not replace root).
+	assert.Equal(t, 2, w.router.Depth(), "navigate pushes onto existing stack")
+	assert.Equal(t, "Home", w.router.Current().Title(), "current view should be Home")
+
+	// Session scope must be reset to an empty AccountID so global views
+	// fan-out across all accounts instead of scoping to a single one.
+	assert.Empty(t, session.Scope().AccountID,
+		"session scope AccountID must be empty after All Accounts switch")
 }
