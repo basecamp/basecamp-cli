@@ -595,6 +595,7 @@ func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
 				Target: workspace.BoostTarget{
 					ProjectID:   v.session.Scope().ProjectID,
 					RecordingID: v.session.Scope().RecordingID,
+					AccountID:   v.session.Scope().AccountID,
 					Title:       v.data.title,
 				},
 			}

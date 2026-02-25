@@ -927,6 +927,21 @@ func TestTodos_FocusMsg_NothingSelected(t *testing.T) {
 	assert.NotNil(t, cmd, "FocusMsg should still fetch todolistPool")
 }
 
+// --- Boost AccountID ---
+
+func TestTodos_BoostTarget_IncludesAccountID(t *testing.T) {
+	v := testTodosViewWithTodos()
+
+	cmd := v.boostSelectedTodo()
+	require.NotNil(t, cmd, "boost should return a command")
+
+	msg := cmd()
+	picker, ok := msg.(workspace.OpenBoostPickerMsg)
+	require.True(t, ok, "should produce OpenBoostPickerMsg, got %T", msg)
+	assert.Equal(t, "acct1", picker.Target.AccountID, "boost target should include session AccountID")
+	assert.Equal(t, int64(42), picker.Target.ProjectID)
+}
+
 // newTextInputWithValue creates a textinput with a preset value for testing.
 func newTextInputWithValue(val string) textinput.Model {
 	ti := textinput.New()

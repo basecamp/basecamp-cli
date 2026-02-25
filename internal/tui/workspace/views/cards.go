@@ -625,6 +625,7 @@ func (v *Cards) boostFocusedCard() tea.Cmd {
 			Target: workspace.BoostTarget{
 				ProjectID:   v.session.Scope().ProjectID,
 				RecordingID: cardID,
+				AccountID:   v.session.Scope().AccountID,
 				Title:       card.Title,
 			},
 		}

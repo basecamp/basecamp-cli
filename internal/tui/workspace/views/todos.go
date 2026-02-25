@@ -1243,6 +1243,7 @@ func (v *Todos) boostSelectedTodo() tea.Cmd {
 			Target: workspace.BoostTarget{
 				ProjectID:   v.session.Scope().ProjectID,
 				RecordingID: id,
+				AccountID:   v.session.Scope().AccountID,
 				Title:       item.Title,
 			},
 		}
