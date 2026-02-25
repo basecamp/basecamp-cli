@@ -1155,6 +1155,7 @@ func (w *Workspace) relayout() {
 	w.palette.SetSize(w.width, w.viewHeight())
 	w.accountSwitcher.SetSize(w.width, w.viewHeight())
 	w.quickJump.SetSize(w.width, w.viewHeight())
+	w.boostPicker.SetSize(w.width, w.height)
 
 	if w.sidebarActive() {
 		sidebarW := int(float64(w.width) * w.sidebarRatio)

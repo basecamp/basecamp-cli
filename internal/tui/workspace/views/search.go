@@ -189,6 +189,12 @@ func (v *Search) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.SearchResultsMsg:
 		return v, v.handleResults(msg)
 
+	case workspace.FocusMsg:
+		if v.focus == searchFocusInput {
+			return v, v.textInput.Focus()
+		}
+		return v, nil
+
 	case workspace.RefreshMsg:
 		if v.query != "" {
 			v.searching = true

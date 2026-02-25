@@ -387,8 +387,12 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case workspace.FocusMsg:
-		v.loading = true
-		return v, tea.Batch(v.spinner.Tick, v.fetchDetail())
+		if v.data == nil {
+			v.loading = true
+			return v, tea.Batch(v.spinner.Tick, v.fetchDetail())
+		}
+		// Silently refresh without loading indicator
+		return v, v.fetchDetail()
 
 	case workspace.RefreshMsg:
 		v.loading = true
