@@ -96,21 +96,25 @@ release:
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
-    ## basecamp v{{.Version}}
-
     ### Install
 
-    Requires `gh` CLI with access to the basecamp org (`gh auth login`).
+    **Linux (Omarchy):**
+    ```sh
+    gh release download v{{.Version}} --repo basecamp/basecamp-cli --pattern '*linux_amd64*'
+    tar xzf basecamp_{{.Version}}_linux_amd64.tar.gz
+    sudo mv basecamp /usr/local/bin/
+    basecamp auth login
+    ```
 
-        gh release download v{{.Version}} --repo basecamp/basecamp-cli --pattern '*darwin_arm64*'
-        tar xzf basecamp_{{.Version}}_darwin_arm64.tar.gz
-        sudo mv basecamp /usr/local/bin/
+    **macOS (Apple Silicon):**
+    ```sh
+    gh release download v{{.Version}} --repo basecamp/basecamp-cli --pattern '*darwin_arm64*'
+    tar xzf basecamp_{{.Version}}_darwin_arm64.tar.gz
+    sudo mv basecamp /usr/local/bin/
+    basecamp auth login
+    ```
 
-    Other platforms: download the matching archive from the assets below.
-
-    Or via Docker (requires `docker login ghcr.io`):
-
-        docker pull ghcr.io/basecamp/cli:{{.Version}}
+    Requires `gh` CLI with access to the basecamp org. Other platforms: grab the matching archive from the assets below.
 
 # Homebrew cask — deferred until repo goes public or cask auth for private repos is solved
 # homebrew_casks:
@@ -149,7 +153,7 @@ dockers_v2:
       - "ghcr.io/basecamp/cli"
     tags:
       - "{{ .Version }}"
-      - latest
+      - "{{ if not .Prerelease }}latest{{ end }}"
     platforms:
       - linux/amd64
       - linux/arm64
