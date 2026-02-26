@@ -310,28 +310,29 @@ for rich text (HTML) messages.`,
 }
 
 func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, content, contentType string) error {
-	// Resolve project, with interactive fallback
-	projectID := project
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
+	// Resolve project only when needed (campfire ID not provided, or for breadcrumbs)
+	var resolvedProjectID string
+	if campfireID == "" {
+		projectID := project
+		if projectID == "" {
+			projectID = app.Flags.Project
+		}
+		if projectID == "" {
+			projectID = app.Config.ProjectID
+		}
+		if projectID == "" {
+			if err := ensureProject(cmd, app); err != nil {
+				return err
+			}
+			projectID = app.Config.ProjectID
+		}
+
+		var err error
+		resolvedProjectID, _, err = app.Names.ResolveProject(cmd.Context(), projectID)
+		if err != nil {
 			return err
 		}
-		projectID = app.Config.ProjectID
-	}
 
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-	if err != nil {
-		return err
-	}
-
-	// Get campfire ID from project if not specified
-	if campfireID == "" {
 		campfireID, err = getCampfireID(cmd, app, resolvedProjectID)
 		if err != nil {
 			return err
@@ -355,9 +356,10 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 
 	summary := fmt.Sprintf("Posted message #%d", line.ID)
 
-	return app.OK(line,
-		output.WithSummary(summary),
-		output.WithBreadcrumbs(
+	// Build breadcrumbs — include project context if resolved
+	var breadcrumbs []output.Breadcrumb
+	if resolvedProjectID != "" {
+		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
 				Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", campfireID, resolvedProjectID),
@@ -368,7 +370,25 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 				Cmd:         fmt.Sprintf("basecamp campfire %s post \"reply\" --in %s", campfireID, resolvedProjectID),
 				Description: "Post another",
 			},
-		),
+		)
+	} else {
+		breadcrumbs = append(breadcrumbs,
+			output.Breadcrumb{
+				Action:      "messages",
+				Cmd:         fmt.Sprintf("basecamp campfire %s messages", campfireID),
+				Description: "View messages",
+			},
+			output.Breadcrumb{
+				Action:      "post",
+				Cmd:         fmt.Sprintf("basecamp campfire %s post \"reply\"", campfireID),
+				Description: "Post another",
+			},
+		)
+	}
+
+	return app.OK(line,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }
 
