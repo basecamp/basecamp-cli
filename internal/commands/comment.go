@@ -276,7 +276,10 @@ Supports batch commenting on multiple recordings at once.`,
 
 			// If no recording specified, try interactive resolution
 			if len(recordingIDs) == 0 {
-				target, err := app.Resolve().Comment(cmd.Context(), "", "")
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				target, err := app.Resolve().Comment(cmd.Context(), "", app.Config.ProjectID)
 				if err != nil {
 					return err
 				}
