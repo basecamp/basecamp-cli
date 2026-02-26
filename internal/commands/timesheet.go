@@ -16,6 +16,7 @@ func NewTimesheetCmd() *cobra.Command {
 	var startDate string
 	var endDate string
 	var personID string
+	var project string
 
 	cmd := &cobra.Command{
 		Use:   "timesheet",
@@ -35,11 +36,13 @@ date range is specified.`,
 	cmd.PersistentFlags().StringVar(&endDate, "end", "", "End date (ISO 8601)")
 	cmd.PersistentFlags().StringVar(&endDate, "to", "", "End date (alias for --end)")
 	cmd.PersistentFlags().StringVar(&personID, "person", "", "Filter by person ID")
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project name, URL, or ID")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project name, URL, or ID (alias for --project)")
 
 	cmd.AddCommand(
 		newTimesheetReportCmd(&startDate, &endDate, &personID),
-		newTimesheetProjectCmd(),
-		newTimesheetRecordingCmd(),
+		newTimesheetProjectCmd(&project),
+		newTimesheetRecordingCmd(&project),
 	)
 
 	return cmd
@@ -118,7 +121,7 @@ func sumTimesheetHours(entries []basecamp.TimesheetEntry) float64 {
 	return total
 }
 
-func newTimesheetProjectCmd() *cobra.Command {
+func newTimesheetProjectCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
 		Short: "View project timesheet",
@@ -130,7 +133,32 @@ func newTimesheetProjectCmd() *cobra.Command {
 				return err
 			}
 
-			entries, err := app.Account().Timesheet().ProjectReport(cmd.Context(), nil)
+			// Resolve project — required for project-scoped timesheet
+			projectID := *project
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID == "" {
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
+			}
+
+			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+
+			projectIDInt, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			entries, err := app.Account().Timesheet().ProjectReport(cmd.Context(), projectIDInt, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -158,7 +186,7 @@ func newTimesheetProjectCmd() *cobra.Command {
 	return cmd
 }
 
-func newTimesheetRecordingCmd() *cobra.Command {
+func newTimesheetRecordingCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "recording <id>",
 		Short: "View recording timesheet",
@@ -169,6 +197,21 @@ func newTimesheetRecordingCmd() *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// Resolve project if provided
+			projectID := *project
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID != "" {
+				_, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+				if err != nil {
+					return err
+				}
 			}
 
 			recordingIDStr := args[0]

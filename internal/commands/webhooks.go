@@ -15,6 +15,8 @@ import (
 
 // NewWebhooksCmd creates the webhooks command group.
 func NewWebhooksCmd() *cobra.Command {
+	var project string
+
 	cmd := &cobra.Command{
 		Use:     "webhooks",
 		Aliases: []string{"webhook"},
@@ -39,32 +41,35 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				)
 			}
 			// Default to list when called without subcommand
-			return runWebhooksList(cmd)
+			return runWebhooksList(cmd, &project)
 		},
 	}
 
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project name, URL, or ID")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project name, URL, or ID (alias for --project)")
+
 	cmd.AddCommand(
-		newWebhooksListCmd(),
-		newWebhooksShowCmd(),
-		newWebhooksCreateCmd(),
-		newWebhooksUpdateCmd(),
-		newWebhooksDeleteCmd(),
+		newWebhooksListCmd(&project),
+		newWebhooksShowCmd(&project),
+		newWebhooksCreateCmd(&project),
+		newWebhooksUpdateCmd(&project),
+		newWebhooksDeleteCmd(&project),
 	)
 
 	return cmd
 }
 
-func newWebhooksListCmd() *cobra.Command {
+func newWebhooksListCmd(project *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List webhooks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWebhooksList(cmd)
+			return runWebhooksList(cmd, project)
 		},
 	}
 }
 
-func runWebhooksList(cmd *cobra.Command) error {
+func runWebhooksList(cmd *cobra.Command, project *string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Resolve account (enables interactive prompt if needed)
@@ -72,7 +77,32 @@ func runWebhooksList(cmd *cobra.Command) error {
 		return err
 	}
 
-	webhooksResult, err := app.Account().Webhooks().List(cmd.Context())
+	// Resolve project — required for project-scoped webhook listing
+	projectID := *project
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
+	webhooksResult, err := app.Account().Webhooks().List(cmd.Context(), bucketID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -95,7 +125,7 @@ func runWebhooksList(cmd *cobra.Command) error {
 	)
 }
 
-func newWebhooksShowCmd() *cobra.Command {
+func newWebhooksShowCmd(project *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show webhook details",
@@ -105,6 +135,22 @@ func newWebhooksShowCmd() *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// Resolve project if provided (optional for show)
+			projectID := *project
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID != "" {
+				resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+				if err != nil {
+					return err
+				}
+				_ = resolvedProjectID
 			}
 
 			webhookIDStr := args[0]
@@ -144,7 +190,7 @@ func newWebhooksShowCmd() *cobra.Command {
 	}
 }
 
-func newWebhooksCreateCmd() *cobra.Command {
+func newWebhooksCreateCmd(project *string) *cobra.Command {
 	var url string
 	var types string
 
@@ -160,6 +206,31 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// Resolve project — required for project-scoped webhook creation
+			projectID := *project
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID == "" {
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
+			}
+
+			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
 			}
 
 			if url == "" {
@@ -185,7 +256,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				Types:      typeArray, // nil = server defaults
 			}
 
-			webhook, err := app.Account().Webhooks().Create(cmd.Context(), req)
+			webhook, err := app.Account().Webhooks().Create(cmd.Context(), bucketID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -215,7 +286,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 	return cmd
 }
 
-func newWebhooksUpdateCmd() *cobra.Command {
+func newWebhooksUpdateCmd(project *string) *cobra.Command {
 	var url string
 	var types string
 	var active bool
@@ -230,6 +301,22 @@ func newWebhooksUpdateCmd() *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// Resolve project if provided (optional for update)
+			projectID := *project
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID != "" {
+				resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+				if err != nil {
+					return err
+				}
+				_ = resolvedProjectID
 			}
 
 			webhookIDStr := args[0]
@@ -305,7 +392,7 @@ func newWebhooksUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func newWebhooksDeleteCmd() *cobra.Command {
+func newWebhooksDeleteCmd(project *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a webhook",
@@ -315,6 +402,22 @@ func newWebhooksDeleteCmd() *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// Resolve project if provided (optional for delete)
+			projectID := *project
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID != "" {
+				resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+				if err != nil {
+					return err
+				}
+				_ = resolvedProjectID
 			}
 
 			webhookIDStr := args[0]
