@@ -50,10 +50,10 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 
 	cmd.AddCommand(
 		newWebhooksListCmd(&project),
-		newWebhooksShowCmd(&project),
+		newWebhooksShowCmd(),
 		newWebhooksCreateCmd(&project),
-		newWebhooksUpdateCmd(&project),
-		newWebhooksDeleteCmd(&project),
+		newWebhooksUpdateCmd(),
+		newWebhooksDeleteCmd(),
 	)
 
 	return cmd
@@ -125,7 +125,7 @@ func runWebhooksList(cmd *cobra.Command, project *string) error {
 	)
 }
 
-func newWebhooksShowCmd(project *string) *cobra.Command {
+func newWebhooksShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show webhook details",
@@ -135,22 +135,6 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Resolve project if provided (optional for show)
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID != "" {
-				resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-				if err != nil {
-					return err
-				}
-				_ = resolvedProjectID
 			}
 
 			webhookIDStr := args[0]
@@ -286,7 +270,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 	return cmd
 }
 
-func newWebhooksUpdateCmd(project *string) *cobra.Command {
+func newWebhooksUpdateCmd() *cobra.Command {
 	var url string
 	var types string
 	var active bool
@@ -301,22 +285,6 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Resolve project if provided (optional for update)
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID != "" {
-				resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-				if err != nil {
-					return err
-				}
-				_ = resolvedProjectID
 			}
 
 			webhookIDStr := args[0]
@@ -392,7 +360,7 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func newWebhooksDeleteCmd(project *string) *cobra.Command {
+func newWebhooksDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a webhook",
@@ -402,22 +370,6 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Resolve project if provided (optional for delete)
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID != "" {
-				resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-				if err != nil {
-					return err
-				}
-				_ = resolvedProjectID
 			}
 
 			webhookIDStr := args[0]

@@ -37,7 +37,7 @@ Use 'basecamp boost delete <boost-id>' to remove a boost.`,
 		newBoostListCmd(&project),
 		newBoostShowCmd(&project),
 		newBoostCreateCmd(&project),
-		newBoostDeleteCmd(&project),
+		newBoostDeleteCmd(),
 	)
 
 	return cmd
@@ -326,14 +326,14 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 	)
 }
 
-func newBoostDeleteCmd(project *string) *cobra.Command {
+func newBoostDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <boost-id|url>",
 		Short: "Delete a boost",
 		Long: `Delete a boost from a recording.
 
 You can pass either a boost ID or a Basecamp URL:
-  basecamp boost delete 789 --project my-project
+  basecamp boost delete 789
   basecamp boost delete https://3.basecamp.com/123/buckets/456/boosts/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -342,36 +342,12 @@ You can pass either a boost ID or a Basecamp URL:
 				return err
 			}
 
-			boostID, urlProjectID := extractWithProject(args[0])
-
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
+			boostID := extractID(args[0])
 
 			boostIDInt, err := strconv.ParseInt(boostID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid boost ID")
 			}
-
-			_ = resolvedProjectID
 
 			err = app.Account().Boosts().Delete(cmd.Context(), boostIDInt)
 			if err != nil {
