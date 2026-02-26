@@ -433,7 +433,7 @@ func transformCobraError(err error) error {
 func resolvePreferences(cmd *cobra.Command, cfg *config.Config, flags *appctx.GlobalFlags) {
 	pf := cmd.PersistentFlags()
 
-	if !pf.Changed("stats") && !(pf.Changed("no-stats") && flags.NoStats) {
+	if !pf.Changed("stats") && (!pf.Changed("no-stats") || !flags.NoStats) {
 		if cfg.Stats != nil {
 			flags.Stats = *cfg.Stats
 		} else {
@@ -441,7 +441,7 @@ func resolvePreferences(cmd *cobra.Command, cfg *config.Config, flags *appctx.Gl
 		}
 	}
 
-	if !pf.Changed("hints") && !(pf.Changed("no-hints") && flags.NoHints) {
+	if !pf.Changed("hints") && (!pf.Changed("no-hints") || !flags.NoHints) {
 		if cfg.Hints != nil {
 			flags.Hints = *cfg.Hints
 		} else {
