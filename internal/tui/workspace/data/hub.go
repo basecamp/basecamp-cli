@@ -769,7 +769,7 @@ func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
 		}, func(ctx context.Context) ([]TimelineEventInfo, error) {
 			client := h.accountClient()
 			acct := h.currentAccountInfo()
-			events, err := client.Timeline().ProjectTimeline(ctx)
+			events, err := client.Timeline().ProjectTimeline(ctx, projectID)
 			if err != nil {
 				return nil, err
 			}
