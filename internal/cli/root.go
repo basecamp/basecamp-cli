@@ -72,6 +72,9 @@ func NewRootCmd() *cobra.Command {
 				}
 			}
 
+			// Resolve behavior preferences: explicit flag > config > version.IsDev()
+			resolvePreferences(cmd, cfg, &flags)
+
 			// Create app and store in context
 			app := appctx.NewApp(cfg)
 			app.Flags = flags
@@ -104,10 +107,10 @@ func NewRootCmd() *cobra.Command {
 
 	// Behavior flags
 	cmd.PersistentFlags().CountVarP(&flags.Verbose, "verbose", "v", "Verbose output (-v for ops, -vv for requests)")
-	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", version.IsDev(), "Show session statistics (default: on in dev builds)")
+	cmd.PersistentFlags().BoolVar(&flags.Stats, "stats", false, "Show session statistics (persisted via: basecamp config set stats true)")
 	cmd.PersistentFlags().BoolVar(&flags.NoStats, "no-stats", false, "Disable session statistics")
 	cmd.MarkFlagsMutuallyExclusive("stats", "no-stats")
-	cmd.PersistentFlags().BoolVar(&flags.Hints, "hints", version.IsDev(), "Show follow-up hints (default: on in dev builds)")
+	cmd.PersistentFlags().BoolVar(&flags.Hints, "hints", false, "Show follow-up hints (persisted via: basecamp config set hints true)")
 	cmd.PersistentFlags().BoolVar(&flags.NoHints, "no-hints", false, "Disable follow-up hints")
 	cmd.MarkFlagsMutuallyExclusive("hints", "no-hints")
 	cmd.PersistentFlags().StringVar(&flags.CacheDir, "cache-dir", "", "Cache directory")
@@ -420,4 +423,33 @@ func transformCobraError(err error) error {
 	}
 
 	return err
+}
+
+// resolvePreferences resolves behavior flag values using the precedence chain:
+// explicit flag > config > version.IsDev()
+//
+// Flags register with default=false so we can detect explicit usage via Changed().
+// When no flag is passed, we check config, then fall back to version.IsDev().
+func resolvePreferences(cmd *cobra.Command, cfg *config.Config, flags *appctx.GlobalFlags) {
+	pf := cmd.PersistentFlags()
+
+	if !pf.Changed("stats") && !(pf.Changed("no-stats") && flags.NoStats) {
+		if cfg.Stats != nil {
+			flags.Stats = *cfg.Stats
+		} else {
+			flags.Stats = version.IsDev()
+		}
+	}
+
+	if !pf.Changed("hints") && !(pf.Changed("no-hints") && flags.NoHints) {
+		if cfg.Hints != nil {
+			flags.Hints = *cfg.Hints
+		} else {
+			flags.Hints = version.IsDev()
+		}
+	}
+
+	if !pf.Changed("verbose") && cfg.Verbose != nil {
+		flags.Verbose = *cfg.Verbose
+	}
 }
