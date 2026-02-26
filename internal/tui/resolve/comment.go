@@ -116,7 +116,7 @@ func (r *Resolver) Comment(ctx context.Context, onFlag string, projectID string)
 }
 
 // fetchCommentableRecordings retrieves recent recordings that can be commented on.
-func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int64) ([]basecamp.Recording, error) {
+func (r *Resolver) fetchCommentableRecordings(ctx context.Context, projectID int64) ([]basecamp.Recording, error) {
 	if r.config.AccountID == "" {
 		return nil, output.ErrUsage("Account must be resolved before fetching recordings")
 	}
@@ -127,7 +127,7 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 
 	// Fetch todos
 	todosResult, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
-		Bucket:    []int64{bucketID},
+		Bucket:    []int64{projectID},
 		Status:    "active",
 		Sort:      "updated_at",
 		Direction: "desc",
@@ -140,7 +140,7 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 
 	// Fetch messages
 	messagesResult, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeMessage, &basecamp.RecordingsListOptions{
-		Bucket:    []int64{bucketID},
+		Bucket:    []int64{projectID},
 		Status:    "active",
 		Sort:      "updated_at",
 		Direction: "desc",
@@ -153,7 +153,7 @@ func (r *Resolver) fetchCommentableRecordings(ctx context.Context, bucketID int6
 
 	// Fetch documents
 	docsResult, err := r.sdk.ForAccount(r.config.AccountID).Recordings().List(ctx, basecamp.RecordingTypeDocument, &basecamp.RecordingsListOptions{
-		Bucket:    []int64{bucketID},
+		Bucket:    []int64{projectID},
 		Status:    "active",
 		Sort:      "updated_at",
 		Direction: "desc",
