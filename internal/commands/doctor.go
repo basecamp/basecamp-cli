@@ -2,6 +2,7 @@
 package commands
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
 
@@ -800,6 +802,13 @@ func checkShellCompletion(verbose bool) Check {
 				break
 			}
 		}
+		// Check for eval-based installation in .zshrc
+		if !completionInstalled {
+			if zshrcHasCompletionEval() {
+				completionInstalled = true
+				completionPath = "~/.zshrc (via eval)"
+			}
+		}
 	case "fish":
 		completionPath = filepath.Join(os.Getenv("HOME"), ".config/fish/completions/basecamp.fish")
 		if _, err := os.Stat(completionPath); err == nil {
@@ -835,6 +844,29 @@ func detectShell() string {
 		return base
 	}
 	return ""
+}
+
+// zshrcHasCompletionEval checks if ~/.zshrc contains an eval-based
+// basecamp completion install (e.g., eval "$(basecamp completion zsh)").
+func zshrcHasCompletionEval() bool {
+	home := os.Getenv("HOME")
+	if home == "" {
+		return false
+	}
+	f, err := os.Open(filepath.Join(home, ".zshrc")) //nolint:gosec // G304: trusted path
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "basecamp completion zsh") {
+			return true
+		}
+	}
+	return false
 }
 
 // summarizeChecks counts results by status.
@@ -909,70 +941,64 @@ func pluralize(n int, singular, plural string) string {
 
 // renderDoctorStyled outputs a human-friendly styled format for TTY.
 func renderDoctorStyled(w io.Writer, result *DoctorResult) {
-	// ANSI color codes
-	const (
-		reset  = "\033[0m"
-		bold   = "\033[1m"
-		dim    = "\033[2m"
-		red    = "\033[31m"
-		green  = "\033[32m"
-		yellow = "\033[33m"
-		blue   = "\033[34m"
-		cyan   = "\033[36m"
-	)
+	r := output.NewRenderer(w, false)
 
-	// Status symbols and colors
-	statusIcon := map[string]string{
-		"pass": green + "✓" + reset,
-		"fail": red + "✗" + reset,
-		"warn": yellow + "!" + reset,
-		"skip": dim + "○" + reset,
+	// Status icon styles
+	iconPass := r.Success
+	iconFail := r.Error
+	iconWarn := r.Warning
+	iconSkip := r.Muted
+
+	nameStyle := lipgloss.NewStyle().Bold(true)
+	hintStyle := r.Hint
+
+	statusIcon := map[string]func(string) string{
+		"pass": func(_ string) string { return iconPass.Render("✓") },
+		"fail": func(_ string) string { return iconFail.Render("✗") },
+		"warn": func(_ string) string { return iconWarn.Render("!") },
+		"skip": func(_ string) string { return iconSkip.Render("○") },
 	}
 
-	statusColor := map[string]string{
-		"pass": green,
-		"fail": red,
-		"warn": yellow,
-		"skip": dim,
+	statusMsg := map[string]lipgloss.Style{
+		"pass": r.Success,
+		"fail": r.Error,
+		"warn": r.Warning,
+		"skip": r.Muted,
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "%s%sBasecamp CLI Doctor%s\n", bold, cyan, reset)
+	fmt.Fprintln(w, r.Summary.Render("Basecamp CLI Doctor"))
 	fmt.Fprintln(w)
 
-	// Print each check
 	for _, check := range result.Checks {
-		icon := statusIcon[check.Status]
-		color := statusColor[check.Status]
+		icon := statusIcon[check.Status]("")
+		msgStyle := statusMsg[check.Status]
 
-		// Main line: icon + name + message
-		fmt.Fprintf(w, "  %s %s%s%s %s%s%s\n",
+		fmt.Fprintf(w, "  %s %s %s\n",
 			icon,
-			bold, check.Name, reset,
-			color, check.Message, reset,
+			nameStyle.Render(check.Name),
+			msgStyle.Render(check.Message),
 		)
 
-		// Hint on next line, indented
 		if check.Hint != "" && (check.Status == "fail" || check.Status == "warn") {
-			fmt.Fprintf(w, "      %s↳ %s%s\n", dim, check.Hint, reset)
+			fmt.Fprintf(w, "      %s\n", hintStyle.Render("↳ "+check.Hint))
 		}
 	}
 
 	fmt.Fprintln(w)
 
-	// Summary line
 	var summaryParts []string
 	if result.Passed > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s%d passed%s", green, result.Passed, reset))
+		summaryParts = append(summaryParts, r.Success.Render(fmt.Sprintf("%d passed", result.Passed)))
 	}
 	if result.Failed > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s%d failed%s", red, result.Failed, reset))
+		summaryParts = append(summaryParts, r.Error.Render(fmt.Sprintf("%d failed", result.Failed)))
 	}
 	if result.Warned > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s%d %s%s", yellow, result.Warned, pluralize(result.Warned, "warning", "warnings"), reset))
+		summaryParts = append(summaryParts, r.Warning.Render(fmt.Sprintf("%d %s", result.Warned, pluralize(result.Warned, "warning", "warnings"))))
 	}
 	if result.Skipped > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s%d skipped%s", dim, result.Skipped, reset))
+		summaryParts = append(summaryParts, r.Muted.Render(fmt.Sprintf("%d skipped", result.Skipped)))
 	}
 
 	fmt.Fprintf(w, "  %s\n", strings.Join(summaryParts, "  "))
