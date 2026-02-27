@@ -26,9 +26,9 @@ func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool) {
 	t.Cleanup(func() { homebrewChecker = origHC })
 }
 
-// executeUpgradeCommand runs the upgrade command and returns both the
-// progressive output (cmd stdout) and the app.OK() response output.
-func executeUpgradeCommand(t *testing.T, app *appctx.App) (cmdOut string, appOut *bytes.Buffer, err error) {
+// executeUpgradeCommand runs the upgrade command and returns the combined
+// output captured from cmd.OutOrStdout().
+func executeUpgradeCommand(t *testing.T, app *appctx.App) (cmdOut string, err error) {
 	t.Helper()
 	cmd := NewUpgradeCmd()
 	cmd.SetArgs(nil)
@@ -40,7 +40,7 @@ func executeUpgradeCommand(t *testing.T, app *appctx.App) (cmdOut string, appOut
 	cmd.SetErr(&bytes.Buffer{})
 
 	err = cmd.Execute()
-	return buf.String(), nil, err
+	return buf.String(), err
 }
 
 func TestUpgradeDevBuild(t *testing.T) {
@@ -50,7 +50,7 @@ func TestUpgradeDevBuild(t *testing.T) {
 	version.Version = "dev"
 	t.Cleanup(func() { version.Version = orig })
 
-	_, _, err := executeUpgradeCommand(t, app)
+	_, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	// app.OK() routes through the output writer, not cmd stdout
 	assert.Contains(t, appBuf.String(), "Development build")
@@ -65,7 +65,7 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 
 	stubUpgradeCheckers(t, "1.2.3", false)
 
-	cmdOut, _, err := executeUpgradeCommand(t, app)
+	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	assert.Contains(t, cmdOut, "already up to date")
 	assert.Contains(t, appBuf.String(), "up_to_date")
@@ -80,7 +80,7 @@ func TestUpgradeAvailable(t *testing.T) {
 
 	stubUpgradeCheckers(t, "1.3.0", false)
 
-	cmdOut, _, err := executeUpgradeCommand(t, app)
+	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	assert.Contains(t, cmdOut, "update available: 1.3.0")
 	assert.Contains(t, appBuf.String(), "releases/tag/v1.3.0")
