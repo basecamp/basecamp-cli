@@ -1871,3 +1871,120 @@ func TestWriterStyledErrorWithHint(t *testing.T) {
 	// Should have ANSI codes (styled output)
 	assert.Contains(t, output, "\x1b[", "Expected ANSI escape codes in styled output")
 }
+
+// =============================================================================
+// Terminal Escape Injection Defense Tests
+// =============================================================================
+
+func TestFormatCellStripsANSIEscapes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    any
+		expected string
+	}{
+		{
+			name:     "CSI clear screen",
+			input:    "evil\x1b[2Jproject",
+			expected: "evilproject",
+		},
+		{
+			name:     "OSC title set",
+			input:    "task\x1b]0;pwned\x07done",
+			expected: "taskdone",
+		},
+		{
+			name:     "CSI cursor move up",
+			input:    "hello\x1b[5Aworld",
+			expected: "helloworld",
+		},
+		{
+			name:     "clean string passthrough",
+			input:    "normal text",
+			expected: "normal text",
+		},
+		{
+			name:     "only escape sequences",
+			input:    "\x1b[31m\x1b[0m",
+			expected: "",
+		},
+		{
+			name:     "OSC 52 clipboard injection",
+			input:    "safe\x1b]52;c;cHduZWQ=\x07text",
+			expected: "safetext",
+		},
+		{
+			name:     "CSI SGR color codes",
+			input:    "\x1b[1;31mred bold\x1b[0m",
+			expected: "red bold",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatCell(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatCellStripsANSIFromArrayElements(t *testing.T) {
+	t.Run("string elements in array", func(t *testing.T) {
+		input := []any{"clean", "has\x1b[2Jescapes", "also\x1b[31mcolored\x1b[0m"}
+		result := formatCell(input)
+		assert.Equal(t, "clean, hasescapes, alsocolored", result)
+	})
+
+	t.Run("map elements with escaped name", func(t *testing.T) {
+		input := []any{
+			map[string]any{"name": "Alice\x1b[2J"},
+			map[string]any{"name": "Bob\x1b]0;pwned\x07"},
+		}
+		result := formatCell(input)
+		assert.Equal(t, "Alice, Bob", result)
+	})
+
+	t.Run("map elements with escaped title", func(t *testing.T) {
+		input := []any{
+			map[string]any{"title": "Task\x1b[5A One"},
+		}
+		result := formatCell(input)
+		assert.Equal(t, "Task One", result)
+	})
+}
+
+func TestRenderDataStripsEscapesFromTopLevelStrings(t *testing.T) {
+	tests := []struct {
+		name   string
+		data   any
+		format Format
+	}{
+		{"styled string", "hello\x1b[2Jworld", FormatStyled},
+		{"markdown string", "hello\x1b[2Jworld", FormatMarkdown},
+		{"styled default (int-like)", 42, FormatStyled},
+		{"markdown default (int-like)", 42, FormatMarkdown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := New(Options{Format: tt.format, Writer: &buf})
+			err := w.OK(tt.data)
+			require.NoError(t, err)
+
+			output := buf.String()
+			assert.NotContains(t, output, "\x1b[2J",
+				"escape sequence must not appear in rendered output")
+		})
+	}
+}
+
+func TestRenderDataStripsOSCFromTopLevelString(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK("safe\x1b]52;c;cHduZWQ=\x07text")
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "\x1b]52", "OSC 52 clipboard injection must be stripped")
+	assert.Contains(t, output, "safetext")
+}
