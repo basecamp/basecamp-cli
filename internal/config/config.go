@@ -411,6 +411,9 @@ func repoConfigPath() string {
 	// Bounded by $HOME: only search within the home directory tree.
 	// If CWD is outside $HOME (e.g., /tmp), no repo config is trusted.
 	dir, _ := os.Getwd()
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	home, _ := os.UserHomeDir()
 	if resolved, err := filepath.EvalSymlinks(home); err == nil {
 		home = resolved
@@ -467,6 +470,9 @@ func isInsideDir(child, parent string) bool {
 //   - Outside a git repo: only the current working directory (no parent traversal)
 func localConfigPaths(repoConfigPath string) []string {
 	dir, _ := os.Getwd()
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	var paths []string
 
 	// Determine trust boundary (resolve symlinks for reliable comparison

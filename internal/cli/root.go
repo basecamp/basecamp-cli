@@ -84,12 +84,6 @@ func NewRootCmd() *cobra.Command {
 					}
 					return fmt.Errorf("base_url (%s): %w\nFix with: basecamp config unset base_url", source, err)
 				}
-				if profileName != "" {
-					// Re-validate: profile may have changed base_url
-					if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
-						return fmt.Errorf("base_url (from profile %q): %w\nFix with: basecamp config unset base_url", profileName, err)
-					}
-				}
 			}
 
 			// Resolve behavior preferences: explicit flag > config > version.IsDev()
@@ -377,8 +371,6 @@ func promptForProfile(cfg *config.Config) (string, error) {
 	return selected.ID, nil
 }
 
-// transformCobraError transforms Cobra's default error messages to match the
-// Bash CLI format for consistency with existing tests and user expectations.
 // isConfigCmd returns true if cmd is "config" or any of its subcommands.
 // Used to skip HTTPS enforcement so users can repair a bad base_url.
 func isConfigCmd(cmd *cobra.Command) bool {
@@ -390,6 +382,8 @@ func isConfigCmd(cmd *cobra.Command) bool {
 	return false
 }
 
+// transformCobraError transforms Cobra's default error messages to match the
+// Bash CLI format for consistency with existing tests and user expectations.
 func transformCobraError(err error) error {
 	msg := err.Error()
 
