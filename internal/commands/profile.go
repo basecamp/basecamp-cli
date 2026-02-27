@@ -262,17 +262,15 @@ Examples:
 			configData["profiles"] = profilesMap
 
 			// If this is the first profile, set it as default
-			if len(profilesMap) == 1 {
+			isDefault := len(profilesMap) == 1
+			if isDefault {
 				configData["default_profile"] = name
-				fmt.Printf("Set %q as default profile (first profile created)\n", name)
 			}
 
 			// Write config atomically
 			if err := atomicWriteJSON(configPath, configData); err != nil {
 				return err
 			}
-
-			fmt.Printf("Created profile %q\n", name)
 
 			// Update in-memory config and start login
 			if app.Config.Profiles == nil {
@@ -286,7 +284,6 @@ Examples:
 			}
 
 			// Start OAuth login flow for the new profile
-			fmt.Printf("Starting authentication for profile %q...\n", name)
 			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
@@ -294,8 +291,6 @@ Examples:
 			}); err != nil {
 				return err
 			}
-
-			fmt.Println("\nAuthentication successful!")
 
 			// Try to fetch and store user profile
 			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
@@ -305,13 +300,19 @@ Examples:
 					Name string `json:"name"`
 				}
 				if err := resp.UnmarshalData(&profile); err == nil {
-					if err := app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID)); err == nil {
-						fmt.Printf("Logged in as: %s\n", profile.Name)
-					}
+					_ = app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID))
 				}
 			}
 
-			return nil
+			result := map[string]any{
+				"name":     name,
+				"base_url": baseURL,
+				"scope":    scope,
+			}
+			if isDefault {
+				result["default"] = true
+			}
+			return app.OK(result, output.WithSummary(fmt.Sprintf("Created profile %q", name)))
 		},
 	}
 
