@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -130,7 +131,7 @@ func newConfigInitCmd() *cobra.Command {
 			}
 
 			// Create directory
-			if err := os.MkdirAll(configDir, 0750); err != nil {
+			if err := os.MkdirAll(configDir, 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
@@ -189,7 +190,12 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				"verbose":         true,
 			}
 			if !validKeys[key] {
-				return output.ErrUsage(fmt.Sprintf("Invalid config key: %s", key))
+				names := make([]string, 0, len(validKeys))
+				for k := range validKeys {
+					names = append(names, k)
+				}
+				sort.Strings(names)
+				return output.ErrUsage(fmt.Sprintf("Invalid config key %q. Valid keys: %s", key, strings.Join(names, ", ")))
 			}
 
 			var configPath string
@@ -206,7 +212,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 
 			// Ensure directory exists
 			configDir := filepath.Dir(configPath)
-			if err := os.MkdirAll(configDir, 0750); err != nil {
+			if err := os.MkdirAll(configDir, 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
@@ -432,7 +438,7 @@ func newConfigProjectCmd() *cobra.Command {
 			configPath := filepath.Join(".basecamp", "config.json")
 
 			// Ensure directory exists
-			if err := os.MkdirAll(".basecamp", 0750); err != nil {
+			if err := os.MkdirAll(".basecamp", 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
