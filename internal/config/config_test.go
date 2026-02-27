@@ -573,7 +573,8 @@ func TestProfilesConfigLayering(t *testing.T) {
 	data, _ := json.Marshal(globalConfig)
 	os.WriteFile(globalPath, data, 0644)
 
-	// Local config adds dev and overrides default_profile
+	// Local config tries to add dev profile and override default_profile —
+	// both are authority keys and must be rejected from local sources.
 	localConfig := map[string]any{
 		"default_profile": "dev",
 		"profiles": map[string]any{
@@ -581,6 +582,7 @@ func TestProfilesConfigLayering(t *testing.T) {
 				"base_url": "http://localhost:3000",
 			},
 		},
+		"account_id": "99999", // Non-authority key, should be applied
 	}
 	data, _ = json.Marshal(localConfig)
 	os.WriteFile(localPath, data, 0644)
@@ -589,26 +591,28 @@ func TestProfilesConfigLayering(t *testing.T) {
 	loadFromFile(cfg, globalPath, SourceGlobal)
 	loadFromFile(cfg, localPath, SourceLocal)
 
-	// default_profile should be overridden by local
-	if cfg.DefaultProfile != "dev" {
-		t.Errorf("DefaultProfile = %q, want %q", cfg.DefaultProfile, "dev")
+	// default_profile from local must be rejected — global value persists
+	if cfg.DefaultProfile != "production" {
+		t.Errorf("DefaultProfile = %q, want %q (local override must be rejected)", cfg.DefaultProfile, "production")
 	}
 
-	// profiles should be merged (global + local)
-	if len(cfg.Profiles) != 3 {
-		t.Errorf("len(Profiles) = %d, want 3 (production + beta + dev)", len(cfg.Profiles))
+	// profiles from local must be rejected — only global profiles persist
+	if len(cfg.Profiles) != 2 {
+		t.Errorf("len(Profiles) = %d, want 2 (production + beta only)", len(cfg.Profiles))
 	}
 
-	// Verify all profiles are present
 	if _, ok := cfg.Profiles["production"]; !ok {
 		t.Error("Profiles[production] from global should be present")
 	}
 	if _, ok := cfg.Profiles["beta"]; !ok {
 		t.Error("Profiles[beta] from global should be present")
 	}
-	if _, ok := cfg.Profiles["dev"]; !ok {
-		t.Error("Profiles[dev] from local should be present")
+	if _, ok := cfg.Profiles["dev"]; ok {
+		t.Error("Profiles[dev] from local should be rejected")
 	}
+
+	// Non-authority keys from local config should still be applied
+	assert.Equal(t, "99999", cfg.AccountID, "non-authority key account_id from local should be applied")
 }
 
 func TestApplyProfile(t *testing.T) {
@@ -641,6 +645,190 @@ func TestApplyProfileNotFound(t *testing.T) {
 	err := cfg.ApplyProfile("nonexistent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestLocalConfigPaths_StopsAtRepoRoot(t *testing.T) {
+	// Create a directory structure:
+	//   tmpDir/
+	//     .basecamp/config.json  ← ABOVE repo root, should NOT be loaded
+	//     repo/
+	//       .git/                ← repo root marker
+	//       .basecamp/config.json ← repo config (loaded as SourceRepo, excluded from local)
+	//       sub/
+	//         .basecamp/config.json ← local config INSIDE repo, should be loaded
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+
+	aboveRepo := filepath.Join(tmpDir, ".basecamp")
+	require.NoError(t, os.MkdirAll(aboveRepo, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(aboveRepo, "config.json"), []byte(`{"account_id":"evil"}`), 0644))
+
+	repoRoot := filepath.Join(tmpDir, "repo")
+	require.NoError(t, os.MkdirAll(filepath.Join(repoRoot, ".git"), 0755))
+	repoConfig := filepath.Join(repoRoot, ".basecamp")
+	require.NoError(t, os.MkdirAll(repoConfig, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(repoConfig, "config.json"), []byte(`{"account_id":"repo"}`), 0644))
+
+	subDir := filepath.Join(repoRoot, "sub")
+	subConfig := filepath.Join(subDir, ".basecamp")
+	require.NoError(t, os.MkdirAll(subConfig, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(subConfig, "config.json"), []byte(`{"account_id":"local"}`), 0644))
+
+	// Change to sub dir
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(subDir))
+	defer os.Chdir(origDir)
+
+	repoCfgPath := filepath.Join(repoConfig, "config.json")
+	paths := localConfigPaths(repoCfgPath)
+
+	// Should only contain the sub dir config, NOT the above-repo config
+	assert.Len(t, paths, 1, "should find exactly 1 local config (sub dir)")
+	assert.Equal(t, filepath.Join(subConfig, "config.json"), paths[0])
+}
+
+func TestLocalConfigPaths_NoRepo_OnlyCWD(t *testing.T) {
+	// Without a git repo, only CWD's config should be loaded.
+	//   tmpDir/
+	//     parent/
+	//       .basecamp/config.json ← should NOT be loaded
+	//       child/
+	//         .basecamp/config.json ← should be loaded (CWD)
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+
+	parentConfig := filepath.Join(tmpDir, "parent", ".basecamp")
+	require.NoError(t, os.MkdirAll(parentConfig, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(parentConfig, "config.json"), []byte(`{"account_id":"parent"}`), 0644))
+
+	childDir := filepath.Join(tmpDir, "parent", "child")
+	childConfig := filepath.Join(childDir, ".basecamp")
+	require.NoError(t, os.MkdirAll(childConfig, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(childConfig, "config.json"), []byte(`{"account_id":"child"}`), 0644))
+
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(childDir))
+	defer os.Chdir(origDir)
+
+	// No repo config
+	paths := localConfigPaths("")
+
+	// Should only contain child config, not parent
+	assert.Len(t, paths, 1, "should find exactly 1 local config (CWD)")
+	assert.Equal(t, filepath.Join(childConfig, "config.json"), paths[0])
+}
+
+func TestRepoConfigPath_StopsAtHome(t *testing.T) {
+	// Create a fake .git above $HOME (simulating /tmp/.git attack).
+	// repoConfigPath should not walk above $HOME.
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	// We can't actually create a .git in a parent of $HOME without root,
+	// but we can verify the boundary by working in a subdirectory of tmpDir
+	// where we control the HOME env var.
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	fakeHome := filepath.Join(tmpDir, "home", "user")
+	require.NoError(t, os.MkdirAll(fakeHome, 0755))
+
+	// Put a .git and .basecamp/config.json ABOVE fake home
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".basecamp"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".basecamp", "config.json"), []byte(`{"base_url":"https://evil.com"}`), 0644))
+
+	// Work inside fake home
+	workDir := filepath.Join(fakeHome, "projects", "myapp")
+	require.NoError(t, os.MkdirAll(workDir, 0755))
+
+	origDir, _ := os.Getwd()
+	origHome := os.Getenv("HOME")
+	require.NoError(t, os.Chdir(workDir))
+	os.Setenv("HOME", fakeHome)
+	defer func() {
+		os.Chdir(origDir)
+		os.Setenv("HOME", origHome)
+	}()
+	_ = home // suppress unused
+
+	// repoConfigPath should NOT find the .git above fake home
+	result := repoConfigPath()
+	assert.Empty(t, result, "should not find repo config above HOME")
+}
+
+func TestLoadFromFile_BaseURLRejectedFromLocal(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"base_url":"https://custom.example.com"}`), 0644))
+
+	// Capture stderr
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceLocal)
+
+	w.Close()
+	var buf [1024]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	output := string(buf[:n])
+	assert.Contains(t, output, "warning: ignoring base_url")
+	assert.Contains(t, output, "https://custom.example.com")
+	assert.Contains(t, output, "local")
+
+	// Value must NOT be applied
+	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL, "local config should not override base_url")
+}
+
+func TestLoadFromFile_BaseURLNoWarningForGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"base_url":"https://custom.example.com"}`), 0644))
+
+	// Capture stderr
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	w.Close()
+	var buf [1024]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	output := string(buf[:n])
+	assert.Empty(t, output, "global config should not emit base_url warning")
+}
+
+func TestLoadFromFile_MalformedJSONWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{not valid json}`), 0644))
+
+	// Capture stderr
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	w.Close()
+	var buf [1024]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	output := string(buf[:n])
+	assert.Contains(t, output, "warning: skipping malformed config")
+	assert.Contains(t, output, configPath)
+
+	// Should still have defaults
+	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
 }
 
 func TestPreferenceFieldsNilByDefault(t *testing.T) {

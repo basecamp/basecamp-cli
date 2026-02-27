@@ -14,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -66,6 +67,10 @@ func NewRootCmd() *cobra.Command {
 					Todolist: flags.Todolist,
 					CacheDir: flags.CacheDir,
 				})
+				// Re-validate: profile may have changed base_url
+				if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
+					return fmt.Errorf("base_url (from profile %q): %w", profileName, err)
+				}
 				// Profile-scoped cache (only if cache dir was not explicitly set via flag or env)
 				if flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
 					cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
