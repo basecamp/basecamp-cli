@@ -49,9 +49,52 @@ get_latest_version() {
   echo "$version"
 }
 
+verify_checksums() {
+  local version="$1"
+  local tmp_dir="$2"
+  local archive_name="$3"
+  local base_url="https://github.com/${REPO}/releases/download/v${version}"
+
+  info "Verifying checksums..."
+
+  if ! curl -fsSL "${base_url}/checksums.txt" -o "${tmp_dir}/checksums.txt"; then
+    error "Failed to download checksums.txt"
+  fi
+
+  # Verify SHA256 checksum of the downloaded archive
+  (cd "$tmp_dir" && grep "$archive_name" checksums.txt | shasum -a 256 --check --status) \
+    || error "Checksum verification failed for $archive_name"
+
+  info "Checksum verified"
+
+  # If cosign is available, verify the signature
+  if command -v cosign &>/dev/null; then
+    info "Verifying cosign signature..."
+
+    if ! curl -fsSL "${base_url}/checksums.txt.sig" -o "${tmp_dir}/checksums.txt.sig"; then
+      error "Failed to download checksums.txt.sig"
+    fi
+
+    if ! curl -fsSL "${base_url}/checksums.txt.pem" -o "${tmp_dir}/checksums.txt.pem"; then
+      error "Failed to download checksums.txt.pem"
+    fi
+
+    cosign verify-blob \
+      --certificate "${tmp_dir}/checksums.txt.pem" \
+      --signature "${tmp_dir}/checksums.txt.sig" \
+      --certificate-identity-regexp "https://github.com/basecamp/basecamp-cli" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      "${tmp_dir}/checksums.txt" \
+      || error "Cosign signature verification failed"
+
+    info "Signature verified"
+  fi
+}
+
 download_binary() {
   local version="$1"
   local platform="$2"
+  local tmp_dir="$3"
   local url archive_name ext
 
   # Determine archive extension
@@ -66,13 +109,12 @@ download_binary() {
 
   info "Downloading basecamp v${version} for ${platform}..."
 
-  local tmp_dir
-  tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
-
   if ! curl -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
     error "Failed to download from $url"
   fi
+
+  # Verify integrity before extraction
+  verify_checksums "$version" "$tmp_dir" "$archive_name"
 
   # Extract binary
   info "Extracting..."
@@ -166,7 +208,7 @@ main() {
     error "curl is required but not installed"
   fi
 
-  local platform version
+  local platform version tmp_dir
   platform=$(detect_platform)
 
   if [[ -n "$VERSION" ]]; then
@@ -175,7 +217,10 @@ main() {
     version=$(get_latest_version)
   fi
 
-  download_binary "$version" "$platform"
+  tmp_dir=$(mktemp -d)
+  trap 'rm -rf "$tmp_dir"' EXIT
+
+  download_binary "$version" "$platform" "$tmp_dir"
   setup_path
   setup_theme
   verify_install
