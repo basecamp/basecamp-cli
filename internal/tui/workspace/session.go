@@ -198,6 +198,13 @@ func (s *Session) ConsumeInitialView() (ViewTarget, Scope, bool) {
 	return target, scope, true
 }
 
+// ReloadTheme re-reads the theme from disk and updates the shared Styles
+// in place. All components holding *Styles see new colors on the next render.
+func (s *Session) ReloadTheme() {
+	theme := tui.ResolveTheme()
+	s.styles.UpdateTheme(theme)
+}
+
 // Shutdown cancels the session context and tears down all Hub realms.
 // Called on program exit.
 func (s *Session) Shutdown() {
