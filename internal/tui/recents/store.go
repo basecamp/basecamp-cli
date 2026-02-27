@@ -163,7 +163,7 @@ func (s *Store) load() {
 func (s *Store) saveSnapshot(items map[string][]Item) {
 	// Ensure directory exists
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		s.mu.Lock()
 		s.lastError = err
 		s.mu.Unlock()
