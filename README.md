@@ -1,7 +1,5 @@
 # <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI
 
-> **Prerelease.** This is an early internal release for 37signals dogfooding. The repo is private — all install methods below require GitHub access. Expect rough edges; file issues as you find them.
-
 `basecamp` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
@@ -20,7 +18,7 @@ That's it. You now have full access to Basecamp from your terminal.
 <details>
 <summary>Other installation methods</summary>
 
-**Go install** (requires `GOPRIVATE=github.com/basecamp/*`):
+**Go install:**
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```

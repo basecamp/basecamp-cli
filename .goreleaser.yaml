@@ -97,9 +97,9 @@ release:
     basecamp auth login
     ```
 
-    Requires `gh` CLI with access to the basecamp org. Other platforms: grab the matching archive from the assets below.
+    Other platforms: download the matching archive from the assets below.
 
-# Homebrew cask — deferred until repo goes public or cask auth for private repos is solved
+# Homebrew cask — deferred until cask tap is set up
 # homebrew_casks:
 #   - name: basecamp
 #     repository:
@@ -113,7 +113,7 @@ release:
 #       - basecamp
 #     skip_upload: auto
 
-# Scoop (Windows) — deferred, no internal Windows users
+# Scoop (Windows) — deferred, no Windows users yet
 # scoops:
 #   - name: basecamp
 #     repository:
