@@ -293,24 +293,35 @@ func (m *Manager) Logout() error {
 	return m.store.Delete(credKey)
 }
 
-func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) { //nolint:unparam // error return for consistent signature
+func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) {
 	discoverer := oauth.NewDiscoverer(m.httpClient)
 	cfg, err := discoverer.Discover(ctx, m.cfg.BaseURL)
 	if err != nil {
-		// Fallback to Launchpad - intentionally return nil error with fallback config
-		return &oauth.Config{ //nolint:nilerr // intentional fallback to Launchpad on discovery error
-			AuthorizationEndpoint: m.launchpadURL() + "/authorization/new",
-			TokenEndpoint:         m.launchpadURL() + "/authorization/token",
-		}, "launchpad", nil
+		fmt.Fprintf(os.Stderr, "warning: OAuth discovery failed for %s, using Launchpad fallback\n", m.cfg.BaseURL)
+		// Fallback to Launchpad
+		lpURL, lpErr := m.launchpadURL()
+		if lpErr != nil {
+			return nil, "", lpErr
+		}
+		fallbackCfg := &oauth.Config{
+			AuthorizationEndpoint: lpURL + "/authorization/new",
+			TokenEndpoint:         lpURL + "/authorization/token",
+		}
+		fmt.Fprintf(os.Stderr, "Authenticating via launchpad (%s)\n", fallbackCfg.AuthorizationEndpoint)
+		return fallbackCfg, "launchpad", nil
 	}
+	fmt.Fprintf(os.Stderr, "Authenticating via bc3 (%s)\n", cfg.AuthorizationEndpoint)
 	return cfg, "bc3", nil
 }
 
-func (m *Manager) launchpadURL() string {
-	if url := os.Getenv("BASECAMP_LAUNCHPAD_URL"); url != "" {
-		return url
+func (m *Manager) launchpadURL() (string, error) {
+	if u := os.Getenv("BASECAMP_LAUNCHPAD_URL"); u != "" {
+		if err := hostutil.RequireSecureURL(u); err != nil {
+			return "", fmt.Errorf("BASECAMP_LAUNCHPAD_URL: %w", err)
+		}
+		return u, nil
 	}
-	return "https://launchpad.37signals.com"
+	return "https://launchpad.37signals.com", nil
 }
 
 func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Config, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
@@ -395,7 +406,7 @@ func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint st
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // 64 KB limit
 		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf("DCR failed: %s", string(respBody)))
 	}
 
@@ -403,7 +414,7 @@ func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint st
 		ClientID     string `json:"client_id"`
 		ClientSecret string `json:"client_secret,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&regResp); err != nil { // 64 KB limit
 		return nil, err
 	}
 
@@ -478,32 +489,40 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
+	var shutdownOnce sync.Once
 
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			state := r.URL.Query().Get("state")
-			code := r.URL.Query().Get("code")
-			errParam := r.URL.Query().Get("error")
-
-			if errParam != "" {
-				errCh <- fmt.Errorf("OAuth error: %s", errParam)
-				fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
-				return
-			}
-
-			if state != expectedState {
-				errCh <- fmt.Errorf("state mismatch: CSRF protection failed")
-				fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
-				return
-			}
-
-			codeCh <- code
-			fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
-		}),
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 
-	go server.Serve(listener)
+	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state := r.URL.Query().Get("state")
+		code := r.URL.Query().Get("code")
+		errParam := r.URL.Query().Get("error")
+
+		if errParam != "" {
+			errCh <- fmt.Errorf("OAuth error: %s", errParam)
+			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
+			shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck // best-effort shutdown
+			return
+		}
+
+		if state != expectedState {
+			errCh <- fmt.Errorf("state mismatch: CSRF protection failed")
+			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
+			shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck // best-effort shutdown
+			return
+		}
+
+		codeCh <- code
+		fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
+		shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck // best-effort shutdown
+	})
+
+	go server.Serve(listener) //nolint:errcheck // server.Serve returns ErrServerClosed on Shutdown
 
 	// Try to open browser automatically unless --no-browser was specified
 	if opts.BrowserLauncher != nil {

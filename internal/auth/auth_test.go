@@ -1,10 +1,12 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -397,4 +399,89 @@ func TestUsingKeyring(t *testing.T) {
 
 	store = &Store{useKeyring: false, fallbackDir: "/tmp"}
 	assert.False(t, store.UsingKeyring(), "UsingKeyring() should be false")
+}
+
+func TestLaunchpadURL_InsecureRejected(t *testing.T) {
+	m := &Manager{cfg: config.Default()}
+
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "http://evil.example.com")
+	_, err := m.launchpadURL()
+	require.Error(t, err, "insecure non-localhost launchpad URL must be rejected")
+	assert.Contains(t, err.Error(), "BASECAMP_LAUNCHPAD_URL")
+}
+
+func TestLaunchpadURL_LocalhostHTTPAllowed(t *testing.T) {
+	m := &Manager{cfg: config.Default()}
+
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "http://localhost:3000")
+	url, err := m.launchpadURL()
+	require.NoError(t, err, "localhost http should be allowed")
+	assert.Equal(t, "http://localhost:3000", url)
+}
+
+func TestLaunchpadURL_DefaultWhenUnset(t *testing.T) {
+	m := &Manager{cfg: config.Default()}
+
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "")
+	url, err := m.launchpadURL()
+	require.NoError(t, err)
+	assert.Equal(t, "https://launchpad.37signals.com", url)
+}
+
+func TestDiscoverOAuth_PropagatesInsecureLaunchpadError(t *testing.T) {
+	// Server that fails OAuth discovery (404 on .well-known), forcing Launchpad fallback.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL // discovery will fail (404)
+
+	m := &Manager{cfg: cfg, httpClient: srv.Client()}
+
+	// Set insecure Launchpad URL — should cause hard error, not silent fallback.
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "http://evil.example.com")
+
+	_, _, err := m.discoverOAuth(context.Background())
+	require.Error(t, err, "insecure launchpad URL error must propagate through discoverOAuth")
+	assert.Contains(t, err.Error(), "BASECAMP_LAUNCHPAD_URL")
+}
+
+func TestAtomicCredentialWrite_OverwriteExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := &Store{useKeyring: false, fallbackDir: tmpDir}
+	origin := "https://test.example.com"
+
+	// Write initial credentials
+	creds1 := &Credentials{
+		AccessToken:  "token-1",
+		RefreshToken: "refresh-1",
+		ExpiresAt:    time.Now().Unix() + 3600,
+		OAuthType:    "launchpad",
+	}
+	require.NoError(t, store.Save(origin, creds1))
+
+	// Overwrite with new credentials (exercises the Windows pre-remove path)
+	creds2 := &Credentials{
+		AccessToken:  "token-2",
+		RefreshToken: "refresh-2",
+		ExpiresAt:    time.Now().Unix() + 7200,
+		OAuthType:    "bc3",
+	}
+	require.NoError(t, store.Save(origin, creds2), "overwrite of existing credential file must succeed")
+
+	// Verify the new value persists
+	loaded, err := store.Load(origin)
+	require.NoError(t, err)
+	assert.Equal(t, "token-2", loaded.AccessToken)
+	assert.Equal(t, "bc3", loaded.OAuthType)
+
+	// Verify no stale temp files left behind
+	entries, err := os.ReadDir(tmpDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.False(t, filepath.Ext(e.Name()) == ".tmp",
+			"stale temp file left behind: %s", e.Name())
+	}
 }
