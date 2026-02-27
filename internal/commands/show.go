@@ -22,7 +22,8 @@ func NewShowCmd() *cobra.Command {
 		Short: "Show any recording by ID",
 		Long: `Show details of any Basecamp recording by ID or URL.
 
-Types: todo, todolist, message, comment, card, card-table, document
+Types: todo, todolist, message, comment, card, card-table, document,
+       schedule-entry, checkin, forward, upload
 
 If no type specified, uses generic recording lookup.
 
@@ -173,7 +174,7 @@ You can also pass a Basecamp URL directly:
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type (todo, todolist, message, comment, card, card-table, document)")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	return cmd
