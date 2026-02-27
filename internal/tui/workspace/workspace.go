@@ -1343,9 +1343,11 @@ func (w *Workspace) createBoost(target BoostTarget, emoji string) tea.Cmd {
 }
 
 // CloseWatcher shuts down the theme file watcher, if running.
+// Safe to call multiple times.
 func (w *Workspace) CloseWatcher() {
 	if w.themeWatcher != nil {
 		w.themeWatcher.Close()
+		w.themeWatcher = nil
 	}
 }
 
