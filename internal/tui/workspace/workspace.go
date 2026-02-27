@@ -123,8 +123,6 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		sidebarRatio:    0.30,
 	}
 	w.createBoostFunc = w.createBoost
-	w.breadcrumb.SetExperimental(true)
-
 	// Metrics panel reads live stats from the Hub's metrics collector.
 	if hub := session.Hub(); hub != nil {
 		m := hub.Metrics()
@@ -262,8 +260,8 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// - Single-account: identity is now available for identity-dependent
 		//   pools (Assignments), replacing bootstrap-empty data.
 		if view := w.router.Current(); view != nil {
-			title := view.Title()
-			if title == "Home" || title == "Projects" {
+			target := w.router.CurrentTarget()
+			if target == ViewHome || target == ViewProjects {
 				updated, cmd := view.Update(RefreshMsg{})
 				w.replaceCurrentView(updated)
 				return w, w.stampCmd(cmd)
