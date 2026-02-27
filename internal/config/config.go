@@ -410,7 +410,15 @@ func repoConfigPath() string {
 	// Walk up to find .git directory, then look for .basecamp/config.json.
 	// Bounded by $HOME: only search within the home directory tree.
 	// If CWD is outside $HOME (e.g., /tmp), no repo config is trusted.
-	dir, _ := os.Getwd()
+	dir, err := os.Getwd()
+	if err != nil {
+		return "" // fail closed: can't determine CWD
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "" // fail closed: can't resolve symlinks for trust boundary
+	}
+	dir = resolved
 	home, _ := os.UserHomeDir()
 	if resolved, err := filepath.EvalSymlinks(home); err == nil {
 		home = resolved
@@ -466,7 +474,15 @@ func isInsideDir(child, parent string) bool {
 //   - Inside a git repo: only paths at or below the repo root
 //   - Outside a git repo: only the current working directory (no parent traversal)
 func localConfigPaths(repoConfigPath string) []string {
-	dir, _ := os.Getwd()
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil // fail closed: can't determine CWD
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil // fail closed: can't resolve symlinks for trust boundary
+	}
+	dir = resolved
 	var paths []string
 
 	// Determine trust boundary (resolve symlinks for reliable comparison
