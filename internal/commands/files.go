@@ -129,11 +129,6 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -149,7 +144,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	// Get vault details using SDK
-	vault, err := app.Account().Vaults().Get(cmd.Context(), bucketID, vaultIDNum)
+	vault, err := app.Account().Vaults().Get(cmd.Context(), vaultIDNum)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -161,7 +156,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 
 	// Get folders (subvaults) using SDK
 	var folders []basecamp.Vault
-	foldersResult, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	foldersResult, err := app.Account().Vaults().List(cmd.Context(), vaultIDNum, nil)
 	if err != nil {
 		folders = []basecamp.Vault{} // Best-effort
 	} else {
@@ -170,7 +165,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 
 	// Get uploads using SDK
 	var uploads []basecamp.Upload
-	uploadsResult, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	uploadsResult, err := app.Account().Uploads().List(cmd.Context(), vaultIDNum, nil)
 	if err != nil {
 		uploads = []basecamp.Upload{} // Best-effort
 	} else {
@@ -179,7 +174,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 
 	// Get documents using SDK
 	var documents []basecamp.Document
-	documentsResult, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, nil)
+	documentsResult, err := app.Account().Documents().List(cmd.Context(), vaultIDNum, nil)
 	if err != nil {
 		documents = []basecamp.Document{} // Best-effort
 	} else {
@@ -313,11 +308,6 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -344,7 +334,7 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int
 	}
 
 	// Get folders using SDK
-	foldersResult, err := app.Account().Vaults().List(cmd.Context(), bucketID, vaultIDNum, opts)
+	foldersResult, err := app.Account().Vaults().List(cmd.Context(), vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -404,11 +394,6 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get vault ID
 			resolvedVaultID := *vaultID
 			if resolvedVaultID == "" {
@@ -428,7 +413,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				Title: name,
 			}
 
-			folder, err := app.Account().Vaults().Create(cmd.Context(), bucketID, vaultIDNum, req)
+			folder, err := app.Account().Vaults().Create(cmd.Context(), vaultIDNum, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -535,11 +520,6 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -566,7 +546,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 	}
 
 	// Get uploads using SDK
-	uploadsResult, err := app.Account().Uploads().List(cmd.Context(), bucketID, vaultIDNum, opts)
+	uploadsResult, err := app.Account().Uploads().List(cmd.Context(), vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -668,11 +648,6 @@ func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, a
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get vault ID
 	resolvedVaultID := vaultID
 	if resolvedVaultID == "" {
@@ -699,7 +674,7 @@ func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, a
 	}
 
 	// Get documents using SDK
-	documentsResult, err := app.Account().Documents().List(cmd.Context(), bucketID, vaultIDNum, opts)
+	documentsResult, err := app.Account().Documents().List(cmd.Context(), vaultIDNum, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -761,11 +736,6 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get vault ID
 			resolvedVaultID := *vaultID
 			if resolvedVaultID == "" {
@@ -791,7 +761,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				req.Status = "active"
 			}
 
-			doc, err := app.Account().Documents().Create(cmd.Context(), bucketID, vaultIDNum, req)
+			doc, err := app.Account().Documents().Create(cmd.Context(), vaultIDNum, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -872,11 +842,6 @@ You can pass either an item ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Try to detect type if not specified
 			var result any
 			var detectedType string
@@ -888,7 +853,7 @@ You can pass either an item ID or a Basecamp URL:
 				var firstErr error
 
 				// Try vault first
-				vault, err := app.Account().Vaults().Get(cmd.Context(), bucketID, itemID)
+				vault, err := app.Account().Vaults().Get(cmd.Context(), itemID)
 				if err == nil {
 					result = vault
 					detectedType = "vault"
@@ -896,7 +861,7 @@ You can pass either an item ID or a Basecamp URL:
 				} else {
 					firstErr = err
 					// Try upload
-					upload, err := app.Account().Uploads().Get(cmd.Context(), bucketID, itemID)
+					upload, err := app.Account().Uploads().Get(cmd.Context(), itemID)
 					if err == nil {
 						result = upload
 						detectedType = "upload"
@@ -906,7 +871,7 @@ You can pass either an item ID or a Basecamp URL:
 						}
 					} else {
 						// Try document
-						doc, err := app.Account().Documents().Get(cmd.Context(), bucketID, itemID)
+						doc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 						if err == nil {
 							result = doc
 							detectedType = "document"
@@ -926,7 +891,7 @@ You can pass either an item ID or a Basecamp URL:
 			} else {
 				switch itemType {
 				case "vault", "folder":
-					vault, err := app.Account().Vaults().Get(cmd.Context(), bucketID, itemID)
+					vault, err := app.Account().Vaults().Get(cmd.Context(), itemID)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -934,7 +899,7 @@ You can pass either an item ID or a Basecamp URL:
 					detectedType = "vault"
 					title = vault.Title
 				case "upload", "file":
-					upload, err := app.Account().Uploads().Get(cmd.Context(), bucketID, itemID)
+					upload, err := app.Account().Uploads().Get(cmd.Context(), itemID)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -945,7 +910,7 @@ You can pass either an item ID or a Basecamp URL:
 						title = upload.Title
 					}
 				case "document", "doc":
-					doc, err := app.Account().Documents().Get(cmd.Context(), bucketID, itemID)
+					doc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1050,11 +1015,6 @@ You can pass either an item ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Auto-detect type if not specified
 			var result any
 			var detectedType string
@@ -1063,7 +1023,7 @@ You can pass either an item ID or a Basecamp URL:
 				switch itemType {
 				case "vault", "folder":
 					req := &basecamp.UpdateVaultRequest{Title: title}
-					vault, err := app.Account().Vaults().Update(cmd.Context(), bucketID, itemID, req)
+					vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1071,7 +1031,7 @@ You can pass either an item ID or a Basecamp URL:
 					detectedType = "vault"
 				case "document", "doc":
 					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
-					doc, err := app.Account().Documents().Update(cmd.Context(), bucketID, itemID, req)
+					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1082,7 +1042,7 @@ You can pass either an item ID or a Basecamp URL:
 					if title != "" {
 						req.BaseName = title
 					}
-					upload, err := app.Account().Uploads().Update(cmd.Context(), bucketID, itemID, req)
+					upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1100,10 +1060,10 @@ You can pass either an item ID or a Basecamp URL:
 				var firstErr error
 
 				// Try document first (most common update case)
-				_, err := app.Account().Documents().Get(cmd.Context(), bucketID, itemID)
+				_, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
 					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
-					doc, err := app.Account().Documents().Update(cmd.Context(), bucketID, itemID, req)
+					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1112,10 +1072,10 @@ You can pass either an item ID or a Basecamp URL:
 				} else {
 					firstErr = err
 					// Try vault
-					_, err = app.Account().Vaults().Get(cmd.Context(), bucketID, itemID)
+					_, err = app.Account().Vaults().Get(cmd.Context(), itemID)
 					if err == nil {
 						req := &basecamp.UpdateVaultRequest{Title: title}
-						vault, err := app.Account().Vaults().Update(cmd.Context(), bucketID, itemID, req)
+						vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 						if err != nil {
 							return convertSDKError(err)
 						}
@@ -1123,13 +1083,13 @@ You can pass either an item ID or a Basecamp URL:
 						detectedType = "vault"
 					} else {
 						// Try upload
-						_, err = app.Account().Uploads().Get(cmd.Context(), bucketID, itemID)
+						_, err = app.Account().Uploads().Get(cmd.Context(), itemID)
 						if err == nil {
 							req := &basecamp.UpdateUploadRequest{Description: content}
 							if title != "" {
 								req.BaseName = title
 							}
-							upload, err := app.Account().Uploads().Update(cmd.Context(), bucketID, itemID, req)
+							upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 							if err != nil {
 								return convertSDKError(err)
 							}
@@ -1222,13 +1182,8 @@ You can pass either an upload ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Download the file
-			result, err := app.Account().Uploads().Download(cmd.Context(), bucketID, uploadID)
+			result, err := app.Account().Uploads().Download(cmd.Context(), uploadID)
 			if err != nil {
 				return convertSDKError(err)
 			}

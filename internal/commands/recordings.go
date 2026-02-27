@@ -71,10 +71,10 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 
 	cmd.AddCommand(
 		newRecordingsListCmd(&project),
-		newRecordingsTrashCmd(&project),
-		newRecordingsArchiveCmd(&project),
-		newRecordingsRestoreCmd(&project),
-		newRecordingsVisibilityCmd(&project),
+		newRecordingsTrashCmd(),
+		newRecordingsArchiveCmd(),
+		newRecordingsRestoreCmd(),
+		newRecordingsVisibilityCmd(),
 	)
 
 	return cmd
@@ -222,7 +222,7 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 	return app.OK(recordings, respOpts...)
 }
 
-func newRecordingsTrashCmd(project *string) *cobra.Command {
+func newRecordingsTrashCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "trash <id|url>",
 		Aliases: []string{"trashed"},
@@ -230,18 +230,18 @@ func newRecordingsTrashCmd(project *string) *cobra.Command {
 		Long: `Move a recording to the trash.
 
 You can pass either a recording ID or a Basecamp URL:
-  basecamp recordings trash 789 --in my-project
+  basecamp recordings trash 789
   basecamp recordings trash https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], *project, "trashed")
+			return runRecordingsStatus(cmd, app, args[0], "trashed")
 		},
 	}
 	return cmd
 }
 
-func newRecordingsArchiveCmd(project *string) *cobra.Command {
+func newRecordingsArchiveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "archive <id|url>",
 		Aliases: []string{"archived"},
@@ -249,18 +249,18 @@ func newRecordingsArchiveCmd(project *string) *cobra.Command {
 		Long: `Archive a recording to remove it from active view.
 
 You can pass either a recording ID or a Basecamp URL:
-  basecamp recordings archive 789 --in my-project
+  basecamp recordings archive 789
   basecamp recordings archive https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], *project, "archived")
+			return runRecordingsStatus(cmd, app, args[0], "archived")
 		},
 	}
 	return cmd
 }
 
-func newRecordingsRestoreCmd(project *string) *cobra.Command {
+func newRecordingsRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "restore <id|url>",
 		Aliases: []string{"active"},
@@ -268,25 +268,24 @@ func newRecordingsRestoreCmd(project *string) *cobra.Command {
 		Long: `Restore a recording from trash or archive to active status.
 
 You can pass either a recording ID or a Basecamp URL:
-  basecamp recordings restore 789 --in my-project
+  basecamp recordings restore 789
   basecamp recordings restore https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], *project, "active")
+			return runRecordingsStatus(cmd, app, args[0], "active")
 		},
 	}
 	return cmd
 }
 
-func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, project, newStatus string) error {
+func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, newStatus string) error {
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Extract ID and project from URL if provided
-	extractedID, urlProjectID := extractWithProject(recordingIDStr)
-	recordingIDStr = extractedID
+	// Extract ID from URL if provided
+	recordingIDStr = extractID(recordingIDStr)
 
 	// Parse recording ID
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
@@ -294,44 +293,16 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 		return output.ErrUsage("Invalid recording ID")
 	}
 
-	// Resolve project - use URL > flag > config, with interactive fallback
-	projectIDStr := project
-	if projectIDStr == "" && urlProjectID != "" {
-		projectIDStr = urlProjectID
-	}
-	if projectIDStr == "" {
-		projectIDStr = app.Flags.Project
-	}
-	if projectIDStr == "" {
-		projectIDStr = app.Config.ProjectID
-	}
-	if projectIDStr == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectIDStr = app.Config.ProjectID
-	}
-
-	resolvedProjectIDStr, _, err := app.Names.ResolveProject(cmd.Context(), projectIDStr)
-	if err != nil {
-		return err
-	}
-
-	bucketID, err := strconv.ParseInt(resolvedProjectIDStr, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Call appropriate SDK method based on status
 	switch newStatus {
 	case "trashed":
-		err = app.Account().Recordings().Trash(cmd.Context(), bucketID, recordingID)
+		err = app.Account().Recordings().Trash(cmd.Context(), recordingID)
 	case "archived":
-		err = app.Account().Recordings().Archive(cmd.Context(), bucketID, recordingID)
+		err = app.Account().Recordings().Archive(cmd.Context(), recordingID)
 	case "active":
 		// Unarchive() sets status to active via PUT /status/active.json
 		// This works for both archived AND trashed recordings
-		err = app.Account().Recordings().Unarchive(cmd.Context(), bucketID, recordingID)
+		err = app.Account().Recordings().Unarchive(cmd.Context(), recordingID)
 	default:
 		return output.ErrUsage(fmt.Sprintf("Unknown status: %s", newStatus))
 	}
@@ -359,14 +330,14 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, pr
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp show %s --in %s", recordingIDStr, resolvedProjectIDStr),
+				Cmd:         fmt.Sprintf("basecamp show %s", recordingIDStr),
 				Description: "View recording",
 			},
 		),
 	)
 }
 
-func newRecordingsVisibilityCmd(project *string) *cobra.Command {
+func newRecordingsVisibilityCmd() *cobra.Command {
 	var visible bool
 	var hidden bool
 
@@ -377,7 +348,7 @@ func newRecordingsVisibilityCmd(project *string) *cobra.Command {
 		Long: `Set whether a recording is visible to clients.
 
 You can pass either a recording ID or a Basecamp URL:
-  basecamp recordings visibility 789 --visible --in my-project
+  basecamp recordings visibility 789 --visible
   basecamp recordings visibility https://3.basecamp.com/123/buckets/456/recordings/789 --visible`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -387,8 +358,8 @@ You can pass either a recording ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			recordingIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			recordingIDStr := extractID(args[0])
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
@@ -405,35 +376,7 @@ You can pass either a recording ID or a Basecamp URL:
 			}
 			isVisible = visible
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectIDStr := *project
-			if projectIDStr == "" && urlProjectID != "" {
-				projectIDStr = urlProjectID
-			}
-			if projectIDStr == "" {
-				projectIDStr = app.Flags.Project
-			}
-			if projectIDStr == "" {
-				projectIDStr = app.Config.ProjectID
-			}
-			if projectIDStr == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectIDStr = app.Config.ProjectID
-			}
-
-			resolvedProjectIDStr, _, err := app.Names.ResolveProject(cmd.Context(), projectIDStr)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			recording, err := app.Account().Recordings().SetClientVisibility(cmd.Context(), bucketID, recordingID, isVisible)
+			recording, err := app.Account().Recordings().SetClientVisibility(cmd.Context(), recordingID, isVisible)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -450,7 +393,7 @@ You can pass either a recording ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp show %s --in %s", recordingIDStr, resolvedProjectIDStr),
+						Cmd:         fmt.Sprintf("basecamp show %s", recordingIDStr),
 						Description: "View recording",
 					},
 				),

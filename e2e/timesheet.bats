@@ -33,16 +33,6 @@ load test_helper
   assert_output_contains "--person requires a value"
 }
 
-@test "timesheet --project without value shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp timesheet --project
-  assert_failure
-  assert_output_contains "--project requires a value"
-}
-
-
 # Date range validation
 
 @test "timesheet with start but no end shows error" {
@@ -66,31 +56,13 @@ load test_helper
 
 # Missing context errors
 
-@test "timesheet project without id shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp timesheet project
-  assert_failure
-  assert_output_contains "Project ID"
-}
-
 @test "timesheet recording without id shows error" {
   create_credentials
-  create_global_config '{"account_id": 99999, "project_id": 123}'
+  create_global_config '{"account_id": 99999}'
 
   run basecamp timesheet recording
   assert_failure
   assert_output_contains "ID required"
-}
-
-@test "timesheet recording without project shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp timesheet recording 456
-  assert_failure
-  assert_output_contains "project"
 }
 
 

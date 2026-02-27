@@ -72,11 +72,6 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get questionnaire ID
 	resolvedQuestionnaireID := questionnaireID
 	if resolvedQuestionnaireID == "" {
@@ -91,7 +86,7 @@ func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error 
 		return output.ErrUsage("Invalid questionnaire ID")
 	}
 
-	questionnaire, err := app.Account().Checkins().GetQuestionnaire(cmd.Context(), bucketID, qID)
+	questionnaire, err := app.Account().Checkins().GetQuestionnaire(cmd.Context(), qID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -160,11 +155,6 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get questionnaire ID
 			resolvedQuestionnaireID := *questionnaireID
 			if resolvedQuestionnaireID == "" {
@@ -190,7 +180,7 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 				opts.Page = page
 			}
 
-			questionsResult, err := app.Account().Checkins().ListQuestions(cmd.Context(), bucketID, qID, opts)
+			questionsResult, err := app.Account().Checkins().ListQuestions(cmd.Context(), qID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -292,17 +282,12 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid question ID")
 	}
 
-	question, err := app.Account().Checkins().GetQuestion(cmd.Context(), bucketID, questionID)
+	question, err := app.Account().Checkins().GetQuestion(cmd.Context(), questionID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -371,11 +356,6 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get questionnaire ID
 			resolvedQuestionnaireID := questionnaireID
 			if resolvedQuestionnaireID == "" {
@@ -432,7 +412,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				},
 			}
 
-			question, err := app.Account().Checkins().CreateQuestion(cmd.Context(), bucketID, qID, req)
+			question, err := app.Account().Checkins().CreateQuestion(cmd.Context(), qID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -513,11 +493,6 @@ You can pass either a question ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid question ID")
@@ -564,7 +539,7 @@ You can pass either a question ID or a Basecamp URL:
 				return output.ErrUsage("at least one of --title, --frequency, --time, or --days is required")
 			}
 
-			question, err := app.Account().Checkins().UpdateQuestion(cmd.Context(), bucketID, questionID, req)
+			question, err := app.Account().Checkins().UpdateQuestion(cmd.Context(), questionID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -648,11 +623,6 @@ You can pass either a question ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid question ID")
@@ -669,7 +639,7 @@ You can pass either a question ID or a Basecamp URL:
 				opts.Page = page
 			}
 
-			answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), bucketID, questionID, opts)
+			answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), questionID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -771,17 +741,12 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	answerID, err := strconv.ParseInt(answerIDStr, 10, 64)
 	if err != nil {
 		return output.ErrUsage("Invalid answer ID")
 	}
 
-	answer, err := app.Account().Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
+	answer, err := app.Account().Checkins().GetAnswer(cmd.Context(), answerID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -865,11 +830,6 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			qID, err := strconv.ParseInt(questionID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid question ID")
@@ -880,7 +840,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				GroupOn: groupOn,
 			}
 
-			answer, err := app.Account().Checkins().CreateAnswer(cmd.Context(), bucketID, qID, req)
+			answer, err := app.Account().Checkins().CreateAnswer(cmd.Context(), qID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -965,11 +925,6 @@ You can pass either an answer ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			answerID, err := strconv.ParseInt(answerIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid answer ID")
@@ -979,13 +934,13 @@ You can pass either an answer ID or a Basecamp URL:
 				Content: fmt.Sprintf("<div>%s</div>", content),
 			}
 
-			err = app.Account().Checkins().UpdateAnswer(cmd.Context(), bucketID, answerID, req)
+			err = app.Account().Checkins().UpdateAnswer(cmd.Context(), answerID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
 			// Fetch the updated answer for display
-			answer, err := app.Account().Checkins().GetAnswer(cmd.Context(), bucketID, answerID)
+			answer, err := app.Account().Checkins().GetAnswer(cmd.Context(), answerID)
 			if err != nil {
 				return convertSDKError(err)
 			}

@@ -6,15 +6,6 @@ load test_helper
 
 # Missing context errors
 
-@test "messagetypes without project shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp messagetypes
-  assert_failure
-  assert_output_contains "project"
-}
-
 @test "messagetypes show without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
@@ -94,18 +85,6 @@ load test_helper
   run basecamp messagetypes delete
   assert_failure
   assert_output_contains "ID required"
-}
-
-
-# Flag parsing
-
-@test "messagetypes --project without value shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp messagetypes --project
-  assert_failure
-  assert_output_contains "--project requires a value"
 }
 
 

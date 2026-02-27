@@ -135,7 +135,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 basecamp url parse "https://3.basecamp.com/2914079/buckets/41746046/messages/9478142982#__recording_9488783598" --json
 ```
 
-Returns: `account_id`, `bucket_id`, `type`, `recording_id`, `comment_id` (from fragment).
+Returns: `account_id`, `project_id`, `type`, `recording_id`, `comment_id` (from fragment).
 
 **URL patterns:**
 - `/buckets/27/messages/123` - Message 123 in project 27

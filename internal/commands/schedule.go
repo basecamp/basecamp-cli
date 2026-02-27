@@ -105,10 +105,9 @@ func runScheduleShow(cmd *cobra.Command, app *appctx.App, project, scheduleID st
 		}
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
-	schedule, err := app.Account().Schedules().Get(cmd.Context(), bucketID, scheduleIDInt)
+	schedule, err := app.Account().Schedules().Get(cmd.Context(), scheduleIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -202,7 +201,6 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 		}
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
 	// Build pagination options
@@ -219,7 +217,7 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 		opts.Status = status
 	}
 
-	entriesResult, err := app.Account().Schedules().ListEntries(cmd.Context(), bucketID, scheduleIDInt, opts)
+	entriesResult, err := app.Account().Schedules().ListEntries(cmd.Context(), scheduleIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -299,12 +297,11 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		return err
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
 
 	// Use SDK method for specific occurrences of recurring entries
 	if occurrenceDate != "" {
-		entry, err := app.Account().Schedules().GetEntryOccurrence(cmd.Context(), bucketID, entryIDInt, occurrenceDate)
+		entry, err := app.Account().Schedules().GetEntryOccurrence(cmd.Context(), entryIDInt, occurrenceDate)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -336,7 +333,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		)
 	}
 
-	entry, err := app.Account().Schedules().GetEntry(cmd.Context(), bucketID, entryIDInt)
+	entry, err := app.Account().Schedules().GetEntry(cmd.Context(), entryIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -452,7 +449,6 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		}
 	}
 
-	bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
 	// Build request
@@ -478,7 +474,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		}
 	}
 
-	entry, err := app.Account().Schedules().CreateEntry(cmd.Context(), bucketID, scheduleIDInt, req)
+	entry, err := app.Account().Schedules().CreateEntry(cmd.Context(), scheduleIDInt, req)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -552,7 +548,6 @@ You can pass either an entry ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
 
 			// Build request with provided fields only
@@ -601,7 +596,7 @@ You can pass either an entry ID or a Basecamp URL:
 				return output.ErrUsage("No update fields provided")
 			}
 
-			entry, err := app.Account().Schedules().UpdateEntry(cmd.Context(), bucketID, entryIDInt, req)
+			entry, err := app.Account().Schedules().UpdateEntry(cmd.Context(), entryIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -683,14 +678,13 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 				}
 			}
 
-			bucketID, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
 			scheduleIDInt, _ := strconv.ParseInt(effectiveScheduleID, 10, 64)
 
 			req := &basecamp.UpdateScheduleSettingsRequest{
 				IncludeDueAssignments: includeDue,
 			}
 
-			schedule, err := app.Account().Schedules().UpdateSettings(cmd.Context(), bucketID, scheduleIDInt, req)
+			schedule, err := app.Account().Schedules().UpdateSettings(cmd.Context(), scheduleIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

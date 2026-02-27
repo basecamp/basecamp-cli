@@ -57,7 +57,7 @@ func (m *CardCreateMutation) ApplyLocally(columns []CardColumnInfo) []CardColumn
 
 // ApplyRemotely calls the SDK to create the card.
 func (m *CardCreateMutation) ApplyRemotely(ctx context.Context) error {
-	card, err := m.Client.Cards().Create(ctx, m.ProjectID, m.ColumnID, &basecamp.CreateCardRequest{
+	card, err := m.Client.Cards().Create(ctx, m.ColumnID, &basecamp.CreateCardRequest{
 		Title: m.Title,
 	})
 	if err != nil {

@@ -1069,7 +1069,6 @@ func (v *Todos) handleEditDescKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (v *Todos) updateTodoDescription(content widget.ComposerContent) tea.Cmd {
-	scope := v.session.Scope()
 	todoID := v.descTodoID
 	todolistID := v.selectedListID
 
@@ -1091,7 +1090,7 @@ func (v *Todos) updateTodoDescription(content widget.ComposerContent) tea.Cmd {
 	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
-		_, err := client.Todos().Update(ctx, scope.ProjectID, todoID, &basecamp.UpdateTodoRequest{
+		_, err := client.Todos().Update(ctx, todoID, &basecamp.UpdateTodoRequest{
 			Description: html,
 		})
 		return todoDescUpdatedMsg{todoID: todoID, todolistID: todolistID, err: err}

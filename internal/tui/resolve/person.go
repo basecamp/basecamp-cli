@@ -93,7 +93,7 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 	}
 
 	// Parse project ID
-	bucketID, err := strconv.ParseInt(projectID, 10, 64)
+	projectIDInt, err := strconv.ParseInt(projectID, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid project ID: %w", err)
 	}
@@ -101,7 +101,7 @@ func (r *Resolver) PersonInProject(ctx context.Context, projectID string) (*Reso
 	// Interactive mode - show picker with loading spinner
 	accountID := r.config.AccountID
 	loader := func() ([]tui.PickerItem, error) {
-		result, err := r.sdk.ForAccount(accountID).People().ListProjectPeople(ctx, bucketID, nil)
+		result, err := r.sdk.ForAccount(accountID).People().ListProjectPeople(ctx, projectIDInt, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch project people: %w", err)
 		}

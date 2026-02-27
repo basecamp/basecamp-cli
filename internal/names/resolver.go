@@ -378,7 +378,7 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 	}
 
 	// Fetch todolists from todoset
-	todolistsPath := fmt.Sprintf("/buckets/%s/todosets/%d/todolists.json", projectID, todosetID)
+	todolistsPath := fmt.Sprintf("/todosets/%d/todolists.json", todosetID)
 	resp, err := r.forAccount().Get(ctx, todolistsPath)
 	if err != nil {
 		return nil, convertSDKError(err)

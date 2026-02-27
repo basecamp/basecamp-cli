@@ -61,7 +61,7 @@ func TestURLParseFullMessageURL(t *testing.T) {
 
 	parsed := getParsedURL(t, resp)
 	assertStringPtr(t, parsed.AccountID, "2914079", "account_id")
-	assertStringPtr(t, parsed.BucketID, "41746046", "bucket_id")
+	assertStringPtr(t, parsed.ProjectID, "41746046", "project_id")
 	assertStringPtr(t, parsed.Type, "messages", "type")
 	assertStringPtr(t, parsed.RecordingID, "9478142982", "recording_id")
 }
@@ -72,7 +72,7 @@ func TestURLParseWithCommentFragment(t *testing.T) {
 
 	parsed := getParsedURL(t, resp)
 	assertStringPtr(t, parsed.AccountID, "2914079", "account_id")
-	assertStringPtr(t, parsed.BucketID, "41746046", "bucket_id")
+	assertStringPtr(t, parsed.ProjectID, "41746046", "project_id")
 	assertStringPtr(t, parsed.Type, "messages", "type")
 	assertStringPtr(t, parsed.RecordingID, "9478142982", "recording_id")
 	assertStringPtr(t, parsed.CommentID, "9488783598", "comment_id")
@@ -125,7 +125,7 @@ func TestURLParseCardURLWithNestedPath(t *testing.T) {
 
 	parsed := getParsedURL(t, resp)
 	assertStringPtr(t, parsed.AccountID, "2914079", "account_id")
-	assertStringPtr(t, parsed.BucketID, "27", "bucket_id")
+	assertStringPtr(t, parsed.ProjectID, "27", "project_id")
 	assertStringPtr(t, parsed.Type, "cards", "type")
 	assertStringPtr(t, parsed.TypeSingular, "card", "type_singular")
 	assertStringPtr(t, parsed.RecordingID, "9486682178", "recording_id")
@@ -199,7 +199,7 @@ func TestURLParseProjectURL(t *testing.T) {
 
 	parsed := getParsedURL(t, resp)
 	assertStringPtr(t, parsed.AccountID, "2914079", "account_id")
-	assertStringPtr(t, parsed.BucketID, "41746046", "bucket_id")
+	assertStringPtr(t, parsed.ProjectID, "41746046", "project_id")
 	assertStringPtr(t, parsed.Type, "project", "type")
 }
 
@@ -212,7 +212,7 @@ func TestURLParseTypeListURL(t *testing.T) {
 	require.NoError(t, err)
 
 	parsed := getParsedURL(t, resp)
-	assertStringPtr(t, parsed.BucketID, "456", "bucket_id")
+	assertStringPtr(t, parsed.ProjectID, "456", "project_id")
 	assertStringPtr(t, parsed.Type, "todos", "type")
 	assert.Nil(t, parsed.RecordingID, "recording_id should be nil for type list")
 }
@@ -236,7 +236,7 @@ func TestURLParseAccountOnlyURL(t *testing.T) {
 
 	parsed := getParsedURL(t, resp)
 	assertStringPtr(t, parsed.AccountID, "2914079", "account_id")
-	assert.Nil(t, parsed.BucketID, "bucket_id should be nil for account-only URL")
+	assert.Nil(t, parsed.ProjectID, "bucket_id should be nil for account-only URL")
 }
 
 // =============================================================================

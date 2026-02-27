@@ -15,7 +15,7 @@ import (
 type ParsedURL struct {
 	URL          string  `json:"url"`
 	AccountID    *string `json:"account_id"`
-	BucketID     *string `json:"bucket_id"`
+	ProjectID    *string `json:"project_id"`
 	Type         *string `json:"type"`
 	TypeSingular *string `json:"type_singular"`
 	RecordingID  *string `json:"recording_id"`
@@ -126,7 +126,7 @@ func runURLParse(app *appctx.App, url string) error {
 		result.AccountID = &accountID
 	}
 	if bucketID != "" {
-		result.BucketID = &bucketID
+		result.ProjectID = &bucketID
 	}
 	if recordingType != "" {
 		result.Type = &recordingType

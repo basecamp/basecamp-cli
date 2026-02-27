@@ -114,11 +114,6 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get inbox ID
 	resolvedInboxID, err := getInboxID(cmd, app, resolvedProjectID, inboxID)
 	if err != nil {
@@ -141,7 +136,7 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 		opts.Page = page
 	}
 
-	forwardsResult, err := app.Account().Forwards().List(cmd.Context(), bucketID, inboxIDInt, opts)
+	forwardsResult, err := app.Account().Forwards().List(cmd.Context(), inboxIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -222,12 +217,7 @@ You can pass either a forward ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			forward, err := app.Account().Forwards().Get(cmd.Context(), bucketID, forwardID)
+			forward, err := app.Account().Forwards().Get(cmd.Context(), forwardID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -288,11 +278,6 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get inbox ID
 			resolvedInboxID, err := getInboxID(cmd, app, resolvedProjectID, *inboxID)
 			if err != nil {
@@ -304,7 +289,7 @@ func newForwardsInboxCmd(project, inboxID *string) *cobra.Command {
 				return output.ErrUsage("Invalid inbox ID")
 			}
 
-			inbox, err := app.Account().Forwards().GetInbox(cmd.Context(), bucketID, inboxIDInt)
+			inbox, err := app.Account().Forwards().GetInbox(cmd.Context(), inboxIDInt)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -391,11 +376,6 @@ You can pass either a forward ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Build pagination options
 			opts := &basecamp.ForwardReplyListOptions{}
 			if all {
@@ -407,7 +387,7 @@ You can pass either a forward ID or a Basecamp URL:
 				opts.Page = page
 			}
 
-			repliesResult, err := app.Account().Forwards().ListReplies(cmd.Context(), bucketID, forwardID, opts)
+			repliesResult, err := app.Account().Forwards().ListReplies(cmd.Context(), forwardID, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -502,12 +482,7 @@ You can pass either IDs or Basecamp URLs:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			reply, err := app.Account().Forwards().GetReply(cmd.Context(), bucketID, forwardID, replyID)
+			reply, err := app.Account().Forwards().GetReply(cmd.Context(), forwardID, replyID)
 			if err != nil {
 				return convertSDKError(err)
 			}

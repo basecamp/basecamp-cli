@@ -45,9 +45,9 @@ func NewCardsCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newCardsListCmd(&project, &cardTable),
-		newCardsShowCmd(&project),
+		newCardsShowCmd(),
 		newCardsCreateCmd(&project, &cardTable),
-		newCardsUpdateCmd(&project),
+		newCardsUpdateCmd(),
 		newCardsMoveCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
@@ -137,11 +137,6 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Build pagination options
 	opts := &basecamp.CardListOptions{}
 	if all {
@@ -161,7 +156,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cardsResult, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -195,7 +190,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	}
 
 	// Get card table with embedded columns (lists)
-	cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+	cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -211,7 +206,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 				"Use column ID or exact name",
 			)
 		}
-		cardsResult, err := app.Account().Cards().List(cmd.Context(), bucketID, columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, opts)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -219,7 +214,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	} else {
 		// Get cards from all columns (no pagination - already validated above)
 		for _, col := range cardTableData.Lists {
-			cardsResult, err := app.Account().Cards().List(cmd.Context(), bucketID, col.ID, nil)
+			cardsResult, err := app.Account().Cards().List(cmd.Context(), col.ID, nil)
 			if err != nil {
 				continue // Skip columns with errors
 			}
@@ -249,14 +244,14 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	)
 }
 
-func newCardsShowCmd(project *string) *cobra.Command {
+func newCardsShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show card details",
 		Long: `Display detailed information about a card.
 
 You can pass either a card ID or a Basecamp URL:
-  basecamp cards show 789 --in my-project
+  basecamp cards show 789
   basecamp cards show https://3.basecamp.com/123/buckets/456/card_tables/cards/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -266,43 +261,15 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			cardIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			cardIDStr := extractID(args[0])
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			card, err := app.Account().Cards().Get(cmd.Context(), bucketID, cardID)
+			card, err := app.Account().Cards().Get(cmd.Context(), cardID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -314,11 +281,6 @@ You can pass either a card ID or a Basecamp URL:
 						Action:      "comment",
 						Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s", cardIDStr),
 						Description: "Add comment",
-					},
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
-						Description: "List cards",
 					},
 				),
 			)
@@ -373,11 +335,6 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// If column is a numeric ID, use it directly without card table discovery
 			var columnID int64
 			var cardTableIDVal string
@@ -400,7 +357,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -429,7 +386,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				Content: content,
 			}
 
-			card, err := app.Account().Cards().Create(cmd.Context(), bucketID, columnID, req)
+			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -438,7 +395,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
-					Cmd:         fmt.Sprintf("basecamp cards show %d --in %s", card.ID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards show %d", card.ID),
 					Description: "View card",
 				},
 			}
@@ -478,7 +435,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	return cmd
 }
 
-func newCardsUpdateCmd(project *string) *cobra.Command {
+func newCardsUpdateCmd() *cobra.Command {
 	var title string
 	var content string
 	var due string
@@ -490,7 +447,7 @@ func newCardsUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing card.
 
 You can pass either a card ID or a Basecamp URL:
-  basecamp cards update 789 --title "new title" --in my-project
+  basecamp cards update 789 --title "new title"
   basecamp cards update https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --title "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -500,8 +457,8 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			cardIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			cardIDStr := extractID(args[0])
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -510,34 +467,6 @@ You can pass either a card ID or a Basecamp URL:
 
 			if title == "" && content == "" && due == "" && assignee == "" {
 				return output.ErrUsage("At least one field required")
-			}
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
 			}
 
 			req := &basecamp.UpdateCardRequest{}
@@ -559,7 +488,7 @@ You can pass either a card ID or a Basecamp URL:
 				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 
-			card, err := app.Account().Cards().Update(cmd.Context(), bucketID, cardID, req)
+			card, err := app.Account().Cards().Update(cmd.Context(), cardID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -569,13 +498,8 @@ You can pass either a card ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp cards show %s --in %s", cardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards show %s", cardIDStr),
 						Description: "View card",
-					},
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
-						Description: "List cards",
 					},
 				),
 			)
@@ -656,11 +580,6 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Determine column ID - numeric IDs bypass card table resolution
 			var columnID int64
 			var cardTableIDVal string // Will be empty if using numeric column ID directly
@@ -685,7 +604,7 @@ You can pass either a card ID or a Basecamp URL:
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -701,7 +620,7 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			// Move card to column
-			err = app.Account().Cards().Move(cmd.Context(), bucketID, cardID, columnID)
+			err = app.Account().Cards().Move(cmd.Context(), cardID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -771,11 +690,6 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get card table ID from project dock
 			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 			if err != nil {
@@ -788,7 +702,7 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 			}
 
 			// Get card table with embedded columns (lists)
-			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -862,11 +776,6 @@ func NewCardCmd() *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// If column is a numeric ID, use it directly without card table discovery
 			var columnID int64
 			var cardTableIDVal string
@@ -889,7 +798,7 @@ func NewCardCmd() *cobra.Command {
 				}
 
 				// Get card table with embedded columns (lists)
-				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), bucketID, cardTableIDInt)
+				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
@@ -918,7 +827,7 @@ func NewCardCmd() *cobra.Command {
 				Content: content,
 			}
 
-			card, err := app.Account().Cards().Create(cmd.Context(), bucketID, columnID, req)
+			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -927,7 +836,7 @@ func NewCardCmd() *cobra.Command {
 			cardBreadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
-					Cmd:         fmt.Sprintf("basecamp cards show %d --in %s", card.ID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp cards show %d", card.ID),
 					Description: "View card",
 				},
 			}
@@ -967,7 +876,7 @@ func NewCardCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("title")
 
 	cmd.AddCommand(
-		newCardsUpdateCmd(&project),
+		newCardsUpdateCmd(),
 		newCardsMoveCmd(&project, &cardTable),
 	)
 
@@ -985,13 +894,13 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 	cmd.AddCommand(
 		newCardsColumnShowCmd(project),
 		newCardsColumnCreateCmd(project, cardTable),
-		newCardsColumnUpdateCmd(project),
+		newCardsColumnUpdateCmd(),
 		newCardsColumnMoveCmd(project, cardTable),
-		newCardsColumnWatchCmd(project),
-		newCardsColumnUnwatchCmd(project),
-		newCardsColumnOnHoldCmd(project),
-		newCardsColumnNoOnHoldCmd(project),
-		newCardsColumnColorCmd(project),
+		newCardsColumnWatchCmd(),
+		newCardsColumnUnwatchCmd(),
+		newCardsColumnOnHoldCmd(),
+		newCardsColumnNoOnHoldCmd(),
+		newCardsColumnColorCmd(),
 	)
 
 	return cmd
@@ -1044,12 +953,7 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			col, err := app.Account().CardColumns().Get(cmd.Context(), bucketID, columnID)
+			col, err := app.Account().CardColumns().Get(cmd.Context(), columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1113,11 +1017,6 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get card table ID
 			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 			if err != nil {
@@ -1134,7 +1033,7 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				Description: description,
 			}
 
-			col, err := app.Account().CardColumns().Create(cmd.Context(), bucketID, cardTableIDInt, req)
+			col, err := app.Account().CardColumns().Create(cmd.Context(), cardTableIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1164,7 +1063,7 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 	return cmd
 }
 
-func newCardsColumnUpdateCmd(project *string) *cobra.Command {
+func newCardsColumnUpdateCmd() *cobra.Command {
 	var title string
 	var description string
 
@@ -1184,8 +1083,8 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1195,40 +1094,12 @@ You can pass either a column ID or a Basecamp URL:
 				return output.ErrUsage("No update fields provided")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			req := &basecamp.UpdateColumnRequest{
 				Title:       title,
 				Description: description,
 			}
 
-			col, err := app.Account().CardColumns().Update(cmd.Context(), bucketID, columnID, req)
+			col, err := app.Account().CardColumns().Update(cmd.Context(), columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1298,11 +1169,6 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get card table ID
 			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 			if err != nil {
@@ -1320,7 +1186,7 @@ You can pass either a column ID or a Basecamp URL:
 				Position: position,
 			}
 
-			err = app.Account().CardColumns().Move(cmd.Context(), bucketID, cardTableIDInt, req)
+			err = app.Account().CardColumns().Move(cmd.Context(), cardTableIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1339,7 +1205,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnWatchCmd(project *string) *cobra.Command {
+func newCardsColumnWatchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch <id|url>",
 		Short: "Watch a column",
@@ -1356,42 +1222,14 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			_, err = app.Account().CardColumns().Watch(cmd.Context(), bucketID, columnID)
+			_, err = app.Account().CardColumns().Watch(cmd.Context(), columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1405,7 +1243,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnUnwatchCmd(project *string) *cobra.Command {
+func newCardsColumnUnwatchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unwatch <id|url>",
 		Short: "Unwatch a column",
@@ -1422,42 +1260,14 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().CardColumns().Unwatch(cmd.Context(), bucketID, columnID)
+			err = app.Account().CardColumns().Unwatch(cmd.Context(), columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1471,7 +1281,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
+func newCardsColumnOnHoldCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "on-hold <id|url>",
 		Short: "Enable on-hold section",
@@ -1488,42 +1298,14 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			col, err := app.Account().CardColumns().EnableOnHold(cmd.Context(), bucketID, columnID)
+			col, err := app.Account().CardColumns().EnableOnHold(cmd.Context(), columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1536,7 +1318,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
+func newCardsColumnNoOnHoldCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "no-on-hold <id|url>",
 		Short: "Disable on-hold section",
@@ -1553,42 +1335,14 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			col, err := app.Account().CardColumns().DisableOnHold(cmd.Context(), bucketID, columnID)
+			col, err := app.Account().CardColumns().DisableOnHold(cmd.Context(), columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1601,7 +1355,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnColorCmd(project *string) *cobra.Command {
+func newCardsColumnColorCmd() *cobra.Command {
 	var color string
 
 	cmd := &cobra.Command{
@@ -1620,8 +1374,8 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -1631,35 +1385,7 @@ You can pass either a column ID or a Basecamp URL:
 				return output.ErrUsage("--color is required")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			col, err := app.Account().CardColumns().SetColor(cmd.Context(), bucketID, columnID, color)
+			col, err := app.Account().CardColumns().SetColor(cmd.Context(), columnID, color)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1723,13 +1449,8 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get card with steps
-			card, err := app.Account().Cards().Get(cmd.Context(), bucketID, cardIDInt)
+			card, err := app.Account().Cards().Get(cmd.Context(), cardIDInt)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1767,11 +1488,11 @@ func newCardsStepCmd(project *string) *cobra.Command {
 
 	cmd.AddCommand(
 		newCardsStepCreateCmd(project),
-		newCardsStepUpdateCmd(project),
-		newCardsStepCompleteCmd(project),
-		newCardsStepUncompleteCmd(project),
-		newCardsStepMoveCmd(project),
-		newCardsStepDeleteCmd(project),
+		newCardsStepUpdateCmd(),
+		newCardsStepCompleteCmd(),
+		newCardsStepUncompleteCmd(),
+		newCardsStepMoveCmd(),
+		newCardsStepDeleteCmd(),
 	)
 
 	return cmd
@@ -1826,11 +1547,6 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			req := &basecamp.CreateStepRequest{
 				Title: title,
 			}
@@ -1845,7 +1561,7 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				req.Assignees = assigneeIDs
 			}
 
-			step, err := app.Account().CardSteps().Create(cmd.Context(), bucketID, cardIDInt, req)
+			step, err := app.Account().CardSteps().Create(cmd.Context(), cardIDInt, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1878,7 +1594,7 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func newCardsStepUpdateCmd(project *string) *cobra.Command {
+func newCardsStepUpdateCmd() *cobra.Command {
 	var title string
 	var dueOn string
 	var assignees string
@@ -1899,8 +1615,8 @@ You can pass either a step ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			stepIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -1908,34 +1624,6 @@ You can pass either a step ID or a Basecamp URL:
 
 			if title == "" && dueOn == "" && assignees == "" {
 				return output.ErrUsage("No update fields provided")
-			}
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
 			}
 
 			req := &basecamp.UpdateStepRequest{}
@@ -1953,7 +1641,7 @@ You can pass either a step ID or a Basecamp URL:
 				req.Assignees = assigneeIDs
 			}
 
-			step, err := app.Account().CardSteps().Update(cmd.Context(), bucketID, stepID, req)
+			step, err := app.Account().CardSteps().Update(cmd.Context(), stepID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1971,7 +1659,7 @@ You can pass either a step ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsStepCompleteCmd(project *string) *cobra.Command {
+func newCardsStepCompleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "complete <step_id|url>",
 		Short: "Complete a step",
@@ -1988,42 +1676,14 @@ You can pass either a step ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			stepIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			step, err := app.Account().CardSteps().Complete(cmd.Context(), bucketID, stepID)
+			step, err := app.Account().CardSteps().Complete(cmd.Context(), stepID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -2036,7 +1696,7 @@ You can pass either a step ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsStepUncompleteCmd(project *string) *cobra.Command {
+func newCardsStepUncompleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uncomplete <step_id|url>",
 		Short: "Uncomplete a step",
@@ -2053,42 +1713,14 @@ You can pass either a step ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			stepIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			step, err := app.Account().CardSteps().Uncomplete(cmd.Context(), bucketID, stepID)
+			step, err := app.Account().CardSteps().Uncomplete(cmd.Context(), stepID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -2101,7 +1733,7 @@ You can pass either a step ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsStepMoveCmd(project *string) *cobra.Command {
+func newCardsStepMoveCmd() *cobra.Command {
 	var cardID string
 	var position int
 
@@ -2121,8 +1753,8 @@ You can pass either a step ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			stepIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Step ID must be numeric")
@@ -2140,35 +1772,7 @@ You can pass either a step ID or a Basecamp URL:
 				return output.ErrUsage("Invalid card ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().CardSteps().Reposition(cmd.Context(), bucketID, cardIDInt, stepID, position)
+			err = app.Account().CardSteps().Reposition(cmd.Context(), cardIDInt, stepID, position)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -2188,7 +1792,7 @@ You can pass either a step ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsStepDeleteCmd(project *string) *cobra.Command {
+func newCardsStepDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <step_id|url>",
 		Short: "Delete a step",
@@ -2205,42 +1809,14 @@ You can pass either a step ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			stepIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			stepIDStr := extractID(args[0])
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().CardSteps().Delete(cmd.Context(), bucketID, stepID)
+			err = app.Account().CardSteps().Delete(cmd.Context(), stepID)
 			if err != nil {
 				return convertSDKError(err)
 			}

@@ -26,7 +26,7 @@ load test_helper
   assert_success
   is_valid_json
   assert_json_value ".data.account_id" "2914079"
-  assert_json_value ".data.bucket_id" "41746046"
+  assert_json_value ".data.project_id" "41746046"
   assert_json_value ".data.type" "messages"
   assert_json_value ".data.recording_id" "9478142982"
 }
@@ -36,7 +36,7 @@ load test_helper
   assert_success
   is_valid_json
   assert_json_value ".data.account_id" "2914079"
-  assert_json_value ".data.bucket_id" "41746046"
+  assert_json_value ".data.project_id" "41746046"
   assert_json_value ".data.type" "messages"
   assert_json_value ".data.recording_id" "9478142982"
   assert_json_value ".data.comment_id" "9488783598"
@@ -90,7 +90,7 @@ load test_helper
   assert_success
   is_valid_json
   assert_json_value ".data.account_id" "2914079"
-  assert_json_value ".data.bucket_id" "27"
+  assert_json_value ".data.project_id" "27"
   assert_json_value ".data.type" "cards"
   assert_json_value ".data.type_singular" "card"
   assert_json_value ".data.recording_id" "9486682178"
@@ -105,7 +105,7 @@ load test_helper
   assert_success
   is_valid_json
   assert_json_value ".data.account_id" "2914079"
-  assert_json_value ".data.bucket_id" "41746046"
+  assert_json_value ".data.project_id" "41746046"
   assert_json_value ".data.type" "project"
 }
 
@@ -116,7 +116,7 @@ load test_helper
   run basecamp url parse "https://3.basecamp.com/123/buckets/456/todos" --json
   assert_success
   is_valid_json
-  assert_json_value ".data.bucket_id" "456"
+  assert_json_value ".data.project_id" "456"
   assert_json_value ".data.type" "todos"
   assert_json_value ".data.recording_id" "null"
 }

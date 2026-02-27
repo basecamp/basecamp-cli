@@ -27,7 +27,6 @@ type OperationMetrics struct {
 	Operation    string // e.g., "Complete", "List"
 	ResourceType string // e.g., "todo", "project"
 	IsMutation   bool
-	BucketID     int64
 	ResourceID   int64
 	Duration     time.Duration
 	Error        error
@@ -120,7 +119,6 @@ func (c *SessionCollector) RecordOperationFromSDK(op basecamp.OperationInfo, err
 		Operation:    op.Operation,
 		ResourceType: op.ResourceType,
 		IsMutation:   op.IsMutation,
-		BucketID:     op.BucketID,
 		ResourceID:   op.ResourceID,
 		Duration:     duration,
 		Error:        err,

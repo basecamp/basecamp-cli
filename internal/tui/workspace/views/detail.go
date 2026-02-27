@@ -1138,7 +1138,6 @@ func (v *Detail) handleComposingKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (v *Detail) postComment(content widget.ComposerContent) tea.Cmd {
-	scope := v.session.Scope()
 	recordingID := v.recordingID
 
 	html := richtext.MarkdownToHTML(content.Markdown)
@@ -1160,7 +1159,7 @@ func (v *Detail) postComment(content widget.ComposerContent) tea.Cmd {
 	return func() tea.Msg {
 		ctx := session.Hub().ProjectContext()
 		client := session.AccountClient()
-		_, err := client.Comments().Create(ctx, scope.ProjectID, recordingID, &basecamp.CreateCommentRequest{
+		_, err := client.Comments().Create(ctx, recordingID, &basecamp.CreateCommentRequest{
 			Content: html,
 		})
 		return workspace.CommentCreatedMsg{RecordingID: recordingID, Err: err}
@@ -1340,7 +1339,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 
 		switch recordingType {
 		case "todo", "Todo":
-			todo, err := client.Todos().Get(ctx, scope.ProjectID, recordingID)
+			todo, err := client.Todos().Get(ctx, recordingID)
 			if err != nil {
 				return detailLoadedMsg{err: err}
 			}
@@ -1365,7 +1364,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 			}
 
 		case "message", "Message":
-			msg, err := client.Messages().Get(ctx, scope.ProjectID, recordingID)
+			msg, err := client.Messages().Get(ctx, recordingID)
 			if err != nil {
 				return detailLoadedMsg{err: err}
 			}
@@ -1388,7 +1387,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 			}
 
 		case "card", "Card":
-			card, err := client.Cards().Get(ctx, scope.ProjectID, recordingID)
+			card, err := client.Cards().Get(ctx, recordingID)
 			if err != nil {
 				return detailLoadedMsg{err: err}
 			}
@@ -1459,7 +1458,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 		}
 
 		// Fetch comments for the recording
-		commentsResult, err := client.Comments().List(ctx, scope.ProjectID, recordingID, nil)
+		commentsResult, err := client.Comments().List(ctx, recordingID, nil)
 		if err == nil && len(commentsResult.Comments) > 0 {
 			for _, c := range commentsResult.Comments {
 				creator := ""
@@ -1477,7 +1476,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 
 		// Best-effort subscription state — default to false if fetch fails
 		data.subscribed = fetchSubscriptionState(
-			client.Subscriptions().Get(ctx, scope.ProjectID, recordingID),
+			client.Subscriptions().Get(ctx, recordingID),
 		)
 
 		return detailLoadedMsg{data: data}

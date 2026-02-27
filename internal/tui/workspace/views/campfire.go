@@ -557,7 +557,6 @@ func (v *Campfire) sendLine(content string, isHTML bool) tea.Cmd {
 	})
 	v.renderMessages()
 
-	projectID := v.projectID
 	campfireID := v.campfireID
 	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
@@ -566,7 +565,7 @@ func (v *Campfire) sendLine(content string, isHTML bool) tea.Cmd {
 		if isHTML {
 			opts = &basecamp.CreateLineOptions{ContentType: "text/html"}
 		}
-		_, err := client.Campfires().CreateLine(ctx, projectID, campfireID, content, opts)
+		_, err := client.Campfires().CreateLine(ctx, campfireID, content, opts)
 		return workspace.CampfireLineSentMsg{Err: err}
 	}
 }

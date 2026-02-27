@@ -21,7 +21,7 @@ func NewWebhooksCmd() *cobra.Command {
 		Use:     "webhooks",
 		Aliases: []string{"webhook"},
 		Short:   "Manage webhooks",
-		Long: `Manage webhooks for project notifications.
+		Long: `Manage webhooks for notifications.
 
 Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
@@ -41,19 +41,19 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				)
 			}
 			// Default to list when called without subcommand
-			return runWebhooksList(cmd, project)
+			return runWebhooksList(cmd, &project)
 		},
 	}
 
-	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project name, URL, or ID")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project name, URL, or ID (alias for --project)")
 
 	cmd.AddCommand(
 		newWebhooksListCmd(&project),
-		newWebhooksShowCmd(&project),
+		newWebhooksShowCmd(),
 		newWebhooksCreateCmd(&project),
-		newWebhooksUpdateCmd(&project),
-		newWebhooksDeleteCmd(&project),
+		newWebhooksUpdateCmd(),
+		newWebhooksDeleteCmd(),
 	)
 
 	return cmd
@@ -64,12 +64,12 @@ func newWebhooksListCmd(project *string) *cobra.Command {
 		Use:   "list",
 		Short: "List webhooks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWebhooksList(cmd, *project)
+			return runWebhooksList(cmd, project)
 		},
 	}
 }
 
-func runWebhooksList(cmd *cobra.Command, project string) error {
+func runWebhooksList(cmd *cobra.Command, project *string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Resolve account (enables interactive prompt if needed)
@@ -77,16 +77,14 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 		return err
 	}
 
-	// Resolve project from CLI flags and config, with interactive fallback
-	projectID := project
+	// Resolve project — required for project-scoped webhook listing
+	projectID := *project
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
-
-	// If no project specified, try interactive resolution
 	if projectID == "" {
 		if err := ensureProject(cmd, app); err != nil {
 			return err
@@ -115,19 +113,19 @@ func runWebhooksList(cmd *cobra.Command, project string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp webhooks show <id> --in %s", resolvedProjectID),
+				Cmd:         "basecamp webhooks show <id>",
 				Description: "Show webhook details",
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp webhooks create --url <url> --in %s", resolvedProjectID),
+				Cmd:         "basecamp webhooks create --url <url>",
 				Description: "Create webhook",
 			},
 		),
 	)
 }
 
-func newWebhooksShowCmd(project *string) *cobra.Command {
+func newWebhooksShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show webhook details",
@@ -145,32 +143,7 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid webhook ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			webhook, err := app.Account().Webhooks().Get(cmd.Context(), bucketID, webhookID)
+			webhook, err := app.Account().Webhooks().Get(cmd.Context(), webhookID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -182,17 +155,17 @@ func newWebhooksShowCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp webhooks update %s --in %s", webhookIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks update %s", webhookIDStr),
 						Description: "Update webhook",
 					},
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("basecamp webhooks delete %s --in %s", webhookIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks delete %s", webhookIDStr),
 						Description: "Delete webhook",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
+						Cmd:         "basecamp webhooks",
 						Description: "Back to webhooks",
 					},
 				),
@@ -208,7 +181,7 @@ func newWebhooksCreateCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new webhook",
-		Long: `Create a new webhook for project notifications.
+		Long: `Create a new webhook for notifications.
 
 Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
@@ -219,11 +192,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				return err
 			}
 
-			if url == "" {
-				return output.ErrUsage("--url is required")
-			}
-
-			// Resolve project, with interactive fallback
+			// Resolve project — required for project-scoped webhook creation
 			projectID := *project
 			if projectID == "" {
 				projectID = app.Flags.Project
@@ -246,6 +215,10 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
+			}
+
+			if url == "" {
+				return output.ErrUsage("--url is required")
 			}
 
 			// Build type array from comma-separated string if specified
@@ -277,12 +250,12 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp webhooks show %d --in %s", webhook.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks show %d", webhook.ID),
 						Description: "View webhook",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
+						Cmd:         "basecamp webhooks",
 						Description: "List webhooks",
 					},
 				),
@@ -297,7 +270,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 	return cmd
 }
 
-func newWebhooksUpdateCmd(project *string) *cobra.Command {
+func newWebhooksUpdateCmd() *cobra.Command {
 	var url string
 	var types string
 	var active bool
@@ -318,31 +291,6 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 			webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid webhook ID")
-			}
-
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
 			}
 
 			// Build update request
@@ -381,7 +329,7 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("at least one of --url, --types, --active, or --inactive is required")
 			}
 
-			webhook, err := app.Account().Webhooks().Update(cmd.Context(), bucketID, webhookID, req)
+			webhook, err := app.Account().Webhooks().Update(cmd.Context(), webhookID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -391,12 +339,12 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp webhooks show %s --in %s", webhookIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp webhooks show %s", webhookIDStr),
 						Description: "View webhook",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
+						Cmd:         "basecamp webhooks",
 						Description: "List webhooks",
 					},
 				),
@@ -412,7 +360,7 @@ func newWebhooksUpdateCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func newWebhooksDeleteCmd(project *string) *cobra.Command {
+func newWebhooksDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a webhook",
@@ -430,32 +378,7 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid webhook ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().Webhooks().Delete(cmd.Context(), bucketID, webhookID)
+			err = app.Account().Webhooks().Delete(cmd.Context(), webhookID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -470,7 +393,7 @@ func newWebhooksDeleteCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp webhooks --in %s", resolvedProjectID),
+						Cmd:         "basecamp webhooks",
 						Description: "List webhooks",
 					},
 				),

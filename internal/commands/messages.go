@@ -40,11 +40,11 @@ func NewMessagesCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newMessagesListCmd(&project, &messageBoard),
-		newMessagesShowCmd(&project),
+		newMessagesShowCmd(),
 		newMessagesCreateCmd(&project, &messageBoard),
-		newMessagesUpdateCmd(&project),
-		newMessagesPinCmd(&project),
-		newMessagesUnpinCmd(&project),
+		newMessagesUpdateCmd(),
+		newMessagesPinCmd(),
+		newMessagesUnpinCmd(),
 	)
 
 	return cmd
@@ -111,11 +111,6 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 		return err
 	}
 
-	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid project ID")
-	}
-
 	// Get message board ID from project dock
 	messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
 	if err != nil {
@@ -139,7 +134,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	}
 
 	// Get messages using SDK
-	messagesResult, err := app.Account().Messages().List(cmd.Context(), bucketID, boardID, opts)
+	messagesResult, err := app.Account().Messages().List(cmd.Context(), boardID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -170,14 +165,14 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	return app.OK(messages, respOpts...)
 }
 
-func newMessagesShowCmd(project *string) *cobra.Command {
+func newMessagesShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show message details",
 		Long: `Display detailed information about a message.
 
 You can pass either a message ID or a Basecamp URL:
-  basecamp messages show 789 --in my-project
+  basecamp messages show 789
   basecamp messages show https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -187,43 +182,15 @@ You can pass either a message ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			messageIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			messageIDStr := extractID(args[0])
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			message, err := app.Account().Messages().Get(cmd.Context(), bucketID, messageID)
+			message, err := app.Account().Messages().Get(cmd.Context(), messageID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -233,13 +200,8 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp comment --content <text> --on %s", messageIDStr),
 						Description: "Add comment",
-					},
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp messages --in %s", resolvedProjectID),
-						Description: "Back to messages",
 					},
 				),
 			)
@@ -288,11 +250,6 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get message board ID from project dock
 			messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, *messageBoard)
 			if err != nil {
@@ -318,7 +275,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				req.Status = "active"
 			}
 
-			message, err := app.Account().Messages().Create(cmd.Context(), bucketID, boardID, req)
+			message, err := app.Account().Messages().Create(cmd.Context(), boardID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -350,7 +307,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	return cmd
 }
 
-func newMessagesUpdateCmd(project *string) *cobra.Command {
+func newMessagesUpdateCmd() *cobra.Command {
 	var subject string
 	var content string
 
@@ -360,7 +317,7 @@ func newMessagesUpdateCmd(project *string) *cobra.Command {
 		Long: `Update an existing message's subject or content.
 
 You can pass either a message ID or a Basecamp URL:
-  basecamp messages update 789 --subject "new title" --in my-project
+  basecamp messages update 789 --subject "new title"
   basecamp messages update https://3.basecamp.com/123/buckets/456/messages/789 --subject "new title"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -370,8 +327,8 @@ You can pass either a message ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			messageIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			messageIDStr := extractID(args[0])
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -382,34 +339,6 @@ You can pass either a message ID or a Basecamp URL:
 				return output.ErrUsage("at least one of --subject or --content is required")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.UpdateMessageRequest{
@@ -417,7 +346,7 @@ You can pass either a message ID or a Basecamp URL:
 				Content: richtext.MarkdownToHTML(content),
 			}
 
-			message, err := app.Account().Messages().Update(cmd.Context(), bucketID, messageID, req)
+			message, err := app.Account().Messages().Update(cmd.Context(), messageID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -427,7 +356,7 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp messages show %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages show %s", messageIDStr),
 						Description: "View message",
 					},
 				),
@@ -442,14 +371,14 @@ You can pass either a message ID or a Basecamp URL:
 	return cmd
 }
 
-func newMessagesPinCmd(project *string) *cobra.Command {
+func newMessagesPinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pin <id|url>",
 		Short: "Pin a message",
 		Long: `Pin a message to the top of the message board.
 
 You can pass either a message ID or a Basecamp URL:
-  basecamp messages pin 789 --in my-project
+  basecamp messages pin 789
   basecamp messages pin https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -459,43 +388,15 @@ You can pass either a message ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			messageIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			messageIDStr := extractID(args[0])
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().Messages().Pin(cmd.Context(), bucketID, messageID)
+			err = app.Account().Messages().Pin(cmd.Context(), messageID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -508,12 +409,12 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "unpin",
-						Cmd:         fmt.Sprintf("basecamp messages unpin %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages unpin %s", messageIDStr),
 						Description: "Unpin message",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp messages show %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages show %s", messageIDStr),
 						Description: "View message",
 					},
 				),
@@ -523,14 +424,14 @@ You can pass either a message ID or a Basecamp URL:
 	return cmd
 }
 
-func newMessagesUnpinCmd(project *string) *cobra.Command {
+func newMessagesUnpinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unpin <id|url>",
 		Short: "Unpin a message",
 		Long: `Remove a message from the pinned position.
 
 You can pass either a message ID or a Basecamp URL:
-  basecamp messages unpin 789 --in my-project
+  basecamp messages unpin 789
   basecamp messages unpin https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -540,43 +441,15 @@ You can pass either a message ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			messageIDStr, urlProjectID := extractWithProject(args[0])
+			// Extract ID from URL if provided
+			messageIDStr := extractID(args[0])
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
-			err = app.Account().Messages().Unpin(cmd.Context(), bucketID, messageID)
+			err = app.Account().Messages().Unpin(cmd.Context(), messageID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -589,12 +462,12 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "pin",
-						Cmd:         fmt.Sprintf("basecamp messages pin %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages pin %s", messageIDStr),
 						Description: "Pin message",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp messages show %s --in %s", messageIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp messages show %s", messageIDStr),
 						Description: "View message",
 					},
 				),
@@ -647,11 +520,6 @@ func NewMessageCmd() *cobra.Command {
 				return err
 			}
 
-			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
-			}
-
 			// Get message board ID from project dock
 			messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
 			if err != nil {
@@ -675,7 +543,7 @@ func NewMessageCmd() *cobra.Command {
 				req.Status = "active"
 			}
 
-			message, err := app.Account().Messages().Create(cmd.Context(), bucketID, boardID, req)
+			message, err := app.Account().Messages().Create(cmd.Context(), boardID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

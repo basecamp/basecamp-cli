@@ -295,7 +295,6 @@ func (v *Compose) submit() tea.Cmd {
 
 func (v *Compose) postMessage(content widget.ComposerContent) tea.Cmd {
 	subject := v.subject.Value()
-	projectID := v.projectID
 	boardID := v.boardID
 
 	var html string
@@ -319,7 +318,7 @@ func (v *Compose) postMessage(content widget.ComposerContent) tea.Cmd {
 	ctx := v.session.Hub().ProjectContext()
 	client := v.session.AccountClient()
 	return func() tea.Msg {
-		msg, err := client.Messages().Create(ctx, projectID, boardID, &basecamp.CreateMessageRequest{
+		msg, err := client.Messages().Create(ctx, boardID, &basecamp.CreateMessageRequest{
 			Subject: subject,
 			Content: html,
 		})
