@@ -124,7 +124,19 @@ func (v *Messages) ShortHelp() []key.Binding {
 
 // FullHelp implements View.
 func (v *Messages) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+			key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new message")),
+		},
+		{
+			key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "pin")),
+			key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "unpin")),
+			key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
+			key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
+		},
+	}
 }
 
 // StartFilter implements workspace.Filterable.

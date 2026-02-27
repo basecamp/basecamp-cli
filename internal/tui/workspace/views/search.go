@@ -162,7 +162,13 @@ func (v *Search) ShortHelp() []key.Binding {
 
 // FullHelp implements View.
 func (v *Search) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			v.keys.Submit,
+			v.keys.Select,
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+		},
+	}
 }
 
 // SetSize implements View.

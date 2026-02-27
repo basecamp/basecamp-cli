@@ -148,7 +148,15 @@ func (v *Home) defaultHints() []key.Binding {
 }
 
 func (v *Home) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		},
+		{
+			key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+		},
+	}
 }
 
 func (v *Home) SetSize(w, h int) {

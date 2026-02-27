@@ -171,7 +171,18 @@ func (v *Cards) ShortHelp() []key.Binding {
 
 // FullHelp implements View.
 func (v *Cards) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+			v.keys.Move,
+			v.keys.New,
+		},
+		{
+			key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
+			key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
+		},
+	}
 }
 
 // SetSize implements View.
