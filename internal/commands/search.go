@@ -25,6 +25,9 @@ func NewSearchCmd() *cobra.Command {
 
 Uses the Basecamp search API to find content matching your query.
 Use 'basecamp search metadata' to see available search scopes.`,
+		Example: `  basecamp search "quarterly goals"
+  basecamp search "bug report" --sort created_at
+  basecamp search "design review" --limit 5`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
