@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/basecamp/basecamp-cli/internal/hostutil"
 )
 
 // Config holds the resolved configuration.
@@ -121,11 +119,6 @@ func Load(overrides FlagOverrides) (*Config, error) {
 
 	// Apply flag overrides
 	ApplyOverrides(cfg, overrides)
-
-	// Enforce HTTPS for non-localhost base_url
-	if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
-		return nil, fmt.Errorf("base_url: %w", err)
-	}
 
 	return cfg, nil
 }

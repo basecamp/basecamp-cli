@@ -159,12 +159,15 @@ func (s *Store) saveAllToFile(all map[string]*Credentials) error {
 	// Windows: rename fails when destination exists. Try rename first to
 	// preserve the old file on unrelated errors; only remove+retry on failure.
 	destPath := s.credentialsPath()
-	if err := os.Rename(tmpPath, destPath); err != nil && runtime.GOOS == "windows" {
-		_ = os.Remove(destPath)
-		return os.Rename(tmpPath, destPath)
-	} else { //nolint:revive // else-with-return kept for clarity of the two-branch pattern
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		if runtime.GOOS == "windows" {
+			_ = os.Remove(destPath)
+			return os.Rename(tmpPath, destPath)
+		}
+		os.Remove(tmpPath) // Clean up stale temp on failure
 		return err
 	}
+	return nil
 }
 
 func (s *Store) loadFromFile(origin string) (*Credentials, error) {

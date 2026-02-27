@@ -443,7 +443,8 @@ func TestDiscoverOAuth_PropagatesInsecureLaunchpadError(t *testing.T) {
 	// Set insecure Launchpad URL — should cause hard error, not silent fallback.
 	t.Setenv("BASECAMP_LAUNCHPAD_URL", "http://evil.example.com")
 
-	_, _, err := m.discoverOAuth(context.Background())
+	noop := func(string) {}
+	_, _, err := m.discoverOAuth(context.Background(), noop)
 	require.Error(t, err, "insecure launchpad URL error must propagate through discoverOAuth")
 	assert.Contains(t, err.Error(), "BASECAMP_LAUNCHPAD_URL")
 }

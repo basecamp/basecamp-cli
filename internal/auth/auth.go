@@ -241,7 +241,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	credKey := m.credentialKey()
 
 	// Discover OAuth config
-	oauthCfg, oauthType, err := m.discoverOAuth(ctx)
+	oauthCfg, oauthType, err := m.discoverOAuth(ctx, opts.log)
 	if err != nil {
 		return err
 	}
@@ -293,11 +293,11 @@ func (m *Manager) Logout() error {
 	return m.store.Delete(credKey)
 }
 
-func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, error) {
+func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*oauth.Config, string, error) {
 	discoverer := oauth.NewDiscoverer(m.httpClient)
 	cfg, err := discoverer.Discover(ctx, m.cfg.BaseURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: OAuth discovery failed for %s, using Launchpad fallback\n", m.cfg.BaseURL)
+		log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", m.cfg.BaseURL))
 		// Fallback to Launchpad
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {
@@ -307,10 +307,10 @@ func (m *Manager) discoverOAuth(ctx context.Context) (*oauth.Config, string, err
 			AuthorizationEndpoint: lpURL + "/authorization/new",
 			TokenEndpoint:         lpURL + "/authorization/token",
 		}
-		fmt.Fprintf(os.Stderr, "Authenticating via launchpad (%s)\n", fallbackCfg.AuthorizationEndpoint)
+		log(fmt.Sprintf("Authenticating via launchpad (%s)", fallbackCfg.AuthorizationEndpoint))
 		return fallbackCfg, "launchpad", nil
 	}
-	fmt.Fprintf(os.Stderr, "Authenticating via bc3 (%s)\n", cfg.AuthorizationEndpoint)
+	log(fmt.Sprintf("Authenticating via bc3 (%s)", cfg.AuthorizationEndpoint))
 	return cfg, "bc3", nil
 }
 

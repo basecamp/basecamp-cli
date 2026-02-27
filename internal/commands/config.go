@@ -417,12 +417,15 @@ func atomicWriteFile(path string, data []byte) error {
 	// Unix: rename atomically replaces the destination.
 	// Windows: rename fails when destination exists. Try rename first to
 	// preserve the old file on unrelated errors; only remove+retry on failure.
-	if err := os.Rename(tmpPath, path); err != nil && runtime.GOOS == "windows" {
-		_ = os.Remove(path)
-		return os.Rename(tmpPath, path)
-	} else { //nolint:revive // else-with-return kept for clarity of the two-branch pattern
+	if err := os.Rename(tmpPath, path); err != nil {
+		if runtime.GOOS == "windows" {
+			_ = os.Remove(path)
+			return os.Rename(tmpPath, path)
+		}
+		os.Remove(tmpPath) // Clean up stale temp on failure
 		return err
 	}
+	return nil
 }
 
 func newConfigProjectCmd() *cobra.Command {

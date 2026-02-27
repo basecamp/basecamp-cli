@@ -67,13 +67,28 @@ func NewRootCmd() *cobra.Command {
 					Todolist: flags.Todolist,
 					CacheDir: flags.CacheDir,
 				})
-				// Re-validate: profile may have changed base_url
-				if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
-					return fmt.Errorf("base_url (from profile %q): %w", profileName, err)
-				}
 				// Profile-scoped cache (only if cache dir was not explicitly set via flag or env)
 				if flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
 					cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
+				}
+			}
+
+			// Enforce HTTPS for non-localhost base_url.
+			// Skip for "config" subcommands so users can fix a bad base_url
+			// without being locked out by the validation they need to repair.
+			if !isConfigCmd(cmd) {
+				if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
+					source := cfg.Sources["base_url"]
+					if source == "" {
+						source = "unknown"
+					}
+					return fmt.Errorf("base_url (%s): %w\nFix with: basecamp config unset base_url", source, err)
+				}
+				if profileName != "" {
+					// Re-validate: profile may have changed base_url
+					if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
+						return fmt.Errorf("base_url (from profile %q): %w\nFix with: basecamp config unset base_url", profileName, err)
+					}
 				}
 			}
 
@@ -364,6 +379,17 @@ func promptForProfile(cfg *config.Config) (string, error) {
 
 // transformCobraError transforms Cobra's default error messages to match the
 // Bash CLI format for consistency with existing tests and user expectations.
+// isConfigCmd returns true if cmd is "config" or any of its subcommands.
+// Used to skip HTTPS enforcement so users can repair a bad base_url.
+func isConfigCmd(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "config" {
+			return true
+		}
+	}
+	return false
+}
+
 func transformCobraError(err error) error {
 	msg := err.Error()
 
