@@ -86,7 +86,7 @@ jobs:
       - name: Run gosec
         uses: securego/gosec@v2.23.0
         with:
-          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+          args: '-fmt sarif -out gosec-results.sarif ./...'
 
       - name: Upload gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -97,5 +97,10 @@ jobs:
 
   # NOTE: govulncheck runs in test.yml - not duplicated here
 
-  # TODO: Restore dependency-review job when repo goes public
-  # Requires GitHub Advanced Security, noisy during private dev
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/dependency-review-action@v4
