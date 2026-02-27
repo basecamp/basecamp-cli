@@ -26,7 +26,7 @@ func TestResolvePreferences(t *testing.T) {
 		wantVerbose int
 	}{
 		{
-			name:      "nil config falls back to IsDev",
+			name:      "empty config falls back to IsDev",
 			cfg:       &config.Config{},
 			wantStats: isDev,
 			wantHints: isDev,
