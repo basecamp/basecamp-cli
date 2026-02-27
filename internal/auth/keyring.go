@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/zalando/go-keyring"
 )
@@ -44,6 +45,8 @@ func NewStore(fallbackDir string) *Store {
 		_ = keyring.Delete(serviceName, testKey) // Best-effort cleanup
 		return &Store{useKeyring: true, fallbackDir: fallbackDir}
 	}
+	fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
+		filepath.Join(fallbackDir, "credentials.json"))
 	return &Store{useKeyring: false, fallbackDir: fallbackDir}
 }
 
@@ -131,12 +134,40 @@ func (s *Store) saveAllToFile(all map[string]*Credentials) error {
 		return err
 	}
 
-	// Atomic write
-	tmpPath := s.credentialsPath() + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	// Atomic write with randomized temp file name
+	tmpFile, err := os.CreateTemp(s.fallbackDir, "credentials-*.json.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, s.credentialsPath())
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmpFile.Chmod(0600); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	// Unix: rename atomically replaces the destination.
+	// Windows: rename fails when destination exists. Try rename first to
+	// preserve the old file on unrelated errors; only remove+retry on failure.
+	destPath := s.credentialsPath()
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		if runtime.GOOS == "windows" {
+			_ = os.Remove(destPath)
+			return os.Rename(tmpPath, destPath)
+		}
+		os.Remove(tmpPath) // Clean up stale temp on failure
+		return err
+	}
+	return nil
 }
 
 func (s *Store) loadFromFile(origin string) (*Credentials, error) {

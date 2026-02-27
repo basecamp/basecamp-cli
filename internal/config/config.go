@@ -131,12 +131,22 @@ func loadFromFile(cfg *Config, path string, source Source) {
 
 	var fileCfg map[string]any
 	if err := json.Unmarshal(data, &fileCfg); err != nil {
-		return // Invalid JSON, skip
+		fmt.Fprintf(os.Stderr, "warning: skipping malformed config at %s: %v\n", path, err)
+		return
 	}
 
+	// Authority keys (base_url, profiles, default_profile) control where tokens
+	// are sent. Local/repo config must NOT set these — a malicious config in a
+	// cloned repo or parent directory could redirect authenticated traffic.
+	untrusted := source == SourceLocal || source == SourceRepo
+
 	if v, ok := fileCfg["base_url"].(string); ok && v != "" {
-		cfg.BaseURL = v
-		cfg.Sources["base_url"] = string(source)
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring base_url %q from %s config at %s (authority keys are not trusted from local/repo config)\n", v, source, path)
+		} else {
+			cfg.BaseURL = v
+			cfg.Sources["base_url"] = string(source)
+		}
 	}
 	if v := getStringOrNumber(fileCfg, "account_id"); v != "" {
 		cfg.AccountID = v
@@ -184,41 +194,49 @@ func loadFromFile(cfg *Config, path string, source Source) {
 		}
 	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
-		cfg.DefaultProfile = v
-		cfg.Sources["default_profile"] = string(source)
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s (authority keys are not trusted from local/repo config)\n", v, source, path)
+		} else {
+			cfg.DefaultProfile = v
+			cfg.Sources["default_profile"] = string(source)
+		}
 	}
 	if v, ok := fileCfg["profiles"].(map[string]any); ok {
-		if cfg.Profiles == nil {
-			cfg.Profiles = make(map[string]*ProfileConfig)
-		}
-		for name, profileData := range v {
-			if profileMap, ok := profileData.(map[string]any); ok {
-				profileCfg := &ProfileConfig{}
-				if baseURL, ok := profileMap["base_url"].(string); ok && baseURL != "" {
-					profileCfg.BaseURL = baseURL
-				} else {
-					// Skip profiles with empty or missing base_url
-					continue
-				}
-				if accountID := getStringOrNumber(profileMap, "account_id"); accountID != "" {
-					profileCfg.AccountID = accountID
-				}
-				if projectID := getStringOrNumber(profileMap, "project_id"); projectID != "" {
-					profileCfg.ProjectID = projectID
-				}
-				if todolistID := getStringOrNumber(profileMap, "todolist_id"); todolistID != "" {
-					profileCfg.TodolistID = todolistID
-				}
-				if scope, ok := profileMap["scope"].(string); ok {
-					profileCfg.Scope = scope
-				}
-				if clientID, ok := profileMap["client_id"].(string); ok {
-					profileCfg.ClientID = clientID
-				}
-				cfg.Profiles[name] = profileCfg
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s (authority keys are not trusted from local/repo config)\n", source, path)
+		} else {
+			if cfg.Profiles == nil {
+				cfg.Profiles = make(map[string]*ProfileConfig)
 			}
+			for name, profileData := range v {
+				if profileMap, ok := profileData.(map[string]any); ok {
+					profileCfg := &ProfileConfig{}
+					if baseURL, ok := profileMap["base_url"].(string); ok && baseURL != "" {
+						profileCfg.BaseURL = baseURL
+					} else {
+						// Skip profiles with empty or missing base_url
+						continue
+					}
+					if accountID := getStringOrNumber(profileMap, "account_id"); accountID != "" {
+						profileCfg.AccountID = accountID
+					}
+					if projectID := getStringOrNumber(profileMap, "project_id"); projectID != "" {
+						profileCfg.ProjectID = projectID
+					}
+					if todolistID := getStringOrNumber(profileMap, "todolist_id"); todolistID != "" {
+						profileCfg.TodolistID = todolistID
+					}
+					if scope, ok := profileMap["scope"].(string); ok {
+						profileCfg.Scope = scope
+					}
+					if clientID, ok := profileMap["client_id"].(string); ok {
+						profileCfg.ClientID = clientID
+					}
+					cfg.Profiles[name] = profileCfg
+				}
+			}
+			cfg.Sources["profiles"] = string(source)
 		}
-		cfg.Sources["profiles"] = string(source)
 	}
 }
 
@@ -389,8 +407,21 @@ func globalConfigPath() string {
 }
 
 func repoConfigPath() string {
-	// Walk up to find .git directory, then look for .basecamp/config.json
+	// Walk up to find .git directory, then look for .basecamp/config.json.
+	// Bounded by $HOME: only search within the home directory tree.
+	// If CWD is outside $HOME (e.g., /tmp), no repo config is trusted.
 	dir, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
+
+	// If CWD is not inside $HOME, don't trust any repo config.
+	// This prevents a malicious .git in /tmp/ from anchoring the repo root.
+	if home != "" && !isInsideDir(dir, home) {
+		return ""
+	}
+
 	for {
 		gitPath := filepath.Join(dir, ".git")
 		if _, err := os.Stat(gitPath); err == nil {
@@ -405,18 +436,54 @@ func repoConfigPath() string {
 		if parent == dir {
 			return ""
 		}
+		// Don't walk above home directory
+		if home != "" && dir == home {
+			return ""
+		}
 		dir = parent
 	}
 }
 
-// localConfigPaths returns all .basecamp/config.json paths from root to current directory,
+// isInsideDir reports whether child is the same as or a subdirectory of parent.
+// Both paths must be absolute and already cleaned/resolved.
+func isInsideDir(child, parent string) bool {
+	if child == parent {
+		return true
+	}
+	// Ensure parent has a trailing separator for prefix matching
+	prefix := parent
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+	return strings.HasPrefix(child, prefix)
+}
+
+// localConfigPaths returns .basecamp/config.json paths within the trust boundary,
 // excluding the repo config path (already loaded as SourceRepo).
 // Paths are returned in order from furthest ancestor to closest, so closer configs override.
+//
+// Trust boundary:
+//   - Inside a git repo: only paths at or below the repo root
+//   - Outside a git repo: only the current working directory (no parent traversal)
 func localConfigPaths(repoConfigPath string) []string {
 	dir, _ := os.Getwd()
 	var paths []string
 
-	// Collect all paths walking up
+	// Determine trust boundary (resolve symlinks for reliable comparison
+	// since os.Getwd returns the resolved path on platforms like macOS)
+	var boundary string
+	if repoConfigPath != "" {
+		// Inside a repo: trust boundary is the repo root
+		boundary = filepath.Dir(filepath.Dir(repoConfigPath)) // .basecamp/config.json -> repo root
+	} else {
+		// No repo: only trust current directory
+		boundary = dir
+	}
+	if resolved, err := filepath.EvalSymlinks(boundary); err == nil {
+		boundary = resolved
+	}
+
+	// Collect paths walking up, stopping at the trust boundary
 	for {
 		cfgPath := filepath.Join(dir, ".basecamp", "config.json")
 		if _, err := os.Stat(cfgPath); err == nil {
@@ -427,13 +494,13 @@ func localConfigPaths(repoConfigPath string) []string {
 		}
 
 		parent := filepath.Dir(dir)
-		if parent == dir {
+		if parent == dir || dir == boundary {
 			break
 		}
 		dir = parent
 	}
 
-	// Reverse so paths go from root to current (closer overrides)
+	// Reverse so paths go from boundary to current (closer overrides)
 	for i, j := 0, len(paths)-1; i < j; i, j = i+1, j-1 {
 		paths[i], paths[j] = paths[j], paths[i]
 	}

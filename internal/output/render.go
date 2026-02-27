@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 
 	"github.com/basecamp/basecamp-cli/internal/observability"
@@ -319,7 +320,7 @@ func (r *Renderer) renderData(b *strings.Builder, data any) {
 		}
 
 	case string:
-		b.WriteString(r.Data.Render(d))
+		b.WriteString(r.Data.Render(ansi.Strip(d)))
 		b.WriteString("\n")
 
 	case nil:
@@ -328,7 +329,7 @@ func (r *Renderer) renderData(b *strings.Builder, data any) {
 
 	default:
 		// Fallback: format as string
-		b.WriteString(r.Data.Render(fmt.Sprintf("%v", data)))
+		b.WriteString(r.Data.Render(ansi.Strip(fmt.Sprintf("%v", data))))
 		b.WriteString("\n")
 	}
 }
@@ -654,6 +655,7 @@ func formatCell(val any) string {
 	case nil:
 		return ""
 	case string:
+		v = ansi.Strip(v)
 		// Truncate long strings (rune-safe for multi-byte UTF-8)
 		if utf8.RuneCountInString(v) > 40 {
 			runes := []rune(v)
@@ -683,7 +685,7 @@ func formatCell(val any) string {
 		for _, item := range v {
 			switch elem := item.(type) {
 			case string:
-				items = append(items, elem)
+				items = append(items, ansi.Strip(elem))
 			case json.Number:
 				items = append(items, elem.String())
 			case float64:
@@ -697,19 +699,19 @@ func formatCell(val any) string {
 			case map[string]any:
 				// Try name, then title, then id, then fallback
 				if name, ok := elem["name"].(string); ok {
-					items = append(items, name)
+					items = append(items, ansi.Strip(name))
 				} else if title, ok := elem["title"].(string); ok {
-					items = append(items, title)
+					items = append(items, ansi.Strip(title))
 				} else if id, ok := elem["id"]; ok {
 					items = append(items, fmt.Sprintf("%v", id))
 				}
 			default:
-				items = append(items, fmt.Sprintf("%v", item))
+				items = append(items, ansi.Strip(fmt.Sprintf("%v", item)))
 			}
 		}
 		return strings.Join(items, ", ")
 	default:
-		return fmt.Sprintf("%v", v)
+		return ansi.Strip(fmt.Sprintf("%v", v))
 	}
 }
 
@@ -868,13 +870,13 @@ func (r *MarkdownRenderer) renderData(b *strings.Builder, data any) {
 		}
 
 	case string:
-		b.WriteString(d + "\n")
+		b.WriteString(ansi.Strip(d) + "\n")
 
 	case nil:
 		b.WriteString("*No data*\n")
 
 	default:
-		fmt.Fprintf(b, "%v\n", data)
+		fmt.Fprintf(b, "%v\n", ansi.Strip(fmt.Sprintf("%v", data)))
 	}
 }
 

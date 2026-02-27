@@ -4,6 +4,7 @@ package hostutil
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -51,6 +52,22 @@ func IsLocalhost(host string) bool {
 		return true
 	}
 	return false
+}
+
+// RequireSecureURL returns an error if the URL uses http:// for a non-localhost host.
+// Localhost (127.0.0.1, ::1, *.localhost) is exempt for local development.
+func RequireSecureURL(rawURL string) error {
+	if rawURL == "" {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme == "http" && !IsLocalhost(u.Host) {
+		return fmt.Errorf("refusing insecure http:// URL for non-localhost host %q — use https:// or target localhost for development", u.Host)
+	}
+	return nil
 }
 
 // OpenBrowser opens the specified URL in the default browser.

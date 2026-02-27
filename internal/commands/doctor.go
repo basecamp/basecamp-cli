@@ -310,7 +310,7 @@ func fetchLatestVersion() (string, error) {
 	var release struct {
 		TagName string `json:"tag_name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil { // 1 MB limit
 		return "", err
 	}
 

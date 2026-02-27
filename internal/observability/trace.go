@@ -17,6 +17,7 @@ import (
 var sensitiveParams = map[string]bool{
 	"access_token":  true, // OAuth tokens
 	"refresh_token": true, // OAuth refresh
+	"token":         true, // Generic tokens
 	"api_key":       true, // API keys
 	"apikey":        true, // API keys (no underscore)
 	"password":      true, // Passwords

@@ -51,6 +51,42 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestRequireSecureURL(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantErr bool
+	}{
+		// HTTPS always ok
+		{"https://api.example.com", false},
+		{"https://evil.com", false},
+		{"", false},
+
+		// HTTP localhost ok (dev use)
+		{"http://localhost:3001", false},
+		{"http://127.0.0.1:8080", false},
+		{"http://[::1]:3000", false},
+		{"http://3.basecamp.localhost:3001", false},
+		{"http://app.localhost", false},
+
+		// HTTP non-localhost rejected
+		{"http://evil.com", true},
+		{"http://api.example.com", true},
+		{"http://staging.basecamp.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			err := RequireSecureURL(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "insecure http://")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestIsLocalhost(t *testing.T) {
 	tests := []struct {
 		input    string
