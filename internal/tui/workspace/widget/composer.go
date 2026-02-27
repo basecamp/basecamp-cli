@@ -505,16 +505,10 @@ func (c *Composer) OpenEditor() tea.Cmd {
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 
-	// Build the editor command (same pattern as campfire.go)
-	var cmd *exec.Cmd
-	if strings.ContainsAny(editor, `'"`) {
-		escaped := "'" + strings.ReplaceAll(tmpPath, "'", `'"'"'`) + "'"
-		cmd = exec.Command("sh", "-c", editor+" "+escaped) //nolint:gosec,noctx
-	} else {
-		parts := strings.Fields(editor)
-		args := append(parts[1:], tmpPath)
-		cmd = exec.Command(parts[0], args...) //nolint:gosec,noctx
-	}
+	// Build the editor command — always use exec.Command to avoid shell injection
+	parts := strings.Fields(editor)
+	args := append(parts[1:], tmpPath)
+	cmd := exec.Command(parts[0], args...) //nolint:gosec,noctx
 
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
