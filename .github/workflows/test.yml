@@ -259,7 +259,7 @@ jobs:
         run: |
           benchstat benchmarks-baseline.txt benchmarks.txt > comparison.txt 2>&1 || true
           if grep -E '\+[2-9][0-9]\.[0-9]+%|\+[1-9][0-9][0-9]+' comparison.txt; then
-            echo "::warning::Potential performance regression detected (>20% slower in some benchmarks)"
+            echo "::error::Performance regression detected (>20% slower). See benchmark comparison in step summary."
           fi
 
       - name: Save benchmark baseline
