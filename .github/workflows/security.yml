@@ -85,9 +85,9 @@ jobs:
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Run gosec
-        uses: securego/gosec@v2.23.0
-        with:
-          args: '-fmt sarif -out gosec-results.sarif ./...'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+          gosec -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -102,6 +102,7 @@ jobs:
     name: Dependency Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    continue-on-error: true  # Requires GitHub Advanced Security (not available on all plans)
     steps:
       - uses: actions/checkout@v6
       - uses: actions/dependency-review-action@v4
