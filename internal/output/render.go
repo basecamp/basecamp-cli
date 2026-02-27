@@ -654,9 +654,10 @@ func formatCell(val any) string {
 	case nil:
 		return ""
 	case string:
-		// Truncate long strings
-		if len(v) > 40 {
-			return v[:37] + "..."
+		// Truncate long strings (rune-safe for multi-byte UTF-8)
+		if utf8.RuneCountInString(v) > 40 {
+			runes := []rune(v)
+			return string(runes[:37]) + "..."
 		}
 		return v
 	case bool:
