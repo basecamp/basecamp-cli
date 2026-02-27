@@ -131,7 +131,7 @@ Events track all changes to a recording. Common event actions:
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of events to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all events (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

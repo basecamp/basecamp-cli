@@ -245,7 +245,7 @@ func newFoldersCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of folders to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all folders (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newFoldersListCmd(project, vaultID),
@@ -270,7 +270,7 @@ func newFoldersListCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of folders to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all folders (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }
@@ -468,7 +468,7 @@ func newUploadsCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of files to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all files (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newUploadsListCmd(project, vaultID),
@@ -492,7 +492,7 @@ func newUploadsListCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of files to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all files (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }
@@ -600,7 +600,7 @@ func newDocsCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of documents to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all documents (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newDocsListCmd(project, vaultID),
@@ -625,7 +625,7 @@ func newDocsListCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of documents to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all documents (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }
@@ -1307,7 +1307,7 @@ func createFile(path string) (*os.File, error) {
 	// Create parent directories if they don't exist
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
 	}

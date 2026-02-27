@@ -43,7 +43,7 @@ Each project has one todoset containing multiple todolists.`,
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newTodolistsListCmd(&project),
@@ -70,7 +70,7 @@ func newTodolistsListCmd(project *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

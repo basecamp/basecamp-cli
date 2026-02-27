@@ -67,7 +67,7 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 	cmd.Flags().StringVar(&direction, "direction", "desc", "Sort direction (asc, desc)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newRecordingsListCmd(&project),
@@ -144,7 +144,7 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVar(&direction, "direction", "desc", "Sort direction (asc, desc)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }
@@ -200,7 +200,8 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 	}
 	recordings := recordingsResult.Recordings
 
-	summary := fmt.Sprintf("%d %ss", len(recordings), recordingType)
+	displayType := recordingDisplayName(recordingType)
+	summary := fmt.Sprintf("%d %s", len(recordings), displayType)
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
@@ -463,4 +464,24 @@ You can pass either a recording ID or a Basecamp URL:
 	cmd.Flags().BoolVar(&hidden, "hide", false, "Hide from clients (alias)")
 
 	return cmd
+}
+
+// recordingDisplayName maps SDK recording type names to human-friendly display names.
+func recordingDisplayName(sdkType string) string {
+	switch sdkType {
+	case "Kanban::Card":
+		return "cards"
+	case "Todolist::Todo":
+		return "todos"
+	case "Inbox::Forward":
+		return "forwards"
+	case "Schedule::Entry":
+		return "schedule entries"
+	case "Question::Answer":
+		return "check-in answers"
+	case "Vault::Document":
+		return "documents"
+	default:
+		return sdkType + "s"
+	}
 }
