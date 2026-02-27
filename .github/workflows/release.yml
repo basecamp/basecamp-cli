@@ -43,6 +43,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9.0
+          install-only: true
 
       - name: Cache BATS
         id: cache-bats
@@ -61,6 +62,11 @@ jobs:
         run: |
           make fmt-check vet lint test test-e2e provenance-check check-naming
           go test -race -count=1 ./...
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
   release:
     name: Release
