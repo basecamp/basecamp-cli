@@ -72,7 +72,7 @@ verify_checksums() {
   fi
 
   # Verify SHA256 checksum of the downloaded archive
-  (cd "$tmp_dir" && grep "$archive_name" checksums.txt | $(find_sha256_cmd) --check --status) \
+  (cd "$tmp_dir" && grep -F "$archive_name" checksums.txt | $(find_sha256_cmd) --check --status) \
     || error "Checksum verification failed for $archive_name"
 
   info "Checksum verified"
