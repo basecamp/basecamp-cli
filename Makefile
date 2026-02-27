@@ -210,7 +210,14 @@ fmt-check:
 	@test -z "$$($(GOFMT) -s -l . | tee /dev/stderr)" || (echo "Code is not formatted. Run 'make fmt'" && exit 1)
 
 # Run linter (requires golangci-lint)
-GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell go env GOPATH)/bin/golangci-lint")
+# Prefer GOBIN/GOPATH binary (matches active Go toolchain) over PATH (may be Homebrew/system)
+GOLANGCI_LINT := $(shell go env GOBIN)/golangci-lint
+ifeq ($(wildcard $(GOLANGCI_LINT)),)
+  GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
+endif
+ifeq ($(wildcard $(GOLANGCI_LINT)),)
+  GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null)
+endif
 
 .PHONY: lint
 lint:
