@@ -8,6 +8,7 @@ on:
   schedule:
     # Weekly scan on Monday at 6am UTC
     - cron: '0 6 * * 1'
+  workflow_call:  # Allow release.yml to invoke the full security suite
   workflow_dispatch:
 
 permissions:
@@ -84,9 +85,9 @@ jobs:
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Run gosec
-        uses: securego/gosec@v2.23.0
-        with:
-          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+          gosec -no-fail -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -97,5 +98,11 @@ jobs:
 
   # NOTE: govulncheck runs in test.yml - not duplicated here
 
-  # TODO: Restore dependency-review job when repo goes public
-  # Requires GitHub Advanced Security, noisy during private dev
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true  # Requires GitHub Advanced Security (not available on all plans)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/dependency-review-action@v4

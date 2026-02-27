@@ -1,6 +1,11 @@
 package commands
 
 import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
@@ -111,6 +116,7 @@ func commandCategories() []CommandCategory {
 				{Name: "setup", Category: "auth", Description: "Interactive first-time setup"},
 				{Name: "quick-start", Category: "auth", Description: "Show getting started guide"},
 				{Name: "doctor", Category: "auth", Description: "Check CLI health and diagnose issues"},
+				{Name: "upgrade", Category: "auth", Description: "Upgrade to the latest version"},
 				{Name: "migrate", Category: "auth", Description: "Migrate data from legacy bcq installation"},
 			},
 		},
@@ -157,28 +163,66 @@ func NewCommandsCmd() *cobra.Command {
 		Long:    "List all available basecamp commands organized by category.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-
 			categories := commandCategories()
-			if !app.Flags.JSON {
-				for i := range categories {
-					for j := range categories[i].Commands {
-						if categories[i].Commands[j].Experimental {
-							categories[i].Commands[j].Description = "[experimental] " + categories[i].Commands[j].Description
-						}
-					}
-				}
+
+			// For styled terminal output, render grouped columns directly
+			if app.Output.EffectiveFormat() == output.FormatStyled {
+				renderCommandsStyled(cmd.OutOrStdout(), categories)
+				return nil
 			}
 
 			return app.OK(categories,
 				output.WithSummary("All available basecamp commands"),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "help",
-						Cmd:         "basecamp --help",
-						Description: "View help",
-					},
-				),
 			)
 		},
+	}
+}
+
+// renderCommandsStyled writes a grouped command listing with aligned columns.
+func renderCommandsStyled(w io.Writer, categories []CommandCategory) {
+	bold := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#666", Dark: "#888"})
+
+	experimentalPrefix := "[experimental] "
+
+	// Find max widths across all categories for alignment,
+	// accounting for the experimental prefix in the description column.
+	maxName := 0
+	maxDesc := 0
+	for _, cat := range categories {
+		for _, cmd := range cat.Commands {
+			if len(cmd.Name) > maxName {
+				maxName = len(cmd.Name)
+			}
+			descWidth := len(cmd.Description)
+			if cmd.Experimental {
+				descWidth += len(experimentalPrefix)
+			}
+			if descWidth > maxDesc {
+				maxDesc = descWidth
+			}
+		}
+	}
+
+	for i, cat := range categories {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintln(w, bold.Render(cat.Name))
+		for _, cmd := range cat.Commands {
+			actions := ""
+			if len(cmd.Actions) > 0 {
+				actions = strings.Join(cmd.Actions, ", ")
+			}
+			desc := cmd.Description
+			if cmd.Experimental {
+				desc = experimentalPrefix + desc
+			}
+			line := fmt.Sprintf("  %-*s  %-*s", maxName, cmd.Name, maxDesc, desc)
+			if actions != "" {
+				line += "  " + muted.Render(actions)
+			}
+			fmt.Fprintln(w, line)
+		}
 	}
 }

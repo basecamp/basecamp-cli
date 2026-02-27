@@ -41,6 +41,29 @@ func ResolveTheme() Theme {
 	return DefaultTheme()
 }
 
+// ThemeFilePath returns the resolved path to the active theme file,
+// or "" if using defaults or NO_COLOR is set.
+func ThemeFilePath() string {
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return ""
+	}
+	if path := os.Getenv("BASECAMP_THEME"); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(home, ".config", "basecamp", "theme", "colors.toml")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
+}
+
 // NoColorTheme returns a theme with empty colors (honors NO_COLOR standard).
 // Lipgloss treats empty strings as "no color", resulting in plain text output.
 func NoColorTheme() Theme {

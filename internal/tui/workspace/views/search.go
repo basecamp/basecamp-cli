@@ -162,7 +162,13 @@ func (v *Search) ShortHelp() []key.Binding {
 
 // FullHelp implements View.
 func (v *Search) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			v.keys.Submit,
+			v.keys.Select,
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+		},
+	}
 }
 
 // SetSize implements View.
@@ -313,7 +319,7 @@ func (v *Search) toggleFocus() tea.Cmd {
 
 func (v *Search) submitQuery() tea.Cmd {
 	q := strings.TrimSpace(v.textInput.Value())
-	if q == "" || q == v.query {
+	if q == "" {
 		return nil
 	}
 	v.query = q
@@ -401,11 +407,20 @@ func (v *Search) View() string {
 		results = v.list.View()
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	content := lipgloss.JoinVertical(lipgloss.Left,
 		inputLine,
 		separator,
 		results,
 	)
+
+	// Hard-clamp to allocated height to prevent chrome overflow
+	if v.height > 0 {
+		lines := strings.Split(content, "\n")
+		if len(lines) > v.height {
+			content = strings.Join(lines[:v.height], "\n")
+		}
+	}
+	return content
 }
 
 // -- Commands

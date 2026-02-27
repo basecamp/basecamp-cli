@@ -196,7 +196,15 @@ func (v *Campfire) ShortHelp() []key.Binding {
 
 // FullHelp implements View.
 func (v *Campfire) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys("j", "k"), key.WithHelp("j/k", "scroll")),
+			key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "compose")),
+		},
+		{
+			key.NewBinding(key.WithKeys("b", "B"), key.WithHelp("b", "boost")),
+		},
+	}
 }
 
 // SetSize implements View.

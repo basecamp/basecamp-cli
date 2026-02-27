@@ -74,18 +74,13 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build context info
+	// Build context info from config only (no API calls — must be instant)
 	contextInfo := ContextInfo{}
-	if app.Config.ProjectID != "" && app.RequireAccount() == nil {
-		// Try to resolve project name (best-effort, skip if account not configured)
-		projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), app.Config.ProjectID)
-		if err == nil {
-			var id int64
-			_, _ = fmt.Sscanf(projectID, "%d", &id) //nolint:gosec // G104: ID validated
+	if app.Config.ProjectID != "" {
+		var id int64
+		_, _ = fmt.Sscanf(app.Config.ProjectID, "%d", &id) //nolint:gosec // G104: ID validated
+		if id != 0 {
 			contextInfo.ProjectID = &id
-			if projectName != "" {
-				contextInfo.ProjectName = &projectName
-			}
 		}
 	}
 
@@ -116,6 +111,9 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 			summary = fmt.Sprintf("basecamp v%s - logged in @ %s", version.Version, authInfo.Account)
 		} else {
 			summary = fmt.Sprintf("basecamp v%s - logged in", version.Version)
+		}
+		if app.Flags.Profile != "" {
+			summary += fmt.Sprintf(" (profile: %s)", app.Flags.Profile)
 		}
 	} else {
 		summary = fmt.Sprintf("basecamp v%s - not logged in", version.Version)

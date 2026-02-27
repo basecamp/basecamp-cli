@@ -1,7 +1,5 @@
 # <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI
 
-> **Prerelease.** This is an early internal release for 37signals dogfooding. The repo is private — all install methods below require GitHub access. Expect rough edges; file issues as you find them.
-
 `basecamp` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
@@ -20,7 +18,7 @@ That's it. You now have full access to Basecamp from your terminal.
 <details>
 <summary>Other installation methods</summary>
 
-**Go install** (requires `GOPRIVATE=github.com/basecamp/*`):
+**Go install:**
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
@@ -30,11 +28,6 @@ go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 
-**Windows (Scoop):**
-```bash
-scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install basecamp
-```
 </details>
 
 ## Usage
@@ -77,8 +70,8 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 OAuth 2.1 with automatic token refresh. First login opens your browser:
 
 ```bash
-basecamp auth login              # Full read/write access
-basecamp auth login --scope read # Read-only access
+basecamp auth login              # Read-only access (default)
+basecamp auth login --scope full # Full read/write access
 basecamp auth token              # Print token for scripts
 ```
 
@@ -120,7 +113,7 @@ See [install.md](install.md) for step-by-step setup instructions.
 
 ```bash
 basecamp doctor              # Check CLI health and diagnose issues
-basecamp doctor -V           # Verbose output with details
+basecamp doctor --verbose    # Verbose output with details
 ```
 
 ## Development

@@ -71,7 +71,20 @@ func NewStyles() *Styles {
 
 // NewStylesWithTheme creates a new Styles with a custom theme.
 func NewStylesWithTheme(theme Theme) *Styles {
-	s := &Styles{theme: theme}
+	s := &Styles{}
+	applyTheme(s, theme)
+	return s
+}
+
+// UpdateTheme re-applies a theme to the existing Styles in place.
+// Because all components hold a *Styles pointer, the next View() call
+// picks up the new colors with zero propagation.
+func (s *Styles) UpdateTheme(theme Theme) {
+	applyTheme(s, theme)
+}
+
+func applyTheme(s *Styles, theme Theme) {
+	s.theme = theme
 
 	// Text styles
 	s.Title = lipgloss.NewStyle().
@@ -149,8 +162,6 @@ func NewStylesWithTheme(theme Theme) *Styles {
 
 	s.StatusInfo = lipgloss.NewStyle().
 		Foreground(theme.Primary)
-
-	return s
 }
 
 // Theme returns the current theme.

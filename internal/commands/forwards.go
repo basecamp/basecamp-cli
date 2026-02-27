@@ -37,7 +37,7 @@ that can receive forwarded emails.`,
 	cmd.PersistentFlags().StringVar(&inboxID, "inbox", "", "Inbox ID (auto-detected from project)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newForwardsListCmd(&project, &inboxID),
@@ -71,7 +71,7 @@ func newForwardsListCmd(project, inboxID *string) *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }
@@ -443,7 +443,7 @@ You can pass either a forward ID or a Basecamp URL:
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of replies to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all replies (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

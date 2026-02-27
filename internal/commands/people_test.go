@@ -72,6 +72,7 @@ func setupPeopleTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 			Format: output.FormatJSON,
 			Writer: buf,
 		}),
+		Flags: appctx.GlobalFlags{Hints: true},
 	}
 	return app, buf
 }
@@ -181,6 +182,7 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 			Format: output.FormatJSON,
 			Writer: buf,
 		}),
+		Flags: appctx.GlobalFlags{Hints: true},
 	}
 	return app, buf
 }

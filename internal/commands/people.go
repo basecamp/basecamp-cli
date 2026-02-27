@@ -124,7 +124,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 		// No account configured yet - suggest setup
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "setup",
-			Cmd:         fmt.Sprintf("basecamp config set account %d", accounts[0].ID),
+			Cmd:         fmt.Sprintf("basecamp config set account_id %d", accounts[0].ID),
 			Description: "Configure your Basecamp account",
 		})
 	} else {
@@ -193,7 +193,7 @@ func newPeopleListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&projectID, "project", "p", "", "List people in a specific project")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of people to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all people (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

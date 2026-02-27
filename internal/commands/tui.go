@@ -60,6 +60,7 @@ func NewTUICmd() *cobra.Command {
 			)
 
 			_, err := p.Run()
+			model.CloseWatcher()
 			return err
 		},
 	}

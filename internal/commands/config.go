@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -74,6 +76,9 @@ func runConfigShow(cmd *cobra.Command) error {
 		{"cache_dir", app.Config.CacheDir, app.Config.CacheDir != ""},
 		{"cache_enabled", fmt.Sprintf("%t", app.Config.CacheEnabled), app.Config.Sources["cache_enabled"] != "" || !app.Config.CacheEnabled},
 		{"format", app.Config.Format, app.Config.Format != ""},
+		{"hints", fmt.Sprintf("%t", app.Config.Hints != nil && *app.Config.Hints), app.Config.Hints != nil},
+		{"stats", fmt.Sprintf("%t", app.Config.Stats != nil && *app.Config.Stats), app.Config.Stats != nil},
+		{"verbose", fmt.Sprintf("%d", derefInt(app.Config.Verbose)), app.Config.Verbose != nil},
 	}
 
 	for _, k := range keys {
@@ -126,7 +131,7 @@ func newConfigInitCmd() *cobra.Command {
 			}
 
 			// Create directory
-			if err := os.MkdirAll(configDir, 0750); err != nil {
+			if err := os.MkdirAll(configDir, 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
@@ -160,7 +165,8 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Set a configuration value",
 		Long: `Set a configuration value in the local or global config file.
 
-Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled, format, scope, default_profile`,
+Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
+            format, scope, default_profile, hints, stats, verbose`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -179,9 +185,17 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				"format":          true,
 				"scope":           true,
 				"default_profile": true,
+				"hints":           true,
+				"stats":           true,
+				"verbose":         true,
 			}
 			if !validKeys[key] {
-				return output.ErrUsage(fmt.Sprintf("Invalid config key: %s", key))
+				names := make([]string, 0, len(validKeys))
+				for k := range validKeys {
+					names = append(names, k)
+				}
+				sort.Strings(names)
+				return output.ErrUsage(fmt.Sprintf("Invalid config key %q. Valid keys: %s", key, strings.Join(names, ", ")))
 			}
 
 			var configPath string
@@ -198,7 +212,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 
 			// Ensure directory exists
 			configDir := filepath.Dir(configPath)
-			if err := os.MkdirAll(configDir, 0750); err != nil {
+			if err := os.MkdirAll(configDir, 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 
@@ -222,16 +236,24 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				}
 			}
 
-			// Set value
+			// Set value with type-specific validation
 			valueOut := value
-			if key == "cache_enabled" {
+			switch key {
+			case "cache_enabled", "hints", "stats":
 				boolVal, ok := parseBoolFlag(value)
 				if !ok {
-					return output.ErrUsage("cache_enabled must be true/false (or 1/0)")
+					return output.ErrUsage(fmt.Sprintf("%s must be true/false (or 1/0)", key))
 				}
 				configData[key] = boolVal
 				valueOut = fmt.Sprintf("%t", boolVal)
-			} else {
+			case "verbose":
+				level, err := strconv.Atoi(value)
+				if err != nil || level < 0 || level > 2 {
+					return output.ErrUsage("verbose must be 0, 1, or 2")
+				}
+				configData[key] = level
+				valueOut = value
+			default:
 				configData[key] = value
 			}
 
@@ -268,6 +290,13 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 	// Note: local is the default, so no --local flag needed
 
 	return cmd
+}
+
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 func parseBoolFlag(value string) (bool, bool) {
@@ -409,7 +438,7 @@ func newConfigProjectCmd() *cobra.Command {
 			configPath := filepath.Join(".basecamp", "config.json")
 
 			// Ensure directory exists
-			if err := os.MkdirAll(".basecamp", 0750); err != nil {
+			if err := os.MkdirAll(".basecamp", 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
 			}
 

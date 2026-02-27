@@ -66,7 +66,7 @@ Opens browser for OAuth. Grant access when prompted.
 **Verify:**
 ```bash
 basecamp auth status
-# Expected: Authenticated as your@email.com
+# Expected: Authenticated (scope: read)
 ```
 
 ---

@@ -423,6 +423,11 @@ func WithBreadcrumbs(b ...Breadcrumb) ResponseOption {
 	return func(r *Response) { r.Breadcrumbs = append(r.Breadcrumbs, b...) }
 }
 
+// WithoutBreadcrumbs removes all breadcrumbs from the response.
+func WithoutBreadcrumbs() ResponseOption {
+	return func(r *Response) { r.Breadcrumbs = nil }
+}
+
 // WithContext adds context to the response.
 func WithContext(key string, value any) ResponseOption {
 	return func(r *Response) {
@@ -541,7 +546,7 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 	out.WriteString(buf.String())
 
 	if len(resp.Breadcrumbs) > 0 {
-		out.WriteString("\n### Next\n\n")
+		out.WriteString("\n### Hints\n\n")
 		for _, bc := range resp.Breadcrumbs {
 			line := "- `" + bc.Cmd + "`"
 			if bc.Description != "" {

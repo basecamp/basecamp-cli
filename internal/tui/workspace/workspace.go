@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -68,6 +69,9 @@ type Workspace struct {
 	quitting            bool
 	confirmQuit         bool
 
+	// Theme file watcher for live reloading
+	themeWatcher *fsnotify.Watcher
+
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
 	viewFactory ViewFactory
 	openFunc    func(Scope) tea.Cmd
@@ -119,8 +123,6 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		sidebarRatio:    0.30,
 	}
 	w.createBoostFunc = w.createBoost
-	w.breadcrumb.SetExperimental(true)
-
 	// Metrics panel reads live stats from the Hub's metrics collector.
 	if hub := session.Hub(); hub != nil {
 		m := hub.Metrics()
@@ -162,6 +164,11 @@ func (w *Workspace) Init() tea.Cmd {
 
 	// Discover all accounts for multi-account features
 	cmds = append(cmds, w.discoverAccounts())
+
+	// Watch theme file for live reloading
+	if cmd := w.startThemeWatcher(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -253,8 +260,8 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// - Single-account: identity is now available for identity-dependent
 		//   pools (Assignments), replacing bootstrap-empty data.
 		if view := w.router.Current(); view != nil {
-			title := view.Title()
-			if title == "Home" || title == "Projects" {
+			target := w.router.CurrentTarget()
+			if target == ViewHome || target == ViewProjects {
 				updated, cmd := view.Update(RefreshMsg{})
 				w.replaceCurrentView(updated)
 				return w, w.stampCmd(cmd)
@@ -271,6 +278,23 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.pickingBoost = true
 		w.boostTarget = msg.Target
 		w.boostPicker.Focus()
+		return w, nil
+
+	case ThemeChangedMsg:
+		w.session.ReloadTheme()
+		// Re-arm the watcher. Re-resolve symlinks in case the target changed.
+		if w.themeWatcher != nil {
+			path := tui.ThemeFilePath()
+			if path != "" {
+				resolved, err := filepath.EvalSymlinks(path)
+				if err == nil {
+					// If symlink now points to a different directory, update the watcher
+					newDir := filepath.Dir(resolved)
+					_ = w.themeWatcher.Add(newDir) // no-op if already watching
+					return w, waitForThemeChange(w.themeWatcher, resolved)
+				}
+			}
+		}
 		return w, nil
 
 	case NavigateMsg:
@@ -1314,6 +1338,60 @@ func (w *Workspace) createBoost(target BoostTarget, emoji string) tea.Cmd {
 		return tea.BatchMsg{
 			func() tea.Msg { return BoostCreatedMsg{Target: target, Emoji: emoji} },
 			func() tea.Msg { return StatusMsg{Text: "Boosted!"} },
+		}
+	}
+}
+
+// CloseWatcher shuts down the theme file watcher, if running.
+// Safe to call multiple times.
+func (w *Workspace) CloseWatcher() {
+	if w.themeWatcher != nil {
+		w.themeWatcher.Close()
+		w.themeWatcher = nil
+	}
+}
+
+// startThemeWatcher sets up fsnotify on the resolved theme file's parent
+// directory and returns a Cmd that blocks until the file changes.
+func (w *Workspace) startThemeWatcher() tea.Cmd {
+	path := tui.ThemeFilePath()
+	if path == "" {
+		return nil
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil
+	}
+	if err := watcher.Add(filepath.Dir(resolved)); err != nil {
+		watcher.Close()
+		return nil
+	}
+	w.themeWatcher = watcher
+	return waitForThemeChange(watcher, resolved)
+}
+
+// waitForThemeChange blocks on fsnotify events and emits ThemeChangedMsg
+// when the target file is written or created.
+func waitForThemeChange(watcher *fsnotify.Watcher, target string) tea.Cmd {
+	return func() tea.Msg {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return nil
+				}
+				if event.Name == target && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename)) {
+					return ThemeChangedMsg{}
+				}
+			case _, ok := <-watcher.Errors:
+				if !ok {
+					return nil
+				}
+			}
 		}
 	}
 }

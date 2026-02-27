@@ -229,6 +229,9 @@ type ProjectBookmarkedMsg struct {
 	Err        error
 }
 
+// ThemeChangedMsg signals that the theme file changed on disk.
+type ThemeChangedMsg struct{}
+
 // ErrorMsg wraps an error for display.
 type ErrorMsg struct {
 	Err     error

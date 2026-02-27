@@ -642,3 +642,190 @@ func TestApplyProfileNotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestPreferenceFieldsNilByDefault(t *testing.T) {
+	cfg := Default()
+	assert.Nil(t, cfg.Hints, "Hints should be nil by default")
+	assert.Nil(t, cfg.Stats, "Stats should be nil by default")
+	assert.Nil(t, cfg.Verbose, "Verbose should be nil by default")
+}
+
+func TestLoadPreferencesFromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	testConfig := map[string]any{
+		"hints":   true,
+		"stats":   false,
+		"verbose": 2,
+	}
+	data, err := json.Marshal(testConfig)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(configPath, data, 0644))
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	require.NotNil(t, cfg.Hints)
+	assert.True(t, *cfg.Hints)
+	assert.Equal(t, "global", cfg.Sources["hints"])
+
+	require.NotNil(t, cfg.Stats)
+	assert.False(t, *cfg.Stats)
+	assert.Equal(t, "global", cfg.Sources["stats"])
+
+	require.NotNil(t, cfg.Verbose)
+	assert.Equal(t, 2, *cfg.Verbose)
+	assert.Equal(t, "global", cfg.Sources["verbose"])
+}
+
+func TestPreferenceLayering(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	localPath := filepath.Join(tmpDir, "local.json")
+
+	// Global sets hints=true, stats=true
+	globalConfig := map[string]any{"hints": true, "stats": true}
+	data, _ := json.Marshal(globalConfig)
+	os.WriteFile(globalPath, data, 0644)
+
+	// Local overrides hints=false
+	localConfig := map[string]any{"hints": false}
+	data, _ = json.Marshal(localConfig)
+	os.WriteFile(localPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, globalPath, SourceGlobal)
+	loadFromFile(cfg, localPath, SourceLocal)
+
+	// hints overridden by local
+	require.NotNil(t, cfg.Hints)
+	assert.False(t, *cfg.Hints)
+	assert.Equal(t, "local", cfg.Sources["hints"])
+
+	// stats from global (not in local)
+	require.NotNil(t, cfg.Stats)
+	assert.True(t, *cfg.Stats)
+	assert.Equal(t, "global", cfg.Sources["stats"])
+}
+
+func TestPreferencesFromEnv(t *testing.T) {
+	envVars := []string{"BASECAMP_HINTS", "BASECAMP_STATS"}
+	originals := make(map[string]string)
+	for _, k := range envVars {
+		originals[k] = os.Getenv(k)
+	}
+	defer func() {
+		for k, v := range originals {
+			if v == "" {
+				os.Unsetenv(k)
+			} else {
+				os.Setenv(k, v)
+			}
+		}
+	}()
+
+	os.Setenv("BASECAMP_HINTS", "true")
+	os.Setenv("BASECAMP_STATS", "0")
+
+	cfg := Default()
+	LoadFromEnv(cfg)
+
+	require.NotNil(t, cfg.Hints)
+	assert.True(t, *cfg.Hints)
+	assert.Equal(t, "env", cfg.Sources["hints"])
+
+	require.NotNil(t, cfg.Stats)
+	assert.False(t, *cfg.Stats)
+	assert.Equal(t, "env", cfg.Sources["stats"])
+}
+
+func TestPreferencesEnvOverridesFile(t *testing.T) {
+	// Save/restore env
+	original := os.Getenv("BASECAMP_HINTS")
+	defer func() {
+		if original == "" {
+			os.Unsetenv("BASECAMP_HINTS")
+		} else {
+			os.Setenv("BASECAMP_HINTS", original)
+		}
+	}()
+
+	// File sets hints=true
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	data, _ := json.Marshal(map[string]any{"hints": true})
+	os.WriteFile(configPath, data, 0644)
+
+	// Env sets hints=false
+	os.Setenv("BASECAMP_HINTS", "false")
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+	LoadFromEnv(cfg)
+
+	require.NotNil(t, cfg.Hints)
+	assert.False(t, *cfg.Hints, "env should override file")
+	assert.Equal(t, "env", cfg.Sources["hints"])
+}
+
+func TestVerboseOutOfRangeIgnored(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	// verbose: 5 is out of range (0-2) — should be ignored
+	data, _ := json.Marshal(map[string]any{"verbose": 5})
+	os.WriteFile(configPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	assert.Nil(t, cfg.Verbose, "out-of-range verbose should be ignored")
+}
+
+func TestVerboseFloatIgnored(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	// verbose: 1.5 is not an integer — should be ignored
+	data, _ := json.Marshal(map[string]any{"verbose": 1.5})
+	os.WriteFile(configPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	assert.Nil(t, cfg.Verbose, "non-integer verbose should be ignored")
+}
+
+func TestEnvInvalidBoolIgnored(t *testing.T) {
+	original := os.Getenv("BASECAMP_HINTS")
+	defer func() {
+		if original == "" {
+			os.Unsetenv("BASECAMP_HINTS")
+		} else {
+			os.Setenv("BASECAMP_HINTS", original)
+		}
+	}()
+
+	os.Setenv("BASECAMP_HINTS", "banana")
+
+	cfg := Default()
+	LoadFromEnv(cfg)
+
+	assert.Nil(t, cfg.Hints, "invalid env bool should leave pointer nil")
+}
+
+func TestPreferencesUnsetInFile(t *testing.T) {
+	// File without preference keys should leave them nil
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	data, _ := json.Marshal(map[string]any{"account_id": "12345"})
+	os.WriteFile(configPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal)
+
+	assert.Nil(t, cfg.Hints)
+	assert.Nil(t, cfg.Stats)
+	assert.Nil(t, cfg.Verbose)
+}

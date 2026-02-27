@@ -25,6 +25,10 @@ fields:
     role: detail
     format: text
 
+  bookmarked:
+    role: detail
+    format: text
+
   created_at:
     role: meta
     emphasis: muted
@@ -36,12 +40,12 @@ fields:
 
 views:
   list:
-    columns: [name, status]
+    columns: [id, name]
   detail:
     sections:
       - fields: [name, description]
       - heading: Info
-        fields: [status]
+        fields: [status, bookmarked]
       - heading: Metadata
         fields: [id, created_at]
   compact:

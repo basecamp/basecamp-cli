@@ -67,19 +67,19 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 	}
 
 	if styled {
-		// Use Dark colors directly since we can't reliably detect terminal background
-		// when output might be piped
-		r.Summary = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Primary.Dark)).Bold(true)
-		r.Muted = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark))
-		r.Data = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
-		r.Error = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Error.Dark)).Bold(true)
-		r.Hint = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)).Italic(true)
-		r.Warning = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Warning.Dark))
-		r.Success = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Success.Dark))
-		r.Subtle = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Border.Dark))
-		r.Header = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)).Bold(true)
-		r.Cell = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
-		r.CellMuted = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark))
+		// Use AdaptiveColor directly — lipgloss resolves Light vs Dark
+		// based on terminal background detection.
+		r.Summary = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
+		r.Muted = lipgloss.NewStyle().Foreground(theme.Muted)
+		r.Data = lipgloss.NewStyle().Foreground(theme.Foreground)
+		r.Error = lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
+		r.Hint = lipgloss.NewStyle().Foreground(theme.Muted).Italic(true)
+		r.Warning = lipgloss.NewStyle().Foreground(theme.Warning)
+		r.Success = lipgloss.NewStyle().Foreground(theme.Success)
+		r.Subtle = lipgloss.NewStyle().Foreground(theme.Border)
+		r.Header = lipgloss.NewStyle().Foreground(theme.Foreground).Bold(true)
+		r.Cell = lipgloss.NewStyle().Foreground(theme.Foreground)
+		r.CellMuted = lipgloss.NewStyle().Foreground(theme.Muted)
 	} else {
 		// Plain text - no styling
 		r.Summary = lipgloss.NewStyle()
@@ -614,14 +614,14 @@ func (r *Renderer) renderList(b *strings.Builder, data []any) {
 }
 
 func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
-	b.WriteString(r.Subtle.Render("Next:"))
+	b.WriteString(r.Muted.Render("Hints:"))
 	b.WriteString("\n")
 	for _, bc := range crumbs {
-		cmd := r.Subtle.Render("  " + bc.Cmd)
+		line := r.Data.Render("  " + bc.Cmd)
 		if bc.Description != "" {
-			cmd += r.Subtle.Render("  # " + bc.Description)
+			line += r.Subtle.Render("  # " + bc.Description)
 		}
-		b.WriteString(cmd + "\n")
+		b.WriteString(line + "\n")
 	}
 }
 
@@ -630,7 +630,7 @@ func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
 	metrics := observability.SessionMetricsFromMap(stats)
 	parts := metrics.FormatParts()
 	if len(parts) > 0 {
-		line := r.Subtle.Render("Stats: " + strings.Join(parts, " | "))
+		line := r.Subtle.Render(strings.Join(parts, " · "))
 		b.WriteString(line + "\n")
 	}
 }
@@ -654,9 +654,10 @@ func formatCell(val any) string {
 	case nil:
 		return ""
 	case string:
-		// Truncate long strings
-		if len(v) > 40 {
-			return v[:37] + "..."
+		// Truncate long strings (rune-safe for multi-byte UTF-8)
+		if utf8.RuneCountInString(v) > 40 {
+			runes := []rune(v)
+			return string(runes[:37]) + "..."
 		}
 		return v
 	case bool:
@@ -810,7 +811,7 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 
 	// Breadcrumbs
 	if len(resp.Breadcrumbs) > 0 {
-		b.WriteString("\n### Next\n\n")
+		b.WriteString("\n### Hints\n\n")
 		for _, bc := range resp.Breadcrumbs {
 			line := "- `" + bc.Cmd + "`"
 			if bc.Description != "" {
@@ -1007,7 +1008,7 @@ func (r *MarkdownRenderer) renderStats(b *strings.Builder, stats map[string]any)
 	metrics := observability.SessionMetricsFromMap(stats)
 	parts := metrics.FormatParts()
 	if len(parts) > 0 {
-		b.WriteString("*Stats: " + strings.Join(parts, " | ") + "*\n")
+		b.WriteString("*" + strings.Join(parts, " · ") + "*\n")
 	}
 }
 

@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/charmbracelet/x/term v0.2.1
+	github.com/fsnotify/fsnotify v1.8.0
 	github.com/gofrs/flock v0.13.0
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.10.2

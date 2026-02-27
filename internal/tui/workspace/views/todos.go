@@ -345,7 +345,22 @@ func (v *Todos) ShortHelp() []key.Binding {
 
 // FullHelp implements View.
 func (v *Todos) FullHelp() [][]key.Binding {
-	return [][]key.Binding{v.ShortHelp()}
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+			v.keys.SwitchTab,
+			v.keys.Toggle,
+			v.keys.New,
+		},
+		{
+			v.keys.EditDesc,
+			v.keys.DueDate,
+			v.keys.Assign,
+			v.keys.Unassign,
+			v.keys.Boost,
+		},
+	}
 }
 
 // SetSize implements View.

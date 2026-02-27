@@ -42,7 +42,7 @@ func NewProjectsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newProjectsListCmd(),
@@ -72,7 +72,7 @@ func newProjectsListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

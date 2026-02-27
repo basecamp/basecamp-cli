@@ -190,15 +190,29 @@ func TestSearch_EscFromList_ReturnsFocusToInput(t *testing.T) {
 	assert.Equal(t, searchFocusInput, v.focus, "Esc from list should return focus to input")
 }
 
-// --- Debounce deduplication ---
+// --- Submit behavior ---
 
-func TestSearch_DuplicateQuerySkipsSearch(t *testing.T) {
+func TestSearch_EmptyQuerySkipsSearch(t *testing.T) {
 	v := testSearchView()
 	v.query = "test"
-	v.textInput.SetValue("test")
+	v.textInput.SetValue("")
 
 	cmd := v.submitQuery()
-	assert.Nil(t, cmd, "submitting the same query again should be a no-op")
+	assert.Nil(t, cmd, "empty query should be a no-op")
+}
+
+func TestSearch_DebounceDeduplication(t *testing.T) {
+	v := testSearchView()
+	v.query = "test"
+	v.debounceSeq = 5
+
+	// Debounce with matching seq but same query is still a no-op
+	_, cmd := v.Update(searchDebounceMsg{query: "test", seq: 5})
+	assert.Nil(t, cmd, "debounce for same query should be skipped")
+
+	// Debounce with stale seq should be discarded
+	_, cmd = v.Update(searchDebounceMsg{query: "new", seq: 3})
+	assert.Nil(t, cmd, "debounce with stale seq should be discarded")
 }
 
 // --- Partial failure surfacing ---

@@ -546,9 +546,13 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 
 	// Add description inline (after title) when no extra badge
 	if item.Description != "" && item.Extra == "" {
-		desc := descStyle.Render(" " + item.Description)
-		if lipgloss.Width(line)+lipgloss.Width(desc) <= l.width {
-			line += desc
+		avail := l.width - lipgloss.Width(line)
+		if avail > 3 {
+			desc := " " + item.Description
+			truncated := Truncate(desc, avail)
+			if truncated != "" {
+				line += descStyle.Render(truncated)
+			}
 		}
 	}
 

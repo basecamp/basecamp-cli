@@ -41,7 +41,7 @@ func NewCardsCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newCardsListCmd(&project, &cardTable),
@@ -76,7 +76,7 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

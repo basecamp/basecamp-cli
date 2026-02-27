@@ -22,7 +22,8 @@ func NewShowCmd() *cobra.Command {
 		Short: "Show any recording by ID",
 		Long: `Show details of any Basecamp recording by ID or URL.
 
-Types: todo, todolist, message, comment, card, card-table, document
+Types: todo, todolist, message, comment, card, card-table, document,
+       schedule-entry, checkin, forward, upload
 
 If no type specified, uses generic recording lookup.
 
@@ -61,7 +62,7 @@ You can also pass a Basecamp URL directly:
 			if !isValidRecordType(recordType) {
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document",
+					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
 				)
 			}
 
@@ -113,7 +114,7 @@ You can also pass a Basecamp URL directly:
 			default:
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document",
+					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
 				)
 			}
 
@@ -173,7 +174,7 @@ You can also pass a Basecamp URL directly:
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type (todo, todolist, message, comment, card, card-table, document)")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	return cmd
@@ -184,7 +185,9 @@ func isValidRecordType(t string) bool {
 	switch t {
 	case "", "todo", "todos", "todolist", "todolists", "message", "messages",
 		"comment", "comments", "card", "cards", "card-table", "card_table",
-		"cardtable", "document", "documents", "recording", "recordings":
+		"cardtable", "document", "documents", "recording", "recordings",
+		"schedule-entry", "schedule_entry", "checkin", "check-in", "check_in",
+		"forward", "forwards", "upload", "uploads":
 		return true
 	default:
 		return false

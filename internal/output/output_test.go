@@ -798,8 +798,8 @@ func TestWriterMarkdownFormatBreadcrumbs(t *testing.T) {
 	require.NoError(t, err, "OK() failed")
 
 	output := buf.String()
-	// Should contain breadcrumb (literal Markdown uses "### Next" heading)
-	assert.Contains(t, output, "Next")
+	// Should contain breadcrumb (literal Markdown uses "### Hints" heading)
+	assert.Contains(t, output, "Hints")
 	assert.Contains(t, output, "basecamp show 1")
 }
 
@@ -1299,9 +1299,7 @@ func TestStyledOutputWithStats(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain Stats line
-	assert.Contains(t, output, "Stats:")
-	// Should contain request count
+	// Should contain stats info (no "Stats:" prefix)
 	assert.Contains(t, output, "5 requests")
 	// Should contain cache info
 	assert.Contains(t, output, "cached")
@@ -1331,8 +1329,8 @@ func TestMarkdownOutputWithStats(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain Stats line in markdown format
-	assert.Contains(t, output, "*Stats:")
+	// Should contain stats in markdown italic format (no "Stats:" prefix)
+	assert.Contains(t, output, "·")
 	// Should contain failed count
 	assert.Contains(t, output, "1 failed")
 }
@@ -1349,8 +1347,8 @@ func TestStyledOutputWithoutStats(t *testing.T) {
 
 	output := buf.String()
 
-	// Should NOT contain Stats line when no stats provided
-	assert.NotContains(t, output, "Stats:")
+	// Should NOT contain stats separator when no stats provided
+	assert.NotContains(t, output, "·")
 }
 
 func TestStatsRenderingSingleRequest(t *testing.T) {
@@ -1499,9 +1497,9 @@ func TestWithEntityMarkdownOutput(t *testing.T) {
 		t.Errorf("Markdown entity output should contain '## Todo details', got:\n%s", output)
 	}
 
-	// Should contain Markdown breadcrumbs with "### Next"
-	if !strings.Contains(output, "### Next") {
-		t.Errorf("Markdown entity output should contain '### Next', got:\n%s", output)
+	// Should contain Markdown breadcrumbs with "### Hints"
+	if !strings.Contains(output, "### Hints") {
+		t.Errorf("Markdown entity output should contain '### Hints', got:\n%s", output)
 	}
 
 	// Breadcrumb should be a Markdown list item with backtick-quoted command

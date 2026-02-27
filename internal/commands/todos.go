@@ -43,14 +43,14 @@ func NewTodosCmd() *cobra.Command {
 
 	// Allow flags on root command for default list behavior
 	// Note: can't use -a for assignee since it conflicts with global -a for account
-	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID")
+	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID or name")
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
-	cmd.Flags().IntVar(&flags.page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newTodosListCmd(),
@@ -245,14 +245,14 @@ func newTodosListCmd() *cobra.Command {
 	}
 
 	// Note: can't use -a for assignee since it conflicts with global -a for account
-	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID")
+	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID or name")
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
-	cmd.Flags().IntVar(&flags.page, "page", 0, "Disable pagination and return first page only")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -598,7 +598,7 @@ You can pass either a todo ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	// Register tab completion for flags
@@ -743,7 +743,7 @@ func newTodosCreateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Todo content (required)")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID")
@@ -777,7 +777,7 @@ You can pass either todo IDs or Basecamp URLs:
 		},
 	}
 
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	// Register tab completion for flags
@@ -805,7 +805,7 @@ You can pass either todo IDs or Basecamp URLs:
 		},
 	}
 
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	// Register tab completion for flags
@@ -924,7 +924,7 @@ You can pass either todo IDs or Basecamp URLs:
 		},
 	}
 
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	// Register tab completion for flags
@@ -1225,7 +1225,7 @@ You can pass either todo IDs or Basecamp URLs:
 		},
 	}
 
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID")
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	// Register tab completion for flags

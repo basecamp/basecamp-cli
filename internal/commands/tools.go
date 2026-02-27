@@ -26,7 +26,7 @@ Campfire, Schedule, etc. Tool IDs can be found in the project's dock array
 Tools can be created by cloning existing ones (e.g., create a second Campfire).
 Disabling a tool hides it from the dock but preserves its content.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return output.ErrUsageHint("Action required", "Run: basecamp tools --help")
+			return cmd.Help()
 		},
 	}
 

@@ -64,6 +64,8 @@ type GlobalFlags struct {
 	Verbose  int // 0=off, 1=operations, 2=operations+requests (stacks with -v -v or -vv)
 	Stats    bool
 	NoStats  bool // Explicit disable (overrides --stats and dev default)
+	Hints    bool
+	NoHints  bool // Explicit disable (overrides --hints and dev default)
 	CacheDir string
 }
 
@@ -211,6 +213,9 @@ func (a *App) OK(data any, opts ...output.ResponseOption) error {
 		stats := a.Collector.Summary()
 		opts = append(opts, output.WithStats(&stats))
 	}
+	if !a.Flags.Hints || a.Flags.NoHints {
+		opts = append(opts, output.WithoutBreadcrumbs())
+	}
 	return a.Output.OK(data, opts...)
 }
 
@@ -297,7 +302,7 @@ func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
 
 	parts := stats.FormatParts()
 	if len(parts) > 0 {
-		fmt.Fprintf(os.Stderr, "\nStats: %s\n", strings.Join(parts, " | "))
+		fmt.Fprintf(os.Stderr, "\n%s\n", strings.Join(parts, " · "))
 	}
 }
 

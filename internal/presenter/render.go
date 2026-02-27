@@ -268,7 +268,7 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 	b.WriteString("\n")
 	b.WriteString(styles.Muted.Render("─────"))
 	b.WriteString("\n")
-	b.WriteString(styles.Subtle.Render("Next:"))
+	b.WriteString(styles.Subtle.Render("Hints:"))
 	b.WriteString("\n")
 
 	// Find max command width for alignment
@@ -510,7 +510,7 @@ func renderAffordancesMarkdown(b *strings.Builder, schema *EntitySchema, data ma
 		return
 	}
 
-	b.WriteString("\n#### Next\n\n")
+	b.WriteString("\n#### Hints\n\n")
 	for _, a := range visible {
 		cmd := RenderTemplate(a.Cmd, data)
 		b.WriteString("- `" + cmd + "` — " + a.Label + "\n")

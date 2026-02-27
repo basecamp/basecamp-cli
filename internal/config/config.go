@@ -32,6 +32,11 @@ type Config struct {
 	// Output settings
 	Format string `json:"format"`
 
+	// Behavior preferences (persisted via config set, overridable by flags)
+	Hints   *bool `json:"hints,omitempty"`
+	Stats   *bool `json:"stats,omitempty"`
+	Verbose *int  `json:"verbose,omitempty"`
+
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
 }
@@ -161,6 +166,23 @@ func loadFromFile(cfg *Config, path string, source Source) {
 		cfg.Format = v
 		cfg.Sources["format"] = string(source)
 	}
+	if v, ok := fileCfg["hints"].(bool); ok {
+		cfg.Hints = &v
+		cfg.Sources["hints"] = string(source)
+	}
+	if v, ok := fileCfg["stats"].(bool); ok {
+		cfg.Stats = &v
+		cfg.Sources["stats"] = string(source)
+	}
+	if v, ok := fileCfg["verbose"]; ok {
+		if fv, ok := v.(float64); ok {
+			iv := int(fv)
+			if iv >= 0 && iv <= 2 && fv == float64(iv) {
+				cfg.Verbose = &iv
+				cfg.Sources["verbose"] = string(source)
+			}
+		}
+	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
 		cfg.DefaultProfile = v
 		cfg.Sources["default_profile"] = string(source)
@@ -226,6 +248,32 @@ func LoadFromEnv(cfg *Config) {
 	if v := os.Getenv("BASECAMP_CACHE_ENABLED"); v != "" {
 		cfg.CacheEnabled = strings.ToLower(v) == "true" || v == "1"
 		cfg.Sources["cache_enabled"] = string(SourceEnv)
+	}
+	if v := os.Getenv("BASECAMP_HINTS"); v != "" {
+		if b, ok := parseEnvBool(v); ok {
+			cfg.Hints = &b
+			cfg.Sources["hints"] = string(SourceEnv)
+		}
+	}
+	if v := os.Getenv("BASECAMP_STATS"); v != "" {
+		if b, ok := parseEnvBool(v); ok {
+			cfg.Stats = &b
+			cfg.Sources["stats"] = string(SourceEnv)
+		}
+	}
+}
+
+// parseEnvBool parses a boolean environment variable strictly.
+// Returns (value, true) for recognized values, (false, false) for unrecognized.
+// Unrecognized values are ignored to preserve three-state pointer semantics.
+func parseEnvBool(v string) (bool, bool) {
+	switch strings.ToLower(v) {
+	case "true", "1":
+		return true, true
+	case "false", "0":
+		return false, true
+	default:
+		return false, false
 	}
 }
 
