@@ -3,7 +3,7 @@ module github.com/basecamp/basecamp-cli
 go 1.26
 
 require (
-	github.com/basecamp/basecamp-sdk/go v0.0.0-20260226163539-96abdc8a5d9c
+	github.com/basecamp/basecamp-sdk/go v0.0.0-20260227230418-6b4c632286aa
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
