@@ -8,6 +8,7 @@ on:
   schedule:
     # Weekly scan on Monday at 6am UTC
     - cron: '0 6 * * 1'
+  workflow_call:  # Allow release.yml to invoke the full security suite
   workflow_dispatch:
 
 permissions:

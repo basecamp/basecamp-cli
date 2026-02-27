@@ -9,8 +9,15 @@ permissions:
   contents: write
   packages: write  # Required for Docker push to ghcr.io
   id-token: write  # Required for keyless cosign signing via OIDC
+  security-events: write  # Required for SARIF upload in security scan
+  pull-requests: read
 
 jobs:
+  security:
+    name: Security scan
+    uses: ./.github/workflows/security.yml
+    secrets: inherit
+
   test:
     name: Test before release
     runs-on: ubuntu-latest
@@ -70,7 +77,7 @@ jobs:
 
   release:
     name: Release
-    needs: test
+    needs: [test, security]
     runs-on: ubuntu-latest
     env:
       GOPRIVATE: github.com/basecamp/basecamp-sdk
