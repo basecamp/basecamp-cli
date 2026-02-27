@@ -288,6 +288,9 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if path != "" {
 				resolved, err := filepath.EvalSymlinks(path)
 				if err == nil {
+					// If symlink now points to a different directory, update the watcher
+					newDir := filepath.Dir(resolved)
+					_ = w.themeWatcher.Add(newDir) // no-op if already watching
 					return w, waitForThemeChange(w.themeWatcher, resolved)
 				}
 			}
@@ -1379,7 +1382,7 @@ func waitForThemeChange(watcher *fsnotify.Watcher, target string) tea.Cmd {
 				if !ok {
 					return nil
 				}
-				if event.Name == target && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+				if event.Name == target && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename)) {
 					return ThemeChangedMsg{}
 				}
 			case _, ok := <-watcher.Errors:
