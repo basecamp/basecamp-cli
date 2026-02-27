@@ -30,11 +30,6 @@ go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 
-**Windows (Scoop):**
-```bash
-scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install basecamp
-```
 </details>
 
 ## Usage
@@ -77,8 +72,8 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 OAuth 2.1 with automatic token refresh. First login opens your browser:
 
 ```bash
-basecamp auth login              # Full read/write access
-basecamp auth login --scope read # Read-only access
+basecamp auth login              # Read-only access (default)
+basecamp auth login --scope full # Full read/write access
 basecamp auth token              # Print token for scripts
 ```
 
@@ -120,7 +115,7 @@ See [install.md](install.md) for step-by-step setup instructions.
 
 ```bash
 basecamp doctor              # Check CLI health and diagnose issues
-basecamp doctor -V           # Verbose output with details
+basecamp doctor --verbose    # Verbose output with details
 ```
 
 ## Development
