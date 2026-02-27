@@ -124,7 +124,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 		// No account configured yet - suggest setup
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "setup",
-			Cmd:         fmt.Sprintf("basecamp config set account %d", accounts[0].ID),
+			Cmd:         fmt.Sprintf("basecamp config set account_id %d", accounts[0].ID),
 			Description: "Configure your Basecamp account",
 		})
 	} else {
