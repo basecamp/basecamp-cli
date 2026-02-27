@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -31,14 +32,15 @@ func NewUpgradeCmd() *cobra.Command {
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
-	_ = app // used for output format consistency
 
 	w := cmd.OutOrStdout()
 
 	current := version.Version
 	if current == "dev" {
-		fmt.Fprintln(w, "Development build — upgrade not applicable (build from source)")
-		return nil
+		return app.OK(
+			map[string]string{"status": "dev", "version": current},
+			output.WithSummary("Development build — upgrade not applicable (build from source)"),
+		)
 	}
 
 	fmt.Fprintf(w, "Current version: %s\n", current)
@@ -52,7 +54,10 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	if latest == current {
 		fmt.Fprintln(w, "already up to date")
-		return nil
+		return app.OK(
+			map[string]string{"status": "up_to_date", "version": current},
+			output.WithSummary(fmt.Sprintf("Already up to date (%s)", current)),
+		)
 	}
 
 	fmt.Fprintf(w, "update available: %s\n", latest)
@@ -66,14 +71,20 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		if err := upgrade.Run(); err != nil {
 			return fmt.Errorf("brew upgrade failed: %w", err)
 		}
-		fmt.Fprintln(w, "Upgrade complete!")
-		return nil
+		return app.OK(
+			map[string]string{"status": "upgraded", "from": current, "to": latest},
+			output.WithSummary(fmt.Sprintf("Upgraded %s → %s", current, latest)),
+		)
 	}
 
+	downloadURL := fmt.Sprintf("https://github.com/basecamp/basecamp-cli/releases/tag/v%s", latest)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Download the latest release from:\n")
-	fmt.Fprintf(w, "  https://github.com/basecamp/basecamp-cli/releases/tag/v%s\n", latest)
-	return nil
+	fmt.Fprintf(w, "  %s\n", downloadURL)
+	return app.OK(
+		map[string]string{"status": "update_available", "from": current, "to": latest, "download_url": downloadURL},
+		output.WithSummary(fmt.Sprintf("Update available: %s → %s", current, latest)),
+	)
 }
 
 // isHomebrew returns true if the binary appears to be installed via Homebrew.

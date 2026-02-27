@@ -26,7 +26,9 @@ func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool) {
 	t.Cleanup(func() { homebrewChecker = origHC })
 }
 
-func executeUpgradeCommand(t *testing.T, app *appctx.App) (string, error) {
+// executeUpgradeCommand runs the upgrade command and returns both the
+// progressive output (cmd stdout) and the app.OK() response output.
+func executeUpgradeCommand(t *testing.T, app *appctx.App) (cmdOut string, appOut *bytes.Buffer, err error) {
 	t.Helper()
 	cmd := NewUpgradeCmd()
 	cmd.SetArgs(nil)
@@ -37,24 +39,25 @@ func executeUpgradeCommand(t *testing.T, app *appctx.App) (string, error) {
 	cmd.SetOut(buf)
 	cmd.SetErr(&bytes.Buffer{})
 
-	err := cmd.Execute()
-	return buf.String(), err
+	err = cmd.Execute()
+	return buf.String(), nil, err
 }
 
 func TestUpgradeDevBuild(t *testing.T) {
-	app, _ := setupPeopleTestApp(t)
+	app, appBuf := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "dev"
 	t.Cleanup(func() { version.Version = orig })
 
-	out, err := executeUpgradeCommand(t, app)
+	_, _, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
-	assert.Contains(t, out, "Development build")
+	// app.OK() routes through the output writer, not cmd stdout
+	assert.Contains(t, appBuf.String(), "Development build")
 }
 
 func TestUpgradeAlreadyCurrent(t *testing.T) {
-	app, _ := setupPeopleTestApp(t)
+	app, appBuf := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "1.2.3"
@@ -62,13 +65,14 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 
 	stubUpgradeCheckers(t, "1.2.3", false)
 
-	out, err := executeUpgradeCommand(t, app)
+	cmdOut, _, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
-	assert.Contains(t, out, "already up to date")
+	assert.Contains(t, cmdOut, "already up to date")
+	assert.Contains(t, appBuf.String(), "up_to_date")
 }
 
 func TestUpgradeAvailable(t *testing.T) {
-	app, _ := setupPeopleTestApp(t)
+	app, appBuf := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "1.2.3"
@@ -76,10 +80,10 @@ func TestUpgradeAvailable(t *testing.T) {
 
 	stubUpgradeCheckers(t, "1.3.0", false)
 
-	out, err := executeUpgradeCommand(t, app)
+	cmdOut, _, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
-	assert.Contains(t, out, "update available: 1.3.0")
-	assert.Contains(t, out, "releases/tag/v1.3.0")
+	assert.Contains(t, cmdOut, "update available: 1.3.0")
+	assert.Contains(t, appBuf.String(), "releases/tag/v1.3.0")
 }
 
 // TestUpgradeOutputGoesToWriter verifies output uses cmd.OutOrStdout(), not os.Stdout.
@@ -111,7 +115,7 @@ func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	err := root.Execute()
 	require.NoError(t, err)
 
-	// All output should be captured in our buffer, not leaked to os.Stdout
+	// Progressive output should be captured in our buffer, not leaked to os.Stdout
 	assert.Contains(t, buf.String(), "Current version: 1.0.0")
 	assert.Contains(t, buf.String(), "already up to date")
 }
