@@ -116,7 +116,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().BoolVarP(&verbose, "verbose", "V", false, "Show additional debug information")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show additional debug information")
 
 	return cmd
 }
@@ -296,7 +296,8 @@ func fetchLatestVersion() (string, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
