@@ -208,9 +208,14 @@ func TestScrubURL(t *testing.T) {
 			expected: "/api/todos?api_key=%5BREDACTED%5D",
 		},
 		{
+			name:     "token param scrubbed",
+			input:    "https://api.example.com/data?token=secret123",
+			expected: "https://api.example.com/data?token=%5BREDACTED%5D",
+		},
+		{
 			name:     "generic params not scrubbed",
-			input:    "https://api.example.com/data?key=sortorder&token=pagetoken&auth=basic",
-			expected: "https://api.example.com/data?key=sortorder&token=pagetoken&auth=basic",
+			input:    "https://api.example.com/data?key=sortorder&cursor=pagetoken&auth=basic",
+			expected: "https://api.example.com/data?key=sortorder&cursor=pagetoken&auth=basic",
 		},
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -257,13 +258,13 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				configData[key] = value
 			}
 
-			// Write back
+			// Write back (atomic: temp + rename)
 			data, err := json.MarshalIndent(configData, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
 
-			if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
+			if err := atomicWriteFile(configPath, append(data, '\n')); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
@@ -356,13 +357,13 @@ func newConfigUnsetCmd() *cobra.Command {
 			// Remove key
 			delete(configData, key)
 
-			// Write back
+			// Write back (atomic: temp + rename)
 			data, err := json.MarshalIndent(configData, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
 
-			if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
+			if err := atomicWriteFile(configPath, append(data, '\n')); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
@@ -386,6 +387,42 @@ func newConfigUnsetCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&global, "global", false, "Unset from global config")
 
 	return cmd
+}
+
+// atomicWriteFile writes data to a file atomically using temp+rename.
+// Files are always created with 0600 permissions (owner read/write only).
+func atomicWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmpFile.Chmod(0600); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	// Unix: rename atomically replaces the destination.
+	// Windows: rename fails when destination exists. Try rename first to
+	// preserve the old file on unrelated errors; only remove+retry on failure.
+	if err := os.Rename(tmpPath, path); err != nil && runtime.GOOS == "windows" {
+		_ = os.Remove(path)
+		return os.Rename(tmpPath, path)
+	} else { //nolint:revive // else-with-return kept for clarity of the two-branch pattern
+		return err
+	}
 }
 
 func newConfigProjectCmd() *cobra.Command {
@@ -451,13 +488,13 @@ func newConfigProjectCmd() *cobra.Command {
 			// Set project_id
 			configData["project_id"] = fmt.Sprintf("%d", selected.ID)
 
-			// Write back
+			// Write back (atomic: temp + rename)
 			data, err := json.MarshalIndent(configData, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
 
-			if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
+			if err := atomicWriteFile(configPath, append(data, '\n')); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
