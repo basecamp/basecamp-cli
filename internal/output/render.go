@@ -67,19 +67,19 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 	}
 
 	if styled {
-		// Use Dark colors directly since we can't reliably detect terminal background
-		// when output might be piped
-		r.Summary = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Primary.Dark)).Bold(true)
-		r.Muted = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark))
-		r.Data = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
-		r.Error = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Error.Dark)).Bold(true)
-		r.Hint = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)).Italic(true)
-		r.Warning = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Warning.Dark))
-		r.Success = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Success.Dark))
-		r.Subtle = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Border.Dark))
-		r.Header = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)).Bold(true)
-		r.Cell = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark))
-		r.CellMuted = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark))
+		// Use AdaptiveColor directly — lipgloss resolves Light vs Dark
+		// based on terminal background detection.
+		r.Summary = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
+		r.Muted = lipgloss.NewStyle().Foreground(theme.Muted)
+		r.Data = lipgloss.NewStyle().Foreground(theme.Foreground)
+		r.Error = lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
+		r.Hint = lipgloss.NewStyle().Foreground(theme.Muted).Italic(true)
+		r.Warning = lipgloss.NewStyle().Foreground(theme.Warning)
+		r.Success = lipgloss.NewStyle().Foreground(theme.Success)
+		r.Subtle = lipgloss.NewStyle().Foreground(theme.Border)
+		r.Header = lipgloss.NewStyle().Foreground(theme.Foreground).Bold(true)
+		r.Cell = lipgloss.NewStyle().Foreground(theme.Foreground)
+		r.CellMuted = lipgloss.NewStyle().Foreground(theme.Muted)
 	} else {
 		// Plain text - no styling
 		r.Summary = lipgloss.NewStyle()
