@@ -115,10 +115,10 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 	fmt.Println(styles.Heading.Render("  Step 1: Authentication"))
 	fmt.Println()
 
-	// Let user choose scope (map to OAuth scopes: "read" or "write")
+	// Let user choose scope (map to OAuth scopes: "read" or "full")
 	scope, err := tui.Select("  What access level do you need?", []tui.SelectOption{
 		{Value: "read", Label: "Read-only (recommended for browsing)"},
-		{Value: "write", Label: "Full access (read + write)"},
+		{Value: "full", Label: "Full access (read + write)"},
 	})
 	if err != nil {
 		return fmt.Errorf("scope selection canceled: %w", err)
