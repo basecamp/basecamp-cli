@@ -614,14 +614,14 @@ func (r *Renderer) renderList(b *strings.Builder, data []any) {
 }
 
 func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
-	b.WriteString(r.Subtle.Render("Hints:"))
+	b.WriteString(r.Muted.Render("Hints:"))
 	b.WriteString("\n")
 	for _, bc := range crumbs {
-		cmd := r.Subtle.Render("  " + bc.Cmd)
+		line := r.Data.Render("  " + bc.Cmd)
 		if bc.Description != "" {
-			cmd += r.Subtle.Render("  # " + bc.Description)
+			line += r.Subtle.Render("  # " + bc.Description)
 		}
-		b.WriteString(cmd + "\n")
+		b.WriteString(line + "\n")
 	}
 }
 
