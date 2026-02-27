@@ -39,8 +39,28 @@ jobs:
       - name: Configure git for private modules
         run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.9.0
+
+      - name: Cache BATS
+        id: cache-bats
+        uses: actions/cache@v5
+        with:
+          path: /usr/local/libexec/bats-core
+          key: bats-1.11.0
+
+      - name: Install BATS
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+
       - name: Run release quality gate
-        run: make fmt-check vet test provenance-check check-naming
+        run: |
+          make fmt-check vet lint test test-e2e provenance-check check-naming
+          go test -race -count=1 ./...
 
   release:
     name: Release
