@@ -66,7 +66,12 @@ func runMigrate(cmd *cobra.Command, force bool) error {
 	// Check if already migrated
 	if !force {
 		if _, err := os.Stat(markerPath); err == nil {
-			return output.ErrUsage("Migration already completed. Use --force to re-run.")
+			result := &MigrateResult{AlreadyMigrated: true}
+			if app := getApp(cmd); app != nil {
+				return app.OK(result, output.WithSummary("Migration already completed (use --force to re-run)"))
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Migration already completed. Use --force to re-run.")
+			return nil
 		}
 	}
 
