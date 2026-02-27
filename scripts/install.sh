@@ -17,6 +17,16 @@ VERSION="${BASECAMP_VERSION:-}"
 info() { echo "==> $1"; }
 error() { echo "ERROR: $1" >&2; exit 1; }
 
+find_sha256_cmd() {
+  if command -v sha256sum &>/dev/null; then
+    echo "sha256sum"
+  elif command -v shasum &>/dev/null; then
+    echo "shasum -a 256"
+  else
+    error "No SHA256 tool found (need sha256sum or shasum)"
+  fi
+}
+
 detect_platform() {
   local os arch
 
@@ -62,7 +72,7 @@ verify_checksums() {
   fi
 
   # Verify SHA256 checksum of the downloaded archive
-  (cd "$tmp_dir" && grep "$archive_name" checksums.txt | shasum -a 256 --check --status) \
+  (cd "$tmp_dir" && grep "$archive_name" checksums.txt | $(find_sha256_cmd) --check --status) \
     || error "Checksum verification failed for $archive_name"
 
   info "Checksum verified"
@@ -82,7 +92,7 @@ verify_checksums() {
     cosign verify-blob \
       --certificate "${tmp_dir}/checksums.txt.pem" \
       --signature "${tmp_dir}/checksums.txt.sig" \
-      --certificate-identity-regexp "https://github.com/basecamp/basecamp-cli" \
+      --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v${version}" \
       --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
       "${tmp_dir}/checksums.txt" \
       || error "Cosign signature verification failed"
