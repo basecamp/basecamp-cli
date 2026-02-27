@@ -11,6 +11,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // NewAuthCmd creates the auth command group.
@@ -55,26 +56,30 @@ func newAuthLoginCmd() *cobra.Command {
 				scope = "read"
 			}
 
+			w := cmd.OutOrStdout()
+			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme())
+
 			if app.Config.ActiveProfile != "" {
-				fmt.Printf("Starting authentication for profile %q...\n", app.Config.ActiveProfile)
+				fmt.Fprintln(w, r.Summary.Render(fmt.Sprintf("Starting authentication for profile %q...", app.Config.ActiveProfile)))
 			} else {
-				fmt.Println("Starting Basecamp authentication...")
+				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
 			}
 			if scope == "read" {
-				fmt.Println("Scope: read-only (use --scope full for write access)")
+				fmt.Fprintln(w, r.Muted.Render("Scope: read-only (use --scope full for write access)"))
 			} else {
-				fmt.Println("Scope: full (read and write access)")
+				fmt.Fprintln(w, r.Muted.Render("Scope: full (read and write access)"))
 			}
 
 			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
-				Logger:    func(msg string) { fmt.Println(msg) },
+				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
 			}); err != nil {
 				return err
 			}
 
-			fmt.Println("\nAuthentication successful!")
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, r.Success.Render("Authentication successful!"))
 
 			// Try to fetch and store user profile
 			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
@@ -85,7 +90,7 @@ func newAuthLoginCmd() *cobra.Command {
 				}
 				if err := resp.UnmarshalData(&profile); err == nil {
 					if err := app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID)); err == nil {
-						fmt.Printf("Logged in as: %s\n", profile.Name)
+						fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("Logged in as: %s", profile.Name)))
 					}
 				}
 			}
