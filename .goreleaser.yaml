@@ -129,27 +129,3 @@ release:
 #     description: "Command-line interface for Basecamp"
 #     license: MIT
 #     skip_upload: auto
-
-# Docker multi-arch images
-# Uses Dockerfile.goreleaser which copies the pre-built binary (avoids private SDK auth issues)
-dockers_v2:
-  - id: basecamp
-    ids: [basecamp]
-    dockerfile: Dockerfile.goreleaser
-    images:
-      - "ghcr.io/basecamp/cli"
-    tags:
-      - "{{ .Version }}"
-      - "{{ if not .Prerelease }}latest{{ end }}"
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    labels:
-      "org.opencontainers.image.title": "basecamp"
-      "org.opencontainers.image.description": "Command-line interface for Basecamp"
-      "org.opencontainers.image.url": "https://github.com/basecamp/basecamp-cli"
-      "org.opencontainers.image.source": "https://github.com/basecamp/basecamp-cli"
-      "org.opencontainers.image.version": "{{ .Version }}"
-      "org.opencontainers.image.revision": "{{ .Commit }}"
-      "org.opencontainers.image.created": "{{ .Date }}"
-      "org.opencontainers.image.licenses": "MIT"
