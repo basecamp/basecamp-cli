@@ -180,13 +180,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           RESPONSE_FILE="${{ steps.detect.outputs.response-file }}"
+          if [ -z "$RESPONSE_FILE" ] || [ ! -f "$RESPONSE_FILE" ]; then
+            echo "::warning::Model response file is missing; skipping breaking label."
+            exit 0
+          fi
           if ! jq empty "$RESPONSE_FILE" 2>/dev/null; then
             echo "::warning::Model response is not valid JSON; skipping breaking label."
             echo "## Breaking change detection failed" >> "$GITHUB_STEP_SUMMARY"
             echo "Model returned invalid JSON. Breaking label was **not** applied." >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat "$RESPONSE_FILE" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            if [ -s "$RESPONSE_FILE" ]; then
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              cat "$RESPONSE_FILE" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            fi
             exit 0
           fi
           BREAKING=$(jq -r '.breaking' "$RESPONSE_FILE")

@@ -229,10 +229,11 @@ jobs:
 
       - name: Set changelog env
         run: |
-          if [ -f "${{ steps.ai-changelog.outputs.response-file }}" ]; then
+          RESPONSE_FILE="${{ steps.ai-changelog.outputs.response-file }}"
+          if [ -n "$RESPONSE_FILE" ] && [ -f "$RESPONSE_FILE" ]; then
             {
               echo "RELEASE_CHANGELOG<<CHANGELOG_EOF"
-              cat "${{ steps.ai-changelog.outputs.response-file }}"
+              cat "$RESPONSE_FILE"
               echo "CHANGELOG_EOF"
             } >> $GITHUB_ENV
           else

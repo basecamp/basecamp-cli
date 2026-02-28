@@ -4,7 +4,7 @@
 set -euo pipefail
 BASELINE="$1"
 CURRENT="$2"
-REMOVED=$(comm -23 "$BASELINE" "$CURRENT")
+REMOVED=$(LC_ALL=C comm -23 "$BASELINE" "$CURRENT")
 if [ -n "$REMOVED" ]; then
   echo "FAIL: CLI surface removals detected:"
   echo "$REMOVED"

@@ -8,6 +8,11 @@ set -euo pipefail
 BINARY="${1:-./bin/basecamp}"
 OUTPUT="${2:-/dev/stdout}"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required but not installed. See CONTRIBUTING.md." >&2
+  exit 1
+fi
+
 walk_commands() {
   local cmd_path="$1"
   local json
@@ -41,4 +46,4 @@ walk_commands() {
   done
 }
 
-walk_commands "basecamp" | sort > "$OUTPUT"
+walk_commands "basecamp" | LC_ALL=C sort > "$OUTPUT"
