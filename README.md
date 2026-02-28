@@ -18,15 +18,23 @@ That's it. You now have full access to Basecamp from your terminal.
 <details>
 <summary>Other installation methods</summary>
 
-**Go install:**
+**Scoop (Windows):**
 ```bash
-go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
+scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+scoop install basecamp
 ```
 
 **Shell script:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
+
+**Go install:**
+```bash
+go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
+```
+
+**GitHub Release:** download from [Releases](https://github.com/basecamp/basecamp-cli/releases).
 
 </details>
 
@@ -127,4 +135,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## License
 
-[MIT](LICENSE.md)
+[MIT](MIT-LICENSE)

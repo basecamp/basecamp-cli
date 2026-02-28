@@ -107,14 +107,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate token for private SDK access
+      - name: Generate token for private SDK and tap access
         id: sdk-token
         uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
         with:
           app-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
-          repositories: basecamp-sdk
+          repositories: basecamp-sdk,homebrew-tap
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
@@ -234,3 +234,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.sdk-token.outputs.token }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
