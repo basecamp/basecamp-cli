@@ -37,6 +37,9 @@ jobs:
       - name: Check SDK provenance
         run: make provenance-check
 
+      - name: Check module tidiness
+        run: make tidy-check
+
       - name: Check naming (no stale legacy references)
         run: make check-naming
 
