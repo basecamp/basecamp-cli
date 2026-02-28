@@ -78,6 +78,10 @@ linters:
         - fieldalignment  # Too noisy for minimal gains
         - shadow          # Too noisy - variable shadowing is common in Go
 
+    errorlint:
+      asserts: false
+      comparison: false
+
     gosec:
       excludes:
         - G104  # Unhandled errors (covered by errcheck)
@@ -133,3 +137,7 @@ linters:
       - text: "G117:|G703:|G704:"
         linters:
           - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

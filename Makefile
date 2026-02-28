@@ -228,6 +228,24 @@ lint:
 tidy:
 	$(GOMOD) tidy
 
+# Verify go.mod/go.sum are tidy (CI gate)
+# Restores original files on any failure so the check is non-mutating.
+.PHONY: tidy-check
+tidy-check:
+	@set -e; cp go.mod go.mod.tidycheck; cp go.sum go.sum.tidycheck; \
+	restore() { mv go.mod.tidycheck go.mod; mv go.sum.tidycheck go.sum; }; \
+	if ! $(GOMOD) tidy; then \
+		restore; \
+		echo "'go mod tidy' failed. Restored original go.mod/go.sum."; \
+		exit 1; \
+	fi; \
+	if ! git diff --quiet -- go.mod go.sum; then \
+		restore; \
+		echo "go.mod/go.sum are not tidy. Run 'make tidy' and commit the result."; \
+		exit 1; \
+	fi; \
+	rm -f go.mod.tidycheck go.sum.tidycheck
+
 # Verify dependencies
 .PHONY: verify
 verify:
@@ -250,7 +268,7 @@ install:
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e check-naming check-surface
+check: fmt-check vet lint test test-e2e check-naming check-surface provenance-check tidy-check
 
 # Generate CLI surface snapshot (validates binary produces valid output)
 .PHONY: check-surface
@@ -366,7 +384,8 @@ help:
 	@echo "  fmt            Format code"
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
-	@echo "  check          Run all checks (fmt-check, vet, lint, test, test-e2e)"
+	@echo "  tidy-check     Verify go.mod/go.sum are tidy"
+	@echo "  check          Run all checks (local CI gate)"
 	@echo "  check-surface  Generate CLI surface snapshot (validates --help --agent output)"
 	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
 	@echo ""

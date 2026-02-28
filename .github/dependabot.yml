@@ -9,6 +9,9 @@ updates:
     schedule:
       interval: weekly
       day: monday
+      time: "06:00"
+      timezone: America/Chicago
+    open-pull-requests-limit: 10
     groups:
       go-dependencies:
         patterns:
@@ -27,6 +30,9 @@ updates:
     schedule:
       interval: weekly
       day: monday
+      time: "06:00"
+      timezone: America/Chicago
+    open-pull-requests-limit: 10
     groups:
       github-actions:
         patterns:
