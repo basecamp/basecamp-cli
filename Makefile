@@ -98,6 +98,11 @@ test:
 test-e2e: build
 	./e2e/run.sh
 
+# Run tests with race detector
+.PHONY: race-test
+race-test:
+	BASECAMP_NO_KEYRING=1 $(GOTEST) -race -count=1 ./...
+
 # Run tests with coverage
 .PHONY: test-coverage
 test-coverage:
@@ -266,9 +271,30 @@ clean-all: clean clean-pgo
 install:
 	$(GOCMD) install ./cmd/basecamp
 
+# Guard against local replace directives in go.mod
+.PHONY: replace-check
+replace-check:
+	@if grep -q '^\s*replace\s' go.mod; then \
+		echo "ERROR: go.mod contains replace directives"; \
+		grep '^\s*replace\s' go.mod; \
+		echo ""; \
+		echo "Remove replace directives before releasing."; \
+		exit 1; \
+	fi
+	@echo "Replace check passed (no local replace directives)"
+
 # Run all checks (local CI gate)
 .PHONY: check
 check: fmt-check vet lint test test-e2e check-naming check-surface provenance-check tidy-check
+
+# Full pre-flight for release: check + replace-check + vuln + race
+.PHONY: release-check
+release-check: check replace-check vuln race-test
+
+# Cut a release (delegates to scripts/release.sh)
+.PHONY: release
+release:
+	scripts/release.sh $(VERSION)
 
 # Generate CLI surface snapshot (validates binary produces valid output)
 .PHONY: check-surface
@@ -366,6 +392,7 @@ help:
 	@echo "Test:"
 	@echo "  test           Run Go unit tests"
 	@echo "  test-e2e       Run end-to-end tests against Go binary"
+	@echo "  race-test      Run tests with race detector"
 	@echo "  test-coverage  Run tests with coverage report"
 	@echo ""
 	@echo "Performance:"
@@ -400,9 +427,14 @@ help:
 	@echo "  clean          Remove build artifacts"
 	@echo "  clean-all      Remove all artifacts (including PGO)"
 	@echo "  install        Install to GOPATH/bin"
-	@echo "  check          Run all checks (local CI gate)"
-	@echo "  check-naming   Guard against stale bcq/BCQ references"
-	@echo "  run            Build and run"
+	@echo "  check            Run all checks (local CI gate)"
+	@echo "  check-naming     Guard against stale bcq/BCQ references"
+	@echo "  replace-check    Guard against local replace directives in go.mod"
+	@echo "  run              Build and run"
+	@echo ""
+	@echo "Release:"
+	@echo "  release-check    Full pre-flight (check + replace-check + vuln)"
+	@echo "  release          Cut a release (VERSION=x.y.z, DRY_RUN=1 optional)"
 	@echo ""
 	@echo "Security:"
 	@echo "  security       Run all security checks (lint, vuln, secrets)"

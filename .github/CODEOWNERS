@@ -1,0 +1,4 @@
+* @basecamp/sip
+.goreleaser.yaml      @basecamp/sip
+.github/workflows/    @basecamp/sip
+scripts/release.sh    @basecamp/sip

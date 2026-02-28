@@ -18,7 +18,7 @@ Install the Basecamp CLI and connect it to your AI agent. Execute all steps auto
 
 Choose ONE installation method:
 
-### Option A: Homebrew (macOS/Linux) - Recommended
+### Option A: Homebrew (macOS/Linux) — Recommended
 ```bash
 brew install --cask basecamp/tap/basecamp
 ```
@@ -29,15 +29,20 @@ scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
 scoop install basecamp
 ```
 
-### Option C: Go install
+### Option C: Shell script
+```bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
+```
+
+The install script downloads the latest release, verifies the SHA-256 checksum, and verifies the cosign signature when cosign is available.
+
+### Option D: Go install
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
-### Option D: Shell script
-```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
-```
+### Option E: GitHub Release
+Download the archive for your platform from [Releases](https://github.com/basecamp/basecamp-cli/releases), extract, and move `basecamp` to a directory on your PATH.
 
 **Verify:**
 ```bash
