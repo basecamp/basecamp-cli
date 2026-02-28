@@ -79,6 +79,7 @@ jobs:
     name: Release
     needs: [test, security]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
