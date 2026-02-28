@@ -150,7 +150,7 @@ aurs:
     skip_upload: auto
     package: |-
       install -Dm755 "./basecamp" "${pkgdir}/usr/bin/basecamp"
-      install -Dm644 "./LICENSE.md" "${pkgdir}/usr/share/licenses/basecamp/LICENSE.md"
+      install -Dm644 "./MIT-LICENSE" "${pkgdir}/usr/share/licenses/basecamp/MIT-LICENSE"
       install -Dm644 completions/basecamp.bash "${pkgdir}/usr/share/bash-completion/completions/basecamp"
       install -Dm644 completions/_basecamp "${pkgdir}/usr/share/zsh/site-functions/_basecamp"
       install -Dm644 completions/basecamp.fish "${pkgdir}/usr/share/fish/vendor_completions.d/basecamp.fish"

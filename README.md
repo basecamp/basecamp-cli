@@ -135,4 +135,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## License
 
-[MIT](LICENSE.md)
+[MIT](MIT-LICENSE)

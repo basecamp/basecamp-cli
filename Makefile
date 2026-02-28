@@ -287,9 +287,9 @@ replace-check:
 .PHONY: check
 check: fmt-check vet lint test test-e2e check-naming check-surface provenance-check tidy-check
 
-# Full pre-flight for release: check + replace-check + vuln + race
+# Full pre-flight for release: check + replace-check + vuln + race + surface compat
 .PHONY: release-check
-release-check: check replace-check vuln race-test
+release-check: check replace-check vuln race-test check-surface-compat
 
 # Cut a release (delegates to scripts/release.sh)
 .PHONY: release
@@ -306,6 +306,23 @@ check-surface: build
 .PHONY: check-surface-diff
 check-surface-diff:
 	scripts/check-cli-surface-diff.sh $(BASELINE) $(CURRENT)
+
+# Check CLI surface compatibility against previous tag (mirrors CI gate)
+.PHONY: check-surface-compat
+check-surface-compat: build
+	@scripts/check-cli-surface.sh $(BUILD_DIR)/$(BINARY) /tmp/current-surface.txt
+	@PREV_TAG=$$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo ""); \
+	if [ -n "$$PREV_TAG" ]; then \
+		SCRIPT_DIR="$$(pwd)/scripts"; \
+		git worktree add /tmp/baseline-tree "$$PREV_TAG" 2>/dev/null; \
+		cd /tmp/baseline-tree && make build && \
+		"$$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt; \
+		cd - >/dev/null; \
+		git worktree remove /tmp/baseline-tree --force 2>/dev/null; \
+		scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt; \
+	else \
+		echo "First release — no baseline to compare against"; \
+	fi
 
 # Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
 .PHONY: check-naming
@@ -433,7 +450,7 @@ help:
 	@echo "  run              Build and run"
 	@echo ""
 	@echo "Release:"
-	@echo "  release-check    Full pre-flight (check + replace-check + vuln)"
+	@echo "  release-check    Full pre-flight (check + replace-check + vuln + race + surface compat)"
 	@echo "  release          Cut a release (VERSION=x.y.z, DRY_RUN=1 optional)"
 	@echo ""
 	@echo "Security:"
