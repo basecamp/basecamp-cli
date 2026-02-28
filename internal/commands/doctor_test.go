@@ -512,6 +512,17 @@ func TestCheckLegacyInstall_NilWhenAlreadyMigrated(t *testing.T) {
 	assert.Nil(t, check, "should return nil when .migrated marker exists")
 }
 
+func TestCheckClaudeIntegration(t *testing.T) {
+	// checkClaudeIntegration calls harness.CheckClaudePlugin which reads
+	// ~/.claude/plugins/installed_plugins.json. In test environments there's
+	// no ~/.claude directory, so the plugin check should return "fail".
+	checks := checkClaudeIntegration()
+	require.NotEmpty(t, checks, "should return at least one check")
+	assert.Equal(t, "Claude Code Plugin", checks[0].Name)
+	// Status depends on environment — in CI there's no ~/.claude so it'll be "fail"
+	assert.Contains(t, []string{"pass", "fail", "warn"}, checks[0].Status)
+}
+
 func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

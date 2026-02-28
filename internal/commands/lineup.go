@@ -25,6 +25,7 @@ or other important dates visible to the entire team.
 
 Unlike most basecamp commands, lineup markers are not scoped to a project.
 They apply to the entire Basecamp account.`,
+		Annotations: map[string]string{"agent_notes": "Lineup markers are account-wide, not project-scoped"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return output.ErrUsageHint("Action required", "Run: basecamp lineup --help")
 		},

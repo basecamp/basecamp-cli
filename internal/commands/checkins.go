@@ -25,6 +25,7 @@ func NewCheckinsCmd() *cobra.Command {
 
 Check-ins are recurring questions that collect answers from team members
 on a schedule (e.g., "What did you work on today?").`,
+		Annotations: map[string]string{"agent_notes": "Each project has one questionnaire (check-in container)\nQuestions are asked on a recurring schedule\nAnswers are posted by team members in response"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to show questionnaire when called without subcommand
 			return runCheckinsShow(cmd, project, questionnaireID)

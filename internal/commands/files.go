@@ -37,6 +37,7 @@ func NewFilesCmd() *cobra.Command {
 
 A vault is a container for documents, uploads (files), and subvaults (folders).
 Each project has one root vault in its dock.`,
+		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, vaults for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocuments support Markdown content\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runFilesList(cmd, project, vaultID)

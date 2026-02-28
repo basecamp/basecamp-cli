@@ -21,10 +21,11 @@ func NewMessagesCmd() *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:     "messages",
-		Aliases: []string{"msgs"},
-		Short:   "Manage message board messages",
-		Long:    "List, show, create, and manage messages in a project's message board.",
+		Use:         "messages",
+		Aliases:     []string{"msgs"},
+		Short:       "Manage message board messages",
+		Long:        "List, show, create, and manage messages in a project's message board.",
+		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runMessagesList(cmd, project, messageBoard, limit, page, all)

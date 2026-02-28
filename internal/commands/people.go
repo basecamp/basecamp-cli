@@ -162,9 +162,10 @@ func updateAccountsCache(accounts []AccountInfo, cacheDir string) {
 
 func NewPeopleCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "people [action]",
-		Short: "Manage people",
-		Long:  "List, show, and manage people in your Basecamp account.",
+		Use:         "people [action]",
+		Short:       "Manage people",
+		Long:        "List, show, and manage people in your Basecamp account.",
+		Annotations: map[string]string{"agent_notes": "--assignee me resolves to the current user's ID automatically\nPerson IDs are needed for --participants, --people, assign --to\nbasecamp people pingable lists people who can be @mentioned"},
 	}
 
 	cmd.AddCommand(newPeopleListCmd())

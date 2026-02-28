@@ -22,9 +22,10 @@ func NewCommentsCmd() *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "comments",
-		Short: "List and manage comments",
-		Long:  "List, show, and update comments on recordings.",
+		Use:         "comments",
+		Short:       "List and manage comments",
+		Long:        "List, show, and update comments on recordings.",
+		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent recording, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on recordings (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runCommentsList(cmd, recordingID, limit, page, all)
@@ -262,6 +263,7 @@ func NewCommentCmd() *cobra.Command {
 		Long: `Add a comment to one or more Basecamp recordings (todos, messages, etc.)
 
 Supports batch commenting on multiple recordings at once.`,
+		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent recording, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on recordings (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 

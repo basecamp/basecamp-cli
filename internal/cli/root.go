@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/commands"
@@ -136,6 +138,16 @@ func NewRootCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("profile", completer.ProfileCompletion())
 
+	// Override help to support --help --agent for structured JSON output.
+	defaultHelp := cmd.HelpFunc()
+	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if agent, _ := c.Root().PersistentFlags().GetBool("agent"); agent {
+			emitAgentHelp(c)
+			return
+		}
+		defaultHelp(c, args)
+	})
+
 	return cmd
 }
 
@@ -199,6 +211,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewUpgradeCmd())
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
+	cmd.AddCommand(commands.NewSkillCmd())
 	cmd.AddCommand(commands.NewTUICmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
@@ -476,4 +489,87 @@ func resolvePreferences(cmd *cobra.Command, cfg *config.Config, flags *appctx.Gl
 	if !pf.Changed("verbose") && cfg.Verbose != nil {
 		flags.Verbose = *cfg.Verbose
 	}
+}
+
+// agentHelpInfo is the structured help output for --help --agent.
+type agentHelpInfo struct {
+	Command        string            `json:"command"`
+	Path           string            `json:"path"`
+	Short          string            `json:"short"`
+	Long           string            `json:"long,omitempty"`
+	Usage          string            `json:"usage"`
+	Notes          []string          `json:"notes,omitempty"`
+	Subcommands    []agentSubcommand `json:"subcommands,omitempty"`
+	Flags          []agentFlag       `json:"flags,omitempty"`
+	InheritedFlags []agentFlag       `json:"inherited_flags,omitempty"`
+}
+
+type agentSubcommand struct {
+	Name  string `json:"name"`
+	Short string `json:"short"`
+	Path  string `json:"path"`
+}
+
+type agentFlag struct {
+	Name      string `json:"name"`
+	Shorthand string `json:"shorthand,omitempty"`
+	Type      string `json:"type"`
+	Default   string `json:"default"`
+	Usage     string `json:"usage"`
+}
+
+// emitAgentHelp writes structured JSON help for the given command to stdout.
+func emitAgentHelp(cmd *cobra.Command) {
+	info := agentHelpInfo{
+		Command: cmd.Name(),
+		Path:    cmd.CommandPath(),
+		Short:   cmd.Short,
+		Long:    cmd.Long,
+		Usage:   cmd.UseLine(),
+	}
+
+	// Extract notes from Annotations["agent_notes"]
+	if notes, ok := cmd.Annotations["agent_notes"]; ok && notes != "" {
+		for _, line := range strings.Split(notes, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				info.Notes = append(info.Notes, line)
+			}
+		}
+	}
+
+	// Subcommands
+	for _, sub := range cmd.Commands() {
+		if sub.IsAvailableCommand() || sub.Name() == "help" {
+			info.Subcommands = append(info.Subcommands, agentSubcommand{
+				Name:  sub.Name(),
+				Short: sub.Short,
+				Path:  sub.CommandPath(),
+			})
+		}
+	}
+
+	// Local flags
+	cmd.NonInheritedFlags().VisitAll(func(f *pflag.Flag) {
+		info.Flags = append(info.Flags, agentFlag{
+			Name:      f.Name,
+			Shorthand: f.Shorthand,
+			Type:      f.Value.Type(),
+			Default:   f.DefValue,
+			Usage:     f.Usage,
+		})
+	})
+
+	// Inherited flags
+	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
+		info.InheritedFlags = append(info.InheritedFlags, agentFlag{
+			Name:      f.Name,
+			Shorthand: f.Shorthand,
+			Type:      f.Value.Type(),
+			Default:   f.DefValue,
+			Usage:     f.Usage,
+		})
+	})
+
+	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(info)
 }

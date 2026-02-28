@@ -28,7 +28,8 @@ Use 'basecamp search metadata' to see available search scopes.`,
 		Example: `  basecamp search "quarterly goals"
   basecamp search "bug report" --sort created_at
   basecamp search "design review" --limit 5`,
-		Args: cobra.MinimumNArgs(0),
+		Annotations: map[string]string{"agent_notes": "Use search for keyword queries, use recordings for browsing by type/status without a search term"},
+		Args:        cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 

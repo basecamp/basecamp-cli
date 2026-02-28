@@ -26,6 +26,7 @@ func NewTimesheetCmd() *cobra.Command {
 Timesheet entries track time logged against any recording (todo, message,
 document, etc.). The account-wide report defaults to the last month if no
 date range is specified.`,
+		Annotations: map[string]string{"agent_notes": "Time is logged against recordings (todos, cards, messages, etc.)\nbasecamp clock is a shortcut for timesheet entry create\nUse basecamp reports assigned --json to see assigned items, then clock time against them"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTimesheetReport(cmd, startDate, endDate, personID)
 		},

@@ -34,7 +34,8 @@ Events track all changes to a recording. Common event actions:
 - content_changed - Content was edited
 - archived/unarchived - Recording status changed
 - commented_on - A comment was added`,
-		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": "Events show change history for a specific recording"},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 

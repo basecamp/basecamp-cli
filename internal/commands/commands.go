@@ -126,6 +126,7 @@ func commandCategories() []CommandCategory {
 				{Name: "completion", Category: "additional", Description: "Generate shell completions", Actions: []string{"bash", "zsh", "fish", "powershell", "refresh", "status"}},
 				{Name: "mcp", Category: "additional", Description: "MCP server integration", Actions: []string{"server"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},
+				{Name: "skill", Category: "additional", Description: "Print the embedded agent skill file"},
 				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
 				{Name: "help", Category: "additional", Description: "Show help"},

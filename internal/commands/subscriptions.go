@@ -21,7 +21,8 @@ func NewSubscriptionsCmd() *cobra.Command {
 
 Subscriptions control who receives notifications when a recording is updated,
 commented on, or otherwise changed.`,
-		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": "Subscriptions control email/push notifications for a recording"},
+		Args:        cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {

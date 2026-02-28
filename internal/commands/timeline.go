@@ -37,7 +37,8 @@ By default, shows the account-wide activity feed (recent activity across all pro
 Use --in to view a specific project's timeline.
 Use "me" or --person to view a person's activity timeline.
 Use --watch to continuously poll for new activity.`,
-		Args: cobra.MaximumNArgs(1),
+		Annotations: map[string]string{"agent_notes": "Timeline shows activity feed — account-wide by default, or scoped with --in <project> or --person <id>"},
+		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if watch {
 				return runTimelineWatch(cmd, args, project, person, time.Duration(interval)*time.Second)

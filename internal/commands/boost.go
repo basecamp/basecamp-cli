@@ -24,7 +24,8 @@ Use 'basecamp boost list <recording-id>' to see boosts on a recording.
 Use 'basecamp boost show <boost-id>' to view a specific boost.
 Use 'basecamp boost create <recording-id> "emoji"' to boost a recording.
 Use 'basecamp boost delete <boost-id>' to remove a boost.`,
-		Args: cobra.MinimumNArgs(0),
+		Annotations: map[string]string{"agent_notes": "Boost content is typically an emoji but can be text\nbasecamp react is a shortcut for boost create"},
+		Args:        cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
