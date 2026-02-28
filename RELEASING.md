@@ -16,7 +16,7 @@ make release VERSION=0.2.0 DRY_RUN=1
 
 1. Validates semver format, main branch, clean tree, synced with remote
 2. Checks for `replace` directives in go.mod
-3. Runs `make release-check` (all quality checks + vuln scan)
+3. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
 4. Creates annotated tag `v$VERSION` and pushes to origin
 5. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
    - Security scan + full test suite + CLI surface compatibility check
@@ -38,8 +38,7 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 
 - On `main` branch with clean, synced working tree
 - No `replace` directives in go.mod
-- `make check` passes (formatting, vet, lint, tests, e2e, naming, surface, provenance, tidy)
-- `govulncheck` passes
+- `make release-check` passes (includes check, replace-check, vuln scan, race-test, surface compat)
 
 ## CI secrets
 

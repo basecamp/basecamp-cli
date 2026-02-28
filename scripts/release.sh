@@ -38,7 +38,7 @@ fi
 
 TAG="v${VERSION}"
 
-if [[ "${DRY_RUN}" == "true" ]]; then
+if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
   info "Dry run — no tags will be created or pushed"
   echo ""
 fi
@@ -63,7 +63,7 @@ if [[ "${LOCAL}" != "${REMOTE}" ]]; then
 fi
 
 # --- Verify no replace directives ---
-if grep -q '^\s*replace\s' go.mod; then
+if grep -q '^[[:space:]]*replace[[:space:]]' go.mod; then
   die "go.mod contains replace directives. Remove them before releasing."
 fi
 
@@ -84,7 +84,7 @@ if git rev-parse "${TAG}" >/dev/null 2>&1; then
   fi
 else
   info "Creating tag ${TAG}"
-  if [[ "${DRY_RUN}" == "true" ]]; then
+  if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
     echo "  (skipped — dry run)"
   else
     git tag -a "${TAG}" -m "Release ${TAG}"
@@ -93,7 +93,7 @@ fi
 
 # --- Push tag ---
 info "Pushing ${TAG} to origin"
-if [[ "${DRY_RUN}" == "true" ]]; then
+if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
   echo "  (skipped — dry run)"
 else
   git push origin "${TAG}"

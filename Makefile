@@ -274,9 +274,9 @@ install:
 # Guard against local replace directives in go.mod
 .PHONY: replace-check
 replace-check:
-	@if grep -q '^\s*replace\s' go.mod; then \
+	@if grep -q '^[[:space:]]*replace[[:space:]]' go.mod; then \
 		echo "ERROR: go.mod contains replace directives"; \
-		grep '^\s*replace\s' go.mod; \
+		grep '^[[:space:]]*replace[[:space:]]' go.mod; \
 		echo ""; \
 		echo "Remove replace directives before releasing."; \
 		exit 1; \
