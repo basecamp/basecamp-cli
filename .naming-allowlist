@@ -19,3 +19,5 @@ keyring.Get("bcq"
 keyring(bcq
 # commands.go — catalog description for migrate command
 legacy bcq
+# RELEASING.md — actual GitHub App name
+bcq-release-bot
