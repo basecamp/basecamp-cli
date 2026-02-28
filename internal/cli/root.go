@@ -493,15 +493,15 @@ func resolvePreferences(cmd *cobra.Command, cfg *config.Config, flags *appctx.Gl
 
 // agentHelpInfo is the structured help output for --help --agent.
 type agentHelpInfo struct {
-	Command        string              `json:"command"`
-	Path           string              `json:"path"`
-	Short          string              `json:"short"`
-	Long           string              `json:"long,omitempty"`
-	Usage          string              `json:"usage"`
-	Notes          []string            `json:"notes,omitempty"`
-	Subcommands    []agentSubcommand   `json:"subcommands,omitempty"`
-	Flags          []agentFlag         `json:"flags,omitempty"`
-	InheritedFlags []agentFlag         `json:"inherited_flags,omitempty"`
+	Command        string            `json:"command"`
+	Path           string            `json:"path"`
+	Short          string            `json:"short"`
+	Long           string            `json:"long,omitempty"`
+	Usage          string            `json:"usage"`
+	Notes          []string          `json:"notes,omitempty"`
+	Subcommands    []agentSubcommand `json:"subcommands,omitempty"`
+	Flags          []agentFlag       `json:"flags,omitempty"`
+	InheritedFlags []agentFlag       `json:"inherited_flags,omitempty"`
 }
 
 type agentSubcommand struct {
