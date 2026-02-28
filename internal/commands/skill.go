@@ -19,8 +19,8 @@ func NewSkillCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("reading embedded skill: %w", err)
 			}
-			fmt.Fprint(cmd.OutOrStdout(), string(data))
-			return nil
+			_, err = fmt.Fprint(cmd.OutOrStdout(), string(data))
+			return err
 		},
 	}
 }

@@ -571,5 +571,5 @@ func emitAgentHelp(cmd *cobra.Command) {
 		})
 	})
 
-	_ = json.NewEncoder(os.Stdout).Encode(info)
+	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(info)
 }

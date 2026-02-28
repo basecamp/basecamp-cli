@@ -20,8 +20,12 @@ fi
 # Check if commit succeeded by looking for output patterns
 tool_output=$(echo "$input" | jq -r '.tool_output // empty' 2>/dev/null)
 
-# Skip if commit failed — detect error indicators before checking for success
-if echo "$tool_output" | grep -qiE '(^|[[:space:]])(error|fatal|failed|aborted|rejected)[[:space:]:]|hook[[:space:]].*[[:space:]]failed|pre-commit[[:space:]].*[[:space:]]failed'; then
+# Skip if commit failed — detect error indicators before checking for success.
+# Only match lines that look like git/hook errors, not commit subject lines
+# (e.g. "[branch abc1234] Fix failed login" should not trigger this guard).
+# We strip the "[branch hash] subject" success line before scanning for errors.
+filtered_output=$(echo "$tool_output" | grep -v '^\[.*[a-f0-9]\{7,\}\]')
+if echo "$filtered_output" | grep -qiE '(^|[[:space:]])(error|fatal|aborted|rejected)[[:space:]:]|hook[[:space:]].*[[:space:]]failed|pre-commit[[:space:]].*[[:space:]]failed|^error:'; then
   exit 0
 fi
 
