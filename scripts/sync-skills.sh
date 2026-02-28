@@ -137,7 +137,7 @@ if [[ -f "$target/$MANIFEST" ]]; then
   while IFS= read -r previously_managed; do
     [[ -z "$previously_managed" ]] && continue
     # Reject path traversal, slashes, and non-portable names
-    if [[ ! "$previously_managed" =~ ^[a-z0-9._-]+$ ]]; then
+    if [[ "$previously_managed" == "." || "$previously_managed" == ".." || ! "$previously_managed" =~ ^[a-z0-9._-]+$ ]]; then
       echo "WARNING: skipping invalid manifest entry: $previously_managed" >&2
       continue
     fi
@@ -197,7 +197,10 @@ if ! output=$(push_target); then
   if echo "$output" | grep -qi "non-fast-forward"; then
     echo "Push rejected (non-fast-forward). Pulling with rebase and retrying..."
     git -C "$target" pull --rebase origin "$TARGET_BRANCH"
-    push_target
+    if ! retry_output=$(push_target); then
+      echo "$retry_output" >&2
+      die "Push failed after retry"
+    fi
   else
     echo "$output" >&2
     die "Push failed"

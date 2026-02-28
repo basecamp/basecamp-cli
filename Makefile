@@ -407,6 +407,7 @@ sync-skills:
 .PHONY: sync-skills-remote
 sync-skills-remote:
 	@test -n "$(TAG)" || (echo "Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=..." && exit 1)
+	@test -n "$(SKILLS_TOKEN)" || (echo "Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=..." && exit 1)
 	RELEASE_TAG=$(TAG) SOURCE_SHA=$$(git rev-parse HEAD) DRY_RUN=remote scripts/sync-skills.sh
 
 # Show help
