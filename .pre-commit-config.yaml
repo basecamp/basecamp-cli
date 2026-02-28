@@ -1,6 +1,8 @@
 # Pre-commit hooks for Basecamp CLI
-# Install: pip install pre-commit && pre-commit install
+# Install: pip install pre-commit && pre-commit install --install-hooks
 # https://pre-commit.com
+
+default_install_hook_types: [pre-commit, pre-push]
 
 repos:
   - repo: https://github.com/golangci/golangci-lint
@@ -13,6 +15,23 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: bash -c 'go mod tidy && git diff --exit-code go.mod go.sum'
+        language: system
+        pass_filenames: false
+        files: '(\.go$|go\.mod$|go\.sum$)'
+
+      - id: go-test-short
+        name: go test -short
+        entry: bash -c 'BASECAMP_NO_KEYRING=1 go test -short ./...'
+        language: system
+        pass_filenames: false
+        files: '(\.go$|go\.mod$|go\.sum$)'
+        stages: [pre-push]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
