@@ -20,9 +20,13 @@ fi
 # Check if commit succeeded by looking for output patterns
 tool_output=$(echo "$input" | jq -r '.tool_output // empty' 2>/dev/null)
 
+# Skip if commit failed — detect error indicators before checking for success
+if echo "$tool_output" | grep -qiE '(^|[[:space:]])(error|fatal|failed|aborted|rejected)[[:space:]:]|hook[[:space:]].*[[:space:]]failed|pre-commit[[:space:]].*[[:space:]]failed'; then
+  exit 0
+fi
+
 # Verify commit actually succeeded - look for commit hash pattern or "create mode"
 if [[ ! "$tool_output" =~ \[.*[a-f0-9]{7,}\] ]] && [[ ! "$tool_output" =~ "create mode" ]]; then
-  # Commit likely failed, don't suggest linking
   exit 0
 fi
 
@@ -30,8 +34,8 @@ fi
 branch=$(git branch --show-current 2>/dev/null || true)
 last_commit_msg=$(git log -1 --format=%s 2>/dev/null || true)
 
-# Patterns: BC-12345, todo-12345, basecamp-12345, #12345
-todo_patterns='BC-[0-9]+|todo-[0-9]+|basecamp-[0-9]+|#[0-9]{5,}'
+# Patterns: BC-12345, todo-12345, basecamp-12345
+todo_patterns='BC-[0-9]+|todo-[0-9]+|basecamp-[0-9]+'
 
 found_in_branch=$(echo "$branch" | grep -oEi "$todo_patterns" | head -1 || true)
 found_in_msg=$(echo "$last_commit_msg" | grep -oEi "$todo_patterns" | head -1 || true)

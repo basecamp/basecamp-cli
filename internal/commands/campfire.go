@@ -26,7 +26,8 @@ func NewCampfireCmd() *cobra.Command {
 Use 'basecamp campfire list' to see campfires in a project.
 Use 'basecamp campfire messages' to view recent messages.
 Use 'basecamp campfire post "message"' to post a message.`,
-		Args: cobra.MinimumNArgs(0),
+		Annotations: map[string]string{"agent_notes": "Each project has one campfire (the chat room)\nContent supports Markdown — converted to HTML automatically\nCampfire is project-scoped, no cross-project campfire queries"},
+		Args:        cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {

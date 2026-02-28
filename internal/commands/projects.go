@@ -25,6 +25,7 @@ func NewProjectsCmd() *cobra.Command {
 		Aliases: []string{"project"},
 		Short:   "Manage projects",
 		Long:    "List, show, create, and manage Basecamp projects.",
+		Annotations: map[string]string{"agent_notes": "Project IDs appear in Basecamp URLs as the buckets segment: /buckets/<project_id>/...\nbasecamp config project sets the default project for the current repo\nCreating a project returns its ID — use it with basecamp config set project_id <id>"},
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {

@@ -26,6 +26,7 @@ func NewScheduleCmd() *cobra.Command {
 Use 'basecamp schedule' to view the project schedule.
 Use 'basecamp schedule entries' to list schedule entries.
 Use 'basecamp schedule create' to create new entries.`,
+		Annotations: map[string]string{"agent_notes": "Each project has one schedule\nRecurring events: use --date on show to get a specific occurrence\nschedule settings --include-due makes todo/card due dates appear on the schedule\nNatural dates work for --starts-at: tomorrow, next monday"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {

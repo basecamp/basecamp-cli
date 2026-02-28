@@ -27,6 +27,7 @@ func NewForwardsCmd() *cobra.Command {
 
 Forwards are emails forwarded into Basecamp. Each project has an inbox
 that can receive forwarded emails.`,
+		Annotations: map[string]string{"agent_notes": "Forwards are emails sent into a Basecamp project's inbox\nEach project has one inbox (forward container)\nContent supports Markdown"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runForwardsList(cmd, project, inboxID, limit, page, all)
 		},

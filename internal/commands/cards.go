@@ -29,6 +29,7 @@ func NewCardsCmd() *cobra.Command {
 		Use:   "cards",
 		Short: "Manage cards in Card Tables",
 		Long:  "List, show, create, and manage cards in Card Tables (Kanban boards).",
+		Annotations: map[string]string{"agent_notes": "Cards do NOT support --assignee filtering like todos — fetch all and filter client-side\nIf a project has multiple card tables, you must specify --card-table <id>\nAssign/unassign shortcuts work on cards: basecamp assign <card_id> --to <person>\nCross-project cards: basecamp recordings cards --json"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runCardsList(cmd, project, column, cardTable, limit, page, all)

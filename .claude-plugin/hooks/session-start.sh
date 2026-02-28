@@ -6,6 +6,11 @@
 
 set -euo pipefail
 
+# Require jq for JSON parsing
+if ! command -v jq &>/dev/null; then
+  exit 0
+fi
+
 # Find basecamp - prefer PATH, fall back to plugin's bin directory
 if command -v basecamp &>/dev/null; then
   BASECAMP_BIN="basecamp"
@@ -22,6 +27,9 @@ EOF
     exit 0
   fi
 fi
+
+# Get CLI version
+cli_version=$("$BASECAMP_BIN" version --json 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)
 
 # Check if we have any Basecamp configuration
 config_output=$("$BASECAMP_BIN" config show --json 2>/dev/null || echo '{}')
@@ -43,6 +51,17 @@ fi
 
 # Build context message
 context="Basecamp context loaded:"
+
+if [[ -n "$cli_version" ]]; then
+  context+="\n  CLI: v${cli_version}"
+fi
+
+# Show active profile if using named profiles
+active_profile=$("$BASECAMP_BIN" profile show --json 2>/dev/null | jq -r '.data.name // empty' 2>/dev/null || true)
+if [[ -n "$active_profile" ]]; then
+  context+="\n  Profile: $active_profile"
+fi
+
 context+="\n  Account: $account_id"
 
 if [[ -n "$project_id" ]]; then
@@ -68,6 +87,7 @@ $(echo -e "$context")
 Use \`basecamp\` commands to interact with Basecamp:
   basecamp todos list          # List todos in current project
   basecamp search "query"      # Search across projects
-  basecamp comment "msg" --on ID  # Comment on a recording
+  basecamp reports assigned    # See what's assigned to you
+  basecamp clock <id> --hours 1.5  # Log time on a recording
 </hook-output>
 EOF

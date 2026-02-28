@@ -25,6 +25,7 @@ Campfire, Schedule, etc. Tool IDs can be found in the project's dock array
 
 Tools can be created by cloning existing ones (e.g., create a second Campfire).
 Disabling a tool hides it from the dock but preserves its content.`,
+		Annotations: map[string]string{"agent_notes": "Dock tools are the sidebar navigation items in a project\nEnable/disable controls visibility without deleting\nEach tool has a type (e.g., Todoset, Schedule, MessageBoard, Vault, Chat::Campfire)"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},

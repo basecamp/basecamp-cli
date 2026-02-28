@@ -79,14 +79,11 @@ basecamp auth token              # Print token for scripts
 
 `basecamp` works with any AI agent that can run shell commands.
 
-**Claude Code:** The `.claude-plugin/` is discovered automatically when you clone this repo. For standalone use, point at `skills/basecamp/SKILL.md`.
+**Claude Code:** `claude plugin install basecamp` — installs the plugin with skills, hooks, and agent workflow support.
 
-**Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for full Basecamp workflow coverage.
+**Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 
-**One-liner** to install skills locally (any agent):
-```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-skills.sh | bash
-```
+**Agent discovery:** Every command supports `--help --agent` for structured JSON output (flags, gotchas, subcommands). Use `basecamp commands --json` for the full catalog.
 
 See [install.md](install.md) for step-by-step setup instructions.
 

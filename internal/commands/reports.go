@@ -21,6 +21,7 @@ func NewReportsCmd() *cobra.Command {
 		Long: `View various reports including assignable people, assigned todos, overdue todos, and upcoming schedule.
 
 Reports provide cross-project views of assignments and schedules.`,
+		Annotations: map[string]string{"agent_notes": "Reports are account-wide — no --in <project> needed\nreports assigned is the best way to see what's on my plate across projects\nreports overdue surfaces todos past their due date"},
 	}
 
 	cmd.AddCommand(

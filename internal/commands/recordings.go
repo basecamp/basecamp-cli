@@ -29,7 +29,8 @@ func NewRecordingsCmd() *cobra.Command {
 
 Provides filtered view of content across all projects.
 Type is required: todos, messages, documents, comments, cards, uploads.`,
-		Args: cobra.MaximumNArgs(1),
+		Annotations: map[string]string{"agent_notes": "Recordings is the only cross-project browse mechanism besides search\nDefault status is active — use --status archived or --status trashed for other states\nTypes: todos, messages, documents, comments, cards, uploads"},
+		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {

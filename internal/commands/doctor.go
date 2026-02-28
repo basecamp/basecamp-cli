@@ -20,6 +20,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -196,6 +197,11 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	// 11. Legacy bcq detection
 	if legacyCheck := checkLegacyInstall(); legacyCheck != nil {
 		checks = append(checks, *legacyCheck)
+	}
+
+	// 12. AI Agent integration (only when Claude Code is detected)
+	if harness.DetectClaude() {
+		checks = append(checks, checkClaudeIntegration()...)
 	}
 
 	return checks
@@ -1004,6 +1010,24 @@ func renderDoctorStyled(w io.Writer, result *DoctorResult) {
 
 	fmt.Fprintf(w, "  %s\n", strings.Join(summaryParts, "  "))
 	fmt.Fprintln(w)
+}
+
+// checkClaudeIntegration runs Claude Code-specific health checks.
+func checkClaudeIntegration() []Check {
+	var checks []Check
+
+	// Plugin installed?
+	pluginCheck := harness.CheckClaudePlugin()
+	if pluginCheck != nil {
+		checks = append(checks, Check{
+			Name:    pluginCheck.Name,
+			Status:  pluginCheck.Status,
+			Message: pluginCheck.Message,
+			Hint:    pluginCheck.Hint,
+		})
+	}
+
+	return checks
 }
 
 // checkLegacyInstall detects stale bcq artifacts and suggests migration.

@@ -10,7 +10,6 @@ Install the Basecamp CLI and connect it to your AI agent. Execute all steps auto
 
 - [ ] Install Basecamp CLI
 - [ ] Authenticate with Basecamp
-- [ ] Install skills (optional)
 - [ ] Connect agent (optional)
 
 ---
@@ -71,22 +70,6 @@ basecamp auth status
 
 ---
 
-## Step 3: Install Skills (Optional)
-
-Skills provide AI agents with Basecamp workflow knowledge.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install-skills.sh | bash
-```
-
-**Verify:**
-```bash
-ls ${BASECAMP_DIR:-$HOME/.local/share/basecamp}/skills/*/SKILL.md
-# Expected: List of SKILL.md files
-```
-
----
-
 EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `basecamp --version && basecamp auth status` both succeed.
 
 ---
@@ -97,19 +80,20 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 
 ### Claude Code
 
-The `.claude-plugin/` is discovered automatically when you clone the repo. No extra setup needed.
+```bash
+claude plugin install basecamp
+```
+
+This installs the plugin with skills, hooks, and agent workflow support.
 
 ### Other Agents
 
 Point your agent at the skill file for full Basecamp workflow coverage:
 ```
-~/.local/share/basecamp/skills/basecamp/SKILL.md
-```
-
-Or if you cloned the repo:
-```
 skills/basecamp/SKILL.md
 ```
+
+Every command supports `--help --agent` for structured JSON discovery.
 
 ---
 
