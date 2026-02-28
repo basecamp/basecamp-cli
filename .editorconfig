@@ -45,6 +45,11 @@ indent_size = 2
 indent_style = space
 indent_size = 2
 
+# BATS test files
+[*.bats]
+indent_style = space
+indent_size = 2
+
 # Dockerfiles
 [Dockerfile*]
 indent_style = space
