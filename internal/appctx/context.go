@@ -255,6 +255,8 @@ func (a *App) shouldIncludeStatsInError() bool {
 		switch a.Output.EffectiveFormat() {
 		case output.FormatJSON, output.FormatMarkdown:
 			return true
+		default:
+			return false
 		}
 	}
 	return false
@@ -271,6 +273,8 @@ func (a *App) shouldPrintStatsToStderr() bool {
 		switch a.Output.EffectiveFormat() {
 		case output.FormatJSON, output.FormatMarkdown, output.FormatQuiet, output.FormatIDs, output.FormatCount:
 			return false
+		default:
+			return true
 		}
 	}
 	return true

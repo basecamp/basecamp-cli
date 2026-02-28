@@ -65,7 +65,7 @@ func (p *BoostPicker) Update(msg tea.Msg) (*BoostPicker, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.Type {
+		switch msg.Type { //nolint:exhaustive // partial key handler; tea.KeyType has 80+ values
 		case tea.KeyEnter:
 			val := strings.TrimSpace(p.textInput.Value())
 			if val == "" {

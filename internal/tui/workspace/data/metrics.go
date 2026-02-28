@@ -138,6 +138,8 @@ func (m *PoolMetrics) Summary() MetricsSummary {
 		case FetchError:
 			errors++
 			total++
+		default:
+			// FetchStart events are not counted toward latency/error metrics
 		}
 	}
 

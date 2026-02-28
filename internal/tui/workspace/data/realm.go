@@ -23,7 +23,7 @@ type Realm struct {
 }
 
 // NewRealm creates a realm with a cancellable context derived from parent.
-func NewRealm(name string, parent context.Context) *Realm {
+func NewRealm(name string, parent context.Context) *Realm { //nolint:revive // context-as-argument: name is the primary differentiator
 	ctx, cancel := context.WithCancel(parent)
 	return &Realm{
 		name:   name,

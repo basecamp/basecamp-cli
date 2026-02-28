@@ -449,7 +449,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Help overlay consumes all keys when active
 	if w.pickingBoost {
-		switch msg.Type {
+		switch msg.Type { //nolint:exhaustive // partial key handler; tea.KeyType has 80+ values
 		case tea.KeyEsc:
 			w.pickingBoost = false
 			w.boostPicker.Blur()

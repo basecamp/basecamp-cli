@@ -127,7 +127,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	checks := []Check{}
 
 	// 1. Version check
-	checks = append(checks, checkVersion(verbose))
+	checks = append(checks, checkVersion(verbose)) //nolint:contextcheck // checkVersion uses fetchLatestVersion which creates its own bounded context intentionally
 
 	// 2. SDK provenance
 	checks = append(checks, checkSDKProvenance(verbose))
@@ -292,7 +292,8 @@ func formatSDKProvenance(p *version.SDKProvenance, verbose bool) Check {
 }
 
 // fetchLatestVersion attempts to fetch the latest release version from GitHub.
-func fetchLatestVersion() (string, error) {
+// Uses its own context since version checks are best-effort and independent of caller lifecycle.
+func fetchLatestVersion() (string, error) { //nolint:contextcheck // intentionally creates bounded context for best-effort check
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 

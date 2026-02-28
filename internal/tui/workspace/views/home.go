@@ -577,7 +577,7 @@ func (v *Home) openSelected() tea.Cmd {
 		scope.ProjectID = meta.projectID
 	}
 
-	switch meta.viewTarget {
+	switch meta.viewTarget { //nolint:exhaustive // partial target handler; not all views are navigable from here
 	case workspace.ViewDock:
 		scope.ProjectName = item.Title
 		// Record project in recents

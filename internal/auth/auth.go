@@ -506,20 +506,20 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 		if errParam != "" {
 			errCh <- fmt.Errorf("OAuth error: %s", errParam)
 			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
-			shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck // best-effort shutdown
+			shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck,contextcheck // best-effort shutdown; Background intentional (outer ctx may be canceled)
 			return
 		}
 
 		if state != expectedState {
 			errCh <- fmt.Errorf("state mismatch: CSRF protection failed")
 			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
-			shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck // best-effort shutdown
+			shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck,contextcheck // best-effort shutdown; Background intentional
 			return
 		}
 
 		codeCh <- code
 		fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
-		shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck // best-effort shutdown
+		shutdownOnce.Do(func() { go server.Shutdown(context.Background()) }) //nolint:errcheck,contextcheck // best-effort shutdown; Background intentional
 	})
 
 	go server.Serve(listener) //nolint:errcheck // server.Serve returns ErrServerClosed on Shutdown
