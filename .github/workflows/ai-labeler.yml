@@ -72,7 +72,7 @@ jobs:
 
       - name: Classify
         id: classify
-        uses: actions/ai-inference@b81b2afb8390ee6839b494a404766bef6493c7d9 # v1
+        uses: actions/ai-inference@e09e65981758de8b2fdab13c2bfb7c7d5493b0b6 # v2.0.7
         with:
           prompt-file: /tmp/prompt.yml
 
@@ -170,7 +170,7 @@ jobs:
       - name: Detect breaking changes
         if: steps.cmd-diff.outputs.skip != 'true'
         id: detect
-        uses: actions/ai-inference@b81b2afb8390ee6839b494a404766bef6493c7d9 # v1
+        uses: actions/ai-inference@e09e65981758de8b2fdab13c2bfb7c7d5493b0b6 # v2.0.7
         with:
           prompt-file: /tmp/prompt.yml
 

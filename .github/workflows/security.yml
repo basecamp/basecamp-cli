@@ -105,7 +105,7 @@ jobs:
     continue-on-error: true  # Requires GitHub Advanced Security (not available on all plans)
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/dependency-review-action@4901385134134e04cec5fbe5ddfe3b2c5bd5d976 # v4
+      - uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4
 
   codeql:
     name: CodeQL Analysis
