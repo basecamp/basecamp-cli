@@ -17,22 +17,27 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto-merge patch updates
-        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
-        run: |
-          gh pr review --approve "$PR_URL"
-          gh pr merge --auto --squash "$PR_URL"
+      # CI is the safety gate — auto-merging action updates is circular.
+      - name: Approve patch and minor updates (excluding actions)
+        if: >-
+          (
+            steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+            steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          ) &&
+          steps.metadata.outputs.package-ecosystem != 'github_actions'
+        run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto-merge minor github-actions updates
+      - name: Enable auto-merge for patch and minor updates (excluding actions)
         if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' &&
-          steps.metadata.outputs.package-ecosystem == 'github_actions'
-        run: |
-          gh pr review --approve "$PR_URL"
-          gh pr merge --auto --squash "$PR_URL"
+          (
+            steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+            steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          ) &&
+          steps.metadata.outputs.package-ecosystem != 'github_actions'
+        run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
