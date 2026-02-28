@@ -87,23 +87,23 @@ func DefaultConfig() *Config {
 
 // WithCircuitBreaker returns a copy of the config with custom circuit breaker settings.
 func (c *Config) WithCircuitBreaker(cb CircuitBreakerConfig) *Config {
-	copy := *c
-	copy.CircuitBreaker = cb
-	return &copy
+	cfg := *c
+	cfg.CircuitBreaker = cb
+	return &cfg
 }
 
 // WithRateLimiter returns a copy of the config with custom rate limiter settings.
 func (c *Config) WithRateLimiter(rl RateLimiterConfig) *Config {
-	copy := *c
-	copy.RateLimiter = rl
-	return &copy
+	cfg := *c
+	cfg.RateLimiter = rl
+	return &cfg
 }
 
 // WithBulkhead returns a copy of the config with custom bulkhead settings.
 func (c *Config) WithBulkhead(bh BulkheadConfig) *Config {
-	copy := *c
-	copy.Bulkhead = bh
-	return &copy
+	cfg := *c
+	cfg.Bulkhead = bh
+	return &cfg
 }
 
 // CircuitBreaker builder methods

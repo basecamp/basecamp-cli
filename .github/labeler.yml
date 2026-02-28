@@ -1,0 +1,41 @@
+commands:
+  - changed-files:
+      - any-glob-to-any-file: "internal/commands/**"
+
+tui:
+  - changed-files:
+      - any-glob-to-any-file: "internal/tui/**"
+
+sdk:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "internal/sdk/**"
+          - "internal/version/sdk-provenance.json"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "e2e/**"
+          - "**/*_test.go"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+skills:
+  - changed-files:
+      - any-glob-to-any-file: "skills/**"
+
+plugin:
+  - changed-files:
+      - any-glob-to-any-file: ".claude-plugin/**"
+
+auth:
+  - changed-files:
+      - any-glob-to-any-file: "internal/auth/**"
+
+output:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "internal/output/**"
+          - "internal/presenter/**"

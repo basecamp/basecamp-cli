@@ -101,7 +101,7 @@ func (h *GatingHooks) OnOperationStart(ctx context.Context, op basecamp.Operatio
 func (h *GatingHooks) OnOperationEnd(ctx context.Context, op basecamp.OperationInfo, err error, duration time.Duration) {
 	// Release bulkhead slot if we acquired one
 	if _, ok := ctx.Value(releaseKey{}).(bool); ok && h.bulkhead != nil {
-		_ = h.bulkhead.Release()
+		_ = h.bulkhead.Release() //nolint:contextcheck // lock acquisition is context-independent by design
 	}
 
 	// Record success/failure for circuit breaker
@@ -109,10 +109,10 @@ func (h *GatingHooks) OnOperationEnd(ctx context.Context, op basecamp.OperationI
 		if err != nil {
 			// Check if this is a retryable/server error that should trip the circuit
 			if isCircuitBreakerError(err) {
-				_ = h.circuitBreaker.RecordFailure()
+				_ = h.circuitBreaker.RecordFailure() //nolint:contextcheck // lock acquisition is context-independent by design
 			}
 		} else {
-			_ = h.circuitBreaker.RecordSuccess()
+			_ = h.circuitBreaker.RecordSuccess() //nolint:contextcheck // lock acquisition is context-independent by design
 		}
 	}
 
@@ -135,11 +135,11 @@ func (h *GatingHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInf
 
 	// Honor Retry-After header from rate-limited or overloaded responses
 	if result.RetryAfter > 0 {
-		_ = h.rateLimiter.SetRetryAfterDuration(time.Duration(result.RetryAfter) * time.Second)
+		_ = h.rateLimiter.SetRetryAfterDuration(time.Duration(result.RetryAfter) * time.Second) //nolint:contextcheck // lock acquisition is context-independent by design
 	} else if result.StatusCode == 429 {
 		// Default to 60 seconds if no Retry-After specified (SDK parity for 429 only)
 		// Note: 503 requires explicit Retry-After header per SDK behavior
-		_ = h.rateLimiter.SetRetryAfterDuration(60 * time.Second)
+		_ = h.rateLimiter.SetRetryAfterDuration(60 * time.Second) //nolint:contextcheck // lock acquisition is context-independent by design
 	}
 }
 
