@@ -11,6 +11,7 @@ permissions:
   id-token: write  # Required for keyless cosign signing via OIDC
   security-events: write  # Required for SARIF upload in security scan
   pull-requests: read
+  models: read
 
 jobs:
   security:
@@ -67,13 +68,33 @@ jobs:
 
       - name: Run release quality gate
         run: |
-          make fmt-check vet lint test test-e2e provenance-check check-naming
+          make fmt-check vet lint test test-e2e provenance-check check-naming check-surface
           go test -race -count=1 ./...
 
       - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+
+      - name: Check CLI surface compatibility
+        run: |
+          # Generate current snapshot
+          make build
+          scripts/check-cli-surface.sh ./bin/basecamp /tmp/current-surface.txt
+          # Generate baseline from previous tag in isolated worktree
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            SCRIPT_DIR="$(pwd)/scripts"
+            git worktree add /tmp/baseline-tree "$PREV_TAG"
+            cd /tmp/baseline-tree
+            make build
+            "$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt
+            cd -
+            git worktree remove /tmp/baseline-tree --force
+            scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
+          else
+            echo "First release — no baseline to compare against"
+          fi
 
   release:
     name: Release
@@ -154,6 +175,69 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build changelog context
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --oneline --no-decorate)
+            DIFF=$(git diff --stat 4b825dc642cb6eb9a060e54bf899d69f82a3ef17 HEAD)
+          else
+            COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
+            DIFF=$(git diff "${PREV_TAG}..HEAD" -- '*.go' 'go.mod')
+          fi
+          {
+            echo "Commits:"
+            echo "$COMMITS"
+            echo ""
+            echo "Diff summary:"
+            echo "$DIFF" | head -c 80000
+          } > /tmp/user-message.txt
+          # Splice into prompt YAML
+          python3 -c "
+          with open('.github/prompts/summarize-changelog.prompt.yml') as f:
+              lines = f.readlines()
+          with open('/tmp/user-message.txt') as f:
+              user_msg = f.read()
+          insert_at = len(lines)
+          for i, line in enumerate(lines):
+              if i == 0: continue
+              if line.strip() and not line[0].isspace():
+                  insert_at = i
+                  break
+          entry = ['  - role: user\n', '    content: |\n']
+          for ln in user_msg.splitlines():
+              entry.append('      ' + ln + '\n')
+          lines[insert_at:insert_at] = entry
+          with open('/tmp/prompt.yml', 'w') as f:
+              f.writelines(lines)
+          try:
+              import yaml
+              doc = yaml.safe_load(open('/tmp/prompt.yml'))
+              assert doc['messages'][-1]['role'] == 'user', 'prompt splice failed'
+          except ImportError:
+              pass
+          "
+        continue-on-error: true
+
+      - name: Generate AI changelog
+        id: ai-changelog
+        uses: actions/ai-inference@b81b2afb8390ee6839b494a404766bef6493c7d9 # v1
+        continue-on-error: true
+        with:
+          prompt-file: /tmp/prompt.yml
+
+      - name: Set changelog env
+        run: |
+          if [ -f "${{ steps.ai-changelog.outputs.response-file }}" ]; then
+            {
+              echo "RELEASE_CHANGELOG<<CHANGELOG_EOF"
+              cat "${{ steps.ai-changelog.outputs.response-file }}"
+              echo "CHANGELOG_EOF"
+            } >> $GITHUB_ENV
+          else
+            echo "RELEASE_CHANGELOG=" >> $GITHUB_ENV
+          fi
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7

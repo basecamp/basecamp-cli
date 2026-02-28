@@ -250,7 +250,18 @@ install:
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e check-naming
+check: fmt-check vet lint test test-e2e check-naming check-surface
+
+# Generate CLI surface snapshot (validates binary produces valid output)
+.PHONY: check-surface
+check-surface: build
+	scripts/check-cli-surface.sh $(BUILD_DIR)/$(BINARY) /tmp/cli-surface.txt
+	@echo "CLI surface snapshot generated ($$(wc -l < /tmp/cli-surface.txt) entries)"
+
+# Compare CLI surface against baseline (fails on removals)
+.PHONY: check-surface-diff
+check-surface-diff:
+	scripts/check-cli-surface-diff.sh $(BASELINE) $(CURRENT)
 
 # Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
 .PHONY: check-naming
@@ -317,6 +328,7 @@ tools:
 	$(GOCMD) install golang.org/x/vuln/cmd/govulncheck@latest
 	$(GOCMD) install golang.org/x/perf/cmd/benchstat@latest
 	$(GOCMD) install github.com/zricethezav/gitleaks/v8@latest
+	@command -v jq >/dev/null 2>&1 || echo "NOTE: jq is also required (install via your package manager)"
 
 
 # Show help
@@ -355,6 +367,8 @@ help:
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
 	@echo "  check          Run all checks (fmt-check, vet, lint, test, test-e2e)"
+	@echo "  check-surface  Generate CLI surface snapshot (validates --help --agent output)"
+	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
 	@echo ""
 	@echo "Dependencies:"
 	@echo "  bump-sdk          Bump SDK and update provenance (REF=<git-ref>)"

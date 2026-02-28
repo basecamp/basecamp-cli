@@ -184,6 +184,54 @@ jobs:
       - name: Run BATS integration tests
         run: make test-e2e
 
+  cli-surface:
+    name: CLI Surface Check
+    runs-on: ubuntu-latest
+    env:
+      BASECAMP_NO_KEYRING: "1"
+      GOPRIVATE: github.com/basecamp/basecamp-sdk
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate token for private SDK access
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
+        with:
+          app-id: ${{ vars.RELEASE_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: basecamp
+          repositories: basecamp-sdk
+
+      - name: Set up Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Configure git for private modules
+        run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Build and snapshot PR surface
+        run: |
+          make build
+          scripts/check-cli-surface.sh ./bin/basecamp /tmp/current-surface.txt
+
+      - name: Build and snapshot baseline surface
+        run: |
+          SCRIPT_DIR="$(pwd)/scripts"
+          git worktree add /tmp/baseline-tree origin/main
+          cd /tmp/baseline-tree
+          make build
+          "$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt
+
+      - name: Compare surfaces
+        run: scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
+
+      - name: Cleanup worktree
+        if: always()
+        run: git worktree remove /tmp/baseline-tree --force 2>/dev/null || true
+
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
