@@ -3,7 +3,7 @@ module github.com/basecamp/basecamp-cli
 go 1.26
 
 require (
-	github.com/basecamp/basecamp-sdk/go v0.0.0-20260227230418-6b4c632286aa
+	github.com/basecamp/basecamp-sdk/go v0.0.0-20260228105634-f97b325fe599
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
@@ -57,7 +57,7 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
-	github.com/oapi-codegen/runtime v1.1.2 // indirect
+	github.com/oapi-codegen/runtime v1.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect

@@ -7,6 +7,10 @@
 
 set -euo pipefail
 
+# Disable go.work so we operate against go.mod directly.
+# With a workspace, `go list -m` sees the SDK as a main module (no version).
+export GOWORK=off
+
 REF="${1:-main}"
 MODULE="github.com/basecamp/basecamp-sdk/go"
 PROVENANCE_FILE="internal/version/sdk-provenance.json"
