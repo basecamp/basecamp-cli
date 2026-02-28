@@ -132,12 +132,21 @@ scoops:
 aurs:
   - name: basecamp-bin
     homepage: "https://github.com/basecamp/basecamp-cli"
-    description: "Command-line interface for Basecamp"
+    description: "CLI for Basecamp project management"
     maintainers:
       - "Basecamp <support@basecamp.com>"
     license: "MIT"
     private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/basecamp-bin.git"
+    provides:
+      - basecamp
+    conflicts:
+      - basecamp
+      - basecamp-cli
+    optdepends:
+      - "bash-completion: for bash shell completions"
+      - "zsh: for zsh shell completions"
+      - "fish: for fish shell completions"
     skip_upload: auto
     package: |-
       install -Dm755 "./basecamp" "${pkgdir}/usr/bin/basecamp"
