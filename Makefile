@@ -294,7 +294,7 @@ release-check: check replace-check vuln race-test check-surface-compat
 # Cut a release (delegates to scripts/release.sh)
 .PHONY: release
 release:
-	scripts/release.sh $(VERSION)
+	DRY_RUN=$(DRY_RUN) scripts/release.sh $(VERSION)
 
 # Generate CLI surface snapshot (validates binary produces valid output)
 .PHONY: check-surface
@@ -314,11 +314,14 @@ check-surface-compat: build
 	@PREV_TAG=$$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo ""); \
 	if [ -n "$$PREV_TAG" ]; then \
 		SCRIPT_DIR="$$(pwd)/scripts"; \
-		git worktree add /tmp/baseline-tree "$$PREV_TAG" 2>/dev/null; \
-		cd /tmp/baseline-tree && make build && \
+		BASELINE_DIR=$$(mktemp -d); \
+		cleanup() { git worktree remove "$$BASELINE_DIR" --force 2>/dev/null || true; rm -rf "$$BASELINE_DIR" 2>/dev/null || true; }; \
+		trap cleanup EXIT; \
+		git worktree add "$$BASELINE_DIR" "$$PREV_TAG" || { echo "Failed to create worktree for $$PREV_TAG"; exit 1; }; \
+		cd "$$BASELINE_DIR" && make build && \
 		"$$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt; \
 		cd - >/dev/null; \
-		git worktree remove /tmp/baseline-tree --force 2>/dev/null; \
+		cleanup; trap - EXIT; \
 		scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt; \
 	else \
 		echo "First release — no baseline to compare against"; \
