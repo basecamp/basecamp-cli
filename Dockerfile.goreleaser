@@ -1,7 +1,0 @@
-# Minimal Dockerfile for GoReleaser (dockers_v2)
-# GoReleaser builds the binary with proper auth, then copies it here
-FROM gcr.io/distroless/static-debian12:nonroot
-ARG TARGETPLATFORM
-COPY ${TARGETPLATFORM}/basecamp /basecamp
-USER nonroot:nonroot
-ENTRYPOINT ["/basecamp"]
