@@ -1,0 +1,51 @@
+area/commands:
+  - changed-files:
+      - any-glob-to-any-file: "internal/commands/**"
+
+area/tui:
+  - changed-files:
+      - any-glob-to-any-file: "internal/tui/**"
+
+area/sdk:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "internal/sdk/**"
+          - "internal/version/sdk-provenance.json"
+
+area/tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "e2e/**"
+          - "**/*_test.go"
+
+area/docs:
+  - changed-files:
+      - any-glob-to-any-file: "**/*.md"
+
+area/deps:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "go.sum"
+          - "go.mod"
+
+area/ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+area/skills:
+  - changed-files:
+      - any-glob-to-any-file: "skills/**"
+
+area/plugin:
+  - changed-files:
+      - any-glob-to-any-file: ".claude-plugin/**"
+
+area/auth:
+  - changed-files:
+      - any-glob-to-any-file: "internal/auth/**"
+
+area/output:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "internal/output/**"
+          - "internal/presenter/**"
