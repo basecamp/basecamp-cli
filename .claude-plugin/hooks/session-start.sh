@@ -28,8 +28,8 @@ EOF
   fi
 fi
 
-# Get CLI version
-cli_version=$("$BASECAMP_BIN" version --json 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)
+# Get CLI version (--version prints "basecamp version X.Y.Z")
+cli_version=$("$BASECAMP_BIN" --version 2>/dev/null | awk '{print $NF}' || true)
 
 # Check if we have any Basecamp configuration
 config_output=$("$BASECAMP_BIN" config show --json 2>/dev/null || echo '{}')
