@@ -60,12 +60,10 @@ sboms:
 # Requires: permissions.id-token: write in workflow for OIDC
 signs:
   - cmd: cosign
-    certificate: '${artifact}.pem'
+    signature: '${artifact}.bundle'
     args:
       - sign-blob
-      - '--output-certificate=${certificate}'
-      - '--output-signature=${signature}'
-      - '--bundle=${artifact}.bundle'
+      - '--bundle=${signature}'
       - '${artifact}'
       - '--yes'
     artifacts: checksum
