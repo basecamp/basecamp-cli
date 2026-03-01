@@ -144,7 +144,9 @@ if [[ -f "$target/$MANIFEST" ]]; then
     previously_managed_names+=("$entry")
   done < "$target/$MANIFEST"
 else
-  # No manifest yet — treat all */SKILL.md dirs in target as managed
+  # No manifest yet (first run). basecamp-cli is the source of truth, so
+  # treat all */SKILL.md dirs in the target as managed. Any skill not in the
+  # source set will be removed. Use DRY_RUN=remote to preview before pushing.
   for candidate in "$target"/*/SKILL.md; do
     [[ -f "$candidate" ]] || continue
     previously_managed_names+=("$(basename "$(dirname "$candidate")")")
