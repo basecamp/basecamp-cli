@@ -89,11 +89,17 @@ jobs:
             git worktree add "$WORKTREE_DIR" "$PREV_TAG"
             cd "$WORKTREE_DIR"
             make build
-            "$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt
-            cd -
-            git worktree remove "$WORKTREE_DIR" --force
-            trap - EXIT
-            scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
+            if "$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt 2>/dev/null; then
+              cd -
+              git worktree remove "$WORKTREE_DIR" --force
+              trap - EXIT
+              scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
+            else
+              echo "Baseline ($PREV_TAG) does not support --help --agent — skipping surface diff"
+              cd -
+              git worktree remove "$WORKTREE_DIR" --force
+              trap - EXIT
+            fi
           else
             echo "First release — no baseline to compare against"
           fi
