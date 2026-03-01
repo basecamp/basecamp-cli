@@ -395,6 +395,21 @@ tools:
 	@command -v jq >/dev/null 2>&1 || echo "NOTE: jq is also required (install via your package manager)"
 
 
+# Sync skills to basecamp/skills distribution repo
+# Usage: make sync-skills TAG=v1.2.3
+.PHONY: sync-skills
+sync-skills:
+	@test -n "$(TAG)" || (echo "Usage: make sync-skills TAG=v1.2.3" && exit 1)
+	RELEASE_TAG=$(TAG) SOURCE_SHA=$$(git rev-parse HEAD) DRY_RUN=local scripts/sync-skills.sh
+
+# Sync skills (dry-run against real target repo)
+# Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=ghp_...
+.PHONY: sync-skills-remote
+sync-skills-remote:
+	@test -n "$(TAG)" || (echo "Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=..." && exit 1)
+	@test -n "$(SKILLS_TOKEN)" || (echo "Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=..." && exit 1)
+	RELEASE_TAG=$(TAG) SOURCE_SHA=$$(git rev-parse HEAD) DRY_RUN=remote SKILLS_TOKEN=$(SKILLS_TOKEN) scripts/sync-skills.sh
+
 # Show help
 .PHONY: help
 help:
@@ -462,5 +477,9 @@ help:
 	@echo "  secrets        Run gitleaks for secret detection"
 	@echo "  fuzz           Run fuzz tests (30s each)"
 	@echo "  fuzz-quick     Run quick fuzz tests (10s each, for CI)"
+	@echo ""
+	@echo "Skills:"
+	@echo "  sync-skills         Local dry-run of skill sync (TAG=v1.2.3)"
+	@echo "  sync-skills-remote  Remote dry-run (TAG=v1.2.3 SKILLS_TOKEN=...)"
 	@echo ""
 	@echo "  help           Show this help"
