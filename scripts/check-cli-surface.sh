@@ -24,10 +24,17 @@ walk_commands() {
     args=(${cmd_path#basecamp })
   fi
 
-  if ! json=$("$BINARY" "${args[@]}" --help --agent 2>/dev/null); then
+  local stderr_file
+  stderr_file="$(mktemp)"
+  if ! json=$("$BINARY" "${args[@]}" --help --agent 2>"$stderr_file"); then
     echo "ERROR: failed to get help for: $cmd_path" >&2
+    if [ -s "$stderr_file" ]; then
+      cat "$stderr_file" >&2
+    fi
+    rm -f "$stderr_file"
     exit 1
   fi
+  rm -f "$stderr_file"
 
   # Emit: every record carries the full command path to stay unique after sort
   echo "$json" | jq -r --arg path "$cmd_path" '
