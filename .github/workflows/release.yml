@@ -227,10 +227,11 @@ jobs:
         run: |
           RESPONSE_FILE="${{ steps.ai-changelog.outputs.response-file }}"
           if [ -n "$RESPONSE_FILE" ] && [ -f "$RESPONSE_FILE" ]; then
+            DELIM="CHANGELOG_DELIM_$(openssl rand -hex 8)"
             {
-              echo "RELEASE_CHANGELOG<<CHANGELOG_EOF"
+              echo "RELEASE_CHANGELOG<<${DELIM}"
               cat "$RESPONSE_FILE"
-              echo "CHANGELOG_EOF"
+              echo "${DELIM}"
             } >> $GITHUB_ENV
           else
             echo "RELEASE_CHANGELOG=" >> $GITHUB_ENV
