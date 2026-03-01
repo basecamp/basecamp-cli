@@ -133,24 +133,34 @@ for skill_dir in "${skill_dirs[@]}"; do
   source_skill_names+=("$(basename "$skill_dir")")
 done
 
+previously_managed_names=()
 if [[ -f "$target/$MANIFEST" ]]; then
-  while IFS= read -r previously_managed; do
-    [[ -z "$previously_managed" ]] && continue
-    # Reject path traversal, slashes, and non-portable names
-    if [[ "$previously_managed" == "." || "$previously_managed" == ".." || ! "$previously_managed" =~ ^[a-z0-9._-]+$ ]]; then
-      echo "WARNING: skipping invalid manifest entry: $previously_managed" >&2
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    if [[ "$entry" == "." || "$entry" == ".." || ! "$entry" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+      echo "WARNING: skipping invalid manifest entry: $entry" >&2
       continue
     fi
-    found=0
-    for name in "${source_skill_names[@]}"; do
-      [[ "$name" == "$previously_managed" ]] && found=1 && break
-    done
-    if [[ "$found" -eq 0 && -d "$target/$previously_managed" ]]; then
-      echo "Removing stale skill: $previously_managed"
-      rm -rf "${target:?}/$previously_managed"
-    fi
+    previously_managed_names+=("$entry")
   done < "$target/$MANIFEST"
+else
+  # No manifest yet — treat all */SKILL.md dirs in target as managed
+  for candidate in "$target"/*/SKILL.md; do
+    [[ -f "$candidate" ]] || continue
+    previously_managed_names+=("$(basename "$(dirname "$candidate")")")
+  done
 fi
+
+for previously_managed in "${previously_managed_names[@]}"; do
+  found=0
+  for name in "${source_skill_names[@]}"; do
+    [[ "$name" == "$previously_managed" ]] && found=1 && break
+  done
+  if [[ "$found" -eq 0 && -d "$target/$previously_managed" ]]; then
+    echo "Removing stale skill: $previously_managed"
+    rm -rf "${target:?}/$previously_managed"
+  fi
+done
 
 # Write current manifest
 printf '%s\n' "${source_skill_names[@]}" | sort > "$target/$MANIFEST"
