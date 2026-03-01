@@ -31,7 +31,7 @@ assert_remote_url() {
     https://github.com/"$TARGET_REPO") ;;
     https://x-access-token:*@github.com/"$TARGET_REPO") ;;
     git@github.com:"$TARGET_REPO") ;;
-    *) die "origin remote '$url' does not point to github.com/$TARGET_REPO" ;;
+    *) die "origin remote '$(echo "$url" | sed -E 's#(https://[^:@]+:)[^@]*@#\1***@#')' does not point to github.com/$TARGET_REPO" ;;
   esac
 }
 
