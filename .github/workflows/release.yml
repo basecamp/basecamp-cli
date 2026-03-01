@@ -231,6 +231,7 @@ jobs:
             {
               echo "RELEASE_CHANGELOG<<${DELIM}"
               cat "$RESPONSE_FILE"
+              echo ""
               echo "${DELIM}"
             } >> $GITHUB_ENV
           else
