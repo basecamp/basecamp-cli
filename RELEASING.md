@@ -27,7 +27,7 @@ make release VERSION=0.2.0 DRY_RUN=1
    - Generates SBOM for supply chain transparency
    - Updates Homebrew cask in `basecamp/homebrew-tap`
    - Updates Scoop manifest in `basecamp/homebrew-tap`
-   - Updates AUR `basecamp-bin` package (when `AUR_KEY` is configured)
+   - Updates AUR `basecamp-cli` package (when `AUR_KEY` is configured)
 
 ## Versioning
 
@@ -51,7 +51,7 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 ## AUR setup (one-time)
 
 1. Create an account at https://aur.archlinux.org
-2. Register the `basecamp-bin` package
+2. Register the `basecamp-cli` package
 3. Generate an SSH keypair: `ssh-keygen -t ed25519 -f aur_key -C "basecamp-cli AUR"`
 4. Add the public key to your AUR profile
 5. Add the private key as `AUR_KEY` in GitHub Actions secrets
@@ -63,5 +63,5 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 | GitHub Releases | [basecamp/basecamp-cli](https://github.com/basecamp/basecamp-cli/releases) | GoReleaser |
 | Homebrew cask | `basecamp/homebrew-tap` Casks/ | GoReleaser |
 | Scoop | `basecamp/homebrew-tap` root | GoReleaser |
-| AUR | `basecamp-bin` | GoReleaser |
+| AUR | `basecamp-cli` | GoReleaser |
 | go install | `go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest` | Go module proxy |

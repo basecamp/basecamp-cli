@@ -98,7 +98,7 @@ func TestCircuitBreakerFailureInHalfOpenOpens(t *testing.T) {
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold: 3,
 		SuccessThreshold: 2,
-		OpenTimeout:      1 * time.Millisecond,
+		OpenTimeout:      5 * time.Second,
 	})
 
 	// Open the circuit
@@ -106,8 +106,11 @@ func TestCircuitBreakerFailureInHalfOpenOpens(t *testing.T) {
 		cb.RecordFailure()
 	}
 
-	// Wait for timeout and transition to half-open
-	time.Sleep(10 * time.Millisecond)
+	// Force half-open by backdating the open timestamp
+	s, _ := store.Load()
+	s.CircuitBreaker.State = CircuitOpen
+	s.CircuitBreaker.OpenedAt = time.Now().Add(-10 * time.Second)
+	store.Save(s)
 	cb.Allow()
 
 	// Record one success, then failure
