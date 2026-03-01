@@ -299,6 +299,11 @@ release:
 # Generate CLI surface snapshot (validates binary produces valid output)
 .PHONY: check-surface
 check-surface: build
+	@command -v jq >/dev/null 2>&1 || { \
+		echo "ERROR: jq is required for check-surface but was not found."; \
+		echo "Install with: brew install jq (macOS), apt-get install jq (Debian/Ubuntu)"; \
+		exit 1; \
+	}
 	scripts/check-cli-surface.sh $(BUILD_DIR)/$(BINARY) /tmp/cli-surface.txt
 	@echo "CLI surface snapshot generated ($$(wc -l < /tmp/cli-surface.txt) entries)"
 

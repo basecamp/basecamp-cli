@@ -84,12 +84,15 @@ jobs:
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
             SCRIPT_DIR="$(pwd)/scripts"
-            git worktree add /tmp/baseline-tree "$PREV_TAG"
-            cd /tmp/baseline-tree
+            WORKTREE_DIR=/tmp/baseline-tree
+            trap 'git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true' EXIT
+            git worktree add "$WORKTREE_DIR" "$PREV_TAG"
+            cd "$WORKTREE_DIR"
             make build
             "$SCRIPT_DIR/check-cli-surface.sh" ./bin/basecamp /tmp/baseline-surface.txt
             cd -
-            git worktree remove /tmp/baseline-tree --force
+            git worktree remove "$WORKTREE_DIR" --force
+            trap - EXIT
             scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
           else
             echo "First release — no baseline to compare against"
@@ -165,19 +168,20 @@ jobs:
       - name: Build changelog context
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          DIFF_FILE=/tmp/diff.txt
           if [ -z "$PREV_TAG" ]; then
             COMMITS=$(git log --oneline --no-decorate)
-            DIFF=$(git diff --stat 4b825dc642cb6eb9a060e54bf899d69f82a3ef17 HEAD)
+            git diff --stat 4b825dc642cb6eb9a060e54bf899d69f82a3ef17 HEAD > "$DIFF_FILE"
           else
             COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
-            DIFF=$(git diff "${PREV_TAG}..HEAD" -- '*.go' 'go.mod')
+            git diff "${PREV_TAG}..HEAD" -- '*.go' 'go.mod' > "$DIFF_FILE"
           fi
           {
             echo "Commits:"
             echo "$COMMITS"
             echo ""
             echo "Diff summary:"
-            echo "$DIFF" | head -c 80000
+            head -c 80000 "$DIFF_FILE"
           } > /tmp/user-message.txt
           # Splice into prompt YAML
           python3 -c "

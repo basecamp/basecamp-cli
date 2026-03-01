@@ -39,3 +39,15 @@ output:
       - any-glob-to-any-file:
           - "internal/output/**"
           - "internal/presenter/**"
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "docs/**"
+
+deps:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "go.mod"
+          - "go.sum"
