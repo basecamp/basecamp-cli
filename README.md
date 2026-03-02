@@ -20,7 +20,7 @@ That's it. You now have full access to Basecamp from your terminal.
 
 **Arch Linux / Omarchy (AUR):**
 ```bash
-yay -S basecamp-cli
+yay -S basecamp-cli-bin
 ```
 
 **Scoop (Windows):**
