@@ -48,6 +48,10 @@ archives:
       - README*
       - completions/*
 
+source:
+  enabled: true
+  prefix_template: "{{ .ProjectName }}-{{ .Version }}/"
+
 checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
