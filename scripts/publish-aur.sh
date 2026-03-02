@@ -10,8 +10,8 @@ AUR_REPO="ssh://aur@aur.archlinux.org/${PKGNAME}.git"
 
 # Compute checksums from the GitHub release assets
 base_url="https://github.com/basecamp/basecamp-cli/releases/download/v${VERSION}"
-sha_x86=$(curl -sL "${base_url}/checksums.txt" | grep "linux_amd64" | awk '{print $1}')
-sha_arm=$(curl -sL "${base_url}/checksums.txt" | grep "linux_arm64" | awk '{print $1}')
+sha_x86=$(curl -sL "${base_url}/checksums.txt" | grep "linux_amd64\.tar\.gz$" | awk '{print $1}')
+sha_arm=$(curl -sL "${base_url}/checksums.txt" | grep "linux_arm64\.tar\.gz$" | awk '{print $1}')
 
 if [ -z "$sha_x86" ] || [ -z "$sha_arm" ]; then
   echo "ERROR: could not find linux checksums in release assets" >&2

@@ -257,8 +257,8 @@ jobs:
           echo "$AUR_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
-          git config --global user.name "Basecamp"
-          git config --global user.email "support@basecamp.com"
+          git config --global user.name "37signals"
+          git config --global user.email "dev@37signals.com"
           scripts/publish-aur.sh "$VERSION"
 
   sync-skills:
