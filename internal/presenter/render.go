@@ -294,7 +294,7 @@ func renderListRow(b *strings.Builder, schema *EntitySchema, columns []string, d
 	for _, col := range columns {
 		spec := schema.Fields[col]
 		val := data[col]
-		formatted := FormatField(spec, col, val, locale)
+		formatted := singleLine(FormatField(spec, col, val, locale))
 
 		style := resolveEmphasis(spec, col, val, styles)
 		parts = append(parts, style.Render(formatted))
@@ -435,7 +435,7 @@ func renderTableMarkdown(w io.Writer, schema *EntitySchema, data []map[string]an
 		for _, col := range columns {
 			spec := schema.Fields[col]
 			val := item[col]
-			cells = append(cells, escapePipe(FormatField(spec, col, val, locale)))
+			cells = append(cells, escapePipe(singleLine(FormatField(spec, col, val, locale))))
 		}
 		b.WriteString("| " + strings.Join(cells, " | ") + " |\n")
 	}
@@ -490,7 +490,7 @@ func renderTaskItem(b *strings.Builder, schema *EntitySchema, item map[string]an
 		checkbox = "- [x] "
 	}
 
-	content := FormatField(schema.Fields["content"], "content", item["content"], locale)
+	content := singleLine(FormatField(schema.Fields["content"], "content", item["content"], locale))
 	b.WriteString(checkbox + content)
 
 	// Inline metadata from columns (excluding content and completed, which are structural)
@@ -501,7 +501,7 @@ func renderTaskItem(b *strings.Builder, schema *EntitySchema, item map[string]an
 		}
 		spec := schema.Fields[col]
 		val := item[col]
-		formatted := FormatField(spec, col, val, locale)
+		formatted := singleLine(FormatField(spec, col, val, locale))
 		if formatted == "" {
 			continue
 		}

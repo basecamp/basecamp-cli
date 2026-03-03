@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // FormatField formats a field value according to its FieldSpec using the given locale.
@@ -127,6 +129,16 @@ func formatPeople(val any) string {
 	return strings.Join(names, ", ")
 }
 
+// singleLine returns the first non-empty line from s, trimmed.
+func singleLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
 // formatText converts any value to a string representation.
 // Numbers are rendered raw (no locale grouping) so IDs and other numeric
 // values remain copy-paste safe. Use format: "number" for locale-aware output.
@@ -135,6 +147,9 @@ func formatText(val any) string {
 	case nil:
 		return ""
 	case string:
+		if richtext.IsHTML(v) {
+			return richtext.HTMLToMarkdown(v)
+		}
 		return v
 	case bool:
 		if v {

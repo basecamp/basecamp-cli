@@ -1551,3 +1551,224 @@ func TestRenderTaskItemCommaInAssigneeName(t *testing.T) {
 		t.Errorf("Should preserve full name with comma, got:\n%s", out)
 	}
 }
+
+// =============================================================================
+// HTML → Markdown Conversion Tests
+// =============================================================================
+
+func TestFormatTextHTMLConversion(t *testing.T) {
+	got := formatText("<p>Hello <strong>world</strong></p>")
+	if !strings.Contains(got, "Hello") || !strings.Contains(got, "**world**") {
+		t.Errorf("formatText(HTML) should convert to markdown, got: %q", got)
+	}
+	if strings.Contains(got, "<p>") || strings.Contains(got, "<strong>") {
+		t.Errorf("formatText(HTML) should not contain HTML tags, got: %q", got)
+	}
+}
+
+func TestFormatTextPlainPassthrough(t *testing.T) {
+	input := "plain text without HTML"
+	got := formatText(input)
+	if got != input {
+		t.Errorf("formatText(plain) = %q, want %q", got, input)
+	}
+}
+
+func TestFormatTextBcAttachmentOnly(t *testing.T) {
+	input := `<bc-attachment sgid="BAh7CEkiCG" content-type="application/vnd.basecamp.mention">@Alice</bc-attachment>`
+	got := formatText(input)
+	if strings.Contains(got, "bc-attachment") {
+		t.Errorf("formatText(bc-attachment) should not contain raw tags, got: %q", got)
+	}
+	if !strings.Contains(got, "Alice") {
+		t.Errorf("formatText(bc-attachment) should preserve mention name, got: %q", got)
+	}
+}
+
+func TestSingleLineSkipsLeadingBlanks(t *testing.T) {
+	got := singleLine("\n\nfirst\nsecond")
+	if got != "first" {
+		t.Errorf("singleLine = %q, want %q", got, "first")
+	}
+}
+
+func TestSingleLinePlainText(t *testing.T) {
+	got := singleLine("no newlines")
+	if got != "no newlines" {
+		t.Errorf("singleLine = %q, want %q", got, "no newlines")
+	}
+}
+
+func TestRenderHeadlineHTMLContent(t *testing.T) {
+	schema := &EntitySchema{
+		Identity: Identity{Label: "content"},
+	}
+	data := map[string]any{
+		"content": "<div>Title<br>subtitle</div>",
+	}
+	got := RenderHeadline(schema, data)
+	if strings.Contains(got, "<") {
+		t.Errorf("RenderHeadline should strip HTML tags, got: %q", got)
+	}
+	if got != "Title" {
+		t.Errorf("RenderHeadline = %q, want %q", got, "Title")
+	}
+}
+
+func TestRenderHeadlineHTMLStrongStripped(t *testing.T) {
+	schema := &EntitySchema{
+		Identity: Identity{Label: "content"},
+	}
+	data := map[string]any{
+		"content": "<p>Important <strong>task</strong> here</p>",
+	}
+	got := RenderHeadline(schema, data)
+	// Emphasis markers are stripped because headlines are always rendered
+	// in a bold/primary context; nested ** would produce ****task****
+	if strings.Contains(got, "**") {
+		t.Errorf("RenderHeadline should strip emphasis markers, got: %q", got)
+	}
+	if got != "Important task here" {
+		t.Errorf("RenderHeadline = %q, want %q", got, "Important task here")
+	}
+}
+
+func TestRenderTaskItemHTMLContent(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content":   "<div>Buy <strong>groceries</strong><br>from the store</div>",
+			"completed": false,
+			"due_on":    "",
+			"assignees": []any{},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "<div>") || strings.Contains(out, "<strong>") {
+		t.Errorf("Task item should not contain HTML tags, got:\n%s", out)
+	}
+	if !strings.Contains(out, "- [ ]") {
+		t.Errorf("Task item should have checkbox, got:\n%s", out)
+	}
+	// Should be single line (content collapsed)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Errorf("Task item should be single line, got %d lines:\n%s", len(lines), out)
+	}
+}
+
+func TestRenderListRowHTMLContent(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false)
+	data := []map[string]any{
+		{
+			"content":   "<p>Hello <strong>world</strong></p>",
+			"completed": false,
+			"due_on":    "",
+			"assignees": []any{},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderList(&buf, schema, data, styles, enUS); err != nil {
+		t.Fatalf("RenderList failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "<p>") || strings.Contains(out, "<strong>") {
+		t.Errorf("List row should not contain HTML tags, got:\n%s", out)
+	}
+}
+
+func TestRenderTaskItemMetadataHTML(t *testing.T) {
+	schema := &EntitySchema{
+		Fields: map[string]FieldSpec{
+			"content":   {Role: "title"},
+			"completed": {Format: "boolean"},
+			"notes":     {Role: "detail"},
+		},
+		Views: ViewSpecs{
+			List: ListView{
+				Columns:  []string{"content", "completed", "notes"},
+				Markdown: &MarkdownListView{Style: "tasklist"},
+			},
+		},
+	}
+
+	data := []map[string]any{
+		{
+			"content":   "Fix bug",
+			"completed": false,
+			"notes":     "<p>See <strong>details</strong><br>on the next line</p>",
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "<p>") || strings.Contains(out, "<strong>") {
+		t.Errorf("Metadata should not contain HTML tags, got:\n%s", out)
+	}
+	// Metadata should be single-line
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Errorf("Task item with metadata should be single line, got %d lines:\n%s", len(lines), out)
+	}
+}
+
+func TestRenderTableMarkdownHTMLCell(t *testing.T) {
+	schema := &EntitySchema{
+		Fields: map[string]FieldSpec{
+			"title": {Role: "title"},
+			"notes": {Role: "detail"},
+		},
+		Views: ViewSpecs{
+			List: ListView{
+				Columns: []string{"title", "notes"},
+			},
+		},
+	}
+
+	data := []map[string]any{
+		{
+			"title": "Item 1",
+			"notes": "<p>Some <strong>bold</strong> note</p>",
+		},
+	}
+
+	var buf strings.Builder
+	if err := renderTableMarkdown(&buf, schema, data, enUS); err != nil {
+		t.Fatalf("renderTableMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "<p>") || strings.Contains(out, "<strong>") {
+		t.Errorf("Table cell should not contain HTML tags, got:\n%s", out)
+	}
+	if !strings.Contains(out, "**bold**") {
+		t.Errorf("Table cell should contain markdown bold, got:\n%s", out)
+	}
+	// Each data row should be a single pipe-table line
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	// header + divider + 1 data row = 3
+	if len(lines) != 3 {
+		t.Errorf("Table should have 3 lines (header, divider, data), got %d:\n%s", len(lines), out)
+	}
+}
