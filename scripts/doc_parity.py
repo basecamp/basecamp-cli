@@ -53,6 +53,8 @@ def resolve_bc3_api_root(basecamp_root: Path, provided: str) -> Path:
 
 def load_doc_endpoints(sections_dir: Path) -> dict[str, list[tuple[str, str]]]:
     sections: dict[str, list[tuple[str, str]]] = {}
+    if not sections_dir.is_dir():
+        return sections
     for md_file in sorted(sections_dir.glob("*.md")):
         text = md_file.read_text(encoding="utf-8")
         seen = set()
@@ -72,6 +74,8 @@ def load_doc_endpoints(sections_dir: Path) -> dict[str, list[tuple[str, str]]]:
 
 def load_basecamp_endpoints(commands_dir: Path) -> set[tuple[str, str]]:
     endpoints: set[tuple[str, str]] = set()
+    if not commands_dir.is_dir():
+        return endpoints
 
     for script in commands_dir.rglob("*.sh"):
         text = script.read_text(encoding="utf-8")
@@ -150,6 +154,9 @@ def endpoints_match(doc_endpoint: tuple[str, str], basecamp_endpoint: tuple[str,
 def main() -> int:
     args = parse_args()
     basecamp_root = Path(args.basecamp_root).resolve()
+    if not basecamp_root.is_dir():
+        print(f"error: basecamp root not found: {basecamp_root}", file=sys.stderr)
+        return 1
     bc3_api_root = resolve_bc3_api_root(basecamp_root, args.bc3_api)
     sections_dir = bc3_api_root / "sections"
 
