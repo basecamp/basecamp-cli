@@ -43,7 +43,7 @@ func TestLoadFromFile(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	// Verify values loaded
 	assert.Equal(t, "http://test.example.com", cfg.BaseURL)
@@ -69,7 +69,7 @@ func TestLoadFromFileSkipsInvalidJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	// Should still have defaults
 	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
@@ -77,7 +77,7 @@ func TestLoadFromFileSkipsInvalidJSON(t *testing.T) {
 
 func TestLoadFromFileSkipsMissingFile(t *testing.T) {
 	cfg := Default()
-	loadFromFile(cfg, "/nonexistent/path/config.json", SourceGlobal)
+	loadFromFile(cfg, "/nonexistent/path/config.json", SourceGlobal, nil)
 
 	// Should still have defaults
 	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
@@ -226,8 +226,8 @@ func TestConfigLayering(t *testing.T) {
 	cfg := Default()
 
 	// Load in order: global then local (local wins)
-	loadFromFile(cfg, filepath.Join(globalDir, "config.json"), SourceGlobal)
-	loadFromFile(cfg, filepath.Join(localDir, "config.json"), SourceLocal)
+	loadFromFile(cfg, filepath.Join(globalDir, "config.json"), SourceGlobal, nil)
+	loadFromFile(cfg, filepath.Join(localDir, "config.json"), SourceLocal, nil)
 
 	// account_id from global (not in local)
 	assert.Equal(t, "global-account", cfg.AccountID)
@@ -284,8 +284,8 @@ func TestFullLayeringPrecedence(t *testing.T) {
 	cfg := Default()
 
 	// Apply layers in order
-	loadFromFile(cfg, globalConfig, SourceGlobal)
-	loadFromFile(cfg, localConfig, SourceLocal)
+	loadFromFile(cfg, globalConfig, SourceGlobal, nil)
+	loadFromFile(cfg, localConfig, SourceLocal, nil)
 	LoadFromEnv(cfg)
 	ApplyOverrides(cfg, FlagOverrides{
 		// No flag overrides
@@ -428,7 +428,7 @@ func TestLoadFromFilePartialConfig(t *testing.T) {
 	cfg.AccountID = "pre-existing-account"
 	cfg.Sources["account_id"] = "manual"
 
-	loadFromFile(cfg, configPath, SourceLocal)
+	loadFromFile(cfg, configPath, SourceLocal, nil)
 
 	// project_id should be set
 	assert.Equal(t, "only-project", cfg.ProjectID)
@@ -458,7 +458,7 @@ func TestLoadFromFileEmptyValues(t *testing.T) {
 	cfg.AccountID = "existing"
 	cfg.Sources["account_id"] = "manual"
 
-	loadFromFile(cfg, configPath, SourceLocal)
+	loadFromFile(cfg, configPath, SourceLocal, nil)
 
 	// account_id should remain unchanged (empty value doesn't override)
 	assert.Equal(t, "existing", cfg.AccountID)
@@ -493,7 +493,7 @@ func TestLoadFromFileWithProfiles(t *testing.T) {
 	os.WriteFile(configPath, data, 0644)
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	// Verify default_profile
 	if cfg.DefaultProfile != "production" {
@@ -588,8 +588,8 @@ func TestProfilesConfigLayering(t *testing.T) {
 	os.WriteFile(localPath, data, 0644)
 
 	cfg := Default()
-	loadFromFile(cfg, globalPath, SourceGlobal)
-	loadFromFile(cfg, localPath, SourceLocal)
+	loadFromFile(cfg, globalPath, SourceGlobal, nil)
+	loadFromFile(cfg, localPath, SourceLocal, nil)
 
 	// default_profile from local must be rejected — global value persists
 	if cfg.DefaultProfile != "production" {
@@ -749,7 +749,7 @@ func TestRepoConfigPath_StopsAtHome(t *testing.T) {
 	_ = home // suppress unused
 
 	// repoConfigPath should NOT find the .git above fake home
-	result := repoConfigPath()
+	result := RepoConfigPath()
 	assert.Empty(t, result, "should not find repo config above HOME")
 }
 
@@ -765,7 +765,7 @@ func TestLoadFromFile_BaseURLRejectedFromLocal(t *testing.T) {
 	os.Stderr = w
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceLocal)
+	loadFromFile(cfg, configPath, SourceLocal, nil)
 
 	w.Close()
 	var buf [1024]byte
@@ -793,7 +793,7 @@ func TestLoadFromFile_BaseURLNoWarningForGlobal(t *testing.T) {
 	os.Stderr = w
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	w.Close()
 	var buf [1024]byte
@@ -816,7 +816,7 @@ func TestLoadFromFile_MalformedJSONWarning(t *testing.T) {
 	os.Stderr = w
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	w.Close()
 	var buf [1024]byte
@@ -852,7 +852,7 @@ func TestLoadPreferencesFromFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, data, 0644))
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	require.NotNil(t, cfg.Hints)
 	assert.True(t, *cfg.Hints)
@@ -883,8 +883,8 @@ func TestPreferenceLayering(t *testing.T) {
 	os.WriteFile(localPath, data, 0644)
 
 	cfg := Default()
-	loadFromFile(cfg, globalPath, SourceGlobal)
-	loadFromFile(cfg, localPath, SourceLocal)
+	loadFromFile(cfg, globalPath, SourceGlobal, nil)
+	loadFromFile(cfg, localPath, SourceLocal, nil)
 
 	// hints overridden by local
 	require.NotNil(t, cfg.Hints)
@@ -949,7 +949,7 @@ func TestPreferencesEnvOverridesFile(t *testing.T) {
 	os.Setenv("BASECAMP_HINTS", "false")
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 	LoadFromEnv(cfg)
 
 	require.NotNil(t, cfg.Hints)
@@ -966,7 +966,7 @@ func TestVerboseOutOfRangeIgnored(t *testing.T) {
 	os.WriteFile(configPath, data, 0644)
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	assert.Nil(t, cfg.Verbose, "out-of-range verbose should be ignored")
 }
@@ -980,7 +980,7 @@ func TestVerboseFloatIgnored(t *testing.T) {
 	os.WriteFile(configPath, data, 0644)
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	assert.Nil(t, cfg.Verbose, "non-integer verbose should be ignored")
 }
@@ -1011,7 +1011,7 @@ func TestPreferencesUnsetInFile(t *testing.T) {
 	os.WriteFile(configPath, data, 0644)
 
 	cfg := Default()
-	loadFromFile(cfg, configPath, SourceGlobal)
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
 
 	assert.Nil(t, cfg.Hints)
 	assert.Nil(t, cfg.Stats)
