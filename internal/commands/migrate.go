@@ -251,10 +251,13 @@ func migrateCache(result *MigrateResult) {
 	if err != nil {
 		return
 	}
+	home = filepath.Clean(home)
 
 	cacheBase := os.Getenv("XDG_CACHE_HOME")
 	if cacheBase == "" {
 		cacheBase = filepath.Join(home, ".cache")
+	} else {
+		cacheBase = filepath.Clean(cacheBase)
 	}
 
 	oldDir := filepath.Join(cacheBase, "bcq")
@@ -325,10 +328,13 @@ func migrateTheme(result *MigrateResult) {
 	if err != nil {
 		return
 	}
+	home = filepath.Clean(home)
 
 	configBase := os.Getenv("XDG_CONFIG_HOME")
 	if configBase == "" {
 		configBase = filepath.Join(home, ".config")
+	} else {
+		configBase = filepath.Clean(configBase)
 	}
 
 	oldDir := filepath.Join(configBase, "bcq", "theme")

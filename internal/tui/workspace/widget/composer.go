@@ -572,7 +572,7 @@ func (c *Composer) ProcessPaste(text string) (string, tea.Cmd) {
 		expanded := trimmed
 		if strings.HasPrefix(expanded, "~/") {
 			if home, err := os.UserHomeDir(); err == nil {
-				expanded = filepath.Join(home, expanded[2:])
+				expanded = filepath.Join(filepath.Clean(home), expanded[2:])
 			}
 		}
 

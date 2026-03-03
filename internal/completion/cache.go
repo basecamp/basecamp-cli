@@ -78,8 +78,13 @@ func NewStore(dir string) *Store {
 func defaultCacheDir() string {
 	cacheDir := os.Getenv("XDG_CACHE_HOME")
 	if cacheDir == "" {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".cache")
+		if home, _ := os.UserHomeDir(); home != "" {
+			cacheDir = filepath.Join(filepath.Clean(home), ".cache")
+		} else {
+			cacheDir = os.TempDir()
+		}
+	} else {
+		cacheDir = filepath.Clean(cacheDir)
 	}
 	return filepath.Join(cacheDir, "basecamp")
 }
@@ -351,8 +356,10 @@ func loadConfigForCompletion() *configForCompletion {
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
 		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			configDir = filepath.Join(home, ".config")
+			configDir = filepath.Join(filepath.Clean(home), ".config")
 		}
+	} else {
+		configDir = filepath.Clean(configDir)
 	}
 	if configDir != "" {
 		globalPath := filepath.Join(configDir, "basecamp", "config.json")

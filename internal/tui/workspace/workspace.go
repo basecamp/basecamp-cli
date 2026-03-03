@@ -93,7 +93,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 
 	keys := DefaultGlobalKeyMap()
 	if configDir, err := os.UserConfigDir(); err == nil {
-		overrides, err := LoadKeyOverrides(filepath.Join(configDir, "basecamp", "keybindings.json"))
+		overrides, err := LoadKeyOverrides(filepath.Join(filepath.Clean(configDir), "basecamp", "keybindings.json"))
 		if err != nil {
 			log.Printf("keybindings: %v", err)
 		}

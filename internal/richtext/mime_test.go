@@ -48,6 +48,22 @@ func TestDetectMIMEFromContent(t *testing.T) {
 	}
 }
 
+func TestDetectMIMEEmptyPath(t *testing.T) {
+	// Empty path should not panic or return "." behavior
+	got := DetectMIME("")
+	if got != "application/octet-stream" {
+		t.Errorf("DetectMIME(\"\") = %q, want application/octet-stream", got)
+	}
+}
+
+func TestValidateFileEmptyPath(t *testing.T) {
+	// Empty path should return an error, not try to stat "."
+	err := ValidateFile("")
+	if err == nil {
+		t.Error("ValidateFile(\"\") = nil, want error")
+	}
+}
+
 func TestValidateFile(t *testing.T) {
 	dir := t.TempDir()
 

@@ -26,7 +26,7 @@ func ResolveTheme() Theme {
 
 	// BASECAMP_THEME allows custom theme file path
 	if path := os.Getenv("BASECAMP_THEME"); path != "" {
-		if theme, err := LoadThemeFromFile(path); err == nil {
+		if theme, err := LoadThemeFromFile(filepath.Clean(path)); err == nil {
 			return theme
 		}
 		// Fall through on error
@@ -48,6 +48,7 @@ func ThemeFilePath() string {
 		return ""
 	}
 	if path := os.Getenv("BASECAMP_THEME"); path != "" {
+		path = filepath.Clean(path)
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
@@ -57,7 +58,7 @@ func ThemeFilePath() string {
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(home, ".config", "basecamp", "theme", "colors.toml")
+	path := filepath.Join(filepath.Clean(home), ".config", "basecamp", "theme", "colors.toml")
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
@@ -89,7 +90,7 @@ func LoadUserTheme() (Theme, error) {
 		return Theme{}, err
 	}
 
-	path := filepath.Join(home, ".config", "basecamp", "theme", "colors.toml")
+	path := filepath.Join(filepath.Clean(home), ".config", "basecamp", "theme", "colors.toml")
 	return LoadThemeFromFile(path)
 }
 
