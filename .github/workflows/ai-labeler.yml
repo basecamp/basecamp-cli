@@ -89,11 +89,11 @@ jobs:
           CURRENT=$(gh pr view "$PR" --json labels --jq '.labels[].name')
           for L in bug enhancement documentation; do
             if [ "$L" != "$LABEL" ] && echo "$CURRENT" | grep -qx "$L"; then
-              gh pr edit "$PR" --remove-label "$L"
+              gh pr edit "$PR" --remove-label "$L" 2>/dev/null || true
             fi
           done
           if ! echo "$CURRENT" | grep -qx "$LABEL"; then
-            gh pr edit "$PR" --add-label "$LABEL"
+            gh pr edit "$PR" --add-label "$LABEL" 2>/dev/null || true
           fi
 
   breaking:
