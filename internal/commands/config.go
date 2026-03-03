@@ -276,7 +276,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				absPath, _ := filepath.Abs(configPath)
 				ts := config.LoadTrustStore(config.GlobalConfigDir())
 				if ts == nil || !ts.IsTrusted(configPath) {
-					fmt.Fprintf(os.Stderr, "warning: authority key %q in local config requires trust to take effect; run:\n  basecamp config trust %q\n", key, absPath)
+					fmt.Fprintf(os.Stderr, "warning: authority key %q in local config requires trust to take effect; run:\n  basecamp config trust %s\n", key, config.ShellQuote(absPath))
 				}
 			}
 

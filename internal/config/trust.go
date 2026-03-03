@@ -2,7 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -167,6 +169,9 @@ func atomicWriteTrustFile(path string, data []byte) error {
 // Returns empty string on failure (fail closed).
 // When the file itself doesn't exist, resolves symlinks on the parent
 // directory so that deleted-file paths still match stored entries.
+// Non-existence errors are the only case where fallback is allowed;
+// other EvalSymlinks failures (permission denied, etc.) return ""
+// to prevent treating unresolvable paths as trusted.
 func canonicalizePath(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -174,7 +179,10 @@ func canonicalizePath(path string) string {
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		// File may not exist — try resolving the parent directory instead.
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "" // fail closed on non-existence errors
+		}
+		// File doesn't exist — try resolving the parent directory instead.
 		// This keeps canonical form consistent for deleted/moved files.
 		dir := filepath.Dir(abs)
 		if resolvedDir, dirErr := filepath.EvalSymlinks(dir); dirErr == nil {

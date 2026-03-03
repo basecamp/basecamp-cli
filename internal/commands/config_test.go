@@ -336,4 +336,5 @@ func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 	assert.Contains(t, stderr, "authority key")
 	assert.Contains(t, stderr, "requires trust")
 	assert.Contains(t, stderr, absPath, "warning must include the exact config path")
+	assert.Contains(t, stderr, "'"+absPath+"'", "path must be single-quoted for shell safety")
 }

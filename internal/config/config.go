@@ -145,7 +145,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 
 	if v, ok := fileCfg["base_url"].(string); ok && v != "" {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring base_url %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %q` to allow)\n", v, source, path, path)
+			fmt.Fprintf(os.Stderr, "warning: ignoring base_url %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
 		} else {
 			cfg.BaseURL = v
 			cfg.Sources["base_url"] = string(source)
@@ -198,7 +198,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %q` to allow)\n", v, source, path, path)
+			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
 		} else {
 			cfg.DefaultProfile = v
 			cfg.Sources["default_profile"] = string(source)
@@ -206,7 +206,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["profiles"].(map[string]any); ok {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %q` to allow)\n", source, path, path)
+			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
 		} else {
 			if cfg.Profiles == nil {
 				cfg.Profiles = make(map[string]*ProfileConfig)
@@ -542,4 +542,11 @@ func GlobalConfigDir() string {
 // NormalizeBaseURL ensures consistent URL format (no trailing slash).
 func NormalizeBaseURL(url string) string {
 	return strings.TrimSuffix(url, "/")
+}
+
+// ShellQuote returns a POSIX single-quoted string safe for copy-paste into
+// a shell. Single quotes inside the value are escaped as '\” (end quote,
+// escaped literal quote, resume quote).
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
