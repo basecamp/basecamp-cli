@@ -387,10 +387,8 @@ func (m *Manager) launchpadURL() (string, error) {
 
 func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Config, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
 	if oauthType == "bc3" {
-		customRedirect := opts.RedirectURI != defaultRedirectURI
-
 		// BC3 with default redirect: try stored client first
-		if !customRedirect {
+		if opts.RedirectURI == defaultRedirectURI {
 			creds, err := m.loadBC3Client()
 			if err == nil {
 				return creds, nil
@@ -401,7 +399,7 @@ func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Con
 		if oauthCfg.RegistrationEndpoint == "" {
 			return nil, output.ErrAuth("OAuth server does not support Dynamic Client Registration")
 		}
-		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, customRedirect, opts)
+		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, opts)
 	}
 
 	// Launchpad: resolve client credentials from env vars
@@ -460,7 +458,8 @@ func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 	return &creds, nil
 }
 
-func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, customRedirect bool, opts *LoginOptions) (*ClientCredentials, error) {
+func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
+	customRedirect := opts.RedirectURI != defaultRedirectURI
 	regReq := map[string]any{
 		"client_name":                "basecamp-cli",
 		"client_uri":                 "https://github.com/basecamp/basecamp-cli",

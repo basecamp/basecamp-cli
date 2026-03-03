@@ -98,7 +98,7 @@ To use your own OAuth app (e.g., a custom Launchpad integration):
 | `BASECAMP_OAUTH_CLIENT_SECRET` | OAuth client secret |
 | `BASECAMP_OAUTH_REDIRECT_URI` | Redirect URI (must be `http://` loopback with explicit port) |
 
-Both `CLIENT_ID` and `CLIENT_SECRET` must be set together.
+Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set together.
 
 ## AI Agent Integration
 

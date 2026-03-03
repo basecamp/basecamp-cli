@@ -644,6 +644,8 @@ func TestRegisterBC3Client_UsesResolvedRedirectURI(t *testing.T) {
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
 	m := &Manager{
 		cfg:        config.Default(),
 		httpClient: srv.Client(),
@@ -651,7 +653,7 @@ func TestRegisterBC3Client_UsesResolvedRedirectURI(t *testing.T) {
 	}
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
 
-	creds, err := m.registerBC3Client(context.Background(), srv.URL+"/register", false, opts)
+	creds, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
 	require.NoError(t, err)
 	assert.Equal(t, "dcr-id", creds.ClientID)
 
@@ -680,7 +682,7 @@ func TestRegisterBC3Client_CustomRedirectNotPersisted(t *testing.T) {
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
 
 	// Custom redirect: should NOT persist
-	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", true, opts)
+	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
 	require.NoError(t, err)
 
 	clientFile := filepath.Join(tmpDir, "basecamp", "client.json")
@@ -707,7 +709,7 @@ func TestRegisterBC3Client_DefaultRedirectPersisted(t *testing.T) {
 	opts := &LoginOptions{RedirectURI: defaultRedirectURI}
 
 	// Default redirect: should persist
-	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", false, opts)
+	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
 	require.NoError(t, err)
 
 	clientFile := filepath.Join(tmpDir, "basecamp", "client.json")
