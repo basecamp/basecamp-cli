@@ -43,11 +43,18 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 
 ## CI secrets
 
+**Repository secrets** (Settings → Secrets and variables → Actions):
+
 | Secret | Purpose |
 |--------|---------|
 | `RELEASE_CLIENT_ID` (var) | GitHub App ID for `bcq-release-bot` |
 | `RELEASE_APP_PRIVATE_KEY` | GitHub App private key |
 | `AUR_KEY` | SSH private key for AUR push (optional) |
+
+**Environment secrets** (`release` environment — Settings → Environments):
+
+| Secret | Purpose |
+|--------|---------|
 | `MACOS_SIGN_P12` | Base64-encoded Developer ID Application certificate (.p12) |
 | `MACOS_SIGN_PASSWORD` | .p12 unlock password |
 | `MACOS_NOTARY_KEY` | Base64-encoded App Store Connect API key (.p8) |
