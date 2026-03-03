@@ -433,6 +433,16 @@ func TestIsHTML(t *testing.T) {
 			input:    "This is **bold**",
 			expected: false,
 		},
+		{
+			name:     "bc-attachment mention",
+			input:    `<bc-attachment sgid="BAh7CEkiCG" content-type="application/vnd.basecamp.mention">@Alice</bc-attachment>`,
+			expected: true,
+		},
+		{
+			name:     "bc-attachment file",
+			input:    `<bc-attachment sgid="BAh7" content-type="application/pdf" filename="report.pdf"></bc-attachment>`,
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {

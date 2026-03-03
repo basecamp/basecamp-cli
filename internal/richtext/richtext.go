@@ -74,7 +74,7 @@ var (
 )
 
 // Pre-compiled regexes for IsHTML detection
-var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img)\b[^>]*>`)
+var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
 
 // Pre-compiled regexes for IsMarkdown detection
 var reMarkdownPatterns = []*regexp.Regexp{
