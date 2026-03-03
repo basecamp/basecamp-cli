@@ -44,6 +44,8 @@ Config locations:
 		newConfigSetCmd(),
 		newConfigUnsetCmd(),
 		newConfigProjectCmd(),
+		newConfigTrustCmd(),
+		newConfigUntrustCmd(),
 	)
 
 	return cmd
@@ -269,6 +271,15 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
+			// Warn when writing authority keys to local config without trust
+			if !global && isAuthorityKey(key) {
+				absPath, _ := filepath.Abs(configPath)
+				ts := config.LoadTrustStore(config.GlobalConfigDir())
+				if ts == nil || !ts.IsTrusted(configPath) {
+					fmt.Fprintf(os.Stderr, "warning: authority key %q in local config requires trust to take effect; run:\n  basecamp config trust %q\n", key, absPath)
+				}
+			}
+
 			return app.OK(map[string]any{
 				"key":    key,
 				"value":  valueOut,
@@ -292,6 +303,15 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 	// Note: local is the default, so no --local flag needed
 
 	return cmd
+}
+
+// isAuthorityKey reports whether key controls where tokens are sent.
+func isAuthorityKey(key string) bool {
+	switch key {
+	case "base_url", "default_profile", "profiles":
+		return true
+	}
+	return false
 }
 
 func derefInt(p *int) int {
@@ -427,6 +447,176 @@ func atomicWriteFile(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+func newConfigTrustCmd() *cobra.Command {
+	var list bool
+
+	cmd := &cobra.Command{
+		Use:   "trust [path]",
+		Short: "Trust a local config file",
+		Long: `Trust a local or repo .basecamp/config.json to allow authority keys
+(base_url, default_profile, profiles).
+
+Without arguments, trusts the nearest .basecamp/config.json (CWD or repo root).
+With --list, shows all trusted config paths.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if list {
+				if len(args) > 0 {
+					return output.ErrUsage("--list does not accept a path argument")
+				}
+				ts := config.LoadTrustStore(config.GlobalConfigDir())
+				if ts == nil {
+					return app.OK([]any{}, output.WithSummary("No trusted configs"))
+				}
+				entries := ts.List()
+				if len(entries) == 0 {
+					return app.OK([]any{}, output.WithSummary("No trusted configs"))
+				}
+				result := make([]map[string]string, len(entries))
+				for i, e := range entries {
+					result[i] = map[string]string{
+						"path":       e.Path,
+						"trusted_at": e.TrustedAt,
+					}
+				}
+				return app.OK(result, output.WithSummary(fmt.Sprintf("%d trusted config(s)", len(entries))))
+			}
+
+			path, err := resolveConfigTrustPath(args)
+			if err != nil {
+				return err
+			}
+
+			ts := config.NewTrustStore(config.GlobalConfigDir())
+			if err := ts.Trust(path); err != nil {
+				return fmt.Errorf("failed to trust config: %w", err)
+			}
+
+			return app.OK(map[string]any{
+				"path":   path,
+				"status": "trusted",
+			},
+				output.WithSummary(fmt.Sprintf("Trusted: %s", path)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp config show",
+						Description: "View config (authority keys now active)",
+					},
+					output.Breadcrumb{
+						Action:      "untrust",
+						Cmd:         "basecamp config untrust",
+						Description: "Revoke trust",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().BoolVar(&list, "list", false, "List all trusted config paths")
+
+	return cmd
+}
+
+func newConfigUntrustCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "untrust [path]",
+		Short: "Untrust a local config file",
+		Long: `Revoke trust from a local or repo .basecamp/config.json.
+Authority keys (base_url, default_profile, profiles) will be rejected again.
+
+Without arguments, untrusts the nearest .basecamp/config.json.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			path, err := resolveUntrustPath(args)
+			if err != nil {
+				return err
+			}
+
+			ts := config.NewTrustStore(config.GlobalConfigDir())
+			removed, err := ts.Untrust(path)
+			if err != nil {
+				return fmt.Errorf("failed to untrust config: %w", err)
+			}
+
+			status := "not_trusted"
+			summary := fmt.Sprintf("Not trusted: %s (was not in trust store)", path)
+			if removed {
+				status = "untrusted"
+				summary = fmt.Sprintf("Untrusted: %s", path)
+			}
+
+			return app.OK(map[string]any{
+				"path":   path,
+				"status": status,
+			},
+				output.WithSummary(summary),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp config show",
+						Description: "View config",
+					},
+				),
+			)
+		},
+	}
+}
+
+// resolveConfigTrustPath resolves the config file path for `config trust`.
+// Requires the file to exist (you can't trust a nonexistent config).
+func resolveConfigTrustPath(args []string) (string, error) {
+	if len(args) > 0 {
+		absPath, err := filepath.Abs(args[0])
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve path: %w", err)
+		}
+		if _, err := os.Stat(absPath); err != nil {
+			return "", fmt.Errorf("config file not found: %s", absPath)
+		}
+		return absPath, nil
+	}
+
+	// Try CWD first
+	cwdPath := filepath.Join(".basecamp", "config.json")
+	if _, err := os.Stat(cwdPath); err == nil {
+		absPath, err := filepath.Abs(cwdPath)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve path: %w", err)
+		}
+		return absPath, nil
+	}
+
+	// Fall back to repo root
+	repoPath := config.RepoConfigPath()
+	if repoPath != "" {
+		return repoPath, nil
+	}
+
+	return "", output.ErrUsage("no .basecamp/config.json found in current directory or repo root")
+}
+
+// resolveUntrustPath resolves the config file path for `config untrust`.
+// An explicit path argument does NOT require the file to still exist —
+// you need to be able to revoke trust for deleted/moved configs.
+// Without arguments, auto-discovery still requires the file to exist.
+func resolveUntrustPath(args []string) (string, error) {
+	if len(args) > 0 {
+		absPath, err := filepath.Abs(args[0])
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve path: %w", err)
+		}
+		return absPath, nil
+	}
+
+	// Auto-discovery: same as trust (file must exist to discover it)
+	return resolveConfigTrustPath(nil)
 }
 
 func newConfigProjectCmd() *cobra.Command {
