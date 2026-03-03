@@ -507,8 +507,15 @@ func (c *Composer) OpenEditor() tea.Cmd {
 
 	// Build the editor command — always use exec.Command to avoid shell injection
 	parts := strings.Fields(editor)
+	resolvedEditor, err := exec.LookPath(parts[0])
+	if err != nil {
+		os.Remove(tmpPath)
+		return func() tea.Msg {
+			return EditorReturnMsg{Err: fmt.Errorf("editor %q not found: %w", parts[0], err)}
+		}
+	}
 	args := append(parts[1:], tmpPath)
-	cmd := exec.Command(parts[0], args...) //nolint:gosec,noctx
+	cmd := exec.Command(resolvedEditor, args...) //nolint:gosec,noctx
 
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
@@ -572,7 +579,7 @@ func (c *Composer) ProcessPaste(text string) (string, tea.Cmd) {
 		expanded := trimmed
 		if strings.HasPrefix(expanded, "~/") {
 			if home, err := os.UserHomeDir(); err == nil {
-				expanded = filepath.Join(home, expanded[2:])
+				expanded = filepath.Join(filepath.Clean(home), expanded[2:])
 			}
 		}
 

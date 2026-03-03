@@ -780,6 +780,11 @@ func checkShellCompletion(verbose bool) Check {
 	var completionInstalled bool
 	var completionPath string
 
+	home := os.Getenv("HOME")
+	if home != "" {
+		home = filepath.Clean(home)
+	}
+
 	switch shell {
 	case "bash":
 		// Check common bash completion paths
@@ -787,7 +792,9 @@ func checkShellCompletion(verbose bool) Check {
 			"/opt/homebrew/etc/bash_completion.d/basecamp",
 			"/usr/local/etc/bash_completion.d/basecamp",
 			"/etc/bash_completion.d/basecamp",
-			filepath.Join(os.Getenv("HOME"), ".local/share/bash-completion/completions/basecamp"),
+		}
+		if home != "" {
+			paths = append(paths, filepath.Join(home, ".local/share/bash-completion/completions/basecamp"))
 		}
 		for _, p := range paths {
 			if _, err := os.Stat(p); err == nil {
@@ -801,7 +808,9 @@ func checkShellCompletion(verbose bool) Check {
 		paths := []string{
 			"/opt/homebrew/share/zsh/site-functions/_basecamp",
 			"/usr/local/share/zsh/site-functions/_basecamp",
-			filepath.Join(os.Getenv("HOME"), ".zsh/completions/_basecamp"),
+		}
+		if home != "" {
+			paths = append(paths, filepath.Join(home, ".zsh/completions/_basecamp"))
 		}
 		for _, p := range paths {
 			if _, err := os.Stat(p); err == nil {
@@ -818,9 +827,11 @@ func checkShellCompletion(verbose bool) Check {
 			}
 		}
 	case "fish":
-		completionPath = filepath.Join(os.Getenv("HOME"), ".config/fish/completions/basecamp.fish")
-		if _, err := os.Stat(completionPath); err == nil {
-			completionInstalled = true
+		if home != "" {
+			completionPath = filepath.Join(home, ".config/fish/completions/basecamp.fish")
+			if _, err := os.Stat(completionPath); err == nil {
+				completionInstalled = true
+			}
 		}
 	}
 
@@ -861,6 +872,7 @@ func zshrcHasCompletionEval() bool {
 	if home == "" {
 		return false
 	}
+	home = filepath.Clean(home)
 	f, err := os.Open(filepath.Join(home, ".zshrc")) //nolint:gosec // G304: trusted path
 	if err != nil {
 		return false
@@ -1038,11 +1050,14 @@ func checkLegacyInstall() *Check {
 	if err != nil {
 		return nil
 	}
+	home = filepath.Clean(home)
 
 	// Check marker first — if already migrated, skip
 	configBase := os.Getenv("XDG_CONFIG_HOME")
 	if configBase == "" {
 		configBase = filepath.Join(home, ".config")
+	} else {
+		configBase = filepath.Clean(configBase)
 	}
 	markerPath := filepath.Join(configBase, "basecamp", ".migrated")
 	if _, err := os.Stat(markerPath); err == nil {
@@ -1052,6 +1067,8 @@ func checkLegacyInstall() *Check {
 	cacheBase := os.Getenv("XDG_CACHE_HOME")
 	if cacheBase == "" {
 		cacheBase = filepath.Join(home, ".cache")
+	} else {
+		cacheBase = filepath.Clean(cacheBase)
 	}
 
 	var found []string

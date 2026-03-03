@@ -12,6 +12,7 @@ func DetectClaude() bool {
 	if err != nil {
 		return false
 	}
+	home = filepath.Clean(home)
 	info, err := os.Stat(filepath.Join(home, ".claude"))
 	return err == nil && info.IsDir()
 }
@@ -27,7 +28,7 @@ func CheckClaudePlugin() *StatusCheck {
 		}
 	}
 
-	pluginsPath := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	pluginsPath := filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")
 	data, err := os.ReadFile(pluginsPath) //nolint:gosec // G304: trusted path
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -79,8 +79,13 @@ type FlagOverrides struct {
 func Default() *Config {
 	cacheDir := os.Getenv("XDG_CACHE_HOME")
 	if cacheDir == "" {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".cache")
+		if home, _ := os.UserHomeDir(); home != "" {
+			cacheDir = filepath.Join(filepath.Clean(home), ".cache")
+		} else {
+			cacheDir = os.TempDir()
+		}
+	} else {
+		cacheDir = filepath.Clean(cacheDir)
 	}
 
 	return &Config{
@@ -400,8 +405,13 @@ func systemConfigPath() string {
 func globalConfigPath() string {
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
-		home, _ := os.UserHomeDir()
-		configDir = filepath.Join(home, ".config")
+		if home, _ := os.UserHomeDir(); home != "" {
+			configDir = filepath.Join(filepath.Clean(home), ".config")
+		} else {
+			configDir = os.TempDir()
+		}
+	} else {
+		configDir = filepath.Clean(configDir)
 	}
 	return filepath.Join(configDir, "basecamp", "config.json")
 }
@@ -528,8 +538,13 @@ func localConfigPaths(repoConfigPath string) []string {
 func GlobalConfigDir() string {
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
-		home, _ := os.UserHomeDir()
-		configDir = filepath.Join(home, ".config")
+		if home, _ := os.UserHomeDir(); home != "" {
+			configDir = filepath.Join(filepath.Clean(home), ".config")
+		} else {
+			configDir = os.TempDir()
+		}
+	} else {
+		configDir = filepath.Clean(configDir)
 	}
 	return filepath.Join(configDir, "basecamp")
 }

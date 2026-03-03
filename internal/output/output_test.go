@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -664,6 +666,52 @@ func TestFormatCellWithJSONNumber(t *testing.T) {
 
 	result = formatCell(json.Number("3.14"))
 	assert.Equal(t, "3.14", result)
+}
+
+func TestFormatCellFloatBoundary(t *testing.T) {
+	const maxSafe = float64(1 << 53) // 2^53: largest exact float64 integer
+
+	tests := []struct {
+		name string
+		val  float64
+		want string
+	}{
+		{"integer", 42.0, "42"},
+		{"negative integer", -7.0, "-7"},
+		{"fractional", 3.14, "3.14"},
+		{"zero", 0.0, "0"},
+		{"large safe int", 1e15, "1000000000000000"},
+		{"max safe int (2^53)", maxSafe, fmt.Sprintf("%d", int64(maxSafe))},
+		{"negative max safe int", -maxSafe, fmt.Sprintf("%d", int64(-maxSafe))},
+		// maxSafe+1 rounds to maxSafe in float64, so it still formats as int.
+		// Use maxSafe*2 to get a value truly beyond the safe range.
+		{"beyond safe int (2^54)", maxSafe * 2, fmt.Sprintf("%.2f", maxSafe*2)},
+		{"2^63 (MaxInt64 boundary)", math.Pow(2, 63), fmt.Sprintf("%.2f", math.Pow(2, 63))},
+		{"just below 2^63", math.Nextafter(math.Pow(2, 63), 0), fmt.Sprintf("%.2f", math.Nextafter(math.Pow(2, 63), 0))},
+		{"negative 2^63", -math.Pow(2, 63), fmt.Sprintf("%.2f", -math.Pow(2, 63))},
+		{"very large float beyond int64", 1e20, "100000000000000000000.00"},
+		{"huge float beyond int64", 1e19, "10000000000000000000.00"},
+		{"NaN", math.NaN(), "NaN"},
+		{"positive infinity", math.Inf(1), "+Inf"},
+		{"negative infinity", math.Inf(-1), "-Inf"},
+		{"max float64", math.MaxFloat64, fmt.Sprintf("%.2f", math.MaxFloat64)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatCell(tt.val)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFormatCellFloatBoundaryInArray(t *testing.T) {
+	arr := []any{math.NaN(), math.Inf(1), 42.0, 3.14, math.MaxFloat64}
+	got := formatCell(arr)
+	assert.Contains(t, got, "42")
+	assert.Contains(t, got, "3.14")
+	// NaN and Inf should not crash
+	assert.NotEmpty(t, got)
 }
 
 func TestFormatCellWithScalarArray(t *testing.T) {

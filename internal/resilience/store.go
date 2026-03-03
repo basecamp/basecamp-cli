@@ -43,7 +43,7 @@ func NewStore(dir string) *Store {
 func defaultStateDir() string {
 	// First, check XDG_CACHE_HOME (Linux/BSD convention)
 	if cacheDir := os.Getenv("XDG_CACHE_HOME"); cacheDir != "" {
-		return filepath.Join(cacheDir, "basecamp", DefaultDirName)
+		return filepath.Join(filepath.Clean(cacheDir), "basecamp", DefaultDirName)
 	}
 
 	// Use os.UserCacheDir() which handles platform-specific paths:
@@ -51,12 +51,12 @@ func defaultStateDir() string {
 	// - Linux: ~/.cache (respects XDG_CACHE_HOME)
 	// - Windows: %LocalAppData%
 	if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
-		return filepath.Join(cacheDir, "basecamp", DefaultDirName)
+		return filepath.Join(filepath.Clean(cacheDir), "basecamp", DefaultDirName)
 	}
 
 	// Fall back to home directory
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".cache", "basecamp", DefaultDirName)
+		return filepath.Join(filepath.Clean(home), ".cache", "basecamp", DefaultDirName)
 	}
 
 	// Last resort: use temp directory to avoid relative paths

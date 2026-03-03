@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -349,6 +350,11 @@ func toMapSlice(slice []any) []map[string]any {
 	return result
 }
 
+// maxSafeInt is the largest integer that float64 can represent exactly (2^53).
+// Beyond this, consecutive integers have gaps, so int64(f) may silently
+// round to the wrong value.
+const maxSafeInt = 1 << 53
+
 // Column priority for table rendering (lower = higher priority)
 var columnPriority = map[string]int{
 	"id":          1,
@@ -670,8 +676,8 @@ func formatCell(val any) string {
 	case json.Number:
 		return v.String()
 	case float64:
-		if v == float64(int(v)) {
-			return fmt.Sprintf("%d", int(v))
+		if v == math.Trunc(v) && v >= -maxSafeInt && v <= maxSafeInt {
+			return fmt.Sprintf("%d", int64(v))
 		}
 		return fmt.Sprintf("%.2f", v)
 	case int, int64:
@@ -689,8 +695,8 @@ func formatCell(val any) string {
 			case json.Number:
 				items = append(items, elem.String())
 			case float64:
-				if elem == float64(int(elem)) {
-					items = append(items, fmt.Sprintf("%d", int(elem)))
+				if elem == math.Trunc(elem) && elem >= -maxSafeInt && elem <= maxSafeInt {
+					items = append(items, fmt.Sprintf("%d", int64(elem)))
 				} else {
 					items = append(items, fmt.Sprintf("%.2f", elem))
 				}

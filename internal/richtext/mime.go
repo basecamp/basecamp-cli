@@ -57,6 +57,9 @@ var mimeByExt = map[string]string{
 // DetectMIME returns the MIME type for a file path.
 // It uses the extension map first, then falls back to reading file header bytes.
 func DetectMIME(path string) string {
+	if path != "" {
+		path = filepath.Clean(path)
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	if mime, ok := mimeByExt[ext]; ok {
 		return mime
@@ -80,6 +83,9 @@ func DetectMIME(path string) string {
 // ValidateFile checks that a path refers to an existing, regular, readable file
 // within the size limit. Returns nil on success.
 func ValidateFile(path string) error {
+	if path != "" {
+		path = filepath.Clean(path)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("cannot access %s: %w", filepath.Base(path), err)

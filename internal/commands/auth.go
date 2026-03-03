@@ -4,6 +4,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -277,7 +278,7 @@ Output modes:
 			}
 
 			// Raw output: print token directly, with optional stats on stderr
-			fmt.Println(token)
+			fmt.Println(strings.ReplaceAll(strings.ReplaceAll(token, "\n", ""), "\r", ""))
 			return nil
 		},
 	}
