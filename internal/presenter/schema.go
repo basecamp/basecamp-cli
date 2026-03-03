@@ -48,7 +48,14 @@ type ViewSpecs struct {
 
 // ListView configures the table/list presentation.
 type ListView struct {
-	Columns []string `yaml:"columns"`
+	Columns  []string          `yaml:"columns"`
+	Markdown *MarkdownListView `yaml:"markdown,omitempty"`
+}
+
+// MarkdownListView overrides the default GFM table when rendering markdown lists.
+type MarkdownListView struct {
+	Style   string `yaml:"style"`    // "tasklist" → - [ ] / - [x] format
+	GroupBy string `yaml:"group_by"` // dot-path field for grouping, e.g. "bucket.name"
 }
 
 // DetailView configures the single-entity detail presentation.

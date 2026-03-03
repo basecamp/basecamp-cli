@@ -384,8 +384,23 @@ func RenderDetailMarkdown(w io.Writer, schema *EntitySchema, data map[string]any
 	return err
 }
 
-// RenderListMarkdown renders a slice of entities as a Markdown table.
-func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any, locale Locale) error {
+// RenderListMarkdown renders a slice of entities as Markdown.
+// When the schema declares a tasklist markdown style, renders as a task list
+// with optional grouping. Otherwise falls back to a GFM pipe table.
+// The groupByOverride, when non-empty, replaces the schema's group_by field.
+func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any, locale Locale, groupByOverride string) error {
+	if md := schema.Views.List.Markdown; md != nil && md.Style == "tasklist" {
+		groupBy := md.GroupBy
+		if groupByOverride != "" {
+			groupBy = groupByOverride
+		}
+		return renderTaskListMarkdown(w, schema, data, locale, groupBy)
+	}
+	return renderTableMarkdown(w, schema, data, locale)
+}
+
+// renderTableMarkdown renders a GFM pipe table (the original default).
+func renderTableMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any, locale Locale) error {
 	columns := schema.Views.List.Columns
 	if len(columns) == 0 {
 		var candidates []string
@@ -398,7 +413,8 @@ func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any
 		columns = candidates
 	}
 	if len(columns) == 0 || len(data) == 0 {
-		return nil
+		_, err := io.WriteString(w, "*No results*\n")
+		return err
 	}
 
 	var b strings.Builder
@@ -426,6 +442,134 @@ func RenderListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// taskGroup holds items sharing a common group-by value.
+type taskGroup struct {
+	name  string
+	items []map[string]any
+}
+
+// renderTaskListMarkdown renders items as a Markdown task list with optional grouping.
+func renderTaskListMarkdown(w io.Writer, schema *EntitySchema, data []map[string]any, locale Locale, groupBy string) error {
+	if len(data) == 0 {
+		_, err := io.WriteString(w, "*No results*\n")
+		return err
+	}
+
+	groups := groupByDotPath(data, groupBy)
+
+	var b strings.Builder
+	suppressHeadings := len(groups) == 1
+
+	for i, g := range groups {
+		if !suppressHeadings {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			heading := g.name
+			if heading == "" {
+				heading = "Other"
+			}
+			b.WriteString("## " + heading + "\n")
+		}
+		for _, item := range g.items {
+			renderTaskItem(&b, schema, item, locale)
+		}
+	}
+
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// renderTaskItem renders a single `- [ ] content (metadata)` line.
+func renderTaskItem(b *strings.Builder, schema *EntitySchema, item map[string]any, locale Locale) {
+	completed := toBool(item["completed"])
+	checkbox := "- [ ] "
+	if completed {
+		checkbox = "- [x] "
+	}
+
+	content := FormatField(schema.Fields["content"], "content", item["content"], locale)
+	b.WriteString(checkbox + content)
+
+	// Inline metadata from columns (excluding content and completed, which are structural)
+	var meta []string
+	for _, col := range schema.Views.List.Columns {
+		if col == "content" || col == "completed" {
+			continue
+		}
+		spec := schema.Fields[col]
+		val := item[col]
+		formatted := FormatField(spec, col, val, locale)
+		if formatted == "" {
+			continue
+		}
+
+		switch spec.Format {
+		case "date":
+			meta = append(meta, "due: "+formatted)
+		case "people":
+			for _, name := range strings.Split(formatted, ", ") {
+				if name != "" {
+					meta = append(meta, "@"+name)
+				}
+			}
+		default:
+			meta = append(meta, fieldLabel(col)+": "+formatted)
+		}
+	}
+
+	if len(meta) > 0 {
+		b.WriteString(" (" + strings.Join(meta, ", ") + ")")
+	}
+	b.WriteString("\n")
+}
+
+// groupByDotPath groups items by a dot-separated field path, preserving encounter order.
+// Returns a single group with an empty name when groupBy is empty or the field is absent.
+func groupByDotPath(data []map[string]any, groupBy string) []taskGroup {
+	if groupBy == "" {
+		return []taskGroup{{items: data}}
+	}
+
+	seen := map[string]int{}
+	var groups []taskGroup
+
+	for _, item := range data {
+		key := extractDotPath(item, groupBy)
+		if idx, ok := seen[key]; ok {
+			groups[idx].items = append(groups[idx].items, item)
+		} else {
+			seen[key] = len(groups)
+			groups = append(groups, taskGroup{name: key, items: []map[string]any{item}})
+		}
+	}
+
+	return groups
+}
+
+// extractDotPath walks a map[string]any via dot-separated path segments
+// and returns the leaf value as a string.
+func extractDotPath(data map[string]any, path string) string {
+	parts := strings.Split(path, ".")
+	var current any = data
+
+	for _, part := range parts {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = m[part]
+	}
+
+	if s, ok := current.(string); ok {
+		return s
+	}
+	if current == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", current)
 }
 
 func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, locale Locale) {

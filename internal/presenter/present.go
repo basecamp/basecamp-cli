@@ -14,10 +14,30 @@ const (
 	ModeMarkdown                   // Literal Markdown syntax
 )
 
+// PresentOption configures presentation behavior.
+type PresentOption func(*presentOpts)
+
+type presentOpts struct {
+	groupBy string // overrides schema's markdown group_by
+}
+
+// WithGroupBy overrides the schema's default group_by field for task list rendering.
+func WithGroupBy(field string) PresentOption {
+	return func(o *presentOpts) { o.groupBy = field }
+}
+
+func buildOpts(opts []PresentOption) presentOpts {
+	var o presentOpts
+	for _, fn := range opts {
+		fn(&o)
+	}
+	return o
+}
+
 // Present attempts schema-aware rendering of the data.
 // Returns true if a schema was found and rendering was handled.
 // Returns false if no schema matched (caller should fall back to generic rendering).
-func Present(w io.Writer, data any, entityHint string, mode RenderMode) bool {
+func Present(w io.Writer, data any, entityHint string, mode RenderMode, opts ...PresentOption) bool {
 	schema := Detect(data, entityHint)
 	if schema == nil {
 		return false
@@ -25,23 +45,23 @@ func Present(w io.Writer, data any, entityHint string, mode RenderMode) bool {
 
 	theme := tui.ResolveTheme()
 	locale := DetectLocale()
-	return presentWith(w, data, schema, theme, locale, mode)
+	return presentWith(w, data, schema, theme, locale, mode, buildOpts(opts))
 }
 
 // PresentWithTheme is like Present but accepts a theme and locale directly (for testing).
-func PresentWithTheme(w io.Writer, data any, entityHint string, mode RenderMode, theme tui.Theme, locale Locale) bool {
+func PresentWithTheme(w io.Writer, data any, entityHint string, mode RenderMode, theme tui.Theme, locale Locale, opts ...PresentOption) bool {
 	schema := Detect(data, entityHint)
 	if schema == nil {
 		return false
 	}
 
-	return presentWith(w, data, schema, theme, locale, mode)
+	return presentWith(w, data, schema, theme, locale, mode, buildOpts(opts))
 }
 
-func presentWith(w io.Writer, data any, schema *EntitySchema, theme tui.Theme, locale Locale, mode RenderMode) bool {
+func presentWith(w io.Writer, data any, schema *EntitySchema, theme tui.Theme, locale Locale, mode RenderMode, opts presentOpts) bool {
 	switch mode {
 	case ModeMarkdown:
-		return presentMarkdown(w, data, schema, locale)
+		return presentMarkdown(w, data, schema, locale, opts)
 	default:
 		return presentStyled(w, data, schema, theme, locale)
 	}
@@ -57,9 +77,6 @@ func presentStyled(w io.Writer, data any, schema *EntitySchema, theme tui.Theme,
 		}
 		return true
 	case []map[string]any:
-		if len(d) == 0 {
-			return false
-		}
 		if err := RenderList(w, schema, d, styles, locale); err != nil {
 			return false
 		}
@@ -68,7 +85,7 @@ func presentStyled(w io.Writer, data any, schema *EntitySchema, theme tui.Theme,
 	return false
 }
 
-func presentMarkdown(w io.Writer, data any, schema *EntitySchema, locale Locale) bool {
+func presentMarkdown(w io.Writer, data any, schema *EntitySchema, locale Locale, opts presentOpts) bool {
 	switch d := data.(type) {
 	case map[string]any:
 		if err := RenderDetailMarkdown(w, schema, d, locale); err != nil {
@@ -76,10 +93,7 @@ func presentMarkdown(w io.Writer, data any, schema *EntitySchema, locale Locale)
 		}
 		return true
 	case []map[string]any:
-		if len(d) == 0 {
-			return false
-		}
-		if err := RenderListMarkdown(w, schema, d, locale); err != nil {
+		if err := RenderListMarkdown(w, schema, d, locale, opts.groupBy); err != nil {
 			return false
 		}
 		return true
