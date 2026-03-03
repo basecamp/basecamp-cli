@@ -1615,7 +1615,7 @@ func TestRenderHeadlineHTMLContent(t *testing.T) {
 	}
 }
 
-func TestRenderHeadlineHTMLStrongStripped(t *testing.T) {
+func TestRenderHeadlineHTMLStrongUnwrapped(t *testing.T) {
 	schema := &EntitySchema{
 		Identity: Identity{Label: "content"},
 	}
@@ -1623,13 +1623,27 @@ func TestRenderHeadlineHTMLStrongStripped(t *testing.T) {
 		"content": "<p>Important <strong>task</strong> here</p>",
 	}
 	got := RenderHeadline(schema, data)
-	// Emphasis markers are stripped because headlines are always rendered
+	// Bold pairs are unwrapped because headlines are always rendered
 	// in a bold/primary context; nested ** would produce ****task****
 	if strings.Contains(got, "**") {
-		t.Errorf("RenderHeadline should strip emphasis markers, got: %q", got)
+		t.Errorf("RenderHeadline should unwrap bold markers, got: %q", got)
 	}
 	if got != "Important task here" {
 		t.Errorf("RenderHeadline = %q, want %q", got, "Important task here")
+	}
+}
+
+func TestRenderHeadlineHTMLPreservesLiteralAsterisks(t *testing.T) {
+	schema := &EntitySchema{
+		Identity: Identity{Label: "content"},
+	}
+	data := map[string]any{
+		"content": "<p>2**10 = 1024</p>",
+	}
+	got := RenderHeadline(schema, data)
+	// Literal ** that aren't bold pairs should be preserved
+	if got != "2**10 = 1024" {
+		t.Errorf("RenderHeadline = %q, want %q", got, "2**10 = 1024")
 	}
 }
 

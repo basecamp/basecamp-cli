@@ -131,12 +131,15 @@ func formatPeople(val any) string {
 
 // singleLine returns the first non-empty line from s, trimmed.
 func singleLine(s string) string {
+	if strings.IndexByte(s, '\n') == -1 {
+		return strings.TrimSpace(s)
+	}
 	for _, line := range strings.Split(s, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed
 		}
 	}
-	return strings.TrimSpace(s)
+	return ""
 }
 
 // formatText converts any value to a string representation.

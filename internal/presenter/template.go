@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"math"
-	"strings"
+	"regexp"
 	"text/template"
 
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
+
+// reBoldWrap matches **...**  pairs produced by HTMLToMarkdown from <strong> tags.
+var reBoldWrap = regexp.MustCompile(`\*\*(.+?)\*\*`)
 
 // templateFuncs provides helper functions for schema templates.
 var templateFuncs = template.FuncMap{
@@ -65,14 +68,15 @@ func sanitizeNumericValues(data map[string]any) map[string]any {
 // RenderHeadline selects and renders the appropriate headline for the data.
 // If the raw headline contains HTML, it is converted to markdown and collapsed
 // to a single line so it stays compact in list and detail views.
-// Inline emphasis is stripped because headlines are always rendered in a
-// bold/primary context (lipgloss or **...** wrapper), so nested markers
-// would produce visual noise like ****word****.
+// Inline bold markers (**...**) produced by HTMLToMarkdown are unwrapped
+// because headlines are always rendered in a bold/primary context (lipgloss
+// or an outer **...** wrapper), so nested markers would produce visual noise
+// like ****word****.
 func RenderHeadline(schema *EntitySchema, data map[string]any) string {
 	raw := renderHeadlineRaw(schema, data)
 	if richtext.IsHTML(raw) {
 		md := singleLine(richtext.HTMLToMarkdown(raw))
-		return strings.ReplaceAll(md, "**", "")
+		return reBoldWrap.ReplaceAllString(md, "$1")
 	}
 	return raw
 }
