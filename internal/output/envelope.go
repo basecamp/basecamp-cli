@@ -14,14 +14,16 @@ import (
 
 // Response is the success envelope for JSON output.
 type Response struct {
-	OK          bool           `json:"ok"`
-	Data        any            `json:"data,omitempty"`
-	Summary     string         `json:"summary,omitempty"`
-	Notice      string         `json:"notice,omitempty"` // Informational message (e.g., truncation warning)
-	Breadcrumbs []Breadcrumb   `json:"breadcrumbs,omitempty"`
-	Context     map[string]any `json:"context,omitempty"`
-	Meta        map[string]any `json:"meta,omitempty"`
-	Entity      string         `json:"-"` // Schema hint for presenter (not serialized)
+	OK            bool                      `json:"ok"`
+	Data          any                       `json:"data,omitempty"`
+	Summary       string                    `json:"summary,omitempty"`
+	Notice        string                    `json:"notice,omitempty"` // Informational message (e.g., truncation warning)
+	Breadcrumbs   []Breadcrumb              `json:"breadcrumbs,omitempty"`
+	Context       map[string]any            `json:"context,omitempty"`
+	Meta          map[string]any            `json:"meta,omitempty"`
+	Entity        string                    `json:"-"` // Schema hint for presenter (not serialized)
+	DisplayData   any                       `json:"-"` // Alternate data for styled/markdown rendering (not serialized)
+	presenterOpts []presenter.PresentOption // Display options for presenter (not serialized)
 }
 
 // Breadcrumb is a suggested follow-up action.
@@ -475,13 +477,34 @@ func WithEntity(name string) ResponseOption {
 	return func(r *Response) { r.Entity = name }
 }
 
+// WithDisplayData provides alternate data for styled/markdown rendering.
+// When set, the presenter uses this instead of Data, keeping Data untouched
+// for JSON serialization. Use this when the response wrapper struct should be
+// preserved for machine consumption but a different shape (e.g. an unwrapped
+// slice) is better for human-oriented output.
+func WithDisplayData(data any) ResponseOption {
+	return func(r *Response) { r.DisplayData = data }
+}
+
+// WithGroupBy overrides the schema's default group_by field for task list rendering.
+// For example, WithGroupBy("due_on") groups todos by due date instead of project.
+func WithGroupBy(field string) ResponseOption {
+	return func(r *Response) {
+		r.presenterOpts = append(r.presenterOpts, presenter.WithGroupBy(field))
+	}
+}
+
 // presentStyledEntity attempts schema-aware rendering for styled output.
 // Returns true if the presenter handled it, false to fall back to generic.
 func (w *Writer) presentStyledEntity(resp *Response) bool {
-	data := NormalizeData(resp.Data)
+	src := resp.Data
+	if resp.DisplayData != nil {
+		src = resp.DisplayData
+	}
+	data := NormalizeData(src)
 	var buf strings.Builder
 
-	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeStyled) {
+	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeStyled, resp.presenterOpts...) {
 		return false
 	}
 
@@ -521,10 +544,14 @@ func (w *Writer) presentStyledEntity(resp *Response) bool {
 // presentMarkdownEntity attempts schema-aware rendering for Markdown output.
 // Returns true if the presenter handled it, false to fall back to generic.
 func (w *Writer) presentMarkdownEntity(resp *Response) bool {
-	data := NormalizeData(resp.Data)
+	src := resp.Data
+	if resp.DisplayData != nil {
+		src = resp.DisplayData
+	}
+	data := NormalizeData(src)
 	var buf strings.Builder
 
-	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeMarkdown) {
+	if !presenter.Present(&buf, data, resp.Entity, presenter.ModeMarkdown, resp.presenterOpts...) {
 		return false
 	}
 
