@@ -85,10 +85,16 @@ jobs:
             bug|enhancement|documentation) ;;
             *) echo "Unexpected: $LABEL — skipping"; exit 0 ;;
           esac
+          PR=${{ github.event.pull_request.number }}
+          CURRENT=$(gh pr view "$PR" --json labels --jq '.labels[].name')
           for L in bug enhancement documentation; do
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "$L" 2>/dev/null || true
+            if [ "$L" != "$LABEL" ] && echo "$CURRENT" | grep -qx "$L"; then
+              gh pr edit "$PR" --remove-label "$L"
+            fi
           done
-          gh pr edit ${{ github.event.pull_request.number }} --add-label "$LABEL"
+          if ! echo "$CURRENT" | grep -qx "$LABEL"; then
+            gh pr edit "$PR" --add-label "$LABEL"
+          fi
 
   breaking:
     runs-on: ubuntu-latest
