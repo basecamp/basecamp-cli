@@ -23,6 +23,7 @@ make release VERSION=0.2.0 DRY_RUN=1
    - Collects PGO profile from benchmarks
    - Generates AI changelog from commit history
    - Builds binaries for all platforms (darwin, linux, windows, freebsd, openbsd × amd64/arm64)
+   - Signs and notarizes macOS binaries (Developer ID via GoReleaser/quill)
    - Signs checksums with cosign (keyless via Sigstore OIDC)
    - Generates SBOM for supply chain transparency
    - Updates Homebrew cask in `basecamp/homebrew-tap`
@@ -47,6 +48,11 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 | `RELEASE_CLIENT_ID` (var) | GitHub App ID for `bcq-release-bot` |
 | `RELEASE_APP_PRIVATE_KEY` | GitHub App private key |
 | `AUR_KEY` | SSH private key for AUR push (optional) |
+| `MACOS_SIGN_P12` | Base64-encoded Developer ID Application certificate (.p12) |
+| `MACOS_SIGN_PASSWORD` | .p12 unlock password |
+| `MACOS_NOTARY_KEY` | Base64-encoded App Store Connect API key (.p8) |
+| `MACOS_NOTARY_KEY_ID` | App Store Connect API key ID (10 characters) |
+| `MACOS_NOTARY_ISSUER_ID` | App Store Connect issuer UUID |
 
 ## AUR setup (one-time)
 
