@@ -508,12 +508,14 @@ func renderTaskItem(b *strings.Builder, schema *EntitySchema, item map[string]an
 
 		switch spec.Format {
 		case "date":
-			meta = append(meta, "due: "+formatted)
+			if col == "due_on" {
+				meta = append(meta, "due: "+formatted)
+			} else {
+				meta = append(meta, fieldLabel(col)+": "+formatted)
+			}
 		case "people":
-			for _, name := range strings.Split(formatted, ", ") {
-				if name != "" {
-					meta = append(meta, "@"+name)
-				}
+			for _, name := range extractPeopleNames(val) {
+				meta = append(meta, "@"+name)
 			}
 		default:
 			meta = append(meta, fieldLabel(col)+": "+formatted)
@@ -547,6 +549,24 @@ func groupByDotPath(data []map[string]any, groupBy string) []taskGroup {
 	}
 
 	return groups
+}
+
+// extractPeopleNames extracts name strings directly from a people array value,
+// avoiding comma-splitting which would break names containing commas.
+func extractPeopleNames(val any) []string {
+	arr, ok := val.([]any)
+	if !ok {
+		return nil
+	}
+	var names []string
+	for _, item := range arr {
+		if m, ok := item.(map[string]any); ok {
+			if name, ok := m["name"].(string); ok && name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 // extractDotPath walks a map[string]any via dot-separated path segments

@@ -1506,3 +1506,48 @@ func TestLocaleRenderListMarkdownUsesLocale(t *testing.T) {
 		t.Errorf("de-DE markdown task list should show '15. Mar 2026', got:\n%s", out)
 	}
 }
+
+func TestExtractPeopleNamesCommaInName(t *testing.T) {
+	// Names with commas should not be split — extractPeopleNames reads
+	// from the raw array value, not from a comma-joined string.
+	val := []any{
+		map[string]any{"name": "Park, Joon-seo"},
+		map[string]any{"name": "Alice"},
+	}
+	names := extractPeopleNames(val)
+	if len(names) != 2 {
+		t.Fatalf("Expected 2 names, got %d: %v", len(names), names)
+	}
+	if names[0] != "Park, Joon-seo" {
+		t.Errorf("names[0] = %q, want %q", names[0], "Park, Joon-seo")
+	}
+	if names[1] != "Alice" {
+		t.Errorf("names[1] = %q, want %q", names[1], "Alice")
+	}
+}
+
+func TestRenderTaskItemCommaInAssigneeName(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content":   "Review PR",
+			"completed": false,
+			"due_on":    "",
+			"assignees": []any{map[string]any{"name": "Park, Joon-seo"}},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "@Park, Joon-seo") {
+		t.Errorf("Should preserve full name with comma, got:\n%s", out)
+	}
+}
