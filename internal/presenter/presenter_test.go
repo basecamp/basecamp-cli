@@ -109,6 +109,17 @@ func TestSchemaViews(t *testing.T) {
 	if len(schema.Views.Detail.Sections) != 3 {
 		t.Errorf("Detail sections = %d, want 3", len(schema.Views.Detail.Sections))
 	}
+
+	// Markdown list view config
+	if schema.Views.List.Markdown == nil {
+		t.Fatal("Expected Markdown list view config for todo")
+	}
+	if schema.Views.List.Markdown.Style != "tasklist" {
+		t.Errorf("Markdown.Style = %q, want %q", schema.Views.List.Markdown.Style, "tasklist")
+	}
+	if schema.Views.List.Markdown.GroupBy != "bucket.name" {
+		t.Errorf("Markdown.GroupBy = %q, want %q", schema.Views.List.Markdown.GroupBy, "bucket.name")
+	}
 }
 
 func TestSchemaAffordances(t *testing.T) {
@@ -528,13 +539,45 @@ func TestPresentSlice(t *testing.T) {
 	}
 }
 
-func TestPresentEmptySlice(t *testing.T) {
+func TestPresentEmptySliceStyled(t *testing.T) {
 	data := []map[string]any{}
 
 	var buf strings.Builder
 	handled := PresentWithTheme(&buf, data, "todo", ModeStyled, tui.NoColorTheme(), enUS)
-	if handled {
-		t.Error("Present should not handle empty slice (fall back to generic)")
+	if !handled {
+		t.Error("Presenter should handle empty slice (envelope renders summary chrome around it)")
+	}
+	// Styled renders nothing for empty list — summary is the envelope's responsibility
+	if buf.String() != "" {
+		t.Errorf("Empty styled list should produce no content, got:\n%s", buf.String())
+	}
+}
+
+func TestPresentEmptySliceMarkdown(t *testing.T) {
+	data := []map[string]any{}
+
+	var buf strings.Builder
+	handled := PresentWithTheme(&buf, data, "todo", ModeMarkdown, tui.NoColorTheme(), enUS)
+	if !handled {
+		t.Error("Presenter should handle empty slice in markdown mode")
+	}
+	// Markdown task list renders "No results" for empty data
+	if !strings.Contains(buf.String(), "*No results*") {
+		t.Errorf("Empty markdown task list should contain '*No results*', got:\n%s", buf.String())
+	}
+}
+
+func TestPresentEmptySliceMarkdownTable(t *testing.T) {
+	// Non-tasklist schema (project uses GFM table) should also render "No results"
+	data := []map[string]any{}
+
+	var buf strings.Builder
+	handled := PresentWithTheme(&buf, data, "project", ModeMarkdown, tui.NoColorTheme(), enUS)
+	if !handled {
+		t.Error("Presenter should handle empty slice for table markdown")
+	}
+	if !strings.Contains(buf.String(), "*No results*") {
+		t.Errorf("Empty markdown table should contain '*No results*', got:\n%s", buf.String())
 	}
 }
 
@@ -859,29 +902,217 @@ func TestRenderListMarkdown(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := RenderListMarkdown(&buf, schema, data, enUS); err != nil {
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
 		t.Fatalf("RenderListMarkdown failed: %v", err)
 	}
 
 	out := buf.String()
 
-	// Should be a Markdown table with header + divider + rows
-	if !strings.Contains(out, "| Content |") {
-		t.Errorf("Markdown table should have Content header, got:\n%s", out)
+	// Todo schema declares tasklist style, so output should be task list items
+	if !strings.Contains(out, "- [ ] Fix bug") {
+		t.Errorf("Task list should contain '- [ ] Fix bug', got:\n%s", out)
 	}
-	if !strings.Contains(out, "| --- |") {
-		t.Errorf("Markdown table should have divider row, got:\n%s", out)
+	if !strings.Contains(out, "- [x] Write tests") {
+		t.Errorf("Task list should contain '- [x] Write tests', got:\n%s", out)
 	}
-	if !strings.Contains(out, "Fix bug") {
-		t.Errorf("Markdown table should contain 'Fix bug', got:\n%s", out)
+	// Inline metadata
+	if !strings.Contains(out, "due: Feb 1, 2026") {
+		t.Errorf("Task list should contain 'due: Feb 1, 2026', got:\n%s", out)
 	}
-	if !strings.Contains(out, "Write tests") {
-		t.Errorf("Markdown table should contain 'Write tests', got:\n%s", out)
+	if !strings.Contains(out, "@Alice") {
+		t.Errorf("Task list should contain '@Alice', got:\n%s", out)
+	}
+	// Single group (no bucket field) → no heading
+	if strings.Contains(out, "## ") {
+		t.Errorf("Task list with single group should suppress heading, got:\n%s", out)
 	}
 
 	// No ANSI escape codes
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("Markdown output should contain no ANSI codes, got:\n%q", out)
+	}
+}
+
+func TestRenderListMarkdownTaskListGrouped(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content": "Fix bug", "completed": false, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "Project Alpha"},
+		},
+		{
+			"content": "Write docs", "completed": true, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "Project Beta"},
+		},
+		{
+			"content": "Deploy", "completed": false, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "Project Alpha"},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+
+	// Multiple groups → headings
+	if !strings.Contains(out, "## Project Alpha") {
+		t.Errorf("Should contain '## Project Alpha', got:\n%s", out)
+	}
+	if !strings.Contains(out, "## Project Beta") {
+		t.Errorf("Should contain '## Project Beta', got:\n%s", out)
+	}
+	// Items under correct groups
+	if !strings.Contains(out, "- [ ] Fix bug") {
+		t.Errorf("Should contain '- [ ] Fix bug', got:\n%s", out)
+	}
+	if !strings.Contains(out, "- [x] Write docs") {
+		t.Errorf("Should contain '- [x] Write docs', got:\n%s", out)
+	}
+	// Alpha items should be grouped together (encounter order)
+	alphaIdx := strings.Index(out, "## Project Alpha")
+	betaIdx := strings.Index(out, "## Project Beta")
+	deployIdx := strings.Index(out, "- [ ] Deploy")
+	if deployIdx < alphaIdx || deployIdx > betaIdx {
+		t.Errorf("Deploy should be under Project Alpha (before Beta heading), got:\n%s", out)
+	}
+}
+
+func TestRenderListMarkdownTaskListNoBucket(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	// No bucket field at all
+	data := []map[string]any{
+		{"content": "Standalone task", "completed": false, "due_on": "", "assignees": []any{}},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+
+	if !strings.Contains(out, "- [ ] Standalone task") {
+		t.Errorf("Should contain '- [ ] Standalone task', got:\n%s", out)
+	}
+	// No heading when group-by field is absent (single empty-name group)
+	if strings.Contains(out, "## ") {
+		t.Errorf("Should not contain group heading when bucket is absent, got:\n%s", out)
+	}
+}
+
+func TestGroupByDotPath(t *testing.T) {
+	data := []map[string]any{
+		{"content": "A", "bucket": map[string]any{"name": "P1"}},
+		{"content": "B", "bucket": map[string]any{"name": "P2"}},
+		{"content": "C", "bucket": map[string]any{"name": "P1"}},
+		{"content": "D"},
+	}
+
+	groups := groupByDotPath(data, "bucket.name")
+
+	if len(groups) != 3 {
+		t.Fatalf("Expected 3 groups, got %d", len(groups))
+	}
+
+	// Encounter order preserved
+	if groups[0].name != "P1" {
+		t.Errorf("First group = %q, want %q", groups[0].name, "P1")
+	}
+	if len(groups[0].items) != 2 {
+		t.Errorf("P1 should have 2 items, got %d", len(groups[0].items))
+	}
+	if groups[1].name != "P2" {
+		t.Errorf("Second group = %q, want %q", groups[1].name, "P2")
+	}
+	// Missing field falls into empty-name group
+	if groups[2].name != "" {
+		t.Errorf("Third group = %q, want empty string", groups[2].name)
+	}
+
+	// Empty groupBy returns single group
+	single := groupByDotPath(data, "")
+	if len(single) != 1 {
+		t.Fatalf("Empty groupBy should return 1 group, got %d", len(single))
+	}
+	if len(single[0].items) != 4 {
+		t.Errorf("Single group should have all 4 items, got %d", len(single[0].items))
+	}
+}
+
+func TestRenderListMarkdownGroupByOverride(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{"content": "Task A", "completed": false, "due_on": "2026-03-01", "assignees": []any{}},
+		{"content": "Task B", "completed": true, "due_on": "2026-03-15", "assignees": []any{}},
+	}
+
+	var buf strings.Builder
+	// Override group_by from "bucket.name" to "due_on"
+	if err := RenderListMarkdown(&buf, schema, data, enUS, "due_on"); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+
+	// Should group by due_on values
+	if !strings.Contains(out, "## 2026-03-01") {
+		t.Errorf("Should contain '## 2026-03-01' heading, got:\n%s", out)
+	}
+	if !strings.Contains(out, "## 2026-03-15") {
+		t.Errorf("Should contain '## 2026-03-15' heading, got:\n%s", out)
+	}
+	if !strings.Contains(out, "- [ ] Task A") {
+		t.Errorf("Should contain '- [ ] Task A', got:\n%s", out)
+	}
+	if !strings.Contains(out, "- [x] Task B") {
+		t.Errorf("Should contain '- [x] Task B', got:\n%s", out)
+	}
+}
+
+func TestRenderListMarkdownMixedGroupsOtherHeading(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content": "With project", "completed": false, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "Alpha"},
+		},
+		{
+			"content": "No project", "completed": false, "due_on": "", "assignees": []any{},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+
+	// Items with missing bucket should render under "Other" heading
+	if !strings.Contains(out, "## Alpha") {
+		t.Errorf("Should contain '## Alpha' heading, got:\n%s", out)
+	}
+	if !strings.Contains(out, "## Other") {
+		t.Errorf("Items without bucket should render under '## Other', got:\n%s", out)
 	}
 }
 
@@ -1033,29 +1264,28 @@ func TestIsOverdueDateOnlyIsLocal(t *testing.T) {
 // =============================================================================
 
 func TestMarkdownTableEscapesPipes(t *testing.T) {
-	schema := LookupByName("todo")
+	// Use project schema (GFM table format) to test pipe escaping
+	schema := LookupByName("project")
 	if schema == nil {
-		t.Fatal("Expected todo schema")
+		t.Fatal("Expected project schema")
 	}
 
 	data := []map[string]any{
 		{
-			"content":   "Fix bug | urgent",
-			"completed": false,
-			"due_on":    "2026-02-01",
-			"assignees": []any{},
+			"id":   float64(1),
+			"name": "Project | Alpha",
 		},
 	}
 
 	var buf strings.Builder
-	if err := RenderListMarkdown(&buf, schema, data, enUS); err != nil {
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
 		t.Fatalf("RenderListMarkdown failed: %v", err)
 	}
 
 	out := buf.String()
 
-	// The pipe in "Fix bug | urgent" should be escaped
-	if !strings.Contains(out, `Fix bug \| urgent`) {
+	// The pipe in "Project | Alpha" should be escaped
+	if !strings.Contains(out, `Project \| Alpha`) {
 		t.Errorf("Pipes in cell content should be escaped, got:\n%s", out)
 	}
 }
@@ -1266,12 +1496,13 @@ func TestLocaleRenderListMarkdownUsesLocale(t *testing.T) {
 	de := NewLocale("de-DE")
 
 	var buf strings.Builder
-	if err := RenderListMarkdown(&buf, schema, data, de); err != nil {
+	if err := RenderListMarkdown(&buf, schema, data, de, ""); err != nil {
 		t.Fatalf("RenderListMarkdown failed: %v", err)
 	}
 
 	out := buf.String()
+	// Todo uses tasklist style; date appears as inline metadata
 	if !strings.Contains(out, "15. Mar 2026") {
-		t.Errorf("de-DE markdown table should show '15. Mar 2026', got:\n%s", out)
+		t.Errorf("de-DE markdown task list should show '15. Mar 2026', got:\n%s", out)
 	}
 }

@@ -1927,6 +1927,107 @@ func TestFormatCellStripsANSIEscapes(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// WithDisplayData Contract Tests
+// =============================================================================
+
+func TestWithDisplayDataJSONUsesData(t *testing.T) {
+	// JSON format should serialize Data (the wrapper), not DisplayData
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
+
+	wrapper := map[string]any{
+		"person": map[string]any{"name": "Alice"},
+		"todos":  []any{map[string]any{"content": "Fix bug"}},
+	}
+	todos := []map[string]any{
+		{"content": "Fix bug", "completed": false},
+	}
+
+	err := w.OK(wrapper,
+		WithEntity("todo"),
+		WithDisplayData(todos),
+	)
+	require.NoError(t, err)
+
+	// JSON should contain the wrapper structure
+	output := buf.String()
+	assert.Contains(t, output, `"person"`)
+	assert.Contains(t, output, `"todos"`)
+}
+
+func TestWithDisplayDataMarkdownUsesDisplayData(t *testing.T) {
+	// Markdown format should use DisplayData for presenter rendering
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+
+	wrapper := map[string]any{
+		"person": map[string]any{"name": "Alice"},
+		"todos":  []any{map[string]any{"content": "Fix bug"}},
+	}
+	todos := []map[string]any{
+		{"content": "Fix bug", "completed": false, "due_on": "", "assignees": []any{}},
+	}
+
+	err := w.OK(wrapper,
+		WithEntity("todo"),
+		WithDisplayData(todos),
+	)
+	require.NoError(t, err)
+
+	// Markdown should render using DisplayData (task list format from todo schema)
+	output := buf.String()
+	assert.Contains(t, output, "- [ ] Fix bug")
+	// Should NOT contain the wrapper's raw "person" field
+	assert.NotContains(t, output, `"person"`)
+}
+
+func TestWithDisplayDataStyledUsesDisplayData(t *testing.T) {
+	// Styled format should use DisplayData for presenter rendering
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+
+	wrapper := map[string]any{
+		"person": map[string]any{"name": "Alice"},
+		"todos":  []any{map[string]any{"content": "Fix bug"}},
+	}
+	todos := []map[string]any{
+		{"content": "Fix bug", "completed": false, "due_on": "", "assignees": []any{}},
+	}
+
+	err := w.OK(wrapper,
+		WithEntity("todo"),
+		WithDisplayData(todos),
+	)
+	require.NoError(t, err)
+
+	// Styled should render the todo content (from DisplayData), not the wrapper
+	output := buf.String()
+	assert.Contains(t, output, "Fix bug")
+}
+
+func TestWithGroupByOverridesSchemaGrouping(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+
+	todos := []map[string]any{
+		{"content": "Task A", "completed": false, "due_on": "2026-03-01", "assignees": []any{}},
+		{"content": "Task B", "completed": false, "due_on": "2026-03-15", "assignees": []any{}},
+	}
+
+	err := w.OK(todos,
+		WithEntity("todo"),
+		WithDisplayData(todos),
+		WithGroupBy("due_on"),
+	)
+	require.NoError(t, err)
+
+	output := buf.String()
+	// Should group by due_on instead of bucket.name
+	assert.Contains(t, output, "## 2026-03-01")
+	assert.Contains(t, output, "## 2026-03-15")
+}
+
 func TestFormatCellStripsANSIFromArrayElements(t *testing.T) {
 	t.Run("string elements in array", func(t *testing.T) {
 		input := []any{"clean", "has\x1b[2Jescapes", "also\x1b[31mcolored\x1b[0m"}

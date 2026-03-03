@@ -136,7 +136,9 @@ Results can be grouped by bucket (project) or date.`,
 				summary += fmt.Sprintf(" (grouped by %s)", result.GroupedBy)
 			}
 
-			return app.OK(result,
+			respOpts := []output.ResponseOption{
+				output.WithEntity("todo"),
+				output.WithDisplayData(result.Todos),
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -150,7 +152,14 @@ Results can be grouped by bucket (project) or date.`,
 						Description: "List todos in a specific project",
 					},
 				),
-			)
+			}
+
+			// Match display grouping to API grouping
+			if groupBy == "date" {
+				respOpts = append(respOpts, output.WithGroupBy("due_on"))
+			}
+
+			return app.OK(result, respOpts...)
 		},
 	}
 
