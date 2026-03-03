@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -447,6 +449,300 @@ func TestDiscoverOAuth_PropagatesInsecureLaunchpadError(t *testing.T) {
 	_, _, err := m.discoverOAuth(context.Background(), noop)
 	require.Error(t, err, "insecure launchpad URL error must propagate through discoverOAuth")
 	assert.Contains(t, err.Error(), "BASECAMP_LAUNCHPAD_URL")
+}
+
+func TestResolveOAuthCallback(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       LoginOptions
+		envURI     string
+		wantURI    string
+		wantAddr   string
+		wantErrMsg string
+	}{
+		{
+			name:     "default",
+			opts:     LoginOptions{},
+			wantURI:  "http://127.0.0.1:8976/callback",
+			wantAddr: "127.0.0.1:8976",
+		},
+		{
+			name:     "env var override",
+			opts:     LoginOptions{},
+			envURI:   "http://localhost:9999/callback",
+			wantURI:  "http://localhost:9999/callback",
+			wantAddr: "localhost:9999",
+		},
+		{
+			name:     "LoginOptions.RedirectURI overrides env",
+			opts:     LoginOptions{RedirectURI: "http://127.0.0.1:4000/callback"},
+			envURI:   "http://localhost:9999/callback",
+			wantURI:  "http://127.0.0.1:4000/callback",
+			wantAddr: "127.0.0.1:4000",
+		},
+		{
+			name:     "CallbackAddr without RedirectURI",
+			opts:     LoginOptions{CallbackAddr: "127.0.0.1:5555"},
+			wantURI:  "http://127.0.0.1:5555/callback",
+			wantAddr: "127.0.0.1:5555",
+		},
+		{
+			name:       "non-loopback host rejected",
+			opts:       LoginOptions{RedirectURI: "http://evil.example.com:8976/callback"},
+			wantErrMsg: "host must be loopback",
+		},
+		{
+			name:       "https scheme rejected",
+			opts:       LoginOptions{RedirectURI: "https://127.0.0.1:8976/callback"},
+			wantErrMsg: "scheme must be http",
+		},
+		{
+			name:       "missing port rejected",
+			opts:       LoginOptions{RedirectURI: "http://localhost/callback"},
+			wantErrMsg: "port is required",
+		},
+		{
+			name:       "userinfo rejected",
+			opts:       LoginOptions{RedirectURI: "http://user:pass@127.0.0.1:8976/callback"},
+			wantErrMsg: "userinfo not allowed",
+		},
+		{
+			name:       "fragment rejected",
+			opts:       LoginOptions{RedirectURI: "http://127.0.0.1:8976/callback#frag"},
+			wantErrMsg: "fragment not allowed",
+		},
+		{
+			name:       "query string rejected",
+			opts:       LoginOptions{RedirectURI: "http://127.0.0.1:8976/callback?foo=bar"},
+			wantErrMsg: "query string not allowed",
+		},
+		{
+			name:     "localhost subdomain accepted",
+			opts:     LoginOptions{RedirectURI: "http://app.localhost:3000/callback"},
+			wantURI:  "http://app.localhost:3000/callback",
+			wantAddr: "app.localhost:3000",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_OAUTH_REDIRECT_URI", tt.envURI)
+
+			uri, addr, err := resolveOAuthCallback(&tt.opts)
+			if tt.wantErrMsg != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrMsg)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURI, uri)
+			assert.Equal(t, tt.wantAddr, addr)
+		})
+	}
+}
+
+func TestResolveClientCredentials(t *testing.T) {
+	noop := func(string) {}
+
+	tests := []struct {
+		name       string
+		envVars    map[string]string
+		wantID     string
+		wantSecret string
+		wantNil    bool
+		wantErrMsg string
+	}{
+		{
+			name:    "no env vars returns nil",
+			wantNil: true,
+		},
+		{
+			name:       "both env vars",
+			envVars:    map[string]string{"BASECAMP_OAUTH_CLIENT_ID": "my-id", "BASECAMP_OAUTH_CLIENT_SECRET": "my-secret"},
+			wantID:     "my-id",
+			wantSecret: "my-secret",
+		},
+		{
+			name:       "ID only, no secret",
+			envVars:    map[string]string{"BASECAMP_OAUTH_CLIENT_ID": "my-id"},
+			wantErrMsg: "BASECAMP_OAUTH_CLIENT_SECRET is required",
+		},
+		{
+			name:       "secret only, no ID",
+			envVars:    map[string]string{"BASECAMP_OAUTH_CLIENT_SECRET": "my-secret"},
+			wantErrMsg: "BASECAMP_OAUTH_CLIENT_ID is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
+			t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			creds, err := resolveClientCredentials(noop)
+			if tt.wantErrMsg != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrMsg)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantNil {
+				assert.Nil(t, creds)
+				return
+			}
+			require.NotNil(t, creds)
+			assert.Equal(t, tt.wantID, creds.ClientID)
+			assert.Equal(t, tt.wantSecret, creds.ClientSecret)
+		})
+	}
+}
+
+func TestBuildAuthURL_UsesResolvedRedirectURI(t *testing.T) {
+	m := &Manager{cfg: config.Default(), httpClient: http.DefaultClient}
+	oauthCfg := &oauth.Config{
+		AuthorizationEndpoint: "https://auth.example.com/authorize",
+	}
+	opts := &LoginOptions{RedirectURI: "http://localhost:9999/my-callback"}
+
+	authURL, err := m.buildAuthURL(oauthCfg, "launchpad", "", "state123", "", "client-id", opts)
+	require.NoError(t, err)
+	assert.Contains(t, authURL, "redirect_uri=http%3A%2F%2Flocalhost%3A9999%2Fmy-callback")
+}
+
+func TestExchangeCode_UsesResolvedRedirectURI(t *testing.T) {
+	// Capture the request body sent to the token endpoint
+	var receivedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"tok","token_type":"bearer"}`)
+	}))
+	defer srv.Close()
+
+	m := &Manager{cfg: config.Default(), httpClient: srv.Client()}
+	oauthCfg := &oauth.Config{TokenEndpoint: srv.URL + "/token"}
+	clientCreds := &ClientCredentials{ClientID: "cid", ClientSecret: "csecret"}
+	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
+
+	_, err := m.exchangeCode(context.Background(), oauthCfg, "launchpad", "code123", "", clientCreds, opts)
+	require.NoError(t, err)
+	// Body is URL-encoded form data
+	assert.Contains(t, receivedBody, "redirect_uri=http%3A%2F%2Flocalhost%3A7777%2Fcb")
+}
+
+func TestRegisterBC3Client_UsesResolvedRedirectURI(t *testing.T) {
+	var receivedBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	m := &Manager{
+		cfg:        config.Default(),
+		httpClient: srv.Client(),
+		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+	}
+	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
+
+	creds, err := m.registerBC3Client(context.Background(), srv.URL+"/register", false, opts)
+	require.NoError(t, err)
+	assert.Equal(t, "dcr-id", creds.ClientID)
+
+	// Verify the redirect URI was sent in the DCR request
+	redirectURIs, ok := receivedBody["redirect_uris"].([]any)
+	require.True(t, ok)
+	assert.Equal(t, "http://localhost:7777/cb", redirectURIs[0])
+}
+
+func TestRegisterBC3Client_CustomRedirectNotPersisted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	// Override XDG_CONFIG_HOME so saveBC3Client would write to tmpDir (but shouldn't)
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	m := &Manager{
+		cfg:        config.Default(),
+		httpClient: srv.Client(),
+		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+	}
+	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
+
+	// Custom redirect: should NOT persist
+	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", true, opts)
+	require.NoError(t, err)
+
+	clientFile := filepath.Join(tmpDir, "basecamp", "client.json")
+	_, statErr := os.Stat(clientFile)
+	assert.True(t, os.IsNotExist(statErr), "client.json should not be written for custom redirect URI")
+}
+
+func TestRegisterBC3Client_DefaultRedirectPersisted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	// Override XDG_CONFIG_HOME so saveBC3Client writes to tmpDir
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	m := &Manager{
+		cfg:        config.Default(),
+		httpClient: srv.Client(),
+		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+	}
+	opts := &LoginOptions{RedirectURI: defaultRedirectURI}
+
+	// Default redirect: should persist
+	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", false, opts)
+	require.NoError(t, err)
+
+	clientFile := filepath.Join(tmpDir, "basecamp", "client.json")
+	_, statErr := os.Stat(clientFile)
+	assert.NoError(t, statErr, "client.json should be written for default redirect URI")
+}
+
+func TestLoadClientCredentials_BC3_CustomRedirect_SkipsStoredClient(t *testing.T) {
+	// DCR server
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"client_id":"dcr-fresh","client_secret":"dcr-secret"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	m := &Manager{
+		cfg:        config.Default(),
+		httpClient: srv.Client(),
+		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+	}
+
+	// Pre-populate client.json
+	storedCreds := &ClientCredentials{ClientID: "stored-id", ClientSecret: "stored-secret"}
+	require.NoError(t, m.saveBC3Client(storedCreds))
+
+	oauthCfg := &oauth.Config{RegistrationEndpoint: srv.URL + "/register"}
+
+	// Custom redirect: should skip stored client and do DCR
+	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
+	creds, err := m.loadClientCredentials(context.Background(), oauthCfg, "bc3", opts)
+	require.NoError(t, err)
+	assert.Equal(t, "dcr-fresh", creds.ClientID, "should use DCR result, not stored client")
 }
 
 func TestAtomicCredentialWrite_OverwriteExisting(t *testing.T) {

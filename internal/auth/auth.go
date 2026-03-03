@@ -37,6 +37,12 @@ const (
 	launchpadClientSecret = "a3dc33d78258e828efd6768ac2cd67f32ec1910a" //nolint:gosec // G101: Public OAuth client secret for native app
 )
 
+// Default OAuth callback address and redirect URI.
+const (
+	defaultCallbackAddr = "127.0.0.1:8976"
+	defaultRedirectURI  = "http://127.0.0.1:8976/callback"
+)
+
 // Manager handles OAuth authentication.
 type Manager struct {
 	cfg        *config.Config
@@ -205,6 +211,10 @@ type LoginOptions struct {
 	Scope     string
 	NoBrowser bool // If true, don't auto-open browser, just print URL
 
+	// RedirectURI overrides the OAuth redirect URI.
+	// Takes precedence over BASECAMP_OAUTH_REDIRECT_URI and CallbackAddr.
+	RedirectURI string
+
 	// CallbackAddr is the address for the local OAuth callback server.
 	// Default: "127.0.0.1:8976"
 	CallbackAddr string
@@ -220,9 +230,6 @@ type LoginOptions struct {
 
 // defaults fills in default values for LoginOptions.
 func (o *LoginOptions) defaults() {
-	if o.CallbackAddr == "" {
-		o.CallbackAddr = "127.0.0.1:8976"
-	}
 	if o.BrowserLauncher == nil && !o.NoBrowser {
 		o.BrowserLauncher = openBrowser
 	}
@@ -235,9 +242,63 @@ func (o *LoginOptions) log(msg string) {
 	}
 }
 
+// resolveOAuthCallback determines the redirect URI and listener address for
+// the OAuth callback. Precedence: LoginOptions.RedirectURI > env var
+// BASECAMP_OAUTH_REDIRECT_URI > CallbackAddr-derived > hardcoded default.
+func resolveOAuthCallback(opts *LoginOptions) (redirectURI string, listenAddr string, err error) {
+	raw := opts.RedirectURI
+	if raw == "" {
+		raw = os.Getenv("BASECAMP_OAUTH_REDIRECT_URI")
+	}
+	if raw == "" && opts.CallbackAddr != "" {
+		raw = "http://" + opts.CallbackAddr + "/callback"
+	}
+	if raw == "" {
+		return defaultRedirectURI, defaultCallbackAddr, nil
+	}
+
+	u, parseErr := url.Parse(raw)
+	if parseErr != nil || !u.IsAbs() {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: must be an absolute URL", raw))
+	}
+	if u.Scheme != "http" {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: scheme must be http (RFC 8252 loopback)", raw))
+	}
+	if !hostutil.IsLocalhost(u.Host) {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: host must be loopback (localhost, 127.0.0.1, [::1])", raw))
+	}
+	if u.Port() == "" {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: port is required", raw))
+	}
+	if u.User != nil {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: userinfo not allowed", raw))
+	}
+	if u.RawQuery != "" {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: query string not allowed", raw))
+	}
+	if u.Fragment != "" {
+		return "", "", output.ErrAuth(fmt.Sprintf("invalid redirect URI %q: fragment not allowed", raw))
+	}
+
+	return raw, u.Host, nil
+}
+
 // Login initiates the OAuth login flow.
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	opts.defaults()
+
+	// Resolve redirect URI and listener address
+	redirectURI, listenAddr, err := resolveOAuthCallback(&opts)
+	if err != nil {
+		return err
+	}
+	opts.RedirectURI = redirectURI
+
+	// Log overrides
+	if redirectURI != defaultRedirectURI {
+		opts.log(fmt.Sprintf("Using custom redirect URI: %s", redirectURI))
+	}
+
 	credKey := m.credentialKey()
 
 	// Discover OAuth config
@@ -269,7 +330,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	}
 
 	// Start local callback server
-	code, err := m.waitForCallback(ctx, state, authURL, &opts)
+	code, err := m.waitForCallback(ctx, state, authURL, listenAddr, &opts)
 	if err != nil {
 		return err
 	}
@@ -326,29 +387,30 @@ func (m *Manager) launchpadURL() (string, error) {
 
 func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Config, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
 	if oauthType == "bc3" {
-		// BC3: Try to load from stored file, otherwise register via DCR
-		creds, err := m.loadBC3Client()
-		if err == nil {
-			return creds, nil
+		customRedirect := opts.RedirectURI != defaultRedirectURI
+
+		// BC3 with default redirect: try stored client first
+		if !customRedirect {
+			creds, err := m.loadBC3Client()
+			if err == nil {
+				return creds, nil
+			}
 		}
 
 		// Register new client via DCR
 		if oauthCfg.RegistrationEndpoint == "" {
 			return nil, output.ErrAuth("OAuth server does not support Dynamic Client Registration")
 		}
-		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, opts)
+		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, customRedirect, opts)
 	}
 
-	// Launchpad: Check environment variables, then use built-in defaults
-	// Priority: env vars > built-in defaults
-	clientID := os.Getenv("BASECAMP_CLIENT_ID")
-	clientSecret := os.Getenv("BASECAMP_CLIENT_SECRET")
-
-	if clientID != "" && clientSecret != "" {
-		return &ClientCredentials{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-		}, nil
+	// Launchpad: resolve client credentials from env vars
+	creds, err := resolveClientCredentials(opts.log)
+	if err != nil {
+		return nil, err
+	}
+	if creds != nil {
+		return creds, nil
 	}
 
 	// Use built-in defaults for production Launchpad
@@ -356,6 +418,27 @@ func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Con
 		ClientID:     launchpadClientID,
 		ClientSecret: launchpadClientSecret,
 	}, nil
+}
+
+// resolveClientCredentials reads OAuth client credentials from environment
+// variables BASECAMP_OAUTH_CLIENT_ID and BASECAMP_OAUTH_CLIENT_SECRET.
+// Both must be set together. Returns nil, nil when neither is set.
+func resolveClientCredentials(log func(string)) (*ClientCredentials, error) {
+	clientID := os.Getenv("BASECAMP_OAUTH_CLIENT_ID")
+	clientSecret := os.Getenv("BASECAMP_OAUTH_CLIENT_SECRET")
+
+	if clientID == "" && clientSecret == "" {
+		return nil, nil
+	}
+	if clientID == "" {
+		return nil, output.ErrAuth("BASECAMP_OAUTH_CLIENT_ID is required when BASECAMP_OAUTH_CLIENT_SECRET is set")
+	}
+	if clientSecret == "" {
+		return nil, output.ErrAuth("BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set")
+	}
+
+	log("Using custom OAuth client credentials from BASECAMP_OAUTH_CLIENT_ID/SECRET")
+	return &ClientCredentials{ClientID: clientID, ClientSecret: clientSecret}, nil
 }
 
 func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
@@ -377,12 +460,11 @@ func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 	return &creds, nil
 }
 
-func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
-	redirectURI := "http://" + opts.CallbackAddr + "/callback"
+func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, customRedirect bool, opts *LoginOptions) (*ClientCredentials, error) {
 	regReq := map[string]any{
 		"client_name":                "basecamp-cli",
 		"client_uri":                 "https://github.com/basecamp/basecamp-cli",
-		"redirect_uris":              []string{redirectURI},
+		"redirect_uris":              []string{opts.RedirectURI},
 		"grant_types":                []string{"authorization_code"},
 		"response_types":             []string{"code"},
 		"token_endpoint_auth_method": "none",
@@ -422,14 +504,18 @@ func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint st
 		return nil, fmt.Errorf("no client_id in DCR response")
 	}
 
-	// Save client credentials
 	creds := &ClientCredentials{
 		ClientID:     regResp.ClientID,
 		ClientSecret: regResp.ClientSecret,
 	}
 
-	if err := m.saveBC3Client(creds); err != nil {
-		return nil, err
+	// Only persist DCR credentials when using the default redirect URI.
+	// Custom redirect URIs are session-only to prevent stale client.json
+	// entries that would fail on subsequent runs without the override.
+	if !customRedirect {
+		if err := m.saveBC3Client(creds); err != nil {
+			return nil, err
+		}
 	}
 
 	return creds, nil
@@ -456,12 +542,10 @@ func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeC
 		return "", err
 	}
 
-	redirectURI := "http://" + opts.CallbackAddr + "/callback"
-
 	q := u.Query()
 	q.Set("response_type", "code")
 	q.Set("client_id", clientID)
-	q.Set("redirect_uri", redirectURI)
+	q.Set("redirect_uri", opts.RedirectURI)
 	q.Set("state", state)
 
 	if oauthType == "bc3" {
@@ -478,10 +562,10 @@ func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeC
 	return u.String(), nil
 }
 
-func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL string, opts *LoginOptions) (string, error) {
+func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, listenAddr string, opts *LoginOptions) (string, error) {
 	// Start listener
 	lc := net.ListenConfig{}
-	listener, err := lc.Listen(ctx, "tcp", opts.CallbackAddr)
+	listener, err := lc.Listen(ctx, "tcp", listenAddr)
 	if err != nil {
 		return "", fmt.Errorf("failed to start callback server: %w", err)
 	}
@@ -555,7 +639,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case <-time.After(5 * time.Minute):
-		return "", fmt.Errorf("authentication timeout")
+		return "", fmt.Errorf("authentication timeout waiting for callback on %s", listenAddr)
 	}
 }
 
@@ -565,7 +649,7 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType
 	req := oauth.ExchangeRequest{
 		TokenEndpoint:   cfg.TokenEndpoint,
 		Code:            code,
-		RedirectURI:     "http://" + opts.CallbackAddr + "/callback",
+		RedirectURI:     opts.RedirectURI,
 		ClientID:        clientCreds.ClientID,
 		ClientSecret:    clientCreds.ClientSecret,
 		CodeVerifier:    codeVerifier,
