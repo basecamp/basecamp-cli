@@ -88,6 +88,18 @@ basecamp auth login --scope full # Full read/write access
 basecamp auth token              # Print token for scripts
 ```
 
+### Custom OAuth Credentials
+
+To use your own OAuth app (e.g., a custom Launchpad integration):
+
+| Variable | Purpose |
+|----------|---------|
+| `BASECAMP_OAUTH_CLIENT_ID` | OAuth client ID |
+| `BASECAMP_OAUTH_CLIENT_SECRET` | OAuth client secret |
+| `BASECAMP_OAUTH_REDIRECT_URI` | Redirect URI (must be `http://` loopback with explicit port) |
+
+Both `CLIENT_ID` and `CLIENT_SECRET` must be set together.
+
 ## AI Agent Integration
 
 `basecamp` works with any AI agent that can run shell commands.
