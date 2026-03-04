@@ -72,7 +72,7 @@ signs:
 # Sign and notarize macOS binaries (cross-platform via embedded quill)
 notarize:
   macos:
-    - enabled: '{{ and .Env.MACOS_SIGN_P12 .Env.MACOS_SIGN_PASSWORD .Env.MACOS_NOTARY_KEY .Env.MACOS_NOTARY_KEY_ID .Env.MACOS_NOTARY_ISSUER_ID }}'
+    - enabled: '{{ and (ne .Env.MACOS_SIGN_P12 "") (ne .Env.MACOS_SIGN_PASSWORD "") (ne .Env.MACOS_NOTARY_KEY "") (ne .Env.MACOS_NOTARY_KEY_ID "") (ne .Env.MACOS_NOTARY_ISSUER_ID "") }}'
       ids:
         - basecamp
       sign:
