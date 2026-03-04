@@ -1,11 +1,15 @@
 package commands
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -119,9 +123,101 @@ func TestWizardBreadcrumbs(t *testing.T) {
 	})
 }
 
+// TestIsFirstRunOnboarded verifies isFirstRun returns false when onboarded flag is set.
+func TestIsFirstRunOnboarded(t *testing.T) {
+	app, _ := setupQuickstartTestApp(t, "", "")
+	onboarded := true
+	app.Config.Onboarded = &onboarded
+
+	assert.False(t, isFirstRun(app), "isFirstRun should be false when onboarded is true")
+}
+
 // TestNewSetupCmd verifies the setup command is created correctly.
 func TestNewSetupCmd(t *testing.T) {
 	cmd := NewSetupCmd()
 	assert.Equal(t, "setup", cmd.Use)
 	assert.Contains(t, cmd.Short, "setup")
+}
+
+// TestNewSetupCmdHasClaudeSubcommand verifies setup has the claude subcommand.
+func TestNewSetupCmdHasClaudeSubcommand(t *testing.T) {
+	cmd := NewSetupCmd()
+
+	var found bool
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "claude" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "setup should have a 'claude' subcommand")
+}
+
+// TestSetupClaudeJSONOutputPurity verifies setup claude --json emits only
+// valid JSON with no interleaved prose.
+func TestSetupClaudeJSONOutputPurity(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true // makes IsInteractive() return false
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(buf)
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// The output buffer (app.Output) receives app.OK data;
+	// cmd stdout (buf) should have no prose since IsInteractive is false.
+	out := buf.String()
+	if out != "" {
+		// If anything landed on cmd stdout, it must be valid JSON
+		assert.True(t, json.Valid([]byte(out)),
+			"setup claude --json stdout should be empty or valid JSON, got: %s", out)
+	}
+}
+
+// TestSetupClaudeSummaryStates verifies the three summary states.
+func TestSetupClaudeSummaryStates(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	app, appBuf := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	out := appBuf.String()
+
+	// Parse the JSON envelope to check summary and data
+	var envelope struct {
+		Summary string         `json:"summary"`
+		Data    map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &envelope))
+
+	assert.Contains(t, envelope.Data, "claude_detected")
+	assert.Contains(t, envelope.Data, "plugin_installed")
+
+	detected, _ := envelope.Data["claude_detected"].(bool)
+	if !detected {
+		assert.Equal(t, "Claude Code not detected", envelope.Summary)
+	} else {
+		installed, _ := envelope.Data["plugin_installed"].(bool)
+		if installed {
+			assert.Equal(t, "Claude Code plugin installed", envelope.Summary)
+		} else {
+			assert.Equal(t, "Claude Code plugin not installed", envelope.Summary)
+		}
+	}
 }

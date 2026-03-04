@@ -170,7 +170,7 @@ func newConfigSetCmd() *cobra.Command {
 		Long: `Set a configuration value in the local or global config file.
 
 Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
-            format, scope, default_profile, hints, stats, verbose`,
+            format, scope, default_profile, hints, stats, verbose, onboarded`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -192,6 +192,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				"hints":           true,
 				"stats":           true,
 				"verbose":         true,
+				"onboarded":       true,
 			}
 			if !validKeys[key] {
 				names := make([]string, 0, len(validKeys))
@@ -243,7 +244,7 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 			// Set value with type-specific validation
 			valueOut := value
 			switch key {
-			case "cache_enabled", "hints", "stats":
+			case "cache_enabled", "hints", "stats", "onboarded":
 				boolVal, ok := parseBoolFlag(value)
 				if !ok {
 					return output.ErrUsage(fmt.Sprintf("%s must be true/false (or 1/0)", key))

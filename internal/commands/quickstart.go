@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -127,6 +128,11 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	if authInfo.Status == "unauthenticated" {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action: "authenticate", Cmd: "basecamp auth login", Description: "Login",
+		})
+	}
+	if harness.IsPluginNeeded() {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action: "setup_claude", Cmd: "basecamp setup claude", Description: "Connect Claude to Basecamp",
 		})
 	}
 
