@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -15,6 +16,31 @@ func DetectClaude() bool {
 	home = filepath.Clean(home)
 	info, err := os.Stat(filepath.Join(home, ".claude"))
 	return err == nil && info.IsDir()
+}
+
+// IsPluginNeeded returns true if Claude Code is installed but the plugin is not.
+func IsPluginNeeded() bool {
+	if !DetectClaude() {
+		return false
+	}
+	check := CheckClaudePlugin()
+	return check.Status != "pass"
+}
+
+// FindClaudeBinary returns the path to the claude binary, or "" if not found.
+func FindClaudeBinary() string {
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidate := filepath.Join(filepath.Clean(home), ".local", "bin", "claude")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
 }
 
 // CheckClaudePlugin checks whether the basecamp plugin is installed in Claude Code.
@@ -36,7 +62,7 @@ func CheckClaudePlugin() *StatusCheck {
 				Name:    "Claude Code Plugin",
 				Status:  "fail",
 				Message: "Plugin not installed",
-				Hint:    "Run: claude plugin install basecamp",
+				Hint:    "Run: basecamp setup claude",
 			}
 		}
 		return &StatusCheck{
@@ -62,7 +88,7 @@ func CheckClaudePlugin() *StatusCheck {
 		Name:    "Claude Code Plugin",
 		Status:  "fail",
 		Message: "Plugin not installed",
-		Hint:    "Run: claude plugin install basecamp",
+		Hint:    "Run: basecamp setup claude",
 	}
 }
 

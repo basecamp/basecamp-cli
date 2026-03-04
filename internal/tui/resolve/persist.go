@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -71,8 +72,20 @@ func PersistValue(key, value, scope string) error {
 		_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
 	}
 
-	// Set the value
-	configData[key] = value
+	// Set the value (use native JSON types for boolean keys)
+	switch key {
+	case "onboarded", "hints", "stats", "cache_enabled":
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1":
+			configData[key] = true
+		case "false", "0":
+			configData[key] = false
+		default:
+			configData[key] = value
+		}
+	default:
+		configData[key] = value
+	}
 
 	// Write back
 	data, err := json.MarshalIndent(configData, "", "  ")

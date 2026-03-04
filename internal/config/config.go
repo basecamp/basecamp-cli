@@ -33,9 +33,10 @@ type Config struct {
 	Format string `json:"format"`
 
 	// Behavior preferences (persisted via config set, overridable by flags)
-	Hints   *bool `json:"hints,omitempty"`
-	Stats   *bool `json:"stats,omitempty"`
-	Verbose *int  `json:"verbose,omitempty"`
+	Hints     *bool `json:"hints,omitempty"`
+	Stats     *bool `json:"stats,omitempty"`
+	Verbose   *int  `json:"verbose,omitempty"`
+	Onboarded *bool `json:"onboarded,omitempty"`
 
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
@@ -191,6 +192,10 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	if v, ok := fileCfg["stats"].(bool); ok {
 		cfg.Stats = &v
 		cfg.Sources["stats"] = string(source)
+	}
+	if v, ok := fileCfg["onboarded"].(bool); ok {
+		cfg.Onboarded = &v
+		cfg.Sources["onboarded"] = string(source)
 	}
 	if v, ok := fileCfg["verbose"]; ok {
 		if fv, ok := v.(float64); ok {
