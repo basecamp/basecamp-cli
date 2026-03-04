@@ -240,7 +240,7 @@ func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input strin
 		}
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid person ID %q for %q", idStr, token)
+			return nil, fmt.Errorf("invalid person ID %q for %q: %w", idStr, token, err)
 		}
 		ids = append(ids, id)
 	}
@@ -250,7 +250,7 @@ func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input strin
 // applySubscribeFlags interprets --subscribe / --no-subscribe flag values and
 // returns the SDK Subscriptions pointer:
 //   - Both set → usage error (mutually exclusive)
-//   - --no-subscribe → &[]int64{} (empty list, nobody notified)
+//   - --no-subscribe → &[]int64{} (empty list, no one else subscribed)
 //   - --subscribe "X,Y" → resolve each → &[]int64{id1, id2}
 //   - --subscribe "" (explicitly set but empty) → usage error
 //   - Neither → nil (omit, server default: everyone)

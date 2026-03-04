@@ -798,7 +798,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Document content")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (default: published)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
-	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Subscribe nobody (silent, no notifications)")
+	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	_ = cmd.MarkFlagRequired("title")
 
 	return cmd

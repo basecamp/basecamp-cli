@@ -420,7 +420,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
-	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Subscribe nobody (silent, no notifications)")
+	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 
 	return cmd
 }

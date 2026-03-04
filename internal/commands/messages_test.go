@@ -3,8 +3,11 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -347,4 +350,120 @@ func TestMessageShortcutSubscribeEmptyIsError(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "at least one person")
+}
+
+// mockMessageCreateTransport handles resolver and dock API calls, and captures the POST body.
+type mockMessageCreateTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockMessageCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		if strings.Contains(req.URL.Path, "/projects.json") {
+			body = `[{"id": 123, "name": "Test Project"}]`
+		} else if strings.Contains(req.URL.Path, "/projects/") {
+			// Return project with message_board in dock
+			body = `{"id": 123, "dock": [{"name": "message_board", "id": 777}]}`
+		} else {
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "subject": "Test", "status": "active"}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func setupMessagesMockApp(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &messagesTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+	return app, buf
+}
+
+// TestMessagesCreateNoSubscribeSendsEmptyList verifies --no-subscribe sends an empty subscriptions array.
+func TestMessagesCreateNoSubscribeSendsEmptyList(t *testing.T) {
+	transport := &mockMessageCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "--subject", "Bot log", "--no-subscribe")
+	require.NoError(t, err, "command should succeed with mock transport")
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	subs, ok := body["subscriptions"]
+	require.True(t, ok, "expected subscriptions field in request body")
+
+	subsList, ok := subs.([]any)
+	require.True(t, ok, "expected subscriptions to be an array")
+	assert.Empty(t, subsList, "expected empty subscriptions array for --no-subscribe")
+}
+
+// TestMessagesCreateDefaultOmitsSubscriptions verifies that without flags, subscriptions is omitted.
+func TestMessagesCreateDefaultOmitsSubscriptions(t *testing.T) {
+	transport := &mockMessageCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "--subject", "Normal post")
+	require.NoError(t, err, "command should succeed with mock transport")
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, ok := body["subscriptions"]
+	assert.False(t, ok, "expected subscriptions to be omitted when neither flag is set")
 }
