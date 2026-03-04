@@ -3,6 +3,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -35,97 +37,11 @@ func NewAuthCmd() *cobra.Command {
 }
 
 func newAuthLoginCmd() *cobra.Command {
-	var scope string
-	var noBrowser bool
-
-	cmd := &cobra.Command{
-		Use:   "login",
-		Short: "Authenticate with Basecamp",
-		Long:  "Start the OAuth flow to authenticate with Basecamp.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-
-			// Validate scope
-			if scope != "" && scope != "read" && scope != "full" {
-				return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
-			}
-
-			if scope == "" {
-				scope = "read"
-			}
-
-			w := cmd.OutOrStdout()
-			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme())
-
-			if app.Config.ActiveProfile != "" {
-				fmt.Fprintln(w, r.Summary.Render(fmt.Sprintf("Starting authentication for profile %q...", app.Config.ActiveProfile)))
-			} else {
-				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
-			}
-			if scope == "read" {
-				fmt.Fprintln(w, r.Muted.Render("Scope: read-only (use --scope full for write access)"))
-			} else {
-				fmt.Fprintln(w, r.Muted.Render("Scope: full (read and write access)"))
-			}
-
-			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
-				Scope:     scope,
-				NoBrowser: noBrowser,
-				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
-			}); err != nil {
-				return err
-			}
-
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, r.Success.Render("Authentication successful!"))
-
-			// Try to fetch and store user profile
-			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
-			if err == nil {
-				var profile struct {
-					ID   int    `json:"id"`
-					Name string `json:"name"`
-				}
-				if err := resp.UnmarshalData(&profile); err == nil {
-					if err := app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID)); err == nil {
-						fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("Logged in as: %s", profile.Name)))
-					}
-				}
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' (default) or 'full'")
-	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
-
-	return cmd
+	return buildLoginCmd("login")
 }
 
 func newAuthLogoutCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "logout",
-		Short: "Remove stored credentials",
-		Long:  "Remove stored authentication credentials for the current origin.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-
-			if err := app.Auth.Logout(); err != nil {
-				return err
-			}
-
-			return app.OK(map[string]string{
-				"status": "logged_out",
-			}, output.WithSummary("Successfully logged out"))
-		},
-	}
+	return buildLogoutCmd("logout")
 }
 
 func newAuthStatusCmd() *cobra.Command {
@@ -286,4 +202,121 @@ Output modes:
 	cmd.Flags().BoolVar(&stored, "stored", false, "Use stored OAuth token, ignoring BASECAMP_TOKEN env var")
 
 	return cmd
+}
+
+// NewLoginCmd creates the top-level login shortcut.
+func NewLoginCmd() *cobra.Command {
+	return buildLoginCmd("login")
+}
+
+// NewLogoutCmd creates the top-level logout shortcut.
+func NewLogoutCmd() *cobra.Command {
+	return buildLogoutCmd("logout")
+}
+
+// buildLoginCmd constructs a login command with the given Use name.
+// Shared by newAuthLoginCmd ("login" under auth) and NewLoginCmd (top-level).
+func buildLoginCmd(use string) *cobra.Command {
+	var scope string
+	var noBrowser bool
+
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: "Authenticate with Basecamp",
+		Long:  "Start the OAuth flow to authenticate with Basecamp.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			if scope != "" && scope != "read" && scope != "full" {
+				return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
+			}
+
+			if scope == "" {
+				scope = "read"
+			}
+
+			w := cmd.OutOrStdout()
+			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme())
+
+			if app.Config.ActiveProfile != "" {
+				fmt.Fprintln(w, r.Summary.Render(fmt.Sprintf("Starting authentication for profile %q...", app.Config.ActiveProfile)))
+			} else {
+				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
+			}
+			if scope == "read" {
+				fmt.Fprintln(w, r.Muted.Render("Scope: read-only (use --scope full for write access)"))
+			} else {
+				fmt.Fprintln(w, r.Muted.Render("Scope: full (read and write access)"))
+			}
+
+			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
+				Scope:     scope,
+				NoBrowser: noBrowser,
+				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
+			}); err != nil {
+				return err
+			}
+
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, r.Success.Render("Authentication successful!"))
+
+			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
+			if err == nil {
+				var profile struct {
+					ID   int    `json:"id"`
+					Name string `json:"name"`
+				}
+				if err := resp.UnmarshalData(&profile); err == nil {
+					if err := app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID)); err == nil {
+						fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("Logged in as: %s", profile.Name)))
+					}
+				}
+			}
+
+			printClaudeNudge(w, r)
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' (default) or 'full'")
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
+
+	return cmd
+}
+
+// buildLogoutCmd constructs a logout command with the given Use name.
+// Shared by newAuthLogoutCmd ("logout" under auth) and NewLogoutCmd (top-level).
+func buildLogoutCmd(use string) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: "Remove stored credentials",
+		Long:  "Remove stored authentication credentials for the current origin.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			if err := app.Auth.Logout(); err != nil {
+				return err
+			}
+
+			return app.OK(map[string]string{
+				"status": "logged_out",
+			}, output.WithSummary("Successfully logged out"))
+		},
+	}
+}
+
+// printClaudeNudge prints a hint about Claude Code plugin setup after login.
+func printClaudeNudge(w io.Writer, r *output.Renderer) {
+	if harness.IsPluginNeeded() {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, r.Muted.Render("  Claude Code detected. Connect it to Basecamp:"))
+		fmt.Fprintln(w, r.Data.Render("  basecamp setup claude"))
+	}
 }

@@ -207,6 +207,8 @@ func Execute() {
 	cmd.AddCommand(commands.NewReportsCmd())
 	cmd.AddCommand(commands.NewCompletionCmd())
 	cmd.AddCommand(commands.NewSetupCmd())
+	cmd.AddCommand(commands.NewLoginCmd())
+	cmd.AddCommand(commands.NewLogoutCmd())
 	cmd.AddCommand(commands.NewDoctorCmd())
 	cmd.AddCommand(commands.NewUpgradeCmd())
 	cmd.AddCommand(commands.NewMigrateCmd())
