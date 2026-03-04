@@ -33,7 +33,7 @@ func FindClaudeBinary() string {
 		return p
 	}
 	home, err := os.UserHomeDir()
-	if err != nil {
+	if err != nil || home == "" {
 		return ""
 	}
 	candidate := filepath.Join(filepath.Clean(home), ".local", "bin", "claude")

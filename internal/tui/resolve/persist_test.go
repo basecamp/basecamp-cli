@@ -22,8 +22,8 @@ func TestPersistValueBooleanKeys(t *testing.T) {
 	for _, key := range boolKeys {
 		t.Run(key+"=true", func(t *testing.T) {
 			// Start fresh
-			os.MkdirAll(filepath.Dir(configPath), 0700)
-			os.WriteFile(configPath, []byte("{}"), 0600)
+			require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0700))
+			require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0600))
 
 			err := PersistValue(key, "true", "global")
 			require.NoError(t, err)
@@ -40,8 +40,8 @@ func TestPersistValueBooleanKeys(t *testing.T) {
 		})
 
 		t.Run(key+"=false", func(t *testing.T) {
-			os.MkdirAll(filepath.Dir(configPath), 0700)
-			os.WriteFile(configPath, []byte("{}"), 0600)
+			require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0700))
+			require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0600))
 
 			err := PersistValue(key, "false", "global")
 			require.NoError(t, err)
@@ -64,8 +64,8 @@ func TestPersistValueStringKeys(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
 	configPath := filepath.Join(tmpDir, "basecamp", "config.json")
-	os.MkdirAll(filepath.Dir(configPath), 0700)
-	os.WriteFile(configPath, []byte("{}"), 0600)
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0700))
+	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0600))
 
 	err := PersistValue("account_id", "12345", "global")
 	require.NoError(t, err)
@@ -86,8 +86,8 @@ func TestPersistValueBooleanWhitespaceTolerance(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
 	configPath := filepath.Join(tmpDir, "basecamp", "config.json")
-	os.MkdirAll(filepath.Dir(configPath), 0700)
-	os.WriteFile(configPath, []byte("{}"), 0600)
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0700))
+	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0600))
 
 	err := PersistValue("onboarded", " true ", "global")
 	require.NoError(t, err)
