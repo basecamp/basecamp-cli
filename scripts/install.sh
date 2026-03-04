@@ -81,17 +81,12 @@ verify_checksums() {
   if command -v cosign &>/dev/null; then
     info "Verifying cosign signature..."
 
-    if ! curl -fsSL "${base_url}/checksums.txt.sig" -o "${tmp_dir}/checksums.txt.sig"; then
-      error "Failed to download checksums.txt.sig"
-    fi
-
-    if ! curl -fsSL "${base_url}/checksums.txt.pem" -o "${tmp_dir}/checksums.txt.pem"; then
-      error "Failed to download checksums.txt.pem"
+    if ! curl -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
+      error "Failed to download checksums.txt.bundle"
     fi
 
     cosign verify-blob \
-      --certificate "${tmp_dir}/checksums.txt.pem" \
-      --signature "${tmp_dir}/checksums.txt.sig" \
+      --bundle "${tmp_dir}/checksums.txt.bundle" \
       --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v${version}" \
       --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
       "${tmp_dir}/checksums.txt" \
