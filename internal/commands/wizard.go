@@ -187,12 +187,12 @@ func installClaudeNonInteractive(cmd *cobra.Command) {
 	w := cmd.ErrOrStderr()
 
 	// Best-effort marketplace registration
-	marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", "basecamp/claude-plugins") //nolint:gosec // G204: claudePath from exec.LookPath
+	marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
 	marketplaceCmd.Stderr = w
 	_ = marketplaceCmd.Run()
 
 	// Install the plugin
-	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", "basecamp") //nolint:gosec // G204: claudePath from exec.LookPath
+	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
 	installCmd.Stderr = w
 	_ = installCmd.Run()
 }
@@ -221,8 +221,9 @@ func wizardClaude(cmd *cobra.Command, styles *tui.Styles) error {
 	if claudePath == "" {
 		fmt.Fprintln(w, styles.Muted.Render("  Claude Code detected but binary not found in PATH."))
 		fmt.Fprintln(w, styles.Muted.Render("  Install the plugin manually:"))
-		fmt.Fprintln(w, styles.Bold.Render("    claude plugin marketplace add basecamp/claude-plugins"))
-		fmt.Fprintln(w, styles.Bold.Render("    claude plugin install basecamp"))
+		line1, line2 := claudeManualInstallHint(styles)
+		fmt.Fprintln(w, line1)
+		fmt.Fprintln(w, line2)
 		fmt.Fprintln(w)
 		return nil
 	}
@@ -231,8 +232,9 @@ func wizardClaude(cmd *cobra.Command, styles *tui.Styles) error {
 	if confirmErr != nil || !install {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, styles.Muted.Render("  You can install it later:"))
-		fmt.Fprintln(w, styles.Bold.Render("    claude plugin marketplace add basecamp/claude-plugins"))
-		fmt.Fprintln(w, styles.Bold.Render("    claude plugin install basecamp"))
+		line1, line2 := claudeManualInstallHint(styles)
+		fmt.Fprintln(w, line1)
+		fmt.Fprintln(w, line2)
 		fmt.Fprintln(w)
 		return nil //nolint:nilerr // Treat confirm error as skip (user canceled)
 	}
@@ -241,7 +243,7 @@ func wizardClaude(cmd *cobra.Command, styles *tui.Styles) error {
 
 	// Step 1: Register the marketplace (best-effort — may already be registered)
 	ctx := cmd.Context()
-	marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", "basecamp/claude-plugins") //nolint:gosec // G204: claudePath from exec.LookPath
+	marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
 	marketplaceCmd.Stdout = w
 	marketplaceCmd.Stderr = cmd.ErrOrStderr()
 	if err := marketplaceCmd.Run(); err != nil {
@@ -249,14 +251,15 @@ func wizardClaude(cmd *cobra.Command, styles *tui.Styles) error {
 	}
 
 	// Step 2: Install the plugin (attempt regardless of marketplace result)
-	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", "basecamp") //nolint:gosec // G204: claudePath from exec.LookPath
+	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
 	installCmd.Stdout = w
 	installCmd.Stderr = cmd.ErrOrStderr()
 	if err := installCmd.Run(); err != nil {
 		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Plugin install failed: %s", err)))
 		fmt.Fprintln(w, styles.Muted.Render("  Try manually:"))
-		fmt.Fprintln(w, styles.Bold.Render("    claude plugin marketplace add basecamp/claude-plugins"))
-		fmt.Fprintln(w, styles.Bold.Render("    claude plugin install basecamp"))
+		line1, line2 := claudeManualInstallHint(styles)
+		fmt.Fprintln(w, line1)
+		fmt.Fprintln(w, line2)
 		fmt.Fprintln(w)
 		return nil
 	}
@@ -272,6 +275,12 @@ func wizardClaude(cmd *cobra.Command, styles *tui.Styles) error {
 	fmt.Fprintln(w)
 
 	return nil
+}
+
+// claudeManualInstallHint returns the two-line manual install instructions.
+func claudeManualInstallHint(styles *tui.Styles) (string, string) {
+	return styles.Bold.Render(fmt.Sprintf("    claude plugin marketplace add %s", harness.ClaudeMarketplaceSource)),
+		styles.Bold.Render(fmt.Sprintf("    claude plugin install %s", harness.ClaudePluginName))
 }
 
 // showWelcome displays the welcome screen.

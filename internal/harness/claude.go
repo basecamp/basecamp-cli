@@ -7,6 +7,13 @@ import (
 	"path/filepath"
 )
 
+// ClaudeMarketplaceSource is the marketplace repository for the Basecamp plugin.
+// Migrating from basecamp/basecamp-cli → basecamp/claude-plugins.
+const ClaudeMarketplaceSource = "basecamp/claude-plugins"
+
+// ClaudePluginName is the plugin identifier to install.
+const ClaudePluginName = "basecamp"
+
 // DetectClaude returns true if Claude Code is installed (~/.claude/ exists).
 func DetectClaude() bool {
 	home, err := os.UserHomeDir()
