@@ -702,6 +702,8 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	var title string
 	var content string
 	var draft bool
+	var subscribe string
+	var noSubscribe bool
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -715,6 +717,12 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 			if title == "" {
 				return output.ErrUsage("--title is required")
+			}
+
+			// Resolve subscription flags before project (fail fast on bad input)
+			subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
+			if err != nil {
+				return err
 			}
 
 			// Resolve project, with interactive fallback
@@ -753,8 +761,9 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 			// Create document using SDK
 			req := &basecamp.CreateDocumentRequest{
-				Title:   title,
-				Content: content,
+				Title:         title,
+				Content:       content,
+				Subscriptions: subs,
 			}
 			if draft {
 				req.Status = "drafted"
@@ -788,6 +797,8 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Document title (required)")
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Document content")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (default: published)")
+	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
+	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Subscribe nobody (silent, no notifications)")
 	_ = cmd.MarkFlagRequired("title")
 
 	return cmd

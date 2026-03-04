@@ -264,3 +264,87 @@ func TestMessagesAliases(t *testing.T) {
 	require.Len(t, cmd.Aliases, 1)
 	assert.Equal(t, "msgs", cmd.Aliases[0])
 }
+
+// TestMessagesCreateHasSubscribeFlags tests that messages create has --subscribe and --no-subscribe flags.
+func TestMessagesCreateHasSubscribeFlags(t *testing.T) {
+	cmd := NewMessagesCmd()
+	createCmd, _, err := cmd.Find([]string{"create"})
+	require.NoError(t, err)
+
+	flag := createCmd.Flags().Lookup("subscribe")
+	require.NotNil(t, flag, "expected --subscribe flag on messages create")
+
+	flag = createCmd.Flags().Lookup("no-subscribe")
+	require.NotNil(t, flag, "expected --no-subscribe flag on messages create")
+}
+
+// TestMessageShortcutHasSubscribeFlags tests that message shortcut has --subscribe and --no-subscribe flags.
+func TestMessageShortcutHasSubscribeFlags(t *testing.T) {
+	cmd := NewMessageCmd()
+
+	flag := cmd.Flags().Lookup("subscribe")
+	require.NotNil(t, flag, "expected --subscribe flag on message")
+
+	flag = cmd.Flags().Lookup("no-subscribe")
+	require.NotNil(t, flag, "expected --no-subscribe flag on message")
+}
+
+// TestMessagesCreateSubscribeMutualExclusion tests that --subscribe and --no-subscribe are mutually exclusive.
+func TestMessagesCreateSubscribeMutualExclusion(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "--subject", "Test", "--subscribe", "me", "--no-subscribe")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "mutually exclusive")
+}
+
+// TestMessageShortcutSubscribeMutualExclusion tests mutual exclusion on the message shortcut.
+func TestMessageShortcutSubscribeMutualExclusion(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewMessageCmd()
+
+	err := executeMessagesCommand(cmd, app, "--subject", "Test", "--subscribe", "me", "--no-subscribe")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "mutually exclusive")
+}
+
+// TestMessagesCreateSubscribeEmptyIsError tests that --subscribe "" is rejected.
+func TestMessagesCreateSubscribeEmptyIsError(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "--subject", "Test", "--subscribe", "")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "at least one person")
+}
+
+// TestMessageShortcutSubscribeEmptyIsError tests that --subscribe "" is rejected on the shortcut.
+func TestMessageShortcutSubscribeEmptyIsError(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewMessageCmd()
+
+	err := executeMessagesCommand(cmd, app, "--subject", "Test", "--subscribe", "")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "at least one person")
+}

@@ -215,6 +215,8 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	var subject string
 	var content string
 	var draft bool
+	var subscribe string
+	var noSubscribe bool
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -229,6 +231,12 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 
 			if subject == "" {
 				return output.ErrUsage("--subject is required")
+			}
+
+			// Resolve subscription flags before project (fail fast on bad input)
+			subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
+			if err != nil {
+				return err
 			}
 
 			// Resolve project, with interactive fallback
@@ -265,8 +273,9 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateMessageRequest{
-				Subject: subject,
-				Content: richtext.MarkdownToHTML(content),
+				Subject:       subject,
+				Content:       richtext.MarkdownToHTML(content),
+				Subscriptions: subs,
 			}
 
 			// Default to active (published) status unless --draft is specified
@@ -303,6 +312,8 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().StringVarP(&content, "content", "b", "", "Message body content")
 	cmd.Flags().StringVar(&content, "body", "", "Message body content (alias for --content)")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
+	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
+	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Subscribe nobody (silent, no notifications)")
 	_ = cmd.MarkFlagRequired("subject")
 
 	return cmd
@@ -485,6 +496,8 @@ func NewMessageCmd() *cobra.Command {
 	var project string
 	var messageBoard string
 	var draft bool
+	var subscribe string
+	var noSubscribe bool
 
 	cmd := &cobra.Command{
 		Use:   "message",
@@ -499,6 +512,12 @@ func NewMessageCmd() *cobra.Command {
 
 			if subject == "" {
 				return output.ErrUsage("--subject is required")
+			}
+
+			// Resolve subscription flags before project (fail fast on bad input)
+			subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
+			if err != nil {
+				return err
 			}
 
 			// Resolve project, with interactive fallback
@@ -535,8 +554,9 @@ func NewMessageCmd() *cobra.Command {
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateMessageRequest{
-				Subject: subject,
-				Content: richtext.MarkdownToHTML(content),
+				Subject:       subject,
+				Content:       richtext.MarkdownToHTML(content),
+				Subscriptions: subs,
 			}
 			if draft {
 				req.Status = "drafted"
@@ -574,6 +594,8 @@ func NewMessageCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
+	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
+	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Subscribe nobody (silent, no notifications)")
 	_ = cmd.MarkFlagRequired("subject")
 
 	return cmd

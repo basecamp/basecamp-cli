@@ -25,7 +25,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
 | **Communication** |
-| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin |
+| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin. Create supports `--subscribe`/`--no-subscribe` |
 | message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
 | campfires | 14 | `campfire` | ✅ | - | list, messages, post, line show/delete |
@@ -44,11 +44,11 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | **Files & Documents** |
 | uploads | 8 | `files`, `uploads` | ✅ | - | list, show |
 | vaults | 8 | `files`, `vaults` | ✅ | - | list, show, create |
-| documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update |
+| documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe` |
 | attachments | 1 | `uploads` | ✅ | - | Attachment metadata |
 | **Schedule** |
 | schedules | 2 | `schedule` | ✅ | - | Schedule container + settings |
-| schedule_entries | 5 | `schedule` | ✅ | - | list, show, create, update, occurrences |
+| schedule_entries | 5 | `schedule` | ✅ | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
 | events | 1 | `events` | ✅ | - | Recording change audit trail |
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | - | list, show, create, update, delete |

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
@@ -221,4 +223,57 @@ func extractCommentWithProject(arg string) (id, projectID string) {
 // extractIDs extracts IDs from multiple arguments, handling URLs.
 func extractIDs(args []string) []string {
 	return urlarg.ExtractIDs(args)
+}
+
+// resolvePersonIDs splits a comma-separated input string and resolves each
+// token (name, email, ID, or "me") to a person ID via the name resolver.
+func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input string) ([]int64, error) {
+	var ids []int64
+	for token := range strings.SplitSeq(input, ",") {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		idStr, _, err := resolver.ResolvePerson(ctx, token)
+		if err != nil {
+			return nil, fmt.Errorf("resolving %q: %w", token, err)
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid person ID %q for %q", idStr, token)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// applySubscribeFlags interprets --subscribe / --no-subscribe flag values and
+// returns the SDK Subscriptions pointer:
+//   - Both set → usage error (mutually exclusive)
+//   - --no-subscribe → &[]int64{} (empty list, nobody notified)
+//   - --subscribe "X,Y" → resolve each → &[]int64{id1, id2}
+//   - --subscribe "" (explicitly set but empty) → usage error
+//   - Neither → nil (omit, server default: everyone)
+//
+// subscribeChanged should be true when the --subscribe flag was explicitly
+// provided on the command line (i.e. cmd.Flags().Changed("subscribe")).
+func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscribe string, subscribeChanged, noSubscribe bool) (*[]int64, error) {
+	if subscribeChanged && noSubscribe {
+		return nil, output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
+	}
+	if noSubscribe {
+		empty := []int64{}
+		return &empty, nil
+	}
+	if subscribeChanged {
+		ids, err := resolvePersonIDs(ctx, resolver, subscribe)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return nil, output.ErrUsage("--subscribe requires at least one person")
+		}
+		return &ids, nil
+	}
+	return nil, nil
 }

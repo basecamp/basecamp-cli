@@ -374,6 +374,8 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var allDay bool
 	var notify bool
 	var participants string
+	var subscribe string
+	var noSubscribe bool
 
 	cmd := &cobra.Command{
 		Use:   "create [summary]",
@@ -401,7 +403,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return output.ErrUsage("--ends-at required (ISO 8601 datetime)")
 			}
 
-			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, participants)
+			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, participants, subscribe, noSubscribe)
 		},
 	}
 
@@ -417,11 +419,19 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
+	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
+	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Subscribe nobody (silent, no notifications)")
 
 	return cmd
 }
 
-func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify bool, participants string) error {
+func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify bool, participants, subscribe string, noSubscribe bool) error {
+	// Resolve subscription flags early (fail fast on bad input)
+	subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
+	if err != nil {
+		return err
+	}
+
 	// Resolve project, with interactive fallback
 	projectID := project
 	if projectID == "" {
@@ -454,12 +464,13 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 
 	// Build request
 	req := &basecamp.CreateScheduleEntryRequest{
-		Summary:     summary,
-		StartsAt:    startsAt,
-		EndsAt:      endsAt,
-		Description: description,
-		AllDay:      allDay,
-		Notify:      notify,
+		Summary:       summary,
+		StartsAt:      startsAt,
+		EndsAt:        endsAt,
+		Description:   description,
+		AllDay:        allDay,
+		Notify:        notify,
+		Subscriptions: subs,
 	}
 
 	if participants != "" {
