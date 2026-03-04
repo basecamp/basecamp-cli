@@ -15,6 +15,7 @@ basecamp doctor --json
 Interpret the output:
 - **pass**: Working correctly
 - **warn**: Non-critical issue (e.g., shell completion not installed)
+- **skip**: Check not run (e.g., unauthenticated or not applicable)
 - **fail**: Broken — needs attention
 
 For any failures, follow the `hint` field in the check output. Common fixes:
