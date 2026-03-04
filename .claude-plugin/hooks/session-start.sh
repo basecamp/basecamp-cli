@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # session-start.sh - Basecamp plugin liveness check
 #
-# Lightweight: one subprocess call. Confirms the CLI is available and
-# authenticated. Context priming (project IDs, etc.) happens on first
-# use via the /basecamp skill, not here.
+# Lightweight: one subprocess call. Confirms the CLI is available and,
+# when jq is installed, whether it is authenticated. Context priming
+# (project IDs, etc.) happens on first use via the /basecamp skill,
+# not here.
 
 set -euo pipefail
 
@@ -30,7 +31,10 @@ EOF
   exit 0
 fi
 
-is_auth=$(echo "$auth_json" | jq -r '.data.authenticated // false')
+is_auth=false
+if parsed_auth=$(echo "$auth_json" | jq -er '.data.authenticated' 2>/dev/null); then
+  is_auth="$parsed_auth"
+fi
 
 if [[ "$is_auth" == "true" ]]; then
   cat << 'EOF'
