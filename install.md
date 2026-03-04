@@ -86,10 +86,10 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 ### Claude Code
 
 ```bash
-claude plugin install basecamp
+basecamp setup claude
 ```
 
-This installs the plugin with skills, hooks, and agent workflow support.
+This registers the marketplace and installs the plugin with skills, hooks, and agent workflow support.
 
 ### Other Agents
 

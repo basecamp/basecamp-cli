@@ -104,7 +104,7 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 
 `basecamp` works with any AI agent that can run shell commands.
 
-**Claude Code:** `claude plugin install basecamp` — installs the plugin with skills, hooks, and agent workflow support.
+**Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
 **Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 
