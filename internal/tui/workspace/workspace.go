@@ -485,7 +485,7 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Help overlay consumes all keys when active
 	if w.pickingBoost {
 		switch msg.Code { //nolint:exhaustive // partial key handler
-		case tea.KeyEsc:
+		case tea.KeyEscape:
 			w.pickingBoost = false
 			w.boostPicker.Blur()
 			return nil
