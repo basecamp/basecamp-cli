@@ -85,6 +85,10 @@ basecamp <cmd> --agent     # Machine-readable, no interactive prompts
 basecamp <cmd> --ids-only  # Just IDs, one per line
 basecamp <cmd> --count     # Just the count
 basecamp <cmd> --stats     # Include session stats in output
+basecamp <cmd> --md / --markdown / -m  # Markdown output (portable, pipeable to glow/bat)
+basecamp <cmd> --styled    # Force ANSI-styled output even when piped
+basecamp <cmd> -v          # Verbose: show operations
+basecamp <cmd> -vv         # Very verbose: show operations + HTTP requests
 ```
 
 ### Pagination
@@ -120,6 +124,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Create card | `basecamp card --title "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> --in <project> --json` |
 | Post message | `basecamp message --subject "Title" --content "Body" --in <project> --json` |
+| Post silently | `basecamp message --subject "Title" --content "Body" --no-subscribe --in <project> --json` |
 | Post to campfire | `basecamp campfire post --content "Message" --in <project> --json` |
 | Add comment | `basecamp comment --content "Text" --on <recording_id> --in <project> --json` |
 | Search | `basecamp search "query" --json` |
@@ -320,7 +325,12 @@ basecamp messages pin <id> --in <project>         # Pin to top
 basecamp messages unpin <id>                      # Unpin
 ```
 
-**Flags:** `--draft` (create as draft), `--message-board <id>` (if multiple boards)
+**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards)
+
+```bash
+basecamp message --subject "Bot update" --content "Done" --no-subscribe --in <project>
+basecamp message --subject "FYI" --content "Note" --subscribe "Alice,bob@x.com" --in <project>
+```
 
 ### Comments
 
@@ -341,6 +351,7 @@ basecamp files download <id> --out ./dir          # Download to specific dir
 basecamp files folder create --name "Folder" --in <project>
 basecamp files doc create --title "Doc" --content "Body" --in <project>
 basecamp files doc create --title "Draft" --draft --in <project>
+basecamp files doc create --title "Notes" --content "..." --no-subscribe --in <project>
 basecamp files update <id> --title "New" --content "Updated"
 ```
 
@@ -355,11 +366,12 @@ basecamp schedule show <id> --in <project>        # Entry details
 basecamp schedule show <id> --date 20240315       # Specific occurrence (recurring)
 basecamp schedule create "Event" --starts-at "2024-03-15T09:00:00Z" --ends-at "2024-03-15T10:00:00Z" --in <project>
 basecamp schedule create "Meeting" --all-day --notify --participants 1,2,3 --in <project>
+basecamp schedule create "Sync" --starts-at "..." --ends-at "..." --no-subscribe --in <project>
 basecamp schedule update <id> --summary "New title" --starts-at "..."
 basecamp schedule settings --include-due --in <project>  # Include todos/cards due dates
 ```
 
-**Flags:** `--all-day`, `--notify`, `--participants <ids>`, `--status` (active/archived/trashed)
+**Flags:** `--all-day`, `--notify`, `--participants <ids>`, `--no-subscribe`, `--subscribe "people"` (mutually exclusive), `--status` (active/archived/trashed)
 
 ### Check-ins
 
@@ -532,6 +544,18 @@ The CLI uses two directory namespaces: `basecamp` for your Basecamp identity and
 basecamp config init
 basecamp config set project_id <id>
 basecamp config set todolist_id <id>
+```
+
+**Config Trust:**
+
+Authority keys (`base_url`, `default_profile`, `profiles`) in local/repo configs are blocked until explicitly trusted. This prevents a cloned repo's config from redirecting OAuth tokens.
+
+```bash
+basecamp config trust                    # Trust nearest .basecamp/config.json
+basecamp config trust /path/to/.basecamp/config.json  # Trust specific config file
+basecamp config trust --list             # Show all trusted configs
+basecamp config untrust                  # Revoke trust for nearest config
+basecamp config untrust /path/to/.basecamp/config.json  # Revoke trust for specific path
 ```
 
 **Check context:**
