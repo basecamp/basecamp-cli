@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -21,6 +22,7 @@ func NewRecordingsCmd() *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var assignee string
 
 	cmd := &cobra.Command{
 		Use:   "recordings [type]",
@@ -29,9 +31,12 @@ func NewRecordingsCmd() *cobra.Command {
 
 Provides filtered view of content across all projects.
 Type is required: todos, messages, documents, comments, cards, uploads.`,
-		Annotations: map[string]string{"agent_notes": "Recordings is the only cross-project browse mechanism besides search\nDefault status is active — use --status archived or --status trashed for other states\nTypes: todos, messages, documents, comments, cards, uploads"},
+		Annotations: map[string]string{"agent_notes": "Recordings does NOT include assignee data — cannot filter by person\nFor assigned todos use: basecamp reports assigned --json\nDefault status is active — use --status archived or --status trashed for other states\nTypes: todos, messages, documents, comments, cards, uploads"},
 		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("assignee") {
+				return recordingsAssigneeRedirect(assignee, project)
+			}
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -69,6 +74,8 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Not supported — use reports assigned instead")
+	_ = cmd.Flags().MarkHidden("assignee")
 
 	cmd.AddCommand(
 		newRecordingsListCmd(&project),
@@ -104,6 +111,25 @@ func normalizeRecordingType(input string) string {
 	return input
 }
 
+func recordingsAssigneeRedirect(assignee, project string) error {
+	if project != "" {
+		return output.ErrUsageHint(
+			"recordings does not support --assignee (no assignee data available)",
+			fmt.Sprintf("Use: basecamp todos --assignee %q --in %q --json", assignee, project),
+		)
+	}
+	if assignee != "" && !strings.EqualFold(assignee, "me") {
+		return output.ErrUsageHint(
+			"recordings does not support --assignee (no assignee data available)",
+			fmt.Sprintf("Use: basecamp reports assigned %q --json", assignee),
+		)
+	}
+	return output.ErrUsageHint(
+		"recordings does not support --assignee (no assignee data available)",
+		"Use: basecamp reports assigned --json",
+	)
+}
+
 func newRecordingsListCmd(project *string) *cobra.Command {
 	var recordingType string
 	var status string
@@ -112,6 +138,7 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var assignee string
 
 	cmd := &cobra.Command{
 		Use:   "list [type]",
@@ -119,6 +146,10 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 		Long:  "List all recordings of a specific type across projects.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("assignee") {
+				return recordingsAssigneeRedirect(assignee, *project)
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			// Validate type before checking account
@@ -146,6 +177,8 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Not supported — use reports assigned instead")
+	_ = cmd.Flags().MarkHidden("assignee")
 
 	return cmd
 }
