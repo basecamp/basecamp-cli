@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -9,6 +10,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/editor"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
@@ -214,6 +216,7 @@ You can pass either a message ID or a Basecamp URL:
 func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command {
 	var subject string
 	var content string
+	var edit bool
 	var draft bool
 	var subscribe string
 	var noSubscribe bool
@@ -223,6 +226,21 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 		Short: "Create a new message",
 		Long:  "Post a new message to a project's message board.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate user input first, before checking account
+			if edit && content != "" {
+				return output.ErrUsage("cannot combine --edit and --content")
+			}
+			if edit {
+				fi, err := os.Stdin.Stat()
+				if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+					return output.ErrUsage("cannot use --edit when stdin is not a terminal")
+				}
+				content, err = editor.Open("")
+				if err != nil {
+					return output.ErrUsage(err.Error())
+				}
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -311,6 +329,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().StringVarP(&subject, "subject", "s", "", "Message subject (required)")
 	cmd.Flags().StringVarP(&content, "content", "b", "", "Message body content")
 	cmd.Flags().StringVar(&content, "body", "", "Message body content (alias for --content)")
+	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose message body")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
@@ -493,6 +512,7 @@ You can pass either a message ID or a Basecamp URL:
 func NewMessageCmd() *cobra.Command {
 	var subject string
 	var content string
+	var edit bool
 	var project string
 	var messageBoard string
 	var draft bool
@@ -504,6 +524,21 @@ func NewMessageCmd() *cobra.Command {
 		Short: "Post a new message",
 		Long:  "Post a message to a project's message board. Shortcut for 'basecamp messages create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate user input first, before checking account
+			if edit && content != "" {
+				return output.ErrUsage("cannot combine --edit and --content")
+			}
+			if edit {
+				fi, err := os.Stdin.Stat()
+				if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+					return output.ErrUsage("cannot use --edit when stdin is not a terminal")
+				}
+				content, err = editor.Open("")
+				if err != nil {
+					return output.ErrUsage(err.Error())
+				}
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -590,6 +625,7 @@ func NewMessageCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&subject, "subject", "s", "", "Message subject (required)")
 	cmd.Flags().StringVarP(&content, "content", "b", "", "Message body content")
 	cmd.Flags().StringVar(&content, "body", "", "Message body content (alias for --content)")
+	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose message body")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")

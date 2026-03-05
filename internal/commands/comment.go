@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/editor"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
@@ -255,6 +257,7 @@ You can pass either a comment ID or a Basecamp URL:
 // NewCommentCmd creates the comment command (shortcut for creating comments).
 func NewCommentCmd() *cobra.Command {
 	var content string
+	var edit bool
 	var recordingIDs []string
 
 	cmd := &cobra.Command{
@@ -266,6 +269,20 @@ Supports batch commenting on multiple recordings at once.`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent recording, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on recordings (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if edit && content != "" {
+				return output.ErrUsage("cannot combine --edit and --content")
+			}
+			if edit {
+				fi, err := os.Stdin.Stat()
+				if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+					return output.ErrUsage("cannot use --edit when stdin is not a terminal")
+				}
+				content, err = editor.Open("")
+				if err != nil {
+					return output.ErrUsage(err.Error())
+				}
+			}
 
 			// Validate user input first, before checking account
 			if content == "" {
@@ -374,6 +391,7 @@ Supports batch commenting on multiple recordings at once.`,
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Comment content (required)")
+	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose content")
 	cmd.Flags().StringSliceVarP(&recordingIDs, "on", "r", nil, "Recording ID(s) to comment on (required)")
 	// Note: Required flags are validated manually in RunE for better error messages
 
