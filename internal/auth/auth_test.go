@@ -2,8 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +19,13 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
+// newTestStore creates a file-backed credential store for testing.
+func newTestStore(t *testing.T, dir string) *Store {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	return NewStore(dir)
+}
+
 func TestNewStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewStore(tmpDir)
@@ -31,9 +36,7 @@ func TestNewStore(t *testing.T) {
 
 func TestStoreFileBackend(t *testing.T) {
 	tmpDir := t.TempDir()
-
-	// Force file backend by creating store with useKeyring=false
-	store := &Store{useKeyring: false, fallbackDir: tmpDir}
+	store := newTestStore(t, tmpDir)
 
 	origin := "https://test.example.com"
 	creds := &Credentials{
@@ -48,13 +51,6 @@ func TestStoreFileBackend(t *testing.T) {
 	// Save credentials
 	err := store.Save(origin, creds)
 	require.NoError(t, err, "Save failed")
-
-	// Verify file was created with correct permissions
-	credFile := filepath.Join(tmpDir, "credentials.json")
-	info, err := os.Stat(credFile)
-	require.NoError(t, err, "Credentials file not created")
-	perms := info.Mode().Perm()
-	assert.Equal(t, os.FileMode(0600), perms, "File permissions mismatch")
 
 	// Load credentials
 	loaded, err := store.Load(origin)
@@ -71,7 +67,7 @@ func TestStoreFileBackend(t *testing.T) {
 
 func TestStoreMultipleOrigins(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := &Store{useKeyring: false, fallbackDir: tmpDir}
+	store := newTestStore(t, tmpDir)
 
 	// Save credentials for two different origins
 	origin1 := "https://origin1.example.com"
@@ -95,7 +91,7 @@ func TestStoreMultipleOrigins(t *testing.T) {
 
 func TestStoreDelete(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := &Store{useKeyring: false, fallbackDir: tmpDir}
+	store := newTestStore(t, tmpDir)
 
 	origin := "https://delete-test.example.com"
 	creds := &Credentials{AccessToken: "to-be-deleted", ExpiresAt: time.Now().Unix() + 3600}
@@ -111,75 +107,11 @@ func TestStoreDelete(t *testing.T) {
 
 func TestStoreLoadMissing(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := &Store{useKeyring: false, fallbackDir: tmpDir}
+	store := newTestStore(t, tmpDir)
 
 	// Load non-existent origin should fail
 	_, err := store.Load("https://nonexistent.example.com")
 	assert.Error(t, err, "Load should fail for non-existent origin")
-}
-
-func TestKeyFunction(t *testing.T) {
-	tests := []struct {
-		origin   string
-		expected string
-	}{
-		{"https://3.basecampapi.com", "basecamp::https://3.basecampapi.com"},
-		{"http://localhost:3000", "basecamp::http://localhost:3000"},
-		{"https://custom.example.com", "basecamp::https://custom.example.com"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.origin, func(t *testing.T) {
-			result := key(tt.origin)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestGenerateCodeVerifier(t *testing.T) {
-	// Generate multiple verifiers to check they're unique
-	verifiers := make(map[string]bool)
-	for range 10 {
-		v := generateCodeVerifier()
-
-		// Should be base64url encoded (no padding)
-		assert.NotEmpty(t, v, "generateCodeVerifier returned empty string")
-
-		// Check uniqueness
-		assert.False(t, verifiers[v], "generateCodeVerifier produced duplicate: %s", v)
-		verifiers[v] = true
-
-		// Should be ~43 characters (32 bytes base64url encoded)
-		assert.True(t, len(v) >= 40 && len(v) <= 50, "generateCodeVerifier length = %d, expected ~43", len(v))
-	}
-}
-
-func TestGenerateCodeChallenge(t *testing.T) {
-	verifier := "test_code_verifier_12345"
-
-	challenge := generateCodeChallenge(verifier)
-
-	// Manually compute expected challenge
-	h := sha256.Sum256([]byte(verifier))
-	expected := base64.RawURLEncoding.EncodeToString(h[:])
-
-	assert.Equal(t, expected, challenge)
-}
-
-func TestGenerateState(t *testing.T) {
-	// Generate multiple states to check they're unique
-	states := make(map[string]bool)
-	for range 10 {
-		s := generateState()
-
-		assert.NotEmpty(t, s, "generateState returned empty string")
-
-		assert.False(t, states[s], "generateState produced duplicate: %s", s)
-		states[s] = true
-
-		// Should be ~22 characters (16 bytes base64url encoded)
-		assert.True(t, len(s) >= 20 && len(s) <= 25, "generateState length = %d, expected ~22", len(s))
-	}
 }
 
 func TestNewManager(t *testing.T) {
@@ -213,7 +145,7 @@ func TestIsAuthenticatedWithEnvToken(t *testing.T) {
 	}
 	manager := NewManager(cfg, http.DefaultClient)
 	// Use file backend with empty temp dir to ensure no stored creds
-	manager.store = &Store{useKeyring: false, fallbackDir: tmpDir}
+	manager.store = newTestStore(t, tmpDir)
 
 	// Without env token
 	os.Unsetenv("BASECAMP_TOKEN")
@@ -243,7 +175,7 @@ func TestIsAuthenticatedWithStoredCreds(t *testing.T) {
 		BaseURL: "https://3.basecampapi.com",
 	}
 	manager := NewManager(cfg, http.DefaultClient)
-	manager.store = &Store{useKeyring: false, fallbackDir: tmpDir}
+	manager.store = newTestStore(t, tmpDir)
 
 	// Without stored creds
 	assert.False(t, manager.IsAuthenticated(), "Should not be authenticated without stored credentials")
@@ -267,7 +199,7 @@ func TestGetUserID(t *testing.T) {
 		BaseURL: "https://3.basecampapi.com",
 	}
 	manager := NewManager(cfg, http.DefaultClient)
-	manager.store = &Store{useKeyring: false, fallbackDir: tmpDir}
+	manager.store = newTestStore(t, tmpDir)
 
 	// Save credentials with user ID
 	creds := &Credentials{
@@ -288,7 +220,7 @@ func TestSetUserID(t *testing.T) {
 		BaseURL: "https://3.basecampapi.com",
 	}
 	manager := NewManager(cfg, http.DefaultClient)
-	manager.store = &Store{useKeyring: false, fallbackDir: tmpDir}
+	manager.store = newTestStore(t, tmpDir)
 
 	// Save initial credentials
 	creds := &Credentials{
@@ -314,7 +246,7 @@ func TestLogout(t *testing.T) {
 		BaseURL: "https://3.basecampapi.com",
 	}
 	manager := NewManager(cfg, http.DefaultClient)
-	manager.store = &Store{useKeyring: false, fallbackDir: tmpDir}
+	manager.store = newTestStore(t, tmpDir)
 
 	// Save credentials
 	creds := &Credentials{
@@ -396,11 +328,11 @@ func TestClientCredentialsJSON(t *testing.T) {
 }
 
 func TestUsingKeyring(t *testing.T) {
-	store := &Store{useKeyring: true, fallbackDir: "/tmp"}
-	assert.True(t, store.UsingKeyring(), "UsingKeyring() should be true")
+	tmpDir := t.TempDir()
 
-	store = &Store{useKeyring: false, fallbackDir: "/tmp"}
-	assert.False(t, store.UsingKeyring(), "UsingKeyring() should be false")
+	// With keyring disabled, UsingKeyring returns false
+	store := newTestStore(t, tmpDir)
+	assert.False(t, store.UsingKeyring(), "UsingKeyring() should be false when BASECAMP_NO_KEYRING is set")
 }
 
 func TestLaunchpadURL_InsecureRejected(t *testing.T) {
@@ -649,7 +581,7 @@ func TestRegisterBC3Client_UsesResolvedRedirectURI(t *testing.T) {
 	m := &Manager{
 		cfg:        config.Default(),
 		httpClient: srv.Client(),
-		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+		store:      newTestStore(t, tmpDir),
 	}
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
 
@@ -677,7 +609,7 @@ func TestRegisterBC3Client_CustomRedirectNotPersisted(t *testing.T) {
 	m := &Manager{
 		cfg:        config.Default(),
 		httpClient: srv.Client(),
-		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+		store:      newTestStore(t, tmpDir),
 	}
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
 
@@ -704,7 +636,7 @@ func TestRegisterBC3Client_DefaultRedirectPersisted(t *testing.T) {
 	m := &Manager{
 		cfg:        config.Default(),
 		httpClient: srv.Client(),
-		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+		store:      newTestStore(t, tmpDir),
 	}
 	opts := &LoginOptions{RedirectURI: defaultRedirectURI}
 
@@ -731,7 +663,7 @@ func TestLoadClientCredentials_BC3_CustomRedirect_SkipsStoredClient(t *testing.T
 	m := &Manager{
 		cfg:        config.Default(),
 		httpClient: srv.Client(),
-		store:      &Store{useKeyring: false, fallbackDir: tmpDir},
+		store:      newTestStore(t, tmpDir),
 	}
 
 	// Pre-populate client.json
@@ -747,9 +679,9 @@ func TestLoadClientCredentials_BC3_CustomRedirect_SkipsStoredClient(t *testing.T
 	assert.Equal(t, "dcr-fresh", creds.ClientID, "should use DCR result, not stored client")
 }
 
-func TestAtomicCredentialWrite_OverwriteExisting(t *testing.T) {
+func TestCredentialWrite_OverwriteExisting(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := &Store{useKeyring: false, fallbackDir: tmpDir}
+	store := newTestStore(t, tmpDir)
 	origin := "https://test.example.com"
 
 	// Write initial credentials
@@ -761,26 +693,18 @@ func TestAtomicCredentialWrite_OverwriteExisting(t *testing.T) {
 	}
 	require.NoError(t, store.Save(origin, creds1))
 
-	// Overwrite with new credentials (exercises the Windows pre-remove path)
+	// Overwrite with new credentials
 	creds2 := &Credentials{
 		AccessToken:  "token-2",
 		RefreshToken: "refresh-2",
 		ExpiresAt:    time.Now().Unix() + 7200,
 		OAuthType:    "bc3",
 	}
-	require.NoError(t, store.Save(origin, creds2), "overwrite of existing credential file must succeed")
+	require.NoError(t, store.Save(origin, creds2), "overwrite of existing credential must succeed")
 
 	// Verify the new value persists
 	loaded, err := store.Load(origin)
 	require.NoError(t, err)
 	assert.Equal(t, "token-2", loaded.AccessToken)
 	assert.Equal(t, "bc3", loaded.OAuthType)
-
-	// Verify no stale temp files left behind
-	entries, err := os.ReadDir(tmpDir)
-	require.NoError(t, err)
-	for _, e := range entries {
-		assert.False(t, filepath.Ext(e.Name()) == ".tmp",
-			"stale temp file left behind: %s", e.Name())
-	}
 }

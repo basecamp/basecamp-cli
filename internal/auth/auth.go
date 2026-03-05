@@ -3,9 +3,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +15,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
+	"github.com/basecamp/cli/oauthcallback"
+	"github.com/basecamp/cli/pkce"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
@@ -316,12 +315,12 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	// Generate PKCE challenge (for BC3)
 	var codeVerifier, codeChallenge string
 	if oauthType == "bc3" {
-		codeVerifier = generateCodeVerifier()
-		codeChallenge = generateCodeChallenge(codeVerifier)
+		codeVerifier = pkce.GenerateVerifier()
+		codeChallenge = pkce.GenerateChallenge(codeVerifier)
 	}
 
 	// Generate state for CSRF protection
-	state := generateState()
+	state := pkce.GenerateState()
 
 	// Build authorization URL
 	authURL, err := m.buildAuthURL(oauthCfg, oauthType, opts.Scope, state, codeChallenge, clientCreds.ClientID, &opts)
@@ -329,8 +328,31 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		return err
 	}
 
-	// Start local callback server
-	code, err := m.waitForCallback(ctx, state, authURL, listenAddr, &opts)
+	// Start listener for OAuth callback
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("failed to start callback server: %w", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	// Open browser for authentication
+	if opts.BrowserLauncher != nil {
+		if err := opts.BrowserLauncher(authURL); err != nil {
+			opts.log("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
+		} else {
+			opts.log("\nOpening browser for authentication...")
+			opts.log("If the browser doesn't open, visit: " + authURL + "\n\nWaiting for authentication...")
+		}
+	} else {
+		opts.log("\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
+	}
+
+	// Wait for OAuth callback with a hard timeout to avoid hanging indefinitely
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	code, err := oauthcallback.WaitForCallback(waitCtx, state, listener, "")
 	if err != nil {
 		return err
 	}
@@ -561,87 +583,6 @@ func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeC
 	return u.String(), nil
 }
 
-func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, listenAddr string, opts *LoginOptions) (string, error) {
-	// Start listener
-	lc := net.ListenConfig{}
-	listener, err := lc.Listen(ctx, "tcp", listenAddr)
-	if err != nil {
-		return "", fmt.Errorf("failed to start callback server: %w", err)
-	}
-	defer func() { _ = listener.Close() }()
-
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-	var shutdownOnce sync.Once
-
-	server := &http.Server{
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       30 * time.Second,
-	}
-
-	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		state := r.URL.Query().Get("state")
-		code := r.URL.Query().Get("code")
-		errParam := r.URL.Query().Get("error")
-
-		if errParam != "" {
-			errCh <- fmt.Errorf("OAuth error: %s", errParam)
-			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
-			shutdownOnce.Do(func() { //nolint:contextcheck // decoupled from outer ctx intentionally
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				go func() { defer cancel(); server.Shutdown(ctx) }() //nolint:errcheck // best-effort shutdown
-			})
-			return
-		}
-
-		if state != expectedState {
-			errCh <- fmt.Errorf("state mismatch: CSRF protection failed")
-			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
-			shutdownOnce.Do(func() { //nolint:contextcheck // decoupled from outer ctx intentionally
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				go func() { defer cancel(); server.Shutdown(ctx) }() //nolint:errcheck // best-effort shutdown
-			})
-			return
-		}
-
-		codeCh <- code
-		fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
-		shutdownOnce.Do(func() { //nolint:contextcheck // decoupled from outer ctx intentionally
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			go func() { defer cancel(); server.Shutdown(ctx) }() //nolint:errcheck // best-effort shutdown
-		})
-	})
-
-	go server.Serve(listener) //nolint:errcheck // server.Serve returns ErrServerClosed on Shutdown
-
-	// Try to open browser automatically unless --no-browser was specified
-	if opts.BrowserLauncher != nil {
-		if err := opts.BrowserLauncher(authURL); err != nil {
-			// Fall back to printing URL if browser open fails
-			opts.log("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
-		} else {
-			opts.log("\nOpening browser for authentication...")
-			opts.log("If the browser doesn't open, visit: " + authURL + "\n\nWaiting for authentication...")
-		}
-	} else {
-		opts.log("\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
-	}
-
-	// Wait for callback or timeout
-	select {
-	case code := <-codeCh:
-		return code, nil
-	case err := <-errCh:
-		return "", err
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-time.After(5 * time.Minute):
-		return "", fmt.Errorf("authentication timeout waiting for callback on %s", listenAddr)
-	}
-}
-
 func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType, code, codeVerifier string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
 	exchanger := oauth.NewExchanger(m.httpClient)
 
@@ -668,29 +609,6 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 	return creds, nil
-}
-
-// PKCE helpers
-
-func generateCodeVerifier() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func generateCodeChallenge(verifier string) string {
-	h := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(h[:])
-}
-
-func generateState() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // openBrowser opens the specified URL in the default browser.

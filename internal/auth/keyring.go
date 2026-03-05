@@ -4,14 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 
-	"github.com/zalando/go-keyring"
-)
-
-const (
-	serviceName = "basecamp"
+	"github.com/basecamp/cli/credstore"
 )
 
 // Credentials holds OAuth tokens and metadata.
@@ -25,207 +19,51 @@ type Credentials struct {
 	UserID        string `json:"user_id,omitempty"`
 }
 
-// Store handles credential storage, preferring system keychain.
+// Store wraps credstore.Store with typed Credentials marshaling.
 type Store struct {
-	useKeyring  bool
-	fallbackDir string
+	inner *credstore.Store
 }
 
 // NewStore creates a credential store.
 func NewStore(fallbackDir string) *Store {
-	// Skip keyring for tests or when explicitly disabled
-	if os.Getenv("BASECAMP_NO_KEYRING") != "" {
-		return &Store{useKeyring: false, fallbackDir: fallbackDir}
+	s := credstore.NewStore(credstore.StoreOptions{
+		ServiceName:   "basecamp",
+		DisableEnvVar: "BASECAMP_NO_KEYRING",
+		FallbackDir:   fallbackDir,
+	})
+	if w := s.FallbackWarning(); w != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
-
-	// Test if keyring is available
-	testKey := "basecamp::test"
-	err := keyring.Set(serviceName, testKey, "test")
-	if err == nil {
-		_ = keyring.Delete(serviceName, testKey) // Best-effort cleanup
-		return &Store{useKeyring: true, fallbackDir: fallbackDir}
-	}
-	fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
-		filepath.Join(fallbackDir, "credentials.json"))
-	return &Store{useKeyring: false, fallbackDir: fallbackDir}
-}
-
-// key returns the keyring key for an origin.
-func key(origin string) string {
-	return fmt.Sprintf("basecamp::%s", origin)
+	return &Store{inner: s}
 }
 
 // Load retrieves credentials for the given origin.
 func (s *Store) Load(origin string) (*Credentials, error) {
-	if s.useKeyring {
-		return s.loadFromKeyring(origin)
-	}
-	return s.loadFromFile(origin)
-}
-
-// Save stores credentials for the given origin.
-func (s *Store) Save(origin string, creds *Credentials) error {
-	if s.useKeyring {
-		return s.saveToKeyring(origin, creds)
-	}
-	return s.saveToFile(origin, creds)
-}
-
-// Delete removes credentials for the given origin.
-func (s *Store) Delete(origin string) error {
-	if s.useKeyring {
-		return keyring.Delete(serviceName, key(origin))
-	}
-	return s.deleteFile(origin)
-}
-
-// Keyring methods
-
-func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {
-	data, err := keyring.Get(serviceName, key(origin))
+	data, err := s.inner.Load(origin)
 	if err != nil {
-		return nil, fmt.Errorf("credentials not found: %w", err)
+		return nil, err
 	}
-
 	var creds Credentials
-	if err := json.Unmarshal([]byte(data), &creds); err != nil {
+	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 	return &creds, nil
 }
 
-func (s *Store) saveToKeyring(origin string, creds *Credentials) error {
+// Save stores credentials for the given origin.
+func (s *Store) Save(origin string, creds *Credentials) error {
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return err
 	}
-	return keyring.Set(serviceName, key(origin), string(data))
+	return s.inner.Save(origin, data)
 }
 
-// File fallback methods
-
-func (s *Store) credentialsPath() string {
-	return filepath.Join(s.fallbackDir, "credentials.json")
-}
-
-func (s *Store) loadAllFromFile() (map[string]*Credentials, error) {
-	data, err := os.ReadFile(s.credentialsPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]*Credentials), nil
-		}
-		return nil, err
-	}
-
-	var all map[string]*Credentials
-	if err := json.Unmarshal(data, &all); err != nil {
-		return nil, err
-	}
-	return all, nil
-}
-
-func (s *Store) saveAllToFile(all map[string]*Credentials) error {
-	if err := os.MkdirAll(s.fallbackDir, 0700); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Atomic write with randomized temp file name
-	tmpFile, err := os.CreateTemp(s.fallbackDir, "credentials-*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmpFile.Name()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmpFile.Chmod(0600); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	// Unix: rename atomically replaces the destination.
-	// Windows: rename fails when destination exists. Try rename first to
-	// preserve the old file on unrelated errors; only remove+retry on failure.
-	destPath := s.credentialsPath()
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		if runtime.GOOS == "windows" {
-			_ = os.Remove(destPath)
-			return os.Rename(tmpPath, destPath)
-		}
-		os.Remove(tmpPath) // Clean up stale temp on failure
-		return err
-	}
-	return nil
-}
-
-func (s *Store) loadFromFile(origin string) (*Credentials, error) {
-	all, err := s.loadAllFromFile()
-	if err != nil {
-		return nil, err
-	}
-
-	creds, ok := all[origin]
-	if !ok {
-		return nil, fmt.Errorf("credentials not found for %s", origin)
-	}
-	return creds, nil
-}
-
-func (s *Store) saveToFile(origin string, creds *Credentials) error {
-	all, err := s.loadAllFromFile()
-	if err != nil {
-		return err
-	}
-
-	all[origin] = creds
-	return s.saveAllToFile(all)
-}
-
-func (s *Store) deleteFile(origin string) error {
-	all, err := s.loadAllFromFile()
-	if err != nil {
-		return err
-	}
-
-	delete(all, origin)
-	return s.saveAllToFile(all)
-}
+// Delete removes credentials for the given origin.
+func (s *Store) Delete(origin string) error { return s.inner.Delete(origin) }
 
 // MigrateToKeyring migrates credentials from file to keyring.
-func (s *Store) MigrateToKeyring() error {
-	if !s.useKeyring {
-		return nil // Keyring not available
-	}
-
-	all, err := s.loadAllFromFile()
-	if err != nil {
-		return nil //nolint:nilerr // No file to migrate is not an error
-	}
-
-	for origin, creds := range all {
-		if err := s.saveToKeyring(origin, creds); err != nil {
-			return fmt.Errorf("failed to migrate %s: %w", origin, err)
-		}
-	}
-
-	// Remove the plaintext file after successful migration
-	_ = os.Remove(s.credentialsPath()) // Best-effort cleanup
-	return nil
-}
+func (s *Store) MigrateToKeyring() error { return s.inner.MigrateToKeyring() }
 
 // UsingKeyring returns true if the store is using the system keyring.
-func (s *Store) UsingKeyring() bool {
-	return s.useKeyring
-}
+func (s *Store) UsingKeyring() bool { return s.inner.UsingKeyring() }
