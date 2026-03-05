@@ -67,6 +67,18 @@ if grep -q '^[[:space:]]*replace[[:space:]]' go.mod; then
   die "go.mod contains replace directives. Remove them before releasing."
 fi
 
+# --- Update Nix flake ---
+info "Updating Nix flake"
+if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
+  echo "  (skipped — dry run)"
+elif scripts/update-nix-flake.sh "${VERSION}"; then
+  git add nix/package.nix
+  git commit -m "Update nix flake for v${VERSION}"
+  git push origin main --quiet
+  LOCAL=$(git rev-parse HEAD)
+  info "Pushed nix flake update"
+fi
+
 # --- Run pre-flight checks ---
 info "Running release checks"
 make release-check

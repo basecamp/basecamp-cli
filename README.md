@@ -23,6 +23,15 @@ That's it. You now have full access to Basecamp from your terminal.
 yay -S basecamp-cli
 ```
 
+**Linux (deb/rpm/apk):**
+```bash
+# Download from https://github.com/basecamp/basecamp-cli/releases/latest
+sudo apt install ./basecamp-cli_*_linux_amd64.deb            # Debian/Ubuntu
+sudo dnf install ./basecamp-cli_*_linux_amd64.rpm            # Fedora/RHEL
+sudo apk add --allow-untrusted ./basecamp-cli_*_linux_amd64.apk  # Alpine
+```
+Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checksum from `checksums.txt` before installing unsigned Alpine packages.
+
 **Scoop (Windows):**
 ```bash
 scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
@@ -32,6 +41,11 @@ scoop install basecamp
 **Shell script:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
+```
+
+**Nix:**
+```bash
+nix profile install github:basecamp/basecamp-cli
 ```
 
 **Go install:**

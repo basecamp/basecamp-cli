@@ -16,19 +16,22 @@ make release VERSION=0.2.0 DRY_RUN=1
 
 1. Validates semver format, main branch, clean tree, synced with remote
 2. Checks for `replace` directives in go.mod
-3. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
-4. Creates annotated tag `v$VERSION` and pushes to origin
-5. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
+3. Updates `nix/package.nix` version and recomputes `vendorHash` via Docker if `go.mod` changed
+4. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
+5. Creates annotated tag `v$VERSION` and pushes to origin
+6. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
    - Security scan + full test suite + CLI surface compatibility check
    - Collects PGO profile from benchmarks
    - Generates AI changelog from commit history
    - Builds binaries for all platforms (darwin, linux, windows, freebsd, openbsd × amd64/arm64)
+   - Builds `.deb`, `.rpm`, `.apk` Linux packages (amd64 + arm64)
    - Signs and notarizes macOS binaries (Developer ID via GoReleaser/quill)
    - Signs checksums with cosign (keyless via Sigstore OIDC)
    - Generates SBOM for supply chain transparency
    - Updates Homebrew cask in `basecamp/homebrew-tap`
    - Updates Scoop manifest in `basecamp/homebrew-tap`
    - Updates AUR `basecamp-cli` package (when `AUR_KEY` is configured)
+   - Verifies Nix flake builds successfully
 
 ## Versioning
 
@@ -69,6 +72,17 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 4. Add the public key to your AUR profile
 5. Add the private key as `AUR_KEY` in GitHub Actions secrets
 
+## Nix flake maintenance
+
+The `flake.nix` provides `nix profile install github:basecamp/basecamp-cli`. The release
+script automatically updates `nix/package.nix` version and recomputes `vendorHash` when
+`go.mod` changes (requires Docker).
+
+To manually update the vendorHash (e.g. after an SDK bump):
+```bash
+make update-nix-hash
+```
+
 ## Distribution channels
 
 | Channel | Location | Updated by |
@@ -77,4 +91,6 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 | Homebrew cask | `basecamp/homebrew-tap` Casks/ | GoReleaser |
 | Scoop | `basecamp/homebrew-tap` root | GoReleaser |
 | AUR | `basecamp-cli` | GoReleaser |
+| deb/rpm/apk packages | GitHub Release assets | GoReleaser (nfpm) |
+| Nix flake | `flake.nix` in repo | Self-serve (`nix profile install github:basecamp/basecamp-cli`) |
 | go install | `go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest` | Go module proxy |

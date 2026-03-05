@@ -178,6 +178,12 @@ clean-pgo:
 bump-sdk:
 	./scripts/bump-sdk.sh $(REF)
 
+# Recompute Nix vendorHash via Docker and update nix/package.nix
+.PHONY: update-nix-hash
+update-nix-hash:
+	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1) && \
+	scripts/update-nix-flake.sh "$$VERSION" || true
+
 # Verify sdk-provenance.json matches go.mod
 # Skips when a replace directive is active (local dev with go.work or go.mod replace)
 .PHONY: provenance-check
@@ -457,6 +463,7 @@ help:
 	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
 	@echo ""
 	@echo "Dependencies:"
+	@echo "  update-nix-hash   Recompute Nix vendorHash via Docker"
 	@echo "  bump-sdk          Bump SDK and update provenance (REF=<git-ref>)"
 	@echo "  provenance-check  Verify sdk-provenance.json matches go.mod"
 	@echo ""

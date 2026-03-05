@@ -29,19 +29,33 @@ scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
 scoop install basecamp
 ```
 
-### Option C: Shell script
+### Option C: Linux package (Debian/Ubuntu, Fedora/RHEL, Alpine)
+```bash
+# Download the matching package from https://github.com/basecamp/basecamp-cli/releases/latest
+sudo apt install ./basecamp-cli_*_linux_amd64.deb            # Debian/Ubuntu
+sudo dnf install ./basecamp-cli_*_linux_amd64.rpm            # Fedora/RHEL
+sudo apk add --allow-untrusted ./basecamp-cli_*_linux_amd64.apk  # Alpine
+```
+Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checksum from `checksums.txt` before installing unsigned Alpine packages.
+
+### Option D: Nix
+```bash
+nix profile install github:basecamp/basecamp-cli
+```
+
+### Option E: Shell script
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 
 The install script downloads the latest release, verifies the SHA-256 checksum, and verifies the cosign signature when cosign is available.
 
-### Option D: Go install
+### Option F: Go install
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
-### Option E: GitHub Release
+### Option G: GitHub Release
 Download the archive for your platform from [Releases](https://github.com/basecamp/basecamp-cli/releases), extract, and move `basecamp` to a directory on your PATH.
 
 **Verify:**

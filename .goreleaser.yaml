@@ -48,6 +48,34 @@ archives:
       - README*
       - completions/*
 
+nfpms:
+  - id: packages
+    package_name: basecamp-cli
+    ids: [basecamp]
+    vendor: 37signals
+    homepage: "https://github.com/basecamp/basecamp-cli"
+    maintainer: "37signals <support@37signals.com>"
+    description: "Command-line interface for Basecamp"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    contents:
+      - src: completions/basecamp.bash
+        dst: /usr/share/bash-completion/completions/basecamp
+      - src: completions/_basecamp
+        dst: /usr/share/zsh/vendor-completions/_basecamp
+        packager: deb
+      - src: completions/_basecamp
+        dst: /usr/share/zsh/vendor-completions/_basecamp
+        packager: apk
+      - src: completions/_basecamp
+        dst: /usr/share/zsh/site-functions/_basecamp
+        packager: rpm
+      - src: completions/basecamp.fish
+        dst: /usr/share/fish/vendor_completions.d/basecamp.fish
+
 checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
@@ -109,9 +137,32 @@ release:
     basecamp auth login
     ```
 
+    **Linux (deb/rpm/apk):**
+    Download the package for your architecture from the assets below, then:
+    ```sh
+    sudo apt install ./basecamp-cli_{{.Version}}_linux_amd64.deb            # Debian/Ubuntu
+    sudo dnf install ./basecamp-cli_{{.Version}}_linux_amd64.rpm            # Fedora/RHEL
+    sudo apk add --allow-untrusted ./basecamp-cli_{{.Version}}_linux_amd64.apk  # Alpine
+    basecamp auth login
+    ```
+    Arm64 users: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checksum from `checksums.txt` before installing — especially Alpine packages installed with `--allow-untrusted`.
+
     **Arch Linux / Omarchy:**
     ```sh
     yay -S basecamp-cli
+    basecamp auth login
+    ```
+
+    **Nix:**
+    ```sh
+    nix profile install github:basecamp/basecamp-cli
+    basecamp auth login
+    ```
+
+    **Windows:**
+    ```sh
+    scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+    scoop install basecamp
     basecamp auth login
     ```
 
