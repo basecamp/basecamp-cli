@@ -38,19 +38,24 @@ sudo apk add --allow-untrusted ./basecamp-cli_*_linux_amd64.apk  # Alpine
 ```
 Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checksum from `checksums.txt` before installing unsigned Alpine packages.
 
-### Option D: Shell script
+### Option D: Nix
+```bash
+nix profile install github:basecamp/basecamp-cli
+```
+
+### Option E: Shell script
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 
 The install script downloads the latest release, verifies the SHA-256 checksum, and verifies the cosign signature when cosign is available.
 
-### Option E: Go install
+### Option F: Go install
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
-### Option F: GitHub Release
+### Option G: GitHub Release
 Download the archive for your platform from [Releases](https://github.com/basecamp/basecamp-cli/releases), extract, and move `basecamp` to a directory on your PATH.
 
 **Verify:**

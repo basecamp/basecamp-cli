@@ -43,6 +43,11 @@ scoop install basecamp
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
 
+**Nix:**
+```bash
+nix profile install github:basecamp/basecamp-cli
+```
+
 **Go install:**
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest

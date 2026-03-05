@@ -29,3 +29,6 @@ benchmarks-current.txt
 
 # PGO profile (generated, can optionally be committed for reproducible builds)
 default.pgo
+
+# Nix
+result

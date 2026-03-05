@@ -79,4 +79,5 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 | Scoop | `basecamp/homebrew-tap` root | GoReleaser |
 | AUR | `basecamp-cli` | GoReleaser |
 | deb/rpm/apk packages | GitHub Release assets | GoReleaser (nfpm) |
+| Nix flake | `flake.nix` in repo | Self-serve (`nix profile install github:basecamp/basecamp-cli`) |
 | go install | `go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest` | Go module proxy |

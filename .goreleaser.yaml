@@ -153,6 +153,12 @@ release:
     basecamp auth login
     ```
 
+    **Nix:**
+    ```sh
+    nix profile install github:basecamp/basecamp-cli
+    basecamp auth login
+    ```
+
     **Windows:**
     ```sh
     scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
