@@ -32,3 +32,18 @@ Export order: public before private.
 
 One file per top-level command group in `internal/commands/`.
 Shortcut commands (e.g., `todo`, `done`, `comment`) live alongside their parent group.
+
+## Import Ordering
+
+Three groups separated by blank lines, each alphabetically sorted:
+1. Standard library
+2. Third-party modules
+3. Project-internal (`github.com/basecamp/basecamp-cli/...`)
+
+`goimports` enforces this.
+
+## Testing
+
+Prefer `assert`/`require` from testify. Helper functions over table-driven tests
+unless tabular form is clearly better. Skip assertion descriptions when the
+default failure message suffices.
