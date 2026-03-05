@@ -5,6 +5,8 @@ package version
 import (
 	_ "embed"
 	"encoding/json"
+	"runtime/debug"
+	"strings"
 	"sync"
 )
 
@@ -18,6 +20,14 @@ var (
 	// Date is the build date in RFC3339 format
 	Date = "unknown"
 )
+
+func init() {
+	if Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			Version = strings.TrimPrefix(info.Main.Version, "v")
+		}
+	}
+}
 
 //go:embed sdk-provenance.json
 var sdkProvenanceJSON []byte
