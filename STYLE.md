@@ -38,7 +38,7 @@ Shortcut commands (e.g., `todo`, `done`, `comment`) live alongside their parent 
 Three groups separated by blank lines, each alphabetically sorted:
 1. Standard library
 2. Third-party modules
-3. Project-internal (`github.com/basecamp/basecamp-cli/...`)
+3. Project-internal (`github.com/basecamp/cli/...`)
 
 `goimports` enforces this.
 

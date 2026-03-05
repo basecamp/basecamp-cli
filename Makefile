@@ -321,7 +321,7 @@ release-check: check replace-check vuln race-test check-surface-compat
 release:
 	DRY_RUN=$(DRY_RUN) scripts/release.sh $(VERSION)
 
-# Dry-run the full goreleaser pipeline without publishing, signing, or notarizing
+# Dry-run the full goreleaser pipeline (notarize disabled via empty env vars)
 .PHONY: test-release
 test-release:
 	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
@@ -509,7 +509,7 @@ help:
 	@echo "Release:"
 	@echo "  release-check    Full pre-flight (check + replace-check + vuln + race + surface compat)"
 	@echo "  release          Cut a release (VERSION=x.y.z, DRY_RUN=1 optional)"
-	@echo "  test-release     Dry-run goreleaser pipeline (no publish/sign/notarize)"
+	@echo "  test-release     Dry-run goreleaser pipeline (notarize disabled via empty env)"
 	@echo ""
 	@echo "Security:"
 	@echo "  security       Run all security checks (lint, vuln, secrets)"

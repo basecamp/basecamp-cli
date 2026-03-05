@@ -1,6 +1,7 @@
 package commands_test
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"strings"
@@ -20,7 +21,7 @@ func TestSurfaceSnapshot(t *testing.T) {
 
 	baseline, err := os.ReadFile(baselinePath)
 	if err != nil {
-		if *updateSurface {
+		if errors.Is(err, os.ErrNotExist) && *updateSurface {
 			if err := os.WriteFile(baselinePath, []byte(current), 0o644); err != nil {
 				t.Fatalf("writing .surface: %v", err)
 			}
