@@ -546,6 +546,18 @@ basecamp config set project_id <id>
 basecamp config set todolist_id <id>
 ```
 
+**Config Trust:**
+
+Authority keys (`base_url`, `default_profile`, `profiles`) in local/repo configs are blocked until explicitly trusted. This prevents a cloned repo's config from redirecting OAuth tokens.
+
+```bash
+basecamp config trust                    # Trust nearest .basecamp/config.json
+basecamp config trust /path/to/.basecamp/config.json  # Trust specific config file
+basecamp config trust --list             # Show all trusted configs
+basecamp config untrust                  # Revoke trust for nearest config
+basecamp config untrust /path/to/.basecamp/config.json  # Revoke trust for specific path
+```
+
 **Check context:**
 ```bash
 cat .basecamp/config.json 2>/dev/null || echo "No project configured"
