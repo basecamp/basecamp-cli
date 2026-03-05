@@ -85,7 +85,7 @@ basecamp <cmd> --agent     # Machine-readable, no interactive prompts
 basecamp <cmd> --ids-only  # Just IDs, one per line
 basecamp <cmd> --count     # Just the count
 basecamp <cmd> --stats     # Include session stats in output
-basecamp <cmd> --md / -m   # Markdown output (portable, pipeable to glow/bat)
+basecamp <cmd> --md / --markdown / -m  # Markdown output (portable, pipeable to glow/bat)
 basecamp <cmd> --styled    # Force ANSI-styled output even when piped
 basecamp <cmd> -v          # Verbose: show operations
 basecamp <cmd> -vv         # Very verbose: show operations + HTTP requests
