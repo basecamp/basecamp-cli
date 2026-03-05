@@ -13,12 +13,18 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/presenter"
 )
 
-// Re-exported from shared module.
-var (
-	NormalizeData             = clioutput.NormalizeData
-	TruncationNotice          = clioutput.TruncationNotice
-	TruncationNoticeWithTotal = clioutput.TruncationNoticeWithTotal
-)
+// NormalizeData converts json.RawMessage and other types to standard Go types.
+func NormalizeData(data any) any { return clioutput.NormalizeData(data) }
+
+// TruncationNotice returns a notice string if results may be truncated.
+func TruncationNotice(count, defaultLimit int, all bool, explicitLimit int) string {
+	return clioutput.TruncationNotice(count, defaultLimit, all, explicitLimit)
+}
+
+// TruncationNoticeWithTotal returns a truncation notice using totalCount from the API.
+func TruncationNoticeWithTotal(count, totalCount int) string {
+	return clioutput.TruncationNoticeWithTotal(count, totalCount)
+}
 
 // Response is the success envelope for JSON output.
 type Response struct {

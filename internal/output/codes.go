@@ -29,4 +29,4 @@ const (
 )
 
 // ExitCodeFor returns the exit code for a given error code.
-var ExitCodeFor = clioutput.ExitCodeFor
+func ExitCodeFor(code string) int { return clioutput.ExitCodeFor(code) }
