@@ -43,7 +43,7 @@ all: check
 
 # Build the binary
 .PHONY: build
-build:
+build: check-toolchain
 	$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp
 
 # Build with PGO optimization (requires default.pgo)
@@ -90,7 +90,7 @@ build-bsd:
 
 # Run tests
 .PHONY: test
-test:
+test: check-toolchain
 	BASECAMP_NO_KEYRING=1 $(GOTEST) -v ./...
 
 # Run end-to-end tests against Go binary
@@ -100,14 +100,19 @@ test-e2e: build
 
 # Run tests with race detector
 .PHONY: race-test
-race-test:
+race-test: check-toolchain
 	BASECAMP_NO_KEYRING=1 $(GOTEST) -race -count=1 ./...
 
 # Run tests with coverage
 .PHONY: test-coverage
-test-coverage:
+test-coverage: check-toolchain
 	$(GOTEST) -v -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+
+# Coverage with browser open
+.PHONY: coverage
+coverage: test-coverage
+	@command -v open >/dev/null 2>&1 && open coverage.html || true
 
 # ============================================================================
 # Benchmarking & Performance
@@ -173,6 +178,20 @@ clean-pgo:
 	rm -rf profiles/
 	rm -f benchmarks-*.txt
 
+# Guard against Go toolchain mismatch (mise environment)
+.PHONY: check-toolchain
+check-toolchain:
+	@GOV=$$($(GOCMD) version | awk '{print $$3}'); \
+	ROOT=$$($(GOCMD) env GOROOT); \
+	ROOTV=$$($$ROOT/bin/go version | awk '{print $$3}'); \
+	if [ "$$GOV" != "$$ROOTV" ]; then \
+		echo "ERROR: Go toolchain mismatch"; \
+		echo "  PATH go:   $$GOV ($$(which go))"; \
+		echo "  GOROOT go: $$ROOTV ($$ROOT/bin/go)"; \
+		echo "Fix: eval \"\$$(mise hook-env)\" && make <target>"; \
+		exit 1; \
+	fi
+
 # Bump SDK dependency and update provenance
 .PHONY: bump-sdk
 bump-sdk:
@@ -207,7 +226,7 @@ provenance-check:
 
 # Run go vet
 .PHONY: vet
-vet:
+vet: check-toolchain
 	$(GOVET) ./...
 
 # Format code
@@ -242,7 +261,7 @@ tidy:
 # Verify go.mod/go.sum are tidy (CI gate)
 # Restores original files on any failure so the check is non-mutating.
 .PHONY: tidy-check
-tidy-check:
+tidy-check: check-toolchain
 	@set -e; cp go.mod go.mod.tidycheck; cp go.sum go.sum.tidycheck; \
 	restore() { mv go.mod.tidycheck go.mod; mv go.sum.tidycheck go.sum; }; \
 	if ! $(GOMOD) tidy; then \
@@ -440,6 +459,7 @@ help:
 	@echo "  test-e2e       Run end-to-end tests against Go binary"
 	@echo "  race-test      Run tests with race detector"
 	@echo "  test-coverage  Run tests with coverage report"
+	@echo "  coverage       Run tests with coverage and open in browser"
 	@echo ""
 	@echo "Performance:"
 	@echo "  bench          Run all benchmarks"
@@ -453,6 +473,7 @@ help:
 	@echo "  clean-pgo        Remove PGO artifacts"
 	@echo ""
 	@echo "Code Quality:"
+	@echo "  check-toolchain  Guard against Go toolchain mismatch"
 	@echo "  vet            Run go vet"
 	@echo "  fmt            Format code"
 	@echo "  fmt-check      Check code formatting"
