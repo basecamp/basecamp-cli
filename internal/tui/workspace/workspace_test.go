@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
@@ -469,7 +470,7 @@ func testSessionWithContext(accountID, accountName string) *Session {
 	return &Session{
 		styles:     tui.NewStyles(),
 		multiStore: ms,
-		hub:        data.NewHub(ms, data.NewPoller()),
+		hub:        data.NewHub(ms),
 		ctx:        ctx,
 		cancel:     cancel,
 		scope:      Scope{AccountID: accountID, AccountName: accountName},
@@ -1716,6 +1717,41 @@ func TestWorkspace_ToastDoesNotChangeLayoutHeight(t *testing.T) {
 	assert.Equal(t, linesNoToast, linesWithToast, "toast overlay should not change total line count")
 }
 
+func TestWorkspace_TerminalFocusBlur_NilHub(t *testing.T) {
+	w, _ := testWorkspace()
+	// testWorkspace uses a session with no Hub — must not panic.
+	assert.Nil(t, w.session.Hub())
+
+	_, cmd := w.Update(tea.FocusMsg{})
+	assert.Nil(t, cmd)
+
+	_, cmd = w.Update(tea.BlurMsg{})
+	assert.Nil(t, cmd)
+}
+
+func TestWorkspace_TerminalFocusBlur_WithHub(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session = NewTestSessionWithHub()
+
+	hub := w.session.Hub()
+	require.NotNil(t, hub)
+	hub.EnsureAccount("test")
+
+	// Register a polling pool to observe terminal focus changes.
+	pool := data.NewPool[int]("observe", data.PoolConfig{PollBase: 10 * time.Second}, nil)
+	hub.Account().Register("observe", pool)
+
+	assert.Equal(t, 10*time.Second, pool.PollInterval())
+
+	// Blur: 4× interval.
+	w.Update(tea.BlurMsg{})
+	assert.Equal(t, 40*time.Second, pool.PollInterval())
+
+	// Focus: back to base.
+	w.Update(tea.FocusMsg{})
+	assert.Equal(t, 10*time.Second, pool.PollInterval())
+}
+
 func TestWorkspace_BackgroundColorMsg(t *testing.T) {
 	w, _ := testWorkspace()
 	w.session = NewTestSessionWithHub()
@@ -1726,4 +1762,117 @@ func TestWorkspace_BackgroundColorMsg(t *testing.T) {
 	_, cmd := w.Update(tea.BackgroundColorMsg{})
 	assert.Nil(t, cmd)
 	assert.True(t, w.session.hasDarkBG, "zero-color BackgroundColorMsg.IsDark()=true should set dark=true")
+}
+
+func TestWorkspace_ViewReportsFocus(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session = NewTestSessionWithHub()
+
+	// Push an initial view so View() renders something.
+	view := &testView{title: "Test"}
+	w.router.Push(view, Scope{}, ViewHome)
+	w.syncChrome()
+
+	v := w.View()
+	assert.True(t, v.ReportFocus, "View should request terminal focus reporting")
+}
+
+// focusCmdView returns a sentinel cmd from TerminalFocusMsg to verify stamping.
+type termFocusCmdView struct {
+	testView
+}
+
+type termFocusSentinel struct{}
+
+func (v *termFocusCmdView) Update(msg tea.Msg) (View, tea.Cmd) {
+	v.msgs = append(v.msgs, msg)
+	if _, ok := msg.(TerminalFocusMsg); ok {
+		return v, func() tea.Msg { return termFocusSentinel{} }
+	}
+	return v, nil
+}
+
+func TestWorkspace_TerminalFocus_ForwardsToSidebar(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session = NewTestSessionWithHub()
+	pushTestView(w, "Main")
+
+	// Manually activate sidebar with a testView we can inspect.
+	sidebar := &testView{title: "Sidebar"}
+	w.showSidebar = true
+	w.sidebarView = sidebar
+
+	require.True(t, w.sidebarActive())
+
+	w.Update(tea.FocusMsg{})
+
+	// Sidebar should have received TerminalFocusMsg.
+	found := false
+	for _, m := range sidebar.msgs {
+		if _, ok := m.(TerminalFocusMsg); ok {
+			found = true
+		}
+	}
+	assert.True(t, found, "sidebar should receive TerminalFocusMsg on terminal focus")
+}
+
+func TestWorkspace_TerminalFocus_StampsCommands(t *testing.T) {
+	session := testSessionWithContext("acct-1", "Test")
+	w := testWorkspaceWithSession(session)
+
+	// Use a view that returns a cmd from TerminalFocusMsg.
+	mainView := &termFocusCmdView{testView: testView{title: "Main"}}
+	w.router.Push(mainView, Scope{}, ViewHome)
+	w.syncChrome()
+
+	_, cmd := w.Update(tea.FocusMsg{})
+	require.NotNil(t, cmd, "focus should return stamped cmd from main view")
+
+	// The raw msg must be an EpochMsg — proves stampCmd was applied.
+	msg := cmd()
+	ep, ok := msg.(EpochMsg)
+	require.True(t, ok, "focus cmd must produce EpochMsg (stamped), got %T", msg)
+	assert.Equal(t, session.Epoch(), ep.Epoch)
+
+	// Inner must be our sentinel.
+	_, ok = ep.Inner.(termFocusSentinel)
+	assert.True(t, ok, "EpochMsg inner should be termFocusSentinel, got %T", ep.Inner)
+}
+
+func TestWorkspace_TerminalFocus_StampsSidebarCommands(t *testing.T) {
+	session := testSessionWithContext("acct-1", "Test")
+	w := testWorkspaceWithSession(session)
+
+	// Both main and sidebar return cmds so the batch doesn't collapse.
+	mainView := &termFocusCmdView{testView: testView{title: "Main"}}
+	w.router.Push(mainView, Scope{}, ViewHome)
+	w.syncChrome()
+
+	sidebar := &termFocusCmdView{testView: testView{title: "Sidebar"}}
+	w.showSidebar = true
+	w.sidebarView = sidebar
+
+	_, cmd := w.Update(tea.FocusMsg{})
+	require.NotNil(t, cmd, "focus should return stamped cmds from main+sidebar")
+
+	// Both produce cmds, so result must be a BatchMsg.
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "focus with two cmd-returning views should produce BatchMsg, got %T", msg)
+
+	// Every non-nil batch member must be epoch-stamped.
+	sentinelCount := 0
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		m := c()
+		ep, ok := m.(EpochMsg)
+		require.True(t, ok, "each batch member must be EpochMsg (stamped), got %T", m)
+		assert.Equal(t, session.Epoch(), ep.Epoch)
+		if _, ok := ep.Inner.(termFocusSentinel); ok {
+			sentinelCount++
+		}
+	}
+	assert.Equal(t, 2, sentinelCount, "both main and sidebar sentinels should be epoch-stamped")
 }

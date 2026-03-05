@@ -31,6 +31,7 @@ type Activity struct {
 	// Entries metadata for navigation
 	entryMeta map[string]workspace.TimelineEventInfo
 
+	pollGen       uint64
 	width, height int
 }
 
@@ -149,7 +150,7 @@ func (v *Activity) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case data.PollMsg:
-		if msg.Tag == v.pool.Key() {
+		if msg.Tag == v.pool.Key() && msg.Gen == v.pollGen {
 			return v, tea.Batch(
 				v.pool.FetchIfStale(v.session.Hub().Global().Context()),
 				v.schedulePoll(),
@@ -161,6 +162,9 @@ func (v *Activity) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 
 	case workspace.BlurMsg:
 		v.pool.SetFocused(false)
+
+	case workspace.TerminalFocusMsg:
+		return v, v.schedulePoll()
 
 	case spinner.TickMsg:
 		if v.loading {
@@ -242,8 +246,10 @@ func (v *Activity) schedulePoll() tea.Cmd {
 	if interval == 0 {
 		return nil
 	}
+	v.pollGen++
 	key := v.pool.Key()
+	gen := v.pollGen
 	return tea.Tick(interval, func(time.Time) tea.Msg {
-		return data.PollMsg{Tag: key}
+		return data.PollMsg{Tag: key, Gen: gen}
 	})
 }

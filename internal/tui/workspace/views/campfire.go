@@ -112,6 +112,8 @@ type Campfire struct {
 	// Loading
 	spinner spinner.Model
 	loading bool
+
+	pollGen uint64
 }
 
 // NewCampfire creates the campfire chat view.
@@ -339,7 +341,7 @@ func (v *Campfire) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 		return v, nil
 
 	case data.PollMsg:
-		if msg.Tag == v.pool.Key() {
+		if msg.Tag == v.pool.Key() && msg.Gen == v.pollGen {
 			return v, tea.Batch(
 				v.pool.FetchIfStale(v.session.Hub().ProjectContext()),
 				v.schedulePoll(),
@@ -356,6 +358,9 @@ func (v *Campfire) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	case workspace.BlurMsg:
 		v.pool.SetFocused(false)
 		v.composer.Blur()
+
+	case workspace.TerminalFocusMsg:
+		return v, v.schedulePoll()
 
 	case spinner.TickMsg:
 		if v.loading || v.loadingMore {
@@ -861,9 +866,11 @@ func (v *Campfire) schedulePoll() tea.Cmd {
 	if interval == 0 {
 		return nil
 	}
+	v.pollGen++
 	key := v.pool.Key()
+	gen := v.pollGen
 	return tea.Tick(interval, func(time.Time) tea.Msg {
-		return data.PollMsg{Tag: key}
+		return data.PollMsg{Tag: key, Gen: gen}
 	})
 }
 

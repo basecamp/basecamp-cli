@@ -15,21 +15,23 @@ import (
 //   - Account: active account session (projects, hey, assignments)
 //   - Project: active project context (todos, campfire, messages)
 type Realm struct {
-	mu     sync.RWMutex
-	name   string
-	ctx    context.Context
-	cancel context.CancelFunc
-	pools  map[string]Pooler
+	mu              sync.RWMutex
+	name            string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	pools           map[string]Pooler
+	terminalFocused bool // persisted so newly registered pools inherit the state
 }
 
 // NewRealm creates a realm with a cancellable context derived from parent.
 func NewRealm(name string, parent context.Context) *Realm { //nolint:revive // context-as-argument: name is the primary differentiator
 	ctx, cancel := context.WithCancel(parent)
 	return &Realm{
-		name:   name,
-		ctx:    ctx,
-		cancel: cancel,
-		pools:  make(map[string]Pooler),
+		name:            name,
+		ctx:             ctx,
+		cancel:          cancel,
+		pools:           make(map[string]Pooler),
+		terminalFocused: true,
 	}
 }
 
@@ -41,10 +43,14 @@ func (r *Realm) Name() string { return r.name }
 func (r *Realm) Context() context.Context { return r.ctx }
 
 // Register adds a pool to this realm for lifecycle management.
+// If the terminal is currently blurred, the pool inherits that state.
 func (r *Realm) Register(key string, p Pooler) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pools[key] = p
+	if !r.terminalFocused {
+		p.SetTerminalFocused(false)
+	}
 }
 
 // Pool returns a registered pool by key, or nil if not found.
@@ -64,6 +70,17 @@ func (r *Realm) Teardown() {
 		p.Clear()
 	}
 	r.pools = make(map[string]Pooler)
+}
+
+// SetTerminalFocused persists the state and fans out to all pools in this realm.
+// Newly registered pools will also inherit this state.
+func (r *Realm) SetTerminalFocused(focused bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.terminalFocused = focused
+	for _, p := range r.pools {
+		p.SetTerminalFocused(focused)
+	}
 }
 
 // Invalidate marks all pools in this realm as stale.
@@ -104,5 +121,8 @@ func RealmPool[P Pooler](r *Realm, key string, create func() P) P {
 	}
 	pool := create()
 	r.pools[key] = pool
+	if !r.terminalFocused {
+		pool.SetTerminalFocused(false)
+	}
 	return pool
 }

@@ -32,6 +32,7 @@ type PoolConfig struct {
 type Pooler interface {
 	Invalidate()
 	Clear()
+	SetTerminalFocused(focused bool)
 }
 
 // Pool is a typed, self-refreshing data source.
@@ -42,18 +43,19 @@ type Pooler interface {
 // capabilities. TEA's polling mechanism (PollMsg -> view calls FetchIfStale)
 // drives the refresh cycle.
 type Pool[T any] struct {
-	mu         sync.RWMutex
-	key        string
-	snapshot   Snapshot[T]
-	config     PoolConfig
-	fetchFn    FetchFunc[T]
-	version    uint64 // incremented on every data change
-	generation uint64 // incremented on Clear, used to discard stale fetches
-	fetching   bool
-	pushMode   bool // when true, extend poll intervals (SSE connected)
-	missCount  int
-	focused    bool
-	metrics    *PoolMetrics
+	mu              sync.RWMutex
+	key             string
+	snapshot        Snapshot[T]
+	config          PoolConfig
+	fetchFn         FetchFunc[T]
+	version         uint64 // incremented on every data change
+	generation      uint64 // incremented on Clear, used to discard stale fetches
+	fetching        bool
+	pushMode        bool // when true, extend poll intervals (SSE connected)
+	missCount       int
+	focused         bool
+	terminalFocused bool // false when the terminal window has lost OS focus
+	metrics         *PoolMetrics
 
 	// Cumulative counters for observability (separate from missCount backoff state).
 	cumulativeHits   int
@@ -63,10 +65,11 @@ type Pool[T any] struct {
 // NewPool creates a Pool with the given key, config, and fetch function.
 func NewPool[T any](key string, config PoolConfig, fetchFn FetchFunc[T]) *Pool[T] {
 	return &Pool[T]{
-		key:     key,
-		config:  config,
-		fetchFn: fetchFn,
-		focused: true,
+		key:             key,
+		config:          config,
+		fetchFn:         fetchFn,
+		focused:         true,
+		terminalFocused: true,
 	}
 }
 
@@ -267,6 +270,14 @@ func (p *Pool[T]) RecordMiss() {
 	p.cumulativeMisses++
 }
 
+// SetTerminalFocused marks whether the terminal window has OS focus.
+// When false, poll intervals are extended 4× to reduce background load.
+func (p *Pool[T]) SetTerminalFocused(focused bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.terminalFocused = focused
+}
+
 // SetFocused marks whether the view consuming this pool has focus.
 func (p *Pool[T]) SetFocused(focused bool) {
 	p.mu.Lock()
@@ -324,6 +335,9 @@ func (p *Pool[T]) pollInterval() time.Duration {
 	base := p.config.PollBase
 	if !p.focused && p.config.PollBg > 0 {
 		base = p.config.PollBg
+	}
+	if !p.terminalFocused {
+		base *= 4
 	}
 	if p.pushMode {
 		base *= 10

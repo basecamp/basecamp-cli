@@ -1,6 +1,7 @@
 package views
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -235,4 +236,70 @@ func TestActivity_SyncEntries_ListItemIDMatchesMetaKey(t *testing.T) {
 		assert.Contains(t, item.ID, fmt.Sprintf("%d", meta.ID),
 			"list item key should contain the event ID")
 	}
+}
+
+// testPollingActivity creates an Activity view backed by a pool with PollBase
+// configured, so that schedulePoll() returns non-nil ticks and bumps pollGen.
+func testPollingActivity() *Activity {
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetEmptyText("No recent activity.")
+	list.SetFocused(true)
+	list.SetSize(80, 20)
+
+	entries := sampleTimeline()
+	pool := data.NewPool[[]data.TimelineEventInfo]("timeline", data.PoolConfig{
+		FreshTTL: time.Hour,
+		PollBase: 30 * time.Second,
+	}, func(_ context.Context) ([]data.TimelineEventInfo, error) {
+		return entries, nil
+	})
+	pool.Set(entries)
+
+	session := workspace.NewTestSessionWithHub()
+	session.Hub().EnsureAccount("test-account")
+
+	v := &Activity{
+		session:   session,
+		pool:      pool,
+		styles:    styles,
+		list:      list,
+		loading:   false,
+		entryMeta: make(map[string]workspace.TimelineEventInfo),
+	}
+	v.syncEntries(entries)
+	return v
+}
+
+func TestActivity_StalePollGen_Dropped(t *testing.T) {
+	v := testPollingActivity()
+	poolKey := v.pool.Key()
+
+	// First schedulePoll sets pollGen to 1.
+	cmd := v.schedulePoll()
+	require.NotNil(t, cmd)
+	assert.Equal(t, uint64(1), v.pollGen)
+
+	// TerminalFocusMsg bumps to 2 — simulates a focus-reschedule.
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(2), v.pollGen)
+
+	// A PollMsg from the old chain (gen=1) should be silently dropped.
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 1})
+	assert.Nil(t, cmd, "stale gen PollMsg should be dropped")
+
+	// A PollMsg with the current gen should be processed (returns non-nil batch).
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 2})
+	assert.NotNil(t, cmd, "current gen PollMsg should be processed")
+}
+
+func TestActivity_TerminalFocusMsg_BumpsPollGen(t *testing.T) {
+	v := testPollingActivity()
+	assert.Equal(t, uint64(0), v.pollGen)
+
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(1), v.pollGen, "TerminalFocusMsg should bump pollGen")
+
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(2), v.pollGen, "each TerminalFocusMsg should bump pollGen")
 }

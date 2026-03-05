@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -72,4 +73,26 @@ func TestKeyedPoolClear(t *testing.T) {
 	p1New := kp.Get(1)
 	assert.NotSame(t, p1, p1New)
 	assert.False(t, p1New.Get().HasData)
+}
+
+func TestKeyedPoolSetTerminalFocused(t *testing.T) {
+	kp := NewKeyedPool(func(key int) *Pool[int] {
+		return NewPool(fmt.Sprintf("p:%d", key), PoolConfig{PollBase: 10 * time.Second}, func(ctx context.Context) (int, error) {
+			return key, nil
+		})
+	})
+
+	p1 := kp.Get(1)
+	p2 := kp.Get(2)
+
+	assert.Equal(t, 10*time.Second, p1.PollInterval())
+	assert.Equal(t, 10*time.Second, p2.PollInterval())
+
+	kp.SetTerminalFocused(false)
+	assert.Equal(t, 40*time.Second, p1.PollInterval())
+	assert.Equal(t, 40*time.Second, p2.PollInterval())
+
+	kp.SetTerminalFocused(true)
+	assert.Equal(t, 10*time.Second, p1.PollInterval())
+	assert.Equal(t, 10*time.Second, p2.PollInterval())
 }

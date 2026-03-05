@@ -42,7 +42,7 @@ func NewSession(app *appctx.App) *Session {
 		styles:     tui.NewStylesWithTheme(tui.ResolveTheme(true)),
 		hasDarkBG:  true,
 		multiStore: ms,
-		hub:        data.NewHub(ms, data.NewPoller()),
+		hub:        data.NewHub(ms),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -163,7 +163,7 @@ func NewTestSession() *Session {
 // which is enough for key handler tests that exercise the state machine.
 func NewTestSessionWithHub() *Session {
 	s := NewTestSession()
-	s.hub = data.NewHub(s.multiStore, data.NewPoller())
+	s.hub = data.NewHub(s.multiStore)
 	return s
 }
 

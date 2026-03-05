@@ -287,6 +287,49 @@ func helpKeys(bindings []key.Binding) []string {
 	return keys
 }
 
+func testPollingCampfire() *Campfire {
+	styles := tui.NewStyles()
+	pool := data.NewPool[data.CampfireLinesResult](
+		"campfire:test",
+		data.PoolConfig{FreshTTL: time.Hour, PollBase: 5 * time.Second},
+		func(context.Context) (data.CampfireLinesResult, error) {
+			return data.CampfireLinesResult{}, nil
+		},
+	)
+	pool.Set(data.CampfireLinesResult{})
+
+	session := workspace.NewTestSessionWithHub()
+	session.Hub().EnsureAccount("test-account")
+	session.Hub().EnsureProject(99)
+
+	return &Campfire{
+		session:  session,
+		pool:     pool,
+		styles:   styles,
+		keys:     defaultCampfireKeyMap(),
+		composer: widget.NewComposer(styles, widget.WithMode(widget.ComposerQuick)),
+		mode:     campfireModeInput,
+	}
+}
+
+func TestCampfire_StalePollGen_Dropped(t *testing.T) {
+	v := testPollingCampfire()
+	poolKey := v.pool.Key()
+
+	cmd := v.schedulePoll()
+	require.NotNil(t, cmd)
+	assert.Equal(t, uint64(1), v.pollGen)
+
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(2), v.pollGen)
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 1})
+	assert.Nil(t, cmd, "stale gen PollMsg should be dropped")
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 2})
+	assert.NotNil(t, cmd, "current gen PollMsg should be processed")
+}
+
 func TestSameTimeGroup(t *testing.T) {
 	now := time.Now()
 	assert.True(t, sameTimeGroup(now, now.Add(4*time.Minute)), "within 5 min should group")

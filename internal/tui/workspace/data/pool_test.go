@@ -336,6 +336,38 @@ func TestPoolStaleTTLZeroMeansNoExpiry(t *testing.T) {
 	assert.Equal(t, "persistent", snap.Data)
 }
 
+func TestPoolTerminalFocused(t *testing.T) {
+	p := NewPool[int]("tf", PoolConfig{
+		PollBase: 10 * time.Second,
+		PollBg:   30 * time.Second,
+	}, nil)
+
+	// Default: terminal focused, view focused → PollBase.
+	assert.Equal(t, 10*time.Second, p.PollInterval())
+
+	// Terminal blurred: 4× PollBase.
+	p.SetTerminalFocused(false)
+	assert.Equal(t, 40*time.Second, p.PollInterval())
+
+	// View blurred + terminal blurred: 4× PollBg.
+	p.SetFocused(false)
+	assert.Equal(t, 120*time.Second, p.PollInterval())
+
+	// View blurred + terminal focused: PollBg.
+	p.SetTerminalFocused(true)
+	assert.Equal(t, 30*time.Second, p.PollInterval())
+
+	// Restore: view focused + terminal focused → PollBase.
+	p.SetFocused(true)
+	assert.Equal(t, 10*time.Second, p.PollInterval())
+}
+
+func TestPoolTerminalFocusedZeroPollBase(t *testing.T) {
+	p := NewPool[int]("tf-zero", PoolConfig{}, nil)
+	p.SetTerminalFocused(false)
+	assert.Equal(t, time.Duration(0), p.PollInterval(), "zero PollBase should always return 0")
+}
+
 func TestPoolFetchSetsLoading(t *testing.T) {
 	proceed := make(chan struct{})
 	p := NewPool("load", PoolConfig{}, func(ctx context.Context) (int, error) {

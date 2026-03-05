@@ -229,6 +229,31 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.session.ReloadTheme()
 		return w, nil
 
+	case tea.FocusMsg:
+		if hub := w.session.Hub(); hub != nil {
+			hub.SetTerminalFocused(true)
+		}
+		// Forward to current view and sidebar so polling views can reschedule
+		// at the new (faster) interval instead of waiting out the prior 4× timer.
+		var cmds []tea.Cmd
+		if view := w.router.Current(); view != nil {
+			updated, c := view.Update(TerminalFocusMsg{})
+			w.replaceCurrentView(updated)
+			cmds = append(cmds, w.stampCmd(c))
+		}
+		if w.sidebarActive() {
+			updated, c := w.sidebarView.Update(TerminalFocusMsg{})
+			w.sidebarView = updated
+			cmds = append(cmds, w.stampCmd(c))
+		}
+		return w, tea.Batch(cmds...)
+
+	case tea.BlurMsg:
+		if hub := w.session.Hub(); hub != nil {
+			hub.SetTerminalFocused(false)
+		}
+		return w, nil
+
 	case tea.KeyPressMsg:
 		return w, w.handleKey(msg)
 
@@ -1289,6 +1314,7 @@ func (w *Workspace) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = w.windowTitle
+	v.ReportFocus = true
 	return v
 }
 

@@ -281,6 +281,10 @@ type FocusMsg struct{}
 // BlurMsg indicates a view lost focus.
 type BlurMsg struct{}
 
+// TerminalFocusMsg is sent when the terminal window gains OS focus.
+// Polling views should reschedule their poll timer at the new (faster) interval.
+type TerminalFocusMsg struct{}
+
 // Command factories
 
 // Navigate returns a command that sends a NavigateMsg.

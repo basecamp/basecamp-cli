@@ -20,24 +20,24 @@ import (
 // project pools are torn down on LeaveProject/EnsureProject(different),
 // account pools on SwitchAccount, global pools on Shutdown.
 type Hub struct {
-	mu        sync.RWMutex
-	global    *Realm
-	account   *Realm // nil when no account selected
-	project   *Realm // nil when not in a project
-	accountID string // tracks which account the realm belongs to
-	projectID int64  // tracks which project the realm belongs to
-	multi     *MultiStore
-	poller    *Poller
-	metrics   *PoolMetrics
+	mu              sync.RWMutex
+	global          *Realm
+	account         *Realm // nil when no account selected
+	project         *Realm // nil when not in a project
+	accountID       string // tracks which account the realm belongs to
+	projectID       int64  // tracks which project the realm belongs to
+	terminalFocused bool   // persisted so new realms/pools inherit the state
+	multi           *MultiStore
+	metrics         *PoolMetrics
 }
 
 // NewHub creates a Hub with a global realm and the given dependencies.
-func NewHub(multi *MultiStore, poller *Poller) *Hub {
+func NewHub(multi *MultiStore) *Hub {
 	return &Hub{
-		global:  NewRealm("global", context.Background()),
-		multi:   multi,
-		poller:  poller,
-		metrics: NewPoolMetrics(),
+		global:          NewRealm("global", context.Background()),
+		terminalFocused: true,
+		multi:           multi,
+		metrics:         NewPoolMetrics(),
 	}
 }
 
@@ -68,9 +68,6 @@ func (h *Hub) Project() *Realm {
 // MultiStore returns the cross-account SDK access layer.
 func (h *Hub) MultiStore() *MultiStore { return h.multi }
 
-// Poller returns the shared polling coordinator.
-func (h *Hub) Poller() *Poller { return h.poller }
-
 // EnsureAccount returns the account realm, creating one if needed.
 // If called with a different accountID than the current realm, the old
 // realm is torn down (along with any project realm) and a fresh one created.
@@ -90,7 +87,7 @@ func (h *Hub) EnsureAccount(accountID string) *Realm {
 		h.account.Teardown()
 	}
 	h.accountID = accountID
-	h.account = NewRealm("account:"+accountID, h.global.Context())
+	h.account = h.newRealm("account:" + accountID)
 	return h.account
 }
 
@@ -109,7 +106,7 @@ func (h *Hub) SwitchAccount(accountID string) {
 		h.account.Teardown()
 	}
 	h.accountID = accountID
-	h.account = NewRealm("account:"+accountID, h.global.Context())
+	h.account = h.newRealm("account:" + accountID)
 }
 
 // EnsureProject returns the project realm, creating one if needed.
@@ -130,6 +127,9 @@ func (h *Hub) EnsureProject(projectID int64) *Realm {
 		parent = h.account.Context()
 	}
 	h.project = NewRealm(fmt.Sprintf("project:%d", projectID), parent)
+	if !h.terminalFocused {
+		h.project.SetTerminalFocused(false)
+	}
 	return h.project
 }
 
@@ -141,6 +141,32 @@ func (h *Hub) LeaveProject() {
 		h.project.Teardown()
 		h.project = nil
 		h.projectID = 0
+	}
+}
+
+// newRealm creates a realm parented to global, inheriting terminal focus state.
+// Must be called with h.mu held.
+func (h *Hub) newRealm(name string) *Realm {
+	r := NewRealm(name, h.global.Context())
+	if !h.terminalFocused {
+		r.SetTerminalFocused(false)
+	}
+	return r
+}
+
+// SetTerminalFocused propagates terminal focus state to all active realms.
+// When the terminal window loses OS focus, poll intervals are extended
+// to reduce unnecessary background network activity.
+func (h *Hub) SetTerminalFocused(focused bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.terminalFocused = focused
+	h.global.SetTerminalFocused(focused)
+	if h.account != nil {
+		h.account.SetTerminalFocused(focused)
+	}
+	if h.project != nil {
+		h.project.SetTerminalFocused(focused)
 	}
 }
 

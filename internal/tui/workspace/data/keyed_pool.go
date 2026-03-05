@@ -57,6 +57,15 @@ func (kp *KeyedPool[K, T]) Invalidate() {
 	}
 }
 
+// SetTerminalFocused fans out terminal focus state to all sub-pools.
+func (kp *KeyedPool[K, T]) SetTerminalFocused(focused bool) {
+	kp.mu.RLock()
+	defer kp.mu.RUnlock()
+	for _, p := range kp.pools {
+		p.SetTerminalFocused(focused)
+	}
+}
+
 // Clear removes all sub-pools and their data.
 func (kp *KeyedPool[K, T]) Clear() {
 	kp.mu.Lock()
