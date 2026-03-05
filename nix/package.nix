@@ -1,13 +1,13 @@
-{ lib, buildGoModule, installShellFiles, stdenv }:
+{ lib, buildGoModule, go_1_26, installShellFiles, stdenv }:
 
-buildGoModule (finalAttrs: {
+buildGoModule.override { go = go_1_26; } (finalAttrs: {
   pname = "basecamp";
   version = "0.2.3";
 
   src = lib.cleanSource ./..;
 
   # To update: set to lib.fakeHash, run `nix build`, use the hash from the error.
-  vendorHash = lib.fakeHash;
+  vendorHash = "sha256-9YnQ8PaJxcoaYuWM8jB7KSB7MFI5K5Pm/d3wkwugtrA=";
 
   subPackages = [ "cmd/basecamp" ];
 
