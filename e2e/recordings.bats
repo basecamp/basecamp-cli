@@ -90,3 +90,44 @@ load test_helper
   run basecamp recordings foobar
   # Command may show help or require project - just verify it runs
 }
+
+
+# Assignee redirect
+
+@test "recordings todos --assignee redirects to reports assigned" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp recordings todos --assignee me
+  assert_failure
+  assert_output_contains "reports assigned"
+}
+
+@test "recordings list todos --assignee redirects to reports assigned" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp recordings list todos --assignee me
+  assert_failure
+  assert_output_contains "reports assigned"
+}
+
+@test "recordings todos --assignee with --in suggests todos command" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp recordings todos --assignee me --in myproject
+  assert_failure
+  assert_output_contains "basecamp todos --assignee"
+  assert_output_contains "--in"
+}
+
+@test "recordings list todos --assignee with --in suggests todos command" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp recordings list todos --assignee me --in myproject
+  assert_failure
+  assert_output_contains "basecamp todos --assignee"
+  assert_output_contains "--in"
+}
