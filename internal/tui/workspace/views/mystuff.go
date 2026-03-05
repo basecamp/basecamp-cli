@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -89,7 +89,7 @@ func (v *MyStuff) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *MyStuff) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *MyStuff) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspace.RefreshMsg:
 		v.syncRecents()
@@ -99,7 +99,7 @@ func (v *MyStuff) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.syncRecents()
 		return v, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		keys := workspace.DefaultListKeyMap()
 		switch {
 		case key.Matches(msg, keys.Open):

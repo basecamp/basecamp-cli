@@ -3,7 +3,7 @@ package chrome
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +26,7 @@ func TestAccountSwitcher_DigitKeySelection(t *testing.T) {
 
 	// Focus prepends "All Accounts" when >1 account: [All, Acme, Beta]
 	// Digit "0" selects "All Accounts"
-	cmd := s.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	cmd := s.handleKey(tea.KeyPressMsg{Code: '0', Text: "0"})
 	require.NotNil(t, cmd)
 	msg := cmd()
 	switched, ok := msg.(AccountSwitchedMsg)
@@ -43,7 +43,7 @@ func TestAccountSwitcher_DigitKeySelectsAccount(t *testing.T) {
 	s := testSwitcher(accounts)
 
 	// "1" selects first real account (Acme Corp)
-	cmd := s.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	cmd := s.handleKey(tea.KeyPressMsg{Code: '1', Text: "1"})
 	require.NotNil(t, cmd)
 	msg := cmd()
 	switched, ok := msg.(AccountSwitchedMsg)
@@ -52,7 +52,7 @@ func TestAccountSwitcher_DigitKeySelectsAccount(t *testing.T) {
 	assert.Equal(t, "Acme Corp", switched.AccountName)
 
 	// "2" selects second real account (Beta Inc)
-	cmd = s.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	cmd = s.handleKey(tea.KeyPressMsg{Code: '2', Text: "2"})
 	require.NotNil(t, cmd)
 	msg = cmd()
 	switched, ok = msg.(AccountSwitchedMsg)
@@ -69,7 +69,7 @@ func TestAccountSwitcher_DigitKeyOutOfRange(t *testing.T) {
 
 	// Single account: no "All Accounts" prepended, so [Acme].
 	// "5" is out of range — should be a no-op.
-	cmd := s.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	cmd := s.handleKey(tea.KeyPressMsg{Code: '5', Text: "5"})
 	assert.Nil(t, cmd, "out-of-range digit should be a no-op")
 }
 

@@ -1,24 +1,20 @@
 package workspace
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // View is the interface that all workspace views must implement.
+// Decoupled from tea.Model so views return string from View() and
+// View (not tea.Model) from Update().
 type View interface {
-	tea.Model
-
-	// Title returns the breadcrumb segment for this view.
+	Init() tea.Cmd
+	Update(tea.Msg) (View, tea.Cmd)
+	View() string
 	Title() string
-
-	// ShortHelp returns key bindings shown in the status bar.
 	ShortHelp() []key.Binding
-
-	// FullHelp returns all key bindings for the help overlay.
 	FullHelp() [][]key.Binding
-
-	// SetSize updates the view's available dimensions.
 	SetSize(width, height int)
 }
 

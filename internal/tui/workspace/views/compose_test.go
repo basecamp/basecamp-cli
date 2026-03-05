@@ -3,8 +3,8 @@ package views
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -75,11 +75,11 @@ func TestCompose_TabSwitchesFocus(t *testing.T) {
 	require.Equal(t, composeFocusSubject, v.focus, "initial focus should be on subject")
 
 	// Tab switches to body
-	v.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, composeFocusBody, v.focus, "Tab should switch focus to body")
 
 	// Tab switches back to subject
-	v.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, composeFocusSubject, v.focus, "second Tab should return focus to subject")
 }
 
@@ -122,7 +122,7 @@ func TestCompose_EmptyBodyShowsError(t *testing.T) {
 func TestCompose_EscNavigatesBack(t *testing.T) {
 	v := testComposeView()
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.NotNil(t, cmd, "Esc should produce a cmd")
 
 	msg := cmd()
@@ -135,7 +135,7 @@ func TestCompose_EscNavigatesBack_FromBody(t *testing.T) {
 	v.toggleFocus()
 	require.Equal(t, composeFocusBody, v.focus)
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.NotNil(t, cmd)
 
 	msg := cmd()
@@ -173,7 +173,7 @@ func TestCompose_SendingBlocksKeys(t *testing.T) {
 
 	// handleKey is not called when sending — Update returns nil early.
 	// We test via Update to match the real path.
-	_, cmd := v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	_, cmd := v.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Nil(t, cmd, "keys should be blocked while sending")
 }
 
@@ -189,7 +189,7 @@ func TestCompose_SubmitError_ClearsSending(t *testing.T) {
 	assert.False(t, v.sending, "sending should be cleared on ComposerSubmitMsg error")
 
 	// Keys should be unblocked — tab should switch focus
-	_, cmd = v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	_, cmd = v.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.NotNil(t, cmd, "keys should be unblocked after error clears sending")
 	assert.Equal(t, composeFocusBody, v.focus, "tab should switch focus when not sending")
 }
@@ -201,5 +201,5 @@ func TestCompose_NarrowWidth_NoNegative(t *testing.T) {
 
 	// SetSize with an extremely small width — must not panic.
 	v.SetSize(2, 10)
-	assert.GreaterOrEqual(t, v.subject.Width, 0, "subject.Width should never go negative")
+	assert.GreaterOrEqual(t, v.subject.Width(), 0, "subject.Width should never go negative")
 }

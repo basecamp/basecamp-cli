@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -49,6 +49,7 @@ type Hey struct {
 	trashPending   bool
 	trashPendingID string
 
+	pollGen       uint64
 	width, height int
 }
 
@@ -140,7 +141,7 @@ func (v *Hey) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Hey) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
@@ -201,7 +202,7 @@ func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, tea.Batch(v.spinner.Tick, v.pool.Fetch(v.session.Hub().Global().Context()))
 
 	case data.PollMsg:
-		if msg.Tag == v.pool.Key() {
+		if msg.Tag == v.pool.Key() && msg.Gen == v.pollGen {
 			return v, tea.Batch(
 				v.pool.FetchIfStale(v.session.Hub().Global().Context()),
 				v.schedulePoll(),
@@ -214,6 +215,9 @@ func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspace.BlurMsg:
 		v.pool.SetFocused(false)
 
+	case workspace.TerminalFocusMsg:
+		return v, v.schedulePoll()
+
 	case spinner.TickMsg:
 		if v.loading {
 			var cmd tea.Cmd
@@ -221,7 +225,7 @@ func (v *Hey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.loading {
 			return v, nil
 		}
@@ -433,8 +437,10 @@ func (v *Hey) schedulePoll() tea.Cmd {
 	if interval == 0 {
 		return nil
 	}
+	v.pollGen++
 	key := v.pool.Key()
+	gen := v.pollGen
 	return tea.Tick(interval, func(time.Time) tea.Msg {
-		return data.PollMsg{Tag: key}
+		return data.PollMsg{Tag: key, Gen: gen}
 	})
 }

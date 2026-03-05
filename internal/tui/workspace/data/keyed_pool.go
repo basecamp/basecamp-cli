@@ -6,9 +6,10 @@ import "sync"
 // For data keyed by a parent: todos by todolist, campfire lines by campfire,
 // comments by recording.
 type KeyedPool[K comparable, T any] struct {
-	mu      sync.RWMutex
-	pools   map[K]*Pool[T]
-	factory func(key K) *Pool[T]
+	mu              sync.RWMutex
+	pools           map[K]*Pool[T]
+	factory         func(key K) *Pool[T]
+	terminalFocused bool // persisted so new sub-pools inherit the state
 }
 
 // NewKeyedPool creates a KeyedPool with the given factory for creating
@@ -16,8 +17,9 @@ type KeyedPool[K comparable, T any] struct {
 // independent fetch state.
 func NewKeyedPool[K comparable, T any](factory func(key K) *Pool[T]) *KeyedPool[K, T] {
 	return &KeyedPool[K, T]{
-		pools:   make(map[K]*Pool[T]),
-		factory: factory,
+		pools:           make(map[K]*Pool[T]),
+		factory:         factory,
+		terminalFocused: true,
 	}
 }
 
@@ -36,6 +38,9 @@ func (kp *KeyedPool[K, T]) Get(key K) *Pool[T] {
 		return p
 	}
 	p := kp.factory(key)
+	if !kp.terminalFocused {
+		p.SetTerminalFocused(false)
+	}
 	kp.pools[key] = p
 	return p
 }
@@ -54,6 +59,16 @@ func (kp *KeyedPool[K, T]) Invalidate() {
 	defer kp.mu.RUnlock()
 	for _, p := range kp.pools {
 		p.Invalidate()
+	}
+}
+
+// SetTerminalFocused fans out terminal focus state to all sub-pools.
+func (kp *KeyedPool[K, T]) SetTerminalFocused(focused bool) {
+	kp.mu.Lock()
+	defer kp.mu.Unlock()
+	kp.terminalFocused = focused
+	for _, p := range kp.pools {
+		p.SetTerminalFocused(focused)
 	}
 }
 

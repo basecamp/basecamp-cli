@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -87,20 +87,20 @@ func (p *Palette) Blur() {
 func (p *Palette) SetSize(width, height int) {
 	p.width = width
 	p.height = height
-	p.input.Width = max(0, width-8) // account for padding + prompt
+	p.input.SetWidth(max(0, width-8)) // account for padding + prompt
 }
 
 // Update handles key messages while the palette is active.
 // Returns a tea.Cmd if the palette produces an action or wants to close.
 func (p *Palette) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return p.handleKey(msg)
 	}
 	return nil
 }
 
-func (p *Palette) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (p *Palette) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		return func() tea.Msg { return PaletteCloseMsg{} }

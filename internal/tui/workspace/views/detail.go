@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -315,7 +315,7 @@ func (v *Detail) Init() tea.Cmd {
 	return tea.Batch(v.spinner.Tick, v.fetchDetail())
 }
 
-func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Detail) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case detailLoadedMsg:
 		v.loading = false
@@ -508,11 +508,27 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.commentTrashPending = false
 		return v, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.loading && v.data == nil {
 			return v, nil
 		}
 		return v, v.handleKey(msg)
+
+	case tea.PasteMsg:
+		switch {
+		case v.editingComment && v.commentEditComposer != nil:
+			text, cmd := v.commentEditComposer.ProcessPaste(msg.Content)
+			v.commentEditComposer.InsertPaste(text)
+			return v, cmd
+		case v.editingBody && v.bodyEditComposer != nil:
+			text, cmd := v.bodyEditComposer.ProcessPaste(msg.Content)
+			v.bodyEditComposer.InsertPaste(text)
+			return v, cmd
+		case v.composing:
+			text, cmd := v.composer.ProcessPaste(msg.Content)
+			v.composer.InsertPaste(text)
+			return v, cmd
+		}
 	}
 
 	// Forward other messages to composer
@@ -535,7 +551,7 @@ func (v *Detail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, nil
 }
 
-func (v *Detail) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.editing {
 		return v.handleEditingKey(msg)
 	}
@@ -744,17 +760,13 @@ func (v *Detail) startCommentEdit() tea.Cmd {
 	return v.commentEditComposer.Focus()
 }
 
-func (v *Detail) handleCommentEditingKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleCommentEditingKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case msg.String() == "esc":
 		v.editingComment = false
 		v.commentEditComposer = nil
 		v.relayout()
 		return nil
-	case msg.Paste && v.commentEditComposer != nil:
-		text, cmd := v.commentEditComposer.ProcessPaste(string(msg.Runes))
-		v.commentEditComposer.InsertPaste(text)
-		return cmd
 	default:
 		if v.commentEditComposer != nil {
 			return v.commentEditComposer.Update(msg)
@@ -824,7 +836,7 @@ func (v *Detail) startDetailSettingDue() tea.Cmd {
 	return textinput.Blink
 }
 
-func (v *Detail) handleDetailSettingDueKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleDetailSettingDueKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		input := strings.TrimSpace(v.dueInput.Value())
@@ -901,7 +913,7 @@ func (v *Detail) startDetailAssigning() tea.Cmd {
 	return textinput.Blink
 }
 
-func (v *Detail) handleDetailAssigningKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleDetailAssigningKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		input := strings.TrimSpace(v.assignInput.Value())
@@ -1004,7 +1016,7 @@ func (v *Detail) startEditTitle() tea.Cmd {
 	return textinput.Blink
 }
 
-func (v *Detail) handleEditingKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleEditingKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		title := strings.TrimSpace(v.editInput.Value())
@@ -1065,17 +1077,13 @@ func (v *Detail) startEditBody() tea.Cmd {
 	return v.bodyEditComposer.Focus()
 }
 
-func (v *Detail) handleEditingBodyKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleEditingBodyKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case msg.String() == "esc":
 		v.editingBody = false
 		v.bodyEditComposer = nil
 		v.relayout()
 		return nil
-	case msg.Paste && v.bodyEditComposer != nil:
-		text, cmd := v.bodyEditComposer.ProcessPaste(string(msg.Runes))
-		v.bodyEditComposer.InsertPaste(text)
-		return cmd
 	default:
 		if v.bodyEditComposer != nil {
 			return v.bodyEditComposer.Update(msg)
@@ -1118,7 +1126,7 @@ func (v *Detail) toggleSubscribe() tea.Cmd {
 	}
 }
 
-func (v *Detail) handleComposingKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Detail) handleComposingKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case msg.String() == "esc":
 		if v.submitting {
@@ -1128,10 +1136,6 @@ func (v *Detail) handleComposingKey(msg tea.KeyMsg) tea.Cmd {
 		v.composer.Blur()
 		v.relayout()
 		return nil
-	case msg.Paste:
-		text, cmd := v.composer.ProcessPaste(string(msg.Runes))
-		v.composer.InsertPaste(text)
-		return cmd
 	default:
 		return v.composer.Update(msg)
 	}

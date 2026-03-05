@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -112,6 +112,8 @@ type Campfire struct {
 	// Loading
 	spinner spinner.Model
 	loading bool
+
+	pollGen uint64
 }
 
 // NewCampfire creates the campfire chat view.
@@ -123,7 +125,7 @@ func NewCampfire(session *workspace.Session) *Campfire {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Theme().Primary)
 
-	vp := viewport.New(0, 0)
+	vp := viewport.New()
 	vp.MouseWheelEnabled = true
 
 	pool := session.Hub().CampfireLines(scope.ProjectID, scope.ToolID)
@@ -255,7 +257,7 @@ func (v *Campfire) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Campfire) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
@@ -339,7 +341,7 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case data.PollMsg:
-		if msg.Tag == v.pool.Key() {
+		if msg.Tag == v.pool.Key() && msg.Gen == v.pollGen {
 			return v, tea.Batch(
 				v.pool.FetchIfStale(v.session.Hub().ProjectContext()),
 				v.schedulePoll(),
@@ -357,6 +359,9 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.pool.SetFocused(false)
 		v.composer.Blur()
 
+	case workspace.TerminalFocusMsg:
+		return v, v.schedulePoll()
+
 	case spinner.TickMsg:
 		if v.loading || v.loadingMore {
 			var cmd tea.Cmd
@@ -364,8 +369,17 @@ func (v *Campfire) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return v, v.handleKey(msg)
+
+	case tea.PasteMsg:
+		text, cmd := v.composer.ProcessPaste(msg.Content)
+		v.composer.InsertPaste(text)
+		if v.composer.Mode() != widget.ComposerQuick {
+			v.resizeViewport()
+			v.renderMessages()
+		}
+		return v, cmd
 	}
 
 	// Forward other messages to composer (upload results, etc.)
@@ -438,28 +452,19 @@ func (v *Campfire) handleOlderLinesLoaded(msg workspace.CampfireLinesLoadedMsg) 
 	return nil
 }
 
-func (v *Campfire) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Campfire) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.mode == campfireModeInput {
 		return v.handleInputKey(msg)
 	}
 	return v.handleScrollKey(msg)
 }
 
-func (v *Campfire) handleInputKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Campfire) handleInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, v.keys.ScrollMode):
 		v.mode = campfireModeScroll
 		v.composer.Blur()
 		return nil
-
-	case msg.Paste:
-		text, cmd := v.composer.ProcessPaste(string(msg.Runes))
-		v.composer.InsertPaste(text)
-		if v.composer.Mode() != widget.ComposerQuick {
-			v.resizeViewport()
-			v.renderMessages()
-		}
-		return cmd
 
 	default:
 		// Forward to composer — it handles Enter (send), ctrl+enter, ctrl+e, etc.
@@ -474,20 +479,20 @@ func (v *Campfire) handleInputKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (v *Campfire) handleScrollKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Campfire) handleScrollKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, v.keys.EnterInput):
 		v.mode = campfireModeInput
 		return v.composer.Focus()
 
 	case key.Matches(msg, v.keys.ScrollUp):
-		v.viewport.LineUp(1)
+		v.viewport.ScrollUp(1)
 		// After scrolling, target the most recent visible message for boost
 		v.updateSelectedToLatest()
 		return v.maybeLoadMore()
 
 	case key.Matches(msg, v.keys.ScrollDown):
-		v.viewport.LineDown(1)
+		v.viewport.ScrollDown(1)
 		v.updateSelectedToLatest()
 
 	case key.Matches(msg, v.keys.ScrollTop):
@@ -506,7 +511,7 @@ func (v *Campfire) handleScrollKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (v *Campfire) maybeLoadMore() tea.Cmd {
-	if v.viewport.YOffset == 0 && v.hasMore && !v.loadingMore {
+	if v.viewport.YOffset() == 0 && v.hasMore && !v.loadingMore {
 		v.loadingMore = true
 		v.currentPage++
 		v.renderMessages() // re-render to show "loading older..." indicator
@@ -598,7 +603,7 @@ func (v *Campfire) renderMessages() {
 	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Primary)
 	timeStyle := lipgloss.NewStyle().Foreground(theme.Muted)
 	pendingStyle := lipgloss.NewStyle().Foreground(theme.Muted).Italic(true)
-	bodyWidth := v.viewport.Width - 2
+	bodyWidth := v.viewport.Width() - 2
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
@@ -797,8 +802,8 @@ func (v *Campfire) resizeViewport() {
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
-	v.viewport.Width = v.width
-	v.viewport.Height = vpHeight
+	v.viewport.SetWidth(v.width)
+	v.viewport.SetHeight(vpHeight)
 	v.composer.SetSize(v.width, inputHeight)
 }
 
@@ -861,9 +866,11 @@ func (v *Campfire) schedulePoll() tea.Cmd {
 	if interval == 0 {
 		return nil
 	}
+	v.pollGen++
 	key := v.pool.Key()
+	gen := v.pollGen
 	return tea.Tick(interval, func(time.Time) tea.Msg {
-		return data.PollMsg{Tag: key}
+		return data.PollMsg{Tag: key, Gen: gen}
 	})
 }
 

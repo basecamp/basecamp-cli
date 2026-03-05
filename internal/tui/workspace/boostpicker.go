@@ -3,9 +3,9 @@ package workspace
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -32,7 +32,7 @@ func NewBoostPicker(styles *tui.Styles) *BoostPicker {
 	ti := textinput.New()
 	ti.Placeholder = "Type an emoji or 16 chars..."
 	ti.CharLimit = 16
-	ti.Width = 30
+	ti.SetWidth(30)
 
 	return &BoostPicker{
 		styles:    styles,
@@ -64,8 +64,8 @@ func (p *BoostPicker) Update(msg tea.Msg) (*BoostPicker, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type { //nolint:exhaustive // partial key handler; tea.KeyType has 80+ values
+	case tea.KeyPressMsg:
+		switch msg.Code { //nolint:exhaustive // partial key handler
 		case tea.KeyEnter:
 			val := strings.TrimSpace(p.textInput.Value())
 			if val == "" {

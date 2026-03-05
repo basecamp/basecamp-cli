@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
@@ -60,7 +60,7 @@ func newSetupClaudeCmd() *cobra.Command {
 
 			if app.IsInteractive() {
 				// Interactive mode: full wizard flow with prompts
-				styles := tui.NewStylesWithTheme(tui.ResolveTheme())
+				styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
 				w := cmd.OutOrStdout()
 
 				if !app.Auth.IsAuthenticated() && os.Getenv("BASECAMP_TOKEN") == "" {
@@ -113,7 +113,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	styles := tui.NewStylesWithTheme(tui.ResolveTheme())
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
 
 	// Step 1: Welcome
 	if err := showWelcome(styles); err != nil {

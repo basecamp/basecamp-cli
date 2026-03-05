@@ -10,9 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -68,6 +68,7 @@ type Workspace struct {
 	showQuickJump       bool
 	quitting            bool
 	confirmQuit         bool
+	windowTitle         string
 
 	// Theme file watcher for live reloading
 	themeWatcher *fsnotify.Watcher
@@ -146,7 +147,11 @@ func (w *Workspace) Init() tea.Cmd {
 	w.router.Push(view, scope, ViewHome)
 	w.syncChrome()
 
-	cmds := []tea.Cmd{w.stampCmd(view.Init()), chrome.SetTerminalTitle("basecamp")}
+	cmds := []tea.Cmd{
+		w.stampCmd(view.Init()),
+		chrome.SetTerminalTitle("basecamp"),
+		func() tea.Msg { return tea.RequestBackgroundColor() },
+	}
 
 	// Deep-link: if a URL was passed via CLI args, navigate there after Home init.
 	if target, deepScope, ok := w.session.ConsumeInitialView(); ok {
@@ -219,7 +224,37 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.relayout()
 		return w, nil
 
-	case tea.KeyMsg:
+	case tea.BackgroundColorMsg:
+		w.session.SetDarkBackground(msg.IsDark())
+		w.session.ReloadTheme()
+		return w, nil
+
+	case tea.FocusMsg:
+		if hub := w.session.Hub(); hub != nil {
+			hub.SetTerminalFocused(true)
+		}
+		// Forward to current view and sidebar so polling views can reschedule
+		// at the new (faster) interval instead of waiting out the prior 4× timer.
+		var cmds []tea.Cmd
+		if view := w.router.Current(); view != nil {
+			updated, c := view.Update(TerminalFocusMsg{})
+			w.replaceCurrentView(updated)
+			cmds = append(cmds, w.stampCmd(c))
+		}
+		if w.sidebarActive() {
+			updated, c := w.sidebarView.Update(TerminalFocusMsg{})
+			w.sidebarView = updated
+			cmds = append(cmds, w.stampCmd(c))
+		}
+		return w, tea.Batch(cmds...)
+
+	case tea.BlurMsg:
+		if hub := w.session.Hub(); hub != nil {
+			hub.SetTerminalFocused(false)
+		}
+		return w, nil
+
+	case tea.KeyPressMsg:
 		return w, w.handleKey(msg)
 
 	case EpochMsg:
@@ -278,6 +313,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.pickingBoost = true
 		w.boostTarget = msg.Target
 		w.boostPicker.Focus()
+		return w, nil
+
+	case chrome.WindowTitleMsg:
+		w.windowTitle = msg.Title
 		return w, nil
 
 	case ThemeChangedMsg:
@@ -340,9 +379,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var sidebarCmd tea.Cmd
 		if w.sidebarActive() {
 			updated, sc := w.sidebarView.Update(msg)
-			if v, ok := updated.(View); ok {
-				w.sidebarView = v
-			}
+			w.sidebarView = updated
 			sidebarCmd = w.stampCmd(sc)
 		}
 		// Forward to current view
@@ -426,9 +463,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if w.sidebarActive() {
 		if _, ok := msg.(data.PollMsg); ok {
 			updated, sc := w.sidebarView.Update(msg)
-			if v, ok := updated.(View); ok {
-				w.sidebarView = v
-			}
+			w.sidebarView = updated
 			sidebarCmd = w.stampCmd(sc)
 		}
 	}
@@ -446,11 +481,11 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return w, sidebarCmd
 }
 
-func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Help overlay consumes all keys when active
 	if w.pickingBoost {
-		switch msg.Type { //nolint:exhaustive // partial key handler; tea.KeyType has 80+ values
-		case tea.KeyEsc:
+		switch msg.Code { //nolint:exhaustive // partial key handler
+		case tea.KeyEscape:
 			w.pickingBoost = false
 			w.boostPicker.Blur()
 			return nil
@@ -639,8 +674,8 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// Number keys for breadcrumb jumping (1-9)
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-		r := msg.Runes[0]
+	if runes := []rune(msg.Text); len(runes) == 1 {
+		r := runes[0]
 		if r >= '1' && r <= '9' {
 			depth := int(r - '0')
 			return w.goToDepth(depth)
@@ -650,9 +685,7 @@ func (w *Workspace) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Forward to focused panel
 	if w.sidebarActive() && w.sidebarFocused {
 		updated, cmd := w.sidebarView.Update(msg)
-		if v, ok := updated.(View); ok {
-			w.sidebarView = v
-		}
+		w.sidebarView = updated
 		return w.stampCmd(cmd)
 	}
 	if view := w.router.Current(); view != nil {
@@ -1122,14 +1155,11 @@ func stampWithEpoch(epoch uint64, cmd tea.Cmd) tea.Cmd {
 	}
 }
 
-func (w *Workspace) replaceCurrentView(updated tea.Model) {
-	if v, ok := updated.(View); ok {
-		if len(w.router.stack) > 0 {
-			w.router.stack[len(w.router.stack)-1].view = v
-		}
-		// Refresh key hints — view mode may have changed (e.g., cards move mode)
-		w.statusBar.SetKeyHints(v.ShortHelp())
+func (w *Workspace) replaceCurrentView(updated View) {
+	if len(w.router.stack) > 0 {
+		w.router.stack[len(w.router.stack)-1].view = updated
 	}
+	w.statusBar.SetKeyHints(updated.ShortHelp())
 }
 
 // recordNavigation logs a navigation event for Apdex tracking.
@@ -1211,9 +1241,9 @@ func (w *Workspace) viewHeight() int {
 }
 
 // View implements tea.Model.
-func (w *Workspace) View() string {
+func (w *Workspace) View() tea.View {
 	if w.quitting {
-		return ""
+		return tea.NewView("")
 	}
 
 	var sections []string
@@ -1280,7 +1310,12 @@ func (w *Workspace) View() string {
 		ui = lipgloss.Place(w.width, w.height, lipgloss.Center, lipgloss.Center, pickerView)
 	}
 
-	return ui
+	v := tea.NewView(ui)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.WindowTitle = w.windowTitle
+	v.ReportFocus = true
+	return v
 }
 
 // isAuthError returns true if the error indicates an expired or invalid auth token.

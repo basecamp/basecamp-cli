@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,7 +42,7 @@ func TestCampfire_PoolUpdatedSetsBoostTargetToLatestLine(t *testing.T) {
 	v := &Campfire{
 		pool:           pool,
 		styles:         tui.NewStyles(),
-		viewport:       viewport.New(80, 20),
+		viewport:       viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		selectedLineID: 100, // stale target before refresh
 		lastID:         100,
 	}
@@ -66,7 +66,7 @@ func TestCampfire_ScrollModeBoostHotkeyOpensPickerForSelectedLine(t *testing.T) 
 	}
 
 	for _, r := range []rune{'b', 'B'} {
-		cmd := v.handleScrollKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		cmd := v.handleScrollKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		require.NotNil(t, cmd, "expected boost cmd for %q", string(r))
 
 		msg := cmd()
@@ -129,7 +129,7 @@ func testCampfireWithLines(lines []workspace.CampfireLineInfo) *Campfire {
 	return &Campfire{
 		pool:     pool,
 		styles:   tui.NewStyles(),
-		viewport: viewport.New(80, 20),
+		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		lines:    lines,
 		width:    80,
 		height:   20,
@@ -285,6 +285,49 @@ func helpKeys(bindings []key.Binding) []string {
 		keys = append(keys, b.Help().Key)
 	}
 	return keys
+}
+
+func testPollingCampfire() *Campfire {
+	styles := tui.NewStyles()
+	pool := data.NewPool[data.CampfireLinesResult](
+		"campfire:test",
+		data.PoolConfig{FreshTTL: time.Hour, PollBase: 5 * time.Second},
+		func(context.Context) (data.CampfireLinesResult, error) {
+			return data.CampfireLinesResult{}, nil
+		},
+	)
+	pool.Set(data.CampfireLinesResult{})
+
+	session := workspace.NewTestSessionWithHub()
+	session.Hub().EnsureAccount("test-account")
+	session.Hub().EnsureProject(99)
+
+	return &Campfire{
+		session:  session,
+		pool:     pool,
+		styles:   styles,
+		keys:     defaultCampfireKeyMap(),
+		composer: widget.NewComposer(styles, widget.WithMode(widget.ComposerQuick)),
+		mode:     campfireModeInput,
+	}
+}
+
+func TestCampfire_StalePollGen_Dropped(t *testing.T) {
+	v := testPollingCampfire()
+	poolKey := v.pool.Key()
+
+	cmd := v.schedulePoll()
+	require.NotNil(t, cmd)
+	assert.Equal(t, uint64(1), v.pollGen)
+
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(2), v.pollGen)
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 1})
+	assert.Nil(t, cmd, "stale gen PollMsg should be dropped")
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 2})
+	assert.NotNil(t, cmd, "current gen PollMsg should be processed")
 }
 
 func TestSameTimeGroup(t *testing.T) {

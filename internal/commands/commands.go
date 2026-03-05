@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
@@ -183,7 +183,7 @@ func NewCommandsCmd() *cobra.Command {
 // renderCommandsStyled writes a grouped command listing with aligned columns.
 func renderCommandsStyled(w io.Writer, categories []CommandCategory) {
 	bold := lipgloss.NewStyle().Bold(true)
-	muted := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#666", Dark: "#888"})
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
 
 	experimentalPrefix := "[experimental] "
 

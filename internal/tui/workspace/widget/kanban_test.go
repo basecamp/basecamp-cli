@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -420,7 +421,6 @@ func TestKanban_RightOverflow_Width(t *testing.T) {
 	view := k.View()
 	lines := strings.Split(view, "\n")
 	for _, line := range lines {
-		// lipgloss.Width accounts for ANSI escape codes
-		assert.LessOrEqual(t, len([]rune(line)), 62, "rendered line should not significantly exceed widget width")
+		assert.LessOrEqual(t, lipgloss.Width(line), 62, "rendered line should not significantly exceed widget width")
 	}
 }

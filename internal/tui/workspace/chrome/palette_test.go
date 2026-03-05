@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,7 +34,7 @@ func TestPalette_NarrowWidth_NoNegative(t *testing.T) {
 
 	// SetSize with an extremely small width — must not panic.
 	p.SetSize(2, 10)
-	assert.GreaterOrEqual(t, p.input.Width, 0, "input.Width should never go negative")
+	assert.GreaterOrEqual(t, p.input.Width(), 0, "input.Width should never go negative")
 
 	// Exercise View at narrow width.
 	p.Focus()
@@ -46,7 +46,7 @@ func TestPalette_EscCloses(t *testing.T) {
 	p := testPalette()
 	p.Focus()
 
-	cmd := p.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.NotNil(t, cmd)
 
 	msg := cmd()
@@ -67,7 +67,7 @@ func TestPalette_EnterExecutesAction(t *testing.T) {
 	)
 	p.Focus()
 
-	cmd := p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "Enter should produce a batch cmd")
 
 	// Execute the batch — it contains PaletteCloseMsg + PaletteExecMsg
@@ -124,7 +124,7 @@ func TestPalette_CursorScroll(t *testing.T) {
 
 	// Move cursor past maxVisibleItems
 	for range maxVisibleItems + 2 {
-		p.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+		p.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	assert.Greater(t, p.cursor, maxVisibleItems-1, "cursor should be past visible window")
 

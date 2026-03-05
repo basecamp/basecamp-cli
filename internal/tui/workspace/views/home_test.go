@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -75,13 +75,13 @@ func TestHome_FilterDelegatesAllKeys(t *testing.T) {
 	require.True(t, v.list.Filtering())
 
 	// Press 'p' — should be absorbed by filter, NOT trigger navigate to projects
-	updated, cmd := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated, cmd := v.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 	// Verify no navigation command was produced
 	if cmd != nil {
 		// Run the cmd to get the message — navigate produces a NavigateMsg
 		msg := cmd()
-		_, isKey := msg.(tea.KeyMsg)
+		_, isKey := msg.(tea.KeyPressMsg)
 		// The command should NOT be a navigation; it should be nil or a filter-internal cmd
 		assert.False(t, isKey, "should not produce a raw key msg")
 	}

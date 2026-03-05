@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -43,16 +43,16 @@ func NewStyles(theme tui.Theme, styled bool) Styles {
 	}
 
 	return Styles{
-		Primary: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Primary.Dark)).Bold(true),
-		Normal:  lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)),
-		Muted:   lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)),
-		Subtle:  lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Border.Dark)),
-		Success: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Success.Dark)),
-		Warning: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Warning.Dark)),
-		Error:   lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Error.Dark)),
-		Heading: lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)).Bold(true),
-		Label:   lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted.Dark)),
-		Body:    lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Foreground.Dark)),
+		Primary: lipgloss.NewStyle().Foreground(theme.Primary).Bold(true),
+		Normal:  lipgloss.NewStyle().Foreground(theme.Foreground),
+		Muted:   lipgloss.NewStyle().Foreground(theme.Muted),
+		Subtle:  lipgloss.NewStyle().Foreground(theme.Border),
+		Success: lipgloss.NewStyle().Foreground(theme.Success),
+		Warning: lipgloss.NewStyle().Foreground(theme.Warning),
+		Error:   lipgloss.NewStyle().Foreground(theme.Error),
+		Heading: lipgloss.NewStyle().Foreground(theme.Muted).Bold(true),
+		Label:   lipgloss.NewStyle().Foreground(theme.Muted),
+		Body:    lipgloss.NewStyle().Foreground(theme.Foreground),
 	}
 }
 

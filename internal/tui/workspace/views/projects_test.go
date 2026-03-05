@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -87,7 +87,7 @@ func TestProjects_EnterShiftsFocusRight(t *testing.T) {
 	assert.True(t, v.list.Filtering() == false)
 
 	// Press Enter to enter dock
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	assert.True(t, v.focusRight)
 	assert.NotNil(t, v.selectedProject)
@@ -97,7 +97,7 @@ func TestProjects_EnterShiftsFocusRight(t *testing.T) {
 func TestProjects_LKeyShiftsFocusRight(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	v.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 
 	assert.True(t, v.focusRight)
 }
@@ -106,11 +106,11 @@ func TestProjects_EscReturnsFocusLeft(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
 	// Enter dock
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.True(t, v.focusRight)
 
 	// Esc exits dock
-	v.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	assert.False(t, v.focusRight)
 }
@@ -118,10 +118,10 @@ func TestProjects_EscReturnsFocusLeft(t *testing.T) {
 func TestProjects_HKeyReturnsFocusLeft(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.True(t, v.focusRight)
 
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	v.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 
 	assert.False(t, v.focusRight)
 }
@@ -133,10 +133,10 @@ func TestProjects_IsModal_ReflectsFocusRight(t *testing.T) {
 
 	assert.False(t, v.IsModal(), "not modal when left panel focused")
 
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.True(t, v.IsModal(), "modal when right panel focused")
 
-	v.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.IsModal(), "not modal after returning left")
 }
 
@@ -145,7 +145,7 @@ func TestProjects_IsModal_ReflectsFocusRight(t *testing.T) {
 func TestProjects_ToolListPopulatesOnEnter(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	items := v.toolList.Items()
 	require.Len(t, items, 3)
@@ -166,7 +166,7 @@ func TestProjects_ToolListUpdatesOnCursorMove(t *testing.T) {
 	assert.Len(t, v.toolList.Items(), 3)
 
 	// Move cursor down to Beta
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	v.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 
 	require.NotNil(t, v.selectedProject)
 	assert.Equal(t, "Beta", v.selectedProject.Name)
@@ -179,7 +179,7 @@ func TestProjects_LeaveDockClearsToolFilter(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
 	// Enter dock and start filter
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	v.toolList.StartFilter()
 	require.True(t, v.toolList.Filtering())
 
@@ -194,7 +194,7 @@ func TestProjects_ToolFilterDelegatesAllKeys(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
 	// Enter dock
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.True(t, v.focusRight)
 
 	// Start filter on tool list
@@ -202,7 +202,7 @@ func TestProjects_ToolFilterDelegatesAllKeys(t *testing.T) {
 	require.True(t, v.toolList.Filtering())
 
 	// Press 't' — should be absorbed by filter (typing), NOT trigger todos hotkey
-	v.handleToolKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	v.handleToolKey(tea.KeyPressMsg{Code: 't', Text: "t"})
 
 	// Still filtering, still in dock (hotkey was NOT triggered)
 	assert.True(t, v.focusRight, "should still be in dock after typing in filter")
@@ -217,12 +217,12 @@ func TestProjects_ProjectFilterDelegatesAllKeys(t *testing.T) {
 	require.True(t, v.list.Filtering())
 
 	// Press 'b' — should be absorbed by filter, NOT trigger bookmark
-	v.handleProjectKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	v.handleProjectKey(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	assert.True(t, v.list.Filtering(), "filter should still be active after 'b'")
 	assert.False(t, v.focusRight, "should not have entered dock")
 
 	// Press 'l' — should be absorbed by filter, NOT enter dock
-	v.handleProjectKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	v.handleProjectKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	assert.True(t, v.list.Filtering(), "filter should still be active after 'l'")
 	assert.False(t, v.focusRight, "should not have entered dock")
 }
@@ -255,7 +255,7 @@ func TestProjects_StartFilterRoutesToActivePanel(t *testing.T) {
 	v.list.StopFilter()
 
 	// Enter dock: StartFilter goes to tool list
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	v.StartFilter()
 	assert.False(t, v.list.Filtering())
 	assert.True(t, v.toolList.Filtering())
@@ -267,7 +267,7 @@ func TestProjects_AfterPoolUpdate_RebindsSelectedProject(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
 	// Enter dock on Alpha
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Equal(t, int64(1), v.selectedProject.ID)
 	require.Len(t, v.toolList.Items(), 3)
 
@@ -297,7 +297,7 @@ func TestProjects_AfterPoolUpdate_ProjectDisappears(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
 	// Enter dock on Alpha
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.True(t, v.focusRight)
 
 	// Simulate pool refresh: Alpha removed
@@ -325,7 +325,7 @@ func TestProjects_ShortHelp_LeftPanel(t *testing.T) {
 
 func TestProjects_ShortHelp_RightPanel(t *testing.T) {
 	v := testProjectsView(sampleProjects())
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	hints := v.ShortHelp()
 	require.Len(t, hints, 7)
@@ -361,13 +361,13 @@ func TestProjects_ActivityHotkey_NilGuard(t *testing.T) {
 	v := testProjectsView(sampleProjects())
 
 	// Enter dock, then leave (so selectedProject is cleared via leaveDock)
-	v.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	v.leaveDock()
 	v.selectedProject = nil
 
 	// focusRight = true but selectedProject = nil — should not panic
 	v.focusRight = true
-	cmd := v.handleToolKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	cmd := v.handleToolKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	assert.Nil(t, cmd, "pressing 'a' with nil selectedProject should return nil")
 }
 

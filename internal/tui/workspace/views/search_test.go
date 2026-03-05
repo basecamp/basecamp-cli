@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -100,11 +100,11 @@ func TestSearch_TabSwitchesFocus(t *testing.T) {
 	require.Equal(t, searchFocusInput, v.focus, "initial focus should be on input")
 
 	// Tab toggles to list
-	v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, searchFocusList, v.focus, "Tab should switch focus to results list")
 
 	// Tab toggles back to input
-	v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	v.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, searchFocusInput, v.focus, "second Tab should return focus to input")
 }
 
@@ -172,7 +172,7 @@ func TestSearch_EscFromInput_NavigatesBack(t *testing.T) {
 	v := testSearchView()
 	require.Equal(t, searchFocusInput, v.focus)
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.NotNil(t, cmd)
 
 	msg := cmd()
@@ -185,7 +185,7 @@ func TestSearch_EscFromList_ReturnsFocusToInput(t *testing.T) {
 	v.toggleFocus()
 	require.Equal(t, searchFocusList, v.focus)
 
-	v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	assert.Equal(t, searchFocusInput, v.focus, "Esc from list should return focus to input")
 }
@@ -316,7 +316,7 @@ func TestSearch_NarrowWidth_NoNegative(t *testing.T) {
 
 	// SetSize with an extremely small width — must not panic.
 	v.SetSize(2, 10)
-	assert.GreaterOrEqual(t, v.textInput.Width, 0, "textInput.Width should never go negative")
+	assert.GreaterOrEqual(t, v.textInput.Width(), 0, "textInput.Width should never go negative")
 
 	// Exercise View to confirm rendering doesn't panic either.
 	out := v.View()

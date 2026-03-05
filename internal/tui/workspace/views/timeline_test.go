@@ -1,6 +1,7 @@
 package views
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -112,4 +113,54 @@ func TestTimeline_OpenSelected_ValidRecordingID(t *testing.T) {
 	require.True(t, isNav)
 	assert.Equal(t, int64(5001), nav.Scope.RecordingID)
 	assert.Equal(t, workspace.ViewDetail, nav.Target)
+}
+
+func testPollingTimeline() *Timeline {
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetEmptyText("No recent activity for this project.")
+	list.SetFocused(true)
+	list.SetSize(80, 20)
+
+	entries := sampleTimeline()
+	pool := data.NewPool[[]data.TimelineEventInfo]("project-timeline:42", data.PoolConfig{
+		FreshTTL: time.Hour,
+		PollBase: 30 * time.Second,
+	}, func(_ context.Context) ([]data.TimelineEventInfo, error) {
+		return entries, nil
+	})
+	pool.Set(entries)
+
+	session := workspace.NewTestSessionWithHub()
+	session.Hub().EnsureAccount("test-account")
+
+	v := &Timeline{
+		session:   session,
+		pool:      pool,
+		projectID: 42,
+		styles:    styles,
+		list:      list,
+		loading:   false,
+		entryMeta: make(map[string]workspace.TimelineEventInfo),
+	}
+	v.syncEntries(entries)
+	return v
+}
+
+func TestTimeline_StalePollGen_Dropped(t *testing.T) {
+	v := testPollingTimeline()
+	poolKey := v.pool.Key()
+
+	cmd := v.schedulePoll()
+	require.NotNil(t, cmd)
+	assert.Equal(t, uint64(1), v.pollGen)
+
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(2), v.pollGen)
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 1})
+	assert.Nil(t, cmd, "stale gen PollMsg should be dropped")
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 2})
+	assert.NotNil(t, cmd, "current gen PollMsg should be processed")
 }

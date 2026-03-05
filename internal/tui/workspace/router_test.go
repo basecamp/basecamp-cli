@@ -3,8 +3,8 @@ package workspace
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,13 +13,13 @@ type mockView struct {
 	title string
 }
 
-func (v mockView) Init() tea.Cmd                       { return nil }
-func (v mockView) Update(tea.Msg) (tea.Model, tea.Cmd) { return v, nil }
-func (v mockView) View() string                        { return v.title }
-func (v mockView) Title() string                       { return v.title }
-func (v mockView) ShortHelp() []key.Binding            { return nil }
-func (v mockView) FullHelp() [][]key.Binding           { return nil }
-func (v mockView) SetSize(int, int)                    {}
+func (v mockView) Init() tea.Cmd                  { return nil }
+func (v mockView) Update(tea.Msg) (View, tea.Cmd) { return v, nil }
+func (v mockView) View() string                   { return v.title }
+func (v mockView) Title() string                  { return v.title }
+func (v mockView) ShortHelp() []key.Binding       { return nil }
+func (v mockView) FullHelp() [][]key.Binding      { return nil }
+func (v mockView) SetSize(int, int)               {}
 
 func TestNewRouter(t *testing.T) {
 	r := NewRouter()

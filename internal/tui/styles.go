@@ -2,34 +2,39 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"image/color"
+
+	"charm.land/lipgloss/v2"
 )
 
 // Theme defines the color palette for the TUI.
 type Theme struct {
-	Primary    lipgloss.AdaptiveColor
-	Secondary  lipgloss.AdaptiveColor
-	Success    lipgloss.AdaptiveColor
-	Warning    lipgloss.AdaptiveColor
-	Error      lipgloss.AdaptiveColor
-	Muted      lipgloss.AdaptiveColor
-	Background lipgloss.AdaptiveColor
-	Foreground lipgloss.AdaptiveColor
-	Border     lipgloss.AdaptiveColor
+	Dark       bool // how this theme was resolved (for downstream LightDark calls)
+	Primary    color.Color
+	Secondary  color.Color
+	Success    color.Color
+	Warning    color.Color
+	Error      color.Color
+	Muted      color.Color
+	Background color.Color
+	Foreground color.Color
+	Border     color.Color
 }
 
-// DefaultTheme returns the default basecamp theme.
-func DefaultTheme() Theme {
+// DefaultTheme returns the default basecamp theme resolved for the given background.
+func DefaultTheme(dark bool) Theme {
+	ld := lipgloss.LightDark(dark)
 	return Theme{
-		Primary:    lipgloss.AdaptiveColor{Light: "#1a73e8", Dark: "#8ab4f8"},
-		Secondary:  lipgloss.AdaptiveColor{Light: "#5f6368", Dark: "#9aa0a6"},
-		Success:    lipgloss.AdaptiveColor{Light: "#1e8e3e", Dark: "#81c995"},
-		Warning:    lipgloss.AdaptiveColor{Light: "#f9ab00", Dark: "#fdd663"},
-		Error:      lipgloss.AdaptiveColor{Light: "#d93025", Dark: "#f28b82"},
-		Muted:      lipgloss.AdaptiveColor{Light: "#80868b", Dark: "#6e7681"},
-		Background: lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1f1f1f"},
-		Foreground: lipgloss.AdaptiveColor{Light: "#202124", Dark: "#e8eaed"},
-		Border:     lipgloss.AdaptiveColor{Light: "#dadce0", Dark: "#3c4043"},
+		Dark:       dark,
+		Primary:    ld(lipgloss.Color("#1a73e8"), lipgloss.Color("#8ab4f8")),
+		Secondary:  ld(lipgloss.Color("#5f6368"), lipgloss.Color("#9aa0a6")),
+		Success:    ld(lipgloss.Color("#1e8e3e"), lipgloss.Color("#81c995")),
+		Warning:    ld(lipgloss.Color("#f9ab00"), lipgloss.Color("#fdd663")),
+		Error:      ld(lipgloss.Color("#d93025"), lipgloss.Color("#f28b82")),
+		Muted:      ld(lipgloss.Color("#80868b"), lipgloss.Color("#6e7681")),
+		Background: ld(lipgloss.Color("#ffffff"), lipgloss.Color("#1f1f1f")),
+		Foreground: ld(lipgloss.Color("#202124"), lipgloss.Color("#e8eaed")),
+		Border:     ld(lipgloss.Color("#dadce0"), lipgloss.Color("#3c4043")),
 	}
 }
 
@@ -64,9 +69,9 @@ type Styles struct {
 	StatusInfo  lipgloss.Style
 }
 
-// NewStyles creates a new Styles with the default theme.
+// NewStyles creates a new Styles with the default dark theme.
 func NewStyles() *Styles {
-	return NewStylesWithTheme(DefaultTheme())
+	return NewStylesWithTheme(DefaultTheme(true))
 }
 
 // NewStylesWithTheme creates a new Styles with a custom theme.

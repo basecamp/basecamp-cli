@@ -1,9 +1,11 @@
 package views
 
 import (
+	"context"
 	"testing"
+	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -90,7 +92,7 @@ func TestHey_FilterBlocksMutationKeys(t *testing.T) {
 	v := testHey(testHeyEntries)
 	v.list.StartFilter()
 
-	_, cmd := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, cmd := v.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	if cmd != nil {
 		msg := cmd()
 		_, isComplete := msg.(heyCompleteResultMsg)
@@ -102,7 +104,7 @@ func TestHey_FilterBlocksTrashArming(t *testing.T) {
 	v := testHey(testHeyEntries)
 	v.list.StartFilter()
 
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	v.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	assert.False(t, v.trashPending, "t during filter should not arm trash")
 }
 
@@ -116,4 +118,54 @@ func TestHey_ShortHelp_IncludesActions(t *testing.T) {
 	}
 	assert.Equal(t, "complete", keys["x"])
 	assert.Equal(t, "trash", keys["t"])
+}
+
+func testPollingHey() *Hey {
+	styles := tui.NewStyles()
+	list := widget.NewList(styles)
+	list.SetEmptyText("No recent activity.")
+	list.SetFocused(true)
+	list.SetSize(80, 20)
+
+	entries := testHeyEntries
+	pool := data.NewPool[[]data.ActivityEntryInfo]("hey:activity", data.PoolConfig{
+		FreshTTL: time.Hour,
+		PollBase: 30 * time.Second,
+	}, func(_ context.Context) ([]data.ActivityEntryInfo, error) {
+		return entries, nil
+	})
+	pool.Set(entries)
+
+	session := workspace.NewTestSessionWithHub()
+	session.Hub().EnsureAccount("test-account")
+
+	v := &Hey{
+		session:   session,
+		pool:      pool,
+		styles:    styles,
+		list:      list,
+		loading:   false,
+		entryMeta: make(map[string]workspace.ActivityEntryInfo),
+		excluded:  make(map[string]bool),
+	}
+	v.syncEntries(entries)
+	return v
+}
+
+func TestHey_StalePollGen_Dropped(t *testing.T) {
+	v := testPollingHey()
+	poolKey := v.pool.Key()
+
+	cmd := v.schedulePoll()
+	require.NotNil(t, cmd)
+	assert.Equal(t, uint64(1), v.pollGen)
+
+	v.Update(workspace.TerminalFocusMsg{})
+	assert.Equal(t, uint64(2), v.pollGen)
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 1})
+	assert.Nil(t, cmd, "stale gen PollMsg should be dropped")
+
+	_, cmd = v.Update(data.PollMsg{Tag: poolKey, Gen: 2})
+	assert.NotNil(t, cmd, "current gen PollMsg should be processed")
 }

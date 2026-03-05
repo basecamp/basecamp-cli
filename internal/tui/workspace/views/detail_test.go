@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -54,8 +54,8 @@ func testDetailWithSession(recordType string, completed bool) *Detail {
 	}
 }
 
-func runeKey(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func runeKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
 func TestDetail_OriginContext_RenderedInPreview(t *testing.T) {
@@ -275,7 +275,7 @@ func TestDetail_EditTitle_EnterSubmits(t *testing.T) {
 	v.editInput.SetValue("Updated Title")
 
 	// Press Enter to submit
-	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd = v.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter with changed title should return a cmd")
 
 	msg := cmd()
@@ -294,7 +294,7 @@ func TestDetail_EditTitle_EscCancels(t *testing.T) {
 	assert.True(t, v.editing)
 
 	// Press Esc to cancel
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd, "esc should return nil cmd")
 	assert.False(t, v.editing, "editing should be false after esc")
 }
@@ -309,7 +309,7 @@ func TestDetail_EditTitle_InputCapturer(t *testing.T) {
 	assert.True(t, v.InputActive(), "should capture input while editing")
 
 	// Cancel editing
-	v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.InputActive(), "should not capture input after cancel")
 }
 
@@ -348,7 +348,7 @@ func TestDetail_Subscribe_Toggle(t *testing.T) {
 
 func TestDetail_DueDate_OpensInput_ForTodo(t *testing.T) {
 	v := testDetailWithSession("Todo", false)
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	require.NotNil(t, cmd, "D should return blink cmd")
 	assert.True(t, v.settingDue)
 	assert.True(t, v.InputActive())
@@ -357,7 +357,7 @@ func TestDetail_DueDate_OpensInput_ForTodo(t *testing.T) {
 
 func TestDetail_DueDate_Ignored_ForMessage(t *testing.T) {
 	v := testDetailWithSession("Message", false)
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	assert.Nil(t, cmd, "D on Message should do nothing")
 	assert.False(t, v.settingDue)
 }
@@ -366,7 +366,7 @@ func TestDetail_DueDate_EscCancels(t *testing.T) {
 	v := testDetailWithSession("Todo", false)
 	v.settingDue = true
 
-	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleDetailSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.settingDue)
 }
@@ -376,7 +376,7 @@ func TestDetail_DueDate_EnterSubmits(t *testing.T) {
 	v.settingDue = true
 	v.dueInput = newDetailTextInput("tomorrow")
 
-	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleDetailSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.False(t, v.settingDue)
 
@@ -391,7 +391,7 @@ func TestDetail_DueDate_EmptyClears(t *testing.T) {
 	v.settingDue = true
 	v.dueInput = newDetailTextInput("")
 
-	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleDetailSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 
 	msg := cmd()
@@ -405,7 +405,7 @@ func TestDetail_DueDate_InvalidDate(t *testing.T) {
 	v.settingDue = true
 	v.dueInput = newDetailTextInput("not-a-date")
 
-	cmd := v.handleDetailSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleDetailSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 
 	msg := cmd()
@@ -435,14 +435,14 @@ func TestDetail_Assign_EscCancels(t *testing.T) {
 	v := testDetailWithSession("Todo", false)
 	v.assigning = true
 
-	cmd := v.handleDetailAssigningKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleDetailAssigningKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.assigning)
 }
 
 func TestDetail_Unassign_Dispatches_ForTodo(t *testing.T) {
 	v := testDetailWithSession("Todo", false)
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	require.NotNil(t, cmd, "A should return a cmd")
 
 	msg := cmd()
@@ -453,7 +453,7 @@ func TestDetail_Unassign_Dispatches_ForTodo(t *testing.T) {
 
 func TestDetail_Unassign_Ignored_ForMessage(t *testing.T) {
 	v := testDetailWithSession("Message", false)
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	assert.Nil(t, cmd, "A on Message should do nothing")
 }
 
@@ -528,27 +528,27 @@ func TestDetail_CommentFocus_Navigation(t *testing.T) {
 	v := detailWithComments()
 
 	// ] moves to first comment
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: ']', Text: "]"})
 	require.NotNil(t, cmd)
 	assert.Equal(t, 0, v.focusedComment)
 
 	// ] again moves to second comment
-	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	cmd = v.handleKey(tea.KeyPressMsg{Code: ']', Text: "]"})
 	require.NotNil(t, cmd)
 	assert.Equal(t, 1, v.focusedComment)
 
 	// ] clamps at last comment
-	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	cmd = v.handleKey(tea.KeyPressMsg{Code: ']', Text: "]"})
 	require.NotNil(t, cmd)
 	assert.Equal(t, 1, v.focusedComment, "should clamp at last comment")
 
 	// [ moves back
-	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	cmd = v.handleKey(tea.KeyPressMsg{Code: '[', Text: "["})
 	require.NotNil(t, cmd)
 	assert.Equal(t, 0, v.focusedComment)
 
 	// [ again unfocuses
-	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	cmd = v.handleKey(tea.KeyPressMsg{Code: '[', Text: "["})
 	require.NotNil(t, cmd)
 	assert.Equal(t, -1, v.focusedComment, "should unfocus when going past first")
 }
@@ -557,7 +557,7 @@ func TestDetail_CommentEdit_OpensInput(t *testing.T) {
 	v := detailWithComments()
 	v.focusedComment = 0
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'E'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'E', Text: "E"})
 	require.NotNil(t, cmd, "E should return blink cmd")
 	assert.True(t, v.editingComment, "should be in comment editing mode")
 	assert.True(t, v.InputActive(), "input should be active during comment edit")
@@ -568,7 +568,7 @@ func TestDetail_CommentEdit_Ignored_WhenNoFocus(t *testing.T) {
 	v := detailWithComments()
 	assert.Equal(t, -1, v.focusedComment)
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'E'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'E', Text: "E"})
 	assert.Nil(t, cmd, "E should do nothing when no comment focused")
 	assert.False(t, v.editingComment)
 }
@@ -578,12 +578,12 @@ func TestDetail_CommentTrash_DoublePress(t *testing.T) {
 	v.focusedComment = 1
 
 	// First T arms
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	require.NotNil(t, cmd)
 	assert.True(t, v.commentTrashPending, "first T should arm comment trash")
 
 	// Second T fires
-	cmd = v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	cmd = v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	require.NotNil(t, cmd, "second T should return trash cmd")
 	assert.False(t, v.commentTrashPending, "should be cleared after confirm")
 
@@ -598,7 +598,7 @@ func TestDetail_CommentTrash_Ignored_WhenNoFocus(t *testing.T) {
 	v := detailWithComments()
 	assert.Equal(t, -1, v.focusedComment)
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	assert.Nil(t, cmd, "T should do nothing when no comment focused")
 	assert.False(t, v.commentTrashPending)
 }
@@ -717,7 +717,7 @@ func TestDetail_Esc_NoOp_WhileSubmitting(t *testing.T) {
 	v.submitting = true
 	v.composer = widget.NewComposer(v.styles, widget.WithMode(widget.ComposerRich))
 
-	cmd := v.handleComposingKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleComposingKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd, "Esc should be no-op while submitting")
 	assert.True(t, v.composing, "composing should remain true when submit is in flight")
 }
@@ -795,7 +795,7 @@ func TestDetail_EditingCallsRelayout(t *testing.T) {
 	assert.True(t, v.editing, "should be in editing mode")
 
 	// Exit edit mode — preview should restore full height
-	v.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.editing, "should exit editing mode")
 }
 

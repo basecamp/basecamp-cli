@@ -25,6 +25,8 @@ type Session struct {
 	initialTarget *ViewTarget
 	initialScope  *Scope
 
+	hasDarkBG bool // terminal background detected or defaulted
+
 	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -37,9 +39,10 @@ func NewSession(app *appctx.App) *Session {
 	ms := data.NewMultiStore(app.SDK)
 	s := &Session{
 		app:        app,
-		styles:     tui.NewStylesWithTheme(tui.ResolveTheme()),
+		styles:     tui.NewStylesWithTheme(tui.ResolveTheme(true)),
+		hasDarkBG:  true,
 		multiStore: ms,
-		hub:        data.NewHub(ms, data.NewPoller()),
+		hub:        data.NewHub(ms),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -160,7 +163,7 @@ func NewTestSession() *Session {
 // which is enough for key handler tests that exercise the state machine.
 func NewTestSessionWithHub() *Session {
 	s := NewTestSession()
-	s.hub = data.NewHub(s.multiStore, data.NewPoller())
+	s.hub = data.NewHub(s.multiStore)
 	return s
 }
 
@@ -198,11 +201,24 @@ func (s *Session) ConsumeInitialView() (ViewTarget, Scope, bool) {
 	return target, scope, true
 }
 
+// SetDarkBackground updates the terminal background detection state.
+// Thread-safe: may be called from Cmd goroutines (e.g. BackgroundColorMsg handler).
+func (s *Session) SetDarkBackground(dark bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hasDarkBG = dark
+}
+
 // ReloadTheme re-reads the theme from disk and updates the shared Styles
 // in place. All components holding *Styles see new colors on the next render.
+// Thread-safe: serializes the full resolve+apply through the write lock so
+// concurrent calls don't race on Styles fields.
 func (s *Session) ReloadTheme() {
-	theme := tui.ResolveTheme()
+	s.mu.Lock()
+	dark := s.hasDarkBG
+	theme := tui.ResolveTheme(dark)
 	s.styles.UpdateTheme(theme)
+	s.mu.Unlock()
 }
 
 // Shutdown cancels the session context and tears down all Hub realms.

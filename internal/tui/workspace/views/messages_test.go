@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -92,7 +92,7 @@ func TestMessages_FilterDelegatesAllKeys(t *testing.T) {
 
 	// 'b', 'B', 'n' should all be absorbed by the filter
 	for _, r := range []rune{'b', 'B', 'n'} {
-		v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		v.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		assert.True(t, v.list.Filtering(), "filter should still be active after %q", string(r))
 	}
 }
@@ -102,7 +102,7 @@ func TestMessages_FilterDelegatesAllKeys(t *testing.T) {
 func TestMessages_PinKey_CallsPin(t *testing.T) {
 	v := testMessagesViewWithSession()
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'P', Text: "P"})
 	require.NotNil(t, cmd, "P should return a cmd when a message is selected")
 
 	msg := cmd()
@@ -116,7 +116,7 @@ func TestMessages_PinKey_CallsPin(t *testing.T) {
 func TestMessages_UnpinKey_CallsUnpin(t *testing.T) {
 	v := testMessagesViewWithSession()
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'U', Text: "U"})
 	require.NotNil(t, cmd, "U should return a cmd when a message is selected")
 
 	msg := cmd()

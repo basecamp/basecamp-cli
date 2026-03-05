@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -78,7 +78,7 @@ func TestSchedule_Create_SummaryAdvancesToStep1(t *testing.T) {
 	v.createStep = 0
 	v.createInput = newTextInputWithValue("Team sync")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter should return blink cmd for next step")
 	assert.True(t, v.creating)
 	assert.Equal(t, 1, v.createStep)
@@ -94,7 +94,7 @@ func TestSchedule_Create_StartDateAdvancesToStep2(t *testing.T) {
 	v.createSummary = "Team sync"
 	v.createInput = newTextInputWithValue("2026-03-15")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter should return blink cmd for next step")
 	assert.True(t, v.creating)
 	assert.Equal(t, 2, v.createStep)
@@ -111,7 +111,7 @@ func TestSchedule_Create_EndDateDispatches(t *testing.T) {
 	v.createStart = "2026-03-15"
 	v.createInput = newTextInputWithValue("2026-03-16")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter should dispatch create")
 	assert.False(t, v.creating)
 
@@ -130,7 +130,7 @@ func TestSchedule_Create_EscCancels(t *testing.T) {
 		v.creating = true
 		v.createStep = step
 
-		cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEsc})
+		cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 		assert.Nil(t, cmd, "esc should return nil at step %d", step)
 		assert.False(t, v.creating, "creating should be false after esc at step %d", step)
 	}
@@ -145,7 +145,7 @@ func TestSchedule_Create_InvalidDateShowsError(t *testing.T) {
 	v.createSummary = "Team sync"
 	v.createInput = newTextInputWithValue("not-a-date")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.True(t, v.creating, "should stay in create mode on invalid date")
 	assert.Equal(t, 1, v.createStep, "should stay on step 1")
@@ -166,7 +166,7 @@ func TestSchedule_Create_EndBeforeStartShowsError(t *testing.T) {
 	v.createStart = "2026-03-15"
 	v.createInput = newTextInputWithValue("2026-03-10")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.True(t, v.creating, "should stay in create mode")
 	assert.Equal(t, 2, v.createStep, "should stay on step 2")
@@ -187,7 +187,7 @@ func TestSchedule_Create_EmptyEndDefaultsToStart(t *testing.T) {
 	v.createStart = "2026-03-15"
 	v.createInput = newTextInputWithValue("")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "should dispatch create with default end")
 	assert.False(t, v.creating)
 
@@ -212,7 +212,7 @@ func TestSchedule_Create_EmptySummaryExits(t *testing.T) {
 	v.createStep = 0
 	v.createInput = newTextInputWithValue("")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Nil(t, cmd)
 	assert.False(t, v.creating)
 }

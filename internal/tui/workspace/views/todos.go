@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -389,7 +389,7 @@ func (v *Todos) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Todos) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.todolistPool.Key() {
@@ -608,7 +608,7 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return v, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.editingDesc {
 			return v, v.handleEditDescKey(msg)
 		}
@@ -640,7 +640,7 @@ func (v *Todos) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, nil
 }
 
-func (v *Todos) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.listLists.Filtering() || v.listTodos.Filtering() {
 		v.trashListPending = false
 		v.trashListPendingID = ""
@@ -773,7 +773,7 @@ func (v *Todos) openSelectedTodo() tea.Cmd {
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
 
-func (v *Todos) handleCreatingKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) handleCreatingKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		content := strings.TrimSpace(v.textInput.Value())
@@ -795,7 +795,7 @@ func (v *Todos) handleCreatingKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (v *Todos) handleListInputKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) handleListInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		val := strings.TrimSpace(v.listInput.Value())
@@ -889,7 +889,7 @@ func (v *Todos) toggleFocus() {
 	v.listTodos.SetFocused(v.focus == todosPaneRight)
 }
 
-func (v *Todos) updateFocusedList(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) updateFocusedList(msg tea.KeyPressMsg) tea.Cmd {
 	if v.focus == todosPaneLeft {
 		prevIdx := v.listLists.SelectedIndex()
 		cmd := v.listLists.Update(msg)
@@ -1056,7 +1056,7 @@ func (v *Todos) startEditDescription() tea.Cmd {
 	return v.descComposer.Focus()
 }
 
-func (v *Todos) handleEditDescKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) handleEditDescKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		v.editingDesc = false
@@ -1281,7 +1281,7 @@ func (v *Todos) startSettingDue() tea.Cmd {
 	return textinput.Blink
 }
 
-func (v *Todos) handleSettingDueKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) handleSettingDueKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		input := strings.TrimSpace(v.dueInput.Value())
@@ -1356,7 +1356,7 @@ func (v *Todos) startAssigning() tea.Cmd {
 	return textinput.Blink
 }
 
-func (v *Todos) handleAssigningKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Todos) handleAssigningKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		input := strings.TrimSpace(v.assignInput.Value())

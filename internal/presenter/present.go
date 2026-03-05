@@ -43,7 +43,7 @@ func Present(w io.Writer, data any, entityHint string, mode RenderMode, opts ...
 		return false
 	}
 
-	theme := tui.ResolveTheme()
+	theme := tui.ResolveTheme(tui.DetectDark())
 	locale := DetectLocale()
 	return presentWith(w, data, schema, theme, locale, mode, buildOpts(opts))
 }

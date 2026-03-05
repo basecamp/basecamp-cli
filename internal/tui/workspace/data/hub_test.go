@@ -2,6 +2,7 @@ package data
 
 import (
 	"testing"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
@@ -9,14 +10,14 @@ import (
 )
 
 func TestHubNewHasGlobalRealm(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	require.NotNil(t, h.Global())
 	assert.Nil(t, h.Account())
 	assert.Nil(t, h.Project())
 }
 
 func TestHubEnsureAccount(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 
 	r := h.EnsureAccount("123")
 	require.NotNil(t, r)
@@ -29,7 +30,7 @@ func TestHubEnsureAccount(t *testing.T) {
 }
 
 func TestHubSwitchAccount(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	r1 := h.EnsureAccount("aaa")
 	r1Ctx := r1.Context()
 
@@ -46,7 +47,7 @@ func TestHubSwitchAccount(t *testing.T) {
 }
 
 func TestHubSwitchAccountTearsDownProject(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 	pr := h.EnsureProject(42)
 	prCtx := pr.Context()
@@ -58,7 +59,7 @@ func TestHubSwitchAccountTearsDownProject(t *testing.T) {
 }
 
 func TestHubEnsureProject(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 
 	r := h.EnsureProject(42)
@@ -72,7 +73,7 @@ func TestHubEnsureProject(t *testing.T) {
 }
 
 func TestHubLeaveProject(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 	pr := h.EnsureProject(42)
 	prCtx := pr.Context()
@@ -83,7 +84,7 @@ func TestHubLeaveProject(t *testing.T) {
 }
 
 func TestHubShutdown(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 	h.EnsureProject(42)
 
@@ -101,7 +102,7 @@ func TestHubShutdown(t *testing.T) {
 }
 
 func TestHubProjectWithoutAccount(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 
 	// Project realm without account uses global as parent.
 	pr := h.EnsureProject(42)
@@ -110,14 +111,14 @@ func TestHubProjectWithoutAccount(t *testing.T) {
 }
 
 func TestHubEnsureAccountSameIDReuses(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	r1 := h.EnsureAccount("aaa")
 	r2 := h.EnsureAccount("aaa")
 	assert.Same(t, r1, r2, "same ID should return same realm")
 }
 
 func TestHubEnsureAccountDifferentIDTearsDown(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	r1 := h.EnsureAccount("aaa")
 	r1Ctx := r1.Context()
 
@@ -130,7 +131,7 @@ func TestHubEnsureAccountDifferentIDTearsDown(t *testing.T) {
 }
 
 func TestHubEnsureAccountDifferentIDTearsDownProject(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 	pr := h.EnsureProject(42)
 	prCtx := pr.Context()
@@ -143,7 +144,7 @@ func TestHubEnsureAccountDifferentIDTearsDownProject(t *testing.T) {
 }
 
 func TestHubEnsureProjectSameIDReuses(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 	r1 := h.EnsureProject(42)
 	r2 := h.EnsureProject(42)
@@ -151,7 +152,7 @@ func TestHubEnsureProjectSameIDReuses(t *testing.T) {
 }
 
 func TestHubEnsureProjectDifferentIDTearsDown(t *testing.T) {
-	h := NewHub(nil, nil)
+	h := NewHub(nil)
 	h.EnsureAccount("aaa")
 	r1 := h.EnsureProject(42)
 	r1Ctx := r1.Context()
@@ -166,17 +167,15 @@ func TestHubEnsureProjectDifferentIDTearsDown(t *testing.T) {
 
 func TestHubDependencies(t *testing.T) {
 	ms := NewMultiStore(nil)
-	poller := NewPoller()
-	h := NewHub(ms, poller)
+	h := NewHub(ms)
 
 	assert.Same(t, ms, h.MultiStore())
-	assert.Same(t, poller, h.Poller())
 }
 
 // -- Context helper tests
 
 func TestHubProjectContext(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 
 	// No account, no project — falls back to global.
 	ctx := h.ProjectContext()
@@ -199,7 +198,7 @@ func TestHubProjectContext(t *testing.T) {
 }
 
 func TestHubProjectContextCanceledOnLeave(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 	h.EnsureProject(42)
 	ctx := h.ProjectContext()
@@ -210,7 +209,7 @@ func TestHubProjectContextCanceledOnLeave(t *testing.T) {
 }
 
 func TestHubAccountContext(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 
 	// No account — falls back to global.
 	ctx := h.AccountContext()
@@ -223,7 +222,7 @@ func TestHubAccountContext(t *testing.T) {
 }
 
 func TestHubAccountContextCanceledOnSwitch(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 	ctx := h.AccountContext()
 	assert.NoError(t, ctx.Err())
@@ -232,10 +231,59 @@ func TestHubAccountContextCanceledOnSwitch(t *testing.T) {
 	assert.Error(t, ctx.Err(), "account context should be canceled on switch")
 }
 
+// -- Terminal focus propagation tests
+
+func TestHubSetTerminalFocused(t *testing.T) {
+	h := NewHub(NewMultiStore(nil))
+	h.EnsureAccount("aaa")
+	h.EnsureProject(42)
+
+	// Register a polling pool in the project realm to observe interval changes.
+	pool := NewPool[int]("test-poll", PoolConfig{PollBase: 10 * time.Second}, nil)
+	h.Project().Register("test-poll", pool)
+
+	assert.Equal(t, 10*time.Second, pool.PollInterval())
+
+	// Blur terminal: pool interval should be 4× base.
+	h.SetTerminalFocused(false)
+	assert.Equal(t, 40*time.Second, pool.PollInterval())
+
+	// Re-focus: back to base.
+	h.SetTerminalFocused(true)
+	assert.Equal(t, 10*time.Second, pool.PollInterval())
+}
+
+func TestHubSetTerminalFocusedNilRealms(t *testing.T) {
+	h := NewHub(NewMultiStore(nil))
+	// No account or project realm — should not panic.
+	assert.NotPanics(t, func() { h.SetTerminalFocused(false) })
+	assert.NotPanics(t, func() { h.SetTerminalFocused(true) })
+}
+
+func TestHubSetTerminalFocusedAllRealms(t *testing.T) {
+	h := NewHub(NewMultiStore(nil))
+	h.EnsureAccount("aaa")
+	h.EnsureProject(42)
+
+	globalPool := NewPool[int]("g-poll", PoolConfig{PollBase: 5 * time.Second}, nil)
+	acctPool := NewPool[int]("a-poll", PoolConfig{PollBase: 10 * time.Second}, nil)
+	projPool := NewPool[int]("p-poll", PoolConfig{PollBase: 20 * time.Second}, nil)
+
+	h.Global().Register("g-poll", globalPool)
+	h.Account().Register("a-poll", acctPool)
+	h.Project().Register("p-poll", projPool)
+
+	h.SetTerminalFocused(false)
+
+	assert.Equal(t, 20*time.Second, globalPool.PollInterval()) // 5s × 4
+	assert.Equal(t, 40*time.Second, acctPool.PollInterval())   // 10s × 4
+	assert.Equal(t, 80*time.Second, projPool.PollInterval())   // 20s × 4
+}
+
 // -- Typed pool accessor tests
 
 func TestHubScheduleEntries(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.ScheduleEntries(42, 99)
@@ -253,7 +301,7 @@ func TestHubScheduleEntries(t *testing.T) {
 }
 
 func TestHubScheduleEntriesScopedToProject(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.ScheduleEntries(42, 99)
@@ -266,7 +314,7 @@ func TestHubScheduleEntriesScopedToProject(t *testing.T) {
 }
 
 func TestHubCheckins(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.Checkins(42, 88)
@@ -278,7 +326,7 @@ func TestHubCheckins(t *testing.T) {
 }
 
 func TestHubCampfireLines(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.CampfireLines(42, 55)
@@ -293,7 +341,7 @@ func TestHubCampfireLines(t *testing.T) {
 }
 
 func TestHubMessages(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.Messages(42, 33)
@@ -305,7 +353,7 @@ func TestHubMessages(t *testing.T) {
 }
 
 func TestHubDocsFiles(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.DocsFiles(42, 77)
@@ -317,7 +365,7 @@ func TestHubDocsFiles(t *testing.T) {
 }
 
 func TestHubPeople(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.People()
@@ -329,12 +377,12 @@ func TestHubPeople(t *testing.T) {
 }
 
 func TestHubPeoplePanicsWithoutAccount(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	assert.Panics(t, func() { h.People() }, "People() without EnsureAccount should panic")
 }
 
 func TestHubPeopleScopedToAccount(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.People()
@@ -347,7 +395,7 @@ func TestHubPeopleScopedToAccount(t *testing.T) {
 }
 
 func TestHubForwards(t *testing.T) {
-	h := NewHub(NewMultiStore(nil), nil)
+	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")
 
 	pool := h.Forwards(42, 66)

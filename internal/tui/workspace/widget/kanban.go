@@ -2,9 +2,10 @@ package widget
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -561,26 +562,27 @@ func buildDetailLine(card KanbanCard) string {
 }
 
 // columnColor maps Basecamp color names to lipgloss colors.
-func columnColor(name string, theme tui.Theme) lipgloss.AdaptiveColor {
+func columnColor(name string, theme tui.Theme) color.Color {
+	ld := lipgloss.LightDark(theme.Dark)
 	switch strings.ToLower(name) {
 	case "red":
-		return lipgloss.AdaptiveColor{Light: "#d93025", Dark: "#f28b82"}
+		return ld(lipgloss.Color("#d93025"), lipgloss.Color("#f28b82"))
 	case "orange":
-		return lipgloss.AdaptiveColor{Light: "#e8710a", Dark: "#fbbc04"}
+		return ld(lipgloss.Color("#e8710a"), lipgloss.Color("#fbbc04"))
 	case "yellow":
-		return lipgloss.AdaptiveColor{Light: "#f9ab00", Dark: "#fdd663"}
+		return ld(lipgloss.Color("#f9ab00"), lipgloss.Color("#fdd663"))
 	case "green":
-		return lipgloss.AdaptiveColor{Light: "#1e8e3e", Dark: "#81c995"}
+		return ld(lipgloss.Color("#1e8e3e"), lipgloss.Color("#81c995"))
 	case "blue":
-		return lipgloss.AdaptiveColor{Light: "#1a73e8", Dark: "#8ab4f8"}
+		return ld(lipgloss.Color("#1a73e8"), lipgloss.Color("#8ab4f8"))
 	case "aqua":
-		return lipgloss.AdaptiveColor{Light: "#12b5cb", Dark: "#78d9ec"}
+		return ld(lipgloss.Color("#12b5cb"), lipgloss.Color("#78d9ec"))
 	case "purple":
-		return lipgloss.AdaptiveColor{Light: "#9334e6", Dark: "#c58af9"}
+		return ld(lipgloss.Color("#9334e6"), lipgloss.Color("#c58af9"))
 	case "pink":
-		return lipgloss.AdaptiveColor{Light: "#e52592", Dark: "#ff8bcb"}
+		return ld(lipgloss.Color("#e52592"), lipgloss.Color("#ff8bcb"))
 	case "brown":
-		return lipgloss.AdaptiveColor{Light: "#795548", Dark: "#a1887f"}
+		return ld(lipgloss.Color("#795548"), lipgloss.Color("#a1887f"))
 	case "gray", "grey":
 		return theme.Muted
 	case "white":

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -230,7 +230,7 @@ func (c *Composer) Mode() ComposerMode {
 func (c *Composer) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	c.textInput.Width = max(0, w-4)
+	c.textInput.SetWidth(max(0, w-4))
 	c.textArea.SetWidth(max(0, w-2))
 	if h > 2 {
 		c.textArea.SetHeight(h - c.attachBarHeight())
@@ -370,13 +370,13 @@ func (c *Composer) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case attachUploadedMsg:
 		return c.handleUploadResult(msg)
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return c.handleKey(msg)
 	}
 	return nil
 }
 
-func (c *Composer) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (c *Composer) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, c.keys.Editor):
 		return c.OpenEditor()
@@ -395,7 +395,7 @@ func (c *Composer) handleKey(msg tea.KeyMsg) tea.Cmd {
 	return c.handleRichKey(msg)
 }
 
-func (c *Composer) handleQuickKey(msg tea.KeyMsg) tea.Cmd {
+func (c *Composer) handleQuickKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, c.keys.Send):
 		return c.Submit()
@@ -414,7 +414,7 @@ func (c *Composer) handleQuickKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (c *Composer) handleRichKey(msg tea.KeyMsg) tea.Cmd {
+func (c *Composer) handleRichKey(msg tea.KeyPressMsg) tea.Cmd {
 	if c.preview {
 		// In preview mode, only send and toggle-back work
 		switch {
@@ -438,11 +438,12 @@ func (c *Composer) handleRichKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // shouldExpand returns true if the typed character is a markdown formatting trigger.
-func shouldExpand(msg tea.KeyMsg) bool {
-	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
+func shouldExpand(msg tea.KeyPressMsg) bool {
+	runes := []rune(msg.Text)
+	if len(runes) != 1 {
 		return false
 	}
-	switch msg.Runes[0] {
+	switch runes[0] {
 	case '*', '#', '`', '>', '~':
 		return true
 	}

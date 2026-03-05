@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 
@@ -46,7 +46,7 @@ type Renderer struct {
 // Theme resolution follows: NO_COLOR env → BASECAMP_THEME env → user theme
 // (~/.config/basecamp/theme/colors.toml, which may be symlinked to system themes) → default.
 func NewRenderer(w io.Writer, forceStyled bool) *Renderer {
-	return NewRendererWithTheme(w, forceStyled, tui.ResolveTheme())
+	return NewRendererWithTheme(w, forceStyled, tui.ResolveTheme(tui.DetectDark()))
 }
 
 // NewRendererWithTheme creates a renderer with a specific theme (for testing).
@@ -54,23 +54,13 @@ func NewRendererWithTheme(w io.Writer, forceStyled bool, theme tui.Theme) *Rende
 	width, isTTY := terminalInfo(w)
 	styled := isTTY || forceStyled
 
-	// Set global color profile based on styled flag
-	// Note: This is a workaround because lipgloss.NewRenderer doesn't properly
-	// pass through the color profile in this version
-	if styled {
-		lipgloss.SetColorProfile(2) // TrueColor
-	} else {
-		lipgloss.SetColorProfile(0) // Ascii (no colors)
-	}
-
 	r := &Renderer{
 		width:  width,
 		styled: styled,
 	}
 
 	if styled {
-		// Use AdaptiveColor directly — lipgloss resolves Light vs Dark
-		// based on terminal background detection.
+		// Theme colors are pre-resolved for the detected background.
 		r.Summary = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
 		r.Muted = lipgloss.NewStyle().Foreground(theme.Muted)
 		r.Data = lipgloss.NewStyle().Foreground(theme.Foreground)

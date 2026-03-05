@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestPickerModel_GetOriginalItem(t *testing.T) {
@@ -272,7 +272,7 @@ func TestPickerModel_RecentItemsDecoration(t *testing.T) {
 		m.filtered = m.items
 
 		// Simulate enter key press
-		newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		newModel, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		updated := newModel.(pickerModel)
 
 		if updated.selected == nil {
