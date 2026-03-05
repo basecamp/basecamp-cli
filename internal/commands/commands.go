@@ -119,6 +119,7 @@ func commandCategories() []CommandCategory {
 				{Name: "doctor", Category: "auth", Description: "Check CLI health and diagnose issues"},
 				{Name: "upgrade", Category: "auth", Description: "Upgrade to the latest version"},
 				{Name: "migrate", Category: "auth", Description: "Migrate data from legacy bcq installation"},
+				{Name: "profile", Category: "auth", Description: "Manage named profiles", Actions: []string{"list", "show", "create", "delete", "set-default"}},
 			},
 		},
 		{
@@ -128,7 +129,7 @@ func commandCategories() []CommandCategory {
 				{Name: "completion", Category: "additional", Description: "Generate shell completions", Actions: []string{"bash", "zsh", "fish", "powershell", "refresh", "status"}},
 				{Name: "mcp", Category: "additional", Description: "MCP server integration", Actions: []string{"server"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},
-				{Name: "skill", Category: "additional", Description: "Print the embedded agent skill file"},
+				{Name: "skill", Category: "additional", Description: "Manage the embedded agent skill file", Actions: []string{"install"}},
 				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
 				{Name: "help", Category: "additional", Description: "Show help"},

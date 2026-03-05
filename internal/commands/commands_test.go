@@ -4,6 +4,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/basecamp/basecamp-cli/internal/cli"
@@ -11,7 +12,51 @@ import (
 )
 
 func TestCatalogMatchesRegisteredCommands(t *testing.T) {
-	// Build root command with all subcommands (mirrors cli.Execute)
+	root := buildRootWithAllCommands()
+
+	// Get registered command names
+	registered := make(map[string]bool)
+	for _, cmd := range root.Commands() {
+		registered[cmd.Name()] = true
+	}
+	// version is accessed via --version flag, not as a subcommand, but we
+	// include it in the catalog for documentation. Add it to registered set.
+	registered["version"] = true
+
+	// Get catalog command names
+	catalog := make(map[string]bool)
+	for _, name := range commands.CatalogCommandNames() {
+		catalog[name] = true
+	}
+
+	// Find commands in catalog but not registered
+	var missingFromRegistered []string
+	for name := range catalog {
+		if !registered[name] {
+			missingFromRegistered = append(missingFromRegistered, name)
+		}
+	}
+
+	// Find commands registered but not in catalog
+	var missingFromCatalog []string
+	for name := range registered {
+		if !catalog[name] {
+			missingFromCatalog = append(missingFromCatalog, name)
+		}
+	}
+
+	// Sort for deterministic output
+	sort.Strings(missingFromRegistered)
+	sort.Strings(missingFromCatalog)
+
+	// Report failures
+	assert.Empty(t, missingFromRegistered, "Commands in catalog but not registered: %v", missingFromRegistered)
+	assert.Empty(t, missingFromCatalog, "Commands registered but not in catalog: %v", missingFromCatalog)
+}
+
+// buildRootWithAllCommands creates a root command with all subcommands registered,
+// mirroring cli.Execute. Shared by TestCatalog and TestSurfaceSnapshot.
+func buildRootWithAllCommands() *cobra.Command {
 	root := cli.NewRootCmd()
 	root.AddCommand(commands.NewAuthCmd())
 	root.AddCommand(commands.NewProjectsCmd())
@@ -71,46 +116,7 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 	root.AddCommand(commands.NewMigrateCmd())
 	root.AddCommand(commands.NewSkillCmd())
 	root.AddCommand(commands.NewTUICmd())
-
-	// Trigger Cobra's auto-addition of help subcommand
+	root.AddCommand(commands.NewProfileCmd())
 	root.InitDefaultHelpCmd()
-
-	// Get registered command names
-	registered := make(map[string]bool)
-	for _, cmd := range root.Commands() {
-		registered[cmd.Name()] = true
-	}
-	// version is accessed via --version flag, not as a subcommand, but we
-	// include it in the catalog for documentation. Add it to registered set.
-	registered["version"] = true
-
-	// Get catalog command names
-	catalog := make(map[string]bool)
-	for _, name := range commands.CatalogCommandNames() {
-		catalog[name] = true
-	}
-
-	// Find commands in catalog but not registered
-	var missingFromRegistered []string
-	for name := range catalog {
-		if !registered[name] {
-			missingFromRegistered = append(missingFromRegistered, name)
-		}
-	}
-
-	// Find commands registered but not in catalog
-	var missingFromCatalog []string
-	for name := range registered {
-		if !catalog[name] {
-			missingFromCatalog = append(missingFromCatalog, name)
-		}
-	}
-
-	// Sort for deterministic output
-	sort.Strings(missingFromRegistered)
-	sort.Strings(missingFromCatalog)
-
-	// Report failures
-	assert.Empty(t, missingFromRegistered, "Commands in catalog but not registered: %v", missingFromRegistered)
-	assert.Empty(t, missingFromCatalog, "Commands registered but not in catalog: %v", missingFromCatalog)
+	return root
 }
