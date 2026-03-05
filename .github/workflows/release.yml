@@ -305,7 +305,6 @@ jobs:
 
       - name: Build and verify
         run: |
-          nix build --no-link --print-out-paths
           STORE_PATH=$(nix build --no-link --print-out-paths)
           $STORE_PATH/bin/basecamp --version
 

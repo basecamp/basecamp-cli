@@ -41,7 +41,10 @@ if [[ "$NEED_HASH" == "true" ]]; then
     echo "  Run 'make update-nix-hash' after installing Docker"
   else
     echo "  go.mod changed — computing vendorHash via Docker..."
-    BUILD_OUTPUT=$(docker run --rm -v "$(pwd):/src:ro" nixos/nix bash -c '
+    # Pin image digest for supply-chain integrity. Update periodically:
+    #   docker pull nixos/nix && docker inspect nixos/nix:latest --format '{{index .RepoDigests 0}}'
+    NIX_IMAGE="nixos/nix@sha256:b9c9611c8530fa8049a1215b20638536e1e71dcaf85212e47845112caf3adeea"
+    BUILD_OUTPUT=$(docker run --rm -v "$(pwd):/src:ro" "$NIX_IMAGE" bash -c '
       cp -a /src /build && cd /build
       rm -rf .git
       git init -q && git add -A && \
@@ -63,7 +66,7 @@ if [[ "$NEED_HASH" == "true" ]]; then
       else
         echo "  vendorHash: unchanged"
       fi
-    elif echo "$BUILD_OUTPUT" | grep -q "building.*basecamp.*0\." ; then
+    elif echo "$BUILD_OUTPUT" | grep -q "building.*basecamp" ; then
       echo "  vendorHash: verified (build succeeded)"
     else
       echo "  WARNING: Could not determine vendorHash — check Docker output"
