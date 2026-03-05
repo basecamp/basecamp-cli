@@ -74,7 +74,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
 5. **Rich text fields accept Markdown** - the CLI converts to HTML automatically
-6. **Project scope is mandatory** — via `--in <project>` or `.basecamp/config.json`. There is no cross-project query mode. For cross-project data, use `basecamp recordings <type>` or loop through projects individually.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
 
@@ -109,13 +109,14 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). For cross-project data, use `basecamp recordings <type>` or loop through projects individually.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). For assigned work cross-project, use `basecamp reports assigned`. For browsing by type, use `basecamp recordings <type>`.
 
 | Task | Command |
 |------|---------|
 | List projects | `basecamp projects --json` |
-| My todos (in project) | `basecamp todos --assignee me --in <project> --json` |
-| All todos (cross-project) | `basecamp recordings todos --json` (filter client-side) |
+| My todos (in project)      | `basecamp todos --assignee me --in <project> --json` |
+| My todos (cross-project)   | `basecamp reports assigned --json` (defaults to "me") |
+| All todos (cross-project)  | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
 | Overdue todos | `basecamp todos --overdue --in <project> --json` |
 | Create todo | `basecamp todo --content "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create --name "Name" --in <project> --json` |
@@ -167,9 +168,11 @@ basecamp comment --content "Reply" --on 123 --in <project>
 ```
 Need to find something?
 ├── Know the type + project? → basecamp <type> --in <project> --json
-├── Need cross-project data? → basecamp recordings <type> --json (ONLY cross-project option)
+├── My assigned work? → basecamp reports assigned --json (defaults to "me")
+├── Browse by type cross-project? → basecamp recordings <type> --json
 │   (types: todos, messages, documents, comments, cards, uploads)
 │   Note: Defaults to active status; use --status archived for archived items
+│   ⚠ No assignee data — cannot filter by person; use reports assigned instead
 ├── Full-text search? → basecamp search "query" --json
 └── Have a URL? → basecamp url parse "<url>" --json
 ```
@@ -404,7 +407,7 @@ basecamp timeline --watch --interval 60           # Poll every 60 seconds
 
 ### Recordings (Cross-project)
 
-Use `basecamp recordings <type>` for cross-project queries - this is the only way to query across all projects in one call.
+Use `basecamp recordings <type>` for cross-project type browsing. **For assigned todos, prefer `basecamp reports assigned`** — recordings do not include assignee data and cannot be filtered by person.
 
 ```bash
 basecamp recordings todos --json                  # All todos across projects
