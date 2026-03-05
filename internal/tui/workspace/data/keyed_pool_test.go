@@ -96,3 +96,23 @@ func TestKeyedPoolSetTerminalFocused(t *testing.T) {
 	assert.Equal(t, 10*time.Second, p1.PollInterval())
 	assert.Equal(t, 10*time.Second, p2.PollInterval())
 }
+
+func TestKeyedPoolSetTerminalFocusedInherited(t *testing.T) {
+	kp := NewKeyedPool(func(key int) *Pool[int] {
+		return NewPool(fmt.Sprintf("p:%d", key), PoolConfig{PollBase: 10 * time.Second}, func(ctx context.Context) (int, error) {
+			return key, nil
+		})
+	})
+
+	// Blur before any sub-pools exist.
+	kp.SetTerminalFocused(false)
+
+	// New pool created after blur should inherit the blurred state.
+	p := kp.Get(1)
+	assert.Equal(t, 40*time.Second, p.PollInterval(), "new sub-pool should inherit terminal-blurred state")
+
+	// Re-focus and create another — should be at base interval.
+	kp.SetTerminalFocused(true)
+	p2 := kp.Get(2)
+	assert.Equal(t, 10*time.Second, p2.PollInterval(), "new sub-pool should inherit terminal-focused state")
+}
