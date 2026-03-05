@@ -39,27 +39,24 @@ func NewStore(dir string) *Store {
 }
 
 // defaultStateDir returns the default state directory path.
-// Uses platform-specific cache directories with proper fallbacks.
+// On Linux/BSD, prefers XDG_STATE_HOME (~/.local/state) over cache.
+// On macOS/Windows, uses the platform cache directory (no XDG state convention).
 func defaultStateDir() string {
-	// First, check XDG_CACHE_HOME (Linux/BSD convention)
-	if cacheDir := os.Getenv("XDG_CACHE_HOME"); cacheDir != "" {
-		return filepath.Join(filepath.Clean(cacheDir), "basecamp", DefaultDirName)
+	if runtime.GOOS == "linux" || runtime.GOOS == "freebsd" || runtime.GOOS == "openbsd" {
+		if stateDir := os.Getenv("XDG_STATE_HOME"); stateDir != "" {
+			return filepath.Join(filepath.Clean(stateDir), "basecamp", DefaultDirName)
+		}
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, ".local", "state", "basecamp", DefaultDirName)
+		}
 	}
-
-	// Use os.UserCacheDir() which handles platform-specific paths:
-	// - macOS: ~/Library/Caches
-	// - Linux: ~/.cache (respects XDG_CACHE_HOME)
-	// - Windows: %LocalAppData%
+	// macOS, Windows: use cache dir (no XDG state convention)
 	if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
 		return filepath.Join(filepath.Clean(cacheDir), "basecamp", DefaultDirName)
 	}
-
-	// Fall back to home directory
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(filepath.Clean(home), ".cache", "basecamp", DefaultDirName)
 	}
-
-	// Last resort: use temp directory to avoid relative paths
 	return filepath.Join(os.TempDir(), "basecamp", DefaultDirName)
 }
 

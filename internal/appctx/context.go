@@ -94,10 +94,7 @@ func NewApp(cfg *config.Config) *App {
 	// Create resilience components for cross-process state coordination
 	// State is stored in <cacheDir>/resilience/state.json
 	// If CacheDir is empty, NewStore uses the default (~/.cache/basecamp/resilience/)
-	var resilienceDir string
-	if cfg.CacheDir != "" {
-		resilienceDir = filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
-	}
+	resilienceDir := resolveResilienceDir(cfg)
 	resilienceStore := resilience.NewStore(resilienceDir)
 	resilienceCfg := resilience.DefaultConfig()
 	gatingHooks := resilience.NewGatingHooksFromConfig(resilienceStore, resilienceCfg)
@@ -399,4 +396,16 @@ func (a *App) Resolve() *resolve.Resolver {
 			Count:   a.Flags.Count,
 		}),
 	)
+}
+
+// resolveResilienceDir determines the resilience state directory.
+// When cache_dir was explicitly overridden (via flag, env, or config file —
+// any source tracked in cfg.Sources["cache_dir"]), resilience state co-locates
+// under the cache tree for backward compatibility. Otherwise, NewStore("")
+// calls defaultStateDir() which uses XDG_STATE_HOME on Linux/BSD.
+func resolveResilienceDir(cfg *config.Config) string {
+	if cfg.Sources["cache_dir"] != "" {
+		return filepath.Join(cfg.CacheDir, resilience.DefaultDirName)
+	}
+	return ""
 }
