@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -68,6 +69,14 @@ func RequireSecureURL(rawURL string) error {
 		return fmt.Errorf("refusing insecure http:// URL for non-localhost host %q — use https:// or target localhost for development", u.Host)
 	}
 	return nil
+}
+
+// IsRemoteSession returns true when running inside an SSH session,
+// detected via SSH_CONNECTION, SSH_CLIENT, or SSH_TTY environment variables.
+func IsRemoteSession() bool {
+	return os.Getenv("SSH_CONNECTION") != "" ||
+		os.Getenv("SSH_CLIENT") != "" ||
+		os.Getenv("SSH_TTY") != ""
 }
 
 // OpenBrowser opens the specified URL in the default browser.

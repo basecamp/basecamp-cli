@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +21,42 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 )
+
+// syncLogger is a thread-safe log collector for remote-mode login tests.
+// It captures all log messages under a mutex and signals authReady when it
+// sees the auth URL (a line starting with "http" containing "/authorize").
+type syncLogger struct {
+	mu        sync.Mutex
+	logs      []string
+	authReady chan string // receives the auth URL once seen
+	signaled  bool
+}
+
+func newSyncLogger() *syncLogger {
+	return &syncLogger{authReady: make(chan string, 1)}
+}
+
+func (sl *syncLogger) log(msg string) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	sl.logs = append(sl.logs, msg)
+
+	if !sl.signaled {
+		trimmed := strings.TrimSpace(msg)
+		if strings.HasPrefix(trimmed, "http") && strings.Contains(trimmed, "/authorize") {
+			sl.signaled = true
+			sl.authReady <- trimmed
+		}
+	}
+}
+
+func (sl *syncLogger) snapshot() []string {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	cp := make([]string, len(sl.logs))
+	copy(cp, sl.logs)
+	return cp
+}
 
 // newTestStore creates a file-backed credential store for testing.
 func newTestStore(t *testing.T, dir string) *Store {
@@ -677,6 +716,421 @@ func TestLoadClientCredentials_BC3_CustomRedirect_SkipsStoredClient(t *testing.T
 	creds, err := m.loadClientCredentials(context.Background(), oauthCfg, "bc3", opts)
 	require.NoError(t, err)
 	assert.Equal(t, "dcr-fresh", creds.ClientID, "should use DCR result, not stored client")
+}
+
+func TestParseCallbackURL(t *testing.T) {
+	const state = "test-state-123"
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+		want    string
+	}{
+		{
+			name:  "valid URL",
+			input: "http://127.0.0.1:8976/callback?code=abc123&state=test-state-123",
+			want:  "abc123",
+		},
+		{
+			name:  "quoted URL",
+			input: `"http://127.0.0.1:8976/callback?code=abc123&state=test-state-123"`,
+			want:  "abc123",
+		},
+		{
+			name:  "single-quoted URL",
+			input: "'http://127.0.0.1:8976/callback?code=abc123&state=test-state-123'",
+			want:  "abc123",
+		},
+		{
+			name:  "backticked URL",
+			input: "`http://127.0.0.1:8976/callback?code=abc123&state=test-state-123`",
+			want:  "abc123",
+		},
+		{
+			name:  "URL with whitespace",
+			input: "  http://127.0.0.1:8976/callback?code=abc123&state=test-state-123  \n",
+			want:  "abc123",
+		},
+		{
+			name:    "missing code",
+			input:   "http://127.0.0.1:8976/callback?state=test-state-123",
+			wantErr: "no authorization code",
+		},
+		{
+			name:    "state mismatch",
+			input:   "http://127.0.0.1:8976/callback?code=abc123&state=wrong-state",
+			wantErr: "state mismatch",
+		},
+		{
+			name:    "empty input",
+			input:   "",
+			wantErr: "empty callback URL",
+		},
+		{
+			name:    "OAuth error param",
+			input:   "http://127.0.0.1:8976/callback?error=access_denied&error_description=User+denied",
+			wantErr: "OAuth error: access_denied",
+		},
+		{
+			name:    "OAuth error without description",
+			input:   "http://127.0.0.1:8976/callback?error=server_error",
+			wantErr: "OAuth error: server_error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, err := parseCallbackURL(tt.input, state)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, code)
+		})
+	}
+}
+
+func TestReadCallbackInput_Timeout(t *testing.T) {
+	r, w := io.Pipe()
+	defer w.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := readCallbackInput(ctx, r, "state")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+}
+
+func TestReadCallbackInput_Cancel(t *testing.T) {
+	r, w := io.Pipe()
+	defer w.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := readCallbackInput(ctx, r, "state")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "canceled")
+}
+
+func TestLoginRemoteAndLocalMutuallyExclusive(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, http.DefaultClient)
+	m.store = newTestStore(t, tmpDir)
+
+	err := m.Login(context.Background(), LoginOptions{
+		Remote: true,
+		Local:  true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestLoginRemoteMode(t *testing.T) {
+	// Set up httptest server that handles discovery + token exchange
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"authorization_endpoint": "%s/authorize",
+				"token_endpoint": "%s/token",
+				"registration_endpoint": "%s/register"
+			}`, base, base, base)
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"client_id":"test-client","client_secret":"test-secret"}`)
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"remote-tok","token_type":"bearer","refresh_token":"remote-refresh"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+	}()
+
+	// Wait for the auth URL to be logged (deterministic, no sleep)
+	var authURL string
+	select {
+	case authURL = <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL to be logged")
+	}
+
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	state := u.Query().Get("state")
+	require.NotEmpty(t, state, "auth URL should contain state parameter")
+
+	// Write callback URL to the pipe
+	callbackURL := fmt.Sprintf("http://127.0.0.1:8976/callback?code=test-code&state=%s\n", state)
+	_, err = pw.Write([]byte(callbackURL))
+	require.NoError(t, err)
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.NoError(t, err, "Login should succeed in remote mode")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+
+	// Verify instructions reference the redirectURI (safe snapshot after Login returns)
+	var foundRedirectHint bool
+	for _, log := range sl.snapshot() {
+		if strings.Contains(log, "127.0.0.1:8976") && strings.Contains(log, "?code=") {
+			foundRedirectHint = true
+			break
+		}
+	}
+	assert.True(t, foundRedirectHint, "instructions should reference redirect URI")
+
+	// Verify credentials were stored
+	creds, err := m.store.Load(srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "remote-tok", creds.AccessToken)
+}
+
+func TestLoginRemoteMode_StateMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"authorization_endpoint": "%s/authorize",
+				"token_endpoint": "%s/token",
+				"registration_endpoint": "%s/register"
+			}`, base, base, base)
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"client_id":"test-client"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+	}()
+
+	// Wait until Login has logged the auth URL (meaning it's now reading from pr)
+	select {
+	case <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL")
+	}
+
+	// Write callback with wrong state
+	_, _ = pw.Write([]byte("http://127.0.0.1:8976/callback?code=test-code&state=wrong-state\n"))
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "state mismatch")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+}
+
+func TestLoginRemoteMode_EmptyInput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"authorization_endpoint": "%s/authorize",
+				"token_endpoint": "%s/token",
+				"registration_endpoint": "%s/register"
+			}`, base, base, base)
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"client_id":"test-client"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+	}()
+
+	select {
+	case <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL")
+	}
+
+	// Close pipe immediately → EOF / no input
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no input received")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+}
+
+func TestLoginRemoteMode_CustomRedirectURI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"authorization_endpoint": "%s/authorize",
+				"token_endpoint": "%s/token",
+				"registration_endpoint": "%s/register"
+			}`, base, base, base)
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"client_id":"test-client"}`)
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"tok","token_type":"bearer"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			RedirectURI: "http://localhost:9999/my-cb",
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+	}()
+
+	// Wait for auth URL deterministically
+	var authURL string
+	select {
+	case authURL = <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL")
+	}
+
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	state := u.Query().Get("state")
+	require.NotEmpty(t, state)
+
+	// Write callback with custom redirect URI
+	callbackURL := fmt.Sprintf("http://localhost:9999/my-cb?code=c&state=%s\n", state)
+	_, _ = pw.Write([]byte(callbackURL))
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+
+	// Verify instructions reference the custom redirect URI (safe snapshot after Login returns)
+	var foundCustomURI bool
+	for _, log := range sl.snapshot() {
+		if strings.Contains(log, "localhost:9999/my-cb?code=") {
+			foundCustomURI = true
+			break
+		}
+	}
+	assert.True(t, foundCustomURI, "instructions should show custom redirect URI")
+}
+
+func TestDefaults_AutoDetectsSSH(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 12345 10.0.0.2 22")
+
+	opts := &LoginOptions{}
+	opts.defaults()
+	assert.True(t, opts.Remote, "should auto-detect SSH and set Remote")
+	assert.True(t, opts.NoBrowser, "Remote should imply NoBrowser")
+}
+
+func TestDefaults_LocalOverridesSSHDetection(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 12345 10.0.0.2 22")
+
+	opts := &LoginOptions{Local: true}
+	opts.defaults()
+	assert.False(t, opts.Remote, "Local should prevent SSH auto-detection")
 }
 
 func TestCredentialWrite_OverwriteExisting(t *testing.T) {

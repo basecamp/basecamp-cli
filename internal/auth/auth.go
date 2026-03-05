@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -210,6 +211,19 @@ type LoginOptions struct {
 	Scope     string
 	NoBrowser bool // If true, don't auto-open browser, just print URL
 
+	// Remote forces remote/headless mode: skip the loopback listener and
+	// prompt the user to paste the callback URL. Auto-detected when SSH
+	// env vars are present (unless Local is set).
+	Remote bool
+
+	// Local forces local mode, overriding SSH auto-detection.
+	// Mutually exclusive with Remote.
+	Local bool
+
+	// InputReader is the source for pasted callback URLs in remote mode.
+	// If nil, os.Stdin is used.
+	InputReader io.Reader
+
 	// RedirectURI overrides the OAuth redirect URI.
 	// Takes precedence over BASECAMP_OAUTH_REDIRECT_URI and CallbackAddr.
 	RedirectURI string
@@ -229,6 +243,12 @@ type LoginOptions struct {
 
 // defaults fills in default values for LoginOptions.
 func (o *LoginOptions) defaults() {
+	if !o.Remote && !o.Local && hostutil.IsRemoteSession() {
+		o.Remote = true
+	}
+	if o.Remote {
+		o.NoBrowser = true
+	}
 	if o.BrowserLauncher == nil && !o.NoBrowser {
 		o.BrowserLauncher = openBrowser
 	}
@@ -284,6 +304,10 @@ func resolveOAuthCallback(opts *LoginOptions) (redirectURI string, listenAddr st
 
 // Login initiates the OAuth login flow.
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
+	if opts.Remote && opts.Local {
+		return output.ErrUsage("--remote and --local are mutually exclusive")
+	}
+
 	opts.defaults()
 
 	// Resolve redirect URI and listener address
@@ -328,33 +352,59 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		return err
 	}
 
-	// Start listener for OAuth callback
-	lc := net.ListenConfig{}
-	listener, err := lc.Listen(ctx, "tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("failed to start callback server: %w", err)
-	}
-	defer func() { _ = listener.Close() }()
+	var code string
 
-	// Open browser for authentication
-	if opts.BrowserLauncher != nil {
-		if err := opts.BrowserLauncher(authURL); err != nil {
-			opts.log("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
-		} else {
-			opts.log("\nOpening browser for authentication...")
-			opts.log("If the browser doesn't open, visit: " + authURL + "\n\nWaiting for authentication...")
+	if opts.Remote {
+		// Remote/headless mode: prompt user to paste callback URL
+		opts.log("\nOpen this URL in a browser on any device:")
+		opts.log("  " + authURL)
+		opts.log("\nAfter signing in, your browser will redirect to a URL starting with:")
+		opts.log("  " + redirectURI + "?code=...")
+		opts.log("\nThe page will show a connection error — this is expected.")
+		opts.log("Copy the full URL from your browser's address bar and paste it below.\n")
+
+		reader := opts.InputReader
+		if reader == nil {
+			reader = os.Stdin
+		}
+		opts.log("Callback URL: ")
+
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
+		code, err = readCallbackInput(waitCtx, reader, state)
+		if err != nil {
+			return err
 		}
 	} else {
-		opts.log("\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
-	}
+		// Local mode: start listener and wait for callback
+		lc := net.ListenConfig{}
+		listener, listenErr := lc.Listen(ctx, "tcp", listenAddr)
+		if listenErr != nil {
+			return fmt.Errorf("failed to start callback server: %w", listenErr)
+		}
+		defer func() { _ = listener.Close() }()
 
-	// Wait for OAuth callback with a hard timeout to avoid hanging indefinitely
-	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
+		// Open browser for authentication
+		if opts.BrowserLauncher != nil {
+			if launchErr := opts.BrowserLauncher(authURL); launchErr != nil {
+				opts.log("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
+			} else {
+				opts.log("\nOpening browser for authentication...")
+				opts.log("If the browser doesn't open, visit: " + authURL + "\n\nWaiting for authentication...")
+			}
+		} else {
+			opts.log("\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
+		}
 
-	code, err := oauthcallback.WaitForCallback(waitCtx, state, listener, "")
-	if err != nil {
-		return err
+		// Wait for OAuth callback with a hard timeout to avoid hanging indefinitely
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
+		code, err = oauthcallback.WaitForCallback(waitCtx, state, listener, "")
+		if err != nil {
+			return err
+		}
 	}
 
 	// Exchange code for tokens
@@ -609,6 +659,87 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 	return creds, nil
+}
+
+// parseCallbackURL extracts the authorization code from a pasted callback URL.
+// It trims whitespace, strips surrounding quotes/backticks, validates the state
+// parameter, and checks for OAuth error responses.
+func parseCallbackURL(rawURL, expectedState string) (string, error) {
+	// Trim whitespace and surrounding quotes/backticks
+	rawURL = strings.TrimSpace(rawURL)
+	rawURL = strings.Trim(rawURL, "\"'`")
+	rawURL = strings.TrimSpace(rawURL)
+
+	if rawURL == "" {
+		return "", fmt.Errorf("empty callback URL")
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid callback URL: %w", err)
+	}
+
+	q := u.Query()
+
+	// Check for OAuth error response
+	if errParam := q.Get("error"); errParam != "" {
+		desc := q.Get("error_description")
+		if desc != "" {
+			return "", fmt.Errorf("OAuth error: %s — %s", errParam, desc)
+		}
+		return "", fmt.Errorf("OAuth error: %s", errParam)
+	}
+
+	code := q.Get("code")
+	if code == "" {
+		return "", fmt.Errorf("no authorization code in callback URL")
+	}
+
+	state := q.Get("state")
+	if state != expectedState {
+		return "", fmt.Errorf("state mismatch: expected %q, got %q", expectedState, state)
+	}
+
+	return code, nil
+}
+
+// readCallbackInput reads one line from reader and parses it as a callback URL.
+// It respects context cancellation for timeout support.
+//
+// On context cancellation the blocked read goroutine is orphaned. This is
+// acceptable for a CLI process that exits shortly after Login returns. Callers
+// in long-lived processes should pass an io.ReadCloser and close it on error
+// to unblock the goroutine.
+func readCallbackInput(ctx context.Context, reader io.Reader, expectedState string) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		if scanner.Scan() {
+			ch <- result{line: scanner.Text()}
+		} else if err := scanner.Err(); err != nil {
+			ch <- result{err: err}
+		} else {
+			ch <- result{err: fmt.Errorf("no input received")}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timed out waiting for callback URL: %w", ctx.Err())
+		}
+		return "", fmt.Errorf("canceled waiting for callback URL: %w", ctx.Err())
+	case r := <-ch:
+		if r.err != nil {
+			return "", r.err
+		}
+		return parseCallbackURL(r.line, expectedState)
+	}
 }
 
 // openBrowser opens the specified URL in the default browser.

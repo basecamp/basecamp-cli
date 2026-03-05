@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalize(t *testing.T) {
@@ -83,6 +84,35 @@ func TestRequireSecureURL(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestIsRemoteSession(t *testing.T) {
+	// Clear all SSH env vars first
+	for _, key := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		t.Setenv(key, "")
+	}
+
+	require.False(t, IsRemoteSession(), "no SSH vars → not remote")
+
+	tests := []struct {
+		envVar string
+		value  string
+	}{
+		{"SSH_CONNECTION", "10.0.0.1 12345 10.0.0.2 22"},
+		{"SSH_CLIENT", "10.0.0.1 12345 22"},
+		{"SSH_TTY", "/dev/pts/0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.envVar, func(t *testing.T) {
+			// Clear all, then set one
+			for _, key := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+				t.Setenv(key, "")
+			}
+			t.Setenv(tt.envVar, tt.value)
+			assert.True(t, IsRemoteSession(), "%s set → remote", tt.envVar)
 		})
 	}
 }
