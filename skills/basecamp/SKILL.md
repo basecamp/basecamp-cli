@@ -601,6 +601,35 @@ cat ~/.config/basecamp/accounts.json              # Check available accounts
 
 **URL malformed (curl exit 3):** Special characters in content. Use plain text or properly escaped HTML.
 
+## jq Patterns
+
+Common data extraction patterns for the output envelope:
+
+```bash
+# Extract fields from data array
+basecamp todos --in <project> --json | jq '.data[] | select(.completed == false) | .title'
+basecamp todos --in <project> --json | jq '.data | length'
+basecamp todos --in <project> --json | jq '.data[] | {id, title, status}'
+
+# Access envelope metadata
+basecamp todos --in <project> --json | jq '.breadcrumbs[0].cmd'
+basecamp todos --in <project> --json | jq '.meta.stats.requests'
+```
+
+## Exit Codes
+
+| Exit | Meaning | Fix |
+|------|---------|-----|
+| 0 | OK | — |
+| 1 | Usage error | Check `basecamp <cmd> --help` |
+| 2 | Not found | Verify ID/URL exists |
+| 3 | Auth error | `basecamp auth login` |
+| 4 | Forbidden | Check account/project permissions |
+| 5 | Rate limit | Wait and retry (resilience layer handles Retry-After automatically) |
+| 6 | Network error | Check connectivity, `basecamp doctor` |
+| 7 | API error | Retry; if persistent, check `basecamp doctor` |
+| 8 | Ambiguous | Be more specific (use ID instead of name) |
+
 ## Learn More
 
 - API concepts: https://github.com/basecamp/bc3-api#key-concepts
