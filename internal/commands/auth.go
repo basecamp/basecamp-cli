@@ -219,6 +219,8 @@ func NewLogoutCmd() *cobra.Command {
 func buildLoginCmd(use string) *cobra.Command {
 	var scope string
 	var noBrowser bool
+	var remote bool
+	var local bool
 
 	cmd := &cobra.Command{
 		Use:   use,
@@ -255,6 +257,8 @@ func buildLoginCmd(use string) *cobra.Command {
 			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
+				Remote:    remote,
+				Local:     local,
 				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
 			}); err != nil {
 				return err
@@ -284,6 +288,9 @@ func buildLoginCmd(use string) *cobra.Command {
 
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' (default) or 'full'")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
+	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
+	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
+	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 
 	return cmd
 }

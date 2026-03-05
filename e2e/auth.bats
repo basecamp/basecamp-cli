@@ -47,6 +47,23 @@ load test_helper
 }
 
 
+# Auth login
+
+@test "basecamp auth login --help shows --remote and --local" {
+  run basecamp auth login --help
+  assert_success
+  assert_output_contains "--remote"
+  assert_output_contains "--local"
+}
+
+@test "basecamp login --help shows --remote and --local" {
+  run basecamp login --help
+  assert_success
+  assert_output_contains "--remote"
+  assert_output_contains "--local"
+}
+
+
 # Auth status
 
 @test "basecamp auth status shows not authenticated" {

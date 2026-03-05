@@ -178,6 +178,8 @@ func newProfileCreateCmd() *cobra.Command {
 	var scope string
 	var accountID string
 	var noBrowser bool
+	var remote bool
+	var local bool
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -287,6 +289,8 @@ Examples:
 			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
+				Remote:    remote,
+				Local:     local,
 				Logger:    func(msg string) { fmt.Println(msg) },
 			}); err != nil {
 				return err
@@ -320,6 +324,9 @@ Examples:
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' (default) or 'full'")
 	cmd.Flags().StringVar(&accountID, "account", "", "Account ID")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
+	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
+	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
+	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 
 	return cmd
 }

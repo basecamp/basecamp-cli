@@ -208,7 +208,7 @@ func TestProfileCreateRejectsInvalidNames(t *testing.T) {
 func TestProfileCreateHasExpectedFlags(t *testing.T) {
 	cmd := newProfileCreateCmd()
 
-	flags := []string{"base-url", "scope", "account", "no-browser"}
+	flags := []string{"base-url", "scope", "account", "no-browser", "remote", "local"}
 	for _, flag := range flags {
 		f := cmd.Flags().Lookup(flag)
 		assert.NotNil(t, f, "expected flag %q to exist on create command", flag)
