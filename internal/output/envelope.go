@@ -1,15 +1,23 @@
 package output
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	clioutput "github.com/basecamp/cli/output"
+
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/presenter"
+)
+
+// Re-exported from shared module.
+var (
+	NormalizeData             = clioutput.NormalizeData
+	TruncationNotice          = clioutput.TruncationNotice
+	TruncationNoticeWithTotal = clioutput.TruncationNoticeWithTotal
 )
 
 // Response is the success envelope for JSON output.
@@ -257,69 +265,6 @@ func (w *Writer) writeCount(v any) error {
 	return nil
 }
 
-// NormalizeData converts json.RawMessage and other types to standard Go types.
-func NormalizeData(data any) any {
-	// Handle json.RawMessage by unmarshaling it
-	if raw, ok := data.(json.RawMessage); ok {
-		var unmarshaled any
-		if err := unmarshalPreservingNumbers(raw, &unmarshaled); err == nil {
-			return normalizeUnmarshaled(unmarshaled)
-		}
-		return data
-	}
-
-	// Handle typed structs/slices by marshaling then unmarshaling
-	// This converts struct types to map[string]any
-	switch data.(type) {
-	case []map[string]any, map[string]any, []any:
-		return data // Already normalized
-	case nil:
-		return data
-	default:
-		// Try to convert via JSON round-trip
-		b, err := json.Marshal(data)
-		if err != nil {
-			return data
-		}
-		var unmarshaled any
-		if err := unmarshalPreservingNumbers(b, &unmarshaled); err != nil {
-			return data
-		}
-		return normalizeUnmarshaled(unmarshaled)
-	}
-}
-
-// unmarshalPreservingNumbers decodes JSON using UseNumber so numeric values
-// remain as json.Number instead of being converted to float64. This preserves
-// precision for large integer IDs that exceed 53-bit float64 range.
-func unmarshalPreservingNumbers(data []byte, v any) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	return dec.Decode(v)
-}
-
-// normalizeUnmarshaled converts []any to []map[string]any if all elements are maps.
-func normalizeUnmarshaled(v any) any {
-	switch d := v.(type) {
-	case []any:
-		// Check if all elements are maps, convert to []map[string]any
-		if len(d) == 0 {
-			return []map[string]any{}
-		}
-		maps := make([]map[string]any, 0, len(d))
-		for _, item := range d {
-			if m, ok := item.(map[string]any); ok {
-				maps = append(maps, m)
-			} else {
-				return v // Mixed types, return as-is
-			}
-		}
-		return maps
-	default:
-		return v
-	}
-}
-
 // writeStyled outputs ANSI styled terminal output.
 func (w *Writer) writeStyled(v any) error {
 	// Schema-aware presenter is opt-in: only activates when a command
@@ -374,50 +319,6 @@ func WithSummary(s string) ResponseOption {
 // Use this for non-error messages like truncation warnings.
 func WithNotice(s string) ResponseOption {
 	return func(r *Response) { r.Notice = s }
-}
-
-// TruncationNotice returns a notice string if results may be truncated.
-// Returns empty string if no truncation warning is needed.
-// Parameters:
-//   - count: number of results returned
-//   - defaultLimit: the default limit for this resource type (e.g., 100)
-//   - all: whether --all flag was used
-//   - explicitLimit: limit set via --limit flag (0 if not set)
-func TruncationNotice(count, defaultLimit int, all bool, explicitLimit int) string {
-	// No notice if --all was used (user explicitly requested everything)
-	if all {
-		return ""
-	}
-
-	// Determine the effective limit
-	limit := defaultLimit
-	if explicitLimit > 0 {
-		limit = explicitLimit
-	}
-
-	// No notice if no limit was applied (defaultLimit=0 and no explicit limit)
-	if limit == 0 {
-		return ""
-	}
-
-	// If count equals the limit, results are likely truncated
-	if count > 0 && count >= limit {
-		return fmt.Sprintf("Showing %d results (use --all for complete list)", count)
-	}
-
-	return ""
-}
-
-// TruncationNoticeWithTotal returns a truncation notice when results are truncated.
-// Uses totalCount from API's X-Total-Count header to show accurate counts.
-// Returns empty string if no truncation or totalCount is 0 (unavailable).
-func TruncationNoticeWithTotal(count, totalCount int) string {
-	// No notice if total count unavailable or all results returned
-	if totalCount == 0 || count >= totalCount {
-		return ""
-	}
-
-	return fmt.Sprintf("Showing %d of %d results (use --all for complete list)", count, totalCount)
 }
 
 // WithBreadcrumbs adds breadcrumbs to the response.

@@ -75,49 +75,6 @@ func BenchmarkNormalizeData(b *testing.B) {
 	})
 }
 
-// BenchmarkNormalizeUnmarshaled benchmarks array type conversion
-func BenchmarkNormalizeUnmarshaled(b *testing.B) {
-	b.Run("all_maps", func(b *testing.B) {
-		data := []any{
-			map[string]any{"id": 1, "name": "A"},
-			map[string]any{"id": 2, "name": "B"},
-			map[string]any{"id": 3, "name": "C"},
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			normalizeUnmarshaled(data)
-		}
-	})
-
-	b.Run("mixed_types", func(b *testing.B) {
-		data := []any{
-			map[string]any{"id": 1},
-			"string value",
-			42,
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			normalizeUnmarshaled(data)
-		}
-	})
-
-	b.Run("empty_array", func(b *testing.B) {
-		data := []any{}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			normalizeUnmarshaled(data)
-		}
-	})
-
-	b.Run("non_array", func(b *testing.B) {
-		data := map[string]any{"id": 123}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			normalizeUnmarshaled(data)
-		}
-	})
-}
-
 // BenchmarkWriteJSON benchmarks JSON output writing
 func BenchmarkWriteJSON(b *testing.B) {
 	b.Run("simple_response", func(b *testing.B) {

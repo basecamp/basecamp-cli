@@ -1,51 +1,32 @@
 // Package output provides JSON/Markdown output formatting and error handling.
 package output
 
-// Exit codes matching the Bash implementation.
+import clioutput "github.com/basecamp/cli/output"
+
+// Exit codes matching the Bash implementation (re-exported from shared module).
 const (
-	ExitOK        = 0 // Success
-	ExitUsage     = 1 // Invalid arguments or flags
-	ExitNotFound  = 2 // Resource not found
-	ExitAuth      = 3 // Not authenticated
-	ExitForbidden = 4 // Access denied (scope issue)
-	ExitRateLimit = 5 // Rate limited (429)
-	ExitNetwork   = 6 // Connection/DNS/timeout error
-	ExitAPI       = 7 // Server returned error
-	ExitAmbiguous = 8 // Multiple matches for name
+	ExitOK        = clioutput.ExitOK
+	ExitUsage     = clioutput.ExitUsage
+	ExitNotFound  = clioutput.ExitNotFound
+	ExitAuth      = clioutput.ExitAuth
+	ExitForbidden = clioutput.ExitForbidden
+	ExitRateLimit = clioutput.ExitRateLimit
+	ExitNetwork   = clioutput.ExitNetwork
+	ExitAPI       = clioutput.ExitAPI
+	ExitAmbiguous = clioutput.ExitAmbiguous
 )
 
-// Error codes for JSON envelope.
+// Error codes for JSON envelope (re-exported from shared module).
 const (
-	CodeUsage     = "usage"
-	CodeNotFound  = "not_found"
-	CodeAuth      = "auth_required"
-	CodeForbidden = "forbidden"
-	CodeRateLimit = "rate_limit"
-	CodeNetwork   = "network"
-	CodeAPI       = "api_error"
-	CodeAmbiguous = "ambiguous"
+	CodeUsage     = clioutput.CodeUsage
+	CodeNotFound  = clioutput.CodeNotFound
+	CodeAuth      = clioutput.CodeAuth
+	CodeForbidden = clioutput.CodeForbidden
+	CodeRateLimit = clioutput.CodeRateLimit
+	CodeNetwork   = clioutput.CodeNetwork
+	CodeAPI       = clioutput.CodeAPI
+	CodeAmbiguous = clioutput.CodeAmbiguous
 )
 
 // ExitCodeFor returns the exit code for a given error code.
-func ExitCodeFor(code string) int {
-	switch code {
-	case CodeUsage:
-		return ExitUsage
-	case CodeNotFound:
-		return ExitNotFound
-	case CodeAuth:
-		return ExitAuth
-	case CodeForbidden:
-		return ExitForbidden
-	case CodeRateLimit:
-		return ExitRateLimit
-	case CodeNetwork:
-		return ExitNetwork
-	case CodeAPI:
-		return ExitAPI
-	case CodeAmbiguous:
-		return ExitAmbiguous
-	default:
-		return ExitAPI
-	}
-}
+var ExitCodeFor = clioutput.ExitCodeFor
