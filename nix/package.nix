@@ -2,6 +2,7 @@
 
 buildGoModule.override { go = go_1_26; } (finalAttrs: {
   pname = "basecamp";
+  # Updated automatically by scripts/update-nix-flake.sh on each release.
   version = "0.2.3";
 
   src = lib.cleanSource ./..;
