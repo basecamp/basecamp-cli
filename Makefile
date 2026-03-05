@@ -26,7 +26,7 @@ VERSION_PKG := github.com/basecamp/basecamp-cli/internal/version
 
 # Build flags
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)
-BUILD_FLAGS := -ldflags "$(LDFLAGS)"
+BUILD_FLAGS := -trimpath -ldflags "$(LDFLAGS)"
 
 # PGO (Profile-Guided Optimization)
 PGO_PROFILE := default.pgo
@@ -44,7 +44,7 @@ all: check
 # Build the binary
 .PHONY: build
 build: check-toolchain
-	$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp
+	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp
 
 # Build with PGO optimization (requires default.pgo)
 .PHONY: build-pgo
@@ -52,10 +52,10 @@ build-pgo:
 	@if [ ! -f $(PGO_PROFILE) ]; then \
 		echo "Warning: $(PGO_PROFILE) not found. Run 'make collect-profile' first."; \
 		echo "Building without PGO..."; \
-		$(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
+		CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
 	else \
 		echo "Building with PGO optimization..."; \
-		$(GOBUILD) $(BUILD_FLAGS) $(PGO_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
+		CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) $(PGO_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
 	fi
 
 # Build for all platforms
@@ -321,6 +321,12 @@ release-check: check replace-check vuln race-test check-surface-compat
 release:
 	DRY_RUN=$(DRY_RUN) scripts/release.sh $(VERSION)
 
+# Dry-run the full goreleaser pipeline without publishing, signing, or notarizing
+.PHONY: test-release
+test-release:
+	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
+	goreleaser release --snapshot --skip=publish,sign --clean
+
 # Generate CLI surface snapshot (validates binary produces valid output)
 .PHONY: check-surface
 check-surface: build
@@ -503,6 +509,7 @@ help:
 	@echo "Release:"
 	@echo "  release-check    Full pre-flight (check + replace-check + vuln + race + surface compat)"
 	@echo "  release          Cut a release (VERSION=x.y.z, DRY_RUN=1 optional)"
+	@echo "  test-release     Dry-run goreleaser pipeline (no publish/sign/notarize)"
 	@echo ""
 	@echo "Security:"
 	@echo "  security       Run all security checks (lint, vuln, secrets)"

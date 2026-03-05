@@ -27,6 +27,7 @@ builds:
     # PGO: Use profile if available (Go 1.21+)
     flags:
       - -pgo=auto
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/basecamp/basecamp-cli/internal/version.Version={{.Version}}
@@ -179,6 +180,10 @@ homebrew_casks:
     description: "Command-line interface for Basecamp"
     binaries:
       - basecamp
+    completions:
+      bash: "completions/basecamp.bash"
+      zsh: "completions/_basecamp"
+      fish: "completions/basecamp.fish"
     skip_upload: auto
 
 scoops:
