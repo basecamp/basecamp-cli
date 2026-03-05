@@ -27,8 +27,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/basecamp-sdk/go v0.2.2 h1:wfMrjTytLCLsBG2SrQh5UDvGgj3QHVwg6KRvkL+ayeg=
 github.com/basecamp/basecamp-sdk/go v0.2.2/go.mod h1:WmckHy36EAqP+BW//1J9QdMi16l3PNx2XP0vt/kSlXE=
-github.com/basecamp/cli v0.1.0 h1:0fA06OgHD0oObY3aCC8E6QS2jNxCmwYfUeUwK/zyNQw=
-github.com/basecamp/cli v0.1.0/go.mod h1:NTHe+keCTGI2qM5sMXdkUN0QgU3zGbwnBxcmg8vD5QU=
+github.com/basecamp/cli v0.1.1 h1:FAF3M09xo1m7gJJXf38glCkT50ZUuvz+31f+c3R3zcc=
+github.com/basecamp/cli v0.1.1/go.mod h1:NTHe+keCTGI2qM5sMXdkUN0QgU3zGbwnBxcmg8vD5QU=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/catppuccin/go v0.3.0 h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=
 github.com/catppuccin/go v0.3.0/go.mod h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=
