@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // PickerItem represents an item in a picker.
@@ -109,7 +109,7 @@ func WithHelp(show bool) PickerOption {
 func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
-	ti.Width = 40
+	ti.SetWidth(40)
 	ti.Focus()
 
 	s := spinner.New()
@@ -240,7 +240,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// In loading state, only allow cancel
 		if m.loading {
 			if msg.String() == "ctrl+c" || msg.String() == "esc" {
@@ -359,9 +359,9 @@ func (m pickerModel) getOriginalItem(id string) *PickerItem {
 	return nil
 }
 
-func (m pickerModel) View() string {
+func (m pickerModel) View() tea.View {
 	if m.quitting {
-		return ""
+		return tea.NewView("")
 	}
 
 	var b strings.Builder
@@ -376,7 +376,9 @@ func (m pickerModel) View() string {
 	// Loading state
 	if m.loading {
 		b.WriteString(m.spinner.View() + " " + m.styles.Muted.Render(m.loadingMsg) + "\n")
-		return b.String()
+		v := tea.NewView(b.String())
+		v.AltScreen = true
+		return v
 	}
 
 	// Input
@@ -433,7 +435,9 @@ func (m pickerModel) View() string {
 		b.WriteString("\n" + helpStyle.Render("↑↓/jk navigate • enter select • tab first • esc cancel"))
 	}
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 // ItemLoader is a function that loads items asynchronously.
@@ -477,7 +481,7 @@ func (p *Picker) Run() (*PickerItem, error) {
 	}
 
 	// Use alternate screen so picker disappears after selection
-	program := tea.NewProgram(m, tea.WithAltScreen())
+	program := tea.NewProgram(m)
 
 	finalModel, err := program.Run()
 	if err != nil {
@@ -499,7 +503,7 @@ func (p *Picker) runWithLoader() (*PickerItem, error) {
 		m.loadingMsg = "Loading…"
 	}
 	// Use alternate screen so picker disappears after selection
-	program := tea.NewProgram(m, tea.WithAltScreen())
+	program := tea.NewProgram(m)
 
 	// Load items in background
 	go func() {

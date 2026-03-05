@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -197,7 +197,7 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	km, ok := msg.(tea.KeyMsg)
+	km, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return nil
 	}
@@ -285,7 +285,7 @@ func (l *List) skipHeaders(direction int) {
 }
 
 // handleFilterKey processes keys during interactive filter mode.
-func (l *List) handleFilterKey(km tea.KeyMsg) tea.Cmd {
+func (l *List) handleFilterKey(km tea.KeyPressMsg) tea.Cmd {
 	switch km.String() {
 	case "esc":
 		l.StopFilter()
@@ -308,8 +308,8 @@ func (l *List) handleFilterKey(km tea.KeyMsg) tea.Cmd {
 		l.filtering = false
 		// Keep filter applied
 	default:
-		if km.Type == tea.KeyRunes {
-			l.filter += string(km.Runes)
+		if km.Text != "" {
+			l.filter += km.Text
 			l.applyFilter()
 			l.cursor = 0
 			l.offset = 0

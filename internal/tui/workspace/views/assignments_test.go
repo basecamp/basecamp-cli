@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -101,7 +101,7 @@ func TestAssignments_Trash_OtherKeyResets(t *testing.T) {
 	v.trashPendingID = "acct1:1"
 
 	// Send a non-t key
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	v.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	assert.False(t, v.trashPending)
 	assert.Empty(t, v.trashPendingID)
 }
@@ -111,7 +111,7 @@ func TestAssignments_FilterBlocksMutationKeys(t *testing.T) {
 	v.list.StartFilter()
 
 	// Send "x" key while filtering — should go to list.Update (filter input), not completeSelected
-	_, cmd := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, cmd := v.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	// The cmd from list.Update during filtering is not an assignmentCompleteResultMsg
 	if cmd != nil {
 		msg := cmd()
@@ -124,7 +124,7 @@ func TestAssignments_FilterBlocksTrashArming(t *testing.T) {
 	v := testAssignments(testAssignmentEntries)
 	v.list.StartFilter()
 
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	v.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	assert.False(t, v.trashPending, "t during filter should not arm trash")
 }
 

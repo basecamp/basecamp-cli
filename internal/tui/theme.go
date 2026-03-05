@@ -2,12 +2,23 @@
 package tui
 
 import (
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/term"
 )
+
+// DetectDark returns true if the terminal has a dark background.
+// Non-TTY (piped, tests, CI) defaults to true for deterministic output.
+func DetectDark() bool {
+	if !term.IsTerminal(os.Stderr.Fd()) {
+		return true
+	}
+	return lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
+}
 
 // ResolveTheme loads a theme with the following precedence:
 //  1. NO_COLOR env var set → returns NoColorTheme (industry standard)
@@ -18,7 +29,7 @@ import (
 // On systems like Omarchy, users can symlink to their system theme:
 //
 //	ln -s ~/.config/omarchy/current/theme ~/.config/basecamp/theme
-func ResolveTheme() Theme {
+func ResolveTheme(dark bool) Theme {
 	// NO_COLOR support (industry standard for disabling colors)
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return NoColorTheme()
@@ -26,19 +37,19 @@ func ResolveTheme() Theme {
 
 	// BASECAMP_THEME allows custom theme file path
 	if path := os.Getenv("BASECAMP_THEME"); path != "" {
-		if theme, err := LoadThemeFromFile(filepath.Clean(path)); err == nil {
+		if theme, err := LoadThemeFromFile(filepath.Clean(path), dark); err == nil {
 			return theme
 		}
 		// Fall through on error
 	}
 
 	// Try user theme config
-	if theme, err := LoadUserTheme(); err == nil {
+	if theme, err := LoadUserTheme(dark); err == nil {
 		return theme
 	}
 
 	// Fall back to default
-	return DefaultTheme()
+	return DefaultTheme(dark)
 }
 
 // ThemeFilePath returns the resolved path to the active theme file,
@@ -66,36 +77,36 @@ func ThemeFilePath() string {
 }
 
 // NoColorTheme returns a theme with empty colors (honors NO_COLOR standard).
-// Lipgloss treats empty strings as "no color", resulting in plain text output.
+// lipgloss.NoColor{} means "no styling", resulting in plain text output.
 func NoColorTheme() Theme {
-	empty := lipgloss.AdaptiveColor{Light: "", Dark: ""}
+	nc := lipgloss.NoColor{}
 	return Theme{
-		Primary:    empty,
-		Secondary:  empty,
-		Success:    empty,
-		Warning:    empty,
-		Error:      empty,
-		Muted:      empty,
-		Background: empty,
-		Foreground: empty,
-		Border:     empty,
+		Primary:    nc,
+		Secondary:  nc,
+		Success:    nc,
+		Warning:    nc,
+		Error:      nc,
+		Muted:      nc,
+		Background: nc,
+		Foreground: nc,
+		Border:     nc,
 	}
 }
 
 // LoadUserTheme attempts to load a theme from the user's basecamp config.
 // The theme directory can be a symlink to another theme system.
-func LoadUserTheme() (Theme, error) {
+func LoadUserTheme(dark bool) (Theme, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Theme{}, err
 	}
 
 	path := filepath.Join(filepath.Clean(home), ".config", "basecamp", "theme", "colors.toml")
-	return LoadThemeFromFile(path)
+	return LoadThemeFromFile(path, dark)
 }
 
 // LoadThemeFromFile parses a colors.toml file and returns a Theme.
-func LoadThemeFromFile(path string) (Theme, error) {
+func LoadThemeFromFile(path string, dark bool) (Theme, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: Path from trusted config
 	if err != nil {
 		return Theme{}, err
@@ -106,7 +117,7 @@ func LoadThemeFromFile(path string) (Theme, error) {
 		return Theme{}, err
 	}
 
-	return mapColorsToTheme(colors), nil
+	return mapColorsToTheme(colors, dark), nil
 }
 
 // parseSimpleTOML parses a simple TOML file with key = "value" format.
@@ -203,8 +214,8 @@ func isValidHexColor(s string) bool {
 //	color4 = "#89b4fa"       → Primary fallback (blue)
 //	color7 = "#bac2de"       → Secondary (white/light)
 //	color8 = "#585b70"       → Muted, Border (bright black)
-func mapColorsToTheme(colors map[string]string) Theme {
-	defaults := DefaultTheme()
+func mapColorsToTheme(colors map[string]string, dark bool) Theme {
+	defaults := DefaultTheme(dark)
 
 	// Helper to get color with fallbacks
 	get := func(keys ...string) string {
@@ -216,52 +227,23 @@ func mapColorsToTheme(colors map[string]string) Theme {
 		return ""
 	}
 
-	// Build theme from colors, falling back to defaults
-	// Terminal themes are typically dark, so we populate Dark variants
-	return Theme{
-		Primary: lipgloss.AdaptiveColor{
-			Light: defaults.Primary.Light,
-			Dark:  getOrDefault(get("accent", "color4"), defaults.Primary.Dark),
-		},
-		Secondary: lipgloss.AdaptiveColor{
-			Light: defaults.Secondary.Light,
-			Dark:  getOrDefault(get("color7"), defaults.Secondary.Dark),
-		},
-		Success: lipgloss.AdaptiveColor{
-			Light: defaults.Success.Light,
-			Dark:  getOrDefault(get("color2"), defaults.Success.Dark),
-		},
-		Warning: lipgloss.AdaptiveColor{
-			Light: defaults.Warning.Light,
-			Dark:  getOrDefault(get("color3"), defaults.Warning.Dark),
-		},
-		Error: lipgloss.AdaptiveColor{
-			Light: defaults.Error.Light,
-			Dark:  getOrDefault(get("color1"), defaults.Error.Dark),
-		},
-		Muted: lipgloss.AdaptiveColor{
-			Light: defaults.Muted.Light,
-			Dark:  getOrDefault(get("color8", "color0"), defaults.Muted.Dark),
-		},
-		Background: lipgloss.AdaptiveColor{
-			Light: defaults.Background.Light,
-			Dark:  getOrDefault(get("background"), defaults.Background.Dark),
-		},
-		Foreground: lipgloss.AdaptiveColor{
-			Light: defaults.Foreground.Light,
-			Dark:  getOrDefault(get("foreground"), defaults.Foreground.Dark),
-		},
-		Border: lipgloss.AdaptiveColor{
-			Light: defaults.Border.Light,
-			Dark:  getOrDefault(get("color8", "color0"), defaults.Border.Dark),
-		},
+	colorOrDefault := func(hex string, fallback color.Color) color.Color {
+		if hex != "" {
+			return lipgloss.Color(hex)
+		}
+		return fallback
 	}
-}
 
-// getOrDefault returns value if non-empty, otherwise returns defaultValue.
-func getOrDefault(value, defaultValue string) string {
-	if value != "" {
-		return value
+	return Theme{
+		Dark:       dark,
+		Primary:    colorOrDefault(get("accent", "color4"), defaults.Primary),
+		Secondary:  colorOrDefault(get("color7"), defaults.Secondary),
+		Success:    colorOrDefault(get("color2"), defaults.Success),
+		Warning:    colorOrDefault(get("color3"), defaults.Warning),
+		Error:      colorOrDefault(get("color1"), defaults.Error),
+		Muted:      colorOrDefault(get("color8", "color0"), defaults.Muted),
+		Background: colorOrDefault(get("background"), defaults.Background),
+		Foreground: colorOrDefault(get("foreground"), defaults.Foreground),
+		Border:     colorOrDefault(get("color8", "color0"), defaults.Border),
 	}
-	return defaultValue
 }

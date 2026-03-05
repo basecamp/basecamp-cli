@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -151,7 +151,7 @@ func (v *Compose) FullHelp() [][]key.Binding {
 func (v *Compose) SetSize(w, h int) {
 	v.width = w
 	v.height = h
-	v.subject.Width = max(0, w-4)
+	v.subject.SetWidth(max(0, w-4))
 	// Subject takes 2 lines (label + input), body gets the rest
 	bodyHeight := h - 4 // subject label + input + separator + padding
 	if bodyHeight < 3 {
@@ -193,7 +193,7 @@ func (v *Compose) findMessageBoardID() int64 {
 }
 
 // Update implements tea.Model.
-func (v *Compose) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Compose) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspace.MessageCreatedMsg:
 		v.sending = false
@@ -226,11 +226,18 @@ func (v *Compose) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.sending {
 			return v, nil
 		}
 		return v, v.handleKey(msg)
+
+	case tea.PasteMsg:
+		if v.focus == composeFocusBody {
+			text, cmd := v.composer.ProcessPaste(msg.Content)
+			v.composer.InsertPaste(text)
+			return v, cmd
+		}
 	}
 
 	// Forward to composer for upload results, etc.
@@ -241,7 +248,7 @@ func (v *Compose) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, nil
 }
 
-func (v *Compose) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Compose) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, v.keys.Cancel):
 		return workspace.NavigateBack()
@@ -251,11 +258,6 @@ func (v *Compose) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, v.keys.SwitchTab):
 		return v.toggleFocus()
-
-	case msg.Paste && v.focus == composeFocusBody:
-		text, cmd := v.composer.ProcessPaste(string(msg.Runes))
-		v.composer.InsertPaste(text)
-		return cmd
 
 	default:
 		if v.focus == composeFocusSubject {

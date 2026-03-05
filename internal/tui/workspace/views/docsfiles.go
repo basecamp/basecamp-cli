@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -172,7 +172,7 @@ func (v *DocsFiles) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *DocsFiles) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *DocsFiles) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspace.FocusMsg:
 		return v, v.pool.FetchIfStale(v.session.Hub().ProjectContext())
@@ -254,7 +254,7 @@ func (v *DocsFiles) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.loading {
 			return v, nil
 		}
@@ -266,7 +266,7 @@ func (v *DocsFiles) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, nil
 }
 
-func (v *DocsFiles) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *DocsFiles) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.list.Filtering() {
 		v.trashPending = false
 		v.trashPendingID = ""
@@ -290,7 +290,7 @@ func (v *DocsFiles) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return v.startCreateFolder()
 	case key.Matches(msg, keys.Open):
 		return v.openSelectedItem()
-	case msg.Type == tea.KeyEscape || msg.Type == tea.KeyBackspace:
+	case msg.Code == tea.KeyEscape || msg.Code == tea.KeyBackspace:
 		return v.goBackFolder()
 	default:
 		return v.list.Update(msg)
@@ -426,7 +426,7 @@ func (v *DocsFiles) startCreateDoc() tea.Cmd {
 	v.createInput = textinput.New()
 	v.createInput.Placeholder = "New document title..."
 	v.createInput.Focus()
-	return v.createInput.Cursor.BlinkCmd()
+	return textinput.Blink
 }
 
 func (v *DocsFiles) startCreateFolder() tea.Cmd {
@@ -434,11 +434,11 @@ func (v *DocsFiles) startCreateFolder() tea.Cmd {
 	v.createInput = textinput.New()
 	v.createInput.Placeholder = "New folder title..."
 	v.createInput.Focus()
-	return v.createInput.Cursor.BlinkCmd()
+	return textinput.Blink
 }
 
-func (v *DocsFiles) handleCreateKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
+func (v *DocsFiles) handleCreateKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.Code {
 	case tea.KeyEscape:
 		v.creatingDoc = false
 		v.creatingFolder = false

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
@@ -53,11 +53,7 @@ func NewTUICmd() *cobra.Command {
 
 			model := workspace.New(session, viewFactory)
 
-			p := tea.NewProgram(
-				model,
-				tea.WithAltScreen(),
-				tea.WithMouseCellMotion(),
-			)
+			p := tea.NewProgram(model)
 
 			_, err := p.Run()
 			model.CloseWatcher()

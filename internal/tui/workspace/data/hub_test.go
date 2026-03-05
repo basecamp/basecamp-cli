@@ -166,11 +166,11 @@ func TestHubEnsureProjectDifferentIDTearsDown(t *testing.T) {
 
 func TestHubDependencies(t *testing.T) {
 	ms := NewMultiStore(nil)
-	poller := NewPoller()
-	h := NewHub(ms, poller)
+	p := NewPoller()
+	h := NewHub(ms, p)
 
 	assert.Same(t, ms, h.MultiStore())
-	assert.Same(t, poller, h.Poller())
+	assert.Same(t, p, h.Poller())
 }
 
 // -- Context helper tests

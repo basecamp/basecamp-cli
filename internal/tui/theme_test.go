@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -163,16 +165,16 @@ func TestMapColorsToTheme(t *testing.T) {
 			"color8":     "#585b70",
 		}
 
-		theme := mapColorsToTheme(colors)
+		theme := mapColorsToTheme(colors, true)
 
-		assert.Equal(t, "#89b4fa", theme.Primary.Dark)
-		assert.Equal(t, "#f38ba8", theme.Error.Dark)
-		assert.Equal(t, "#a6e3a1", theme.Success.Dark)
-		assert.Equal(t, "#f9e2af", theme.Warning.Dark)
-		assert.Equal(t, "#bac2de", theme.Secondary.Dark)
-		assert.Equal(t, "#585b70", theme.Muted.Dark)
-		assert.Equal(t, "#cdd6f4", theme.Foreground.Dark)
-		assert.Equal(t, "#1e1e2e", theme.Background.Dark)
+		assert.Equal(t, lipgloss.Color("#89b4fa"), theme.Primary)
+		assert.Equal(t, lipgloss.Color("#f38ba8"), theme.Error)
+		assert.Equal(t, lipgloss.Color("#a6e3a1"), theme.Success)
+		assert.Equal(t, lipgloss.Color("#f9e2af"), theme.Warning)
+		assert.Equal(t, lipgloss.Color("#bac2de"), theme.Secondary)
+		assert.Equal(t, lipgloss.Color("#585b70"), theme.Muted)
+		assert.Equal(t, lipgloss.Color("#cdd6f4"), theme.Foreground)
+		assert.Equal(t, lipgloss.Color("#1e1e2e"), theme.Background)
 	})
 
 	t.Run("partial color set uses defaults", func(t *testing.T) {
@@ -180,21 +182,21 @@ func TestMapColorsToTheme(t *testing.T) {
 			"accent": "#89b4fa",
 		}
 
-		theme := mapColorsToTheme(colors)
-		defaults := DefaultTheme()
+		theme := mapColorsToTheme(colors, true)
+		defaults := DefaultTheme(true)
 
-		assert.Equal(t, "#89b4fa", theme.Primary.Dark)
-		assert.Equal(t, defaults.Error.Dark, theme.Error.Dark)
-		assert.Equal(t, defaults.Success.Dark, theme.Success.Dark)
+		assert.Equal(t, lipgloss.Color("#89b4fa"), theme.Primary)
+		assert.Equal(t, defaults.Error, theme.Error)
+		assert.Equal(t, defaults.Success, theme.Success)
 	})
 
 	t.Run("empty map returns all defaults", func(t *testing.T) {
 		colors := map[string]string{}
-		theme := mapColorsToTheme(colors)
-		defaults := DefaultTheme()
+		theme := mapColorsToTheme(colors, true)
+		defaults := DefaultTheme(true)
 
-		assert.Equal(t, defaults.Primary.Dark, theme.Primary.Dark)
-		assert.Equal(t, defaults.Error.Dark, theme.Error.Dark)
+		assert.Equal(t, defaults.Primary, theme.Primary)
+		assert.Equal(t, defaults.Error, theme.Error)
 	})
 
 	t.Run("color4 fallback for primary", func(t *testing.T) {
@@ -202,8 +204,8 @@ func TestMapColorsToTheme(t *testing.T) {
 			"color4": "#0000ff",
 		}
 
-		theme := mapColorsToTheme(colors)
-		assert.Equal(t, "#0000ff", theme.Primary.Dark, "color4 fallback")
+		theme := mapColorsToTheme(colors, true)
+		assert.Equal(t, lipgloss.Color("#0000ff"), theme.Primary, "color4 fallback")
 	})
 }
 
@@ -223,15 +225,15 @@ color3 = "#f9e2af"
 		err := os.WriteFile(testFile, []byte(content), 0644)
 		require.NoError(t, err, "Failed to write test file")
 
-		theme, err := LoadThemeFromFile(testFile)
+		theme, err := LoadThemeFromFile(testFile, true)
 		require.NoError(t, err)
 
-		assert.Equal(t, "#89b4fa", theme.Primary.Dark)
-		assert.Equal(t, "#f38ba8", theme.Error.Dark)
+		assert.Equal(t, lipgloss.Color("#89b4fa"), theme.Primary)
+		assert.Equal(t, lipgloss.Color("#f38ba8"), theme.Error)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
-		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml")
+		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml", true)
 		assert.Error(t, err, "LoadThemeFromFile() should return error for missing file")
 	})
 }
@@ -239,14 +241,10 @@ color3 = "#f9e2af"
 func TestNoColorTheme(t *testing.T) {
 	theme := NoColorTheme()
 
-	assert.Empty(t, theme.Primary.Light)
-	assert.Empty(t, theme.Primary.Dark)
-	assert.Empty(t, theme.Error.Light)
-	assert.Empty(t, theme.Error.Dark)
-	assert.Empty(t, theme.Success.Light)
-	assert.Empty(t, theme.Success.Dark)
-	assert.Empty(t, theme.Foreground.Light)
-	assert.Empty(t, theme.Foreground.Dark)
+	assert.Equal(t, lipgloss.NoColor{}, theme.Primary)
+	assert.Equal(t, lipgloss.NoColor{}, theme.Error)
+	assert.Equal(t, lipgloss.NoColor{}, theme.Success)
+	assert.Equal(t, lipgloss.NoColor{}, theme.Foreground)
 }
 
 func unsetenvForTest(t *testing.T, key string) {
@@ -262,10 +260,9 @@ func TestResolveTheme(t *testing.T) {
 	t.Run("NO_COLOR returns empty theme", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
 
-		theme := ResolveTheme()
+		theme := ResolveTheme(true)
 
-		assert.Empty(t, theme.Primary.Light)
-		assert.Empty(t, theme.Primary.Dark)
+		assert.Equal(t, lipgloss.NoColor{}, theme.Primary)
 	})
 
 	t.Run("BASECAMP_THEME loads custom file", func(t *testing.T) {
@@ -283,9 +280,9 @@ foreground = "#ffffff"
 
 		t.Setenv("BASECAMP_THEME", testFile)
 
-		theme := ResolveTheme()
+		theme := ResolveTheme(true)
 
-		assert.Equal(t, "#ff0000", theme.Primary.Dark)
+		assert.Equal(t, lipgloss.Color("#ff0000"), theme.Primary)
 	})
 
 	t.Run("BASECAMP_THEME invalid file falls back", func(t *testing.T) {
@@ -293,10 +290,10 @@ foreground = "#ffffff"
 		unsetenvForTest(t, "NO_COLOR")
 		t.Setenv("BASECAMP_THEME", "/nonexistent/theme.toml")
 
-		theme := ResolveTheme()
+		theme := ResolveTheme(true)
 
-		// Should fall back to Omarchy or default - just check it's not empty
-		assert.False(t, theme.Primary.Dark == "" && theme.Primary.Light == "",
+		// Should fall back to Omarchy or default - just check it's not NoColor
+		assert.NotEqual(t, lipgloss.NoColor{}, theme.Primary,
 			"With invalid BASECAMP_THEME, should fall back to a valid theme")
 	})
 
@@ -304,11 +301,10 @@ foreground = "#ffffff"
 		unsetenvForTest(t, "NO_COLOR")
 		unsetenvForTest(t, "BASECAMP_THEME")
 
-		theme := ResolveTheme()
+		theme := ResolveTheme(true)
 
 		// Should return a valid theme (either user theme or default)
-		// We just verify it's not empty - could be user config or default
-		assert.False(t, theme.Primary.Dark == "" && theme.Primary.Light == "",
+		assert.NotEqual(t, lipgloss.NoColor{}, theme.Primary,
 			"ResolveTheme() returned theme with empty Primary color")
 	})
 }
@@ -333,30 +329,19 @@ foreground = "#eeeeee"
 		// LoadUserTheme uses os.UserHomeDir, so we test via BASECAMP_THEME instead
 		// since we can't easily mock the home directory
 		t.Setenv("BASECAMP_THEME", themeFile)
-		theme := ResolveTheme()
+		theme := ResolveTheme(true)
 
-		assert.Equal(t, "#00ff00", theme.Primary.Dark)
+		assert.Equal(t, lipgloss.Color("#00ff00"), theme.Primary)
 	})
 
 	t.Run("returns error for missing config", func(t *testing.T) {
-		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml")
+		_, err := LoadThemeFromFile("/nonexistent/path/colors.toml", true)
 		assert.Error(t, err, "LoadThemeFromFile should return error for missing file")
 	})
 }
 
-func TestGetOrDefault(t *testing.T) {
-	tests := []struct {
-		value        string
-		defaultValue string
-		want         string
-	}{
-		{"#ff0000", "#0000ff", "#ff0000"},
-		{"", "#0000ff", "#0000ff"},
-		{"", "", ""},
-	}
-
-	for _, tt := range tests {
-		got := getOrDefault(tt.value, tt.defaultValue)
-		assert.Equal(t, tt.want, got)
-	}
+func TestDetectDark(t *testing.T) {
+	// In test environment, os.Stderr is not a TTY, so DetectDark should
+	// return true (the deterministic non-TTY default).
+	assert.True(t, DetectDark(), "DetectDark should default to true in non-TTY (test) environment")
 }

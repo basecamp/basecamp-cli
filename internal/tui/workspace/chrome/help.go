@@ -3,9 +3,9 @@ package chrome
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -49,7 +49,7 @@ func (h *Help) SetViewKeys(keys [][]key.Binding) {
 
 // Update processes key events for the help overlay. It returns true when
 // the overlay should be closed.
-func (h *Help) Update(msg tea.KeyMsg) (shouldClose bool, cmd tea.Cmd) {
+func (h *Help) Update(msg tea.KeyPressMsg) (shouldClose bool, cmd tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "?":
 		return true, nil

@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -211,7 +211,7 @@ func (v *Checkins) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Checkins) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspace.FocusMsg:
 		cmds := []tea.Cmd{v.pool.FetchIfStale(v.session.Hub().ProjectContext())}
@@ -310,7 +310,7 @@ func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.answering {
 			return v, v.handleAnsweringKey(msg)
 		}
@@ -330,7 +330,7 @@ func (v *Checkins) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, nil
 }
 
-func (v *Checkins) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Checkins) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Filter guard: forward all keys to focused list during filter
 	if v.listQuestions.Filtering() || v.listAnswers.Filtering() {
 		return v.updateFocusedList(msg)
@@ -367,7 +367,7 @@ func (v *Checkins) handleKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (v *Checkins) handleAnsweringKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Checkins) handleAnsweringKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.submitting {
 		// Only allow esc to cancel the in-flight request; block everything else
 		if msg.String() == "esc" {
@@ -401,7 +401,7 @@ func (v *Checkins) toggleFocus() {
 	v.listAnswers.SetFocused(v.focus == checkinsPaneRight)
 }
 
-func (v *Checkins) updateFocusedList(msg tea.KeyMsg) tea.Cmd {
+func (v *Checkins) updateFocusedList(msg tea.KeyPressMsg) tea.Cmd {
 	if v.focus == checkinsPaneLeft {
 		prevIdx := v.listQuestions.SelectedIndex()
 		cmd := v.listQuestions.Update(msg)

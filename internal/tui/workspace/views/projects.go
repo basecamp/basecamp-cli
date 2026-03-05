@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -193,7 +193,7 @@ func (v *Projects) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Projects) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
@@ -240,7 +240,7 @@ func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.loading {
 			return v, nil
 		}
@@ -253,7 +253,7 @@ func (v *Projects) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleProjectKey processes keys when the left (project) panel is focused.
-func (v *Projects) handleProjectKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Projects) handleProjectKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.list.Filtering() {
 		return v.list.Update(msg)
 	}
@@ -277,7 +277,7 @@ func (v *Projects) handleProjectKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // handleToolKey processes keys when the right (tool) panel is focused.
-func (v *Projects) handleToolKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Projects) handleToolKey(msg tea.KeyPressMsg) tea.Cmd {
 	// When filtering, let the tool list handle all keys (esc exits filter,
 	// typing narrows results, enter confirms). Don't intercept hotkeys.
 	if v.toolList.Filtering() {

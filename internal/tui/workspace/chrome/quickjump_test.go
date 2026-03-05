@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -164,7 +164,7 @@ func TestQuickJump_NarrowWidth_NoNegative(t *testing.T) {
 
 	// SetSize with an extremely small width — must not panic.
 	qj.SetSize(2, 10)
-	assert.GreaterOrEqual(t, qj.input.Width, 0, "input.Width should never go negative")
+	assert.GreaterOrEqual(t, qj.input.Width(), 0, "input.Width should never go negative")
 
 	// Populate and render to exercise View at narrow width.
 	src := testQuickJumpSource()

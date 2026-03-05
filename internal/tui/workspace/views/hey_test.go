@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -90,7 +90,7 @@ func TestHey_FilterBlocksMutationKeys(t *testing.T) {
 	v := testHey(testHeyEntries)
 	v.list.StartFilter()
 
-	_, cmd := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, cmd := v.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	if cmd != nil {
 		msg := cmd()
 		_, isComplete := msg.(heyCompleteResultMsg)
@@ -102,7 +102,7 @@ func TestHey_FilterBlocksTrashArming(t *testing.T) {
 	v := testHey(testHeyEntries)
 	v.list.StartFilter()
 
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	v.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	assert.False(t, v.trashPending, "t during filter should not arm trash")
 }
 

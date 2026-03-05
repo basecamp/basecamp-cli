@@ -1,6 +1,6 @@
 package widget
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Truncate truncates s to maxWidth, appending "…" if truncated.
 // Uses lipgloss.Width for accurate ANSI-aware width measurement.

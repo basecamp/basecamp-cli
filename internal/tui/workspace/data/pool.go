@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // PoolUpdatedMsg is sent when a pool's snapshot changes.

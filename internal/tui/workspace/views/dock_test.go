@@ -3,7 +3,7 @@ package views
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,7 +46,7 @@ func TestDock_FilterDelegatesAllKeys(t *testing.T) {
 
 	// Each hotkey letter should be absorbed by the filter, not trigger navigation
 	for _, r := range []rune{'t', 'c', 'm', 'k', 's', 'a'} {
-		v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		v.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		assert.True(t, v.list.Filtering(), "filter should still be active after %q", string(r))
 	}
 }
@@ -68,7 +68,7 @@ func TestDock_ShortHelp_IncludesActivity(t *testing.T) {
 func TestDock_ActivityHotkey_ProducesNavigateMsg(t *testing.T) {
 	v := testDockView()
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	require.NotNil(t, cmd, "'a' key should produce a command")
 
 	msg := cmd()

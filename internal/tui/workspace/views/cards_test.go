@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -182,7 +182,7 @@ func TestCards_MoveMode_EscCancels(t *testing.T) {
 	assert.Equal(t, 1, v.moveTargetCol)
 
 	// Press Esc to cancel
-	v.handleMoveKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleMoveKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.moving, "moving should be false after esc")
 }
 
@@ -198,7 +198,7 @@ func TestCards_InlineCreate_Flow(t *testing.T) {
 	assert.True(t, v.IsModal(), "should be modal during create")
 
 	// Empty Enter exits create mode without submitting
-	cmd := v.handleCreatingKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreatingKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Nil(t, cmd, "enter with empty input should return nil")
 	assert.False(t, v.creating, "creating should be false after empty submit")
 }
@@ -210,7 +210,7 @@ func TestCards_InlineCreate_EscCancels(t *testing.T) {
 	v.creating = true
 	v.createInput.SetValue("Draft card")
 
-	cmd := v.handleCreatingKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleCreatingKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd, "esc should return nil cmd")
 	assert.False(t, v.creating, "creating should be false after esc")
 }
@@ -283,7 +283,7 @@ func TestCards_BoostFocusedCard(t *testing.T) {
 	assert.Equal(t, "Fix bug", card.Title)
 
 	for _, r := range []rune{'b', 'B'} {
-		cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		cmd := v.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		require.NotNil(t, cmd, "expected boost cmd for %q", string(r))
 
 		msg := cmd()
@@ -360,7 +360,7 @@ func TestCards_MoveMode_SameColumn_EscReverts(t *testing.T) {
 	assert.Equal(t, 0, v.moveTargetCol)
 
 	// Without changing target, Esc to cancel — same effect as confirming same column
-	v.handleMoveKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleMoveKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.moving, "esc should exit move mode")
 }
 

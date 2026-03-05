@@ -3,7 +3,7 @@ package data
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // PollMsg is sent when a poll interval fires. Tag identifies which poller triggered.

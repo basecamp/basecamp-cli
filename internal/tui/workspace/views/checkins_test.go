@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -118,10 +118,10 @@ func TestCheckins_SwitchTab_TogglesFocus(t *testing.T) {
 
 	assert.Equal(t, checkinsPaneLeft, v.focus)
 
-	v.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, checkinsPaneRight, v.focus)
 
-	v.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, checkinsPaneLeft, v.focus)
 }
 
@@ -151,7 +151,7 @@ func TestCheckins_EnterOnLeftPane_SelectsQuestion(t *testing.T) {
 	assert.Equal(t, int64(0), v.selectedQuestionID)
 
 	// Press enter on left pane — should select the first question
-	v.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Equal(t, int64(1), v.selectedQuestionID, "enter on left pane should select the first question")
 	assert.True(t, v.loadingAnswers, "should be loading answers after selection")
 }
@@ -227,7 +227,7 @@ func TestCheckins_LoadAnswers_NoCache_ShowsSpinner(t *testing.T) {
 func TestCheckins_EnterOnRightPane_NavigatesToDetail(t *testing.T) {
 	v := testCheckinsViewWithAnswers()
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter should return a nav command")
 
 	msg := cmd()
@@ -299,7 +299,7 @@ func TestCheckins_FilterGuard_KeysDuringFilterDontTriggerNav(t *testing.T) {
 	require.True(t, v.listAnswers.Filtering())
 
 	// 'n' should be absorbed by filter, not trigger new answer
-	v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	v.handleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	assert.True(t, v.listAnswers.Filtering(), "filter should still be active after 'n'")
 	assert.False(t, v.answering, "should not enter answering mode during filter")
 }
@@ -339,7 +339,7 @@ func TestCheckins_Answering_EscCancels(t *testing.T) {
 	v := testCheckinsViewWithAnswers()
 	v.answering = true
 
-	cmd := v.handleAnsweringKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleAnsweringKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.answering)
 }
@@ -421,7 +421,7 @@ func TestCheckins_Submitting_EscCancelsRequest(t *testing.T) {
 	canceled := false
 	v.submitCancel = func() { canceled = true }
 
-	cmd := v.handleAnsweringKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleAnsweringKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.NotNil(t, cmd, "esc during submit should return a status cmd")
 	assert.True(t, canceled, "should have called cancel func")
 	assert.False(t, v.submitting, "submitting should be cleared")
@@ -457,7 +457,7 @@ func TestCheckins_StaleCompletion_IgnoredAfterCancelAndResubmit(t *testing.T) {
 	v.submitCancel = func() {}
 
 	// User cancels request A (esc)
-	v.handleAnsweringKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleAnsweringKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.submitting)
 	assert.True(t, v.answering)
 
@@ -494,7 +494,7 @@ func TestCheckins_CancelEsc_ButRequestSucceeds_ClosesComposer(t *testing.T) {
 	v.submitCancel = func() {} // cancel is a no-op for this test
 
 	// User hits esc — clears submitting, but submitID stays at 1
-	v.handleAnsweringKey(tea.KeyMsg{Type: tea.KeyEsc})
+	v.handleAnsweringKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.False(t, v.submitting)
 	assert.True(t, v.answering)
 

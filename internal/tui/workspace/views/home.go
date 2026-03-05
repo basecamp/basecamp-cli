@@ -6,10 +6,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -206,7 +206,7 @@ func (v *Home) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Home) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
 		var errCmd tea.Cmd
@@ -270,7 +270,7 @@ func (v *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.list.Filtering() {
 			return v, v.list.Update(msg)
 		}

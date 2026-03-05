@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
@@ -89,19 +89,19 @@ func (q *QuickJump) Blur() {
 func (q *QuickJump) SetSize(width, height int) {
 	q.width = width
 	q.height = height
-	q.input.Width = max(0, width-8)
+	q.input.SetWidth(max(0, width-8))
 }
 
 // Update handles key messages while the quick-jump is active.
 func (q *QuickJump) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return q.handleKey(msg)
 	}
 	return nil
 }
 
-func (q *QuickJump) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (q *QuickJump) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		return func() tea.Msg { return QuickJumpCloseMsg{} }

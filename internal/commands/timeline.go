@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
@@ -244,7 +244,7 @@ func (m watchModel) fetchEvents() tea.Msg {
 
 func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.cancel()
@@ -284,7 +284,7 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m watchModel) View() string {
+func (m watchModel) View() tea.View {
 	var status string
 	if m.err != nil {
 		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
@@ -321,7 +321,9 @@ func (m watchModel) View() string {
 		}
 	}
 
-	return output.String()
+	v := tea.NewView(output.String())
+	v.AltScreen = true
+	return v
 }
 
 func formatEvent(e basecamp.TimelineEvent) string {
@@ -484,7 +486,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 	}
 
 	// Run TUI
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	_, err := p.Run()
 	if err != nil {
 		return err

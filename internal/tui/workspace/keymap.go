@@ -5,7 +5,7 @@ import (
 	"os"
 	"reflect"
 
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 )
 
 // GlobalKeyMap defines keybindings that work in every context.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -110,7 +110,7 @@ func TestDocsFiles_EscKey_InSubfolder_PopsFolder(t *testing.T) {
 	require.True(t, v.IsModal())
 
 	// Esc should pop back
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEscape})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.NotNil(t, cmd)
 	assert.False(t, v.IsModal())
 	assert.Equal(t, "Docs & Files", v.Title())
@@ -120,7 +120,7 @@ func TestDocsFiles_BackspaceKey_InSubfolder_PopsFolder(t *testing.T) {
 	v := testDocsFilesView()
 	v.enterFolder(1, "Design Assets")
 
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	require.NotNil(t, cmd)
 	assert.False(t, v.IsModal())
 }
@@ -145,7 +145,7 @@ func TestDocsFiles_BackspaceDuringFilter_EditsFilterNotPops(t *testing.T) {
 	v.handleKey(runeKey('a'))
 
 	// Backspace should edit the filter, not pop the folder
-	v.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	assert.True(t, v.IsModal(), "backspace during filter should not pop folder")
 	// Filter is still active (either filtering or stopped after clearing)
 }
@@ -176,7 +176,7 @@ func TestDocsFiles_CreateDoc_EscCancels(t *testing.T) {
 	v := testDocsFilesView()
 	v.creatingDoc = true
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEscape})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.creatingDoc)
 }
@@ -185,7 +185,7 @@ func TestDocsFiles_CreateFolder_EscCancels(t *testing.T) {
 	v := testDocsFilesView()
 	v.creatingFolder = true
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEscape})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.creatingFolder)
 }
@@ -195,7 +195,7 @@ func TestDocsFiles_CreateDoc_EmptyEnterExits(t *testing.T) {
 	v.creatingDoc = true
 	v.createInput = newTextInputWithValue("")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Nil(t, cmd)
 	assert.False(t, v.creatingDoc)
 }
@@ -205,7 +205,7 @@ func TestDocsFiles_CreateDoc_EnterDispatches(t *testing.T) {
 	v.creatingDoc = true
 	v.createInput = newTextInputWithValue("New Doc")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter with content should return cmd")
 	assert.False(t, v.creatingDoc)
 
@@ -222,7 +222,7 @@ func TestDocsFiles_CreateFolder_EnterDispatches(t *testing.T) {
 	v.creatingFolder = true
 	v.createInput = newTextInputWithValue("New Folder")
 
-	cmd := v.handleCreateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter with content should return cmd")
 	assert.False(t, v.creatingFolder)
 

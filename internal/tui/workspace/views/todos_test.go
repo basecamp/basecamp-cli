@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -125,11 +125,11 @@ func TestTodos_SwitchTab_TogglesFocus(t *testing.T) {
 	assert.Equal(t, todosPaneLeft, v.focus)
 
 	// Press Tab to switch to right pane
-	v.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, todosPaneRight, v.focus)
 
 	// Press Tab again to switch back
-	v.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	v.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	assert.Equal(t, todosPaneLeft, v.focus)
 }
 
@@ -187,7 +187,7 @@ func TestTodos_InlineCreate_EnterSubmits(t *testing.T) {
 	assert.True(t, v.InputActive(), "InputActive should be true during create")
 
 	// Empty Enter exits create mode without submitting
-	cmd := v.handleCreatingKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleCreatingKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Nil(t, cmd, "enter with empty content should return nil")
 	assert.False(t, v.creating, "creating should be false after empty submit")
 }
@@ -209,7 +209,7 @@ func TestTodos_InlineCreate_EscCancels(t *testing.T) {
 	v.textInput.SetValue("Draft task")
 
 	// Press Esc to cancel
-	cmd := v.handleCreatingKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleCreatingKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd, "esc should return nil cmd")
 	assert.False(t, v.creating, "creating should be false after esc")
 }
@@ -283,14 +283,14 @@ func TestTodos_EditingDesc_MakesModal(t *testing.T) {
 
 func TestTodos_DueDate_RequiresRightPane(t *testing.T) {
 	v := testTodosView()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	assert.Nil(t, cmd, "D on left pane should return nil")
 	assert.False(t, v.settingDue)
 }
 
 func TestTodos_DueDate_OpensInput(t *testing.T) {
 	v := testTodosViewWithTodos()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'D', Text: "D"})
 	require.NotNil(t, cmd, "D should return blink cmd")
 	assert.True(t, v.settingDue, "should be in settingDue mode")
 	assert.True(t, v.InputActive(), "InputActive should be true")
@@ -302,7 +302,7 @@ func TestTodos_DueDate_EnterParsesDate(t *testing.T) {
 	v.settingDue = true
 	v.dueInput = newTextInputWithValue("tomorrow")
 
-	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "enter with valid date should return cmd")
 	assert.False(t, v.settingDue, "settingDue should be cleared")
 
@@ -319,7 +319,7 @@ func TestTodos_DueDate_EmptyClears(t *testing.T) {
 	v.settingDue = true
 	v.dueInput = newTextInputWithValue("")
 
-	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd, "empty enter should return clear cmd")
 	assert.False(t, v.settingDue)
 
@@ -334,7 +334,7 @@ func TestTodos_DueDate_InvalidDate(t *testing.T) {
 	v.settingDue = true
 	v.dueInput = newTextInputWithValue("not-a-date")
 
-	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.False(t, v.settingDue)
 
@@ -348,7 +348,7 @@ func TestTodos_DueDate_EscCancels(t *testing.T) {
 	v := testTodosViewWithTodos()
 	v.settingDue = true
 
-	cmd := v.handleSettingDueKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleSettingDueKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.settingDue)
 }
@@ -375,7 +375,7 @@ func TestTodos_Assign_EscCancels(t *testing.T) {
 	v := testTodosViewWithTodos()
 	v.assigning = true
 
-	cmd := v.handleAssigningKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleAssigningKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.assigning)
 }
@@ -385,14 +385,14 @@ func TestTodos_Assign_EmptyEnterDoesNothing(t *testing.T) {
 	v.assigning = true
 	v.assignInput = newTextInputWithValue("")
 
-	cmd := v.handleAssigningKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleAssigningKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Nil(t, cmd, "empty name should return nil")
 	assert.False(t, v.assigning)
 }
 
 func TestTodos_Unassign_Dispatches(t *testing.T) {
 	v := testTodosViewWithTodos()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	require.NotNil(t, cmd, "A should return a cmd")
 
 	msg := cmd()
@@ -439,7 +439,7 @@ func TestTodos_FilterGuard_NDuringFilter(t *testing.T) {
 	v := testTodosView()
 	v.listLists.StartFilter()
 
-	v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	v.handleKey(tea.KeyPressMsg{Code: 'N', Text: "N"})
 	assert.False(t, v.creatingList, "N during filter should NOT enter create mode")
 }
 
@@ -447,7 +447,7 @@ func TestTodos_FilterGuard_NDuringFilter(t *testing.T) {
 
 func TestTodos_NewList_LeftPane(t *testing.T) {
 	v := testTodosView()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'N', Text: "N"})
 	require.NotNil(t, cmd, "N should return blink cmd")
 	assert.True(t, v.creatingList)
 	assert.True(t, v.InputActive())
@@ -455,7 +455,7 @@ func TestTodos_NewList_LeftPane(t *testing.T) {
 
 func TestTodos_NewList_RightPane_Noop(t *testing.T) {
 	v := testTodosViewWithTodos()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'N', Text: "N"})
 	assert.Nil(t, cmd, "N on right pane should return nil")
 	assert.False(t, v.creatingList)
 }
@@ -463,7 +463,7 @@ func TestTodos_NewList_RightPane_Noop(t *testing.T) {
 func TestTodos_NewList_EscCancels(t *testing.T) {
 	v := testTodosView()
 	v.creatingList = true
-	cmd := v.handleListInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cmd := v.handleListInputKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd)
 	assert.False(t, v.creatingList)
 }
@@ -473,7 +473,7 @@ func TestTodos_NewList_EnterDispatches(t *testing.T) {
 	v.creatingList = true
 	v.listInput = newTextInputWithValue("My New List")
 
-	cmd := v.handleListInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleListInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.False(t, v.creatingList)
 
@@ -497,7 +497,7 @@ func TestTodos_NewList_SuccessHandler(t *testing.T) {
 
 func TestTodos_RenameList_LeftPane(t *testing.T) {
 	v := testTodosView()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	require.NotNil(t, cmd, "R should return blink cmd")
 	assert.True(t, v.renamingList)
 	assert.Contains(t, v.listInput.Value(), "Launch") // pre-filled
@@ -508,7 +508,7 @@ func TestTodos_RenameList_EnterDispatches(t *testing.T) {
 	v.renamingList = true
 	v.listInput = newTextInputWithValue("Renamed List")
 
-	cmd := v.handleListInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := v.handleListInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.False(t, v.renamingList)
 
@@ -532,7 +532,7 @@ func TestTodos_RenameList_SuccessHandler(t *testing.T) {
 
 func TestTodos_TrashList_LeftPane_Arms(t *testing.T) {
 	v := testTodosView()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	require.NotNil(t, cmd)
 	assert.True(t, v.trashListPending)
 	assert.Equal(t, "10", v.trashListPendingID)
@@ -541,11 +541,11 @@ func TestTodos_TrashList_LeftPane_Arms(t *testing.T) {
 func TestTodos_TrashList_DoublePress(t *testing.T) {
 	v := testTodosView()
 	// First press
-	v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	require.True(t, v.trashListPending)
 
 	// Second press
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	require.NotNil(t, cmd)
 	assert.False(t, v.trashListPending)
 
@@ -557,7 +557,7 @@ func TestTodos_TrashList_DoublePress(t *testing.T) {
 
 func TestTodos_TrashList_RightPane_Noop(t *testing.T) {
 	v := testTodosViewWithTodos()
-	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	cmd := v.handleKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
 	assert.Nil(t, cmd, "T on right pane should return nil")
 	assert.False(t, v.trashListPending)
 }
@@ -723,15 +723,15 @@ func TestTodos_ShowCompleted_MutationKeysDisabledInCompletedMode(t *testing.T) {
 	// Table-driven test for all disabled keys in completed mode
 	disabledKeys := []struct {
 		name string
-		msg  tea.KeyMsg
+		msg  tea.KeyPressMsg
 	}{
 		{"d (edit desc)", runeKey('d')},
-		{"D (due date)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}},
+		{"D (due date)", tea.KeyPressMsg{Code: 'D', Text: "D"}},
 		{"a (assign)", runeKey('a')},
-		{"A (unassign)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}},
+		{"A (unassign)", tea.KeyPressMsg{Code: 'A', Text: "A"}},
 		{"n (new todo)", runeKey('n')},
 		{"b (boost)", runeKey('b')},
-		{"B (boost)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}}},
+		{"B (boost)", tea.KeyPressMsg{Code: 'B', Text: "B"}},
 	}
 
 	for _, tc := range disabledKeys {

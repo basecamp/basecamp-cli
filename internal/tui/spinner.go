@@ -2,11 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // SpinnerStyle defines the visual style of a spinner.
@@ -65,16 +66,16 @@ func WithSpinnerStyle(style SpinnerStyle) SpinnerOption {
 }
 
 // WithSpinnerColor sets the spinner color.
-func WithSpinnerColor(color lipgloss.TerminalColor) SpinnerOption {
+func WithSpinnerColor(c color.Color) SpinnerOption {
 	return func(m *spinnerModel) {
-		m.spinner.Style = lipgloss.NewStyle().Foreground(color)
+		m.spinner.Style = lipgloss.NewStyle().Foreground(c)
 	}
 }
 
 func newSpinnerModel(message string, opts ...SpinnerOption) spinnerModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(DefaultTheme().Primary)
+	s.Style = lipgloss.NewStyle().Foreground(DefaultTheme(true).Primary)
 
 	m := spinnerModel{
 		spinner: s,
@@ -100,7 +101,7 @@ type spinnerDoneMsg struct {
 
 func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -119,17 +120,21 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m spinnerModel) View() string {
+func (m spinnerModel) View() tea.View {
 	if m.quitting {
-		return ""
+		return tea.NewView("")
 	}
+	var content string
 	if m.done {
 		if m.err != nil {
-			return m.styles.Error.Render("✗ "+m.err.Error()) + "\n"
+			content = m.styles.Error.Render("✗ "+m.err.Error()) + "\n"
+		} else {
+			content = m.styles.Success.Render("✓ "+m.result) + "\n"
 		}
-		return m.styles.Success.Render("✓ "+m.result) + "\n"
+	} else {
+		content = fmt.Sprintf("%s %s\n", m.spinner.View(), m.message)
 	}
-	return fmt.Sprintf("%s %s\n", m.spinner.View(), m.message)
+	return tea.NewView(content)
 }
 
 // Spinner runs a spinner while a function executes.

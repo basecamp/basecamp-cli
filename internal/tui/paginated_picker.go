@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // PageResult represents a page of items from a paginated API.
@@ -89,7 +89,7 @@ func WithLoadingMessage(msg string) PaginatedPickerOption {
 func newPaginatedPickerModel(ctx context.Context, fetcher PageFetcher, opts ...PaginatedPickerOption) paginatedPickerModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
-	ti.Width = 40
+	ti.SetWidth(40)
 	ti.Focus()
 
 	s := spinner.New()
@@ -191,7 +191,7 @@ func (m paginatedPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// In initial loading state, only allow cancel
 		if m.initialLoading {
 			if msg.String() == "ctrl+c" || msg.String() == "esc" {
@@ -276,9 +276,9 @@ func (m paginatedPickerModel) filter(query string) []PickerItem {
 	return result
 }
 
-func (m paginatedPickerModel) View() string {
+func (m paginatedPickerModel) View() tea.View {
 	if m.quitting {
-		return ""
+		return tea.NewView("")
 	}
 
 	var b strings.Builder
@@ -293,14 +293,14 @@ func (m paginatedPickerModel) View() string {
 	// Initial loading state
 	if m.initialLoading {
 		b.WriteString(m.spinner.View() + " " + m.styles.Muted.Render(m.loadingMsg) + "\n")
-		return b.String()
+		return tea.NewView(b.String())
 	}
 
 	// Error state
 	if m.fetchError != nil && len(m.items) == 0 {
 		b.WriteString(m.styles.Error.Render("Error: "+m.fetchError.Error()) + "\n")
 		b.WriteString(m.styles.Muted.Render("Press esc to cancel"))
-		return b.String()
+		return tea.NewView(b.String())
 	}
 
 	// Input
@@ -367,7 +367,7 @@ func (m paginatedPickerModel) View() string {
 	helpStyle := m.styles.Muted.Padding(1, 0, 0, 0)
 	b.WriteString("\n" + helpStyle.Render("↑↓ navigate • enter select • esc cancel"))
 
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 // PaginatedPicker shows a fuzzy-search picker with progressive pagination.

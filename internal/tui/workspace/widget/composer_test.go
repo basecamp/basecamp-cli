@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -77,7 +77,7 @@ func TestComposerAutoExpand(t *testing.T) {
 	}
 
 	// Simulate typing '*' which should trigger auto-expand
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'*'}}
+	msg := tea.KeyPressMsg{Code: '*', Text: "*"}
 	c.Update(msg)
 
 	if c.Mode() != ComposerRich {
@@ -90,7 +90,7 @@ func TestComposerNoAutoExpand(t *testing.T) {
 	c.Focus()
 	c.SetSize(80, 20)
 
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'*'}}
+	msg := tea.KeyPressMsg{Code: '*', Text: "*"}
 	c.Update(msg)
 
 	if c.Mode() != ComposerQuick {
@@ -292,7 +292,7 @@ func TestShouldExpand(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tt.r}}
+		msg := tea.KeyPressMsg{Code: tt.r, Text: string(tt.r)}
 		if got := shouldExpand(msg); got != tt.want {
 			t.Errorf("shouldExpand(%c) = %v, want %v", tt.r, got, tt.want)
 		}

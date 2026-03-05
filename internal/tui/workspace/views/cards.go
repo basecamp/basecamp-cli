@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/empty"
@@ -207,7 +207,7 @@ func (v *Cards) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Cards) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case data.PoolUpdatedMsg:
 		if msg.Key == v.pool.Key() {
@@ -285,7 +285,7 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if v.loading {
 			return v, nil
 		}
@@ -300,7 +300,7 @@ func (v *Cards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, nil
 }
 
-func (v *Cards) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Cards) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Reset trash confirmation on non-t keys
 	if msg.String() != "t" {
 		v.trashPending = false
@@ -359,7 +359,7 @@ func (v *Cards) openFocusedCard() tea.Cmd {
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
 
-func (v *Cards) handleMoveKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Cards) handleMoveKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "h":
 		if v.moveTargetCol > 0 {
@@ -447,7 +447,7 @@ func (v *Cards) enterCreateMode() tea.Cmd {
 	return textinput.Blink
 }
 
-func (v *Cards) handleCreatingKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Cards) handleCreatingKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		title := strings.TrimSpace(v.createInput.Value())

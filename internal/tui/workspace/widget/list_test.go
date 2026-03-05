@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -31,12 +31,12 @@ func sampleItems(n int) []ListItem {
 	return items
 }
 
-func downKey() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyDown}
+func downKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyDown}
 }
 
-func upKey() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyUp}
+func upKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyUp}
 }
 
 func TestList_SetItems(t *testing.T) {
@@ -321,7 +321,7 @@ func TestList_LongFilter_NoOverflow(t *testing.T) {
 	l.StartFilter()
 	require.True(t, l.Filtering())
 	for _, r := range strings.Repeat("abcdefghij", 10) {
-		l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		l.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
 	view := l.View()

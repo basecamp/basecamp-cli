@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -175,7 +175,7 @@ func (v *Search) FullHelp() [][]key.Binding {
 func (v *Search) SetSize(w, h int) {
 	v.width = w
 	v.height = h
-	v.textInput.Width = max(0, w-4)
+	v.textInput.SetWidth(max(0, w-4))
 	// Reserve 2 lines for the input bar + separator
 	listHeight := h - 2
 	if listHeight < 1 {
@@ -190,7 +190,7 @@ func (v *Search) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (v *Search) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *Search) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspace.SearchResultsMsg:
 		return v, v.handleResults(msg)
@@ -223,7 +223,7 @@ func (v *Search) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return v, v.handleKey(msg)
 	}
 	return v, nil
@@ -271,7 +271,7 @@ func (v *Search) handleResults(msg workspace.SearchResultsMsg) tea.Cmd {
 	return nil
 }
 
-func (v *Search) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (v *Search) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, v.keys.Select):
 		return v.toggleFocus()
@@ -362,7 +362,7 @@ func (v *Search) openSelected() tea.Cmd {
 	return workspace.Navigate(workspace.ViewDetail, scope)
 }
 
-func (v *Search) updateInput(msg tea.KeyMsg) tea.Cmd {
+func (v *Search) updateInput(msg tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	v.textInput, cmd = v.textInput.Update(msg)
 

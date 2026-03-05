@@ -239,7 +239,7 @@ func buildLoginCmd(use string) *cobra.Command {
 			}
 
 			w := cmd.OutOrStdout()
-			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme())
+			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
 
 			if app.Config.ActiveProfile != "" {
 				fmt.Fprintln(w, r.Summary.Render(fmt.Sprintf("Starting authentication for profile %q...", app.Config.ActiveProfile)))

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,7 +29,7 @@ type testView struct {
 }
 
 func (v *testView) Init() tea.Cmd { return nil }
-func (v *testView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *testView) Update(msg tea.Msg) (View, tea.Cmd) {
 	v.msgs = append(v.msgs, msg)
 	return v, nil
 }
@@ -117,21 +117,27 @@ func pushTestView(w *Workspace, title string) *testView {
 	return v
 }
 
-func keyMsg(k string) tea.KeyMsg {
-	// Translate common key names to tea.KeyMsg
+func keyMsg(k string) tea.KeyPressMsg {
 	switch k {
 	case "ctrl+c":
-		return tea.KeyMsg{Type: tea.KeyCtrlC}
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	case "ctrl+d":
+		return tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
+	case "ctrl+u":
+		return tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEscape}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	case "backspace":
-		return tea.KeyMsg{Type: tea.KeyBackspace}
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	}
-	// Single rune keys
 	if len(k) == 1 {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+		return tea.KeyPressMsg{Code: rune(k[0]), Text: k}
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+	return tea.KeyPressMsg{Code: rune(k[0]), Text: k}
 }
 
 // --- Tests ---
@@ -191,7 +197,7 @@ func TestWorkspace_BackspaceAlsoQuits(t *testing.T) {
 	assert.True(t, w.confirmQuit, "first esc should arm confirmQuit")
 
 	// Backspace (also a Back binding) should work as second press
-	cmd := w.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	cmd := w.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	require.NotNil(t, cmd)
 	msg := cmd()
 	_, isQuit := msg.(tea.QuitMsg)
@@ -238,7 +244,7 @@ func TestWorkspace_InputCaptureSkipsGlobals(t *testing.T) {
 
 	// Verify the view received the key
 	require.NotEmpty(t, v.msgs, "view should have received the key")
-	_, isKey := v.msgs[len(v.msgs)-1].(tea.KeyMsg)
+	_, isKey := v.msgs[len(v.msgs)-1].(tea.KeyPressMsg)
 	assert.True(t, isKey, "view should receive the key message")
 }
 
@@ -261,9 +267,9 @@ func TestWorkspace_ModalEscGoesToView(t *testing.T) {
 	// The child should have received the esc key
 	require.NotEmpty(t, child.msgs)
 	received := child.msgs[len(child.msgs)-1]
-	km, isKey := received.(tea.KeyMsg)
+	km, isKey := received.(tea.KeyPressMsg)
 	assert.True(t, isKey)
-	assert.Equal(t, tea.KeyEscape, km.Type)
+	assert.Equal(t, tea.KeyEscape, km.Code)
 }
 
 func TestWorkspace_CtrlCAlwaysQuits(t *testing.T) {
@@ -606,6 +612,33 @@ func TestSession_ScopeContextThreadSafety(t *testing.T) {
 	// Success = no race detector failures.
 }
 
+func TestSession_DarkBackgroundThreadSafety(t *testing.T) {
+	session := NewTestSession()
+
+	var wg sync.WaitGroup
+	const workers = 10
+	const iterations = 500
+
+	// Concurrent readers call ReloadTheme (reads hasDarkBG under lock).
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				session.ReloadTheme()
+			}
+		}()
+	}
+
+	// Main goroutine writes hasDarkBG concurrently.
+	for i := 0; i < iterations; i++ {
+		session.SetDarkBackground(i%2 == 0)
+	}
+
+	wg.Wait()
+	// Success = no race detector failures.
+}
+
 func TestWorkspace_StalePaletteExecDropped(t *testing.T) {
 	session := testSessionWithContext("old-account", "Old")
 	w := testWorkspaceWithSession(session)
@@ -838,7 +871,7 @@ func TestWorkspace_ViewHintRefreshOnUpdate(t *testing.T) {
 	v.hints = []key.Binding{
 		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "test")),
 	}
-	updated, _ := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	updated, _ := v.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	w.replaceCurrentView(updated)
 
 	view := w.statusBar.View()
@@ -851,13 +884,13 @@ type dynamicHintView struct {
 	hints []key.Binding
 }
 
-func (v *dynamicHintView) Init() tea.Cmd                       { return nil }
-func (v *dynamicHintView) Update(tea.Msg) (tea.Model, tea.Cmd) { return v, nil }
-func (v *dynamicHintView) View() string                        { return v.title }
-func (v *dynamicHintView) Title() string                       { return v.title }
-func (v *dynamicHintView) ShortHelp() []key.Binding            { return v.hints }
-func (v *dynamicHintView) FullHelp() [][]key.Binding           { return [][]key.Binding{v.hints} }
-func (v *dynamicHintView) SetSize(int, int)                    {}
+func (v *dynamicHintView) Init() tea.Cmd                  { return nil }
+func (v *dynamicHintView) Update(tea.Msg) (View, tea.Cmd) { return v, nil }
+func (v *dynamicHintView) View() string                   { return v.title }
+func (v *dynamicHintView) Title() string                  { return v.title }
+func (v *dynamicHintView) ShortHelp() []key.Binding       { return v.hints }
+func (v *dynamicHintView) FullHelp() [][]key.Binding      { return [][]key.Binding{v.hints} }
+func (v *dynamicHintView) SetSize(int, int)               {}
 
 // pushTestViewWithTarget pushes a named testView with a specific ViewTarget.
 func pushTestViewWithTarget(w *Workspace, title string, target ViewTarget) *testView {
@@ -976,11 +1009,11 @@ func TestWorkspace_TabForwardedWhenSidebarInactive(t *testing.T) {
 	// Sidebar is not open — tab should reach the view.
 	require.False(t, w.sidebarActive())
 
-	w.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	w.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	found := false
 	for _, m := range v.msgs {
-		if km, ok := m.(tea.KeyMsg); ok && km.Type == tea.KeyTab {
+		if km, ok := m.(tea.KeyPressMsg); ok && km.Code == tea.KeyTab {
 			found = true
 			break
 		}
@@ -998,14 +1031,14 @@ func TestWorkspace_TabConsumedWhenSidebarActive(t *testing.T) {
 	require.False(t, w.sidebarFocused, "sidebar starts unfocused")
 
 	// Tab should switch focus to sidebar, not reach the main view.
-	cmd := w.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	cmd := w.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	assert.True(t, w.sidebarFocused, "tab should switch focus to sidebar")
 	assert.Nil(t, cmd, "switchSidebarFocus returns nil")
 
 	// The main view should NOT have received the tab key.
 	for _, m := range v.msgs {
-		if km, ok := m.(tea.KeyMsg); ok && km.Type == tea.KeyTab {
+		if km, ok := m.(tea.KeyPressMsg); ok && km.Code == tea.KeyTab {
 			t.Fatal("main view must not receive tab when sidebar is active")
 		}
 	}
@@ -1309,7 +1342,7 @@ type focusCmdView struct {
 	focusCmd tea.Cmd
 }
 
-func (v *focusCmdView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *focusCmdView) Update(msg tea.Msg) (View, tea.Cmd) {
 	v.msgs = append(v.msgs, msg)
 	if _, ok := msg.(FocusMsg); ok && v.focusCmd != nil {
 		return v, v.focusCmd
@@ -1374,7 +1407,7 @@ type blurCmdView struct {
 	blurCmd tea.Cmd
 }
 
-func (v *blurCmdView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v *blurCmdView) Update(msg tea.Msg) (View, tea.Cmd) {
 	v.msgs = append(v.msgs, msg)
 	if _, ok := msg.(BlurMsg); ok && v.blurCmd != nil {
 		return v, v.blurCmd
@@ -1670,15 +1703,27 @@ func TestWorkspace_ToastDoesNotChangeLayoutHeight(t *testing.T) {
 	w.relayout()
 
 	// Render without toast
-	outputNoToast := w.View()
+	outputNoToast := w.View().Content
 	linesNoToast := strings.Count(outputNoToast, "\n")
 
 	// Show a toast and render again
 	w.toast.Show("Todo completed!", false)
 	require.True(t, w.toast.Visible())
 
-	outputWithToast := w.View()
+	outputWithToast := w.View().Content
 	linesWithToast := strings.Count(outputWithToast, "\n")
 
 	assert.Equal(t, linesNoToast, linesWithToast, "toast overlay should not change total line count")
+}
+
+func TestWorkspace_BackgroundColorMsg(t *testing.T) {
+	w, _ := testWorkspace()
+	w.session = NewTestSessionWithHub()
+	w.session.SetDarkBackground(false)
+
+	// Zero-value BackgroundColorMsg reports IsDark()=true, flipping
+	// hasDarkBG from false to true.
+	_, cmd := w.Update(tea.BackgroundColorMsg{})
+	assert.Nil(t, cmd)
+	assert.True(t, w.session.hasDarkBG, "zero-color BackgroundColorMsg.IsDark()=true should set dark=true")
 }

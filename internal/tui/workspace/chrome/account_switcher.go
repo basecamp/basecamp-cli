@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -71,13 +71,13 @@ func (a *AccountSwitcher) SetSize(width, height int) {
 // Returns a tea.Cmd when the switcher produces an action or wants to close.
 func (a *AccountSwitcher) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return a.handleKey(msg)
 	}
 	return nil
 }
 
-func (a *AccountSwitcher) handleKey(msg tea.KeyMsg) tea.Cmd {
+func (a *AccountSwitcher) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "ctrl+a":
 		return func() tea.Msg { return AccountSwitchCloseMsg{} }
@@ -108,17 +108,14 @@ func (a *AccountSwitcher) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// Digit-key selection: 0 selects "All Accounts", 1-9 select accounts.
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-		r := msg.Runes[0]
-		if r >= '0' && r <= '9' {
-			idx := int(r - '0')
-			if idx < len(a.accounts) {
-				acct := a.accounts[idx]
-				return func() tea.Msg {
-					return AccountSwitchedMsg{
-						AccountID:   acct.ID,
-						AccountName: acct.Name,
-					}
+	if runes := []rune(msg.Text); len(runes) == 1 && runes[0] >= '0' && runes[0] <= '9' {
+		idx := int(runes[0] - '0')
+		if idx < len(a.accounts) {
+			acct := a.accounts[idx]
+			return func() tea.Msg {
+				return AccountSwitchedMsg{
+					AccountID:   acct.ID,
+					AccountName: acct.Name,
 				}
 			}
 		}
