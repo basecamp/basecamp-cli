@@ -23,6 +23,7 @@ make release VERSION=0.2.0 DRY_RUN=1
    - Collects PGO profile from benchmarks
    - Generates AI changelog from commit history
    - Builds binaries for all platforms (darwin, linux, windows, freebsd, openbsd × amd64/arm64)
+   - Builds `.deb`, `.rpm`, `.apk` Linux packages (amd64 + arm64)
    - Signs and notarizes macOS binaries (Developer ID via GoReleaser/quill)
    - Signs checksums with cosign (keyless via Sigstore OIDC)
    - Generates SBOM for supply chain transparency
@@ -77,4 +78,5 @@ Pre-1.0: minor bumps for features, patch bumps for fixes. Prerelease tags
 | Homebrew cask | `basecamp/homebrew-tap` Casks/ | GoReleaser |
 | Scoop | `basecamp/homebrew-tap` root | GoReleaser |
 | AUR | `basecamp-cli` | GoReleaser |
+| deb/rpm/apk packages | GitHub Release assets | GoReleaser (nfpm) |
 | go install | `go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest` | Go module proxy |
