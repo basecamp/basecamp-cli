@@ -3,17 +3,28 @@ package tui
 import (
 	"errors"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 )
 
-// Confirm shows a yes/no confirmation prompt.
+// escKeyMap returns a keymap where both Ctrl+C and Escape abort the form.
+func escKeyMap() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap()
+	km.Quit = key.NewBinding(key.WithKeys("ctrl+c", "esc"))
+	return km
+}
+
+// Confirm shows a yes/no confirmation prompt. Escape or Ctrl+C cancels.
 func Confirm(message string, defaultValue bool) (bool, error) {
 	var result bool
-	err := huh.NewConfirm().
+	field := huh.NewConfirm().
 		Title(message).
 		Affirmative("Yes").
 		Negative("No").
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	if err != nil {
 		return defaultValue, err
@@ -21,15 +32,18 @@ func Confirm(message string, defaultValue bool) (bool, error) {
 	return result, nil
 }
 
-// ConfirmDangerous shows a confirmation prompt for dangerous actions.
+// ConfirmDangerous shows a confirmation prompt for dangerous actions. Escape or Ctrl+C cancels.
 func ConfirmDangerous(message string) (bool, error) {
 	var result bool
-	err := huh.NewConfirm().
+	field := huh.NewConfirm().
 		Title(message).
 		Description("This action cannot be undone.").
 		Affirmative("Yes, I'm sure").
 		Negative("Cancel").
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	if err != nil {
 		return false, err
@@ -37,21 +51,24 @@ func ConfirmDangerous(message string) (bool, error) {
 	return result, nil
 }
 
-// Input shows a text input prompt.
+// Input shows a text input prompt. Escape or Ctrl+C cancels.
 func Input(title, placeholder string) (string, error) {
 	var result string
-	err := huh.NewInput().
+	field := huh.NewInput().
 		Title(title).
 		Placeholder(placeholder).
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	return result, err
 }
 
-// InputRequired shows a required text input prompt.
+// InputRequired shows a required text input prompt. Escape or Ctrl+C cancels.
 func InputRequired(title, placeholder string) (string, error) {
 	var result string
-	err := huh.NewInput().
+	field := huh.NewInput().
 		Title(title).
 		Placeholder(placeholder).
 		Value(&result).
@@ -60,18 +77,24 @@ func InputRequired(title, placeholder string) (string, error) {
 				return errors.New("this field is required")
 			}
 			return nil
-		}).
+		})
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	return result, err
 }
 
-// TextArea shows a multiline text input prompt.
+// TextArea shows a multiline text input prompt. Escape or Ctrl+C cancels.
 func TextArea(title, placeholder string) (string, error) {
 	var result string
-	err := huh.NewText().
+	field := huh.NewText().
 		Title(title).
 		Placeholder(placeholder).
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	return result, err
 }
@@ -82,7 +105,7 @@ type SelectOption struct {
 	Label string
 }
 
-// Select shows a single-select prompt.
+// Select shows a single-select prompt. Escape or Ctrl+C cancels.
 func Select(title string, options []SelectOption) (string, error) {
 	huhOptions := make([]huh.Option[string], len(options))
 	for i, opt := range options {
@@ -90,15 +113,18 @@ func Select(title string, options []SelectOption) (string, error) {
 	}
 
 	var result string
-	err := huh.NewSelect[string]().
+	field := huh.NewSelect[string]().
 		Title(title).
 		Options(huhOptions...).
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	return result, err
 }
 
-// SelectWithDescription shows a select prompt with descriptions.
+// SelectWithDescription shows a select prompt with descriptions. Escape or Ctrl+C cancels.
 func SelectWithDescription(title, description string, options []SelectOption) (string, error) {
 	huhOptions := make([]huh.Option[string], len(options))
 	for i, opt := range options {
@@ -106,16 +132,19 @@ func SelectWithDescription(title, description string, options []SelectOption) (s
 	}
 
 	var result string
-	err := huh.NewSelect[string]().
+	field := huh.NewSelect[string]().
 		Title(title).
 		Description(description).
 		Options(huhOptions...).
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	return result, err
 }
 
-// MultiSelect shows a multi-select prompt.
+// MultiSelect shows a multi-select prompt. Escape or Ctrl+C cancels.
 func MultiSelect(title string, options []SelectOption) ([]string, error) {
 	huhOptions := make([]huh.Option[string], len(options))
 	for i, opt := range options {
@@ -123,10 +152,13 @@ func MultiSelect(title string, options []SelectOption) ([]string, error) {
 	}
 
 	var result []string
-	err := huh.NewMultiSelect[string]().
+	field := huh.NewMultiSelect[string]().
 		Title(title).
 		Options(huhOptions...).
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	return result, err
 }
@@ -169,7 +201,7 @@ func Form(title string, fields []FormField) (map[string]string, error) {
 
 	form := huh.NewForm(
 		huh.NewGroup(huhFields...).Title(title),
-	)
+	).WithKeyMap(escKeyMap())
 
 	if err := form.Run(); err != nil {
 		return nil, err
@@ -190,15 +222,18 @@ func Note(title, body string) error {
 		Run()
 }
 
-// ConfirmSetDefault asks the user if they want to save a value as the default.
+// ConfirmSetDefault asks the user if they want to save a value as the default. Escape or Ctrl+C cancels.
 func ConfirmSetDefault(valueName string) (bool, error) {
 	var result bool
-	err := huh.NewConfirm().
+	field := huh.NewConfirm().
 		Title("Save as default?").
 		Description("Set " + valueName + " as the default for future commands.").
 		Affirmative("Yes").
 		Negative("No").
-		Value(&result).
+		Value(&result)
+
+	err := huh.NewForm(huh.NewGroup(field)).
+		WithKeyMap(escKeyMap()).
 		Run()
 	if err != nil {
 		return false, err
