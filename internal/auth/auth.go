@@ -757,27 +757,6 @@ func (m *Manager) GetOAuthType() string {
 	return creds.OAuthType
 }
 
-// GetUserID returns the stored user ID for the current credential key.
-func (m *Manager) GetUserID() string {
-	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if err != nil {
-		return ""
-	}
-	return creds.UserID
-}
-
-// SetUserID stores the user ID for the current credential key.
-func (m *Manager) SetUserID(userID string) error {
-	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if err != nil {
-		return err
-	}
-	creds.UserID = userID
-	return m.store.Save(credKey, creds)
-}
-
 // GetUserEmail returns the stored user email for the current credential key.
 func (m *Manager) GetUserEmail() string {
 	credKey := m.credentialKey()
