@@ -1,0 +1,61 @@
+internal/commands/auth.go
+  6c6b763329f0666c 284,323-330,332-336
+internal/commands/wizard_test.go
+  6c6b763329f0666c 7-8,11,17-18,165-166,194-195,218,221,233-366
+internal/commands/doctor.go
+  6c6b763329f0666c 202-213
+internal/commands/doctor_test.go
+  6c6b763329f0666c 19,517-523,530-567
+internal/commands/wizard_agents.go
+  6c6b763329f0666c 1-22,24-60,62-70,73-78,80-83,86-214,219,225,227-320,322-373
+internal/commands/quickstart.go
+  6c6b763329f0666c 133-138,140-142,144-146
+internal/commands/wizard.go
+  6c6b763329f0666c 36,42-43,92-93,300-306
+  b3273e58ec86cba3 126-137,139
+internal/harness/claude.go
+  6c6b763329f0666c 10-20,28-29,32-37,39,113-115
+internal/harness/agent.go
+  6c6b763329f0666c 1-32,34-71
+internal/harness/agent_test.go
+  6c6b763329f0666c 1-70,72-84
+internal/harness/claude_test.go
+  6c6b763329f0666c 4-5,60-86
+internal/commands/skill.go
+  6c6b763329f0666c 11,38-39,43,49,52-59,69,75-106,108-119,126-130
+internal/commands/skill_test.go
+  6c6b763329f0666c 17-20,59-61,85-88,131-133,226-228,256-282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "6600143cfbdd0afe3694bd037a0b3b5d0367106c",
+  "prompts": {
+    "6c6b763329f0666c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a80f46f-578f-42bc-b659-918872b3f808",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 908,
+      "overriden_lines": 0
+    },
+    "b3273e58ec86cba3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9b5de7d-a150-4c9b-8fff-b97ac067d642",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 1,
+      "accepted_lines": 13,
+      "overriden_lines": 0
+    }
+  }
+}
