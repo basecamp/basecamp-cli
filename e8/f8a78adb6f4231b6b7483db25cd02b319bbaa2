@@ -1,0 +1,25 @@
+internal/commands/skill.go
+  ab1fe46829bec3c2 46-47,112-113
+internal/tui/forms.go
+  ab1fe46829bec3c2 35,38,44-46,68,71,81-83,88,91,95-97,127,135,140-142,147,155,159-161,204,225,228,234-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "e8f8a78adb6f4231b6b7483db25cd02b319bbaa2",
+  "prompts": {
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 35,
+      "overriden_lines": 0
+    }
+  }
+}
