@@ -218,6 +218,47 @@ func TestCopySkillFilesRejectsSubdirs(t *testing.T) {
 	}
 }
 
+func TestNormalizeSkillPath(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"~/.claude/skills/basecamp/SKILL.md", "~/.claude/skills/basecamp/SKILL.md"},
+		{"/tmp/skills", filepath.Join("/tmp/skills", "basecamp", "SKILL.md")},
+		{"/tmp/basecamp", filepath.Join("/tmp/basecamp", "SKILL.md")},
+		{"/tmp/basecamp/", filepath.Join("/tmp/basecamp", "SKILL.md")},
+		{"/tmp/other.md", "/tmp/other.md"},
+		{"  ~/.claude/skills/basecamp/SKILL.md  ", "~/.claude/skills/basecamp/SKILL.md"},
+	}
+	for _, tt := range tests {
+		got := normalizeSkillPath(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeSkillPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestExpandSkillPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+
+	tests := []struct {
+		input, want string
+	}{
+		{"~/foo/bar", filepath.Join(home, "foo/bar")},
+		{"/absolute/path", "/absolute/path"},
+		{"relative/path", "relative/path"},
+		{"~", home},
+	}
+	for _, tt := range tests {
+		got := expandSkillPath(tt.input)
+		if got != tt.want {
+			t.Errorf("expandSkillPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestSkillInstallResultMap(t *testing.T) {
 	// Run the actual install command and verify the result map is built
 	// correctly by checking paths exist with the expected structure.
