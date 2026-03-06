@@ -7,6 +7,17 @@ import (
 	"path/filepath"
 )
 
+func init() {
+	RegisterAgent(AgentInfo{
+		Name:   "Claude Code",
+		ID:     "claude",
+		Detect: DetectClaude,
+		Checks: func() []*StatusCheck {
+			return []*StatusCheck{CheckClaudePlugin()}
+		},
+	})
+}
+
 // ClaudeMarketplaceSource is the marketplace repository for the Basecamp plugin.
 // Migrating from basecamp/basecamp-cli → basecamp/claude-plugins.
 const ClaudeMarketplaceSource = "basecamp/claude-plugins"
@@ -14,15 +25,18 @@ const ClaudeMarketplaceSource = "basecamp/claude-plugins"
 // ClaudePluginName is the plugin identifier to install.
 const ClaudePluginName = "basecamp"
 
-// DetectClaude returns true if Claude Code is installed (~/.claude/ exists).
+// DetectClaude returns true if Claude Code is installed.
+// Checks ~/.claude/ directory first, then falls back to binary on PATH.
 func DetectClaude() bool {
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
+	if err == nil {
+		home = filepath.Clean(home)
+		info, statErr := os.Stat(filepath.Join(home, ".claude"))
+		if statErr == nil && info.IsDir() {
+			return true
+		}
 	}
-	home = filepath.Clean(home)
-	info, err := os.Stat(filepath.Join(home, ".claude"))
-	return err == nil && info.IsDir()
+	return FindClaudeBinary() != ""
 }
 
 // IsPluginNeeded returns true if Claude Code is installed but the plugin is not.
