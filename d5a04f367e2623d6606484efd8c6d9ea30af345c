@@ -1,0 +1,27 @@
+internal/tui/workspace/workspace.go
+  c3fde71168208b65 1099-1100
+internal/tui/workspace/data/pool.go
+  c3fde71168208b65 90-93,97-98
+internal/tui/workspace/views/pool_monitor.go
+  c3fde71168208b65 327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "d5a04f367e2623d6606484efd8c6d9ea30af345c",
+  "prompts": {
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 12,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
