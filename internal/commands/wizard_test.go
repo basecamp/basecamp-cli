@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/skills"
 )
 
@@ -255,7 +257,8 @@ func TestSetupClaudeNonInteractiveInstallsSkill(t *testing.T) {
 	skillFile := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
 	got, readErr := os.ReadFile(skillFile)
 	require.NoError(t, readErr, "baseline skill file should be installed")
-	embedded, _ := skills.FS.ReadFile("basecamp/SKILL.md")
+	embedded, readErr := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, readErr)
 	assert.Equal(t, string(embedded), string(got))
 }
 
@@ -274,24 +277,20 @@ func TestBaselineSkillInstalled(t *testing.T) {
 	assert.True(t, baselineSkillInstalled(), "should be true when SKILL.md exists")
 }
 
-// TestSetupClaudeBrokenSkillLinkReportsFailure verifies that when the Claude
-// skill link is missing, setup claude --json does NOT report full success.
-func TestSetupClaudeBrokenSkillLinkReportsFailure(t *testing.T) {
+// TestSetupClaudeNonInteractiveRepairsSkillLink verifies that non-interactive
+// setup repairs a missing skill link even when the plugin is already installed
+// and no claude binary is on PATH.
+func TestSetupClaudeNonInteractiveRepairsSkillLink(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", home) // no claude binary
 
-	// Create ~/.claude so DetectClaude() returns true, but do NOT create
-	// the skill link at ~/.claude/skills/basecamp/SKILL.md.
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
-
-	// Also install the plugin file so CheckClaudePlugin passes —
-	// the only failing check should be the skill link.
-	pluginDir := filepath.Join(home, ".claude", "plugins")
-	os.MkdirAll(pluginDir, 0o755)
-	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"),
-		[]byte(`[{"name":"basecamp","version":"1.0.0"}]`), 0o644)
+	// Create ~/.claude with plugin installed
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
+		[]byte(`[{"name":"basecamp","version":"1.0.0"}]`), 0o644))
 
 	app, appBuf := setupQuickstartTestApp(t, "", "")
 	app.Flags.JSON = true
@@ -305,16 +304,57 @@ func TestSetupClaudeBrokenSkillLinkReportsFailure(t *testing.T) {
 	err := cmd.Execute()
 	require.NoError(t, err)
 
+	// Skill link should exist after setup
+	skillLinkPath := filepath.Join(home, ".claude", "skills", "basecamp", "SKILL.md")
+	_, statErr := os.Stat(skillLinkPath)
+	assert.NoError(t, statErr, "skill link should be repaired by non-interactive setup")
+
+	// Result should report success since both checks now pass
 	var envelope struct {
 		Summary string         `json:"summary"`
 		Data    map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(appBuf.Bytes(), &envelope))
-
-	// The skill link check should cause installed=false
 	installed, _ := envelope.Data["plugin_installed"].(bool)
-	assert.False(t, installed, "plugin_installed should be false when skill link is missing")
-	assert.Equal(t, "Claude Code plugin not installed", envelope.Summary)
+	assert.True(t, installed, "plugin_installed should be true after successful repair")
+}
+
+// TestRunClaudeSetupRepairsSkillLink verifies that interactive setup repairs a
+// missing skill link even when the plugin is already installed and no claude
+// binary is on PATH.
+func TestRunClaudeSetupRepairsSkillLink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	// Plugin is installed (check will pass)
+	pluginDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"),
+		[]byte(`[{"name":"basecamp","version":"1.0.0"}]`), 0o644))
+
+	// Install baseline skill files (source for the symlink)
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	// Skill link does NOT exist yet
+	skillLinkPath := filepath.Join(home, ".claude", "skills", "basecamp", "SKILL.md")
+	_, statErr := os.Stat(skillLinkPath)
+	require.True(t, os.IsNotExist(statErr), "skill link should not exist before setup")
+
+	// Run the interactive handler
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetContext(context.Background())
+
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+	require.NoError(t, runClaudeSetup(cmd, styles))
+
+	// Skill link should now exist
+	_, statErr = os.Stat(skillLinkPath)
+	assert.NoError(t, statErr, "skill link should exist after setup repairs it")
 }
 
 // TestJoinNames verifies name joining with commas and "and".

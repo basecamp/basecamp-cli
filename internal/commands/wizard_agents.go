@@ -40,52 +40,55 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 // (marketplace add + plugin install + skill symlink).
 func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 	w := cmd.OutOrStdout()
-	claudePath := harness.FindClaudeBinary()
 
-	if claudePath == "" {
-		fmt.Fprintln(w, styles.Muted.Render("  Claude Code detected but binary not found in PATH."))
-		fmt.Fprintln(w, styles.Muted.Render("  Install the plugin manually:"))
-		line1, line2 := claudeManualInstallHint(styles)
-		fmt.Fprintln(w, line1)
-		fmt.Fprintln(w, line2)
-		return nil
-	}
-
-	ctx := cmd.Context()
-
-	// Register the marketplace (best-effort — may already be registered)
-	marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
-	marketplaceCmd.Stdout = w
-	marketplaceCmd.Stderr = cmd.ErrOrStderr()
-	if err := marketplaceCmd.Run(); err != nil {
-		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Marketplace registration failed: %s", err)))
-	} else {
-		fmt.Fprintln(w, styles.RenderStatus(true, "Marketplace registered"))
-	}
-
-	// Install the plugin
-	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
-	installCmd.Stdout = w
-	installCmd.Stderr = cmd.ErrOrStderr()
-	if err := installCmd.Run(); err != nil {
-		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Plugin install failed: %s", err)))
-		fmt.Fprintln(w, styles.Muted.Render("  Try manually:"))
-		line1, line2 := claudeManualInstallHint(styles)
-		fmt.Fprintln(w, line1)
-		fmt.Fprintln(w, line2)
-		return nil
-	}
-
-	// Verify
-	verify := harness.CheckClaudePlugin()
-	if verify.Status == "pass" {
+	// If the plugin is already installed, skip to skill link repair (no binary needed)
+	pluginOK := harness.CheckClaudePlugin().Status == "pass"
+	if pluginOK {
 		fmt.Fprintln(w, styles.RenderStatus(true, "Claude Code plugin installed"))
 	} else {
-		fmt.Fprintln(w, styles.RenderStatus(false, "Claude Code plugin may not have installed correctly"))
-		fmt.Fprintln(w, styles.Muted.Render("  Run: basecamp doctor"))
+		claudePath := harness.FindClaudeBinary()
+		if claudePath == "" {
+			fmt.Fprintln(w, styles.Muted.Render("  Claude Code detected but binary not found in PATH."))
+			fmt.Fprintln(w, styles.Muted.Render("  Install the plugin manually:"))
+			line1, line2 := claudeManualInstallHint(styles)
+			fmt.Fprintln(w, line1)
+			fmt.Fprintln(w, line2)
+		} else {
+			ctx := cmd.Context()
+
+			// Register the marketplace (best-effort — may already be registered)
+			marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
+			marketplaceCmd.Stdout = w
+			marketplaceCmd.Stderr = cmd.ErrOrStderr()
+			if err := marketplaceCmd.Run(); err != nil {
+				fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Marketplace registration failed: %s", err)))
+			} else {
+				fmt.Fprintln(w, styles.RenderStatus(true, "Marketplace registered"))
+			}
+
+			// Install the plugin
+			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
+			installCmd.Stdout = w
+			installCmd.Stderr = cmd.ErrOrStderr()
+			if err := installCmd.Run(); err != nil {
+				fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Plugin install failed: %s", err)))
+				fmt.Fprintln(w, styles.Muted.Render("  Try manually:"))
+				line1, line2 := claudeManualInstallHint(styles)
+				fmt.Fprintln(w, line1)
+				fmt.Fprintln(w, line2)
+			} else {
+				verify := harness.CheckClaudePlugin()
+				if verify.Status == "pass" {
+					fmt.Fprintln(w, styles.RenderStatus(true, "Claude Code plugin installed"))
+				} else {
+					fmt.Fprintln(w, styles.RenderStatus(false, "Claude Code plugin may not have installed correctly"))
+					fmt.Fprintln(w, styles.Muted.Render("  Run: basecamp doctor"))
+				}
+			}
+		}
 	}
 
-	// Symlink skill into Claude's skill directory
+	// Always attempt skill link repair (handles "plugin ok, link broken" case)
 	if _, _, err := linkSkillToClaude(); err != nil {
 		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Claude skill symlink failed: %s", err)))
 	}
@@ -198,41 +201,32 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 
 // runClaudeSetupNonInteractive attempts plugin install without prompts (for --json/--agent mode).
 func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
-	claudePath := harness.FindClaudeBinary()
-	if claudePath == "" {
-		return nil
-	}
-
 	var errs []string
 
-	// Check if already installed
-	if check := harness.CheckClaudePlugin(); check.Status == "pass" {
-		// Plugin already installed, but still ensure the skill symlink exists
-		if _, _, err := linkSkillToClaude(); err != nil {
-			errs = append(errs, fmt.Sprintf("skill link: %s", err))
+	// If the plugin is already installed, skip to skill link repair (no binary needed)
+	if check := harness.CheckClaudePlugin(); check.Status != "pass" {
+		claudePath := harness.FindClaudeBinary()
+		if claudePath == "" {
+			// Can't install without binary — not an error, just nothing to do
+		} else {
+			ctx := cmd.Context()
+			w := cmd.ErrOrStderr()
+
+			// Best-effort marketplace registration
+			marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
+			marketplaceCmd.Stderr = w
+			_ = marketplaceCmd.Run()
+
+			// Install the plugin
+			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
+			installCmd.Stderr = w
+			if err := installCmd.Run(); err != nil {
+				errs = append(errs, fmt.Sprintf("plugin install: %s", err))
+			}
 		}
-		if len(errs) > 0 {
-			return fmt.Errorf("%s", errs[0])
-		}
-		return nil
 	}
 
-	ctx := cmd.Context()
-	w := cmd.ErrOrStderr()
-
-	// Best-effort marketplace registration
-	marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
-	marketplaceCmd.Stderr = w
-	_ = marketplaceCmd.Run()
-
-	// Install the plugin
-	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
-	installCmd.Stderr = w
-	if err := installCmd.Run(); err != nil {
-		errs = append(errs, fmt.Sprintf("plugin install: %s", err))
-	}
-
-	// Symlink skill into Claude's skill directory
+	// Always attempt skill link repair
 	if _, _, err := linkSkillToClaude(); err != nil {
 		errs = append(errs, fmt.Sprintf("skill link: %s", err))
 	}
