@@ -1,0 +1,23 @@
+scripts/install.sh
+  b3273e58ec86cba3 75-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "cc50fec2b9a125974cc9165edd3045052766b924",
+  "prompts": {
+    "b3273e58ec86cba3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9b5de7d-a150-4c9b-8fff-b97ac067d642",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 2,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
