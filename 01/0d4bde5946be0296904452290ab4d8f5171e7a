@@ -1,0 +1,23 @@
+internal/tui/workspace/views/pool_monitor.go
+  c3fde71168208b65 387-393
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "010d4bde5946be0296904452290ab4d8f5171e7a",
+  "prompts": {
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 1,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
