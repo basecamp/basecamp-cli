@@ -1,0 +1,27 @@
+internal/richtext/hyperlink.go
+  0e3d278ee9afe288 27-29,32-33,41-42,58-59,61-78,92-94,97
+internal/richtext/hyperlink_test.go
+  0e3d278ee9afe288 64-65,94-101,133-165
+internal/tui/workspace/views/campfire.go
+  0e3d278ee9afe288 771-772,774-775
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "21fd39fa84d94a5a3368a5dc7fe043a1a61af0a9",
+  "prompts": {
+    "0e3d278ee9afe288": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0a109c4-8e3f-4a93-93ba-c8ecd81f2ac5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 82,
+      "total_deletions": 12,
+      "accepted_lines": 81,
+      "overriden_lines": 0
+    }
+  }
+}
