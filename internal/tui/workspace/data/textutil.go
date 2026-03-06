@@ -81,6 +81,42 @@ func StripTags(s string) string {
 	return stripTags(s)
 }
 
+// reAttachment matches bc-attachment elements (non-mention).
+var reAttachment = regexp.MustCompile(`(?is)<bc-attachment[^>]*>.*?</bc-attachment>`)
+
+// reBlockTag matches block-level HTML tags that should become line breaks.
+var reBlockTag = regexp.MustCompile(`(?i)</?(div|p|br|blockquote|pre|h[1-6])\b[^>]*/?>`)
+
+// reWhitespace collapses runs of whitespace into a single space.
+var reWhitespace = regexp.MustCompile(`\s{2,}`)
+
+// RiverText converts campfire line HTML to compact plain text for the river view.
+// Replaces attachments with a paperclip indicator, strips remaining tags,
+// and collapses whitespace to a single line.
+func RiverText(html string) string {
+	if html == "" {
+		return ""
+	}
+	// Preserve @mentions by extracting the mention name before stripping
+	s := reMention.ReplaceAllString(html, "@$1")
+	// Replace non-mention attachments with indicator
+	s = reAttachment.ReplaceAllString(s, " \U0001F4CE ")
+	// Block tags → space (prevents words running together)
+	s = reBlockTag.ReplaceAllString(s, " ")
+	// Strip remaining inline tags
+	s = tagRe.ReplaceAllString(s, "")
+	// Decode common HTML entities
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&quot;", "\"")
+	s = strings.ReplaceAll(s, "&#39;", "'")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	// Collapse whitespace
+	s = reWhitespace.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
 // stopwords is a small set of English stopwords for Jaccard filtering.
 var stopwords = map[string]bool{
 	"a": true, "an": true, "the": true, "is": true, "it": true,

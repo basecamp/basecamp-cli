@@ -273,11 +273,6 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 			StaleTTL: 5 * time.Minute,
 			PollBase: 120 * time.Second,
 		}, func(ctx context.Context) ([]BonfireRoomConfig, error) {
-			accounts := h.multi.Accounts()
-			if len(accounts) == 0 {
-				return nil, nil
-			}
-
 			// Fetch all project campfires and bookmarked project IDs per account.
 			// We need both: the full set (for explicit-include overrides to widen)
 			// and the bookmarked subset (for the default when no overrides exist).
@@ -285,65 +280,86 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 				all       []BonfireRoomConfig // every project campfire
 				bookmarks map[string]struct{} // keys of bookmarked-project rooms
 			}
-			results := FanOut[accountRooms](ctx, h.multi,
-				func(acct AccountInfo, client *basecamp.AccountClient) (accountRooms, error) {
-					projResult, projErr := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
-					if projErr != nil {
-						// Can't determine bookmarks — skip this account rather
-						// than silently widening the room set on transient failures.
-						return accountRooms{}, projErr
+			fetchAccountRooms := func(acct AccountInfo, client *basecamp.AccountClient) (accountRooms, error) {
+				projResult, projErr := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
+				if projErr != nil {
+					return accountRooms{}, projErr
+				}
+				bookmarked := make(map[int64]string) // project ID -> name
+				for _, p := range projResult.Projects {
+					if p.Bookmarked {
+						bookmarked[p.ID] = p.Name
 					}
-					bookmarked := make(map[int64]string) // project ID -> name
-					for _, p := range projResult.Projects {
-						if p.Bookmarked {
-							bookmarked[p.ID] = p.Name
-						}
-					}
+				}
 
-					campfires, err := client.Campfires().List(ctx)
-					if err != nil {
-						return accountRooms{}, err
+				campfires, err := client.Campfires().List(ctx)
+				if err != nil {
+					return accountRooms{}, err
+				}
+				var rooms []BonfireRoomConfig
+				bmKeys := make(map[string]struct{})
+				for _, cf := range campfires.Campfires {
+					if cf.Bucket == nil || cf.Bucket.Type != "Project" {
+						continue
 					}
-					var rooms []BonfireRoomConfig
-					bmKeys := make(map[string]struct{})
-					for _, cf := range campfires.Campfires {
-						if cf.Bucket == nil || cf.Bucket.Type != "Project" {
-							continue
-						}
-						projectName := cf.Bucket.Name
-						if name, ok := bookmarked[cf.Bucket.ID]; ok && name != "" {
-							projectName = name
-						}
-						rc := BonfireRoomConfig{
-							RoomID: RoomID{
-								AccountID:  acct.ID,
-								ProjectID:  cf.Bucket.ID,
-								CampfireID: cf.ID,
-							},
-							RoomName:    cf.Title,
-							ProjectName: projectName,
-						}
-						rooms = append(rooms, rc)
-						if _, ok := bookmarked[cf.Bucket.ID]; ok {
-							bmKeys[rc.Key()] = struct{}{}
-						}
+					projectName := cf.Bucket.Name
+					if name, ok := bookmarked[cf.Bucket.ID]; ok && name != "" {
+						projectName = name
 					}
-					// If no bookmarks exist (fresh account), treat all as bookmarked.
-					if len(bookmarked) == 0 {
-						for _, r := range rooms {
-							bmKeys[r.Key()] = struct{}{}
-						}
+					rc := BonfireRoomConfig{
+						RoomID: RoomID{
+							AccountID:  acct.ID,
+							ProjectID:  cf.Bucket.ID,
+							CampfireID: cf.ID,
+						},
+						RoomName:    cf.Title,
+						ProjectName: projectName,
 					}
-					return accountRooms{all: rooms, bookmarks: bmKeys}, nil
-				})
+					rooms = append(rooms, rc)
+					if _, ok := bookmarked[cf.Bucket.ID]; ok {
+						bmKeys[rc.Key()] = struct{}{}
+					}
+				}
+				// If no bookmarks exist (fresh account), treat all as bookmarked.
+				if len(bookmarked) == 0 {
+					for _, r := range rooms {
+						bmKeys[r.Key()] = struct{}{}
+					}
+				}
+				return accountRooms{all: rooms, bookmarks: bmKeys}, nil
+			}
 
 			var allRooms []BonfireRoomConfig
 			bookmarkSet := make(map[string]struct{})
-			for _, r := range results {
-				if r.Err == nil {
-					allRooms = append(allRooms, r.Data.all...)
-					for k := range r.Data.bookmarks {
+
+			accounts := h.multi.Accounts()
+			if len(accounts) == 0 {
+				// Pre-discovery: fall back to the configured single account
+				// so rooms appear immediately. After AccountsDiscoveredMsg
+				// the pool will go stale and re-fetch with all accounts.
+				acct := h.currentAccountInfo()
+				if acct.ID == "" {
+					return nil, nil
+				}
+				client := h.multi.ClientFor(acct.ID)
+				if client == nil {
+					return nil, nil
+				}
+				result, err := fetchAccountRooms(acct, client)
+				if err == nil {
+					allRooms = append(allRooms, result.all...)
+					for k := range result.bookmarks {
 						bookmarkSet[k] = struct{}{}
+					}
+				}
+			} else {
+				results := FanOut[accountRooms](ctx, h.multi, fetchAccountRooms)
+				for _, r := range results {
+					if r.Err == nil {
+						allRooms = append(allRooms, r.Data.all...)
+						for k := range r.Data.bookmarks {
+							bookmarkSet[k] = struct{}{}
+						}
 					}
 				}
 			}
@@ -354,8 +370,6 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 			rs := h.roomStore
 			h.mu.RUnlock()
 
-			// Start with the set of rooms that are wanted: bookmarked plus
-			// any explicit includes (which can add unbookmarked rooms).
 			wantSet := make(map[string]struct{})
 			for k := range bookmarkSet {
 				wantSet[k] = struct{}{}

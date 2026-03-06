@@ -328,7 +328,12 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmds []tea.Cmd
 
-		// Start ambient digest polling for the ticker now that accounts are known.
+		// Invalidate bonfire rooms so they re-fetch with all accounts,
+		// then start ambient digest polling for the ticker.
+		hub := w.session.Hub()
+		if hub != nil {
+			hub.BonfireRooms().Invalidate()
+		}
 		cmds = append(cmds, w.startDigestPoll())
 
 		// Refresh Home/Projects after discovery completes. This handles:

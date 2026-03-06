@@ -15,7 +15,6 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
@@ -665,7 +664,7 @@ func (r *River) renderSegments() {
 
 		for _, line := range seg.Lines {
 			author := nameStyle.Render(line.Creator)
-			body := richtext.HTMLToMarkdown(line.Body)
+			body := data.RiverText(line.Body)
 
 			// Truncate long messages for the river view
 			if runes := []rune(body); len(runes) > 200 {
@@ -696,13 +695,7 @@ func (r *River) updateComposerPrompt() {
 		idx = 0
 	}
 	room := r.rooms[idx]
-	// Abbreviate room name to 2 chars
-	name := room.ProjectName
-	if utf8.RuneCountInString(name) > 2 {
-		runes := []rune(name)
-		name = string(runes[:2])
-	}
-	r.composer.Prompt = fmt.Sprintf("[%s] > ", strings.ToUpper(name))
+	r.composer.Prompt = fmt.Sprintf("[%s] > ", room.ProjectName)
 }
 
 func (r *River) updatePollFocus() {
@@ -845,43 +838,39 @@ func (r *River) renderMixer() string {
 		return ""
 	}
 	theme := r.styles.Theme()
-	var cells []string
+	muted := lipgloss.NewStyle().Foreground(theme.Muted)
+	var parts []string
 	for i, room := range r.rooms {
 		rkey := room.Key()
 		vol := r.volumes[rkey]
 
 		name := room.ProjectName
-		if runes := []rune(name); len(runes) > 6 {
-			name = string(runes[:6])
-		}
 
-		// Volume indicator dots
-		dots := ""
+		// Volume indicator: filled/empty dots
+		var dots strings.Builder
 		for j := range 4 {
 			if j < 4-vol {
-				dots += "\u25cf" // filled
+				dots.WriteString("\u25cf")
 			} else {
-				dots += "\u25cb" // empty
+				dots.WriteString("\u25cb")
 			}
 		}
 
-		label := volumeLabels[vol]
-
 		colorIdx := room.Color(len(theme.RoomColors))
-		var style lipgloss.Style
+		var nameStyle lipgloss.Style
 		if colorIdx < len(theme.RoomColors) {
-			style = lipgloss.NewStyle().Foreground(theme.RoomColors[colorIdx])
+			nameStyle = lipgloss.NewStyle().Foreground(theme.RoomColors[colorIdx])
 		} else {
-			style = lipgloss.NewStyle().Foreground(theme.Primary)
+			nameStyle = lipgloss.NewStyle().Foreground(theme.Primary)
 		}
 
-		cell := style.Render(name) + " " + dots + "\n" + lipgloss.NewStyle().Foreground(theme.Muted).Render("["+label+"]")
+		cell := nameStyle.Render(name) + " " + dots.String() + muted.Render(" "+volumeLabels[vol])
 		if i == r.mixerCursor {
-			cell = lipgloss.NewStyle().Bold(true).Render(cell)
+			cell = "▸ " + cell
 		}
-		cells = append(cells, cell)
+		parts = append(parts, cell)
 	}
-	return strings.Join(cells, " \u2502 ")
+	return strings.Join(parts, "  \u2502  ")
 }
 
 func (r *River) View() string {
