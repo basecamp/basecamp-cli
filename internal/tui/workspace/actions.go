@@ -297,6 +297,26 @@ func DefaultActions() *Registry {
 		},
 	})
 	r.Register(Action{
+		Name:        ":bonfire",
+		Aliases:     []string{"river", "campfires"},
+		Description: "Multi-campfire river view",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewBonfire, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:        ":front-page",
+		Aliases:     []string{"overview", "newspaper"},
+		Description: "Campfire overview",
+		Category:    "navigation",
+		Scope:       ScopeAny,
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewFrontPage, s.Scope())
+		},
+	})
+	r.Register(Action{
 		Name:        ":open",
 		Aliases:     []string{"browser", "web"},
 		Description: "Open in browser",

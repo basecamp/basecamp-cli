@@ -50,14 +50,17 @@ const (
 	ViewCompose
 	ViewHome
 	ViewActivity
-	ViewTimeline // project-scoped timeline
+	ViewTimeline  // project-scoped timeline
+	ViewBonfire   // multi-campfire River view
+	ViewFrontPage // campfire overview (newspaper layout)
 )
 
 // IsGlobal returns true for view targets that aggregate across all accounts.
 func (t ViewTarget) IsGlobal() bool {
 	switch t {
 	case ViewHome, ViewHey, ViewPulse, ViewAssignments,
-		ViewPings, ViewProjects, ViewSearch, ViewActivity:
+		ViewPings, ViewProjects, ViewSearch, ViewActivity,
+		ViewBonfire, ViewFrontPage:
 		return true
 	default:
 		return false
@@ -221,6 +224,18 @@ type PingRoomInfo = data.PingRoomInfo
 
 // TimelineEventInfo is a type alias for data.TimelineEventInfo.
 type TimelineEventInfo = data.TimelineEventInfo
+
+// RoomID is a type alias for data.RoomID.
+type RoomID = data.RoomID
+
+// BonfireRoomConfig is a type alias for data.BonfireRoomConfig.
+type BonfireRoomConfig = data.BonfireRoomConfig
+
+// BonfireDigestEntry is a type alias for data.BonfireDigestEntry.
+type BonfireDigestEntry = data.BonfireDigestEntry
+
+// RiverLine is a type alias for data.RiverLine.
+type RiverLine = data.RiverLine
 
 // ProjectBookmarkedMsg is sent after toggling a project bookmark.
 type ProjectBookmarkedMsg struct {

@@ -25,6 +25,7 @@ type GlobalKeyMap struct {
 	Open          key.Binding
 	Jump          key.Binding
 	Metrics       key.Binding
+	Bonfire       key.Binding
 }
 
 // DefaultGlobalKeyMap returns the default global keybindings.
@@ -90,6 +91,10 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 			key.WithKeys("`"),
 			key.WithHelp("`", "metrics"),
 		),
+		Bonfire: key.NewBinding(
+			key.WithKeys("ctrl+g"),
+			key.WithHelp("ctrl+g", "bonfire"),
+		),
 	}
 }
 
@@ -146,7 +151,7 @@ func DefaultListKeyMap() ListKeyMap {
 // ShortHelp returns the global key bindings for the status bar.
 // The budget-aware renderer in the status bar shows as many as fit.
 func (k GlobalKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Palette, k.Hey, k.Jump, k.AccountSwitch}
+	return []key.Binding{k.Help, k.Palette, k.Hey, k.Jump, k.AccountSwitch, k.Bonfire}
 }
 
 // FullHelp returns all global key bindings for the help overlay.
@@ -155,7 +160,7 @@ func (k GlobalKeyMap) FullHelp() [][]key.Binding {
 		{k.Back, k.Quit},
 		{k.Search, k.Palette},
 		{k.AccountSwitch, k.Hey, k.MyStuff, k.Activity},
-		{k.Help, k.Refresh, k.Open, k.Jump, k.Sidebar, k.Metrics},
+		{k.Help, k.Refresh, k.Open, k.Jump, k.Sidebar, k.Metrics, k.Bonfire},
 	}
 }
 
@@ -176,6 +181,7 @@ var actionFieldMap = map[string]string{
 	"open":           "Open",
 	"jump":           "Jump",
 	"metrics":        "Metrics",
+	"bonfire":        "Bonfire",
 }
 
 // LoadKeyOverrides reads keybinding overrides from a JSON file.
