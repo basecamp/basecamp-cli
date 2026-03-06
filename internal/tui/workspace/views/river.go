@@ -299,12 +299,9 @@ func (r *River) onRoomsUpdated() tea.Cmd {
 		return nil
 	}
 
-	rooms := snap.Data
-
-	// Cap at 8 rooms (room selection filter is applied at the source in Hub.BonfireRooms)
-	if len(rooms) > 8 {
-		rooms = rooms[:8]
-	}
+	// Cap at 8 rooms, distributed across accounts so every account
+	// gets representation before any account gets a second room.
+	rooms := data.CapRoomsRoundRobin(snap.Data, 8)
 
 	r.rooms = rooms
 	r.loading = false

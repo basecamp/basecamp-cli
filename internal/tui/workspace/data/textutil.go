@@ -117,6 +117,49 @@ func RiverText(html string) string {
 	return strings.TrimSpace(s)
 }
 
+// CapRoomsRoundRobin selects up to maxRooms from rooms, distributing evenly
+// across accounts. Ensures every account gets at least one room before any
+// account gets a second.
+func CapRoomsRoundRobin(rooms []BonfireRoomConfig, maxRooms int) []BonfireRoomConfig {
+	if len(rooms) <= maxRooms {
+		return rooms
+	}
+	// Group by account, preserving order within each account.
+	type bucket struct {
+		accountID string
+		rooms     []BonfireRoomConfig
+	}
+	seen := make(map[string]int) // accountID -> index in buckets
+	var buckets []bucket
+	for _, r := range rooms {
+		idx, ok := seen[r.AccountID]
+		if !ok {
+			idx = len(buckets)
+			seen[r.AccountID] = idx
+			buckets = append(buckets, bucket{accountID: r.AccountID})
+		}
+		buckets[idx].rooms = append(buckets[idx].rooms, r)
+	}
+	// Round-robin: take one from each account per pass.
+	result := make([]BonfireRoomConfig, 0, maxRooms)
+	for pass := 0; len(result) < maxRooms; pass++ {
+		added := false
+		for i := range buckets {
+			if pass < len(buckets[i].rooms) {
+				result = append(result, buckets[i].rooms[pass])
+				added = true
+				if len(result) >= maxRooms {
+					break
+				}
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	return result
+}
+
 // stopwords is a small set of English stopwords for Jaccard filtering.
 var stopwords = map[string]bool{
 	"a": true, "an": true, "the": true, "is": true, "it": true,

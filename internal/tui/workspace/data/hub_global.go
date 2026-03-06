@@ -460,12 +460,9 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 				}
 				snap = roomPool.Get()
 			}
-			rooms := snap.Data
+			rooms := CapRoomsRoundRobin(snap.Data, 8)
 			if len(rooms) == 0 {
 				return nil, nil
-			}
-			if len(rooms) > 8 {
-				rooms = rooms[:8]
 			}
 
 			type digestResult struct {
