@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/basecamp/basecamp-cli/internal/observability"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
@@ -425,7 +426,13 @@ func (r *Renderer) renderTable(b *strings.Builder, data []map[string]any) {
 	for _, item := range data {
 		row := make([]string, len(columns))
 		for i, col := range columns {
-			row[i] = formatCell(item[col.key])
+			cell := formatCell(item[col.key])
+			if r.styled && (col.key == "title" || col.key == "name") {
+				if url, ok := item["app_url"].(string); ok && url != "" {
+					cell = richtext.Hyperlink(cell, url)
+				}
+			}
+			row[i] = cell
 		}
 		t.Row(row...)
 	}
@@ -592,12 +599,20 @@ func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 		label := formatHeader(f.key)
 		labelStyled := r.Muted.Render(fmt.Sprintf("%-*s: ", maxLen, label))
 
+		value := formatDateValue(f.key, data[f.key])
+		// Hyperlink title/name fields when styled
+		if r.styled && (f.key == "title" || f.key == "name") {
+			if url, ok := data["app_url"].(string); ok && url != "" {
+				value = richtext.Hyperlink(value, url)
+			}
+		}
+
 		// Apply muted styling to metadata fields
 		var valueStyled string
 		if mutedColumns[f.key] {
-			valueStyled = r.CellMuted.Render(formatDateValue(f.key, data[f.key]))
+			valueStyled = r.CellMuted.Render(value)
 		} else {
-			valueStyled = r.Data.Render(formatDateValue(f.key, data[f.key]))
+			valueStyled = r.Data.Render(value)
 		}
 		b.WriteString(labelStyled + valueStyled + "\n")
 	}

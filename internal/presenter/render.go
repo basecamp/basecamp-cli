@@ -8,11 +8,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // Styles holds the lipgloss styles used by the presenter.
 type Styles struct {
+	Styled  bool // whether terminal styling (including OSC 8 hyperlinks) is active
 	Primary lipgloss.Style
 	Normal  lipgloss.Style
 	Muted   lipgloss.Style
@@ -29,6 +31,7 @@ type Styles struct {
 func NewStyles(theme tui.Theme, styled bool) Styles {
 	if !styled {
 		return Styles{
+			Styled:  false,
 			Primary: lipgloss.NewStyle(),
 			Normal:  lipgloss.NewStyle(),
 			Muted:   lipgloss.NewStyle(),
@@ -43,6 +46,7 @@ func NewStyles(theme tui.Theme, styled bool) Styles {
 	}
 
 	return Styles{
+		Styled:  true,
 		Primary: lipgloss.NewStyle().Foreground(theme.Primary).Bold(true),
 		Normal:  lipgloss.NewStyle().Foreground(theme.Foreground),
 		Muted:   lipgloss.NewStyle().Foreground(theme.Muted),
@@ -81,6 +85,9 @@ func RenderDetail(w io.Writer, schema *EntitySchema, data map[string]any, styles
 	// Headline
 	headline := RenderHeadline(schema, data)
 	if headline != "" {
+		if styles.Styled {
+			headline = hyperlinkFromData(headline, data)
+		}
 		b.WriteString(styles.Primary.Render(headline))
 		b.WriteString("\n")
 	}
@@ -296,6 +303,10 @@ func renderListRow(b *strings.Builder, schema *EntitySchema, columns []string, d
 		val := data[col]
 		formatted := singleLine(FormatField(spec, col, val, locale))
 
+		if styles.Styled && spec.Role == "title" {
+			formatted = hyperlinkFromData(formatted, data)
+		}
+
 		style := resolveEmphasis(spec, col, val, styles)
 		parts = append(parts, style.Render(formatted))
 	}
@@ -345,6 +356,15 @@ func isEmpty(val any) bool {
 		return len(v) == 0
 	}
 	return false
+}
+
+// hyperlinkFromData wraps text in an OSC 8 hyperlink if the data map
+// contains an "app_url" key with a non-empty string value.
+func hyperlinkFromData(text string, data map[string]any) string {
+	if url, ok := data["app_url"].(string); ok && url != "" {
+		return richtext.Hyperlink(text, url)
+	}
+	return text
 }
 
 // escapePipe escapes pipe characters in Markdown table cells.

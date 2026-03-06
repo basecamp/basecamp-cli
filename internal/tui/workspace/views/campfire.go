@@ -17,7 +17,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-runewidth"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -666,7 +666,7 @@ func (v *Campfire) renderMessages() {
 			b.WriteString("\n")
 		}
 
-		body := richtext.HTMLToMarkdown(line.Body)
+		body := richtext.LinkifyURLs(richtext.LinkifyMarkdownLinks(richtext.HTMLToMarkdown(line.Body)))
 		rendered := wrapText(body, bodyWidth)
 		b.WriteString(rendered)
 		// Show boosts inline for grouped (non-header) messages
@@ -745,18 +745,19 @@ func wrapText(text string, width int) string {
 	return result.String()
 }
 
-// wrapLine wraps a single line at word boundaries using terminal display
-// widths (runewidth) so wide glyphs like emoji and CJK occupy the correct
-// number of terminal cells.
+// wrapLine wraps a single line at word boundaries using ANSI-aware terminal
+// display widths so wide glyphs like emoji and CJK occupy the correct
+// number of terminal cells, and escape sequences (including OSC 8 hyperlinks)
+// are treated as zero-width.
 func wrapLine(line string, width int) string {
-	if runewidth.StringWidth(line) <= width {
+	if ansi.StringWidth(line) <= width {
 		return line
 	}
 	var result strings.Builder
 	col := 0
 	words := strings.Fields(line)
 	for i, word := range words {
-		wlen := runewidth.StringWidth(word)
+		wlen := ansi.StringWidth(word)
 		if i > 0 && col+1+wlen > width {
 			result.WriteString("\n")
 			col = 0
@@ -766,20 +767,27 @@ func wrapLine(line string, width int) string {
 		}
 		// Handle words wider than the available width
 		if wlen > width && col == 0 {
-			runes := []rune(word)
-			lineWidth := 0
-			for j, r := range runes {
-				rw := runewidth.RuneWidth(r)
-				if lineWidth+rw > width && lineWidth > 0 {
-					result.WriteString("\n")
-					lineWidth = 0
+			// If the word contains escape sequences (e.g. OSC 8 hyperlinks),
+			// write it whole to avoid splitting inside the sequence.
+			if strings.ContainsAny(word, "\x1b\x07") {
+				result.WriteString(word)
+				col = wlen
+			} else {
+				runes := []rune(word)
+				lineWidth := 0
+				for j, r := range runes {
+					rw := ansi.StringWidth(string(r))
+					if lineWidth+rw > width && lineWidth > 0 {
+						result.WriteString("\n")
+						lineWidth = 0
+					}
+					if j == 0 || lineWidth > 0 || rw > 0 {
+						result.WriteRune(r)
+						lineWidth += rw
+					}
 				}
-				if j == 0 || lineWidth > 0 || rw > 0 {
-					result.WriteRune(r)
-					lineWidth += rw
-				}
+				col = lineWidth
 			}
-			col = lineWidth
 		} else {
 			result.WriteString(word)
 			col += wlen
