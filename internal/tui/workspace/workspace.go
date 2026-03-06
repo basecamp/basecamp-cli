@@ -1247,14 +1247,13 @@ func (w *Workspace) recordNavigation(viewTitle string, quality float64) {
 
 func (w *Workspace) syncChrome() {
 	w.breadcrumb.SetCrumbs(w.router.Breadcrumbs())
-	w.help.SetGlobalKeys(w.keys.FullHelp())
+	w.help.SetGlobalKeys(w.filterFullHelp())
 
 	globalHints := w.keys.ShortHelp()
-	if len(w.accountList) <= 1 {
-		// Remove AccountSwitch hint when only one account
+	if hide := w.hiddenBindingKeys(); len(hide) > 0 {
 		filtered := make([]key.Binding, 0, len(globalHints))
 		for _, b := range globalHints {
-			if keys := b.Keys(); len(keys) > 0 && keys[0] == w.keys.AccountSwitch.Keys()[0] {
+			if k := b.Keys(); len(k) > 0 && hide[k[0]] {
 				continue
 			}
 			filtered = append(filtered, b)
@@ -1293,6 +1292,47 @@ func (w *Workspace) relayout() {
 	} else if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
 	}
+}
+
+// filterFullHelp returns FullHelp with context-dependent bindings removed.
+func (w *Workspace) filterFullHelp() [][]key.Binding {
+	groups := w.keys.FullHelp()
+	hide := w.hiddenBindingKeys()
+	if len(hide) == 0 {
+		return groups
+	}
+	out := make([][]key.Binding, 0, len(groups))
+	for _, group := range groups {
+		var filtered []key.Binding
+		for _, b := range group {
+			if k := b.Keys(); len(k) > 0 {
+				if hide[k[0]] {
+					continue
+				}
+			}
+			filtered = append(filtered, b)
+		}
+		if len(filtered) > 0 {
+			out = append(out, filtered)
+		}
+	}
+	return out
+}
+
+// hiddenBindingKeys returns key strings that should be hidden from help.
+func (w *Workspace) hiddenBindingKeys() map[string]bool {
+	m := make(map[string]bool)
+	if len(w.accountList) <= 1 {
+		if k := w.keys.AccountSwitch.Keys(); len(k) > 0 {
+			m[k[0]] = true
+		}
+	}
+	if !w.bonfireEnabled() {
+		if k := w.keys.Bonfire.Keys(); len(k) > 0 {
+			m[k[0]] = true
+		}
+	}
+	return m
 }
 
 // isExperimentalEnabled returns true when the named experimental feature is on.
