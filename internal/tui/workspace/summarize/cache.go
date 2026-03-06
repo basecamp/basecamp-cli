@@ -100,7 +100,11 @@ func (c *SummaryCache) writeDisk(key string, entry cacheEntry) error {
 		return err
 	}
 	path := filepath.Join(c.dir, key+".json")
-	return os.WriteFile(path, data, 0600)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (c *SummaryCache) evictIfNeeded() {

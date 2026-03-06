@@ -275,6 +275,16 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 			}
 		}
 	}
+	if v, ok := fileCfg["experimental"].(map[string]any); ok {
+		if cfg.Experimental == nil {
+			cfg.Experimental = make(map[string]bool)
+		}
+		for feature, val := range v {
+			if enabled, ok := val.(bool); ok {
+				cfg.Experimental[feature] = enabled
+			}
+		}
+	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
 		if untrusted {
 			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))

@@ -288,6 +288,10 @@ func (s *Segmenter) PruneRoom(roomKey string) {
 			filtered = append(filtered, seg)
 		}
 	}
+	// Nil out stale slots so GC can collect pruned segments.
+	for i := len(filtered); i < len(s.segments); i++ {
+		s.segments[i] = nil
+	}
 	s.segments = filtered
 }
 

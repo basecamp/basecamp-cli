@@ -366,6 +366,16 @@ func (b *BonfireSidebar) applyScroll(content string) string {
 	if b.height <= 0 || len(lines) <= b.height {
 		return content
 	}
+	maxOffset := len(lines) - b.height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if b.offset > maxOffset {
+		b.offset = maxOffset
+	}
+	if b.offset < 0 {
+		b.offset = 0
+	}
 	end := b.offset + b.height
 	if end > len(lines) {
 		end = len(lines)
