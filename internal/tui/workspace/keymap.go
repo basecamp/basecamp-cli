@@ -89,7 +89,7 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 		),
 		Metrics: key.NewBinding(
 			key.WithKeys("`"),
-			key.WithHelp("`", "metrics"),
+			key.WithHelp("`", "pool monitor"),
 		),
 		Bonfire: key.NewBinding(
 			key.WithKeys("ctrl+g"),

@@ -51,7 +51,7 @@ func NewTUICmd() *cobra.Command {
 				session.SetInitialView(target, scope)
 			}
 
-			model := workspace.New(session, viewFactory)
+			model := workspace.New(session, viewFactory, poolMonitorFactory(session))
 
 			p := tea.NewProgram(model)
 
@@ -62,6 +62,18 @@ func NewTUICmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+// poolMonitorFactory returns a factory that creates pool monitor views.
+func poolMonitorFactory(session *workspace.Session) func() workspace.View {
+	return func() workspace.View {
+		hub := session.Hub()
+		if hub == nil {
+			return nil
+		}
+		m := hub.Metrics()
+		return views.NewPoolMonitor(session.Styles(), m.PoolStatsList, m.Apdex, m.RecentEvents)
+	}
 }
 
 // viewFactory creates views for navigation targets.

@@ -471,7 +471,7 @@ func testSessionWithContext(accountID, accountName string) *Session {
 	return &Session{
 		styles:     tui.NewStyles(),
 		multiStore: ms,
-		hub:        data.NewHub(ms),
+		hub:        data.NewHub(ms, ""),
 		ctx:        ctx,
 		cancel:     cancel,
 		scope:      Scope{AccountID: accountID, AccountName: accountName},
