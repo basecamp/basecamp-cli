@@ -124,7 +124,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		openFunc:        openInBrowser,
-		sidebarTargets:  []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
+		sidebarTargets:  defaultSidebarTargets(session),
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
 	}
@@ -225,6 +225,9 @@ func (w *Workspace) fetchAccountName() tea.Cmd {
 // This makes the digest ambient — it refreshes regardless of which view is active,
 // feeding the bonfire sidebar and any views that consume digest data.
 func (w *Workspace) startDigestPoll() tea.Cmd {
+	if !w.bonfireEnabled() {
+		return nil
+	}
 	hub := w.session.Hub()
 	if hub == nil {
 		return nil
@@ -324,11 +327,13 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Invalidate bonfire rooms so they re-fetch with all accounts,
 		// then start ambient digest polling for the sidebar.
-		hub := w.session.Hub()
-		if hub != nil {
-			hub.BonfireRooms().Invalidate()
+		if w.bonfireEnabled() {
+			hub := w.session.Hub()
+			if hub != nil {
+				hub.BonfireRooms().Invalidate()
+			}
+			cmds = append(cmds, w.startDigestPoll())
 		}
-		cmds = append(cmds, w.startDigestPoll())
 
 		// Refresh Home/Projects after discovery completes. This handles:
 		// - Multi-account: views switch to cross-account fan-out mode.
@@ -607,7 +612,7 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, w.keys.Jump):
 			return w.openQuickJump()
 		case key.Matches(msg, w.keys.Bonfire):
-			if !w.isBonfireView() {
+			if w.bonfireEnabled() && !w.isBonfireView() {
 				return w.navigate(ViewFrontPage, w.session.Scope())
 			}
 		}
@@ -732,7 +737,7 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 
 	case key.Matches(msg, w.keys.Bonfire):
-		if !w.isBonfireView() {
+		if w.bonfireEnabled() && !w.isBonfireView() {
 			return w.navigate(ViewFrontPage, w.session.Scope())
 		}
 	}
@@ -1166,21 +1171,23 @@ func (w *Workspace) syncPaletteActions() {
 	scope := w.session.Scope()
 	actions := w.registry.ForScope(scope)
 
-	names := make([]string, len(actions))
-	descriptions := make([]string, len(actions))
-	categories := make([]string, len(actions))
-	executors := make([]func() tea.Cmd, len(actions))
+	names := make([]string, 0, len(actions))
+	descriptions := make([]string, 0, len(actions))
+	categories := make([]string, 0, len(actions))
+	executors := make([]func() tea.Cmd, 0, len(actions))
 
-	for i, a := range actions {
-		names[i] = a.Name
-		descriptions[i] = a.Description
-		categories[i] = a.Category
-		// Capture session for the closure
+	for _, a := range actions {
+		if a.Experimental != "" && !w.isExperimentalEnabled(a.Experimental) {
+			continue
+		}
+		names = append(names, a.Name)
+		descriptions = append(descriptions, a.Description)
+		categories = append(categories, a.Category)
 		sess := w.session
 		exec := a.Execute
-		executors[i] = func() tea.Cmd {
+		executors = append(executors, func() tea.Cmd {
 			return exec(sess)
-		}
+		})
 	}
 	w.palette.SetActions(names, descriptions, categories, executors)
 }
@@ -1286,6 +1293,28 @@ func (w *Workspace) relayout() {
 	} else if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
 	}
+}
+
+// isExperimentalEnabled returns true when the named experimental feature is on.
+func (w *Workspace) isExperimentalEnabled(name string) bool {
+	if app := w.session.App(); app != nil {
+		return app.Config.IsExperimental(name)
+	}
+	return false
+}
+
+// bonfireEnabled returns true when the experimental bonfire feature is on.
+func (w *Workspace) bonfireEnabled() bool {
+	return w.isExperimentalEnabled("bonfire")
+}
+
+// defaultSidebarTargets returns sidebar targets, including bonfire only when enabled.
+func defaultSidebarTargets(session *Session) []ViewTarget {
+	targets := []ViewTarget{ViewActivity, ViewHome}
+	if app := session.App(); app != nil && app.Config.IsExperimental("bonfire") {
+		targets = append([]ViewTarget{ViewBonfireSidebar}, targets...)
+	}
+	return targets
 }
 
 // isBonfireView returns true when the current view is a campfire-related target.

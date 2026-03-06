@@ -28,10 +28,13 @@ type BonfirePane struct {
 func NewBonfireCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bonfire",
-		Short: "Multi-campfire orchestration",
+		Short: "Multi-campfire orchestration (experimental)",
 		Long: `Orchestrate multiple campfire views using terminal multiplexers (tmux/zellij).
 
-Requires an active tmux or zellij session.`,
+Requires an active tmux or zellij session.
+
+This is an experimental feature. Enable it with:
+  basecamp config set experimental.bonfire true --global`,
 		Annotations: map[string]string{"agent_notes": "bonfire split opens a new pane with a campfire\nbonfire layout saves/restores pane arrangements"},
 	}
 
@@ -51,6 +54,9 @@ func newBonfireSplitCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			if err := requireExperimental(app, "bonfire"); err != nil {
+				return err
+			}
 			mux := hostutil.DetectMultiplexer()
 			if mux == hostutil.MultiplexerNone {
 				return output.ErrUsage("bonfire split requires tmux or zellij (not detected)")
@@ -99,6 +105,9 @@ func newBonfireLayoutSaveCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			if err := requireExperimental(app, "bonfire"); err != nil {
+				return err
+			}
 			name := args[0]
 			urls := args[1:]
 
@@ -143,6 +152,9 @@ func newBonfireLayoutLoadCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			if err := requireExperimental(app, "bonfire"); err != nil {
+				return err
+			}
 			name := args[0]
 
 			mux := hostutil.DetectMultiplexer()
@@ -194,6 +206,9 @@ func newBonfireLayoutListCmd() *cobra.Command {
 		Short: "List saved bonfire layouts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			if err := requireExperimental(app, "bonfire"); err != nil {
+				return err
+			}
 
 			if app.Config.CacheDir == "" {
 				return app.OK([]any{}, output.WithSummary("No saved layouts (cache_dir not configured)"))
@@ -215,6 +230,15 @@ func newBonfireLayoutListCmd() *cobra.Command {
 			return app.OK(result, output.WithSummary(fmt.Sprintf("%d saved layout(s)", len(layouts))))
 		},
 	}
+}
+
+func requireExperimental(app *appctx.App, feature string) error {
+	if !app.Config.IsExperimental(feature) {
+		return output.ErrUsage(fmt.Sprintf(
+			"experimental feature %q is not enabled; run: basecamp config set experimental.%s true --global",
+			feature, feature))
+	}
+	return nil
 }
 
 func layoutsPath(cacheDir string) string {

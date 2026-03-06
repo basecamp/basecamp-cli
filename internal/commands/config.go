@@ -104,6 +104,14 @@ func runConfigShow(cmd *cobra.Command) error {
 		}
 	}
 
+	// Show experimental feature flags.
+	for feature, enabled := range app.Config.Experimental {
+		configData["experimental."+feature] = map[string]string{
+			"value":  fmt.Sprintf("%t", enabled),
+			"source": "config",
+		}
+	}
+
 	return app.OK(configData,
 		output.WithSummary("Effective configuration"),
 		output.WithBreadcrumbs(
@@ -178,7 +186,7 @@ func newConfigSetCmd() *cobra.Command {
 Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
             format, scope, default_profile, hints, stats, verbose, onboarded,
             llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
-            llm_max_concurrent, llm_token_budget`,
+            llm_max_concurrent, llm_token_budget, experimental.<feature>`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -208,13 +216,14 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				"llm_max_concurrent": true,
 				"llm_token_budget":   true,
 			}
-			if !validKeys[key] {
+			isExperimentalKey := strings.HasPrefix(key, "experimental.")
+			if !validKeys[key] && !isExperimentalKey {
 				names := make([]string, 0, len(validKeys))
 				for k := range validKeys {
 					names = append(names, k)
 				}
 				sort.Strings(names)
-				return output.ErrUsage(fmt.Sprintf("Invalid config key %q. Valid keys: %s", key, strings.Join(names, ", ")))
+				return output.ErrUsage(fmt.Sprintf("Invalid config key %q. Valid keys: %s, experimental.<feature>", key, strings.Join(names, ", ")))
 			}
 
 			var configPath string
@@ -301,7 +310,25 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				configData[key] = level
 				valueOut = value
 			default:
-				configData[key] = value
+				if isExperimentalKey {
+					feature := strings.TrimPrefix(key, "experimental.")
+					if feature == "" {
+						return output.ErrUsage("experimental key must have a feature name: experimental.<feature>")
+					}
+					boolVal, ok := parseBoolFlag(value)
+					if !ok {
+						return output.ErrUsage(fmt.Sprintf("%s must be true/false (or 1/0)", key))
+					}
+					expMap, _ := configData["experimental"].(map[string]any)
+					if expMap == nil {
+						expMap = make(map[string]any)
+					}
+					expMap[feature] = boolVal
+					configData["experimental"] = expMap
+					valueOut = fmt.Sprintf("%t", boolVal)
+				} else {
+					configData[key] = value
+				}
 			}
 
 			// Write back (atomic: temp + rename)
@@ -437,16 +464,35 @@ func newConfigUnsetCmd() *cobra.Command {
 				}, output.WithSummary(fmt.Sprintf("Config file not found: %s", configPath)))
 			}
 
-			// Check if key exists
-			if _, exists := configData[key]; !exists {
-				return app.OK(map[string]any{
-					"key":    key,
-					"status": "not_set",
-				}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+			// Check if key exists and remove it
+			if strings.HasPrefix(key, "experimental.") {
+				feature := strings.TrimPrefix(key, "experimental.")
+				expMap, _ := configData["experimental"].(map[string]any)
+				if expMap == nil {
+					return app.OK(map[string]any{
+						"key": key, "status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+				}
+				if _, exists := expMap[feature]; !exists {
+					return app.OK(map[string]any{
+						"key": key, "status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+				}
+				delete(expMap, feature)
+				if len(expMap) == 0 {
+					delete(configData, "experimental")
+				} else {
+					configData["experimental"] = expMap
+				}
+			} else {
+				if _, exists := configData[key]; !exists {
+					return app.OK(map[string]any{
+						"key":    key,
+						"status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+				}
+				delete(configData, key)
 			}
-
-			// Remove key
-			delete(configData, key)
 
 			// Write back (atomic: temp + rename)
 			data, err := json.MarshalIndent(configData, "", "  ")

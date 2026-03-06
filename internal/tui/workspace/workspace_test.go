@@ -77,7 +77,7 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
-		sidebarTargets:  []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
@@ -497,7 +497,7 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
-		sidebarTargets: []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
+		sidebarTargets: []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:   -1,
 		width:          120,
 		height:         40,
@@ -1112,7 +1112,7 @@ func TestWorkspace_Navigate_ViewScopeRetainsOrigin(t *testing.T) {
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
-		sidebarTargets:  []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
@@ -1156,7 +1156,7 @@ func TestWorkspace_OriginDoesNotLeakAcrossNavigations(t *testing.T) {
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
-		sidebarTargets:  []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
+		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
@@ -1237,29 +1237,23 @@ func TestWorkspace_ErrorMsg_NonAuth_ShowsToast(t *testing.T) {
 
 // --- Sidebar cycling tests ---
 
-func TestWorkspace_SidebarCyclesChatsActivityHomeClosed(t *testing.T) {
+func TestWorkspace_SidebarCyclesActivityHomeClosed(t *testing.T) {
 	w, viewLog := testWorkspace()
 	pushTestView(w, "Home")
 
-	// 1st ctrl+b: opens Chats (bonfire sidebar)
-	w.toggleSidebar()
-	require.True(t, w.showSidebar)
-	require.NotNil(t, w.sidebarView)
-	assert.Equal(t, "Chats", w.sidebarView.Title())
-
-	// 2nd ctrl+b: cycles to Activity
+	// 1st ctrl+b: opens Activity
 	w.toggleSidebar()
 	require.True(t, w.showSidebar)
 	require.NotNil(t, w.sidebarView)
 	assert.Equal(t, "Activity", w.sidebarView.Title())
 
-	// 3rd ctrl+b: cycles to Home
+	// 2nd ctrl+b: cycles to Home
 	w.toggleSidebar()
 	require.True(t, w.showSidebar)
 	require.NotNil(t, w.sidebarView)
 	assert.Equal(t, "Home", w.sidebarView.Title())
 
-	// 4th ctrl+b: closes
+	// 3rd ctrl+b: closes
 	w.toggleSidebar()
 	assert.False(t, w.showSidebar)
 	assert.Nil(t, w.sidebarView)
@@ -1273,17 +1267,16 @@ func TestWorkspace_SidebarCycleResetOnClose(t *testing.T) {
 	pushTestView(w, "Home")
 
 	// Open → cycle through all → close
-	w.toggleSidebar() // Chats
 	w.toggleSidebar() // Activity
 	w.toggleSidebar() // Home
 	w.toggleSidebar() // closed
 	assert.False(t, w.showSidebar)
 
-	// Reopen — should start at index 0 (Chats) again
+	// Reopen — should start at index 0 (Activity) again
 	w.toggleSidebar()
 	require.True(t, w.showSidebar)
 	require.NotNil(t, w.sidebarView)
-	assert.Equal(t, "Chats", w.sidebarView.Title())
+	assert.Equal(t, "Activity", w.sidebarView.Title())
 }
 
 func TestWorkspace_SidebarCycleNarrowTerminal(t *testing.T) {

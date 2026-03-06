@@ -46,8 +46,19 @@ type Config struct {
 	LLMMaxConcurrent int    `json:"llm_max_concurrent,omitempty"`
 	LLMTokenBudget   int    `json:"llm_token_budget,omitempty"`
 
+	// Experimental feature flags (opt-in via "config set experimental.X true --global").
+	Experimental map[string]bool `json:"experimental,omitempty"`
+
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
+}
+
+// IsExperimental returns true if the named experimental feature is enabled.
+func (c *Config) IsExperimental(name string) bool {
+	if c.Experimental == nil {
+		return false
+	}
+	return c.Experimental[name]
 }
 
 // ProfileConfig holds configuration for a named profile.
