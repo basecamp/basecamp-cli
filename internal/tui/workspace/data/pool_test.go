@@ -368,6 +368,37 @@ func TestPoolTerminalFocusedZeroPollBase(t *testing.T) {
 	assert.Equal(t, time.Duration(0), p.PollInterval(), "zero PollBase should always return 0")
 }
 
+func TestPoolCacheWarmBootPreservesRealAge(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewPoolCache(dir)
+
+	// Simulate a previous session's cached data from 5 minutes ago.
+	realFetchedAt := time.Now().Add(-5 * time.Minute)
+	require.NoError(t, cache.Save("age-test", "cached-data", realFetchedAt))
+
+	p := NewPool("age-test", PoolConfig{FreshTTL: time.Hour, StaleTTL: time.Hour}, func(ctx context.Context) (string, error) {
+		return "fresh-data", nil
+	})
+	p.SetCache(cache)
+
+	// Pool should have data seeded from cache.
+	snap := p.Get()
+	require.True(t, snap.HasData)
+	assert.Equal(t, StateStale, snap.State)
+	assert.Equal(t, "cached-data", snap.Data)
+
+	// FetchedAt should be recent (for TTL), but Status should expose real age.
+	status := p.Status()
+	assert.False(t, status.CachedFetchedAt.IsZero(), "CachedFetchedAt should be set")
+	assert.WithinDuration(t, realFetchedAt, status.CachedFetchedAt, time.Second)
+
+	// After a real fetch, CachedFetchedAt should be cleared.
+	p.Fetch(context.Background())()
+	status = p.Status()
+	assert.True(t, status.CachedFetchedAt.IsZero(), "CachedFetchedAt should be cleared after real fetch")
+	assert.Equal(t, "fresh-data", p.Get().Data)
+}
+
 func TestPoolFetchSetsLoading(t *testing.T) {
 	proceed := make(chan struct{})
 	p := NewPool("load", PoolConfig{}, func(ctx context.Context) (int, error) {
