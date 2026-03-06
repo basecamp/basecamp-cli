@@ -177,13 +177,13 @@ func newConfigSetCmd() *cobra.Command {
 
 Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
             format, scope, default_profile, hints, stats, verbose, onboarded,
-            llm_provider, llm_model, llm_api_key, llm_endpoint, llm_max_concurrent,
-            llm_token_budget`,
+            llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
+            llm_max_concurrent, llm_token_budget`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			key := args[0]
+			key := resolveKeyAlias(args[0])
 			value := args[1]
 
 			// Validate key
@@ -339,6 +339,19 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 	return cmd
 }
 
+// configKeyAliases maps short names to canonical config keys.
+var configKeyAliases = map[string]string{
+	"llm": "llm_provider",
+}
+
+// resolveKeyAlias returns the canonical key name, expanding aliases.
+func resolveKeyAlias(key string) string {
+	if canonical, ok := configKeyAliases[key]; ok {
+		return canonical
+	}
+	return key
+}
+
 // isAuthorityKey reports whether key controls where tokens are sent.
 func isAuthorityKey(key string) bool {
 	switch key {
@@ -385,7 +398,7 @@ func newConfigUnsetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			key := args[0]
+			key := resolveKeyAlias(args[0])
 
 			var configPath string
 			var scope string
