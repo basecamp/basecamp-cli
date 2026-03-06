@@ -35,9 +35,11 @@ func NewPreview(styles *tui.Styles) *Preview {
 	}
 }
 
-// SetTitle sets the preview title.
+// SetTitle sets the preview title and clears any associated URL.
+// Use SetTitleURL after SetTitle to make the title a clickable hyperlink.
 func (p *Preview) SetTitle(title string) {
 	p.title = title
+	p.titleURL = ""
 }
 
 // SetTitleURL sets a URL that makes the title a clickable OSC 8 hyperlink.
