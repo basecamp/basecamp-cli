@@ -1,6 +1,10 @@
 package data
 
-import "time"
+import (
+	"fmt"
+	"hash/fnv"
+	"time"
+)
 
 // Data transfer types for Hub pool accessors.
 // Migrated from workspace/msg.go to break the workspace→data import direction
@@ -244,6 +248,55 @@ type TimelineEventInfo struct {
 	ProjectID      int64
 	Account        string
 	AccountID      string
+}
+
+// RoomID uniquely identifies a campfire room across accounts and projects.
+type RoomID struct {
+	AccountID  string
+	ProjectID  int64
+	CampfireID int64
+}
+
+// Key returns a stable string key for maps and cache filenames.
+func (r RoomID) Key() string {
+	return fmt.Sprintf("%s:%d:%d", r.AccountID, r.ProjectID, r.CampfireID)
+}
+
+// Color returns a deterministic color index from the room key.
+// Uses FNV-1a so the same room always gets the same color.
+func (r RoomID) Color(paletteSize int) int {
+	if paletteSize <= 0 {
+		return 0
+	}
+	h := fnv.New32a()
+	h.Write([]byte(r.Key())) //nolint:errcheck // hash.Write never errors
+	return int(h.Sum32()) % paletteSize
+}
+
+// BonfireRoomConfig describes a discovered campfire room for bonfire.
+type BonfireRoomConfig struct {
+	RoomID
+	RoomName    string // project name or ping partner name
+	ProjectName string
+}
+
+// BonfireDigestEntry is the last message from a single campfire room.
+// Used by the Ticker for ambient display.
+type BonfireDigestEntry struct {
+	RoomID
+	RoomName    string
+	LastAuthor  string
+	LastMessage string
+	LastAt      string
+	LastAtTS    int64
+	NewCount    int // messages since last read
+}
+
+// RiverLine is a campfire line annotated with room context for the River view.
+type RiverLine struct {
+	CampfireLineInfo
+	Room     RoomID
+	RoomName string
 }
 
 // BoostInfo is a lightweight representation of a boost (emoji reaction).
