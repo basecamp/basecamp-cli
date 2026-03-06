@@ -112,6 +112,12 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 		return views.NewActivity(session)
 	case workspace.ViewTimeline:
 		return views.NewTimeline(session, scope.ProjectID)
+	case workspace.ViewBonfire:
+		return views.NewRiver(session)
+	case workspace.ViewFrontPage:
+		return views.NewFrontPage(session)
+	case workspace.ViewBonfireSidebar:
+		return views.NewBonfireSidebar(session)
 	default:
 		return views.NewHome(session)
 	}

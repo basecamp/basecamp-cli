@@ -38,8 +38,27 @@ type Config struct {
 	Verbose   *int  `json:"verbose,omitempty"`
 	Onboarded *bool `json:"onboarded,omitempty"`
 
+	// LLM settings (for TUI smart zoom summarization)
+	LLMProvider      string `json:"llm_provider,omitempty"`
+	LLMModel         string `json:"llm_model,omitempty"`
+	LLMAPIKey        string `json:"llm_api_key,omitempty"`
+	LLMEndpoint      string `json:"llm_endpoint,omitempty"`
+	LLMMaxConcurrent int    `json:"llm_max_concurrent,omitempty"`
+	LLMTokenBudget   int    `json:"llm_token_budget,omitempty"`
+
+	// Experimental feature flags (opt-in via "config set experimental.X true --global").
+	Experimental map[string]bool `json:"experimental,omitempty"`
+
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
+}
+
+// IsExperimental returns true if the named experimental feature is enabled.
+func (c *Config) IsExperimental(name string) bool {
+	if c.Experimental == nil {
+		return false
+	}
+	return c.Experimental[name]
 }
 
 // ProfileConfig holds configuration for a named profile.
@@ -90,12 +109,15 @@ func Default() *Config {
 	}
 
 	return &Config{
-		BaseURL:      "https://3.basecampapi.com",
-		Scope:        "read",
-		CacheDir:     filepath.Join(cacheDir, "basecamp"),
-		CacheEnabled: true,
-		Format:       "auto",
-		Sources:      make(map[string]string),
+		BaseURL:          "https://3.basecampapi.com",
+		Scope:            "read",
+		CacheDir:         filepath.Join(cacheDir, "basecamp"),
+		CacheEnabled:     true,
+		Format:           "auto",
+		LLMProvider:      "auto",
+		LLMMaxConcurrent: 3,
+		LLMTokenBudget:   2000,
+		Sources:          make(map[string]string),
 	}
 }
 
@@ -206,6 +228,64 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 			}
 		}
 	}
+	if v, ok := fileCfg["llm_provider"].(string); ok && v != "" {
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_provider %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+		} else {
+			cfg.LLMProvider = v
+			cfg.Sources["llm_provider"] = string(source)
+		}
+	}
+	if v, ok := fileCfg["llm_model"].(string); ok && v != "" {
+		cfg.LLMModel = v
+		cfg.Sources["llm_model"] = string(source)
+	}
+	if v, ok := fileCfg["llm_api_key"].(string); ok && v != "" {
+		// Secret: only from global/system config, never local/repo
+		if source != SourceLocal && source != SourceRepo {
+			cfg.LLMAPIKey = v
+			cfg.Sources["llm_api_key"] = string(source)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_api_key from %s config at %s (use --global or BASECAMP_LLM_API_KEY env var)\n", source, path)
+		}
+	}
+	if v, ok := fileCfg["llm_endpoint"].(string); ok && v != "" {
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_endpoint %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+		} else {
+			cfg.LLMEndpoint = v
+			cfg.Sources["llm_endpoint"] = string(source)
+		}
+	}
+	if v, ok := fileCfg["llm_max_concurrent"]; ok {
+		if fv, ok := v.(float64); ok {
+			iv := int(fv)
+			if iv >= 1 && iv <= 10 && fv == float64(iv) {
+				cfg.LLMMaxConcurrent = iv
+				cfg.Sources["llm_max_concurrent"] = string(source)
+			}
+		}
+	}
+	if v, ok := fileCfg["llm_token_budget"]; ok {
+		if fv, ok := v.(float64); ok {
+			iv := int(fv)
+			if iv >= 100 && iv <= 100000 && fv == float64(iv) {
+				cfg.LLMTokenBudget = iv
+				cfg.Sources["llm_token_budget"] = string(source)
+			}
+		}
+	}
+	if v, ok := fileCfg["experimental"].(map[string]any); ok {
+		if cfg.Experimental == nil {
+			cfg.Experimental = make(map[string]bool)
+		}
+		for feature, val := range v {
+			if enabled, ok := val.(bool); ok {
+				cfg.Experimental[feature] = enabled
+				cfg.Sources["experimental."+feature] = string(source)
+			}
+		}
+	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
 		if untrusted {
 			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
@@ -292,6 +372,22 @@ func LoadFromEnv(cfg *Config) {
 			cfg.Sources["stats"] = string(SourceEnv)
 		}
 	}
+	if v := os.Getenv("BASECAMP_LLM_PROVIDER"); v != "" {
+		cfg.LLMProvider = v
+		cfg.Sources["llm_provider"] = string(SourceEnv)
+	}
+	if v := os.Getenv("BASECAMP_LLM_MODEL"); v != "" {
+		cfg.LLMModel = v
+		cfg.Sources["llm_model"] = string(SourceEnv)
+	}
+	if v := os.Getenv("BASECAMP_LLM_API_KEY"); v != "" {
+		cfg.LLMAPIKey = v
+		cfg.Sources["llm_api_key"] = string(SourceEnv)
+	}
+	if v := os.Getenv("BASECAMP_LLM_ENDPOINT"); v != "" {
+		cfg.LLMEndpoint = v
+		cfg.Sources["llm_endpoint"] = string(SourceEnv)
+	}
 }
 
 // parseEnvBool parses a boolean environment variable strictly.
@@ -367,38 +463,38 @@ func ApplyOverrides(cfg *Config, o FlagOverrides) {
 //
 // The caller in root.go MUST call LoadFromEnv and ApplyOverrides after this
 // method to maintain the precedence chain: flags > env > profile > file > defaults.
-func (cfg *Config) ApplyProfile(name string) error {
-	if cfg.Profiles == nil {
+func (c *Config) ApplyProfile(name string) error {
+	if c.Profiles == nil {
 		return fmt.Errorf("no profiles configured")
 	}
-	p, ok := cfg.Profiles[name]
+	p, ok := c.Profiles[name]
 	if !ok {
 		return fmt.Errorf("profile %q not found", name)
 	}
 
-	cfg.ActiveProfile = name
+	c.ActiveProfile = name
 
 	// Unconditionally set profile values. Env/flag overrides are re-applied
 	// by the caller afterward to restore correct precedence.
 	if p.BaseURL != "" {
-		cfg.BaseURL = p.BaseURL
-		cfg.Sources["base_url"] = "profile"
+		c.BaseURL = p.BaseURL
+		c.Sources["base_url"] = "profile"
 	}
 	if p.AccountID != "" {
-		cfg.AccountID = p.AccountID
-		cfg.Sources["account_id"] = "profile"
+		c.AccountID = p.AccountID
+		c.Sources["account_id"] = "profile"
 	}
 	if p.ProjectID != "" {
-		cfg.ProjectID = p.ProjectID
-		cfg.Sources["project_id"] = "profile"
+		c.ProjectID = p.ProjectID
+		c.Sources["project_id"] = "profile"
 	}
 	if p.TodolistID != "" {
-		cfg.TodolistID = p.TodolistID
-		cfg.Sources["todolist_id"] = "profile"
+		c.TodolistID = p.TodolistID
+		c.Sources["todolist_id"] = "profile"
 	}
 	if p.Scope != "" {
-		cfg.Scope = p.Scope
-		cfg.Sources["scope"] = "profile"
+		c.Scope = p.Scope
+		c.Sources["scope"] = "profile"
 	}
 
 	return nil

@@ -23,13 +23,14 @@ const (
 
 // Action represents a registered command/action in the workspace.
 type Action struct {
-	Name        string
-	Aliases     []string
-	Description string
-	Category    string           // "navigation", "project", "mutation", etc.
-	Scope       ScopeRequirement // what scope context is needed
-	Available   func(Scope) bool // optional; narrows scope check further
-	Execute     func(session *Session) tea.Cmd
+	Name         string
+	Aliases      []string
+	Description  string
+	Category     string           // "navigation", "project", "mutation", etc.
+	Scope        ScopeRequirement // what scope context is needed
+	Experimental string           // non-empty = requires this experimental feature flag
+	Available    func(Scope) bool // optional; narrows scope check further
+	Execute      func(session *Session) tea.Cmd
 }
 
 // Registry holds all registered actions.
@@ -294,6 +295,28 @@ func DefaultActions() *Registry {
 		Scope:       ScopeProject,
 		Execute: func(s *Session) tea.Cmd {
 			return Navigate(ViewCompose, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:         ":bonfire",
+		Aliases:      []string{"river", "campfires"},
+		Description:  "Multi-campfire river view",
+		Category:     "navigation",
+		Scope:        ScopeAny,
+		Experimental: "bonfire",
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewBonfire, s.Scope())
+		},
+	})
+	r.Register(Action{
+		Name:         ":front-page",
+		Aliases:      []string{"overview", "newspaper"},
+		Description:  "Campfire overview",
+		Category:     "navigation",
+		Scope:        ScopeAny,
+		Experimental: "bonfire",
+		Execute: func(s *Session) tea.Cmd {
+			return Navigate(ViewFrontPage, s.Scope())
 		},
 	})
 	r.Register(Action{

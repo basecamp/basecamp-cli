@@ -83,6 +83,12 @@ func runConfigShow(cmd *cobra.Command) error {
 		{"hints", fmt.Sprintf("%t", app.Config.Hints != nil && *app.Config.Hints), app.Config.Hints != nil},
 		{"stats", fmt.Sprintf("%t", app.Config.Stats != nil && *app.Config.Stats), app.Config.Stats != nil},
 		{"verbose", fmt.Sprintf("%d", derefInt(app.Config.Verbose)), app.Config.Verbose != nil},
+		{"llm_provider", app.Config.LLMProvider, app.Config.LLMProvider != "" && app.Config.LLMProvider != "auto"},
+		{"llm_model", app.Config.LLMModel, app.Config.LLMModel != ""},
+		{"llm_api_key", redactSecret(app.Config.LLMAPIKey), app.Config.LLMAPIKey != ""},
+		{"llm_endpoint", app.Config.LLMEndpoint, app.Config.LLMEndpoint != ""},
+		{"llm_max_concurrent", fmt.Sprintf("%d", app.Config.LLMMaxConcurrent), app.Config.Sources["llm_max_concurrent"] != ""},
+		{"llm_token_budget", fmt.Sprintf("%d", app.Config.LLMTokenBudget), app.Config.Sources["llm_token_budget"] != ""},
 	}
 
 	for _, k := range keys {
@@ -95,6 +101,18 @@ func runConfigShow(cmd *cobra.Command) error {
 				"value":  k.value,
 				"source": source,
 			}
+		}
+	}
+
+	// Show experimental feature flags.
+	for feature, enabled := range app.Config.Experimental {
+		source := app.Config.Sources["experimental."+feature]
+		if source == "" {
+			source = "default"
+		}
+		configData["experimental."+feature] = map[string]string{
+			"value":  fmt.Sprintf("%t", enabled),
+			"source": source,
 		}
 	}
 
@@ -170,37 +188,46 @@ func newConfigSetCmd() *cobra.Command {
 		Long: `Set a configuration value in the local or global config file.
 
 Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
-            format, scope, default_profile, hints, stats, verbose, onboarded`,
+            format, scope, default_profile, hints, stats, verbose, onboarded,
+            llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
+            llm_max_concurrent, llm_token_budget, experimental.<feature>`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			key := args[0]
+			key := resolveKeyAlias(args[0])
 			value := args[1]
 
 			// Validate key
 			validKeys := map[string]bool{
-				"account_id":      true,
-				"project_id":      true,
-				"todolist_id":     true,
-				"base_url":        true,
-				"cache_dir":       true,
-				"cache_enabled":   true,
-				"format":          true,
-				"scope":           true,
-				"default_profile": true,
-				"hints":           true,
-				"stats":           true,
-				"verbose":         true,
-				"onboarded":       true,
+				"account_id":         true,
+				"project_id":         true,
+				"todolist_id":        true,
+				"base_url":           true,
+				"cache_dir":          true,
+				"cache_enabled":      true,
+				"format":             true,
+				"scope":              true,
+				"default_profile":    true,
+				"hints":              true,
+				"stats":              true,
+				"verbose":            true,
+				"onboarded":          true,
+				"llm_provider":       true,
+				"llm_model":          true,
+				"llm_api_key":        true,
+				"llm_endpoint":       true,
+				"llm_max_concurrent": true,
+				"llm_token_budget":   true,
 			}
-			if !validKeys[key] {
+			isExperimentalKey := strings.HasPrefix(key, "experimental.")
+			if !validKeys[key] && !isExperimentalKey {
 				names := make([]string, 0, len(validKeys))
 				for k := range validKeys {
 					names = append(names, k)
 				}
 				sort.Strings(names)
-				return output.ErrUsage(fmt.Sprintf("Invalid config key %q. Valid keys: %s", key, strings.Join(names, ", ")))
+				return output.ErrUsage(fmt.Sprintf("Invalid config key %q. Valid keys: %s, experimental.<feature>", key, strings.Join(names, ", ")))
 			}
 
 			var configPath string
@@ -225,6 +252,11 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 			configData := make(map[string]any)
 			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
 				_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
+			}
+
+			// llm_api_key must be set globally or via env var
+			if key == "llm_api_key" && !global {
+				return output.ErrUsage("llm_api_key must be set globally (--global) or via BASECAMP_LLM_API_KEY env var")
 			}
 
 			// Validate default_profile against configured profiles
@@ -258,8 +290,49 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				}
 				configData[key] = level
 				valueOut = value
-			default:
+			case "llm_provider":
+				validProviders := map[string]bool{
+					"anthropic": true, "openai": true, "ollama": true,
+					"apple": true, "none": true, "auto": true,
+				}
+				if !validProviders[value] {
+					return output.ErrUsage(fmt.Sprintf("llm_provider must be one of: anthropic, openai, ollama, apple, none, auto (got %q)", value))
+				}
 				configData[key] = value
+			case "llm_max_concurrent":
+				level, err := strconv.Atoi(value)
+				if err != nil || level < 1 || level > 10 {
+					return output.ErrUsage("llm_max_concurrent must be 1-10")
+				}
+				configData[key] = level
+				valueOut = value
+			case "llm_token_budget":
+				level, err := strconv.Atoi(value)
+				if err != nil || level < 100 || level > 100000 {
+					return output.ErrUsage("llm_token_budget must be 100-100000")
+				}
+				configData[key] = level
+				valueOut = value
+			default:
+				if isExperimentalKey {
+					feature := strings.TrimPrefix(key, "experimental.")
+					if feature == "" {
+						return output.ErrUsage("experimental key must have a feature name: experimental.<feature>")
+					}
+					boolVal, ok := parseBoolFlag(value)
+					if !ok {
+						return output.ErrUsage(fmt.Sprintf("%s must be true/false (or 1/0)", key))
+					}
+					expMap, _ := configData["experimental"].(map[string]any)
+					if expMap == nil {
+						expMap = make(map[string]any)
+					}
+					expMap[feature] = boolVal
+					configData["experimental"] = expMap
+					valueOut = fmt.Sprintf("%t", boolVal)
+				} else {
+					configData[key] = value
+				}
 			}
 
 			// Write back (atomic: temp + rename)
@@ -281,14 +354,20 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				}
 			}
 
+			// Redact secrets in output
+			displayValue := valueOut
+			if key == "llm_api_key" {
+				displayValue = "(set)"
+			}
+
 			return app.OK(map[string]any{
 				"key":    key,
-				"value":  valueOut,
+				"value":  displayValue,
 				"scope":  scope,
 				"path":   configPath,
 				"status": "set",
 			},
-				output.WithSummary(fmt.Sprintf("Set %s = %s (%s)", key, value, scope)),
+				output.WithSummary(fmt.Sprintf("Set %s = %s (%s)", key, displayValue, scope)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -306,13 +385,34 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 	return cmd
 }
 
+// configKeyAliases maps short names to canonical config keys.
+var configKeyAliases = map[string]string{
+	"llm": "llm_provider",
+}
+
+// resolveKeyAlias returns the canonical key name, expanding aliases.
+func resolveKeyAlias(key string) string {
+	if canonical, ok := configKeyAliases[key]; ok {
+		return canonical
+	}
+	return key
+}
+
 // isAuthorityKey reports whether key controls where tokens are sent.
 func isAuthorityKey(key string) bool {
 	switch key {
-	case "base_url", "default_profile", "profiles":
+	case "base_url", "default_profile", "profiles", "llm_provider", "llm_endpoint":
 		return true
 	}
 	return false
+}
+
+// redactSecret returns "(set)" if the value is non-empty, empty string otherwise.
+func redactSecret(value string) string {
+	if value != "" {
+		return "(set)"
+	}
+	return ""
 }
 
 func derefInt(p *int) int {
@@ -344,7 +444,7 @@ func newConfigUnsetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			key := args[0]
+			key := resolveKeyAlias(args[0])
 
 			var configPath string
 			var scope string
@@ -368,16 +468,35 @@ func newConfigUnsetCmd() *cobra.Command {
 				}, output.WithSummary(fmt.Sprintf("Config file not found: %s", configPath)))
 			}
 
-			// Check if key exists
-			if _, exists := configData[key]; !exists {
-				return app.OK(map[string]any{
-					"key":    key,
-					"status": "not_set",
-				}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+			// Check if key exists and remove it
+			if strings.HasPrefix(key, "experimental.") {
+				feature := strings.TrimPrefix(key, "experimental.")
+				expMap, _ := configData["experimental"].(map[string]any)
+				if expMap == nil {
+					return app.OK(map[string]any{
+						"key": key, "status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+				}
+				if _, exists := expMap[feature]; !exists {
+					return app.OK(map[string]any{
+						"key": key, "status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+				}
+				delete(expMap, feature)
+				if len(expMap) == 0 {
+					delete(configData, "experimental")
+				} else {
+					configData["experimental"] = expMap
+				}
+			} else {
+				if _, exists := configData[key]; !exists {
+					return app.OK(map[string]any{
+						"key":    key,
+						"status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s", key)))
+				}
+				delete(configData, key)
 			}
-
-			// Remove key
-			delete(configData, key)
 
 			// Write back (atomic: temp + rename)
 			data, err := json.MarshalIndent(configData, "", "  ")

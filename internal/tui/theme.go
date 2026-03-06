@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -90,6 +91,10 @@ func NoColorTheme() Theme {
 		Background: nc,
 		Foreground: nc,
 		Border:     nc,
+		RoomColors: []color.Color{
+			lipgloss.NoColor{}, lipgloss.NoColor{}, lipgloss.NoColor{}, lipgloss.NoColor{},
+			lipgloss.NoColor{}, lipgloss.NoColor{}, lipgloss.NoColor{}, lipgloss.NoColor{},
+		},
 	}
 }
 
@@ -245,5 +250,17 @@ func mapColorsToTheme(colors map[string]string, dark bool) Theme {
 		Background: colorOrDefault(get("background"), defaults.Background),
 		Foreground: colorOrDefault(get("foreground"), defaults.Foreground),
 		Border:     colorOrDefault(get("color8", "color0"), defaults.Border),
+		RoomColors: func() []color.Color {
+			rc := make([]color.Color, 8)
+			for i := range 8 {
+				key := fmt.Sprintf("room_color_%d", i)
+				if hex, ok := colors[key]; ok {
+					rc[i] = lipgloss.Color(hex)
+				} else {
+					rc[i] = defaults.RoomColors[i]
+				}
+			}
+			return rc
+		}(),
 	}
 }

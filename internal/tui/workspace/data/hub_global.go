@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -255,6 +256,283 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 				return all[i].LastAtTS > all[j].LastAtTS
 			})
 			return all, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
+// BonfireRooms returns a global-scope pool of campfire rooms from bookmarked
+// and recently visited projects. Uses FanOut like PingRooms but filters for
+// project campfires (not 1:1 pings). For accounts with no bookmarks, falls back
+// to recently visited projects (from recents store). The RoomStore (if configured
+// via SetRoomStore) can further narrow or widen via explicit includes/excludes.
+func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
+	p := RealmPool(h.Global(), "bonfire-rooms", func() *Pool[[]BonfireRoomConfig] {
+		return NewPool("bonfire-rooms", PoolConfig{
+			FreshTTL: 2 * time.Minute,
+			StaleTTL: 5 * time.Minute,
+			PollBase: 120 * time.Second,
+		}, func(ctx context.Context) ([]BonfireRoomConfig, error) {
+			// Fetch all project campfires and bookmarked project IDs per account.
+			// We need both: the full set (for explicit-include overrides to widen)
+			// and the bookmarked subset (for the default when no overrides exist).
+			type accountRooms struct {
+				all       []BonfireRoomConfig // every project campfire
+				bookmarks map[string]struct{} // keys of bookmarked-project rooms
+			}
+			fetchAccountRooms := func(acct AccountInfo, client *basecamp.AccountClient) (accountRooms, error) {
+				projResult, projErr := client.Projects().List(ctx, &basecamp.ProjectListOptions{})
+				if projErr != nil {
+					return accountRooms{}, projErr
+				}
+				bookmarked := make(map[int64]string) // project ID -> name
+				for _, p := range projResult.Projects {
+					if p.Bookmarked {
+						bookmarked[p.ID] = p.Name
+					}
+				}
+
+				campfires, err := client.Campfires().List(ctx)
+				if err != nil {
+					return accountRooms{}, err
+				}
+				var rooms []BonfireRoomConfig
+				bmKeys := make(map[string]struct{})
+				for _, cf := range campfires.Campfires {
+					if cf.Bucket == nil || cf.Bucket.Type != "Project" {
+						continue
+					}
+					projectName := cf.Bucket.Name
+					if name, ok := bookmarked[cf.Bucket.ID]; ok && name != "" {
+						projectName = name
+					}
+					rc := BonfireRoomConfig{
+						RoomID: RoomID{
+							AccountID:  acct.ID,
+							ProjectID:  cf.Bucket.ID,
+							CampfireID: cf.ID,
+						},
+						RoomName:    cf.Title,
+						ProjectName: projectName,
+					}
+					rooms = append(rooms, rc)
+					if _, ok := bookmarked[cf.Bucket.ID]; ok {
+						bmKeys[rc.Key()] = struct{}{}
+					}
+				}
+				// If no bookmarks, fall back to recently visited projects
+				// scoped to this account to avoid cross-account ID collisions.
+				if len(bookmarked) == 0 {
+					h.mu.RLock()
+					recentFn := h.recentProjects
+					h.mu.RUnlock()
+					if recentFn != nil {
+						recentIDs := make(map[int64]struct{})
+						for _, id := range recentFn(acct.ID) {
+							recentIDs[id] = struct{}{}
+						}
+						for _, r := range rooms {
+							if _, ok := recentIDs[r.ProjectID]; ok {
+								bmKeys[r.Key()] = struct{}{}
+							}
+						}
+					}
+					// If still empty (fresh account, no recents), include all rooms
+					// so the user sees something rather than an empty Bonfire.
+					if len(bmKeys) == 0 {
+						for _, r := range rooms {
+							bmKeys[r.Key()] = struct{}{}
+						}
+					}
+				}
+				return accountRooms{all: rooms, bookmarks: bmKeys}, nil
+			}
+
+			var allRooms []BonfireRoomConfig
+			bookmarkSet := make(map[string]struct{})
+
+			accounts := h.multi.Accounts()
+			if len(accounts) == 0 {
+				// Pre-discovery: fall back to the configured single account
+				// so rooms appear immediately. After AccountsDiscoveredMsg
+				// the pool will go stale and re-fetch with all accounts.
+				acct := h.currentAccountInfo()
+				if acct.ID == "" {
+					return nil, nil
+				}
+				client := h.multi.ClientFor(acct.ID)
+				if client == nil {
+					return nil, nil
+				}
+				result, err := fetchAccountRooms(acct, client)
+				if err == nil {
+					allRooms = append(allRooms, result.all...)
+					for k := range result.bookmarks {
+						bookmarkSet[k] = struct{}{}
+					}
+				}
+			} else {
+				results := FanOut[accountRooms](ctx, h.multi, fetchAccountRooms)
+				for _, r := range results {
+					if r.Err == nil {
+						allRooms = append(allRooms, r.Data.all...)
+						for k := range r.Data.bookmarks {
+							bookmarkSet[k] = struct{}{}
+						}
+					}
+				}
+			}
+
+			// Apply room selection overrides.
+			// Contract: (bookmarked ∪ recents ∪ explicit-includes) − explicit-excludes.
+			h.mu.RLock()
+			rs := h.roomStore
+			h.mu.RUnlock()
+
+			wantSet := make(map[string]struct{})
+			for k := range bookmarkSet {
+				wantSet[k] = struct{}{}
+			}
+			if rs != nil {
+				if overrides, err := rs.Load(ctx); err == nil {
+					for k := range overrides.Includes {
+						wantSet[k] = struct{}{}
+					}
+					for k := range overrides.Excludes {
+						delete(wantSet, k)
+					}
+				}
+			}
+
+			var selected []BonfireRoomConfig
+			for _, r := range allRooms {
+				if _, ok := wantSet[r.Key()]; ok {
+					selected = append(selected, r)
+				}
+			}
+
+			sort.Slice(selected, func(i, j int) bool {
+				return selected[i].ProjectName < selected[j].ProjectName
+			})
+			return selected, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
+// BonfireLines returns a global-scope pool of campfire lines for a specific room.
+// Uses h.multi.ClientFor(room.AccountID) — no EnsureProject needed.
+// Keyed as "bonfire-lines:{accountID}:{projectID}:{campfireID}".
+func (h *Hub) BonfireLines(room RoomID) *Pool[CampfireLinesResult] {
+	key := fmt.Sprintf("bonfire-lines:%s", room.Key())
+	p := RealmPool(h.Global(), key, func() *Pool[CampfireLinesResult] {
+		return NewPool(key, PoolConfig{
+			FreshTTL: 5 * time.Second,
+			StaleTTL: 30 * time.Second,
+			PollBase: 15 * time.Second,
+			PollMax:  2 * time.Minute,
+		}, func(ctx context.Context) (CampfireLinesResult, error) {
+			client := h.multi.ClientFor(room.AccountID)
+			if client == nil {
+				return CampfireLinesResult{}, fmt.Errorf("no client for account %s", room.AccountID)
+			}
+			result, err := client.Campfires().ListLines(ctx, room.CampfireID)
+			if err != nil {
+				return CampfireLinesResult{}, err
+			}
+			infos := mapCampfireLines(result.Lines)
+			// API returns newest-first; reverse for chronological display
+			for i, j := 0, len(infos)-1; i < j; i, j = i+1, j-1 {
+				infos[i], infos[j] = infos[j], infos[i]
+			}
+			return CampfireLinesResult{
+				Lines:      infos,
+				TotalCount: result.Meta.TotalCount,
+			}, nil
+		})
+	})
+	p.SetMetrics(h.metrics)
+	return p
+}
+
+// BonfireDigest returns a global-scope pool of last-message-per-room summaries.
+// Self-sufficient: if BonfireRooms hasn't been populated yet, triggers a room
+// fetch inline before reading. This ensures the ticker works on fresh sessions
+// without depending on another view having fetched rooms first.
+func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
+	p := RealmPool(h.Global(), "bonfire-digest", func() *Pool[[]BonfireDigestEntry] {
+		return NewPool("bonfire-digest", PoolConfig{
+			FreshTTL: 10 * time.Second,
+			StaleTTL: 1 * time.Minute,
+			PollBase: 15 * time.Second,
+			PollMax:  2 * time.Minute,
+		}, func(ctx context.Context) ([]BonfireDigestEntry, error) {
+			roomPool := h.BonfireRooms()
+			snap := roomPool.Get()
+			if !snap.HasData {
+				// Rooms not yet populated — run the room fetch inline.
+				// Pool.Fetch returns a Cmd (func() tea.Msg); execute it
+				// directly since we're already in a goroutine.
+				if cmd := roomPool.Fetch(ctx); cmd != nil {
+					cmd() // blocks until room fetch completes
+				}
+				snap = roomPool.Get()
+			}
+			rooms := CapRoomsRoundRobin(snap.Data, 8)
+			if len(rooms) == 0 {
+				return nil, nil
+			}
+
+			ch := make(chan BonfireDigestEntry, len(rooms))
+			sem := make(chan struct{}, 3) // limit 3 concurrent
+
+			for _, room := range rooms {
+				go func(rc BonfireRoomConfig) {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+
+					entry := BonfireDigestEntry{
+						RoomID:   rc.RoomID,
+						RoomName: rc.RoomName,
+					}
+
+					client := h.multi.ClientFor(rc.AccountID)
+					if client == nil {
+						ch <- entry
+						return
+					}
+					lines, err := client.Campfires().ListLines(ctx, rc.CampfireID)
+					if err != nil || len(lines.Lines) == 0 {
+						ch <- entry
+						return
+					}
+					last := lines.Lines[0] // newest first from API
+					entry.LastAuthor = personName(last.Creator)
+					content := StripTags(last.Content)
+					if runes := []rune(content); len(runes) > 80 {
+						content = string(runes[:77]) + "…"
+					}
+					entry.LastMessage = content
+					entry.LastAt = last.CreatedAt.Format("Jan 2 3:04pm")
+					entry.LastAtTS = last.CreatedAt.Unix()
+					ch <- entry
+				}(room)
+			}
+
+			entries := make([]BonfireDigestEntry, 0, len(rooms))
+			for range rooms {
+				entry := <-ch
+				if entry.LastMessage == "" && entry.LastAtTS == 0 {
+					continue // skip rooms with no messages
+				}
+				entries = append(entries, entry)
+			}
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].LastAtTS > entries[j].LastAtTS
+			})
+			return entries, nil
 		})
 	})
 	p.SetMetrics(h.metrics)

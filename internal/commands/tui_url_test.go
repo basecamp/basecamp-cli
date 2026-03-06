@@ -113,10 +113,34 @@ func TestParseBasecampURL_CanonicalizesUpload(t *testing.T) {
 	assert.Equal(t, "Upload", scope.RecordingType, "should canonicalize uploads → Upload")
 }
 
-func TestParseBasecampURL_UnknownType_PassesThrough(t *testing.T) {
-	// URL types not in the canonicalization map pass through as-is
+func TestParseBasecampURL_ChatURL_ViewCampfire(t *testing.T) {
 	target, scope, err := parseBasecampURL("https://3.basecamp.com/99/buckets/42/chats/7")
 	require.NoError(t, err)
-	assert.Equal(t, workspace.ViewDetail, target)
-	assert.Equal(t, "chats", scope.RecordingType, "unknown types pass through verbatim")
+	assert.Equal(t, workspace.ViewCampfire, target, "/chats/{id} should route to ViewCampfire")
+	assert.Equal(t, "chat", scope.ToolType)
+	assert.Equal(t, int64(7), scope.ToolID)
+	assert.Equal(t, "99", scope.AccountID)
+	assert.Equal(t, int64(42), scope.ProjectID)
+}
+
+func TestParseBasecampURL_ChatLineURL_ViewCampfire(t *testing.T) {
+	// Nested /chats/{chatID}/lines/{lineID} should resolve to the parent chat
+	target, scope, err := parseBasecampURL("https://3.basecamp.com/99/buckets/42/chats/7/lines/123")
+	require.NoError(t, err)
+	assert.Equal(t, workspace.ViewCampfire, target, "/chats/{id}/lines/{id} should route to ViewCampfire")
+	assert.Equal(t, "chat", scope.ToolType)
+	assert.Equal(t, int64(7), scope.ToolID, "ToolID should be the chat ID, not the line ID")
+}
+
+func TestParseBasecampURL_ChatURL_LocalBC3(t *testing.T) {
+	// Local BC3 development URL — depends on SDK router supporting localhost.
+	// If the SDK doesn't match, the CLI falls through to "not a recognized URL".
+	target, scope, err := parseBasecampURL("http://3.basecamp.localhost:3001/99/buckets/42/chats/7")
+	if err != nil {
+		// SDK router doesn't support localhost URLs yet; verify the error is clean.
+		assert.Contains(t, err.Error(), "not a valid Basecamp URL")
+		return
+	}
+	assert.Equal(t, workspace.ViewCampfire, target)
+	assert.Equal(t, int64(7), scope.ToolID)
 }

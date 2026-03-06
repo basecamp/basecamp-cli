@@ -29,6 +29,8 @@ type Hub struct {
 	terminalFocused bool   // persisted so new realms/pools inherit the state
 	multi           *MultiStore
 	metrics         *PoolMetrics
+	roomStore       *RoomStore                     // optional; filters BonfireRooms when non-nil
+	recentProjects  func(accountID string) []int64 // optional; returns recent project IDs scoped to one account
 }
 
 // NewHub creates a Hub with a global realm and the given dependencies.
@@ -43,6 +45,22 @@ func NewHub(multi *MultiStore) *Hub {
 
 // Metrics returns the pool metrics collector.
 func (h *Hub) Metrics() *PoolMetrics { return h.metrics }
+
+// SetRoomStore configures the RoomStore used to filter BonfireRooms/BonfireDigest.
+func (h *Hub) SetRoomStore(rs *RoomStore) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.roomStore = rs
+}
+
+// SetRecentProjects configures a function that returns recently visited project IDs
+// scoped to a single account. Used by BonfireRooms as a fallback when an account
+// has no bookmarked projects.
+func (h *Hub) SetRecentProjects(fn func(accountID string) []int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.recentProjects = fn
+}
 
 // Global returns the app-lifetime realm.
 func (h *Hub) Global() *Realm {
@@ -694,20 +712,7 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 			if err != nil {
 				return CampfireLinesResult{}, err
 			}
-			infos := make([]CampfireLineInfo, 0, len(result.Lines))
-			for _, line := range result.Lines {
-				creator := personName(line.Creator)
-				infos = append(infos, CampfireLineInfo{
-					ID:          line.ID,
-					Body:        line.Content,
-					Creator:     creator,
-					CreatedAt:   line.CreatedAt.Format("3:04pm"),
-					CreatedAtTS: line.CreatedAt,
-					BoostEmbed: BoostEmbed{
-						BoostsSummary: BoostSummary{Count: line.BoostsCount},
-					},
-				})
-			}
+			infos := mapCampfireLines(result.Lines)
 			// API returns newest-first; reverse for chronological display
 			for i, j := 0, len(infos)-1; i < j; i, j = i+1, j-1 {
 				infos[i], infos[j] = infos[j], infos[i]
@@ -1134,6 +1139,26 @@ func (h *Hub) CreateCheckinAnswer(ctx context.Context, accountID string, project
 	}
 	_, err := client.Checkins().CreateAnswer(ctx, questionID, &basecamp.CreateAnswerRequest{Content: content})
 	return err
+}
+
+// mapCampfireLines converts SDK campfire lines to CampfireLineInfo.
+// Shared by CampfireLines (project-scoped) and BonfireLines (global-scoped).
+func mapCampfireLines(lines []basecamp.CampfireLine) []CampfireLineInfo {
+	infos := make([]CampfireLineInfo, 0, len(lines))
+	for _, line := range lines {
+		creator := personName(line.Creator)
+		infos = append(infos, CampfireLineInfo{
+			ID:          line.ID,
+			Body:        line.Content,
+			Creator:     creator,
+			CreatedAt:   line.CreatedAt.Format("3:04pm"),
+			CreatedAtTS: line.CreatedAt,
+			BoostEmbed: BoostEmbed{
+				BoostsSummary: BoostSummary{Count: line.BoostsCount},
+			},
+		})
+	}
+	return infos
 }
 
 // mapBoostInfo converts an SDK Boost to BoostInfo.

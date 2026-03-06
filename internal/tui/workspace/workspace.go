@@ -23,8 +23,10 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 )
 
-// chromeHeight is the vertical space reserved for breadcrumb + status bar + toast.
-const chromeHeight = 3
+// chromeHeight returns the vertical space reserved for breadcrumb + divider + status bar.
+func (w *Workspace) chromeHeight() int {
+	return 3 // breadcrumb + divider + status bar
+}
 
 // Workspace is the root tea.Model for the persistent TUI application.
 type Workspace struct {
@@ -73,6 +75,9 @@ type Workspace struct {
 	// Theme file watcher for live reloading
 	themeWatcher *fsnotify.Watcher
 
+	// Ambient digest polling (feeds sidebar and views)
+	digestPollGen uint64
+
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
 	viewFactory ViewFactory
 	openFunc    func(Scope) tea.Cmd
@@ -119,7 +124,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		openFunc:        openInBrowser,
-		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarTargets:  defaultSidebarTargets(session),
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
 	}
@@ -215,6 +220,33 @@ func (w *Workspace) fetchAccountName() tea.Cmd {
 	}
 }
 
+// startDigestPoll kicks off the first BonfireDigest fetch and arms a recurring poll.
+// BonfireDigest is self-sufficient: it fetches BonfireRooms inline when needed.
+// This makes the digest ambient — it refreshes regardless of which view is active,
+// feeding the bonfire sidebar and any views that consume digest data.
+func (w *Workspace) startDigestPoll() tea.Cmd {
+	if !w.bonfireEnabled() {
+		return nil
+	}
+	hub := w.session.Hub()
+	if hub == nil {
+		return nil
+	}
+	ctx := hub.Global().Context()
+	return tea.Batch(
+		hub.BonfireDigest().Fetch(ctx),
+		w.scheduleDigestPoll(),
+	)
+}
+
+func (w *Workspace) scheduleDigestPoll() tea.Cmd {
+	w.digestPollGen++
+	gen := w.digestPollGen
+	return tea.Tick(15*time.Second, func(t time.Time) tea.Msg {
+		return data.PollMsg{Tag: "workspace-digest", Gen: gen}
+	})
+}
+
 // Update implements tea.Model.
 func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -290,6 +322,19 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.accountList = msg.Accounts
 		w.syncAccountBadge(w.router.CurrentTarget())
 		w.syncChrome() // refresh global hints (ctrl+a visibility)
+
+		var cmds []tea.Cmd
+
+		// Invalidate bonfire rooms so they re-fetch with all accounts,
+		// then start ambient digest polling for the sidebar.
+		if w.bonfireEnabled() {
+			hub := w.session.Hub()
+			if hub != nil {
+				hub.BonfireRooms().Invalidate()
+			}
+			cmds = append(cmds, w.startDigestPoll())
+		}
+
 		// Refresh Home/Projects after discovery completes. This handles:
 		// - Multi-account: views switch to cross-account fan-out mode.
 		// - Single-account: identity is now available for identity-dependent
@@ -299,10 +344,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if target == ViewHome || target == ViewProjects {
 				updated, cmd := view.Update(RefreshMsg{})
 				w.replaceCurrentView(updated)
-				return w, w.stampCmd(cmd)
+				cmds = append(cmds, w.stampCmd(cmd))
 			}
 		}
-		return w, nil
+		return w, tea.Batch(cmds...)
 
 	case BoostSelectedMsg:
 		w.pickingBoost = false
@@ -457,6 +502,21 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w, cmd
 	}
 
+	// Handle workspace-owned ambient digest poll.
+	// Refreshes both rooms (for bookmark/override changes) and digest.
+	if pm, ok := msg.(data.PollMsg); ok && pm.Tag == "workspace-digest" && pm.Gen == w.digestPollGen {
+		hub := w.session.Hub()
+		if hub != nil {
+			ctx := hub.Global().Context()
+			return w, tea.Batch(
+				hub.BonfireRooms().FetchIfStale(ctx),
+				hub.BonfireDigest().FetchIfStale(ctx),
+				w.scheduleDigestPoll(),
+			)
+		}
+		return w, w.scheduleDigestPoll()
+	}
+
 	// Forward PollMsg to sidebar alongside the main view
 	// (PoolUpdatedMsg is handled by the explicit case above)
 	var sidebarCmd tea.Cmd
@@ -551,6 +611,10 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return w.toggleSidebar()
 		case key.Matches(msg, w.keys.Jump):
 			return w.openQuickJump()
+		case key.Matches(msg, w.keys.Bonfire):
+			if w.bonfireEnabled() && !w.isBonfireView() {
+				return w.navigate(ViewFrontPage, w.session.Scope())
+			}
 		}
 		// Forward everything else to the view
 		if view := w.router.Current(); view != nil {
@@ -671,6 +735,11 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		w.showMetrics = !w.showMetrics
 		w.relayout()
 		return nil
+
+	case key.Matches(msg, w.keys.Bonfire):
+		if w.bonfireEnabled() && !w.isBonfireView() {
+			return w.navigate(ViewFrontPage, w.session.Scope())
+		}
 	}
 
 	// Number keys for breadcrumb jumping (1-9)
@@ -1102,21 +1171,23 @@ func (w *Workspace) syncPaletteActions() {
 	scope := w.session.Scope()
 	actions := w.registry.ForScope(scope)
 
-	names := make([]string, len(actions))
-	descriptions := make([]string, len(actions))
-	categories := make([]string, len(actions))
-	executors := make([]func() tea.Cmd, len(actions))
+	names := make([]string, 0, len(actions))
+	descriptions := make([]string, 0, len(actions))
+	categories := make([]string, 0, len(actions))
+	executors := make([]func() tea.Cmd, 0, len(actions))
 
-	for i, a := range actions {
-		names[i] = a.Name
-		descriptions[i] = a.Description
-		categories[i] = a.Category
-		// Capture session for the closure
+	for _, a := range actions {
+		if a.Experimental != "" && !w.isExperimentalEnabled(a.Experimental) {
+			continue
+		}
+		names = append(names, a.Name)
+		descriptions = append(descriptions, a.Description)
+		categories = append(categories, a.Category)
 		sess := w.session
 		exec := a.Execute
-		executors[i] = func() tea.Cmd {
+		executors = append(executors, func() tea.Cmd {
 			return exec(sess)
-		}
+		})
 	}
 	w.palette.SetActions(names, descriptions, categories, executors)
 }
@@ -1176,14 +1247,13 @@ func (w *Workspace) recordNavigation(viewTitle string, quality float64) {
 
 func (w *Workspace) syncChrome() {
 	w.breadcrumb.SetCrumbs(w.router.Breadcrumbs())
-	w.help.SetGlobalKeys(w.keys.FullHelp())
+	w.help.SetGlobalKeys(w.filterFullHelp())
 
 	globalHints := w.keys.ShortHelp()
-	if len(w.accountList) <= 1 {
-		// Remove AccountSwitch hint when only one account
+	if hide := w.hiddenBindingKeys(); len(hide) > 0 {
 		filtered := make([]key.Binding, 0, len(globalHints))
 		for _, b := range globalHints {
-			if keys := b.Keys(); len(keys) > 0 && keys[0] == w.keys.AccountSwitch.Keys()[0] {
+			if k := b.Keys(); len(k) > 0 && hide[k[0]] {
 				continue
 			}
 			filtered = append(filtered, b)
@@ -1224,13 +1294,87 @@ func (w *Workspace) relayout() {
 	}
 }
 
+// filterFullHelp returns FullHelp with context-dependent bindings removed.
+func (w *Workspace) filterFullHelp() [][]key.Binding {
+	groups := w.keys.FullHelp()
+	hide := w.hiddenBindingKeys()
+	if len(hide) == 0 {
+		return groups
+	}
+	out := make([][]key.Binding, 0, len(groups))
+	for _, group := range groups {
+		var filtered []key.Binding
+		for _, b := range group {
+			if k := b.Keys(); len(k) > 0 {
+				if hide[k[0]] {
+					continue
+				}
+			}
+			filtered = append(filtered, b)
+		}
+		if len(filtered) > 0 {
+			out = append(out, filtered)
+		}
+	}
+	return out
+}
+
+// hiddenBindingKeys returns key strings that should be hidden from help.
+func (w *Workspace) hiddenBindingKeys() map[string]bool {
+	m := make(map[string]bool)
+	if len(w.accountList) <= 1 {
+		if k := w.keys.AccountSwitch.Keys(); len(k) > 0 {
+			m[k[0]] = true
+		}
+	}
+	if !w.bonfireEnabled() {
+		if k := w.keys.Bonfire.Keys(); len(k) > 0 {
+			m[k[0]] = true
+		}
+	}
+	return m
+}
+
+// isExperimentalEnabled returns true when the named experimental feature is on.
+func (w *Workspace) isExperimentalEnabled(name string) bool {
+	if app := w.session.App(); app != nil {
+		return app.Config.IsExperimental(name)
+	}
+	return false
+}
+
+// bonfireEnabled returns true when the experimental bonfire feature is on.
+func (w *Workspace) bonfireEnabled() bool {
+	return w.isExperimentalEnabled("bonfire")
+}
+
+// defaultSidebarTargets returns sidebar targets, including bonfire only when enabled.
+func defaultSidebarTargets(session *Session) []ViewTarget {
+	targets := []ViewTarget{ViewActivity, ViewHome}
+	if app := session.App(); app != nil && app.Config.IsExperimental("bonfire") {
+		targets = append([]ViewTarget{ViewBonfireSidebar}, targets...)
+	}
+	return targets
+}
+
+// isBonfireView returns true when the current view is a campfire-related target.
+// Used to prevent ctrl+g from pushing duplicate nav entries.
+func (w *Workspace) isBonfireView() bool {
+	switch w.router.CurrentTarget() {
+	case ViewBonfire, ViewFrontPage, ViewBonfireSidebar, ViewCampfire:
+		return true
+	default:
+		return false
+	}
+}
+
 // sidebarActive returns true when the sidebar should be rendered.
 func (w *Workspace) sidebarActive() bool {
 	return w.showSidebar && w.sidebarView != nil && w.width >= sidebarMinWidth
 }
 
 func (w *Workspace) viewHeight() int {
-	h := w.height - chromeHeight
+	h := w.height - w.chromeHeight()
 	if w.showMetrics {
 		h -= chrome.MetricsPanelHeight
 	}

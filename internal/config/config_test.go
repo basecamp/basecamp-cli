@@ -897,6 +897,50 @@ func TestPreferenceLayering(t *testing.T) {
 	assert.Equal(t, "global", cfg.Sources["stats"])
 }
 
+func TestLoadExperimentalFlagsWithProvenance(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	localPath := filepath.Join(tmpDir, "local.json")
+
+	globalConfig := map[string]any{
+		"experimental": map[string]any{
+			"bonfire": true,
+			"alpha":   false,
+		},
+	}
+	data, _ := json.Marshal(globalConfig)
+	os.WriteFile(globalPath, data, 0644)
+
+	// Local overrides bonfire=false, adds beta=true
+	localConfig := map[string]any{
+		"experimental": map[string]any{
+			"bonfire": false,
+			"beta":    true,
+		},
+	}
+	data, _ = json.Marshal(localConfig)
+	os.WriteFile(localPath, data, 0644)
+
+	cfg := Default()
+	loadFromFile(cfg, globalPath, SourceGlobal, nil)
+	loadFromFile(cfg, localPath, SourceLocal, nil)
+
+	// bonfire overridden by local
+	assert.False(t, cfg.IsExperimental("bonfire"))
+	assert.Equal(t, "local", cfg.Sources["experimental.bonfire"])
+
+	// alpha from global only
+	assert.False(t, cfg.IsExperimental("alpha"))
+	assert.Equal(t, "global", cfg.Sources["experimental.alpha"])
+
+	// beta from local only
+	assert.True(t, cfg.IsExperimental("beta"))
+	assert.Equal(t, "local", cfg.Sources["experimental.beta"])
+
+	// unset feature
+	assert.False(t, cfg.IsExperimental("nonexistent"))
+}
+
 func TestPreferencesFromEnv(t *testing.T) {
 	envVars := []string{"BASECAMP_HINTS", "BASECAMP_STATS"}
 	originals := make(map[string]string)

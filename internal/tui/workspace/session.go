@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"path/filepath"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace/summarize"
 )
 
 // Session holds the active workspace state: auth, SDK access, scope, and styles.
@@ -20,6 +24,7 @@ type Session struct {
 	styles     *tui.Styles
 	multiStore *data.MultiStore
 	hub        *data.Hub
+	summarizer *summarize.Summarizer
 
 	// Deep-link: initial navigation target set via CLI args.
 	initialTarget *ViewTarget
@@ -50,10 +55,37 @@ func NewSession(app *appctx.App) *Session {
 	// Initialize scope from config
 	s.scope.AccountID = app.Config.AccountID
 
-	// Initialize recents store
+	// Initialize recents store and room selection filter
 	if app.Config.CacheDir != "" {
 		s.recents = recents.NewStore(app.Config.CacheDir)
+		s.hub.SetRoomStore(data.NewRoomStore(app.Config.CacheDir))
+		s.hub.SetRecentProjects(func(accountID string) []int64 {
+			items := s.recents.Get(recents.TypeProject, accountID, "")
+			ids := make([]int64, 0, len(items))
+			for _, item := range items {
+				if id, err := strconv.ParseInt(item.ID, 10, 64); err == nil {
+					ids = append(ids, id)
+				}
+			}
+			return ids
+		})
 	}
+
+	// Initialize summarizer for bonfire smart zoom
+	provider := summarize.DetectProvider(
+		app.Config.LLMProvider, app.Config.LLMEndpoint,
+		app.Config.LLMAPIKey, app.Config.LLMModel,
+	)
+	var cache *summarize.SummaryCache
+	if app.Config.CacheDir != "" {
+		cache = summarize.NewSummaryCache(
+			filepath.Join(app.Config.CacheDir, "summaries"), 24*time.Hour, 100)
+	}
+	maxConc := app.Config.LLMMaxConcurrent
+	if maxConc == 0 {
+		maxConc = 3
+	}
+	s.summarizer = summarize.NewSummarizer(provider, cache, maxConc)
 
 	return s
 }
@@ -115,6 +147,9 @@ func (s *Session) Hub() *data.Hub {
 	return s.hub
 }
 
+// Summarizer returns the smart zoom summarizer.
+func (s *Session) Summarizer() *summarize.Summarizer { return s.summarizer }
+
 // Context returns the session's cancellable context for SDK operations.
 // Canceled on account switch or shutdown, aborting in-flight requests.
 // Thread-safe: may be called from Cmd goroutines concurrently with ResetContext.
@@ -164,6 +199,7 @@ func NewTestSession() *Session {
 func NewTestSessionWithHub() *Session {
 	s := NewTestSession()
 	s.hub = data.NewHub(s.multiStore)
+	s.summarizer = summarize.NewSummarizer(nil, nil, 1)
 	return s
 }
 

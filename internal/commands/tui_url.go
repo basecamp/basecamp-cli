@@ -2,8 +2,10 @@ package commands
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -49,6 +51,26 @@ func parseBasecampURL(raw string) (workspace.ViewTarget, workspace.Scope, error)
 		if parsed.RecordingID != "" {
 			recordingID, _ := strconv.ParseInt(parsed.RecordingID, 10, 64)
 			scope.RecordingID = recordingID
+
+			// Campfire chat URLs → ViewCampfire (not ViewDetail).
+			// Handles both /chats/{id} and /chats/{chatID}/lines/{lineID}
+			// (for the latter, urlarg returns Type="lines" with the line as
+			// RecordingID; we walk up the raw path to find the parent chat).
+			if parsed.Type == "chats" {
+				scope.ToolType = "chat"
+				scope.ToolID = recordingID
+				scope.RecordingID = 0 // chat ID is ToolID, not a recording
+				return workspace.ViewCampfire, scope, nil
+			}
+			if parsed.Type == "lines" {
+				if chatID := extractParentChatID(raw); chatID != 0 {
+					scope.ToolType = "chat"
+					scope.ToolID = chatID
+					scope.RecordingID = 0
+					return workspace.ViewCampfire, scope, nil
+				}
+			}
+
 			if canonical, ok := urlPathToRecordingType[parsed.Type]; ok {
 				scope.RecordingType = canonical
 			} else {
@@ -74,4 +96,24 @@ func parseBasecampURL(raw string) (workspace.ViewTarget, workspace.Scope, error)
 	}
 
 	return 0, workspace.Scope{}, fmt.Errorf("not a valid Basecamp URL: %s", raw)
+}
+
+// extractParentChatID walks the URL path segments to find /chats/{id} above
+// a nested resource like /lines/{id}. Returns 0 if not found.
+// No host-hardcoded regex — works with any Basecamp host.
+func extractParentChatID(raw string) int64 {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return 0
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if parts[i] == "chats" {
+			id, err := strconv.ParseInt(parts[i+1], 10, 64)
+			if err == nil {
+				return id
+			}
+		}
+	}
+	return 0
 }

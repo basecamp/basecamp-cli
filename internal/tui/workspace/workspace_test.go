@@ -88,21 +88,22 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 
 func targetName(t ViewTarget) string {
 	names := map[ViewTarget]string{
-		ViewProjects:    "Projects",
-		ViewDock:        "Dock",
-		ViewTodos:       "Todos",
-		ViewCampfire:    "Campfire",
-		ViewHey:         "Hey!",
-		ViewCards:       "Cards",
-		ViewMessages:    "Messages",
-		ViewSearch:      "Search",
-		ViewMyStuff:     "My Stuff",
-		ViewPulse:       "Pulse",
-		ViewAssignments: "Assignments",
-		ViewPings:       "Pings",
-		ViewActivity:    "Activity",
-		ViewTimeline:    "Project Activity",
-		ViewHome:        "Home",
+		ViewProjects:       "Projects",
+		ViewDock:           "Dock",
+		ViewTodos:          "Todos",
+		ViewCampfire:       "Campfire",
+		ViewHey:            "Hey!",
+		ViewCards:          "Cards",
+		ViewMessages:       "Messages",
+		ViewSearch:         "Search",
+		ViewMyStuff:        "My Stuff",
+		ViewPulse:          "Pulse",
+		ViewAssignments:    "Assignments",
+		ViewPings:          "Pings",
+		ViewActivity:       "Activity",
+		ViewTimeline:       "Project Activity",
+		ViewHome:           "Home",
+		ViewBonfireSidebar: "Chats",
 	}
 	if n, ok := names[t]; ok {
 		return n
@@ -1265,10 +1266,10 @@ func TestWorkspace_SidebarCycleResetOnClose(t *testing.T) {
 	w, _ := testWorkspace()
 	pushTestView(w, "Home")
 
-	// Open → cycle → close
-	w.toggleSidebar()
-	w.toggleSidebar()
-	w.toggleSidebar()
+	// Open → cycle through all → close
+	w.toggleSidebar() // Activity
+	w.toggleSidebar() // Home
+	w.toggleSidebar() // closed
 	assert.False(t, w.showSidebar)
 
 	// Reopen — should start at index 0 (Activity) again
@@ -1334,7 +1335,7 @@ func TestWorkspace_SidebarCycleWhileFocused(t *testing.T) {
 	// ctrl+b should cycle AND reset focus to main
 	w.toggleSidebar()
 	assert.False(t, w.sidebarFocused, "cycling should reset sidebar focus to main")
-	assert.True(t, w.showSidebar, "should still be showing sidebar (Home panel)")
+	assert.True(t, w.showSidebar, "should still be showing sidebar (Activity panel)")
 }
 
 // focusCmdView returns a tea.Cmd from FocusMsg so we can verify navigation captures it.

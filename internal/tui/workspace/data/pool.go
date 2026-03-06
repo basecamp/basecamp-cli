@@ -246,6 +246,16 @@ func (p *Pool[T]) clearLocked() {
 	p.fetching = false
 }
 
+// SetPollConfig replaces the pool's timing configuration.
+// Does NOT bump generation or return a Cmd — timer invalidation is the
+// caller's responsibility (bump view-side pollGen, re-arm schedulePoll).
+func (p *Pool[T]) SetPollConfig(cfg PoolConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.config = cfg
+	p.missCount = 0 // reset backoff so new config takes effect immediately
+}
+
 // SetPushMode enables/disables push mode (SSE connected).
 // In push mode, poll intervals are extended significantly.
 func (p *Pool[T]) SetPushMode(enabled bool) {
