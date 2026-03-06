@@ -1,0 +1,31 @@
+internal/presenter/render.go
+  0e3d278ee9afe288 11,17,34,49,88-90,306-309,361-369
+internal/presenter/presenter_test.go
+  0e3d278ee9afe288 1789-1876
+internal/tui/workspace/views/campfire.go
+  0e3d278ee9afe288 20,669,748-751,753,760,770-775,779,782-784,789
+internal/richtext/richtext.go
+  0e3d278ee9afe288 405,424
+internal/output/render.go
+  0e3d278ee9afe288 20,429-435,602-609,613,615
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "b9676095e7ee7a9bcc96d141ac1acaa8a577fb18",
+  "prompts": {
+    "0e3d278ee9afe288": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0a109c4-8e3f-4a93-93ba-c8ecd81f2ac5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 166,
+      "overriden_lines": 0
+    }
+  }
+}
