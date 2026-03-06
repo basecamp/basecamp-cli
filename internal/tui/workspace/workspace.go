@@ -1288,11 +1288,11 @@ func (w *Workspace) relayout() {
 	}
 }
 
-// isBonfireView returns true when the current view is a bonfire-related target.
+// isBonfireView returns true when the current view is a campfire-related target.
 // Used to prevent ctrl+g from pushing duplicate nav entries.
 func (w *Workspace) isBonfireView() bool {
 	switch w.router.CurrentTarget() {
-	case ViewBonfire, ViewFrontPage, ViewBonfireSidebar:
+	case ViewBonfire, ViewFrontPage, ViewBonfireSidebar, ViewCampfire:
 		return true
 	default:
 		return false

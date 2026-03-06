@@ -77,7 +77,7 @@ func testWorkspace() (w *Workspace, viewLog *[]*testView) {
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
-		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarTargets:  []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		width:           120,
 		height:          40,
@@ -100,9 +100,10 @@ func targetName(t ViewTarget) string {
 		ViewPulse:       "Pulse",
 		ViewAssignments: "Assignments",
 		ViewPings:       "Pings",
-		ViewActivity:    "Activity",
-		ViewTimeline:    "Project Activity",
-		ViewHome:        "Home",
+		ViewActivity:       "Activity",
+		ViewTimeline:       "Project Activity",
+		ViewHome:           "Home",
+		ViewBonfireSidebar: "Chats",
 	}
 	if n, ok := names[t]; ok {
 		return n
@@ -496,7 +497,7 @@ func testWorkspaceWithSession(session *Session) *Workspace {
 		viewFactory: func(target ViewTarget, _ *Session, scope Scope) View {
 			return &testView{title: targetName(target)}
 		},
-		sidebarTargets: []ViewTarget{ViewActivity, ViewHome},
+		sidebarTargets: []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
 		sidebarIndex:   -1,
 		width:          120,
 		height:         40,
@@ -1236,23 +1237,29 @@ func TestWorkspace_ErrorMsg_NonAuth_ShowsToast(t *testing.T) {
 
 // --- Sidebar cycling tests ---
 
-func TestWorkspace_SidebarCyclesActivityHomeClosed(t *testing.T) {
+func TestWorkspace_SidebarCyclesChatsActivityHomeClosed(t *testing.T) {
 	w, viewLog := testWorkspace()
 	pushTestView(w, "Home")
 
-	// 1st ctrl+b: opens Activity
+	// 1st ctrl+b: opens Chats (bonfire sidebar)
+	w.toggleSidebar()
+	require.True(t, w.showSidebar)
+	require.NotNil(t, w.sidebarView)
+	assert.Equal(t, "Chats", w.sidebarView.Title())
+
+	// 2nd ctrl+b: cycles to Activity
 	w.toggleSidebar()
 	require.True(t, w.showSidebar)
 	require.NotNil(t, w.sidebarView)
 	assert.Equal(t, "Activity", w.sidebarView.Title())
 
-	// 2nd ctrl+b: cycles to Home
+	// 3rd ctrl+b: cycles to Home
 	w.toggleSidebar()
 	require.True(t, w.showSidebar)
 	require.NotNil(t, w.sidebarView)
 	assert.Equal(t, "Home", w.sidebarView.Title())
 
-	// 3rd ctrl+b: closes
+	// 4th ctrl+b: closes
 	w.toggleSidebar()
 	assert.False(t, w.showSidebar)
 	assert.Nil(t, w.sidebarView)
@@ -1265,17 +1272,18 @@ func TestWorkspace_SidebarCycleResetOnClose(t *testing.T) {
 	w, _ := testWorkspace()
 	pushTestView(w, "Home")
 
-	// Open → cycle → close
-	w.toggleSidebar()
-	w.toggleSidebar()
-	w.toggleSidebar()
+	// Open → cycle through all → close
+	w.toggleSidebar() // Chats
+	w.toggleSidebar() // Activity
+	w.toggleSidebar() // Home
+	w.toggleSidebar() // closed
 	assert.False(t, w.showSidebar)
 
-	// Reopen — should start at index 0 (Activity) again
+	// Reopen — should start at index 0 (Chats) again
 	w.toggleSidebar()
 	require.True(t, w.showSidebar)
 	require.NotNil(t, w.sidebarView)
-	assert.Equal(t, "Activity", w.sidebarView.Title())
+	assert.Equal(t, "Chats", w.sidebarView.Title())
 }
 
 func TestWorkspace_SidebarCycleNarrowTerminal(t *testing.T) {
@@ -1334,7 +1342,7 @@ func TestWorkspace_SidebarCycleWhileFocused(t *testing.T) {
 	// ctrl+b should cycle AND reset focus to main
 	w.toggleSidebar()
 	assert.False(t, w.sidebarFocused, "cycling should reset sidebar focus to main")
-	assert.True(t, w.showSidebar, "should still be showing sidebar (Home panel)")
+	assert.True(t, w.showSidebar, "should still be showing sidebar (Activity panel)")
 }
 
 // focusCmdView returns a tea.Cmd from FocusMsg so we can verify navigation captures it.
