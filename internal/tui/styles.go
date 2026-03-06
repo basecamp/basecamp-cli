@@ -19,6 +19,7 @@ type Theme struct {
 	Background color.Color
 	Foreground color.Color
 	Border     color.Color
+	RoomColors []color.Color
 }
 
 // DefaultTheme returns the default basecamp theme resolved for the given background.
@@ -35,6 +36,16 @@ func DefaultTheme(dark bool) Theme {
 		Background: ld(lipgloss.Color("#ffffff"), lipgloss.Color("#1f1f1f")),
 		Foreground: ld(lipgloss.Color("#202124"), lipgloss.Color("#e8eaed")),
 		Border:     ld(lipgloss.Color("#dadce0"), lipgloss.Color("#3c4043")),
+		RoomColors: []color.Color{
+			ld(lipgloss.Color("#c62828"), lipgloss.Color("#ef5350")), // red
+			ld(lipgloss.Color("#1565c0"), lipgloss.Color("#42a5f5")), // blue
+			ld(lipgloss.Color("#2e7d32"), lipgloss.Color("#66bb6a")), // green
+			ld(lipgloss.Color("#f57f17"), lipgloss.Color("#ffca28")), // amber
+			ld(lipgloss.Color("#6a1b9a"), lipgloss.Color("#ab47bc")), // purple
+			ld(lipgloss.Color("#00838f"), lipgloss.Color("#26c6da")), // cyan
+			ld(lipgloss.Color("#d84315"), lipgloss.Color("#ff7043")), // deep orange
+			ld(lipgloss.Color("#00695c"), lipgloss.Color("#26a69a")), // teal
+		},
 	}
 }
 

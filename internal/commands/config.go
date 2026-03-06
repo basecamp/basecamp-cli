@@ -83,6 +83,12 @@ func runConfigShow(cmd *cobra.Command) error {
 		{"hints", fmt.Sprintf("%t", app.Config.Hints != nil && *app.Config.Hints), app.Config.Hints != nil},
 		{"stats", fmt.Sprintf("%t", app.Config.Stats != nil && *app.Config.Stats), app.Config.Stats != nil},
 		{"verbose", fmt.Sprintf("%d", derefInt(app.Config.Verbose)), app.Config.Verbose != nil},
+		{"llm_provider", app.Config.LLMProvider, app.Config.LLMProvider != "" && app.Config.LLMProvider != "auto"},
+		{"llm_model", app.Config.LLMModel, app.Config.LLMModel != ""},
+		{"llm_api_key", redactSecret(app.Config.LLMAPIKey), app.Config.LLMAPIKey != ""},
+		{"llm_endpoint", app.Config.LLMEndpoint, app.Config.LLMEndpoint != ""},
+		{"llm_max_concurrent", fmt.Sprintf("%d", app.Config.LLMMaxConcurrent), app.Config.Sources["llm_max_concurrent"] != ""},
+		{"llm_token_budget", fmt.Sprintf("%d", app.Config.LLMTokenBudget), app.Config.Sources["llm_token_budget"] != ""},
 	}
 
 	for _, k := range keys {
@@ -170,7 +176,9 @@ func newConfigSetCmd() *cobra.Command {
 		Long: `Set a configuration value in the local or global config file.
 
 Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
-            format, scope, default_profile, hints, stats, verbose, onboarded`,
+            format, scope, default_profile, hints, stats, verbose, onboarded,
+            llm_provider, llm_model, llm_api_key, llm_endpoint, llm_max_concurrent,
+            llm_token_budget`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -180,19 +188,25 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 
 			// Validate key
 			validKeys := map[string]bool{
-				"account_id":      true,
-				"project_id":      true,
-				"todolist_id":     true,
-				"base_url":        true,
-				"cache_dir":       true,
-				"cache_enabled":   true,
-				"format":          true,
-				"scope":           true,
-				"default_profile": true,
-				"hints":           true,
-				"stats":           true,
-				"verbose":         true,
-				"onboarded":       true,
+				"account_id":         true,
+				"project_id":         true,
+				"todolist_id":        true,
+				"base_url":           true,
+				"cache_dir":          true,
+				"cache_enabled":      true,
+				"format":             true,
+				"scope":              true,
+				"default_profile":    true,
+				"hints":              true,
+				"stats":              true,
+				"verbose":            true,
+				"onboarded":          true,
+				"llm_provider":       true,
+				"llm_model":          true,
+				"llm_api_key":        true,
+				"llm_endpoint":       true,
+				"llm_max_concurrent": true,
+				"llm_token_budget":   true,
 			}
 			if !validKeys[key] {
 				names := make([]string, 0, len(validKeys))
@@ -227,6 +241,11 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
 			}
 
+			// llm_api_key must be set globally or via env var
+			if key == "llm_api_key" && !global {
+				return output.ErrUsage("llm_api_key must be set globally (--global) or via BASECAMP_LLM_API_KEY env var")
+			}
+
 			// Validate default_profile against configured profiles
 			if key == "default_profile" {
 				profiles, _ := configData["profiles"].(map[string]any)
@@ -255,6 +274,20 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				level, err := strconv.Atoi(value)
 				if err != nil || level < 0 || level > 2 {
 					return output.ErrUsage("verbose must be 0, 1, or 2")
+				}
+				configData[key] = level
+				valueOut = value
+			case "llm_max_concurrent":
+				level, err := strconv.Atoi(value)
+				if err != nil || level < 1 || level > 10 {
+					return output.ErrUsage("llm_max_concurrent must be 1-10")
+				}
+				configData[key] = level
+				valueOut = value
+			case "llm_token_budget":
+				level, err := strconv.Atoi(value)
+				if err != nil || level < 100 || level > 100000 {
+					return output.ErrUsage("llm_token_budget must be 100-100000")
 				}
 				configData[key] = level
 				valueOut = value
@@ -309,10 +342,18 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 // isAuthorityKey reports whether key controls where tokens are sent.
 func isAuthorityKey(key string) bool {
 	switch key {
-	case "base_url", "default_profile", "profiles":
+	case "base_url", "default_profile", "profiles", "llm_provider", "llm_endpoint":
 		return true
 	}
 	return false
+}
+
+// redactSecret returns "(set)" if the value is non-empty, empty string otherwise.
+func redactSecret(value string) string {
+	if value != "" {
+		return "(set)"
+	}
+	return ""
 }
 
 func derefInt(p *int) int {
