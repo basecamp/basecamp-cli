@@ -292,7 +292,7 @@ func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {
 		return nil, convertSDKError(err)
 	}
 
-	var projects []Project
+	projects := make([]Project, 0, len(pages))
 	for _, page := range pages {
 		var p Project
 		if err := json.Unmarshal(page, &p); err != nil {
@@ -327,7 +327,7 @@ func (r *Resolver) getPeople(ctx context.Context) ([]Person, error) {
 		return nil, convertSDKError(err)
 	}
 
-	var people []Person
+	people := make([]Person, 0, len(pages))
 	for _, page := range pages {
 		var p Person
 		if err := json.Unmarshal(page, &p); err != nil {
