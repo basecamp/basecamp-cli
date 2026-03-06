@@ -265,8 +265,8 @@ func (v *PoolMonitor) View() string {
 			if ps.PollInterval > 0 {
 				pollStr = formatDuration(ps.PollInterval)
 			}
-			detail := fmt.Sprintf("  poll:%s h:%d m:%d f:%d e:%d %dms",
-				pollStr, ps.HitCount, ps.MissCount, ps.FetchCount, ps.ErrorCount, ps.AvgLatency.Milliseconds())
+			detail := fmt.Sprintf("  poll:%s h:%d m:%d f:%d e:%d %s",
+				pollStr, ps.HitCount, ps.MissCount, ps.FetchCount, ps.ErrorCount, formatDuration(ps.AvgLatency))
 			lines = append(lines, ansi.Truncate(mutedStyle.Render(detail), v.width, ""))
 			rowCount++
 		}
