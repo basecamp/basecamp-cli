@@ -801,3 +801,9 @@ func (m *Manager) CredentialKey() string {
 func (m *Manager) GetStore() *Store {
 	return m.store
 }
+
+// SetStore replaces the credential store. Used in tests to inject
+// a file-backed store rooted in a temp directory.
+func (m *Manager) SetStore(s *Store) {
+	m.store = s
+}

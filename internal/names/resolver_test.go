@@ -3,11 +3,15 @@ package names
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -524,6 +528,138 @@ func TestResolverResolvePersonAmbiguous(t *testing.T) {
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
 	assert.Equal(t, output.CodeAmbiguous, outErr.Code)
+}
+
+// =============================================================================
+// "me" Resolution Tests
+//
+// These test the fix for the identity-ID-vs-person-ID conflation bug.
+// The Launchpad identity ID (cross-account) is a different namespace from
+// account-scoped person IDs returned by /people.json. Returning an identity
+// ID where a person ID is expected causes 404s on account-scoped endpoints.
+// =============================================================================
+
+// newMockResolverWithAuth creates a mock resolver with a real auth.Manager
+// backed by a file store, so "me" resolution can read stored credentials.
+func newMockResolverWithAuth(t *testing.T) (*mockResolver, *auth.Manager) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	mgr := auth.NewManager(cfg, http.DefaultClient)
+	// Swap in a file-backed store rooted in the temp dir
+	mgr.SetStore(auth.NewStore(tmpDir))
+
+	// Seed credentials so the manager can load them
+	mgr.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "test-token",
+		ExpiresAt:   time.Now().Unix() + 3600,
+	})
+
+	r := newMockResolver()
+	r.auth = mgr
+	return r, mgr
+}
+
+func TestResolverResolvePerson_Me_MatchesByEmail(t *testing.T) {
+	r, mgr := newMockResolverWithAuth(t)
+	r.setPeople([]Person{
+		{ID: 42000, Name: "Alice Smith", Email: "alice@example.com"},
+		{ID: 42001, Name: "Bob Jones", Email: "bob@example.com"},
+	})
+
+	// Simulate auth login storing the person ID + email
+	require.NoError(t, mgr.SetUserIdentity("42000", "alice@example.com"))
+
+	ctx := context.Background()
+	id, name, err := r.ResolvePerson(ctx, "me")
+	require.NoError(t, err)
+	assert.Equal(t, "42000", id)
+	assert.Equal(t, "Alice Smith", name)
+}
+
+func TestResolverResolvePerson_Me_CaseInsensitiveEmail(t *testing.T) {
+	r, mgr := newMockResolverWithAuth(t)
+	r.setPeople([]Person{
+		{ID: 42000, Name: "Alice Smith", Email: "Alice@Example.COM"},
+	})
+
+	require.NoError(t, mgr.SetUserEmail("alice@example.com"))
+
+	ctx := context.Background()
+	id, _, err := r.ResolvePerson(ctx, "Me")
+	require.NoError(t, err)
+	assert.Equal(t, "42000", id)
+}
+
+// TestResolverResolvePerson_Me_IdentityID_NotLeaked is the regression test
+// for the identity-ID conflation bug. Before the fix:
+//
+//  1. `basecamp me` stored an identity ID (e.g. 99999) as UserID
+//  2. ResolvePerson("me") tried email matching — failed (email not in people list)
+//  3. Fell back to GetUserID() → returned "99999" silently
+//  4. Caller used 99999 on /people/99999.json → 404
+//
+// After the fix, the fallback is gone. When email matching fails we get an
+// auth error, not a wrong-namespace ID that causes silent 404s downstream.
+func TestResolverResolvePerson_Me_IdentityID_NotLeaked(t *testing.T) {
+	r, mgr := newMockResolverWithAuth(t)
+
+	// People list does NOT contain alice — simulates a cross-account scenario
+	// where the user's Launchpad email doesn't match anyone in this account.
+	r.setPeople([]Person{
+		{ID: 42001, Name: "Bob Jones", Email: "bob@example.com"},
+	})
+
+	// Simulate the old `basecamp me` storing an identity ID + email.
+	// 99999 is an identity ID, not a person ID in this account.
+	require.NoError(t, mgr.SetUserIdentity("99999", "alice@example.com"))
+
+	ctx := context.Background()
+	id, _, err := r.ResolvePerson(ctx, "me")
+
+	// The critical assertion: we must NOT get "99999" back.
+	// Before the fix, the fallback returned the stored identity ID.
+	assert.Empty(t, id, "must not return identity ID when email match fails")
+	require.Error(t, err)
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
+	assert.Equal(t, output.CodeAuth, outErr.Code)
+}
+
+func TestResolverResolvePerson_Me_NoEmail(t *testing.T) {
+	r, _ := newMockResolverWithAuth(t)
+	r.setPeople([]Person{
+		{ID: 42001, Name: "Bob Jones", Email: "bob@example.com"},
+	})
+	// No email stored — neither SetUserEmail nor SetUserIdentity called
+
+	ctx := context.Background()
+	_, _, err := r.ResolvePerson(ctx, "me")
+	require.Error(t, err)
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeAuth, outErr.Code)
+}
+
+func TestResolverResolvePerson_Me_EmailOnly_NoUserID(t *testing.T) {
+	r, mgr := newMockResolverWithAuth(t)
+	r.setPeople([]Person{
+		{ID: 42000, Name: "Alice Smith", Email: "alice@example.com"},
+	})
+
+	// Only email stored (via SetUserEmail), no UserID at all.
+	// This is the new happy path for `basecamp me`.
+	require.NoError(t, mgr.SetUserEmail("alice@example.com"))
+
+	ctx := context.Background()
+	id, name, err := r.ResolvePerson(ctx, "me")
+	require.NoError(t, err)
+	assert.Equal(t, "42000", id)
+	assert.Equal(t, "Alice Smith", name)
 }
 
 func TestResolverResolveTodolistNumericID(t *testing.T) {
