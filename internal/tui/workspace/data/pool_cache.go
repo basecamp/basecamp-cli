@@ -82,6 +82,6 @@ func (c *PoolCache) Load(key string, dst any) (time.Time, bool) {
 }
 
 func (c *PoolCache) path(key string) string {
-	safe := strings.NewReplacer("/", "_", ":", "_").Replace(key)
-	return filepath.Join(c.dir, safe+".json")
+	safe := strings.NewReplacer("/", "_", ":", "_", "\\", "_", "..", "_").Replace(key)
+	return filepath.Join(c.dir, filepath.Base(safe)+".json")
 }

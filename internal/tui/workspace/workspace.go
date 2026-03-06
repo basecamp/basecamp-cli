@@ -262,7 +262,8 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// return focus to the main view so it resumes polling/input.
 		if w.poolMonitorFocused && !w.poolMonitorActive() {
 			w.poolMonitorFocused = false
-			w.poolMonitor.Update(BlurMsg{})
+			updated, _ := w.poolMonitor.Update(BlurMsg{})
+			w.poolMonitor = updated
 			if view := w.router.Current(); view != nil {
 				updated, cmd := view.Update(FocusMsg{})
 				w.replaceCurrentView(updated)
@@ -1143,7 +1144,8 @@ func (w *Workspace) togglePoolMonitor() tea.Cmd {
 			// Focused → close
 			w.showPoolMonitor = false
 			w.poolMonitorFocused = false
-			w.poolMonitor.Update(BlurMsg{})
+			blurred, _ := w.poolMonitor.Update(BlurMsg{})
+			w.poolMonitor = blurred
 			w.relayout()
 			if view := w.router.Current(); view != nil {
 				updated, cmd := view.Update(FocusMsg{})
@@ -1152,19 +1154,24 @@ func (w *Workspace) togglePoolMonitor() tea.Cmd {
 			}
 			return nil
 		}
-		// Open but unfocused → focus it
+		// Open but unfocused → focus it (only if renderable)
+		if !w.poolMonitorActive() {
+			return nil
+		}
 		w.poolMonitorFocused = true
 		var cmds []tea.Cmd
 		if w.sidebarFocused {
 			w.sidebarFocused = false
-			w.sidebarView.Update(BlurMsg{})
+			sUpdated, _ := w.sidebarView.Update(BlurMsg{})
+			w.sidebarView = sUpdated
 		} else if view := w.router.Current(); view != nil {
 			_, cmd := view.Update(BlurMsg{})
 			if cmd != nil {
 				cmds = append(cmds, w.stampCmd(cmd))
 			}
 		}
-		_, cmd := w.poolMonitor.Update(FocusMsg{})
+		focused, cmd := w.poolMonitor.Update(FocusMsg{})
+		w.poolMonitor = focused
 		if cmd != nil {
 			cmds = append(cmds, w.stampCmd(cmd))
 		}
@@ -1180,7 +1187,7 @@ func (w *Workspace) togglePoolMonitor() tea.Cmd {
 	w.showPoolMonitor = true
 	w.poolMonitorFocused = false
 	w.relayout()
-	return nil
+	return w.stampCmd(w.poolMonitor.Init())
 }
 
 func (w *Workspace) switchSidebarFocus() tea.Cmd {
@@ -1221,7 +1228,8 @@ func (w *Workspace) clearPoolMonitorFocus() {
 	if w.poolMonitorFocused {
 		w.poolMonitorFocused = false
 		if w.poolMonitor != nil {
-			w.poolMonitor.Update(BlurMsg{})
+			updated, _ := w.poolMonitor.Update(BlurMsg{})
+			w.poolMonitor = updated
 		}
 	}
 }

@@ -184,13 +184,19 @@ func (p *Pool[T]) Fetch(ctx context.Context) tea.Cmd {
 		}
 
 		p.mu.Lock()
-		defer p.mu.Unlock()
 		p.fetching = false
 
 		// Discard result if pool was cleared while fetching.
 		if p.generation != gen {
+			p.mu.Unlock()
 			return nil
 		}
+
+		var cacheData any
+		var cacheFetchedAt time.Time
+		var cacheRef *PoolCache
+		var cacheKey string
+
 		if err != nil {
 			p.snapshot.State = StateError
 			p.snapshot.Err = err
@@ -203,9 +209,18 @@ func (p *Pool[T]) Fetch(ctx context.Context) tea.Cmd {
 			p.cachedFetchedAt = time.Time{} // real fetch replaces cache-seeded data
 			p.version++
 			if p.cache != nil {
-				if err := p.cache.Save(p.key, data, p.snapshot.FetchedAt); err != nil {
-					log.Printf("pool cache save %s: %v", p.key, err)
-				}
+				cacheRef = p.cache
+				cacheKey = p.key
+				cacheData = data
+				cacheFetchedAt = p.snapshot.FetchedAt
+			}
+		}
+		p.mu.Unlock()
+
+		// Disk I/O outside the lock to avoid blocking readers.
+		if cacheRef != nil {
+			if err := cacheRef.Save(cacheKey, cacheData, cacheFetchedAt); err != nil {
+				log.Printf("pool cache save %s: %v", cacheKey, err)
 			}
 		}
 		return PoolUpdatedMsg{Key: p.key}
