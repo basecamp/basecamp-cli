@@ -1,0 +1,25 @@
+internal/commands/skill_test.go
+  6c6b763329f0666c 17-18,57,81-82,125,218,246-272
+internal/commands/skill.go
+  6c6b763329f0666c 11,38-39,43,49,52-59,69,75-106,108-119,126-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "95019065ca753ffc06d6ab5c39f78fa5ef03dab9",
+  "prompts": {
+    "6c6b763329f0666c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a80f46f-578f-42bc-b659-918872b3f808",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 563,
+      "overriden_lines": 0
+    }
+  }
+}
