@@ -87,19 +87,20 @@ func (p *Pool[T]) SetCache(c *PoolCache) {
 	if c == nil {
 		return
 	}
+	// Load from disk outside the lock to avoid blocking readers during I/O.
+	var cachedData T
+	fetchedAt, ok := c.Load(p.key, &cachedData)
+
 	p.mu.Lock()
 	p.cache = c
 	// Only seed from cache if pool has no data yet.
-	if !p.snapshot.HasData {
-		var data T
-		if fetchedAt, ok := c.Load(p.key, &data); ok {
-			p.snapshot.Data = data
-			p.snapshot.State = StateStale
-			p.snapshot.FetchedAt = time.Now() // anchor TTL to now so data isn't immediately expired
-			p.snapshot.HasData = true
-			p.cachedFetchedAt = fetchedAt // preserve real time for age display
-			p.version++
-		}
+	if ok && !p.snapshot.HasData {
+		p.snapshot.Data = cachedData
+		p.snapshot.State = StateStale
+		p.snapshot.FetchedAt = time.Now() // anchor TTL to now so data isn't immediately expired
+		p.snapshot.HasData = true
+		p.cachedFetchedAt = fetchedAt // preserve real time for age display
+		p.version++
 	}
 	p.mu.Unlock()
 }

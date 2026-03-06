@@ -324,7 +324,7 @@ func (v *PoolMonitor) View() string {
 		var line string
 		switch ev.EventType {
 		case data.FetchComplete:
-			latStr := fmt.Sprintf("%dms", ev.Duration.Milliseconds())
+			latStr := formatDuration(ev.Duration)
 			ageStr := formatAge(ev.Timestamp)
 			line = successStyle.Render("✓") + " " + keyStr
 			pad := v.width - lipgloss.Width(line) - feedSuffixWidth
