@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -203,40 +204,21 @@ func (f *FrontPage) rebuildList() {
 	var items []widget.ListItem
 
 	if digestSnap.Usable() && len(digestSnap.Data) > 0 {
-		// Group by tier
-		var hot, warm, cold []data.BonfireDigestEntry
-		for _, e := range digestSnap.Data {
-			switch classifyBurst(e) {
-			case burstHot:
-				hot = append(hot, e)
-			case burstWarm:
-				warm = append(warm, e)
-			case burstCold:
-				cold = append(cold, e)
-			}
-		}
-
-		if len(hot) > 0 {
-			items = append(items, widget.ListItem{Title: "Hot", Header: true})
-			items = append(items, f.digestItems(hot, theme)...)
-		}
-		if len(warm) > 0 {
-			items = append(items, widget.ListItem{Title: "Warm", Header: true})
-			items = append(items, f.digestItems(warm, theme)...)
-		}
-		if len(cold) > 0 {
-			items = append(items, widget.ListItem{Title: "Quiet", Header: true})
-			items = append(items, f.digestItems(cold, theme)...)
-		}
+		items = append(items, widget.ListItem{Title: "Campfires", Header: true})
+		items = append(items, f.digestItems(digestSnap.Data, theme)...)
 	} else if roomSnap.Usable() && len(roomSnap.Data) > 0 {
 		// Fallback: just room names
-		items = append(items, widget.ListItem{Title: "Rooms", Header: true})
+		items = append(items, widget.ListItem{Title: "Campfires", Header: true})
 		for _, r := range roomSnap.Data {
 			id := "room:" + r.Key()
+			colorIdx := r.Color(len(theme.RoomColors))
+			title := r.ProjectName
+			if colorIdx < len(theme.RoomColors) {
+				title = lipgloss.NewStyle().Foreground(theme.RoomColors[colorIdx]).Render(r.ProjectName)
+			}
 			items = append(items, widget.ListItem{
-				ID:          id,
-				Title:       r.ProjectName,
-				Description: r.RoomName,
+				ID:    id,
+				Title: title,
 			})
 		}
 	}
@@ -250,38 +232,40 @@ func (f *FrontPage) digestItems(entries []data.BonfireDigestEntry, theme tui.The
 		id := "digest:" + e.Key()
 		f.digestByID[e.Key()] = e
 
-		// Build description from last message
-		var desc string
-		if e.LastAuthor != "" && e.LastMessage != "" {
-			desc = e.LastAuthor + ": " + e.LastMessage
-		}
-
-		// Build extra with tier indicator and time
-		var extraParts []string
-		tier := classifyBurst(e)
-		switch tier {
-		case burstHot:
-			extraParts = append(extraParts, lipgloss.NewStyle().Foreground(theme.Error).Render("\u25cf"))
-		case burstWarm:
-			extraParts = append(extraParts, lipgloss.NewStyle().Foreground(theme.Warning).Render("\u25cb"))
-		case burstCold:
-			extraParts = append(extraParts, lipgloss.NewStyle().Foreground(theme.Muted).Render("\u25cb"))
-		}
-		if e.LastAt != "" {
-			extraParts = append(extraParts, e.LastAt)
-		}
-		// Room color for title
+		// Room-colored title with activity indicator
 		colorIdx := e.Color(len(theme.RoomColors))
 		title := e.RoomName
 		if colorIdx < len(theme.RoomColors) {
 			title = lipgloss.NewStyle().Foreground(theme.RoomColors[colorIdx]).Render(e.RoomName)
 		}
 
+		// Activity indicator prefix
+		tier := classifyBurst(e)
+		switch tier {
+		case burstHot:
+			title = lipgloss.NewStyle().Foreground(theme.Error).Render("\u25cf ") + title
+		case burstWarm:
+			title = lipgloss.NewStyle().Foreground(theme.Warning).Render("\u25cb ") + title
+		default:
+			title = lipgloss.NewStyle().Foreground(theme.Muted).Render("\u25cb ") + title
+		}
+
+		// Description: author + message preview
+		var desc string
+		if e.LastAuthor != "" && e.LastMessage != "" {
+			desc = e.LastAuthor + ": " + e.LastMessage
+		} else if e.LastMessage != "" {
+			desc = e.LastMessage
+		}
+
+		// Relative time in the Extra column
+		extra := frontpageRelativeTime(e.LastAtTS)
+
 		items = append(items, widget.ListItem{
 			ID:          id,
 			Title:       title,
 			Description: desc,
-			Extra:       strings.Join(extraParts, " "),
+			Extra:       extra,
 		})
 	}
 	return items
@@ -335,6 +319,23 @@ func (f *FrontPage) anyLoading() bool {
 		return false
 	}
 	return poolPending(f.roomPool.Get()) || poolPending(f.digestPool.Get())
+}
+
+func frontpageRelativeTime(ts int64) string {
+	if ts == 0 {
+		return ""
+	}
+	d := time.Since(time.Unix(ts, 0))
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 func classifyBurst(entry data.BonfireDigestEntry) burstTier {

@@ -23,14 +23,9 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 )
 
-// chromeHeight returns the vertical space reserved for breadcrumb + divider + status bar,
-// plus the ticker line when active.
+// chromeHeight returns the vertical space reserved for breadcrumb + divider + status bar.
 func (w *Workspace) chromeHeight() int {
-	h := 3 // breadcrumb + divider + status bar
-	if w.ticker.Active() {
-		h++
-	}
-	return h
+	return 3 // breadcrumb + divider + status bar
 }
 
 // Workspace is the root tea.Model for the persistent TUI application.
@@ -52,7 +47,6 @@ type Workspace struct {
 	pickingBoost    bool
 	boostTarget     BoostTarget
 	quickJump       chrome.QuickJump
-	ticker          chrome.Ticker
 
 	// Multi-account
 	accountList []AccountInfo
@@ -81,7 +75,7 @@ type Workspace struct {
 	// Theme file watcher for live reloading
 	themeWatcher *fsnotify.Watcher
 
-	// Ticker digest polling
+	// Ambient digest polling (feeds sidebar and views)
 	digestPollGen uint64
 
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
@@ -127,11 +121,10 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		quickJump:       chrome.NewQuickJump(styles),
-		ticker:          chrome.NewTicker(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		openFunc:        openInBrowser,
-		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
+		sidebarTargets:  []ViewTarget{ViewBonfireSidebar, ViewActivity, ViewHome},
 		sidebarIndex:    -1,
 		sidebarRatio:    0.30,
 	}
@@ -229,7 +222,8 @@ func (w *Workspace) fetchAccountName() tea.Cmd {
 
 // startDigestPoll kicks off the first BonfireDigest fetch and arms a recurring poll.
 // BonfireDigest is self-sufficient: it fetches BonfireRooms inline when needed.
-// This makes the ticker ambient — it refreshes regardless of which view is active.
+// This makes the digest ambient — it refreshes regardless of which view is active,
+// feeding the bonfire sidebar and any views that consume digest data.
 func (w *Workspace) startDigestPoll() tea.Cmd {
 	hub := w.session.Hub()
 	if hub == nil {
@@ -421,25 +415,6 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ErrorRate:   summary.ErrorRate,
 			})
 		}
-		// Update ticker on digest pool changes
-		if msg.Key == "bonfire-digest" {
-			if hub := w.session.Hub(); hub != nil {
-				snap := hub.BonfireDigest().Get()
-				if snap.HasData {
-					// Build map of previous timestamps for flash detection
-					old := make(map[string]int64, len(w.ticker.Entries()))
-					for _, e := range w.ticker.Entries() {
-						old[e.Key()] = e.LastAtTS
-					}
-					w.ticker.SetEntries(snap.Data)
-					for _, e := range snap.Data {
-						if e.LastAtTS > old[e.Key()] {
-							w.ticker.Flash(e.Key())
-						}
-					}
-				}
-			}
-		}
 		// Forward to sidebar if active
 		var sidebarCmd tea.Cmd
 		if w.sidebarActive() {
@@ -522,7 +497,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w, cmd
 	}
 
-	// Handle workspace-owned digest poll for the ticker.
+	// Handle workspace-owned ambient digest poll.
 	// Refreshes both rooms (for bookmark/override changes) and digest.
 	if pm, ok := msg.(data.PollMsg); ok && pm.Tag == "workspace-digest" && pm.Gen == w.digestPollGen {
 		hub := w.session.Hub()
@@ -632,7 +607,9 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, w.keys.Jump):
 			return w.openQuickJump()
 		case key.Matches(msg, w.keys.Bonfire):
-			return w.navigate(ViewFrontPage, w.session.Scope())
+			if !w.isBonfireView() {
+				return w.navigate(ViewFrontPage, w.session.Scope())
+			}
 		}
 		// Forward everything else to the view
 		if view := w.router.Current(); view != nil {
@@ -755,7 +732,9 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 
 	case key.Matches(msg, w.keys.Bonfire):
-		return w.navigate(ViewFrontPage, w.session.Scope())
+		if !w.isBonfireView() {
+			return w.navigate(ViewFrontPage, w.session.Scope())
+		}
 	}
 
 	// Number keys for breadcrumb jumping (1-9)
@@ -1289,7 +1268,6 @@ const sidebarMinWidth = 100
 func (w *Workspace) relayout() {
 	w.breadcrumb.SetWidth(w.width)
 	w.statusBar.SetWidth(w.width)
-	w.ticker.SetWidth(w.width)
 	w.toast.SetWidth(w.width)
 	w.metricsPanel.SetWidth(w.width)
 	w.help.SetSize(w.width, w.viewHeight())
@@ -1307,6 +1285,17 @@ func (w *Workspace) relayout() {
 		}
 	} else if view := w.router.Current(); view != nil {
 		view.SetSize(w.width, w.viewHeight())
+	}
+}
+
+// isBonfireView returns true when the current view is a bonfire-related target.
+// Used to prevent ctrl+g from pushing duplicate nav entries.
+func (w *Workspace) isBonfireView() bool {
+	switch w.router.CurrentTarget() {
+	case ViewBonfire, ViewFrontPage, ViewBonfireSidebar:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1373,11 +1362,6 @@ func (w *Workspace) View() tea.View {
 	// Metrics panel (above status bar when active)
 	if w.showMetrics {
 		sections = append(sections, w.metricsPanel.View())
-	}
-
-	// Ticker
-	if w.ticker.Active() {
-		sections = append(sections, w.ticker.View())
 	}
 
 	// Status bar

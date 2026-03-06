@@ -116,6 +116,8 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 		return views.NewRiver(session)
 	case workspace.ViewFrontPage:
 		return views.NewFrontPage(session)
+	case workspace.ViewBonfireSidebar:
+		return views.NewBonfireSidebar(session)
 	default:
 		return views.NewHome(session)
 	}

@@ -50,9 +50,10 @@ const (
 	ViewCompose
 	ViewHome
 	ViewActivity
-	ViewTimeline  // project-scoped timeline
-	ViewBonfire   // multi-campfire River view
-	ViewFrontPage // campfire overview (newspaper layout)
+	ViewTimeline       // project-scoped timeline
+	ViewBonfire        // multi-campfire River view
+	ViewFrontPage      // campfire overview (newspaper layout)
+	ViewBonfireSidebar // compact live chat/ping sidebar
 )
 
 // IsGlobal returns true for view targets that aggregate across all accounts.
@@ -60,7 +61,7 @@ func (t ViewTarget) IsGlobal() bool {
 	switch t {
 	case ViewHome, ViewHey, ViewPulse, ViewAssignments,
 		ViewPings, ViewProjects, ViewSearch, ViewActivity,
-		ViewBonfire, ViewFrontPage:
+		ViewBonfire, ViewFrontPage, ViewBonfireSidebar:
 		return true
 	default:
 		return false
