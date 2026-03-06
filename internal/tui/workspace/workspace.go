@@ -26,6 +26,12 @@ import (
 // chromeHeight is the vertical space reserved for breadcrumb + status bar + toast.
 const chromeHeight = 3
 
+// poolMonitorWidth is the fixed width of the pool monitor right sidebar.
+const poolMonitorWidth = 38
+
+// minMainWidth is the minimum width for the main content area.
+const minMainWidth = 40
+
 // Workspace is the root tea.Model for the persistent TUI application.
 type Workspace struct {
 	session  *Session
@@ -57,9 +63,10 @@ type Workspace struct {
 	showSidebar    bool
 	sidebarFocused bool
 
-	// Metrics panel
-	metricsPanel chrome.MetricsPanel
-	showMetrics  bool
+	// Pool monitor (right sidebar)
+	poolMonitor        View
+	showPoolMonitor    bool
+	poolMonitorFocused bool
 
 	// State
 	showHelp            bool
@@ -74,8 +81,9 @@ type Workspace struct {
 	themeWatcher *fsnotify.Watcher
 
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
-	viewFactory ViewFactory
-	openFunc    func(Scope) tea.Cmd
+	viewFactory        ViewFactory
+	poolMonitorFactory func() View // creates the pool monitor view
+	openFunc           func(Scope) tea.Cmd
 
 	// createBoostFunc is the function called to create a boost. Defaults to
 	// createBoost; tests can replace it with a spy.
@@ -88,7 +96,7 @@ type Workspace struct {
 type ViewFactory func(target ViewTarget, session *Session, scope Scope) View
 
 // New creates a new Workspace model.
-func New(session *Session, factory ViewFactory) *Workspace {
+func New(session *Session, factory ViewFactory, poolMonitorFactory func() View) *Workspace {
 	styles := session.Styles()
 	registry := DefaultActions()
 
@@ -104,31 +112,27 @@ func New(session *Session, factory ViewFactory) *Workspace {
 	}
 
 	w := &Workspace{
-		session:         session,
-		router:          NewRouter(),
-		styles:          styles,
-		keys:            keys,
-		registry:        registry,
-		statusBar:       chrome.NewStatusBar(styles),
-		breadcrumb:      chrome.NewBreadcrumb(styles),
-		toast:           chrome.NewToast(styles),
-		help:            chrome.NewHelp(styles),
-		palette:         chrome.NewPalette(styles),
-		accountSwitcher: chrome.NewAccountSwitcher(styles),
-		quickJump:       chrome.NewQuickJump(styles),
-		boostPicker:     NewBoostPicker(styles),
-		viewFactory:     factory,
-		openFunc:        openInBrowser,
-		sidebarTargets:  []ViewTarget{ViewActivity, ViewHome},
-		sidebarIndex:    -1,
-		sidebarRatio:    0.30,
+		session:            session,
+		router:             NewRouter(),
+		styles:             styles,
+		keys:               keys,
+		registry:           registry,
+		statusBar:          chrome.NewStatusBar(styles),
+		breadcrumb:         chrome.NewBreadcrumb(styles),
+		toast:              chrome.NewToast(styles),
+		help:               chrome.NewHelp(styles),
+		palette:            chrome.NewPalette(styles),
+		accountSwitcher:    chrome.NewAccountSwitcher(styles),
+		quickJump:          chrome.NewQuickJump(styles),
+		boostPicker:        NewBoostPicker(styles),
+		viewFactory:        factory,
+		poolMonitorFactory: poolMonitorFactory,
+		openFunc:           openInBrowser,
+		sidebarTargets:     []ViewTarget{ViewActivity, ViewHome},
+		sidebarIndex:       -1,
+		sidebarRatio:       0.30,
 	}
 	w.createBoostFunc = w.createBoost
-	// Metrics panel reads live stats from the Hub's metrics collector.
-	if hub := session.Hub(); hub != nil {
-		m := hub.Metrics()
-		w.metricsPanel = chrome.NewMetricsPanel(styles, m.PoolStatsList, m.Apdex)
-	}
 
 	return w
 }
@@ -222,6 +226,18 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.width = msg.Width
 		w.height = msg.Height
 		w.relayout()
+		// If the pool monitor was focused but resize made it inactive,
+		// return focus to the main view so it resumes polling/input.
+		if w.poolMonitorFocused && !w.poolMonitorActive() {
+			w.poolMonitorFocused = false
+			updated, _ := w.poolMonitor.Update(BlurMsg{})
+			w.poolMonitor = updated
+			if view := w.router.Current(); view != nil {
+				updated, cmd := view.Update(FocusMsg{})
+				w.replaceCurrentView(updated)
+				return w, w.stampCmd(cmd)
+			}
+		}
 		return w, nil
 
 	case tea.BackgroundColorMsg:
@@ -375,23 +391,33 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ErrorRate:   summary.ErrorRate,
 			})
 		}
-		// Forward to sidebar if active
-		var sidebarCmd tea.Cmd
+		var extraCmds []tea.Cmd
+		// Forward to left sidebar if active
 		if w.sidebarActive() {
 			updated, sc := w.sidebarView.Update(msg)
 			w.sidebarView = updated
-			sidebarCmd = w.stampCmd(sc)
+			if sc != nil {
+				extraCmds = append(extraCmds, w.stampCmd(sc))
+			}
+		}
+		// Forward to pool monitor if active
+		if w.poolMonitorActive() {
+			updated, mc := w.poolMonitor.Update(msg)
+			w.poolMonitor = updated
+			if mc != nil {
+				extraCmds = append(extraCmds, w.stampCmd(mc))
+			}
 		}
 		// Forward to current view
 		if view := w.router.Current(); view != nil {
 			updated, cmd := view.Update(msg)
 			w.replaceCurrentView(updated)
-			if sidebarCmd != nil {
-				return w, tea.Batch(w.stampCmd(cmd), sidebarCmd)
+			if len(extraCmds) > 0 {
+				return w, tea.Batch(append([]tea.Cmd{w.stampCmd(cmd)}, extraCmds...)...)
 			}
 			return w, w.stampCmd(cmd)
 		}
-		return w, sidebarCmd
+		return w, tea.Batch(extraCmds...)
 
 	case RefreshMsg:
 		if w.statusBar.HasPersistentError() {
@@ -668,9 +694,7 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return w.openQuickJump()
 
 	case key.Matches(msg, w.keys.Metrics):
-		w.showMetrics = !w.showMetrics
-		w.relayout()
-		return nil
+		return w.togglePoolMonitor()
 	}
 
 	// Number keys for breadcrumb jumping (1-9)
@@ -683,6 +707,11 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	// Forward to focused panel
+	if w.poolMonitorActive() && w.poolMonitorFocused {
+		updated, cmd := w.poolMonitor.Update(msg)
+		w.poolMonitor = updated
+		return w.stampCmd(cmd)
+	}
 	if w.sidebarActive() && w.sidebarFocused {
 		updated, cmd := w.sidebarView.Update(msg)
 		w.sidebarView = updated
@@ -1021,12 +1050,14 @@ func (w *Workspace) toggleSidebar() tea.Cmd {
 	w.sidebarIndex = 0
 	w.showSidebar = true
 	w.sidebarFocused = false
+	w.clearPoolMonitorFocus()
 	return w.openSidebarPanel(w.sidebarTargets[0])
 }
 
 func (w *Workspace) openSidebarPanel(target ViewTarget) tea.Cmd {
 	scope := w.session.Scope()
 	w.sidebarView = w.viewFactory(target, w.session, scope)
+	w.clearPoolMonitorFocus()
 	w.relayout()
 	// Init new sidebar; refocus main view
 	cmds := []tea.Cmd{w.stampCmd(w.sidebarView.Init())}
@@ -1038,10 +1069,64 @@ func (w *Workspace) openSidebarPanel(target ViewTarget) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (w *Workspace) togglePoolMonitor() tea.Cmd {
+	if w.showPoolMonitor {
+		if w.poolMonitorFocused {
+			// Focused → close
+			w.showPoolMonitor = false
+			w.poolMonitorFocused = false
+			blurred, _ := w.poolMonitor.Update(BlurMsg{})
+			w.poolMonitor = blurred
+			w.relayout()
+			if view := w.router.Current(); view != nil {
+				updated, cmd := view.Update(FocusMsg{})
+				w.replaceCurrentView(updated)
+				return w.stampCmd(cmd)
+			}
+			return nil
+		}
+		// Open but unfocused → focus it (only if renderable)
+		if !w.poolMonitorActive() {
+			return nil
+		}
+		w.poolMonitorFocused = true
+		var cmds []tea.Cmd
+		if w.sidebarFocused {
+			w.sidebarFocused = false
+			sUpdated, _ := w.sidebarView.Update(BlurMsg{})
+			w.sidebarView = sUpdated
+		} else if view := w.router.Current(); view != nil {
+			updated, cmd := view.Update(BlurMsg{})
+			w.replaceCurrentView(updated)
+			if cmd != nil {
+				cmds = append(cmds, w.stampCmd(cmd))
+			}
+		}
+		focused, cmd := w.poolMonitor.Update(FocusMsg{})
+		w.poolMonitor = focused
+		if cmd != nil {
+			cmds = append(cmds, w.stampCmd(cmd))
+		}
+		return tea.Batch(cmds...)
+	}
+	// Closed → open (unfocused)
+	if w.poolMonitorFactory != nil && w.poolMonitor == nil {
+		w.poolMonitor = w.poolMonitorFactory()
+	}
+	if w.poolMonitor == nil {
+		return nil
+	}
+	w.showPoolMonitor = true
+	w.poolMonitorFocused = false
+	w.relayout()
+	return w.stampCmd(w.poolMonitor.Init())
+}
+
 func (w *Workspace) switchSidebarFocus() tea.Cmd {
 	if !w.sidebarActive() {
 		return nil
 	}
+	w.clearPoolMonitorFocus()
 	var cmds []tea.Cmd
 	w.sidebarFocused = !w.sidebarFocused
 	if w.sidebarFocused {
@@ -1068,6 +1153,17 @@ func (w *Workspace) switchSidebarFocus() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// clearPoolMonitorFocus blurs the pool monitor if focused.
+func (w *Workspace) clearPoolMonitorFocus() {
+	if w.poolMonitorFocused {
+		w.poolMonitorFocused = false
+		if w.poolMonitor != nil {
+			updated, _ := w.poolMonitor.Update(BlurMsg{})
+			w.poolMonitor = updated
+		}
+	}
 }
 
 func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {
@@ -1205,35 +1301,55 @@ func (w *Workspace) relayout() {
 	w.breadcrumb.SetWidth(w.width)
 	w.statusBar.SetWidth(w.width)
 	w.toast.SetWidth(w.width)
-	w.metricsPanel.SetWidth(w.width)
 	w.help.SetSize(w.width, w.viewHeight())
 	w.palette.SetSize(w.width, w.viewHeight())
 	w.accountSwitcher.SetSize(w.width, w.viewHeight())
 	w.quickJump.SetSize(w.width, w.viewHeight())
 	w.boostPicker.SetSize(w.width, w.height)
 
+	contentWidth := w.width
+	if w.poolMonitorActive() {
+		contentWidth -= poolMonitorWidth + 1 // +1 for divider
+		w.poolMonitor.SetSize(poolMonitorWidth, w.viewHeight())
+	}
+
 	if w.sidebarActive() {
-		sidebarW := int(float64(w.width) * w.sidebarRatio)
-		mainW := w.width - sidebarW - 1 // -1 for divider
+		sidebarW := int(float64(contentWidth) * w.sidebarRatio)
+		mainW := contentWidth - sidebarW - 1 // -1 for divider
 		w.sidebarView.SetSize(sidebarW, w.viewHeight())
 		if view := w.router.Current(); view != nil {
 			view.SetSize(mainW, w.viewHeight())
 		}
 	} else if view := w.router.Current(); view != nil {
-		view.SetSize(w.width, w.viewHeight())
+		view.SetSize(contentWidth, w.viewHeight())
 	}
 }
 
-// sidebarActive returns true when the sidebar should be rendered.
+// sidebarActive returns true when the left sidebar should be rendered.
 func (w *Workspace) sidebarActive() bool {
 	return w.showSidebar && w.sidebarView != nil && w.width >= sidebarMinWidth
 }
 
+// poolMonitorActive returns true when the pool monitor right sidebar should be rendered.
+// Checks that the main content area retains at least minMainWidth after allocating
+// space for both the left sidebar (if active) and the pool monitor + its divider.
+// Uses the same geometry as relayout: sidebar ratio applies to contentWidth
+// (total width minus monitor and its divider).
+func (w *Workspace) poolMonitorActive() bool {
+	if !w.showPoolMonitor || w.poolMonitor == nil {
+		return false
+	}
+	contentWidth := w.width - poolMonitorWidth - 1 // -1 for right divider
+	mainSpace := contentWidth
+	if w.sidebarActive() {
+		sidebarW := int(float64(contentWidth) * w.sidebarRatio)
+		mainSpace = contentWidth - sidebarW - 1 // -1 for left divider
+	}
+	return mainSpace >= minMainWidth
+}
+
 func (w *Workspace) viewHeight() int {
 	h := w.height - chromeHeight
-	if w.showMetrics {
-		h -= chrome.MetricsPanelHeight
-	}
 	if h < 1 {
 		h = 1
 	}
@@ -1268,25 +1384,30 @@ func (w *Workspace) View() tea.View {
 		sections = append(sections, w.palette.View())
 	} else if w.showHelp {
 		sections = append(sections, w.help.View())
-	} else if w.sidebarActive() {
+	} else {
+		vDividerStr := strings.TrimRight(strings.Repeat("│\n", w.viewHeight()), "\n")
 		vDivider := lipgloss.NewStyle().
 			Foreground(theme.Border).
 			Height(w.viewHeight()).
-			Render(strings.TrimRight(strings.Repeat("│\n", w.viewHeight()), "\n"))
-		mainContent := ""
-		if view := w.router.Current(); view != nil {
-			mainContent = view.View()
-		}
-		sections = append(sections,
-			lipgloss.JoinHorizontal(lipgloss.Top,
-				w.sidebarView.View(), vDivider, mainContent))
-	} else if view := w.router.Current(); view != nil {
-		sections = append(sections, view.View())
-	}
+			Render(vDividerStr)
 
-	// Metrics panel (above status bar when active)
-	if w.showMetrics {
-		sections = append(sections, w.metricsPanel.View())
+		var content string
+		if w.sidebarActive() {
+			mainContent := ""
+			if view := w.router.Current(); view != nil {
+				mainContent = view.View()
+			}
+			content = lipgloss.JoinHorizontal(lipgloss.Top,
+				w.sidebarView.View(), vDivider, mainContent)
+		} else if view := w.router.Current(); view != nil {
+			content = view.View()
+		}
+
+		if w.poolMonitorActive() {
+			content = lipgloss.JoinHorizontal(lipgloss.Top,
+				content, vDivider, w.poolMonitor.View())
+		}
+		sections = append(sections, content)
 	}
 
 	// Status bar

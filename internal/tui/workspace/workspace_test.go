@@ -470,7 +470,7 @@ func testSessionWithContext(accountID, accountName string) *Session {
 	return &Session{
 		styles:     tui.NewStyles(),
 		multiStore: ms,
-		hub:        data.NewHub(ms),
+		hub:        data.NewHub(ms, ""),
 		ctx:        ctx,
 		cancel:     cancel,
 		scope:      Scope{AccountID: accountID, AccountName: accountName},
@@ -1875,4 +1875,46 @@ func TestWorkspace_TerminalFocus_StampsSidebarCommands(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 2, sentinelCount, "both main and sidebar sentinels should be epoch-stamped")
+}
+
+func TestPoolMonitorResizeRefocusesMainView(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	mainView := pushTestView(w, "Main")
+	w.width = 120
+	w.height = 40
+	w.relayout()
+
+	// Open pool monitor (unfocused), then focus it.
+	w.togglePoolMonitor() // open unfocused
+	w.togglePoolMonitor() // focus it
+	require.True(t, w.poolMonitorFocused)
+
+	// Main view should have received BlurMsg when monitor took focus.
+	hasBlur := false
+	for _, m := range mainView.msgs {
+		if _, ok := m.(BlurMsg); ok {
+			hasBlur = true
+		}
+	}
+	require.True(t, hasBlur, "main view should be blurred when monitor is focused")
+
+	// Clear message log so we can check what resize sends.
+	mainView.msgs = nil
+
+	// Resize narrow enough that the pool monitor can't fit (< minMainWidth + poolMonitorWidth + 1).
+	w.Update(tea.WindowSizeMsg{Width: 70, Height: 40})
+
+	assert.False(t, w.poolMonitorFocused, "monitor focus should be cleared on narrow resize")
+	assert.False(t, w.poolMonitorActive(), "monitor should be inactive at narrow width")
+
+	// Main view must have received FocusMsg so it resumes polling.
+	hasFocus := false
+	for _, m := range mainView.msgs {
+		if _, ok := m.(FocusMsg); ok {
+			hasFocus = true
+		}
+	}
+	assert.True(t, hasFocus, "main view should be re-focused after monitor disappears on resize")
 }

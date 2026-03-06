@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"log"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,10 +37,11 @@ type pendingMutation[T any] struct {
 // Go equivalent of iOS BaseConcurrentDataStore / Android BaseConcurrentRepository.
 type MutatingPool[T any] struct {
 	*Pool[T]
-	pendingMutations []pendingMutation[T]
-	lastRemoteData   *T // last known remote state before local mutations
-	hasRemoteData    bool
-	mutSeq           uint64 // monotonic mutation ID
+	pendingMutations    []pendingMutation[T]
+	lastRemoteData      *T // last known remote state before local mutations
+	lastCachedFetchedAt time.Time
+	hasRemoteData       bool
+	mutSeq              uint64 // monotonic mutation ID
 }
 
 // NewMutatingPool creates a MutatingPool with the given key, config, and fetch function.
@@ -62,6 +64,7 @@ func (mp *MutatingPool[T]) Apply(ctx context.Context, mutation Mutation[T]) tea.
 	if !mp.hasRemoteData && mp.snapshot.HasData {
 		cp := mp.snapshot.Data
 		mp.lastRemoteData = &cp
+		mp.lastCachedFetchedAt = mp.cachedFetchedAt
 		mp.hasRemoteData = true
 	}
 
@@ -77,6 +80,9 @@ func (mp *MutatingPool[T]) Apply(ctx context.Context, mutation Mutation[T]) tea.
 		mp.snapshot.State = StateFresh
 		mp.snapshot.FetchedAt = time.Now()
 		mp.snapshot.Err = nil
+		// cachedFetchedAt is intentionally preserved — it tracks the age of the
+		// remote baseline, not the displayed data. Local mutations overlay the
+		// baseline without changing when it was last fetched from the server.
 		mp.version++
 	}
 	key := mp.key
@@ -92,11 +98,37 @@ func (mp *MutatingPool[T]) Apply(ctx context.Context, mutation Mutation[T]) tea.
 			}
 		}
 
+		// Re-fetch with telemetry + cache, same as MutatingPool.Fetch.
+		mp.mu.RLock()
+		m := mp.metrics
+		cache := mp.cache
+		mp.mu.RUnlock()
+
+		if m != nil {
+			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: FetchStart})
+		}
+		start := time.Now()
 		remoteData, err := fetchFn(ctx)
+		elapsed := time.Since(start)
+
+		if m != nil {
+			evType := FetchComplete
+			if err != nil {
+				evType = FetchError
+			}
+			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: evType, Duration: elapsed})
+		}
+
 		if err != nil {
 			// Remote apply succeeded but re-fetch failed — data is
 			// optimistically correct, just not reconciled yet.
 			return PoolUpdatedMsg{Key: key}
+		}
+
+		if cache != nil {
+			if err := cache.Save(key, remoteData, time.Now()); err != nil {
+				log.Printf("pool cache save %s: %v", key, err)
+			}
 		}
 
 		mp.reconcile(gen, remoteData)
@@ -120,7 +152,25 @@ func (mp *MutatingPool[T]) Fetch(ctx context.Context) tea.Cmd {
 	mp.mu.Unlock()
 
 	return func() tea.Msg {
+		mp.mu.RLock()
+		m := mp.metrics
+		fetchKey := mp.key
+		mp.mu.RUnlock()
+
+		if m != nil {
+			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, EventType: FetchStart})
+		}
+		start := time.Now()
 		data, err := mp.fetchFn(ctx)
+		elapsed := time.Since(start)
+
+		if m != nil {
+			evType := FetchComplete
+			if err != nil {
+				evType = FetchError
+			}
+			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, EventType: evType, Duration: elapsed})
+		}
 
 		mp.mu.Lock()
 		mp.fetching = false
@@ -136,7 +186,17 @@ func (mp *MutatingPool[T]) Fetch(ctx context.Context) tea.Cmd {
 			mp.mu.Unlock()
 			return PoolUpdatedMsg{Key: mp.key}
 		}
+
+		// Capture cache refs under lock, then save outside to avoid blocking readers.
+		cache := mp.cache
+		cacheKey := mp.key
 		mp.mu.Unlock()
+
+		if cache != nil {
+			if err := cache.Save(cacheKey, data, time.Now()); err != nil {
+				log.Printf("pool cache save %s: %v", cacheKey, err)
+			}
+		}
 
 		mp.reconcile(gen, data)
 		return PoolUpdatedMsg{Key: mp.key}
@@ -158,6 +218,7 @@ func (mp *MutatingPool[T]) Clear() {
 	mp.clearLocked()
 	mp.pendingMutations = nil
 	mp.lastRemoteData = nil
+	mp.lastCachedFetchedAt = time.Time{}
 	mp.hasRemoteData = false
 	mp.mu.Unlock()
 	// Unregister outside pool lock to avoid lock-order inversion.
@@ -180,6 +241,7 @@ func (mp *MutatingPool[T]) reconcile(gen uint64, remoteData T) {
 
 	cp := remoteData
 	mp.lastRemoteData = &cp
+	mp.lastCachedFetchedAt = time.Time{} // live data replaces any cache baseline
 	mp.hasRemoteData = true
 
 	// Prune mutations already reflected in remote state.
@@ -202,6 +264,7 @@ func (mp *MutatingPool[T]) reconcile(gen uint64, remoteData T) {
 	mp.snapshot.FetchedAt = time.Now()
 	mp.snapshot.HasData = true
 	mp.snapshot.Err = nil
+	mp.cachedFetchedAt = time.Time{} // real fetch replaces cache-seeded data
 	mp.version++
 }
 
@@ -232,6 +295,7 @@ func (mp *MutatingPool[T]) rollback(gen uint64, mutationID uint64) {
 		mp.snapshot.State = StateFresh
 		mp.snapshot.FetchedAt = time.Now()
 		mp.snapshot.Err = nil
+		mp.cachedFetchedAt = mp.lastCachedFetchedAt // restore baseline age (zero if from live fetch)
 		mp.version++
 	}
 }

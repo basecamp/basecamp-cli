@@ -88,7 +88,7 @@ func DefaultGlobalKeyMap() GlobalKeyMap {
 		),
 		Metrics: key.NewBinding(
 			key.WithKeys("`"),
-			key.WithHelp("`", "metrics"),
+			key.WithHelp("`", "pool monitor"),
 		),
 	}
 }
