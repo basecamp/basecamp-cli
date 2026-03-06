@@ -110,8 +110,12 @@ func (s *Summarizer) Summarize(ctx context.Context, req Request) tea.Cmd {
 			s.mu.Unlock()
 		}()
 
-		// Semaphore
-		s.sem <- struct{}{}
+		// Semaphore — context-aware to avoid blocking after cancellation.
+		select {
+		case s.sem <- struct{}{}:
+		case <-ctx.Done():
+			return nil
+		}
 		defer func() { <-s.sem }()
 
 		prompt := BuildPrompt(req.Content, req.TargetChars, req.Hint)

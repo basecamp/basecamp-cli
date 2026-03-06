@@ -233,9 +233,11 @@ func (f *FrontPage) digestItems(entries []data.BonfireDigestEntry, theme tui.The
 		tier := classifyBurst(e)
 		switch tier {
 		case burstHot:
-			prefix = "\u25cf "
+			prefix = "\u25cf " // ●
+		case burstWarm:
+			prefix = "\u25d0 " // ◐
 		default:
-			prefix = "\u25cb "
+			prefix = "\u25cb " // ○
 		}
 		title := prefix + e.RoomName
 

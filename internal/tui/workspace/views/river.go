@@ -192,7 +192,7 @@ func (r *River) Init() tea.Cmd {
 	ctx := r.session.Context()
 	return tea.Batch(
 		r.spinner.Tick,
-		r.roomPool.Fetch(ctx),
+		r.roomPool.FetchIfStale(ctx),
 	)
 }
 

@@ -495,7 +495,7 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 
 					entry := BonfireDigestEntry{
 						RoomID:   rc.RoomID,
-						RoomName: rc.ProjectName,
+						RoomName: rc.RoomName,
 					}
 
 					client := h.multi.ClientFor(rc.AccountID)
