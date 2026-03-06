@@ -78,7 +78,8 @@ func (s *Summarizer) SummarizeSync(req Request) Result {
 // On completion, emits SummaryReadyMsg. The caller should then
 // call SummarizeSync to get the (now cached) result.
 // Returns nil if no provider is configured or request is already in-flight.
-func (s *Summarizer) Summarize(req Request) tea.Cmd {
+// The parent context is used to cancel in-flight LLM calls on shutdown.
+func (s *Summarizer) Summarize(ctx context.Context, req Request) tea.Cmd {
 	if s.provider == nil {
 		return nil
 	}
@@ -119,7 +120,7 @@ func (s *Summarizer) Summarize(req Request) tea.Cmd {
 			maxTokens = 50
 		}
 
-		llmCtx, llmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer llmCancel()
 		result, err := s.provider.Complete(llmCtx, prompt, maxTokens)
 		if err != nil {

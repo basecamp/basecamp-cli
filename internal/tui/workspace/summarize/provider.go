@@ -27,7 +27,7 @@ func DetectProvider(providerName, endpoint, apiKey, model string) Provider {
 		return nil
 	case "none", "disabled":
 		return nil
-	case "":
+	case "", "auto":
 		return autoDetectProvider()
 	default:
 		// Unknown provider name — fail closed rather than silently

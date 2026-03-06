@@ -1,6 +1,7 @@
 package summarize
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -292,7 +293,7 @@ func TestSummarizer_SummarizeSync_CachedResult(t *testing.T) {
 
 func TestSummarizer_Summarize_NilProvider(t *testing.T) {
 	s := NewSummarizer(nil, nil, 3)
-	cmd := s.Summarize(Request{
+	cmd := s.Summarize(context.Background(), Request{
 		ContentKey:  "test:1",
 		Content:     []Segment{{Author: "A", Text: "B"}},
 		TargetChars: 80,
