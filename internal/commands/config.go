@@ -106,9 +106,13 @@ func runConfigShow(cmd *cobra.Command) error {
 
 	// Show experimental feature flags.
 	for feature, enabled := range app.Config.Experimental {
+		source := app.Config.Sources["experimental."+feature]
+		if source == "" {
+			source = "default"
+		}
 		configData["experimental."+feature] = map[string]string{
 			"value":  fmt.Sprintf("%t", enabled),
-			"source": "config",
+			"source": source,
 		}
 	}
 

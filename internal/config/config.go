@@ -282,9 +282,9 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		for feature, val := range v {
 			if enabled, ok := val.(bool); ok {
 				cfg.Experimental[feature] = enabled
+				cfg.Sources["experimental."+feature] = string(source)
 			}
 		}
-		cfg.Sources["experimental"] = string(source)
 	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
 		if untrusted {
