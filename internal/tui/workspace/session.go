@@ -47,7 +47,7 @@ func NewSession(app *appctx.App) *Session {
 		styles:     tui.NewStylesWithTheme(tui.ResolveTheme(true)),
 		hasDarkBG:  true,
 		multiStore: ms,
-		hub:        data.NewHub(ms),
+		hub:        data.NewHub(ms, app.Config.CacheDir),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -198,7 +198,7 @@ func NewTestSession() *Session {
 // which is enough for key handler tests that exercise the state machine.
 func NewTestSessionWithHub() *Session {
 	s := NewTestSession()
-	s.hub = data.NewHub(s.multiStore)
+	s.hub = data.NewHub(s.multiStore, "")
 	s.summarizer = summarize.NewSummarizer(nil, nil, 1)
 	return s
 }

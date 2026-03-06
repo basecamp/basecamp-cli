@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -56,6 +57,8 @@ type Pool[T any] struct {
 	focused         bool
 	terminalFocused bool // false when the terminal window has lost OS focus
 	metrics         *PoolMetrics
+	cache           *PoolCache
+	cachedFetchedAt time.Time // real FetchedAt from disk cache (for accurate age display)
 
 	// Cumulative counters for observability (separate from missCount backoff state).
 	cumulativeHits   int
@@ -75,6 +78,31 @@ func NewPool[T any](key string, config PoolConfig, fetchFn FetchFunc[T]) *Pool[T
 
 // Key returns the pool's identifier.
 func (p *Pool[T]) Key() string { return p.key }
+
+// SetCache sets the disk cache for this pool.
+// If cached data exists, seeds the snapshot as Stale for SWR boot.
+// FetchedAt is set to now (not the original fetch time) so the data
+// falls within the stale window and isn't immediately expired by Get().
+func (p *Pool[T]) SetCache(c *PoolCache) {
+	if c == nil {
+		return
+	}
+	p.mu.Lock()
+	p.cache = c
+	// Only seed from cache if pool has no data yet.
+	if !p.snapshot.HasData {
+		var data T
+		if fetchedAt, ok := c.Load(p.key, &data); ok {
+			p.snapshot.Data = data
+			p.snapshot.State = StateStale
+			p.snapshot.FetchedAt = time.Now() // anchor TTL to now so data isn't immediately expired
+			p.snapshot.HasData = true
+			p.cachedFetchedAt = fetchedAt // preserve real time for age display
+			p.version++
+		}
+	}
+	p.mu.Unlock()
+}
 
 // SetMetrics sets the metrics collector for this pool.
 func (p *Pool[T]) SetMetrics(m *PoolMetrics) {
@@ -172,7 +200,13 @@ func (p *Pool[T]) Fetch(ctx context.Context) tea.Cmd {
 			p.snapshot.FetchedAt = time.Now()
 			p.snapshot.HasData = true
 			p.snapshot.Err = nil
+			p.cachedFetchedAt = time.Time{} // real fetch replaces cache-seeded data
 			p.version++
+			if p.cache != nil {
+				if err := p.cache.Save(p.key, data, p.snapshot.FetchedAt); err != nil {
+					log.Printf("pool cache save %s: %v", p.key, err)
+				}
+			}
 		}
 		return PoolUpdatedMsg{Key: p.key}
 	}
@@ -223,6 +257,7 @@ func (p *Pool[T]) Set(data T) {
 	p.snapshot.FetchedAt = time.Now()
 	p.snapshot.HasData = true
 	p.snapshot.Err = nil
+	p.cachedFetchedAt = time.Time{}
 	p.version++
 }
 
@@ -241,6 +276,7 @@ func (p *Pool[T]) Clear() {
 func (p *Pool[T]) clearLocked() {
 	var zero T
 	p.snapshot = Snapshot[T]{Data: zero}
+	p.cachedFetchedAt = time.Time{}
 	p.version++
 	p.generation++
 	p.fetching = false
@@ -326,15 +362,17 @@ func (p *Pool[T]) Status() PoolStatus {
 	}
 
 	return PoolStatus{
-		Key:          p.key,
-		State:        p.snapshot.State,
-		FetchedAt:    p.snapshot.FetchedAt,
-		PollInterval: p.pollInterval(),
-		HitCount:     p.cumulativeHits,
-		MissCount:    p.cumulativeMisses,
-		FetchCount:   fetchCount,
-		ErrorCount:   errorCount,
-		AvgLatency:   avgLatency,
+		Key:             p.key,
+		State:           p.snapshot.State,
+		Fetching:        p.fetching,
+		FetchedAt:       p.snapshot.FetchedAt,
+		CachedFetchedAt: p.cachedFetchedAt,
+		PollInterval:    p.pollInterval(),
+		HitCount:        p.cumulativeHits,
+		MissCount:       p.cumulativeMisses,
+		FetchCount:      fetchCount,
+		ErrorCount:      errorCount,
+		AvgLatency:      avgLatency,
 	}
 }
 

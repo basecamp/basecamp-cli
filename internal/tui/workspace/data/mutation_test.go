@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -317,6 +318,166 @@ func TestMutatingPoolClearVsInflightRollback(t *testing.T) {
 	require.True(t, snap.HasData)
 	require.Len(t, snap.Data, 1)
 	assert.Equal(t, 77, snap.Data[0].ID)
+}
+
+func TestMutatingPoolApplyRecordsTelemetry(t *testing.T) {
+	metrics := NewPoolMetrics()
+	mp := newTestMutatingPool()
+	mp.SetMetrics(metrics)
+	mp.Pool.Fetch(context.Background())()
+
+	// Clear events from the initial fetch so we only see Apply's events.
+	metrics.mu.Lock()
+	metrics.events = nil
+	metrics.mu.Unlock()
+
+	cmd := mp.Apply(context.Background(), completeMutation{itemID: 1})
+	cmd()
+
+	events := metrics.RecentEvents(10)
+	require.GreaterOrEqual(t, len(events), 2, "Apply should record FetchStart + FetchComplete")
+
+	var hasStart, hasComplete bool
+	for _, e := range events {
+		switch e.EventType {
+		case FetchStart:
+			hasStart = true
+			assert.Equal(t, "items", e.PoolKey)
+		case FetchComplete:
+			hasComplete = true
+			assert.Equal(t, "items", e.PoolKey)
+		case FetchError:
+			t.Fatal("unexpected FetchError event")
+		}
+	}
+	assert.True(t, hasStart, "should record FetchStart")
+	assert.True(t, hasComplete, "should record FetchComplete")
+}
+
+func TestMutatingPoolApplySavesToCache(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewPoolCache(dir)
+
+	// Server returns completed item after mutation succeeds.
+	fetchCount := 0
+	mp := NewMutatingPool("cached-mut", PoolConfig{}, func(ctx context.Context) ([]testItem, error) {
+		fetchCount++
+		if fetchCount <= 1 {
+			return []testItem{{ID: 1}, {ID: 2}}, nil
+		}
+		return []testItem{{ID: 1, Completed: true}, {ID: 2}}, nil
+	})
+	mp.SetCache(cache)
+	mp.Pool.Fetch(context.Background())()
+
+	cmd := mp.Apply(context.Background(), completeMutation{itemID: 1})
+	cmd()
+
+	// Cache write is synchronous — data should be available immediately.
+	var items []testItem
+	_, ok := cache.Load("cached-mut", &items)
+	require.True(t, ok)
+	assert.Len(t, items, 2, "cache should contain server response")
+}
+
+func TestMutatingPoolRollbackPreservesCachedAge(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewPoolCache(dir)
+
+	// Seed cache with data from 10 minutes ago.
+	realFetchedAt := time.Now().Add(-10 * time.Minute)
+	require.NoError(t, cache.Save("rb-age", []testItem{{ID: 1}}, realFetchedAt))
+
+	mp := NewMutatingPool("rb-age", PoolConfig{FreshTTL: time.Hour, StaleTTL: time.Hour},
+		func(ctx context.Context) ([]testItem, error) {
+			return nil, errors.New("fetch fails")
+		})
+	mp.SetCache(cache)
+
+	// Pool is cache-seeded with real age.
+	status := mp.Status()
+	require.False(t, status.CachedFetchedAt.IsZero())
+
+	// Apply mutation that fails remotely — triggers rollback.
+	cmd := mp.Apply(context.Background(), completeMutation{
+		itemID:    1,
+		remoteErr: errors.New("remote fail"),
+	})
+	cmd()
+
+	// After rollback, data is back to cache-seeded state.
+	// CachedFetchedAt should be restored, not cleared.
+	status = mp.Status()
+	assert.False(t, status.CachedFetchedAt.IsZero(),
+		"rollback to cache-seeded baseline should preserve cached age")
+	assert.WithinDuration(t, realFetchedAt, status.CachedFetchedAt, time.Second)
+}
+
+func TestMutatingPoolCachedAgeConsistentAcrossMutations(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewPoolCache(dir)
+
+	// Seed cache with data from 10 minutes ago.
+	realFetchedAt := time.Now().Add(-10 * time.Minute)
+	require.NoError(t, cache.Save("age-multi", []testItem{{ID: 1}, {ID: 2}}, realFetchedAt))
+
+	mp := NewMutatingPool("age-multi", PoolConfig{FreshTTL: time.Hour, StaleTTL: time.Hour},
+		func(ctx context.Context) ([]testItem, error) {
+			// Server never reflects mutations — all stay pending.
+			return []testItem{{ID: 1}, {ID: 2}}, nil
+		})
+	mp.SetCache(cache)
+
+	// Baseline: cache age visible.
+	status := mp.Status()
+	require.WithinDuration(t, realFetchedAt, status.CachedFetchedAt, time.Second)
+
+	// Mutation A succeeds remotely but stays pending (server doesn't reflect it).
+	cmdA := mp.Apply(context.Background(), completeMutation{itemID: 1})
+
+	// Age should still reflect the cache baseline, not "just now".
+	status = mp.Status()
+	assert.WithinDuration(t, realFetchedAt, status.CachedFetchedAt, time.Second,
+		"optimistic mutation should preserve remote baseline age")
+
+	// Mutation B fails remotely — triggers rollback of B only.
+	cmdB := mp.Apply(context.Background(), completeMutation{
+		itemID:    2,
+		remoteErr: errors.New("remote fail"),
+	})
+
+	// Both mutations applied locally; age still reflects cache baseline.
+	status = mp.Status()
+	assert.WithinDuration(t, realFetchedAt, status.CachedFetchedAt, time.Second,
+		"second mutation should preserve remote baseline age")
+
+	// Run B first — it fails remotely, rolling back while baseline is still cache-seeded.
+	cmdB()
+
+	// After B's rollback, A is still pending and baseline is still cache-seeded.
+	// Age should reflect the cache baseline.
+	status = mp.Status()
+	assert.WithinDuration(t, realFetchedAt, status.CachedFetchedAt, time.Second,
+		"rollback with pending mutation A should preserve cache baseline age")
+
+	// A is still pending, B was removed.
+	mp.mu.RLock()
+	pending := len(mp.pendingMutations)
+	mp.mu.RUnlock()
+	assert.Equal(t, 1, pending, "mutation A should remain pending after B's rollback")
+
+	// Item 1 still completed (A re-applied), item 2 rolled back.
+	data := mp.Get().Data
+	assert.True(t, data[0].Completed, "A's local mutation should be re-applied")
+	assert.False(t, data[1].Completed, "B should be rolled back")
+
+	// Now run A — succeeds + re-fetches with live server data.
+	cmdA()
+
+	// After A's reconcile, cachedFetchedAt should be cleared.
+	status = mp.Status()
+	assert.True(t, status.CachedFetchedAt.IsZero(),
+		"after live reconcile, cached age should be cleared")
 }
 
 func TestMutatingPoolMultipleMutations(t *testing.T) {

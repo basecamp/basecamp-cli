@@ -87,6 +87,7 @@ func (h *Hub) HeyActivity() *Pool[[]ActivityEntryInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -131,6 +132,7 @@ func (h *Hub) Pulse() *Pool[[]ActivityEntryInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -185,6 +187,7 @@ func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -536,6 +539,7 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -581,6 +585,7 @@ func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -746,6 +751,7 @@ func (h *Hub) Projects() *Pool[[]ProjectInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 

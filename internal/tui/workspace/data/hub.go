@@ -31,15 +31,22 @@ type Hub struct {
 	metrics         *PoolMetrics
 	roomStore       *RoomStore                     // optional; filters BonfireRooms when non-nil
 	recentProjects  func(accountID string) []int64 // optional; returns recent project IDs scoped to one account
+	cache           *PoolCache
 }
 
 // NewHub creates a Hub with a global realm and the given dependencies.
-func NewHub(multi *MultiStore) *Hub {
+// cacheDir may be empty to disable persistent caching.
+func NewHub(multi *MultiStore, cacheDir string) *Hub {
+	var poolCacheDir string
+	if cacheDir != "" {
+		poolCacheDir = cacheDir + "/pools"
+	}
 	return &Hub{
 		global:          NewRealm("global", context.Background()),
 		terminalFocused: true,
 		multi:           multi,
 		metrics:         NewPoolMetrics(),
+		cache:           NewPoolCache(poolCacheDir),
 	}
 }
 
@@ -285,6 +292,7 @@ func (h *Hub) ScheduleEntries(projectID, scheduleID int64) *Pool[[]ScheduleEntry
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -317,6 +325,7 @@ func (h *Hub) Checkins(projectID, questionnaireID int64) *Pool[[]CheckinQuestion
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -346,6 +355,7 @@ func (h *Hub) CheckinAnswers(projectID, questionID int64) *Pool[[]CheckinAnswerI
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -427,6 +437,7 @@ func (h *Hub) DocsFiles(projectID, vaultID int64) *Pool[[]DocsFilesItemInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -469,6 +480,7 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -495,6 +507,7 @@ func (h *Hub) Todolists(projectID, todosetID int64) *Pool[[]TodolistInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -533,6 +546,7 @@ func (h *Hub) Todos(projectID, todolistID int64) *MutatingPool[[]TodoInfo] {
 		})
 	})
 	mp.SetMetrics(h.metrics)
+	mp.SetCache(h.cache)
 	return mp
 }
 
@@ -572,6 +586,7 @@ func (h *Hub) CompletedTodos(projectID, todolistID int64) *Pool[[]TodoInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -625,6 +640,7 @@ func (h *Hub) Cards(projectID, tableID int64) *MutatingPool[[]CardColumnInfo] {
 		})
 	})
 	mp.SetMetrics(h.metrics)
+	mp.SetCache(h.cache)
 	return mp
 }
 
@@ -724,6 +740,7 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -760,6 +777,7 @@ func (h *Hub) Messages(projectID, boardID int64) *Pool[[]MessageInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -786,6 +804,7 @@ func (h *Hub) Forwards(projectID, inboxID int64) *Pool[[]ForwardInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -837,6 +856,7 @@ func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
@@ -856,6 +876,7 @@ func (h *Hub) Boosts(projectID, recordingID int64) *Pool[BoostSummary] {
 		})
 	})
 	p.SetMetrics(h.metrics)
+	p.SetCache(h.cache)
 	return p
 }
 
