@@ -1,5 +1,22 @@
 # <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI
 
+```
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣶⣶⣶⣶⣶⣶⣦⣤⣀
+⠀⠀⠀⠀⠀⠀⠀⢀⣴⣾⣿⣿⣿⠿⠿⠛⠛⠛⠻⠿⣿⣿⣿⣦⣀
+⠀⠀⠀⠀⠀⢀⣴⣿⣿⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣿⣿⣦⡀
+⠀⠀⠀⠀⣴⣿⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢿⣿⣿⣄
+⠀⠀⢀⣼⣿⣿⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣤⡀⠀⠀⠀⠀⢻⣿⣿⣆
+⠀⢀⣾⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⠃⠀⠀⠀⠀⠀⢻⣿⣿⡄
+⠀⣼⣿⣿⠃⠀⠀⣠⣶⣿⣷⣦⣄⠀⠀⢀⣼⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⢿⣿⣿⡀
+⢸⣿⣿⠇⠀⢠⣾⣿⡿⠛⠻⣿⣿⣷⣤⣾⣿⡿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣿⣇
+⠈⠉⠉⠀⢠⣿⣿⡟⠁⠀⠀⠈⠻⣿⣿⣿⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣿
+⠀⠀⠀⢠⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⡇
+⠀⠀⠀⢻⣿⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⣿⣿⠇
+⠀⠀⠀⠀⠙⠿⣿⣿⣷⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣶⣿⣿⡿⠋
+⠀⠀⠀⠀⠀⠀⠈⠛⠿⣿⣿⣿⣿⣶⣶⣶⣶⣶⣶⣶⣶⣶⣿⣿⣿⣿⡿⠟⠉
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠛⠛⠿⠿⠿⠿⠿⠿⠟⠛⠛⠉⠉
+```
+
 `basecamp` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
