@@ -576,13 +576,8 @@ func (c *Composer) ProcessPaste(text string) (string, tea.Cmd) {
 			continue
 		}
 
-		// Expand ~ to home directory
-		expanded := trimmed
-		if strings.HasPrefix(expanded, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				expanded = filepath.Join(filepath.Clean(home), expanded[2:])
-			}
-		}
+		// Normalize drag-and-drop paths (shell escapes, quotes, file:// URLs, ~)
+		expanded := richtext.NormalizeDragPath(trimmed)
 
 		// Check if it's a file path
 		info, err := os.Stat(expanded)

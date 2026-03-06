@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -225,6 +226,61 @@ func TestComposerProcessPaste(t *testing.T) {
 		t.Errorf("expected 1 attachment, got %d", len(c.Attachments()))
 	}
 	_ = cmd // upload command (nil without upload fn)
+}
+
+func TestComposerProcessPasteShellEscaped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "my file (1).pdf")
+	os.WriteFile(path, []byte("%PDF"), 0o644)
+
+	// Shell-escaped form: spaces and parens escaped with backslashes
+	escaped := strings.ReplaceAll(dir, " ", `\ `) + `/my\ file\ \(1\).pdf`
+
+	c := NewComposer(testStyles())
+	text, _ := c.ProcessPaste(escaped)
+	if text != "" {
+		t.Errorf("remaining text = %q, want empty (file should be attached)", text)
+	}
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
+	if c.Attachments()[0].Filename != "my file (1).pdf" {
+		t.Errorf("filename = %q, want %q", c.Attachments()[0].Filename, "my file (1).pdf")
+	}
+}
+
+func TestComposerProcessPasteQuoted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "my file.pdf")
+	os.WriteFile(path, []byte("%PDF"), 0o644)
+
+	quoted := "'" + path + "'"
+
+	c := NewComposer(testStyles())
+	text, _ := c.ProcessPaste(quoted)
+	if text != "" {
+		t.Errorf("remaining text = %q, want empty", text)
+	}
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
+}
+
+func TestComposerProcessPasteFileURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "my file.pdf")
+	os.WriteFile(path, []byte("%PDF"), 0o644)
+
+	fileURL := "file://" + strings.ReplaceAll(path, " ", "%20")
+
+	c := NewComposer(testStyles())
+	text, _ := c.ProcessPaste(fileURL)
+	if text != "" {
+		t.Errorf("remaining text = %q, want empty", text)
+	}
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
 }
 
 func TestComposerProcessPasteNoFiles(t *testing.T) {
