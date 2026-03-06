@@ -53,10 +53,12 @@ func (s *Store) Add(item Item) {
 
 		items := s.items[item.Type]
 
-		// Remove existing item with same ID
+		// Remove existing item with same identity (ID + AccountID).
+		// AccountID is included so that the same numeric ID in different
+		// accounts (e.g. project 42 in accounts A and B) coexists.
 		filtered := make([]Item, 0, len(items))
 		for _, existing := range items {
-			if existing.ID != item.ID {
+			if existing.ID != item.ID || existing.AccountID != item.AccountID {
 				filtered = append(filtered, existing)
 			}
 		}

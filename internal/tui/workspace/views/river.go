@@ -306,8 +306,47 @@ func (r *River) onRoomsUpdated() tea.Cmd {
 	// gets representation before any account gets a second room.
 	rooms := data.CapRoomsRoundRobin(snap.Data, 8)
 
+	// Build set of current room keys for teardown check.
+	currentKeys := make(map[string]struct{}, len(rooms))
+	for _, room := range rooms {
+		currentKeys[room.Key()] = struct{}{}
+	}
+
+	// Tear down pools/state for rooms that fell out of the set.
+	for rkey, pool := range r.linePools {
+		if _, ok := currentKeys[rkey]; !ok {
+			r.pollGens[rkey]++ // invalidate any in-flight timer
+			pool.Clear()
+			delete(r.linePools, rkey)
+			delete(r.pollGens, rkey)
+			delete(r.volumes, rkey)
+			delete(r.watermarks, rkey)
+			// Clean up expanded gap keys for this room.
+			for gk := range r.expandedGaps {
+				if strings.HasPrefix(gk, rkey+":") {
+					delete(r.expandedGaps, gk)
+				}
+			}
+			r.segmenter.PruneRoom(rkey)
+		}
+	}
+
+	// Preserve focused room by identity, not index.
+	var prevActiveKey string
+	if r.activeRoom < len(r.rooms) {
+		prevActiveKey = r.rooms[r.activeRoom].Key()
+	}
+	var prevMixerKey string
+	if r.mixerCursor < len(r.rooms) {
+		prevMixerKey = r.rooms[r.mixerCursor].Key()
+	}
+
 	r.rooms = rooms
 	r.loading = false
+
+	// Restore cursors by room key; fall back to clamping if room disappeared.
+	r.activeRoom = indexOfRoomKey(r.rooms, prevActiveKey)
+	r.mixerCursor = indexOfRoomKey(r.rooms, prevMixerKey)
 
 	// Create line pools for new rooms
 	var cmds []tea.Cmd
@@ -483,6 +522,9 @@ func (r *River) handleScrollKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, r.keys.Briefing):
 		r.briefingMode = !r.briefingMode
 		r.renderSegments()
+		if r.briefingMode {
+			return r.kickOffGapSummaries()
+		}
 
 	case key.Matches(msg, r.keys.Mixer):
 		r.mixerActive = !r.mixerActive
@@ -559,24 +601,58 @@ func (r *River) buildGapSummarySegments(seg *data.Segment) []summarize.Segment {
 	return sumSegs
 }
 
+// kickOffGapSummaries fires async LLM summarize calls for all existing gap regions.
+// Called when briefing mode is toggled on after data is already loaded.
+func (r *River) kickOffGapSummaries() tea.Cmd {
+	if r.session.Summarizer() == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, seg := range r.segmenter.Segments() {
+		if r.isInGapRegion(seg) && len(seg.Lines) > 0 {
+			cmd := r.session.Summarizer().Summarize(summarize.Request{
+				ContentKey:  r.gapContentKey(seg),
+				Content:     r.buildGapSummarySegments(seg),
+				TargetChars: 200,
+				Hint:        summarize.HintGap,
+			})
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	if len(cmds) > 0 {
+		return tea.Batch(cmds...)
+	}
+	return nil
+}
+
 func (r *River) gapContentKey(seg *data.Segment) string {
 	return fmt.Sprintf("campfire:%d:gap:%d-%d", seg.RoomID.CampfireID, seg.Lines[0].ID, seg.Lines[len(seg.Lines)-1].ID)
 }
 
 func (r *River) renderWatermark(b *strings.Builder, theme tui.Theme) {
+	// Pick the earliest watermark across all rooms for deterministic placement.
+	var earliest *watermark
 	for _, wm := range r.watermarks {
-		awayDuration := wm.awayEnd.Sub(wm.awayStart)
-		var durationStr string
-		if awayDuration < time.Hour {
-			durationStr = fmt.Sprintf("%d min", int(awayDuration.Minutes()))
-		} else {
-			durationStr = fmt.Sprintf("%.1f hr", awayDuration.Hours())
+		wm := wm
+		if earliest == nil || wm.awayStart.Before(earliest.awayStart) {
+			earliest = &wm
 		}
-		line := fmt.Sprintf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 You were away (%s) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550", durationStr)
-		b.WriteString(lipgloss.NewStyle().Foreground(theme.Warning).Render(line))
-		b.WriteString("\n")
-		break // only render one watermark
 	}
+	if earliest == nil {
+		return
+	}
+	awayDuration := earliest.awayEnd.Sub(earliest.awayStart)
+	var durationStr string
+	if awayDuration < time.Hour {
+		durationStr = fmt.Sprintf("%d min", int(awayDuration.Minutes()))
+	} else {
+		durationStr = fmt.Sprintf("%.1f hr", awayDuration.Hours())
+	}
+	line := fmt.Sprintf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 You were away (%s) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550", durationStr)
+	b.WriteString(lipgloss.NewStyle().Foreground(theme.Warning).Render(line))
+	b.WriteString("\n")
 }
 
 func (r *River) renderSegments() {
@@ -597,15 +673,19 @@ func (r *River) renderSegments() {
 			b.WriteString("\n")
 		}
 
-		// Render watermark line before the first post-watermark segment
+		// Render watermark line before the first post-watermark segment.
+		// Use earliest watermark for deterministic placement.
 		if r.briefingMode && !watermarkRendered && len(r.watermarks) > 0 {
+			var earliestWM *watermark
 			for _, wm := range r.watermarks {
-				if seg.StartTime.After(wm.awayStart) {
-					r.renderWatermark(&b, theme)
-					watermarkRendered = true
-					break
+				wm := wm
+				if earliestWM == nil || wm.awayStart.Before(earliestWM.awayStart) {
+					earliestWM = &wm
 				}
-				break
+			}
+			if earliestWM != nil && seg.StartTime.After(earliestWM.awayStart) {
+				r.renderWatermark(&b, theme)
+				watermarkRendered = true
 			}
 		}
 
@@ -953,6 +1033,19 @@ func (r *River) SetSize(w, h int) {
 	r.viewport.SetWidth(w)
 	r.viewport.SetHeight(vpHeight)
 	r.composer.SetWidth(max(0, w-utf8.RuneCountInString(r.composer.Prompt)-1))
+}
+
+// indexOfRoomKey returns the index of the room with the given key, or 0 if not found.
+func indexOfRoomKey(rooms []data.BonfireRoomConfig, key string) int {
+	if key == "" {
+		return 0
+	}
+	for i, room := range rooms {
+		if room.Key() == key {
+			return i
+		}
+	}
+	return 0
 }
 
 // InputActive implements workspace.InputCapturer.

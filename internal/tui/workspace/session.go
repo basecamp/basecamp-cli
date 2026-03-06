@@ -59,8 +59,8 @@ func NewSession(app *appctx.App) *Session {
 	if app.Config.CacheDir != "" {
 		s.recents = recents.NewStore(app.Config.CacheDir)
 		s.hub.SetRoomStore(data.NewRoomStore(app.Config.CacheDir))
-		s.hub.SetRecentProjects(func() []int64 {
-			items := s.recents.Get(recents.TypeProject, "", "")
+		s.hub.SetRecentProjects(func(accountID string) []int64 {
+			items := s.recents.Get(recents.TypeProject, accountID, "")
 			ids := make([]int64, 0, len(items))
 			for _, item := range items {
 				if id, err := strconv.ParseInt(item.ID, 10, 64); err == nil {

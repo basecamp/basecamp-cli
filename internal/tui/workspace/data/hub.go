@@ -29,8 +29,8 @@ type Hub struct {
 	terminalFocused bool   // persisted so new realms/pools inherit the state
 	multi           *MultiStore
 	metrics         *PoolMetrics
-	roomStore       *RoomStore     // optional; filters BonfireRooms when non-nil
-	recentProjects  func() []int64 // optional; returns recent project IDs for room selection
+	roomStore       *RoomStore                  // optional; filters BonfireRooms when non-nil
+	recentProjects  func(accountID string) []int64 // optional; returns recent project IDs scoped to one account
 }
 
 // NewHub creates a Hub with a global realm and the given dependencies.
@@ -53,9 +53,10 @@ func (h *Hub) SetRoomStore(rs *RoomStore) {
 	h.roomStore = rs
 }
 
-// SetRecentProjects configures a function that returns recently visited project IDs.
-// Used by BonfireRooms as a fallback when an account has no bookmarked projects.
-func (h *Hub) SetRecentProjects(fn func() []int64) {
+// SetRecentProjects configures a function that returns recently visited project IDs
+// scoped to a single account. Used by BonfireRooms as a fallback when an account
+// has no bookmarked projects.
+func (h *Hub) SetRecentProjects(fn func(accountID string) []int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.recentProjects = fn

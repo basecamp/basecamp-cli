@@ -394,6 +394,41 @@ func TestHubPeopleScopedToAccount(t *testing.T) {
 	assert.NotSame(t, pool, pool2, "account switch should produce fresh pool")
 }
 
+func TestHubSetRecentProjectsReceivesAccountID(t *testing.T) {
+	// Regression: SetRecentProjects callback must receive the account ID so
+	// recents are scoped per-account. Before the fix, the callback was
+	// func() []int64 (no account parameter), causing cross-account leaks
+	// when two accounts shared the same numeric project ID.
+	h := NewHub(NewMultiStore(nil))
+
+	var capturedIDs []string
+	h.SetRecentProjects(func(accountID string) []int64 {
+		capturedIDs = append(capturedIDs, accountID)
+		switch accountID {
+		case "acct-A":
+			return []int64{42, 100}
+		case "acct-B":
+			return []int64{42, 200} // project 42 exists in both accounts
+		default:
+			return nil
+		}
+	})
+
+	// Simulate calling the callback for each account
+	h.mu.RLock()
+	fn := h.recentProjects
+	h.mu.RUnlock()
+
+	require.NotNil(t, fn)
+	idsA := fn("acct-A")
+	idsB := fn("acct-B")
+
+	assert.Equal(t, []int64{42, 100}, idsA, "account A should get its own recents")
+	assert.Equal(t, []int64{42, 200}, idsB, "account B should get its own recents")
+	assert.Contains(t, capturedIDs, "acct-A")
+	assert.Contains(t, capturedIDs, "acct-B")
+}
+
 func TestHubForwards(t *testing.T) {
 	h := NewHub(NewMultiStore(nil))
 	h.EnsureAccount("aaa")

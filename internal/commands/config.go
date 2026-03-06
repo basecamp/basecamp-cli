@@ -277,7 +277,16 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				}
 				configData[key] = level
 				valueOut = value
-			case "llm_max_concurrent":
+			case "llm_provider":
+			validProviders := map[string]bool{
+				"anthropic": true, "openai": true, "ollama": true,
+				"apple": true, "none": true, "auto": true,
+			}
+			if !validProviders[value] {
+				return output.ErrUsage(fmt.Sprintf("llm_provider must be one of: anthropic, openai, ollama, apple, none, auto (got %q)", value))
+			}
+			configData[key] = value
+		case "llm_max_concurrent":
 				level, err := strconv.Atoi(value)
 				if err != nil || level < 1 || level > 10 {
 					return output.ErrUsage("llm_max_concurrent must be 1-10")

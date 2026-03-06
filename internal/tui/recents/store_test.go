@@ -94,6 +94,46 @@ func TestStore_FilterByAccount(t *testing.T) {
 	}
 }
 
+func TestStore_FilterByAccountIsolatesSameProjectID(t *testing.T) {
+	// Regression: two accounts with the same numeric project ID must not
+	// leak recents across accounts (the Bonfire room-selection bug).
+	// Dedup key is (ID, AccountID), so same ID in different accounts coexists.
+	tmpDir := t.TempDir()
+	store := NewStore(tmpDir)
+
+	// Project "42" exists in both accounts A and B.
+	store.Add(Item{ID: "42", Title: "Proj in A", Type: TypeProject, AccountID: "A"})
+	store.Add(Item{ID: "42", Title: "Proj in B", Type: TypeProject, AccountID: "B"})
+
+	// Unfiltered: both coexist (different AccountID = different identity)
+	all := store.Get(TypeProject, "", "")
+	require.Len(t, all, 2, "same ID in different accounts should coexist")
+
+	// Filtering by account returns only that account's version
+	acctA := store.Get(TypeProject, "A", "")
+	require.Len(t, acctA, 1)
+	assert.Equal(t, "A", acctA[0].AccountID)
+	assert.Equal(t, "Proj in A", acctA[0].Title)
+
+	acctB := store.Get(TypeProject, "B", "")
+	require.Len(t, acctB, 1)
+	assert.Equal(t, "B", acctB[0].AccountID)
+	assert.Equal(t, "Proj in B", acctB[0].Title)
+
+	// Re-adding A's project 42 updates it in place without touching B's
+	store.Add(Item{ID: "42", Title: "Proj in A v2", Type: TypeProject, AccountID: "A"})
+	all = store.Get(TypeProject, "", "")
+	require.Len(t, all, 2, "re-add should update, not duplicate")
+
+	acctA = store.Get(TypeProject, "A", "")
+	require.Len(t, acctA, 1)
+	assert.Equal(t, "Proj in A v2", acctA[0].Title)
+
+	acctB = store.Get(TypeProject, "B", "")
+	require.Len(t, acctB, 1)
+	assert.Equal(t, "Proj in B", acctB[0].Title, "B's entry must be untouched")
+}
+
 func TestStore_FilterByProject(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := NewStore(tmpDir)

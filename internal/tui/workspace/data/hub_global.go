@@ -321,14 +321,15 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 						bmKeys[rc.Key()] = struct{}{}
 					}
 				}
-				// If no bookmarks, fall back to recently visited projects.
+				// If no bookmarks, fall back to recently visited projects
+				// scoped to this account to avoid cross-account ID collisions.
 				if len(bookmarked) == 0 {
 					h.mu.RLock()
 					recentFn := h.recentProjects
 					h.mu.RUnlock()
 					if recentFn != nil {
 						recentIDs := make(map[int64]struct{})
-						for _, id := range recentFn() {
+						for _, id := range recentFn(acct.ID) {
 							recentIDs[id] = struct{}{}
 						}
 						for _, r := range rooms {

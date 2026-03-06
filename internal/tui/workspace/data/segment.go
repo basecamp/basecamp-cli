@@ -277,6 +277,20 @@ func (s *Segmenter) Segments() []*Segment {
 	return result
 }
 
+// PruneRoom removes all segments and tracking state for a room.
+// Called when a room falls out of the active Bonfire set.
+func (s *Segmenter) PruneRoom(roomKey string) {
+	delete(s.openSegs, roomKey)
+	delete(s.lastSeenID, roomKey)
+	filtered := s.segments[:0]
+	for _, seg := range s.segments {
+		if seg.RoomID.Key() != roomKey {
+			filtered = append(filtered, seg)
+		}
+	}
+	s.segments = filtered
+}
+
 // SegmentCount returns the total number of segments.
 func (s *Segmenter) SegmentCount() int {
 	return len(s.segments)

@@ -61,7 +61,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, prompt string, maxToke
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return "", fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, string(respBody))
 	}
 

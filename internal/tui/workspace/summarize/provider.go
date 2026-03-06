@@ -30,9 +30,9 @@ func DetectProvider(providerName, endpoint, apiKey, model string) Provider {
 	case "":
 		return autoDetectProvider()
 	default:
-		// Unknown provider name — fall back to auto-detect rather than
-		// silently ignoring the user's explicit configuration.
-		return autoDetectProvider()
+		// Unknown provider name — fail closed rather than silently
+		// falling through to auto-detect.
+		return nil
 	}
 }
 
