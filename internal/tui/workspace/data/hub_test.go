@@ -370,7 +370,7 @@ func TestHubPeople(t *testing.T) {
 
 	pool := h.People()
 	require.NotNil(t, pool)
-	assert.Equal(t, "people", pool.Key())
+	assert.Equal(t, "people:aaa", pool.Key())
 
 	pool2 := h.People()
 	assert.Same(t, pool, pool2)
@@ -392,6 +392,21 @@ func TestHubPeopleScopedToAccount(t *testing.T) {
 	h.SwitchAccount("bbb")
 	pool2 := h.People()
 	assert.NotSame(t, pool, pool2, "account switch should produce fresh pool")
+}
+
+func TestHubPeopleCacheKeyIsolation(t *testing.T) {
+	// Cache keys must differ per account so account A's people list
+	// cannot seed account B's People view on boot.
+	h := NewHub(NewMultiStore(nil), "")
+	h.EnsureAccount("aaa")
+	keyA := h.People().Key()
+
+	h.SwitchAccount("bbb")
+	keyB := h.People().Key()
+
+	assert.NotEqual(t, keyA, keyB, "people pool cache keys must differ across accounts")
+	assert.Contains(t, keyA, "aaa")
+	assert.Contains(t, keyB, "bbb")
 }
 
 func TestHubForwards(t *testing.T) {
