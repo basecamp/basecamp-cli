@@ -330,11 +330,12 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 	resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
 	if err == nil {
 		var profile struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
+			ID    int    `json:"id"`
+			Name  string `json:"name"`
+			Email string `json:"email_address"`
 		}
 		if err := resp.UnmarshalData(&profile); err == nil {
-			_ = app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID))
+			_ = app.Auth.SetUserIdentity(fmt.Sprintf("%d", profile.ID), profile.Email)
 			fmt.Println(styles.Success.Render(fmt.Sprintf("  Logged in as %s.", profile.Name)))
 		}
 	} else {

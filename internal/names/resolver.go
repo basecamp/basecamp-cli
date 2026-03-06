@@ -139,22 +139,27 @@ func (r *Resolver) ResolveProject(ctx context.Context, input string) (string, st
 // Special case: "me" resolves to the current user.
 // Returns the ID and the person's name for display.
 func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, string, error) {
-	// Handle "me" keyword
+	// Handle "me" keyword — resolve via stored email against account people list.
+	// The stored user ID is a cross-account identity ID which doesn't match
+	// account-scoped person IDs, so we match by email instead.
 	if strings.ToLower(input) == "me" {
-		userID := r.auth.GetUserID()
-		if userID != "" {
-			// Try to get the name from people list
+		email := r.auth.GetUserEmail()
+		if email != "" {
 			people, err := r.getPeople(ctx)
 			if err == nil {
 				for _, p := range people {
-					if strconv.FormatInt(p.ID, 10) == userID {
-						return userID, p.Name, nil
+					if strings.EqualFold(p.Email, email) {
+						return strconv.FormatInt(p.ID, 10), p.Name, nil
 					}
 				}
 			}
+		}
+		// Fall back to stored identity ID for backward compatibility
+		// (works for endpoints that accept identity IDs)
+		if userID := r.auth.GetUserID(); userID != "" {
 			return userID, "me", nil
 		}
-		return "", "", output.ErrAuth("User ID not available. Run: basecamp auth login")
+		return "", "", output.ErrAuth("User identity not available. Run: basecamp auth login")
 	}
 
 	// Numeric ID passthrough
@@ -284,15 +289,19 @@ func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {
 		return r.projects, nil
 	}
 
-	// Fetch from API
-	resp, err := r.forAccount().Get(ctx, "/projects.json")
+	// Fetch all pages from API
+	pages, err := r.forAccount().GetAll(ctx, "/projects.json")
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
 
 	var projects []Project
-	if err := json.Unmarshal(resp.Data, &projects); err != nil {
-		return nil, err
+	for _, page := range pages {
+		var p Project
+		if err := json.Unmarshal(page, &p); err != nil {
+			return nil, err
+		}
+		projects = append(projects, p)
 	}
 
 	r.projects = projects
@@ -315,15 +324,19 @@ func (r *Resolver) getPeople(ctx context.Context) ([]Person, error) {
 		return r.people, nil
 	}
 
-	// Fetch from API
-	resp, err := r.forAccount().Get(ctx, "/people.json")
+	// Fetch all pages from API
+	pages, err := r.forAccount().GetAll(ctx, "/people.json")
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
 
 	var people []Person
-	if err := json.Unmarshal(resp.Data, &people); err != nil {
-		return nil, err
+	for _, page := range pages {
+		var p Person
+		if err := json.Unmarshal(page, &p); err != nil {
+			return nil, err
+		}
+		people = append(people, p)
 	}
 
 	r.people = people

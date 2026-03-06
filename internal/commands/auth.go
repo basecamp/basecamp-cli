@@ -270,11 +270,12 @@ func buildLoginCmd(use string) *cobra.Command {
 			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
 			if err == nil {
 				var profile struct {
-					ID   int    `json:"id"`
-					Name string `json:"name"`
+					ID    int    `json:"id"`
+					Name  string `json:"name"`
+					Email string `json:"email_address"`
 				}
 				if err := resp.UnmarshalData(&profile); err == nil {
-					if err := app.Auth.SetUserID(fmt.Sprintf("%d", profile.ID)); err == nil {
+					if err := app.Auth.SetUserIdentity(fmt.Sprintf("%d", profile.ID), profile.Email); err == nil {
 						fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("Logged in as: %s", profile.Name)))
 					}
 				}

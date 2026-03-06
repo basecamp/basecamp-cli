@@ -83,8 +83,8 @@ func runMe(cmd *cobra.Command, args []string) error {
 		return convertSDKError(err)
 	}
 
-	// Store user ID for "me" resolution in future commands (non-fatal if fails)
-	_ = app.Auth.SetUserID(fmt.Sprintf("%d", authInfo.Identity.ID))
+	// Store user identity for "me" resolution in future commands (non-fatal if fails)
+	_ = app.Auth.SetUserIdentity(fmt.Sprintf("%d", authInfo.Identity.ID), authInfo.Identity.EmailAddress)
 
 	// Build account output (already filtered to bc3 by SDK)
 	var accounts []AccountInfo

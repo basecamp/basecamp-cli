@@ -413,11 +413,11 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 
 	if len(args) > 0 && args[0] == "me" {
 		// Personal timeline
-		userID := app.Auth.GetUserID()
-		if userID == "" {
-			return output.ErrAuth("User ID not available")
+		resolvedID, _, err := app.Names.ResolvePerson(ctx, "me")
+		if err != nil {
+			return err
 		}
-		personID, err := strconv.ParseInt(userID, 10, 64)
+		personID, err := strconv.ParseInt(resolvedID, 10, 64)
 		if err != nil {
 			return output.ErrUsage("Invalid user ID")
 		}

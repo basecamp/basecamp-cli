@@ -17,6 +17,7 @@ type Credentials struct {
 	OAuthType     string `json:"oauth_type"` // "bc3" or "launchpad"
 	TokenEndpoint string `json:"token_endpoint"`
 	UserID        string `json:"user_id,omitempty"`
+	UserEmail     string `json:"user_email,omitempty"`
 }
 
 // Store wraps credstore.Store with typed Credentials marshaling.

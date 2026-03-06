@@ -278,6 +278,31 @@ func TestSetUserID(t *testing.T) {
 	assert.Equal(t, "67890", loaded.UserID)
 }
 
+func TestSetUserIdentity(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		BaseURL: "https://3.basecampapi.com",
+	}
+	manager := NewManager(cfg, http.DefaultClient)
+	manager.store = newTestStore(t, tmpDir)
+
+	// Save initial credentials
+	creds := &Credentials{
+		AccessToken: "test-token",
+		ExpiresAt:   time.Now().Unix() + 3600,
+	}
+	manager.store.Save("https://3.basecampapi.com", creds)
+
+	// Set user identity
+	err := manager.SetUserIdentity("67890", "test@example.com")
+	require.NoError(t, err)
+
+	// Verify both were saved
+	assert.Equal(t, "67890", manager.GetUserID())
+	assert.Equal(t, "test@example.com", manager.GetUserEmail())
+}
+
 func TestLogout(t *testing.T) {
 	tmpDir := t.TempDir()
 

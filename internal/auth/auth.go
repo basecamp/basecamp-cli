@@ -778,6 +778,28 @@ func (m *Manager) SetUserID(userID string) error {
 	return m.store.Save(credKey, creds)
 }
 
+// GetUserEmail returns the stored user email for the current credential key.
+func (m *Manager) GetUserEmail() string {
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
+	if err != nil {
+		return ""
+	}
+	return creds.UserEmail
+}
+
+// SetUserIdentity stores the user ID and email for the current credential key.
+func (m *Manager) SetUserIdentity(userID, email string) error {
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
+	if err != nil {
+		return err
+	}
+	creds.UserID = userID
+	creds.UserEmail = email
+	return m.store.Save(credKey, creds)
+}
+
 // CredentialKey returns the current credential storage key.
 // This is exported for use in commands that need to display or lookup credentials.
 func (m *Manager) CredentialKey() string {
