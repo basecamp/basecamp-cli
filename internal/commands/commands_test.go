@@ -117,6 +117,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewSkillCmd())
 	root.AddCommand(commands.NewTUICmd())
 	root.AddCommand(commands.NewProfileCmd())
+	root.AddCommand(commands.NewBonfireCmd())
 	root.InitDefaultHelpCmd()
 	return root
 }

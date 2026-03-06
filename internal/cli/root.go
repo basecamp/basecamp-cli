@@ -215,6 +215,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewProfileCmd())
 	cmd.AddCommand(commands.NewSkillCmd())
 	cmd.AddCommand(commands.NewTUICmd())
+	cmd.AddCommand(commands.NewBonfireCmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
