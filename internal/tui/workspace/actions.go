@@ -29,8 +29,8 @@ type Action struct {
 	Category     string           // "navigation", "project", "mutation", etc.
 	Scope        ScopeRequirement // what scope context is needed
 	Experimental string           // non-empty = requires this experimental feature flag
-	Available   func(Scope) bool // optional; narrows scope check further
-	Execute     func(session *Session) tea.Cmd
+	Available    func(Scope) bool // optional; narrows scope check further
+	Execute      func(session *Session) tea.Cmd
 }
 
 // Registry holds all registered actions.

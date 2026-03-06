@@ -195,8 +195,6 @@ func (f *FrontPage) syncDigest(entries []data.BonfireDigestEntry) {
 }
 
 func (f *FrontPage) rebuildList() {
-	theme := f.styles.Theme()
-
 	// Prefer digest entries (sorted by recency from hub). Fall back to rooms.
 	digestSnap := f.digestPool.Get()
 	roomSnap := f.roomPool.Get()
@@ -205,7 +203,7 @@ func (f *FrontPage) rebuildList() {
 
 	if digestSnap.Usable() && len(digestSnap.Data) > 0 {
 		items = append(items, widget.ListItem{Title: "Campfires", Header: true})
-		items = append(items, f.digestItems(digestSnap.Data, theme)...)
+		items = append(items, f.digestItems(digestSnap.Data)...)
 	} else if roomSnap.Usable() && len(roomSnap.Data) > 0 {
 		// Fallback: just room names (plain text for filtering)
 		items = append(items, widget.ListItem{Title: "Campfires", Header: true})
@@ -221,7 +219,7 @@ func (f *FrontPage) rebuildList() {
 	f.list.SetItems(items)
 }
 
-func (f *FrontPage) digestItems(entries []data.BonfireDigestEntry, theme tui.Theme) []widget.ListItem {
+func (f *FrontPage) digestItems(entries []data.BonfireDigestEntry) []widget.ListItem {
 	items := make([]widget.ListItem, 0, len(entries))
 	for _, e := range entries {
 		id := "digest:" + e.Key()

@@ -54,7 +54,7 @@ func newBonfireSplitCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := requireExperimental(app, "bonfire"); err != nil {
+			if err := requireBonfireExperimental(app); err != nil {
 				return err
 			}
 			mux := hostutil.DetectMultiplexer()
@@ -105,7 +105,7 @@ func newBonfireLayoutSaveCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := requireExperimental(app, "bonfire"); err != nil {
+			if err := requireBonfireExperimental(app); err != nil {
 				return err
 			}
 			name := args[0]
@@ -152,7 +152,7 @@ func newBonfireLayoutLoadCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := requireExperimental(app, "bonfire"); err != nil {
+			if err := requireBonfireExperimental(app); err != nil {
 				return err
 			}
 			name := args[0]
@@ -206,7 +206,7 @@ func newBonfireLayoutListCmd() *cobra.Command {
 		Short: "List saved bonfire layouts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := requireExperimental(app, "bonfire"); err != nil {
+			if err := requireBonfireExperimental(app); err != nil {
 				return err
 			}
 
@@ -232,11 +232,10 @@ func newBonfireLayoutListCmd() *cobra.Command {
 	}
 }
 
-func requireExperimental(app *appctx.App, feature string) error {
-	if !app.Config.IsExperimental(feature) {
-		return output.ErrUsage(fmt.Sprintf(
-			"experimental feature %q is not enabled; run: basecamp config set experimental.%s true --global",
-			feature, feature))
+func requireBonfireExperimental(app *appctx.App) error {
+	if !app.Config.IsExperimental("bonfire") {
+		return output.ErrUsage(
+			"experimental feature \"bonfire\" is not enabled; run: basecamp config set experimental.bonfire true --global")
 	}
 	return nil
 }

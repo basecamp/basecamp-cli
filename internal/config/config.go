@@ -463,38 +463,38 @@ func ApplyOverrides(cfg *Config, o FlagOverrides) {
 //
 // The caller in root.go MUST call LoadFromEnv and ApplyOverrides after this
 // method to maintain the precedence chain: flags > env > profile > file > defaults.
-func (cfg *Config) ApplyProfile(name string) error {
-	if cfg.Profiles == nil {
+func (c *Config) ApplyProfile(name string) error {
+	if c.Profiles == nil {
 		return fmt.Errorf("no profiles configured")
 	}
-	p, ok := cfg.Profiles[name]
+	p, ok := c.Profiles[name]
 	if !ok {
 		return fmt.Errorf("profile %q not found", name)
 	}
 
-	cfg.ActiveProfile = name
+	c.ActiveProfile = name
 
 	// Unconditionally set profile values. Env/flag overrides are re-applied
 	// by the caller afterward to restore correct precedence.
 	if p.BaseURL != "" {
-		cfg.BaseURL = p.BaseURL
-		cfg.Sources["base_url"] = "profile"
+		c.BaseURL = p.BaseURL
+		c.Sources["base_url"] = "profile"
 	}
 	if p.AccountID != "" {
-		cfg.AccountID = p.AccountID
-		cfg.Sources["account_id"] = "profile"
+		c.AccountID = p.AccountID
+		c.Sources["account_id"] = "profile"
 	}
 	if p.ProjectID != "" {
-		cfg.ProjectID = p.ProjectID
-		cfg.Sources["project_id"] = "profile"
+		c.ProjectID = p.ProjectID
+		c.Sources["project_id"] = "profile"
 	}
 	if p.TodolistID != "" {
-		cfg.TodolistID = p.TodolistID
-		cfg.Sources["todolist_id"] = "profile"
+		c.TodolistID = p.TodolistID
+		c.Sources["todolist_id"] = "profile"
 	}
 	if p.Scope != "" {
-		cfg.Scope = p.Scope
-		cfg.Sources["scope"] = "profile"
+		c.Scope = p.Scope
+		c.Sources["scope"] = "profile"
 	}
 
 	return nil

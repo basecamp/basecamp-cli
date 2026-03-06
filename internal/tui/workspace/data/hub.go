@@ -29,7 +29,7 @@ type Hub struct {
 	terminalFocused bool   // persisted so new realms/pools inherit the state
 	multi           *MultiStore
 	metrics         *PoolMetrics
-	roomStore       *RoomStore                  // optional; filters BonfireRooms when non-nil
+	roomStore       *RoomStore                     // optional; filters BonfireRooms when non-nil
 	recentProjects  func(accountID string) []int64 // optional; returns recent project IDs scoped to one account
 }
 

@@ -269,8 +269,8 @@ func (r RoomID) Color(paletteSize int) int {
 		return 0
 	}
 	h := fnv.New32a()
-	h.Write([]byte(r.Key())) //nolint:errcheck // hash.Write never errors
-	return int(h.Sum32() % uint32(paletteSize))
+	h.Write([]byte(r.Key()))                    //nolint:errcheck // hash.Write never errors
+	return int(h.Sum32() % uint32(paletteSize)) //nolint:gosec // paletteSize > 0 guarded above
 }
 
 // BonfireRoomConfig describes a discovered campfire room for bonfire.
