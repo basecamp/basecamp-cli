@@ -23,8 +23,15 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 )
 
-// chromeHeight is the vertical space reserved for breadcrumb + status bar + toast.
-const chromeHeight = 3
+// chromeHeight returns the vertical space reserved for breadcrumb + divider + status bar,
+// plus the ticker line when active.
+func (w *Workspace) chromeHeight() int {
+	h := 3 // breadcrumb + divider + status bar
+	if w.ticker.Active() {
+		h++
+	}
+	return h
+}
 
 // Workspace is the root tea.Model for the persistent TUI application.
 type Workspace struct {
@@ -45,6 +52,7 @@ type Workspace struct {
 	pickingBoost    bool
 	boostTarget     BoostTarget
 	quickJump       chrome.QuickJump
+	ticker          chrome.Ticker
 
 	// Multi-account
 	accountList []AccountInfo
@@ -72,6 +80,9 @@ type Workspace struct {
 
 	// Theme file watcher for live reloading
 	themeWatcher *fsnotify.Watcher
+
+	// Ticker digest polling
+	digestPollGen uint64
 
 	// ViewFactory builds views from targets — set by the command that creates the workspace.
 	viewFactory ViewFactory
@@ -116,6 +127,7 @@ func New(session *Session, factory ViewFactory) *Workspace {
 		palette:         chrome.NewPalette(styles),
 		accountSwitcher: chrome.NewAccountSwitcher(styles),
 		quickJump:       chrome.NewQuickJump(styles),
+		ticker:          chrome.NewTicker(styles),
 		boostPicker:     NewBoostPicker(styles),
 		viewFactory:     factory,
 		openFunc:        openInBrowser,
@@ -215,6 +227,29 @@ func (w *Workspace) fetchAccountName() tea.Cmd {
 	}
 }
 
+// startDigestPoll kicks off the first BonfireDigest fetch and arms a recurring poll.
+// BonfireDigest is self-sufficient: it fetches BonfireRooms inline when needed.
+// This makes the ticker ambient — it refreshes regardless of which view is active.
+func (w *Workspace) startDigestPoll() tea.Cmd {
+	hub := w.session.Hub()
+	if hub == nil {
+		return nil
+	}
+	ctx := hub.Global().Context()
+	return tea.Batch(
+		hub.BonfireDigest().Fetch(ctx),
+		w.scheduleDigestPoll(),
+	)
+}
+
+func (w *Workspace) scheduleDigestPoll() tea.Cmd {
+	w.digestPollGen++
+	gen := w.digestPollGen
+	return tea.Tick(15*time.Second, func(t time.Time) tea.Msg {
+		return data.PollMsg{Tag: "workspace-digest", Gen: gen}
+	})
+}
+
 // Update implements tea.Model.
 func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -290,6 +325,12 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.accountList = msg.Accounts
 		w.syncAccountBadge(w.router.CurrentTarget())
 		w.syncChrome() // refresh global hints (ctrl+a visibility)
+
+		var cmds []tea.Cmd
+
+		// Start ambient digest polling for the ticker now that accounts are known.
+		cmds = append(cmds, w.startDigestPoll())
+
 		// Refresh Home/Projects after discovery completes. This handles:
 		// - Multi-account: views switch to cross-account fan-out mode.
 		// - Single-account: identity is now available for identity-dependent
@@ -299,10 +340,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if target == ViewHome || target == ViewProjects {
 				updated, cmd := view.Update(RefreshMsg{})
 				w.replaceCurrentView(updated)
-				return w, w.stampCmd(cmd)
+				cmds = append(cmds, w.stampCmd(cmd))
 			}
 		}
-		return w, nil
+		return w, tea.Batch(cmds...)
 
 	case BoostSelectedMsg:
 		w.pickingBoost = false
@@ -374,6 +415,25 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				P50Latency:  summary.P50Latency,
 				ErrorRate:   summary.ErrorRate,
 			})
+		}
+		// Update ticker on digest pool changes
+		if msg.Key == "bonfire-digest" {
+			if hub := w.session.Hub(); hub != nil {
+				snap := hub.BonfireDigest().Get()
+				if snap.HasData {
+					// Build map of previous timestamps for flash detection
+					old := make(map[string]int64, len(w.ticker.Entries()))
+					for _, e := range w.ticker.Entries() {
+						old[e.Key()] = e.LastAtTS
+					}
+					w.ticker.SetEntries(snap.Data)
+					for _, e := range snap.Data {
+						if e.LastAtTS > old[e.Key()] {
+							w.ticker.Flash(e.Key())
+						}
+					}
+				}
+			}
 		}
 		// Forward to sidebar if active
 		var sidebarCmd tea.Cmd
@@ -455,6 +515,21 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Toast ticks
 	if cmd := w.toast.Update(msg); cmd != nil {
 		return w, cmd
+	}
+
+	// Handle workspace-owned digest poll for the ticker.
+	// Refreshes both rooms (for bookmark/override changes) and digest.
+	if pm, ok := msg.(data.PollMsg); ok && pm.Tag == "workspace-digest" && pm.Gen == w.digestPollGen {
+		hub := w.session.Hub()
+		if hub != nil {
+			ctx := hub.Global().Context()
+			return w, tea.Batch(
+				hub.BonfireRooms().FetchIfStale(ctx),
+				hub.BonfireDigest().FetchIfStale(ctx),
+				w.scheduleDigestPoll(),
+			)
+		}
+		return w, w.scheduleDigestPoll()
 	}
 
 	// Forward PollMsg to sidebar alongside the main view
@@ -551,6 +626,8 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return w.toggleSidebar()
 		case key.Matches(msg, w.keys.Jump):
 			return w.openQuickJump()
+		case key.Matches(msg, w.keys.Bonfire):
+			return w.navigate(ViewFrontPage, w.session.Scope())
 		}
 		// Forward everything else to the view
 		if view := w.router.Current(); view != nil {
@@ -671,6 +748,9 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		w.showMetrics = !w.showMetrics
 		w.relayout()
 		return nil
+
+	case key.Matches(msg, w.keys.Bonfire):
+		return w.navigate(ViewFrontPage, w.session.Scope())
 	}
 
 	// Number keys for breadcrumb jumping (1-9)
@@ -1204,6 +1284,7 @@ const sidebarMinWidth = 100
 func (w *Workspace) relayout() {
 	w.breadcrumb.SetWidth(w.width)
 	w.statusBar.SetWidth(w.width)
+	w.ticker.SetWidth(w.width)
 	w.toast.SetWidth(w.width)
 	w.metricsPanel.SetWidth(w.width)
 	w.help.SetSize(w.width, w.viewHeight())
@@ -1230,7 +1311,7 @@ func (w *Workspace) sidebarActive() bool {
 }
 
 func (w *Workspace) viewHeight() int {
-	h := w.height - chromeHeight
+	h := w.height - w.chromeHeight()
 	if w.showMetrics {
 		h -= chrome.MetricsPanelHeight
 	}
@@ -1287,6 +1368,11 @@ func (w *Workspace) View() tea.View {
 	// Metrics panel (above status bar when active)
 	if w.showMetrics {
 		sections = append(sections, w.metricsPanel.View())
+	}
+
+	// Ticker
+	if w.ticker.Active() {
+		sections = append(sections, w.ticker.View())
 	}
 
 	// Status bar
