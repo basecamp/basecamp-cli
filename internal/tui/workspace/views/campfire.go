@@ -768,10 +768,11 @@ func wrapLine(line string, width int) string {
 		// Handle words wider than the available width
 		if wlen > width && col == 0 {
 			// If the word contains escape sequences (e.g. OSC 8 hyperlinks),
-			// write it whole to avoid splitting inside the sequence.
+			// truncate using ANSI-aware truncation to avoid splitting inside
+			// the sequence or overflowing the viewport.
 			if strings.ContainsAny(word, "\x1b\x07") {
-				result.WriteString(word)
-				col = wlen
+				result.WriteString(ansi.Truncate(word, width, ""))
+				col = width
 			} else {
 				runes := []rune(word)
 				lineWidth := 0

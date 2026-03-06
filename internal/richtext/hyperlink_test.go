@@ -61,6 +61,8 @@ func TestSanitizeURL(t *testing.T) {
 		{"strips null", "https://x.com\x00y", "https://x.comy"},
 		{"strips newline", "https://x.com\ninjected", "https://x.cominjected"},
 		{"strips DEL", "https://x.com\x7fpath", "https://x.compath"},
+		{"strips C1 ST", "https://x.com\u009crest", "https://x.comrest"},
+		{"strips C1 range", "https://x.com\u0080\u008f\u009fpath", "https://x.compath"},
 		{"preserves unicode", "https://example.com/résumé", "https://example.com/résumé"},
 		{"all controls", "\x07\x1b\x00", ""},
 	}
@@ -87,6 +89,14 @@ func TestLinkifyMarkdownLinksMultiple(t *testing.T) {
 
 	assert.Contains(t, got, "\x1b]8;;https://a.com\x07A\x1b]8;;\x07")
 	assert.Contains(t, got, "\x1b]8;;https://b.com\x07B\x1b]8;;\x07")
+}
+
+func TestLinkifyMarkdownLinksBalancedParens(t *testing.T) {
+	input := "See [Foo (bar)](https://en.wikipedia.org/wiki/Foo_(bar)) for info"
+	got := LinkifyMarkdownLinks(input)
+
+	assert.Contains(t, got, "\x1b]8;;https://en.wikipedia.org/wiki/Foo_(bar)\x07")
+	assert.Equal(t, "See Foo (bar) for info", ansi.Strip(got))
 }
 
 func TestLinkifyMarkdownLinksNoMatch(t *testing.T) {
@@ -118,6 +128,39 @@ func TestLinkifyURLsNoDoubleWrap(t *testing.T) {
 
 	// Should not add a second layer of OSC 8 around the URL
 	assert.Equal(t, input, got)
+}
+
+func TestLinkifyURLsBalancedParens(t *testing.T) {
+	input := "See https://en.wikipedia.org/wiki/Foo_(bar) for info"
+	got := LinkifyURLs(input)
+	assert.Contains(t, got, "\x1b]8;;https://en.wikipedia.org/wiki/Foo_(bar)\x07")
+}
+
+func TestLinkifyURLsBalancedParensInParens(t *testing.T) {
+	input := "(https://en.wikipedia.org/wiki/Foo_(bar))"
+	got := LinkifyURLs(input)
+	// Outer ) should be trimmed, inner balanced pair kept
+	assert.Contains(t, got, "\x1b]8;;https://en.wikipedia.org/wiki/Foo_(bar)\x07")
+}
+
+func TestTrimURLMatch(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://example.com", "https://example.com"},
+		{"https://example.com.", "https://example.com"},
+		{"https://example.com,", "https://example.com"},
+		{"https://example.com!", "https://example.com"},
+		{"https://example.com)", "https://example.com"},
+		{"https://en.wikipedia.org/wiki/Foo_(bar)", "https://en.wikipedia.org/wiki/Foo_(bar)"},
+		{"https://en.wikipedia.org/wiki/Foo_(bar))", "https://en.wikipedia.org/wiki/Foo_(bar)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, trimURLMatch(tt.input))
+		})
+	}
 }
 
 func TestLinkifyURLsTrailingPunctuation(t *testing.T) {

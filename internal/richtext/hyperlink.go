@@ -24,12 +24,13 @@ func Hyperlink(text, url string) string {
 
 // sanitizeURL strips terminal control characters from a URL to prevent
 // OSC 8 sequence injection. BEL (\x07) would terminate the sequence early,
-// ESC (\x1b) could start new escape sequences, and other C0 control
-// characters have no place in a URL.
+// ESC (\x1b) could start new escape sequences, and the 8-bit ST (\x9c)
+// can terminate OSC in some terminals. All C0, C1, and DEL characters
+// have no place in a URL.
 func sanitizeURL(url string) string {
 	clean := strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return -1 // strip C0 controls and DEL
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1 // strip C0 controls, DEL, and C1 controls
 		}
 		return r
 	}, url)
@@ -37,7 +38,8 @@ func sanitizeURL(url string) string {
 }
 
 // reMarkdownLink matches markdown-style links [text](url).
-var reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^)]+)\)`)
+// Handles one level of balanced parentheses in URLs (e.g., Wikipedia links).
+var reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\((https?://(?:[^()\s]*|\([^()\s]*\))*)\)`)
 
 // LinkifyMarkdownLinks converts markdown-style [text](url) links to OSC 8
 // terminal hyperlinks where the link text is clickable.
@@ -53,8 +55,27 @@ func LinkifyMarkdownLinks(text string) string {
 }
 
 // reBareURL matches bare http/https URLs not already inside an OSC 8 sequence.
-// Excludes trailing punctuation and parentheses that are likely not part of the URL.
-var reBareURL = regexp.MustCompile(`https?://[^\s\x1b\x07<>"\x00-\x1f]+[^\s\x1b\x07<>"\x00-\x1f.,;:!?)'\]` + "`" + `]`)
+// Trailing punctuation is trimmed by trimURLMatch to preserve balanced parentheses.
+var reBareURL = regexp.MustCompile(`https?://[^\s\x1b\x07<>"\x00-\x1f]+`)
+
+// trimURLMatch trims trailing punctuation from a URL match while
+// preserving balanced parentheses (e.g., Wikipedia URLs).
+func trimURLMatch(url string) string {
+	for len(url) > 0 {
+		switch url[len(url)-1] {
+		case '.', ',', ';', ':', '!', '?', '\'', ']', '`':
+			url = url[:len(url)-1]
+		case ')':
+			if strings.Count(url, "(") >= strings.Count(url, ")") {
+				return url
+			}
+			url = url[:len(url)-1]
+		default:
+			return url
+		}
+	}
+	return url
+}
 
 // LinkifyURLs wraps bare URLs in OSC 8 hyperlink sequences.
 // URLs already inside an OSC 8 sequence are not double-wrapped.
@@ -68,8 +89,13 @@ func LinkifyURLs(text string) string {
 		if isInsideHyperlink(text, start) {
 			continue
 		}
+		// Trim trailing punctuation while preserving balanced parens.
+		url := trimURLMatch(text[start:end])
+		if url == "" {
+			continue
+		}
+		end = start + len(url)
 		b.WriteString(text[last:start])
-		url := text[start:end]
 		b.WriteString(Hyperlink(url, url))
 		last = end
 	}
