@@ -195,6 +195,10 @@ func newBonfireLayoutListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			if app.Config.CacheDir == "" {
+				return app.OK([]any{}, output.WithSummary("No saved layouts (cache_dir not configured)"))
+			}
+
 			layouts, err := loadBonfireLayouts(app.Config.CacheDir)
 			if err != nil || len(layouts) == 0 {
 				return app.OK([]any{}, output.WithSummary("No saved layouts"))

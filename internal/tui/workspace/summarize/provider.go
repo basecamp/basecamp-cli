@@ -42,7 +42,7 @@ func autoDetectProvider() Provider {
 		return NewAppleProvider()
 	}
 	if ollamaReachable() {
-		return NewOllamaProvider("http://localhost:11434", "")
+		return NewOllamaProvider("http://localhost:11434", "llama3.2")
 	}
 	return nil
 }

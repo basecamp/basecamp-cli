@@ -102,7 +102,7 @@ func TestSegmentMentionChain(t *testing.T) {
 	lines := []CampfireLineInfo{
 		makeLine(1, "Alice", mentionHTML, t0),
 		// Bob replies — mention chain (0.15) + temporal (~0.32) > 0.35
-		makeLine(2, "@Bob", "on it", t0.Add(1*time.Minute)),
+		makeLine(2, "Bob", "on it", t0.Add(1*time.Minute)),
 	}
 	seg.IngestSnapshot(room, "Room1", lines)
 
@@ -415,7 +415,7 @@ func TestSegmentSingleMessage(t *testing.T) {
 func TestExtractMentions(t *testing.T) {
 	html := `Hey <bc-attachment sgid="abc" content-type="application/vnd.basecamp.mention">@Alice</bc-attachment> and <bc-attachment sgid="def" content-type="application/vnd.basecamp.mention">@Bob</bc-attachment>`
 	names := ExtractMentions(html)
-	assert.Equal(t, []string{"@Alice", "@Bob"}, names)
+	assert.Equal(t, []string{"Alice", "Bob"}, names)
 }
 
 func TestExtractMentionsNone(t *testing.T) {

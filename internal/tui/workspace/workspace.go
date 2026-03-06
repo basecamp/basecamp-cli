@@ -323,7 +323,7 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 
 		// Invalidate bonfire rooms so they re-fetch with all accounts,
-		// then start ambient digest polling for the ticker.
+		// then start ambient digest polling for the sidebar.
 		hub := w.session.Hub()
 		if hub != nil {
 			hub.BonfireRooms().Invalidate()

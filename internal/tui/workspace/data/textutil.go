@@ -12,12 +12,16 @@ import (
 var reMention = regexp.MustCompile(`(?i)<bc-attachment[^>]*content-type="application/vnd\.basecamp\.mention"[^>]*>([^<]*)</bc-attachment>`)
 
 // ExtractMentions returns the names mentioned in HTML content.
+// Names are returned without a leading '@' so they can be compared
+// directly to Creator fields (which are plain names like "Bob").
 func ExtractMentions(html string) []string {
 	matches := reMention.FindAllStringSubmatch(html, -1)
 	names := make([]string, 0, len(matches))
 	for _, m := range matches {
 		if len(m) > 1 && m[1] != "" {
-			names = append(names, strings.TrimSpace(m[1]))
+			name := strings.TrimSpace(m[1])
+			name = strings.TrimPrefix(name, "@")
+			names = append(names, name)
 		}
 	}
 	return names
@@ -108,6 +112,9 @@ func RiverText(html string) string {
 	s = tagRe.ReplaceAllString(s, "")
 	// Decode HTML entities
 	s = htmlpkg.UnescapeString(s)
+	// Normalize non-breaking spaces (U+00A0) to regular spaces;
+	// html.UnescapeString decodes &nbsp; to U+00A0 which \s doesn't match.
+	s = strings.ReplaceAll(s, "\u00a0", " ")
 	// Collapse whitespace
 	s = reWhitespace.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)

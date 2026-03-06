@@ -528,6 +528,7 @@ func (r *River) handleScrollKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	case key.Matches(msg, r.keys.Mixer):
 		r.mixerActive = !r.mixerActive
+		r.SetSize(r.width, r.height)
 	}
 	return nil
 }
@@ -817,6 +818,10 @@ func (r *River) updatePollFocus() tea.Cmd {
 }
 
 func (r *River) scheduleRoomPoll(roomKey string) tea.Cmd {
+	// Don't schedule polls for muted rooms (volume=off).
+	if r.volumes[roomKey] == 4 {
+		return nil
+	}
 	pool, ok := r.linePools[roomKey]
 	if !ok {
 		return nil
