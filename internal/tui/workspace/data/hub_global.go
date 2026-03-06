@@ -468,7 +468,7 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 
 					entry := BonfireDigestEntry{
 						RoomID:   r.RoomID,
-						RoomName: r.RoomName,
+						RoomName: r.ProjectName,
 					}
 
 					client := h.multi.ClientFor(r.AccountID)
@@ -483,9 +483,9 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 					}
 					last := lines.Lines[0] // newest first from API
 					entry.LastAuthor = personName(last.Creator)
-					content := last.Content
-					if r := []rune(content); len(r) > 40 {
-						content = string(r[:37]) + "…"
+					content := StripTags(last.Content)
+					if r := []rune(content); len(r) > 80 {
+						content = string(r[:77]) + "…"
 					}
 					entry.LastMessage = content
 					entry.LastAt = last.CreatedAt.Format("Jan 2 3:04pm")
@@ -497,6 +497,9 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 			entries := make([]BonfireDigestEntry, 0, len(rooms))
 			for range rooms {
 				r := <-ch
+				if r.entry.LastMessage == "" && r.entry.LastAtTS == 0 {
+					continue // skip rooms with no messages
+				}
 				entries = append(entries, r.entry)
 			}
 			sort.Slice(entries, func(i, j int) bool {
