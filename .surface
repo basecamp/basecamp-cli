@@ -11,6 +11,12 @@ CMD basecamp auth logout
 CMD basecamp auth refresh
 CMD basecamp auth status
 CMD basecamp auth token
+CMD basecamp bonfire
+CMD basecamp bonfire layout
+CMD basecamp bonfire layout list
+CMD basecamp bonfire layout load
+CMD basecamp bonfire layout save
+CMD basecamp bonfire split
 CMD basecamp boost
 CMD basecamp boost create
 CMD basecamp boost delete
@@ -517,6 +523,114 @@ FLAG basecamp auth token --stored type=bool
 FLAG basecamp auth token --styled type=bool
 FLAG basecamp auth token --todolist type=string
 FLAG basecamp auth token --verbose type=count
+FLAG basecamp bonfire --account type=string
+FLAG basecamp bonfire --agent type=bool
+FLAG basecamp bonfire --cache-dir type=string
+FLAG basecamp bonfire --count type=bool
+FLAG basecamp bonfire --hints type=bool
+FLAG basecamp bonfire --ids-only type=bool
+FLAG basecamp bonfire --json type=bool
+FLAG basecamp bonfire --markdown type=bool
+FLAG basecamp bonfire --md type=bool
+FLAG basecamp bonfire --no-hints type=bool
+FLAG basecamp bonfire --no-stats type=bool
+FLAG basecamp bonfire --profile type=string
+FLAG basecamp bonfire --project type=string
+FLAG basecamp bonfire --quiet type=bool
+FLAG basecamp bonfire --stats type=bool
+FLAG basecamp bonfire --styled type=bool
+FLAG basecamp bonfire --todolist type=string
+FLAG basecamp bonfire --verbose type=count
+FLAG basecamp bonfire layout --account type=string
+FLAG basecamp bonfire layout --agent type=bool
+FLAG basecamp bonfire layout --cache-dir type=string
+FLAG basecamp bonfire layout --count type=bool
+FLAG basecamp bonfire layout --hints type=bool
+FLAG basecamp bonfire layout --ids-only type=bool
+FLAG basecamp bonfire layout --json type=bool
+FLAG basecamp bonfire layout --markdown type=bool
+FLAG basecamp bonfire layout --md type=bool
+FLAG basecamp bonfire layout --no-hints type=bool
+FLAG basecamp bonfire layout --no-stats type=bool
+FLAG basecamp bonfire layout --profile type=string
+FLAG basecamp bonfire layout --project type=string
+FLAG basecamp bonfire layout --quiet type=bool
+FLAG basecamp bonfire layout --stats type=bool
+FLAG basecamp bonfire layout --styled type=bool
+FLAG basecamp bonfire layout --todolist type=string
+FLAG basecamp bonfire layout --verbose type=count
+FLAG basecamp bonfire layout list --account type=string
+FLAG basecamp bonfire layout list --agent type=bool
+FLAG basecamp bonfire layout list --cache-dir type=string
+FLAG basecamp bonfire layout list --count type=bool
+FLAG basecamp bonfire layout list --hints type=bool
+FLAG basecamp bonfire layout list --ids-only type=bool
+FLAG basecamp bonfire layout list --json type=bool
+FLAG basecamp bonfire layout list --markdown type=bool
+FLAG basecamp bonfire layout list --md type=bool
+FLAG basecamp bonfire layout list --no-hints type=bool
+FLAG basecamp bonfire layout list --no-stats type=bool
+FLAG basecamp bonfire layout list --profile type=string
+FLAG basecamp bonfire layout list --project type=string
+FLAG basecamp bonfire layout list --quiet type=bool
+FLAG basecamp bonfire layout list --stats type=bool
+FLAG basecamp bonfire layout list --styled type=bool
+FLAG basecamp bonfire layout list --todolist type=string
+FLAG basecamp bonfire layout list --verbose type=count
+FLAG basecamp bonfire layout load --account type=string
+FLAG basecamp bonfire layout load --agent type=bool
+FLAG basecamp bonfire layout load --cache-dir type=string
+FLAG basecamp bonfire layout load --count type=bool
+FLAG basecamp bonfire layout load --hints type=bool
+FLAG basecamp bonfire layout load --ids-only type=bool
+FLAG basecamp bonfire layout load --json type=bool
+FLAG basecamp bonfire layout load --markdown type=bool
+FLAG basecamp bonfire layout load --md type=bool
+FLAG basecamp bonfire layout load --no-hints type=bool
+FLAG basecamp bonfire layout load --no-stats type=bool
+FLAG basecamp bonfire layout load --profile type=string
+FLAG basecamp bonfire layout load --project type=string
+FLAG basecamp bonfire layout load --quiet type=bool
+FLAG basecamp bonfire layout load --stats type=bool
+FLAG basecamp bonfire layout load --styled type=bool
+FLAG basecamp bonfire layout load --todolist type=string
+FLAG basecamp bonfire layout load --verbose type=count
+FLAG basecamp bonfire layout save --account type=string
+FLAG basecamp bonfire layout save --agent type=bool
+FLAG basecamp bonfire layout save --cache-dir type=string
+FLAG basecamp bonfire layout save --count type=bool
+FLAG basecamp bonfire layout save --hints type=bool
+FLAG basecamp bonfire layout save --ids-only type=bool
+FLAG basecamp bonfire layout save --json type=bool
+FLAG basecamp bonfire layout save --markdown type=bool
+FLAG basecamp bonfire layout save --md type=bool
+FLAG basecamp bonfire layout save --no-hints type=bool
+FLAG basecamp bonfire layout save --no-stats type=bool
+FLAG basecamp bonfire layout save --profile type=string
+FLAG basecamp bonfire layout save --project type=string
+FLAG basecamp bonfire layout save --quiet type=bool
+FLAG basecamp bonfire layout save --stats type=bool
+FLAG basecamp bonfire layout save --styled type=bool
+FLAG basecamp bonfire layout save --todolist type=string
+FLAG basecamp bonfire layout save --verbose type=count
+FLAG basecamp bonfire split --account type=string
+FLAG basecamp bonfire split --agent type=bool
+FLAG basecamp bonfire split --cache-dir type=string
+FLAG basecamp bonfire split --count type=bool
+FLAG basecamp bonfire split --hints type=bool
+FLAG basecamp bonfire split --ids-only type=bool
+FLAG basecamp bonfire split --json type=bool
+FLAG basecamp bonfire split --markdown type=bool
+FLAG basecamp bonfire split --md type=bool
+FLAG basecamp bonfire split --no-hints type=bool
+FLAG basecamp bonfire split --no-stats type=bool
+FLAG basecamp bonfire split --profile type=string
+FLAG basecamp bonfire split --project type=string
+FLAG basecamp bonfire split --quiet type=bool
+FLAG basecamp bonfire split --stats type=bool
+FLAG basecamp bonfire split --styled type=bool
+FLAG basecamp bonfire split --todolist type=string
+FLAG basecamp bonfire split --verbose type=count
 FLAG basecamp boost --account type=string
 FLAG basecamp boost --agent type=bool
 FLAG basecamp boost --cache-dir type=string
@@ -6047,6 +6161,12 @@ SUB basecamp auth logout
 SUB basecamp auth refresh
 SUB basecamp auth status
 SUB basecamp auth token
+SUB basecamp bonfire
+SUB basecamp bonfire layout
+SUB basecamp bonfire layout list
+SUB basecamp bonfire layout load
+SUB basecamp bonfire layout save
+SUB basecamp bonfire split
 SUB basecamp boost
 SUB basecamp boost create
 SUB basecamp boost delete
