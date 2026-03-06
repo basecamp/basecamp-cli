@@ -258,6 +258,17 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.width = msg.Width
 		w.height = msg.Height
 		w.relayout()
+		// If the pool monitor was focused but resize made it inactive,
+		// return focus to the main view so it resumes polling/input.
+		if w.poolMonitorFocused && !w.poolMonitorActive() {
+			w.poolMonitorFocused = false
+			w.poolMonitor.Update(BlurMsg{})
+			if view := w.router.Current(); view != nil {
+				updated, cmd := view.Update(FocusMsg{})
+				w.replaceCurrentView(updated)
+				return w, w.stampCmd(cmd)
+			}
+		}
 		return w, nil
 
 	case tea.BackgroundColorMsg:

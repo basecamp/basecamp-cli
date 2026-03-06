@@ -451,8 +451,9 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 	if realm == nil {
 		panic(fmt.Sprintf("Hub.People() called without active account realm (accountID=%q); call EnsureAccount first", id))
 	}
-	p := RealmPool(realm, "people", func() *Pool[[]PersonInfo] {
-		return NewPool("people", PoolConfig{}, func(ctx context.Context) ([]PersonInfo, error) {
+	key := fmt.Sprintf("people:%s", id)
+	p := RealmPool(realm, key, func() *Pool[[]PersonInfo] {
+		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]PersonInfo, error) {
 			client := h.accountClient()
 			result, err := client.People().List(ctx, &basecamp.PeopleListOptions{})
 			if err != nil {
