@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -513,10 +514,13 @@ func TestCheckLegacyInstall_NilWhenAlreadyMigrated(t *testing.T) {
 }
 
 func TestCheckClaudeIntegration(t *testing.T) {
-	// checkClaudeIntegration calls harness.CheckClaudePlugin which reads
-	// ~/.claude/plugins/installed_plugins.json. In test environments there's
-	// no ~/.claude directory, so the plugin check should return "fail".
-	checks := checkClaudeIntegration()
+	// Claude registers via init() in the harness package. Its Checks function
+	// calls harness.CheckClaudePlugin which reads the plugin file.
+	agent := harness.FindAgent("claude")
+	require.NotNil(t, agent, "claude agent should be registered")
+	require.NotNil(t, agent.Checks)
+
+	checks := agent.Checks()
 	require.NotEmpty(t, checks, "should return at least one check")
 	assert.Equal(t, "Claude Code Plugin", checks[0].Name)
 	// Status depends on environment — in CI there's no ~/.claude so it'll be "fail"

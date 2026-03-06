@@ -130,10 +130,20 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 			Action: "authenticate", Cmd: "basecamp auth login", Description: "Login",
 		})
 	}
-	if harness.IsPluginNeeded() {
-		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
-			Action: "setup_claude", Cmd: "basecamp setup claude", Description: "Connect Claude to Basecamp",
-		})
+	for _, agent := range harness.DetectedAgents() {
+		if agent.Checks == nil {
+			continue
+		}
+		for _, c := range agent.Checks() {
+			if c.Status != "pass" {
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+					Action:      "setup_" + agent.ID,
+					Cmd:         "basecamp setup " + agent.ID,
+					Description: "Connect " + agent.Name + " to Basecamp",
+				})
+				break
+			}
+		}
 	}
 
 	return app.OK(json.RawMessage(data),

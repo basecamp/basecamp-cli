@@ -281,7 +281,7 @@ func buildLoginCmd(use string) *cobra.Command {
 				}
 			}
 
-			printClaudeNudge(w, r)
+			printAgentNudge(w, r)
 
 			return nil
 		},
@@ -320,11 +320,19 @@ func buildLogoutCmd(use string) *cobra.Command {
 	}
 }
 
-// printClaudeNudge prints a hint about Claude Code plugin setup after login.
-func printClaudeNudge(w io.Writer, r *output.Renderer) {
-	if harness.IsPluginNeeded() {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, r.Muted.Render("  Claude Code detected. Connect it to Basecamp:"))
-		fmt.Fprintln(w, r.Data.Render("  basecamp setup claude"))
+// printAgentNudge prints a hint about coding agent setup after login.
+func printAgentNudge(w io.Writer, r *output.Renderer) {
+	for _, agent := range harness.DetectedAgents() {
+		if agent.Checks == nil {
+			continue
+		}
+		for _, c := range agent.Checks() {
+			if c.Status != "pass" {
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("  %s detected. Connect it to Basecamp:", agent.Name)))
+				fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", agent.ID)))
+				return // one nudge is enough
+			}
+		}
 	}
 }
