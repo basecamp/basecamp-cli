@@ -1,0 +1,33 @@
+internal/tui/workspace/data/hub.go
+  c3fde71168208b65 6,41
+internal/tui/workspace/workspace.go
+  c3fde71168208b65 233-234,1078-1079,1088-1091,1096-1097,1104-1105,1121,1162-1163
+internal/tui/workspace/views/pool_monitor.go
+  c3fde71168208b65 11,18-25,37,61,125-129,167,190-191,207,209,249,252,257-259,263,270,288,309-311,316,330,335-336,340,345-346,350,363-366,369
+internal/tui/workspace/data/pool_cache.go
+  c3fde71168208b65 85-86
+internal/tui/workspace/data/pool.go
+  c3fde71168208b65 191,194-199,212-223
+internal/tui/workspace/data/mutation.go
+  c3fde71168208b65 190-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "18e685339a5a0fed2716671a33524d78a1d68c9c",
+  "prompts": {
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 95,
+      "total_deletions": 48,
+      "accepted_lines": 92,
+      "overriden_lines": 0
+    }
+  }
+}
