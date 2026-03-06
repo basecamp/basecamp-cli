@@ -30,8 +30,12 @@ func NewOllamaProvider(endpoint, model string) *OllamaProvider {
 }
 
 func (p *OllamaProvider) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	model := p.model
+	if model == "" {
+		model = "llama3.2"
+	}
 	body := map[string]any{
-		"model":  p.model,
+		"model":  model,
 		"prompt": prompt,
 		"stream": false,
 	}
@@ -57,7 +61,7 @@ func (p *OllamaProvider) Complete(ctx context.Context, prompt string, maxTokens 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return "", fmt.Errorf("ollama: status %d: %s", resp.StatusCode, string(respBody))
 	}
 

@@ -59,12 +59,14 @@ func parseBasecampURL(raw string) (workspace.ViewTarget, workspace.Scope, error)
 			if parsed.Type == "chats" {
 				scope.ToolType = "chat"
 				scope.ToolID = recordingID
+				scope.RecordingID = 0 // chat ID is ToolID, not a recording
 				return workspace.ViewCampfire, scope, nil
 			}
 			if parsed.Type == "lines" {
 				if chatID := extractParentChatID(raw); chatID != 0 {
 					scope.ToolType = "chat"
 					scope.ToolID = chatID
+					scope.RecordingID = 0
 					return workspace.ViewCampfire, scope, nil
 				}
 			}

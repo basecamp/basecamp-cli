@@ -1,6 +1,7 @@
 package data
 
 import (
+	htmlpkg "html"
 	"regexp"
 	"strings"
 	"unicode"
@@ -105,13 +106,8 @@ func RiverText(html string) string {
 	s = reBlockTag.ReplaceAllString(s, " ")
 	// Strip remaining inline tags
 	s = tagRe.ReplaceAllString(s, "")
-	// Decode common HTML entities
-	s = strings.ReplaceAll(s, "&amp;", "&")
-	s = strings.ReplaceAll(s, "&lt;", "<")
-	s = strings.ReplaceAll(s, "&gt;", ">")
-	s = strings.ReplaceAll(s, "&quot;", "\"")
-	s = strings.ReplaceAll(s, "&#39;", "'")
-	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	// Decode HTML entities
+	s = htmlpkg.UnescapeString(s)
 	// Collapse whitespace
 	s = reWhitespace.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)

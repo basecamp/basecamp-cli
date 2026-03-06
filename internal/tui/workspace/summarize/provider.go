@@ -25,13 +25,15 @@ func DetectProvider(providerName, endpoint, apiKey, model string) Provider {
 			return NewAppleProvider()
 		}
 		return nil
-	case "none", "disabled", "":
-		if providerName == "" {
-			return autoDetectProvider()
-		}
+	case "none", "disabled":
 		return nil
+	case "":
+		return autoDetectProvider()
+	default:
+		// Unknown provider name — fall back to auto-detect rather than
+		// silently ignoring the user's explicit configuration.
+		return autoDetectProvider()
 	}
-	return autoDetectProvider()
 }
 
 // autoDetectProvider tries providers in priority order: Apple -> Ollama -> nil.

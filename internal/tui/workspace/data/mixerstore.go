@@ -55,7 +55,7 @@ func (ms *MixerStore) Load() (MixerVolumes, error) {
 	return v, nil
 }
 
-// Save writes mixer volumes to disk atomically.
+// Save writes mixer volumes to disk atomically with read-merge-write.
 func (ms *MixerStore) Save(v MixerVolumes) error {
 	if err := os.MkdirAll(ms.dir, 0700); err != nil {
 		return err
@@ -69,7 +69,21 @@ func (ms *MixerStore) Save(v MixerVolumes) error {
 		defer func() { _ = lock.Unlock() }()
 	}
 
-	data, err := json.MarshalIndent(v, "", "  ")
+	// Read-merge-write: merge caller volumes on top of disk state.
+	merged := MixerVolumes{Volumes: make(map[string]int)}
+	if diskData, err := os.ReadFile(ms.filePath()); err == nil {
+		var disk MixerVolumes
+		if json.Unmarshal(diskData, &disk) == nil && disk.Volumes != nil {
+			for k, val := range disk.Volumes {
+				merged.Volumes[k] = val
+			}
+		}
+	}
+	for k, val := range v.Volumes {
+		merged.Volumes[k] = val
+	}
+
+	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return err
 	}

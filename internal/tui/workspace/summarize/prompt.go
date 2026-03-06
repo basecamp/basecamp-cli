@@ -1,6 +1,9 @@
 package summarize
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Hint types for prompt construction.
 const (
@@ -11,21 +14,22 @@ const (
 
 // BuildPrompt constructs an LLM prompt for the given segments and hint.
 func BuildPrompt(segments []Segment, targetChars int, hint string) string {
-	var context string
+	var ctx string
 	switch hint {
 	case HintGap:
-		context = "Summarize what happened in this conversation while the user was away."
+		ctx = "Summarize what happened in this conversation while the user was away."
 	case HintTicker:
-		context = "Write a one-line summary of the latest activity."
+		ctx = "Write a one-line summary of the latest activity."
 	case HintScan:
-		context = "Provide a brief overview of this conversation's current topic."
+		ctx = "Provide a brief overview of this conversation's current topic."
 	default:
-		context = "Summarize this conversation."
+		ctx = "Summarize this conversation."
 	}
 
-	prompt := fmt.Sprintf("%s Keep it under %d characters.\n\n", context, targetChars)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s Keep it under %d characters.\n\n", ctx, targetChars)
 	for _, seg := range segments {
-		prompt += fmt.Sprintf("[%s] %s: %s\n", seg.Time, seg.Author, seg.Text)
+		fmt.Fprintf(&b, "[%s] %s: %s\n", seg.Time, seg.Author, seg.Text)
 	}
-	return prompt
+	return b.String()
 }

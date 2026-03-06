@@ -170,8 +170,10 @@ func (b *BonfireSidebar) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		b.cursor = 0
 		b.offset = 0
 	case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
-		b.cursor = total - 1
-		b.ensureVisible()
+		if total > 0 {
+			b.cursor = total - 1
+			b.ensureVisible()
+		}
 	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 		return b.openSelected()
 	}

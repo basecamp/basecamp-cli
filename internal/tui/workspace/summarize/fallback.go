@@ -122,11 +122,14 @@ func uniqueAuthors(segments []Segment) []string {
 }
 
 func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
 	runes := []rune(s)
 	if len(runes) <= maxRunes {
 		return s
 	}
-	if maxRunes <= 1 {
+	if maxRunes == 1 {
 		return "\u2026"
 	}
 	return string(runes[:maxRunes-1]) + "\u2026"

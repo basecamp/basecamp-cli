@@ -270,13 +270,13 @@ func (r RoomID) Color(paletteSize int) int {
 	}
 	h := fnv.New32a()
 	h.Write([]byte(r.Key())) //nolint:errcheck // hash.Write never errors
-	return int(h.Sum32()) % paletteSize
+	return int(h.Sum32() % uint32(paletteSize))
 }
 
 // BonfireRoomConfig describes a discovered campfire room for bonfire.
 type BonfireRoomConfig struct {
 	RoomID
-	RoomName    string // project name or ping partner name
+	RoomName    string // campfire title (from the API's Title field)
 	ProjectName string
 }
 

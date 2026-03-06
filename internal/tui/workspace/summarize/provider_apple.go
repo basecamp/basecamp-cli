@@ -20,6 +20,8 @@ func NewAppleProvider() *AppleProvider {
 
 func (p *AppleProvider) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	// Read prompt from stdin to avoid string escaping issues in Swift source.
+	// Note: Apple Foundation Models doesn't expose a maxTokens parameter;
+	// the caller's TargetChars constraint is enforced in the prompt itself.
 	script := `
 import Foundation
 import FoundationModels

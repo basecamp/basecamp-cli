@@ -242,7 +242,10 @@ func (r *River) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 
 	case workspace.TerminalFocusMsg:
 		cmds := make([]tea.Cmd, 0, len(r.rooms)+1)
+		// Capture awayStart before RecordTerminalFocus updates lastActivity.
+		awayStart := r.idleTracker.lastActivity
 		if r.idleTracker.RecordTerminalFocus() {
+			awayEnd := time.Now()
 			for _, room := range r.rooms {
 				rkey := room.Key()
 				pool, ok := r.linePools[rkey]
@@ -255,8 +258,8 @@ func (r *River) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 				}
 				lastLine := snap.Data.Lines[len(snap.Data.Lines)-1]
 				r.watermarks[rkey] = watermark{
-					awayStart: r.idleTracker.lastActivity,
-					awayEnd:   time.Now(),
+					awayStart: awayStart,
+					awayEnd:   awayEnd,
 					lineIDAt:  lastLine.ID,
 				}
 			}
@@ -321,6 +324,11 @@ func (r *River) onRoomsUpdated() tea.Cmd {
 	}
 
 	r.updateComposerPrompt()
+
+	// Set focused room to faster poll interval
+	if cmd := r.updatePollFocus(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 
 	if len(cmds) > 0 {
 		return tea.Batch(cmds...)
@@ -469,7 +477,7 @@ func (r *River) handleScrollKey(msg tea.KeyPressMsg) tea.Cmd {
 		if len(r.rooms) > 0 {
 			r.activeRoom = (r.activeRoom + 1) % len(r.rooms)
 			r.updateComposerPrompt()
-			r.updatePollFocus()
+			return r.updatePollFocus()
 		}
 
 	case key.Matches(msg, r.keys.Briefing):
@@ -595,6 +603,7 @@ func (r *River) renderSegments() {
 				if seg.StartTime.After(wm.awayStart) {
 					r.renderWatermark(&b, theme)
 					watermarkRendered = true
+					break
 				}
 				break
 			}
@@ -695,7 +704,8 @@ func (r *River) updateComposerPrompt() {
 	r.composer.Prompt = fmt.Sprintf("[%s] > ", room.ProjectName)
 }
 
-func (r *River) updatePollFocus() {
+func (r *River) updatePollFocus() tea.Cmd {
+	var cmds []tea.Cmd
 	for i, room := range r.rooms {
 		roomKey := room.Key()
 		pool, ok := r.linePools[roomKey]
@@ -717,9 +727,13 @@ func (r *River) updatePollFocus() {
 				PollMax:  2 * time.Minute,
 			})
 		}
-		// Bump poll gen to invalidate old timers
-		r.pollGens[roomKey]++
+		// Bump poll gen and re-arm timer at new interval
+		cmds = append(cmds, r.scheduleRoomPoll(roomKey))
 	}
+	if len(cmds) > 0 {
+		return tea.Batch(cmds...)
+	}
+	return nil
 }
 
 func (r *River) scheduleRoomPoll(roomKey string) tea.Cmd {
@@ -928,8 +942,11 @@ func (r *River) FullHelp() [][]key.Binding {
 func (r *River) SetSize(w, h int) {
 	r.width = w
 	r.height = h
-	composerHeight := 2 // separator + input line
-	vpHeight := h - composerHeight
+	chromeHeight := 2 // separator + input line
+	if r.mixerActive {
+		chromeHeight++ // mixer row
+	}
+	vpHeight := h - chromeHeight
 	if vpHeight < 1 {
 		vpHeight = 1
 	}

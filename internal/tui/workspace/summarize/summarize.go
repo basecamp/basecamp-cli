@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -118,7 +119,9 @@ func (s *Summarizer) Summarize(req Request) tea.Cmd {
 			maxTokens = 50
 		}
 
-		result, err := s.provider.Complete(context.Background(), prompt, maxTokens)
+		llmCtx, llmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer llmCancel()
+		result, err := s.provider.Complete(llmCtx, prompt, maxTokens)
 		if err != nil {
 			return nil // silently fall back to extractive
 		}

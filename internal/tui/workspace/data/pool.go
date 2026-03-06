@@ -253,6 +253,7 @@ func (p *Pool[T]) SetPollConfig(cfg PoolConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.config = cfg
+	p.missCount = 0 // reset backoff so new config takes effect immediately
 }
 
 // SetPushMode enables/disables push mode (SSE connected).

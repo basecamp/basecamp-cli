@@ -207,18 +207,13 @@ func (f *FrontPage) rebuildList() {
 		items = append(items, widget.ListItem{Title: "Campfires", Header: true})
 		items = append(items, f.digestItems(digestSnap.Data, theme)...)
 	} else if roomSnap.Usable() && len(roomSnap.Data) > 0 {
-		// Fallback: just room names
+		// Fallback: just room names (plain text for filtering)
 		items = append(items, widget.ListItem{Title: "Campfires", Header: true})
 		for _, r := range roomSnap.Data {
 			id := "room:" + r.Key()
-			colorIdx := r.Color(len(theme.RoomColors))
-			title := r.ProjectName
-			if colorIdx < len(theme.RoomColors) {
-				title = lipgloss.NewStyle().Foreground(theme.RoomColors[colorIdx]).Render(r.ProjectName)
-			}
 			items = append(items, widget.ListItem{
 				ID:    id,
-				Title: title,
+				Title: r.ProjectName,
 			})
 		}
 	}
@@ -232,23 +227,17 @@ func (f *FrontPage) digestItems(entries []data.BonfireDigestEntry, theme tui.The
 		id := "digest:" + e.Key()
 		f.digestByID[e.Key()] = e
 
-		// Room-colored title with activity indicator
-		colorIdx := e.Color(len(theme.RoomColors))
-		title := e.RoomName
-		if colorIdx < len(theme.RoomColors) {
-			title = lipgloss.NewStyle().Foreground(theme.RoomColors[colorIdx]).Render(e.RoomName)
-		}
-
-		// Activity indicator prefix
+		// Use plain text for Title so filtering works correctly.
+		// Activity indicator as a plain-text prefix.
+		var prefix string
 		tier := classifyBurst(e)
 		switch tier {
 		case burstHot:
-			title = lipgloss.NewStyle().Foreground(theme.Error).Render("\u25cf ") + title
-		case burstWarm:
-			title = lipgloss.NewStyle().Foreground(theme.Warning).Render("\u25cb ") + title
+			prefix = "\u25cf "
 		default:
-			title = lipgloss.NewStyle().Foreground(theme.Muted).Render("\u25cb ") + title
+			prefix = "\u25cb "
 		}
+		title := prefix + e.RoomName
 
 		// Description: author + message preview
 		var desc string

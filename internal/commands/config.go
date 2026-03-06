@@ -314,14 +314,20 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 				}
 			}
 
+			// Redact secrets in output
+			displayValue := valueOut
+			if key == "llm_api_key" {
+				displayValue = "(set)"
+			}
+
 			return app.OK(map[string]any{
 				"key":    key,
-				"value":  valueOut,
+				"value":  displayValue,
 				"scope":  scope,
 				"path":   configPath,
 				"status": "set",
 			},
-				output.WithSummary(fmt.Sprintf("Set %s = %s (%s)", key, value, scope)),
+				output.WithSummary(fmt.Sprintf("Set %s = %s (%s)", key, displayValue, scope)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",

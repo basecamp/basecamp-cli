@@ -71,6 +71,10 @@ func CurrentPaneCommands(ctx context.Context, mux Multiplexer) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return nil, nil
+	}
+	lines := strings.Split(trimmed, "\n")
 	return lines, nil
 }

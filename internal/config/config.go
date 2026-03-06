@@ -234,6 +234,8 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		if source != SourceLocal && source != SourceRepo {
 			cfg.LLMAPIKey = v
 			cfg.Sources["llm_api_key"] = string(source)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_api_key from %s config at %s (use --global or BASECAMP_LLM_API_KEY env var)\n", source, path)
 		}
 	}
 	if v, ok := fileCfg["llm_endpoint"].(string); ok && v != "" {

@@ -112,6 +112,10 @@ func newBonfireLayoutSaveCmd() *cobra.Command {
 				MultiplexerLayout: "tiled",
 			}
 
+			if app.Config.CacheDir == "" {
+				return fmt.Errorf("cache_dir not configured; run: basecamp config set cache_dir <path> --global")
+			}
+
 			layouts, err := loadBonfireLayouts(app.Config.CacheDir)
 			if err != nil {
 				layouts = make(map[string]BonfireLayout)
@@ -144,6 +148,10 @@ func newBonfireLayoutLoadCmd() *cobra.Command {
 			mux := hostutil.DetectMultiplexer()
 			if mux == hostutil.MultiplexerNone {
 				return output.ErrUsage("bonfire layout load requires tmux or zellij (not detected)")
+			}
+
+			if app.Config.CacheDir == "" {
+				return fmt.Errorf("cache_dir not configured; run: basecamp config set cache_dir <path> --global")
 			}
 
 			layouts, err := loadBonfireLayouts(app.Config.CacheDir)

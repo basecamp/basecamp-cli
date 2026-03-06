@@ -1,6 +1,7 @@
 package summarize
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -176,10 +177,10 @@ func TestSummaryCache_Miss(t *testing.T) {
 
 func TestSummaryCache_TTLExpiry(t *testing.T) {
 	dir := t.TempDir()
-	cache := NewSummaryCache(dir, time.Millisecond, 100)
+	cache := NewSummaryCache(dir, 10*time.Millisecond, 100)
 
 	cache.Put("key1", "hello")
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	_, ok := cache.Get("key1")
 	if ok {
@@ -233,8 +234,8 @@ func TestSummaryCache_DiskFile(t *testing.T) {
 
 	// Verify the file exists on disk
 	path := filepath.Join(dir, "testkey.json")
-	if _, err := filepath.Glob(path); err != nil {
-		t.Errorf("expected cache file at %s", path)
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected cache file at %s: %v", path, err)
 	}
 }
 

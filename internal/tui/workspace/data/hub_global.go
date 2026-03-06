@@ -337,6 +337,13 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 							}
 						}
 					}
+					// If still empty (fresh account, no recents), include all rooms
+					// so the user sees something rather than an empty Bonfire.
+					if len(bmKeys) == 0 {
+						for _, r := range rooms {
+							bmKeys[r.Key()] = struct{}{}
+						}
+					}
 				}
 				return accountRooms{all: rooms, bookmarks: bmKeys}, nil
 			}
@@ -477,53 +484,49 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 				return nil, nil
 			}
 
-			type digestResult struct {
-				idx   int
-				entry BonfireDigestEntry
-			}
-			ch := make(chan digestResult, len(rooms))
+			ch := make(chan BonfireDigestEntry, len(rooms))
 			sem := make(chan struct{}, 3) // limit 3 concurrent
 
-			for i, room := range rooms {
-				go func(idx int, r BonfireRoomConfig) {
+			for _, room := range rooms {
+				go func(rc BonfireRoomConfig) {
 					sem <- struct{}{}
 					defer func() { <-sem }()
 
 					entry := BonfireDigestEntry{
-						RoomID:   r.RoomID,
-						RoomName: r.ProjectName,
+						RoomID:   rc.RoomID,
+						RoomName: rc.ProjectName,
 					}
 
-					client := h.multi.ClientFor(r.AccountID)
+					client := h.multi.ClientFor(rc.AccountID)
 					if client == nil {
-						ch <- digestResult{idx: idx, entry: entry}
+						ch <- entry
 						return
 					}
-					lines, err := client.Campfires().ListLines(ctx, r.CampfireID)
+					lines, err := client.Campfires().ListLines(ctx, rc.CampfireID)
 					if err != nil || len(lines.Lines) == 0 {
-						ch <- digestResult{idx: idx, entry: entry}
+						ch <- entry
 						return
 					}
 					last := lines.Lines[0] // newest first from API
 					entry.LastAuthor = personName(last.Creator)
 					content := StripTags(last.Content)
-					if r := []rune(content); len(r) > 80 {
-						content = string(r[:77]) + "…"
+					if runes := []rune(content); len(runes) > 80 {
+						content = string(runes[:77]) + "…"
 					}
 					entry.LastMessage = content
 					entry.LastAt = last.CreatedAt.Format("Jan 2 3:04pm")
 					entry.LastAtTS = last.CreatedAt.Unix()
-					ch <- digestResult{idx: idx, entry: entry}
-				}(i, room)
+					ch <- entry
+				}(room)
 			}
 
 			entries := make([]BonfireDigestEntry, 0, len(rooms))
 			for range rooms {
-				r := <-ch
-				if r.entry.LastMessage == "" && r.entry.LastAtTS == 0 {
+				entry := <-ch
+				if entry.LastMessage == "" && entry.LastAtTS == 0 {
 					continue // skip rooms with no messages
 				}
-				entries = append(entries, r.entry)
+				entries = append(entries, entry)
 			}
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].LastAtTS > entries[j].LastAtTS

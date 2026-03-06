@@ -17,7 +17,7 @@ type cacheEntry struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// SummaryCache provides disk-backed caching with in-memory LRU.
+// SummaryCache provides disk-backed caching with in-memory eviction (oldest-first).
 type SummaryCache struct {
 	mu     sync.RWMutex
 	dir    string // disk cache directory
