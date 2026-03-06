@@ -1096,7 +1096,8 @@ func (w *Workspace) togglePoolMonitor() tea.Cmd {
 			sUpdated, _ := w.sidebarView.Update(BlurMsg{})
 			w.sidebarView = sUpdated
 		} else if view := w.router.Current(); view != nil {
-			_, cmd := view.Update(BlurMsg{})
+			updated, cmd := view.Update(BlurMsg{})
+			w.replaceCurrentView(updated)
 			if cmd != nil {
 				cmds = append(cmds, w.stampCmd(cmd))
 			}
