@@ -64,6 +64,7 @@ verify_checksums() {
   local tmp_dir="$2"
   local archive_name="$3"
   local base_url="https://github.com/${REPO}/releases/download/v${version}"
+  local checksum_line
 
   info "Verifying checksums..."
 
@@ -71,8 +72,14 @@ verify_checksums() {
     error "Failed to download checksums.txt"
   fi
 
-  # Verify SHA256 checksum of the downloaded archive
-  (cd "$tmp_dir" && grep -F "$archive_name" checksums.txt | $(find_sha256_cmd) --check --status) \
+  # Verify SHA256 checksum of the downloaded archive.
+  # Match the exact filename to avoid also selecting "*.sbom.json" entries.
+  checksum_line=$(awk -v file="$archive_name" '$2 == file || $2 == ("*" file) { print; exit }' "${tmp_dir}/checksums.txt")
+  if [[ -z "$checksum_line" ]]; then
+    error "No checksum entry found for $archive_name"
+  fi
+
+  (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | $(find_sha256_cmd) --check --status) \
     || error "Checksum verification failed for $archive_name"
 
   info "Checksum verified"
@@ -223,7 +230,7 @@ main() {
   fi
 
   tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap "rm -rf \"$tmp_dir\"" EXIT
 
   download_binary "$version" "$platform" "$tmp_dir"
   setup_path
