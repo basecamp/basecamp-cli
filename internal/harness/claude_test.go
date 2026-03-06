@@ -58,6 +58,39 @@ func TestPluginInstalled_EmptyData(t *testing.T) {
 	assert.False(t, pluginInstalled(data))
 }
 
+func TestCheckClaudeSkillLink_Missing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	assert.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+
+	check := CheckClaudeSkillLink()
+	assert.Equal(t, "fail", check.Status)
+	assert.Equal(t, "Claude Code Skill", check.Name)
+}
+
+func TestCheckClaudeSkillLink_Present(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	skillDir := filepath.Join(home, ".claude", "skills", "basecamp")
+	assert.NoError(t, os.MkdirAll(skillDir, 0o755))
+	assert.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0o644))
+
+	check := CheckClaudeSkillLink()
+	assert.Equal(t, "pass", check.Status)
+}
+
+func TestCheckClaudeSkillLink_BrokenSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	symlinkDir := filepath.Join(home, ".claude", "skills")
+	assert.NoError(t, os.MkdirAll(symlinkDir, 0o755))
+	// Create a symlink pointing to nowhere
+	assert.NoError(t, os.Symlink("/nonexistent/path", filepath.Join(symlinkDir, "basecamp")))
+
+	check := CheckClaudeSkillLink()
+	assert.Equal(t, "fail", check.Status)
+}
+
 func TestDetectClaude_DirOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

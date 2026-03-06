@@ -274,6 +274,49 @@ func TestBaselineSkillInstalled(t *testing.T) {
 	assert.True(t, baselineSkillInstalled(), "should be true when SKILL.md exists")
 }
 
+// TestSetupClaudeBrokenSkillLinkReportsFailure verifies that when the Claude
+// skill link is missing, setup claude --json does NOT report full success.
+func TestSetupClaudeBrokenSkillLinkReportsFailure(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	// Create ~/.claude so DetectClaude() returns true, but do NOT create
+	// the skill link at ~/.claude/skills/basecamp/SKILL.md.
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+
+	// Also install the plugin file so CheckClaudePlugin passes —
+	// the only failing check should be the skill link.
+	pluginDir := filepath.Join(home, ".claude", "plugins")
+	os.MkdirAll(pluginDir, 0o755)
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"),
+		[]byte(`[{"name":"basecamp","version":"1.0.0"}]`), 0o644)
+
+	app, appBuf := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	var envelope struct {
+		Summary string         `json:"summary"`
+		Data    map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(appBuf.Bytes(), &envelope))
+
+	// The skill link check should cause installed=false
+	installed, _ := envelope.Data["plugin_installed"].(bool)
+	assert.False(t, installed, "plugin_installed should be false when skill link is missing")
+	assert.Equal(t, "Claude Code plugin not installed", envelope.Summary)
+}
+
 // TestJoinNames verifies name joining with commas and "and".
 func TestJoinNames(t *testing.T) {
 	assert.Equal(t, "", joinNames(nil))

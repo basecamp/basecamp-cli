@@ -13,7 +13,15 @@ func init() {
 		ID:     "claude",
 		Detect: DetectClaude,
 		Checks: func() []*StatusCheck {
-			return []*StatusCheck{CheckClaudePlugin()}
+			checks := []*StatusCheck{CheckClaudePlugin()}
+			// Only check the skill link if ~/.claude exists (i.e. Claude is dir-detected)
+			home, err := os.UserHomeDir()
+			if err == nil {
+				if info, statErr := os.Stat(filepath.Join(home, ".claude")); statErr == nil && info.IsDir() {
+					checks = append(checks, CheckClaudeSkillLink())
+				}
+			}
+			return checks
 		},
 	})
 }
@@ -110,6 +118,42 @@ func CheckClaudePlugin() *StatusCheck {
 		Status:  "fail",
 		Message: "Plugin not installed",
 		Hint:    "Run: basecamp setup claude",
+	}
+}
+
+// CheckClaudeSkillLink checks whether ~/.claude/skills/basecamp contains a valid SKILL.md.
+func CheckClaudeSkillLink() *StatusCheck {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return &StatusCheck{
+			Name:    "Claude Code Skill",
+			Status:  "warn",
+			Message: "Cannot determine home directory",
+		}
+	}
+
+	skillPath := filepath.Join(filepath.Clean(home), ".claude", "skills", "basecamp", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		if os.IsNotExist(err) {
+			return &StatusCheck{
+				Name:    "Claude Code Skill",
+				Status:  "fail",
+				Message: "Skill not linked",
+				Hint:    "Run: basecamp setup claude",
+			}
+		}
+		return &StatusCheck{
+			Name:    "Claude Code Skill",
+			Status:  "warn",
+			Message: "Cannot check skill link",
+			Hint:    "Unable to stat " + skillPath,
+		}
+	}
+
+	return &StatusCheck{
+		Name:    "Claude Code Skill",
+		Status:  "pass",
+		Message: "Linked",
 	}
 }
 

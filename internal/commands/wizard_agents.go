@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +20,7 @@ type agentSetupHandler struct {
 	Labels            []string                                           // what this will do
 	Confirm           string                                             // confirmation prompt
 	Run               func(cmd *cobra.Command, styles *tui.Styles) error // interactive setup
-	RunNonInteractive func(cmd *cobra.Command)                           // non-interactive setup (best-effort)
+	RunNonInteractive func(cmd *cobra.Command) error                     // non-interactive setup
 }
 
 // agentSetupHandlers maps agent ID → setup handler.
@@ -196,17 +197,24 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 }
 
 // runClaudeSetupNonInteractive attempts plugin install without prompts (for --json/--agent mode).
-func runClaudeSetupNonInteractive(cmd *cobra.Command) {
+func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 	claudePath := harness.FindClaudeBinary()
 	if claudePath == "" {
-		return
+		return nil
 	}
+
+	var errs []string
 
 	// Check if already installed
 	if check := harness.CheckClaudePlugin(); check.Status == "pass" {
 		// Plugin already installed, but still ensure the skill symlink exists
-		_, _, _ = linkSkillToClaude()
-		return
+		if _, _, err := linkSkillToClaude(); err != nil {
+			errs = append(errs, fmt.Sprintf("skill link: %s", err))
+		}
+		if len(errs) > 0 {
+			return fmt.Errorf("%s", errs[0])
+		}
+		return nil
 	}
 
 	ctx := cmd.Context()
@@ -220,10 +228,19 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) {
 	// Install the plugin
 	installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
 	installCmd.Stderr = w
-	_ = installCmd.Run()
+	if err := installCmd.Run(); err != nil {
+		errs = append(errs, fmt.Sprintf("plugin install: %s", err))
+	}
 
 	// Symlink skill into Claude's skill directory
-	_, _, _ = linkSkillToClaude()
+	if _, _, err := linkSkillToClaude(); err != nil {
+		errs = append(errs, fmt.Sprintf("skill link: %s", err))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // claudeManualInstallHint returns the two-line manual install instructions.
@@ -255,9 +272,16 @@ func newSetupAgentCmds() []*cobra.Command {
 				// Always install baseline skill (interactive and non-interactive)
 				_, skillErr := installSkillFiles()
 
+				var setupErrors []string
+				if skillErr != nil {
+					setupErrors = append(setupErrors, fmt.Sprintf("skill install: %s", skillErr))
+				}
+
 				if !app.IsInteractive() {
 					if h.RunNonInteractive != nil {
-						h.RunNonInteractive(cmd)
+						if err := h.RunNonInteractive(cmd); err != nil {
+							setupErrors = append(setupErrors, err.Error())
+						}
 					}
 				} else {
 					styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
@@ -297,10 +321,20 @@ func newSetupAgentCmds() []*cobra.Command {
 					summary = agent.Name + " plugin not installed"
 				}
 
-				return app.OK(map[string]any{
+				result := map[string]any{
 					"plugin_installed": installed,
 					"agent_detected":   detected,
-				},
+				}
+				if len(setupErrors) > 0 {
+					result["errors"] = setupErrors
+					// If setup had errors, don't claim installed even if checks pass
+					if installed {
+						result["plugin_installed"] = false
+						summary = agent.Name + " plugin not installed"
+					}
+				}
+
+				return app.OK(result,
 					output.WithSummary(summary),
 					output.WithBreadcrumbs(
 						output.Breadcrumb{Action: "doctor", Cmd: "basecamp doctor", Description: "Check CLI health"},
@@ -330,7 +364,7 @@ func joinNames(names []string) string {
 	case 1:
 		return names[0]
 	case 2:
-		return names[0] + " and " + names[1]
+		return names[0] + " and " + names[1] //nolint:gosec // G602: len==2 guaranteed by switch
 	default:
 		result := ""
 		for i, n := range names {
