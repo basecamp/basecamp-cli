@@ -788,6 +788,18 @@ func (m *Manager) GetUserEmail() string {
 	return creds.UserEmail
 }
 
+// SetUserEmail stores the user email for the current credential key
+// without modifying the stored user ID.
+func (m *Manager) SetUserEmail(email string) error {
+	credKey := m.credentialKey()
+	creds, err := m.store.Load(credKey)
+	if err != nil {
+		return err
+	}
+	creds.UserEmail = email
+	return m.store.Save(credKey, creds)
+}
+
 // SetUserIdentity stores the user ID and email for the current credential key.
 func (m *Manager) SetUserIdentity(userID, email string) error {
 	credKey := m.credentialKey()
