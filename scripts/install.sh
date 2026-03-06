@@ -64,22 +64,17 @@ verify_checksums() {
   local tmp_dir="$2"
   local archive_name="$3"
   local base_url="https://github.com/${REPO}/releases/download/v${version}"
-  local checksum_line
-
   info "Verifying checksums..."
 
   if ! curl -fsSL "${base_url}/checksums.txt" -o "${tmp_dir}/checksums.txt"; then
     error "Failed to download checksums.txt"
   fi
 
-  # Verify SHA256 checksum of the downloaded archive.
-  # Match the exact filename to avoid also selecting "*.sbom.json" entries.
-  checksum_line=$(awk -v file="$archive_name" '$2 == file || $2 == ("*" file) { print; exit }' "${tmp_dir}/checksums.txt")
-  if [[ -z "$checksum_line" ]]; then
-    error "No checksum entry found for $archive_name"
-  fi
-
-  (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | $(find_sha256_cmd) --check --status) \
+  # Verify SHA256 checksum of the downloaded archive
+  local expected actual
+  expected=$(awk -v f="$archive_name" '$2 == f || $2 == ("*" f) {print $1; exit}' "${tmp_dir}/checksums.txt")
+  actual=$(cd "$tmp_dir" && $(find_sha256_cmd) "$archive_name" | awk '{print $1}')
+  [[ -n "$expected" && "$expected" == "$actual" ]]  \
     || error "Checksum verification failed for $archive_name"
 
   info "Checksum verified"
@@ -130,11 +125,10 @@ download_binary() {
 
   # Extract binary
   info "Extracting..."
-  cd "$tmp_dir"
   if [[ "$ext" == "zip" ]]; then
-    unzip -q "$archive_name"
+    unzip -q "${tmp_dir}/${archive_name}" -d "$tmp_dir"
   else
-    tar -xzf "$archive_name"
+    tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
   fi
 
   # Find and install binary
@@ -143,12 +137,12 @@ download_binary() {
     binary_name="basecamp.exe"
   fi
 
-  if [[ ! -f "$binary_name" ]]; then
+  if [[ ! -f "${tmp_dir}/${binary_name}" ]]; then
     error "Binary not found in archive"
   fi
 
   mkdir -p "$BIN_DIR"
-  mv "$binary_name" "$BIN_DIR/"
+  mv "${tmp_dir}/${binary_name}" "$BIN_DIR/"
   chmod +x "$BIN_DIR/$binary_name"
 
   info "Installed basecamp to $BIN_DIR/$binary_name"
@@ -230,7 +224,7 @@ main() {
   fi
 
   tmp_dir=$(mktemp -d)
-  trap "rm -rf \"$tmp_dir\"" EXIT
+  trap "rm -rf '${tmp_dir}'" EXIT
 
   download_binary "$version" "$platform" "$tmp_dir"
   setup_path
@@ -238,11 +232,7 @@ main() {
   verify_install
 
   echo ""
-  echo "Next steps:"
-  echo "  1. Reload your shell: source ~/.bashrc (or ~/.zshrc)"
-  echo "  2. Authenticate: basecamp auth login"
-  echo "  3. Test: basecamp projects"
-  echo ""
+  "$BIN_DIR/basecamp" setup
 }
 
 main "$@"
