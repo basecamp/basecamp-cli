@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -37,7 +38,7 @@ type Hub struct {
 func NewHub(multi *MultiStore, cacheDir string) *Hub {
 	var poolCacheDir string
 	if cacheDir != "" {
-		poolCacheDir = cacheDir + "/pools"
+		poolCacheDir = filepath.Join(cacheDir, "pools")
 	}
 	return &Hub{
 		global:          NewRealm("global", context.Background()),

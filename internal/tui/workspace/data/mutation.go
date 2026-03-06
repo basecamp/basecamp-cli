@@ -187,13 +187,16 @@ func (mp *MutatingPool[T]) Fetch(ctx context.Context) tea.Cmd {
 			return PoolUpdatedMsg{Key: mp.key}
 		}
 
-		// Save to disk cache before reconcile (which may re-apply local mutations).
-		if mp.cache != nil {
-			if err := mp.cache.Save(mp.key, data, time.Now()); err != nil {
-				log.Printf("pool cache save %s: %v", mp.key, err)
+		// Capture cache refs under lock, then save outside to avoid blocking readers.
+		cache := mp.cache
+		cacheKey := mp.key
+		mp.mu.Unlock()
+
+		if cache != nil {
+			if err := cache.Save(cacheKey, data, time.Now()); err != nil {
+				log.Printf("pool cache save %s: %v", cacheKey, err)
 			}
 		}
-		mp.mu.Unlock()
 
 		mp.reconcile(gen, data)
 		return PoolUpdatedMsg{Key: mp.key}
