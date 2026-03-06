@@ -552,10 +552,11 @@ func newMockResolverWithAuth(t *testing.T) (*mockResolver, *auth.Manager) {
 	mgr.SetStore(auth.NewStore(tmpDir))
 
 	// Seed credentials so the manager can load them
-	mgr.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
+	err := mgr.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
 		AccessToken: "test-token",
 		ExpiresAt:   time.Now().Unix() + 3600,
 	})
+	require.NoError(t, err)
 
 	r := newMockResolver()
 	r.auth = mgr

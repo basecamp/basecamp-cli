@@ -246,7 +246,7 @@ func TestSetUserEmail(t *testing.T) {
 		ExpiresAt:   time.Now().Unix() + 3600,
 		UserID:      "original-id",
 	}
-	manager.store.Save("https://3.basecampapi.com", creds)
+	require.NoError(t, manager.store.Save("https://3.basecampapi.com", creds))
 
 	// Set email only
 	err := manager.SetUserEmail("test@example.com")
@@ -273,7 +273,7 @@ func TestSetUserIdentity(t *testing.T) {
 		AccessToken: "test-token",
 		ExpiresAt:   time.Now().Unix() + 3600,
 	}
-	manager.store.Save("https://3.basecampapi.com", creds)
+	require.NoError(t, manager.store.Save("https://3.basecampapi.com", creds))
 
 	// Set user identity
 	err := manager.SetUserIdentity("67890", "test@example.com")

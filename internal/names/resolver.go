@@ -144,14 +144,16 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 	// account-scoped person IDs, so we match by email instead.
 	if strings.ToLower(input) == "me" {
 		email := r.auth.GetUserEmail()
-		if email != "" {
-			people, err := r.getPeople(ctx)
-			if err == nil {
-				for _, p := range people {
-					if strings.EqualFold(p.Email, email) {
-						return strconv.FormatInt(p.ID, 10), p.Name, nil
-					}
-				}
+		if email == "" {
+			return "", "", output.ErrAuth("Could not resolve your identity. Run: basecamp auth login")
+		}
+		people, err := r.getPeople(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		for _, p := range people {
+			if strings.EqualFold(p.Email, email) {
+				return strconv.FormatInt(p.ID, 10), p.Name, nil
 			}
 		}
 		return "", "", output.ErrAuth("Could not resolve your identity. Run: basecamp auth login")
