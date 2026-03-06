@@ -1,0 +1,25 @@
+internal/richtext/hyperlink.go
+  0e3d278ee9afe288 1-117
+internal/richtext/hyperlink_test.go
+  0e3d278ee9afe288 1-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "ed302e0fc94bfd151d7ad2d3e04744efc30e255b",
+  "prompts": {
+    "0e3d278ee9afe288": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0a109c4-8e3f-4a93-93ba-c8ecd81f2ac5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 488,
+      "total_deletions": 45,
+      "accepted_lines": 460,
+      "overriden_lines": 0
+    }
+  }
+}
