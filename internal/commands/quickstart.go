@@ -9,6 +9,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -64,6 +65,13 @@ func RunQuickStartDefault(cmd *cobra.Command, args []string) error {
 
 func runQuickStart(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Show animated wordmark on interactive TTY (not JSON/agent/piped/config-driven machine output)
+	if app != nil && app.IsInteractive() && !app.IsMachineOutput() {
+		styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
+		tui.AnimateWordmark(cmd.OutOrStdout(), styles.Theme())
+		fmt.Fprintln(cmd.OutOrStdout())
+	}
 
 	// Determine auth status
 	authInfo := AuthInfo{Status: "unauthenticated"}

@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"charm.land/lipgloss/v2"
@@ -55,7 +56,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
 
 	// Step 1: Welcome
-	if err := showWelcome(styles); err != nil {
+	if err := showWelcome(cmd.OutOrStdout(), styles); err != nil {
 		return err
 	}
 
@@ -86,7 +87,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	}
 
 	// Step 5: Save config
-	configScope := wizardSaveConfig(styles, accountID, projectID)
+	configScope := wizardSaveConfig(cmd.OutOrStdout(), styles, accountID, projectID)
 	result.ConfigScope = configScope
 
 	// Step 6: Coding agent integration
@@ -96,11 +97,16 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 
 	// Persist onboarded flag (always global so it applies everywhere)
 	if err := resolve.PersistValue("onboarded", "true", "global"); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to persist onboarding flag: %v\n", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist onboarding flag: %v\n", err)
 	}
 
 	// Step 7: Summary with next steps
-	showSuccess(styles, result)
+	// Interactive mode shows the rich checklist directly; non-interactive
+	// delegates to app.OK which renders the structured envelope.
+	if app.IsInteractive() {
+		showSuccess(cmd.OutOrStdout(), styles, result)
+		return nil
+	}
 
 	return app.OK(result,
 		output.WithSummary(wizardSummaryLine(result)),
@@ -108,41 +114,44 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	)
 }
 
-// showWelcome displays the welcome screen.
-func showWelcome(styles *tui.Styles) error {
-	title := styles.Title.Render("Welcome to basecamp")
-	body := fmt.Sprintf(
-		"%s\n\n%s\n\n%s",
-		styles.Body.Render(fmt.Sprintf("The command-line interface for Basecamp (v%s).", version.Version)),
-		styles.Body.Render("Let's get you set up. This will only take a moment."),
-		styles.Muted.Render("Press Enter to continue, or Ctrl+C to exit."),
-	)
-	return tui.Note(title, body)
+// showWelcome displays the welcome screen with animated logo.
+// All output goes to w so the command fully honors its output writer.
+func showWelcome(w io.Writer, styles *tui.Styles) error {
+	tui.AnimateWordmark(w, styles.Theme())
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, styles.Title.Render("Welcome to Basecamp"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, styles.Body.Render(fmt.Sprintf("The command-line interface for Basecamp (v%s).", version.Version)))
+	fmt.Fprintln(w, styles.Body.Render("Let's get you set up. This will only take a moment."))
+	fmt.Fprintln(w)
+	return nil
 }
 
 // wizardAuth handles the authentication flow with scope selection.
 func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
+	w := cmd.OutOrStdout()
+
 	if app.Auth.IsAuthenticated() {
 		info, err := app.SDK.Authorization().GetInfo(cmd.Context(), nil)
 		if err == nil {
 			name := fmt.Sprintf("%s %s", info.Identity.FirstName, info.Identity.LastName)
-			fmt.Println(styles.Success.Render(fmt.Sprintf("  Logged in as %s (%s)", name, info.Identity.EmailAddress)))
+			fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s (%s)", name, info.Identity.EmailAddress)))
 			if len(info.Accounts) > 0 {
 				var lines string
 				for _, acct := range info.Accounts {
 					lines += fmt.Sprintf("    • %s\n", acct.Name)
 				}
-				fmt.Print(styles.Muted.Render(lines))
+				fmt.Fprint(w, styles.Muted.Render(lines))
 			}
 		} else {
-			fmt.Println(styles.Success.Render("  Already authenticated."))
+			fmt.Fprintln(w, styles.Success.Render("  Already authenticated."))
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 		return nil
 	}
 
-	fmt.Println(styles.Heading.Render("  Step 1: Authentication"))
-	fmt.Println()
+	fmt.Fprintln(w, styles.Heading.Render("  Step 1: Authentication"))
+	fmt.Fprintln(w)
 
 	// Let user choose scope (map to OAuth scopes: "read" or "full")
 	scope, err := tui.Select("  What access level do you need?", []tui.SelectOption{
@@ -153,13 +162,13 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 		return fmt.Errorf("scope selection canceled: %w", err)
 	}
 
-	fmt.Println()
-	fmt.Println(styles.Muted.Render("  Opening browser for Basecamp login..."))
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, styles.Muted.Render("  Opening browser for Basecamp login..."))
+	fmt.Fprintln(w)
 
 	if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 		Scope:  scope,
-		Logger: func(msg string) { fmt.Println("  " + msg) },
+		Logger: func(msg string) { fmt.Fprintln(w, "  "+msg) },
 	}); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
@@ -174,20 +183,21 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 		}
 		if err := resp.UnmarshalData(&profile); err == nil {
 			_ = app.Auth.SetUserIdentity(fmt.Sprintf("%d", profile.ID), profile.Email)
-			fmt.Println(styles.Success.Render(fmt.Sprintf("  Logged in as %s.", profile.Name)))
+			fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s.", profile.Name)))
 		}
 	} else {
-		fmt.Println(styles.Success.Render("  Authentication successful."))
+		fmt.Fprintln(w, styles.Success.Render("  Authentication successful."))
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	return nil
 }
 
 // wizardAccount resolves the account using the existing interactive picker.
 func wizardAccount(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (string, error) {
-	fmt.Println(styles.Heading.Render("  Step 2: Select Account"))
-	fmt.Println()
+	w := cmd.OutOrStdout()
+	fmt.Fprintln(w, styles.Heading.Render("  Step 2: Select Account"))
+	fmt.Fprintln(w)
 
 	resolved, err := app.Resolve().Account(cmd.Context())
 	if err != nil {
@@ -206,16 +216,17 @@ func wizardAccount(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (str
 
 // wizardProject offers optional project selection.
 func wizardProject(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (string, error) {
-	fmt.Println(styles.Heading.Render("  Step 3: Default Project (optional)"))
-	fmt.Println()
+	w := cmd.OutOrStdout()
+	fmt.Fprintln(w, styles.Heading.Render("  Step 3: Default Project (optional)"))
+	fmt.Fprintln(w)
 
 	wantProject, err := tui.Confirm("  Set a default project?", true)
 	if err != nil {
 		return "", nil //nolint:nilerr // Treat confirm error as skip (user canceled)
 	}
 	if !wantProject {
-		fmt.Println(styles.Muted.Render("  Skipped. Use --project or run: basecamp config project"))
-		fmt.Println()
+		fmt.Fprintln(w, styles.Muted.Render("  Skipped. Use --project or run: basecamp config project"))
+		fmt.Fprintln(w)
 		return "", nil
 	}
 
@@ -230,13 +241,13 @@ func wizardProject(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (str
 
 // wizardSaveConfig asks where to persist the selected defaults.
 // Returns the chosen scope ("global", "local") or "" if skipped.
-func wizardSaveConfig(styles *tui.Styles, accountID, projectID string) string {
+func wizardSaveConfig(w io.Writer, styles *tui.Styles, accountID, projectID string) string {
 	if accountID == "" {
 		return ""
 	}
 
-	fmt.Println(styles.Heading.Render("  Step 4: Save Configuration"))
-	fmt.Println()
+	fmt.Fprintln(w, styles.Heading.Render("  Step 4: Save Configuration"))
+	fmt.Fprintln(w)
 
 	scope, err := tui.Select("  Where should defaults be saved?", []tui.SelectOption{
 		{Value: "global", Label: "Global (~/.config/basecamp/config.json) - applies everywhere"},
@@ -244,29 +255,29 @@ func wizardSaveConfig(styles *tui.Styles, accountID, projectID string) string {
 		{Value: "skip", Label: "Don't save - I'll use flags each time"},
 	})
 	if err != nil || scope == "skip" {
-		fmt.Println(styles.Muted.Render("  Skipped. Use --account and --project flags."))
-		fmt.Println()
+		fmt.Fprintln(w, styles.Muted.Render("  Skipped. Use --account and --project flags."))
+		fmt.Fprintln(w)
 		return ""
 	}
 
 	saved := false
 	if err := resolve.PersistValue("account_id", accountID, scope); err != nil {
-		fmt.Println(styles.Warning.Render(fmt.Sprintf("  Could not save account_id: %s", err)))
+		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Could not save account_id: %s", err)))
 	} else {
-		fmt.Println(styles.Success.Render(fmt.Sprintf("  Saved account_id = %s (%s)", accountID, scope)))
+		fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Saved account_id = %s (%s)", accountID, scope)))
 		saved = true
 	}
 
 	if projectID != "" {
 		if err := resolve.PersistValue("project_id", projectID, scope); err != nil {
-			fmt.Println(styles.Warning.Render(fmt.Sprintf("  Could not save project_id: %s", err)))
+			fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Could not save project_id: %s", err)))
 		} else {
-			fmt.Println(styles.Success.Render(fmt.Sprintf("  Saved project_id = %s (%s)", projectID, scope)))
+			fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Saved project_id = %s (%s)", projectID, scope)))
 			saved = true
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(w)
 	if !saved {
 		return "" // Don't report scope if nothing was actually saved
 	}
@@ -274,42 +285,43 @@ func wizardSaveConfig(styles *tui.Styles, accountID, projectID string) string {
 }
 
 // showSuccess displays the completion summary with example commands.
-func showSuccess(styles *tui.Styles, result WizardResult) {
+func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult) {
 	divider := styles.Muted.Render("─────────────────────────────────")
 
-	fmt.Println(divider)
-	fmt.Println(styles.Success.Render("  Setup complete!"))
-	fmt.Println(divider)
-	fmt.Println()
+	fmt.Fprintln(w, divider)
+	fmt.Fprintln(w, styles.Success.Render("  Setup complete!"))
+	fmt.Fprintln(w, divider)
+	fmt.Fprintln(w)
 
 	// Status checklist
-	fmt.Println(styles.RenderStatus(true, "Authenticated"))
+	fmt.Fprintln(w, styles.RenderStatus(true, "Authenticated"))
 	if result.AccountName != "" {
-		fmt.Println(styles.RenderStatus(true, fmt.Sprintf("Account: %s", result.AccountName)))
+		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Account: %s", result.AccountName)))
 	} else {
-		fmt.Println(styles.RenderStatus(true, fmt.Sprintf("Account: #%s", result.AccountID)))
+		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Account: #%s", result.AccountID)))
 	}
 	if result.ProjectName != "" {
-		fmt.Println(styles.RenderStatus(true, fmt.Sprintf("Project: %s", result.ProjectName)))
+		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Project: %s", result.ProjectName)))
 	} else if result.ProjectID != "" {
-		fmt.Println(styles.RenderStatus(true, fmt.Sprintf("Project: #%s", result.ProjectID)))
+		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Project: #%s", result.ProjectID)))
 	}
 	if result.ConfigScope != "" {
-		fmt.Println(styles.RenderStatus(true, fmt.Sprintf("Config saved (%s)", result.ConfigScope)))
+		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Config saved (%s)", result.ConfigScope)))
 	}
 	for _, agent := range harness.DetectedAgents() {
 		if agent.Checks == nil {
 			continue
 		}
 		for _, check := range agent.Checks() {
-			fmt.Println(styles.RenderStatus(check.Status == "pass", check.Name))
+			
+		fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	// Example commands
-	fmt.Println(styles.Body.Render("  Try these commands:"))
-	fmt.Println()
+	fmt.Fprintln(w, styles.Body.Render("  Try these commands:"))
+	fmt.Fprintln(w)
 
 	cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Theme().Primary)
 	descStyle := styles.Muted
@@ -321,9 +333,9 @@ func showSuccess(styles *tui.Styles, result WizardResult) {
 		{"basecamp search \"quarterly\"", "Search across Basecamp"},
 	}
 	for _, ex := range examples {
-		fmt.Printf("    %s  %s\n", cmdStyle.Render(ex.cmd), descStyle.Render(ex.desc))
+		fmt.Fprintf(w, "    %s  %s\n", cmdStyle.Render(ex.cmd), descStyle.Render(ex.desc))
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 }
 
 // fetchAccountName attempts to get the account name from the authorization endpoint.
