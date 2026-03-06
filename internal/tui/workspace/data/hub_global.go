@@ -262,9 +262,10 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 	return p
 }
 
-// BonfireRooms returns a global-scope pool of campfire rooms from bookmarked projects.
-// Uses FanOut like PingRooms but filters for project campfires (not 1:1 pings).
-// Default scope: only rooms from bookmarked projects. The RoomStore (if configured
+// BonfireRooms returns a global-scope pool of campfire rooms from bookmarked
+// and recently visited projects. Uses FanOut like PingRooms but filters for
+// project campfires (not 1:1 pings). For accounts with no bookmarks, falls back
+// to recently visited projects (from recents store). The RoomStore (if configured
 // via SetRoomStore) can further narrow or widen via explicit includes/excludes.
 func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 	p := RealmPool(h.Global(), "bonfire-rooms", func() *Pool[[]BonfireRoomConfig] {
@@ -320,10 +321,21 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 						bmKeys[rc.Key()] = struct{}{}
 					}
 				}
-				// If no bookmarks exist (fresh account), treat all as bookmarked.
+				// If no bookmarks, fall back to recently visited projects.
 				if len(bookmarked) == 0 {
-					for _, r := range rooms {
-						bmKeys[r.Key()] = struct{}{}
+					h.mu.RLock()
+					recentFn := h.recentProjects
+					h.mu.RUnlock()
+					if recentFn != nil {
+						recentIDs := make(map[int64]struct{})
+						for _, id := range recentFn() {
+							recentIDs[id] = struct{}{}
+						}
+						for _, r := range rooms {
+							if _, ok := recentIDs[r.ProjectID]; ok {
+								bmKeys[r.Key()] = struct{}{}
+							}
+						}
 					}
 				}
 				return accountRooms{all: rooms, bookmarks: bmKeys}, nil
@@ -365,7 +377,7 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 			}
 
 			// Apply room selection overrides.
-			// Contract: (bookmarked ∪ explicit-includes) − explicit-excludes.
+			// Contract: (bookmarked ∪ recents ∪ explicit-includes) − explicit-excludes.
 			h.mu.RLock()
 			rs := h.roomStore
 			h.mu.RUnlock()
