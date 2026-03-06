@@ -1,0 +1,41 @@
+internal/tui/brand.go
+  ab1fe46829bec3c2 1-60
+internal/tui/brand_anim.go
+  ab1fe46829bec3c2 1-82,84,87-109
+internal/tui/brand_test.go
+  ab1fe46829bec3c2 1-56
+internal/commands/wizard.go
+  ab1fe46829bec3c2 6,120,287-293,300
+internal/commands/quickstart.go
+  ab1fe46829bec3c2 12,69-75
+scripts/install.sh
+  ab1fe46829bec3c2 17-60,81,95,98,109,112,126,131,141,145,155,159,169,171,185,194-201,205,214-221,226-233,236-256,258-259,265,275-292,294,298-300,304,310-322,324-327
+internal/tui/forms.go
+  ab1fe46829bec3c2 6-8,10-15,17-23,25-34,36-39,42,47-49,51,54,58-60,65,68,72-74,79,82,86-88,99,107,111-113,116,124,128-130,133,141,145-147
+internal/commands/skill.go
+  ab1fe46829bec3c2 7-9,13,15,17-34,36-47,50-192,197-209,211-282
+internal/commands/skill_test.go
+  ab1fe46829bec3c2 207-279
+README.md
+  ab1fe46829bec3c2 3-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "c584e5d8aa9a6d26a75b1acf59541c8077d80303",
+  "prompts": {
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 821,
+      "overriden_lines": 0
+    }
+  }
+}
