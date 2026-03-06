@@ -221,7 +221,7 @@ func matchesPluginKey(key string) bool {
 func jsonContainsBasecamp(data []byte) bool {
 	// Fallback: raw string search for the plugin identifier
 	s := string(data)
-	return len(s) > 0 && contains(s, `"basecamp`)
+	return len(s) > 0 && (contains(s, `"basecamp"`) || contains(s, `"basecamp@`))
 }
 
 func contains(s, substr string) bool {

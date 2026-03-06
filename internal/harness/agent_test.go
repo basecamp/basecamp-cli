@@ -62,10 +62,28 @@ func TestDetectedAgents_Empty(t *testing.T) {
 	assert.Empty(t, DetectedAgents())
 }
 
-func TestClaudeRegisteredViaInit(t *testing.T) {
-	// Re-register Claude (prior tests call resetRegistry which clears init state).
-	// This verifies the registration contract: DetectClaude and check functions
-	// are correctly wired up.
+func TestRegisterAgent_EmptyID(t *testing.T) {
+	resetRegistry()
+	defer resetRegistry()
+
+	assert.Panics(t, func() {
+		RegisterAgent(AgentInfo{Name: "Bad Agent"})
+	})
+}
+
+func TestRegisterAgent_DuplicateID(t *testing.T) {
+	resetRegistry()
+	defer resetRegistry()
+
+	RegisterAgent(AgentInfo{ID: "dup", Name: "First"})
+	assert.Panics(t, func() {
+		RegisterAgent(AgentInfo{ID: "dup", Name: "Second"})
+	})
+}
+
+func TestClaudeAgentInfoWiring(t *testing.T) {
+	// Verifies the Claude AgentInfo registration contract: DetectClaude and
+	// check functions are correctly wired up.
 	resetRegistry()
 	defer resetRegistry()
 

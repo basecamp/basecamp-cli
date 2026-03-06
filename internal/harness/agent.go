@@ -17,9 +17,18 @@ var (
 
 // RegisterAgent adds an agent to the global registry.
 // Typically called from init() in agent-specific files.
+// Panics on empty or duplicate IDs to keep registry state well-defined.
 func RegisterAgent(info AgentInfo) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
+	if info.ID == "" {
+		panic("harness: RegisterAgent called with empty agent ID")
+	}
+	for i := range registry {
+		if registry[i].ID == info.ID {
+			panic("harness: RegisterAgent called with duplicate agent ID: " + info.ID)
+		}
+	}
 	registry = append(registry, info)
 }
 
