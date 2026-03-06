@@ -156,7 +156,7 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 				return strconv.FormatInt(p.ID, 10), p.Name, nil
 			}
 		}
-		return "", "", output.ErrAuth("Could not resolve your identity. Run: basecamp auth login")
+		return "", "", output.ErrAuth(fmt.Sprintf("Your email (%s) was not found in this account. Check your account selection or run: basecamp auth login", email))
 	}
 
 	// Numeric ID passthrough
