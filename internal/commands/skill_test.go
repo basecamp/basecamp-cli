@@ -14,6 +14,10 @@ import (
 func TestSkillInstallRunE(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Create ~/.claude so DetectClaude() returns true and the symlink is created
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := newSkillInstallCmd()
 	cmd.SetContext(context.Background())
@@ -52,6 +56,9 @@ func TestSkillInstallRunE(t *testing.T) {
 func TestSkillInstallIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := newSkillInstallCmd()
 	cmd.SetContext(context.Background())
@@ -75,6 +82,10 @@ func TestSkillInstallIdempotent(t *testing.T) {
 func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// ~/.claude dir exists so DetectClaude() triggers symlink path
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Pre-create a non-empty directory where the symlink would go.
 	// os.Remove can't remove non-empty dirs, so symlink creation will fail,
@@ -117,6 +128,9 @@ func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
 func TestSkillInstallOutputKeys(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := newSkillInstallCmd()
 	cmd.SetContext(context.Background())
@@ -209,6 +223,9 @@ func TestSkillInstallResultMap(t *testing.T) {
 	// correctly by checking paths exist with the expected structure.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := newSkillInstallCmd()
 	cmd.SetContext(context.Background())
@@ -234,5 +251,34 @@ func TestSkillInstallResultMap(t *testing.T) {
 	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
 	if _, err := os.Lstat(symlinkPath); err != nil {
 		t.Errorf("symlink_path %q does not exist", symlinkPath)
+	}
+}
+
+func TestSkillInstallNoClaude(t *testing.T) {
+	// When Claude is not detected, skill install should NOT create ~/.claude/
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	cmd := newSkillInstallCmd()
+	cmd.SetContext(context.Background())
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := cmd.RunE(cmd, nil)
+	if err != nil {
+		t.Fatalf("RunE() error = %v", err)
+	}
+
+	// Baseline skill should be installed
+	skillFile := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
+	if _, err := os.Stat(skillFile); err != nil {
+		t.Errorf("skill file should exist: %v", err)
+	}
+
+	// ~/.claude should NOT have been created
+	claudeDir := filepath.Join(home, ".claude")
+	if _, err := os.Stat(claudeDir); err == nil {
+		t.Error("~/.claude should not be created when Claude is not detected")
 	}
 }

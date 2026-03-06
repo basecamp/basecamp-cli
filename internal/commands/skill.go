@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/skills"
 )
@@ -34,56 +35,30 @@ func NewSkillCmd() *cobra.Command {
 func newSkillInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install the basecamp skill globally for Claude",
-		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/basecamp/ and creates a symlink in ~/.claude/skills/basecamp.",
+		Short: "Install the basecamp agent skill",
+		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/basecamp/ and creates a symlink in ~/.claude/skills/basecamp (if Claude Code is detected).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			home, err := os.UserHomeDir()
+			skillPath, err := installSkillFiles()
 			if err != nil {
-				return fmt.Errorf("getting home directory: %w", err)
-			}
-
-			skillDir := filepath.Join(home, ".agents", "skills", "basecamp")
-			skillFile := filepath.Join(skillDir, "SKILL.md")
-			symlinkDir := filepath.Join(home, ".claude", "skills")
-			symlinkPath := filepath.Join(symlinkDir, "basecamp")
-
-			data, err := skills.FS.ReadFile("basecamp/SKILL.md")
-			if err != nil {
-				return fmt.Errorf("reading embedded skill: %w", err)
-			}
-
-			if err := os.MkdirAll(skillDir, 0o755); err != nil { //nolint:gosec // G301: Skill files are not secrets
-				return fmt.Errorf("creating skill directory: %w", err)
-			}
-			if err := os.WriteFile(skillFile, data, 0o644); err != nil { //nolint:gosec // G306: Skill files are not secrets
-				return fmt.Errorf("writing skill file: %w", err)
-			}
-
-			if err := os.MkdirAll(symlinkDir, 0o755); err != nil { //nolint:gosec // G301: Skill files are not secrets
-				return fmt.Errorf("creating symlink directory: %w", err)
-			}
-
-			// Remove existing entry at symlink path (idempotent)
-			_ = os.Remove(symlinkPath)
-
-			symlinkTarget := filepath.Join("..", "..", ".agents", "skills", "basecamp")
-			notice := ""
-			if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
-				// Fallback: copy skill files directly
-				notice = fmt.Sprintf("symlink failed (%v), copied files instead", err)
-				if copyErr := copySkillFiles(skillDir, symlinkPath); copyErr != nil {
-					return fmt.Errorf("creating symlink: %w (copy fallback also failed: %w)", err, copyErr)
-				}
+				return err
 			}
 
 			result := map[string]any{
-				"skill_path":   skillFile,
-				"symlink_path": symlinkPath,
+				"skill_path": skillPath,
 			}
-			if notice != "" {
-				result["notice"] = notice
+
+			// Only create the Claude symlink if Claude is actually installed
+			if harness.DetectClaude() {
+				symlinkPath, notice, linkErr := linkSkillToClaude()
+				if linkErr != nil {
+					return linkErr
+				}
+				result["symlink_path"] = symlinkPath
+				if notice != "" {
+					result["notice"] = notice
+				}
 			}
 
 			summary := "Basecamp skill installed"
@@ -91,10 +66,68 @@ func newSkillInstallCmd() *cobra.Command {
 				return app.OK(result, output.WithSummary(summary))
 			}
 			// Fallback if app context not available (shouldn't happen in practice)
-			fmt.Fprintf(cmd.OutOrStdout(), "Installed skill to %s\n", skillFile)
+			fmt.Fprintf(cmd.OutOrStdout(), "Installed skill to %s\n", skillPath)
 			return nil
 		},
 	}
+}
+
+// installSkillFiles writes the embedded SKILL.md to ~/.agents/skills/basecamp/
+// and returns the path to the installed file.
+func installSkillFiles() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+
+	skillDir := filepath.Join(home, ".agents", "skills", "basecamp")
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+
+	data, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	if err != nil {
+		return "", fmt.Errorf("reading embedded skill: %w", err)
+	}
+
+	if err := os.MkdirAll(skillDir, 0o755); err != nil { //nolint:gosec // G301: Skill files are not secrets
+		return "", fmt.Errorf("creating skill directory: %w", err)
+	}
+	if err := os.WriteFile(skillFile, data, 0o644); err != nil { //nolint:gosec // G306: Skill files are not secrets
+		return "", fmt.Errorf("writing skill file: %w", err)
+	}
+
+	return skillFile, nil
+}
+
+// linkSkillToClaude creates a symlink at ~/.claude/skills/basecamp pointing to
+// the baseline skill directory. Returns (symlinkPath, notice, error).
+func linkSkillToClaude() (string, string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("getting home directory: %w", err)
+	}
+
+	skillDir := filepath.Join(home, ".agents", "skills", "basecamp")
+	symlinkDir := filepath.Join(home, ".claude", "skills")
+	symlinkPath := filepath.Join(symlinkDir, "basecamp")
+
+	if err := os.MkdirAll(symlinkDir, 0o755); err != nil { //nolint:gosec // G301: Skill files are not secrets
+		return "", "", fmt.Errorf("creating symlink directory: %w", err)
+	}
+
+	// Remove existing entry at symlink path (idempotent)
+	_ = os.Remove(symlinkPath)
+
+	symlinkTarget := filepath.Join("..", "..", ".agents", "skills", "basecamp")
+	notice := ""
+	if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
+		// Fallback: copy skill files directly
+		notice = fmt.Sprintf("symlink failed (%v), copied files instead", err)
+		if copyErr := copySkillFiles(skillDir, symlinkPath); copyErr != nil {
+			return "", "", fmt.Errorf("creating symlink: %w (copy fallback also failed: %w)", err, copyErr)
+		}
+	}
+
+	return symlinkPath, notice, nil
 }
 
 func copySkillFiles(src, dst string) error {
