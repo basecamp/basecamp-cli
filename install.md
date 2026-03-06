@@ -16,7 +16,13 @@ Install the Basecamp CLI and connect it to your AI agent. Execute all steps auto
 
 ## Step 1: Install Basecamp CLI
 
-Choose ONE installation method:
+Run this in your terminal:
+
+```bash
+curl -fsSL https://basecamp.com/install-cli | bash
+```
+
+Alternatively install manually:
 
 ### Option A: Homebrew (macOS/Linux) — Recommended
 ```bash
@@ -43,19 +49,12 @@ Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checks
 nix profile install github:basecamp/basecamp-cli
 ```
 
-### Option E: Shell script
-```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
-```
-
-The install script downloads the latest release, verifies the SHA-256 checksum, and verifies the cosign signature when cosign is available.
-
-### Option F: Go install
+### Option E: Go install
 ```bash
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
-### Option G: GitHub Release
+### Option F: GitHub Release
 Download the archive for your platform from [Releases](https://github.com/basecamp/basecamp-cli/releases), extract, and move `basecamp` to a directory on your PATH.
 
 **Verify:**
