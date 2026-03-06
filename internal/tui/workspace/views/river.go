@@ -405,7 +405,7 @@ func (r *River) onLinesUpdated(room data.BonfireRoomConfig) tea.Cmd {
 		for _, seg := range r.segmenter.Segments() {
 			if r.isInGapRegion(seg) && len(seg.Lines) > 0 {
 				sumSegs := r.buildGapSummarySegments(seg)
-				cmd := r.session.Summarizer().Summarize(r.session.Hub().Global().Context(), summarize.Request{
+				cmd := r.session.Summarizer().Summarize(r.session.Context(), summarize.Request{
 					ContentKey:  r.gapContentKey(seg),
 					Content:     sumSegs,
 					TargetChars: 200,
@@ -611,7 +611,7 @@ func (r *River) kickOffGapSummaries() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, seg := range r.segmenter.Segments() {
 		if r.isInGapRegion(seg) && len(seg.Lines) > 0 {
-			cmd := r.session.Summarizer().Summarize(r.session.Hub().Global().Context(), summarize.Request{
+			cmd := r.session.Summarizer().Summarize(r.session.Context(), summarize.Request{
 				ContentKey:  r.gapContentKey(seg),
 				Content:     r.buildGapSummarySegments(seg),
 				TargetChars: 200,
