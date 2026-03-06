@@ -1,0 +1,29 @@
+internal/tui/workspace/workspace.go
+  c3fde71168208b65 229-239
+internal/tui/workspace/data/hub.go
+  c3fde71168208b65 436-438
+internal/tui/workspace/data/hub_test.go
+  c3fde71168208b65 373,397-411
+internal/tui/workspace/workspace_test.go
+  c3fde71168208b65 1879-1920
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "242e6fed9140cafcdba639778aa487a8d8a66263",
+  "prompts": {
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 72,
+      "total_deletions": 3,
+      "accepted_lines": 72,
+      "overriden_lines": 0
+    }
+  }
+}
