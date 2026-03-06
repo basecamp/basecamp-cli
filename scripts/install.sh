@@ -14,8 +14,22 @@ REPO="basecamp/basecamp-cli"
 BIN_DIR="${BASECAMP_BIN_DIR:-$HOME/.local/bin}"
 VERSION="${BASECAMP_VERSION:-}"
 
-info() { echo "==> $1"; }
-error() { echo "ERROR: $1" >&2; exit 1; }
+# Color helpers — respect NO_COLOR (https://no-color.org)
+if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+  bold()  { printf '\033[1m%s\033[0m' "$1"; }
+  green() { printf '\033[32m%s\033[0m' "$1"; }
+  red()   { printf '\033[31m%s\033[0m' "$1"; }
+  dim()   { printf '\033[2m%s\033[0m' "$1"; }
+else
+  bold()  { printf '%s' "$1"; }
+  green() { printf '%s' "$1"; }
+  red()   { printf '%s' "$1"; }
+  dim()   { printf '%s' "$1"; }
+fi
+
+info()  { echo "  $(green "✓") $1"; }
+step()  { echo "  $(bold "→") $1"; }
+error() { echo "  $(red "✗ ERROR:") $1" >&2; exit 1; }
 
 find_sha256_cmd() {
   if command -v sha256sum &>/dev/null; then
@@ -64,7 +78,7 @@ verify_checksums() {
   local tmp_dir="$2"
   local archive_name="$3"
   local base_url="https://github.com/${REPO}/releases/download/v${version}"
-  info "Verifying checksums..."
+  step "Verifying checksums..."
 
   if ! curl -fsSL "${base_url}/checksums.txt" -o "${tmp_dir}/checksums.txt"; then
     error "Failed to download checksums.txt"
@@ -81,7 +95,7 @@ verify_checksums() {
 
   # If cosign is available, verify the signature
   if command -v cosign &>/dev/null; then
-    info "Verifying cosign signature..."
+    step "Verifying cosign signature..."
 
     if ! curl -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
       error "Failed to download checksums.txt.bundle"
@@ -114,7 +128,7 @@ download_binary() {
   archive_name="basecamp_${version}_${platform}.${ext}"
   url="https://github.com/${REPO}/releases/download/v${version}/${archive_name}"
 
-  info "Downloading basecamp v${version} for ${platform}..."
+  step "Downloading basecamp v${version} for ${platform}..."
 
   if ! curl -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
     error "Failed to download from $url"
@@ -124,7 +138,7 @@ download_binary() {
   verify_checksums "$version" "$tmp_dir" "$archive_name"
 
   # Extract binary
-  info "Extracting..."
+  step "Extracting..."
   if [[ "$ext" == "zip" ]]; then
     unzip -q "${tmp_dir}/${archive_name}" -d "$tmp_dir"
   else
@@ -154,7 +168,7 @@ setup_path() {
     return 0
   fi
 
-  info "Adding $BIN_DIR to PATH"
+  step "Adding $BIN_DIR to PATH"
 
   local shell_rc=""
   case "${SHELL:-}" in
@@ -177,9 +191,15 @@ setup_path() {
 }
 
 verify_install() {
-  if "$BIN_DIR/basecamp" --version &>/dev/null; then
-    info "Installation verified!"
-    "$BIN_DIR/basecamp" --version
+  local platform="$1"
+  local binary_name="basecamp"
+  if [[ "$platform" == windows_* ]]; then
+    binary_name="basecamp.exe"
+  fi
+
+  local installed_version
+  if installed_version=$("$BIN_DIR/$binary_name" --version 2>/dev/null); then
+    info "$(green "${installed_version} installed")"
     return 0
   fi
 
@@ -197,17 +217,81 @@ setup_theme() {
 
   # Link to Omarchy theme if available
   if [[ -d "$omarchy_theme_dir" ]]; then
-    info "Linking basecamp theme to system theme"
+    step "Linking basecamp theme to system theme"
     mkdir -p "$HOME/.config/basecamp"
     ln -s "$omarchy_theme_dir" "$basecamp_theme_dir" || info "Note: Could not link theme (continuing anyway)"
   fi
 }
 
+show_banner() {
+  # Skip braille art if terminal is too narrow (logo 32 + gap 3 + text 8 = 43)
+  local cols
+  cols=$(tput cols 2>/dev/null || echo 80)
+  if [[ "$cols" -ge 44 ]]; then
+    local y="" b="" r=""
+    if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+      y=$'\033[38;2;232;162;23m'  # brand yellow #e8a217
+      b=$'\033[1m'                # bold
+      r=$'\033[0m'                # reset
+    fi
+
+    local logo=(
+      "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣶⣶⣶⣶⣶⣶⣦⣤⣀"
+      "⠀⠀⠀⠀⠀⠀⠀⢀⣴⣾⣿⣿⣿⠿⠿⠛⠛⠛⠻⠿⣿⣿⣿⣦⣀"
+      "⠀⠀⠀⠀⠀⢀⣴⣿⣿⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣿⣿⣦⡀"
+      "⠀⠀⠀⠀⣴⣿⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢿⣿⣿⣄"
+      "⠀⠀⢀⣼⣿⣿⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣤⡀⠀⠀⠀⠀⢻⣿⣿⣆"
+      "⠀⢀⣾⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⠃⠀⠀⠀⠀⠀⢻⣿⣿⡄"
+      "⠀⣼⣿⣿⠃⠀⠀⣠⣶⣿⣷⣦⣄⠀⠀⢀⣼⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⢿⣿⣿⡀"
+      "⢸⣿⣿⠇⠀⢠⣾⣿⡿⠛⠻⣿⣿⣷⣤⣾⣿⡿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣿⣇"
+      "⠈⠉⠉⠀⢠⣿⣿⡟⠁⠀⠀⠈⠻⣿⣿⣿⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣿"
+      "⠀⠀⠀⢠⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⡇"
+      "⠀⠀⠀⢻⣿⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⣿⣿⠇"
+      "⠀⠀⠀⠀⠙⠿⣿⣿⣷⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣶⣿⣿⡿⠋"
+      "⠀⠀⠀⠀⠀⠀⠈⠛⠿⣿⣿⣿⣿⣶⣶⣶⣶⣶⣶⣶⣶⣶⣿⣿⣿⣿⡿⠟⠉"
+      "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠛⠛⠿⠿⠿⠿⠿⠿⠟⠛⠛⠉⠉"
+    )
+
+    local text_line=6
+
+    echo ""
+    if [[ -t 1 ]]; then
+      # Animated reveal on TTY
+      for line in "${logo[@]}"; do
+        echo "${y}${line}${r}"
+        sleep 0.03
+      done
+
+      # Type "Basecamp" to the right of the logo via cursor repositioning
+      sleep 0.1
+      local text="Basecamp"
+      local lines_up=$(( ${#logo[@]} - text_line ))
+      printf "\033[${lines_up}A\033[36G"
+      for (( i=0; i<${#text}; i++ )); do
+        printf "${b}${text:$i:1}${r}"
+        sleep 0.03
+      done
+      printf "\033[${lines_up}B\r"
+    else
+      # Static output when piped — no sleeps, no cursor movement
+      for i in "${!logo[@]}"; do
+        if [[ "$i" -eq "$text_line" ]]; then
+          echo "${logo[$i]}   Basecamp"
+        else
+          echo "${logo[$i]}"
+        fi
+      done
+    fi
+    echo ""
+  else
+    echo ""
+    echo "Basecamp CLI"
+    echo ""
+  fi
+}
+
 main() {
-  echo ""
-  echo "Basecamp CLI - Installer"
-  echo "========================"
-  echo ""
+  show_banner
 
   # Check for curl
   if ! command -v curl &>/dev/null; then
@@ -226,13 +310,18 @@ main() {
   tmp_dir=$(mktemp -d)
   trap "rm -rf '${tmp_dir}'" EXIT
 
+  local binary_name="basecamp"
+  if [[ "$platform" == windows_* ]]; then
+    binary_name="basecamp.exe"
+  fi
+
   download_binary "$version" "$platform" "$tmp_dir"
   setup_path
   setup_theme
-  verify_install
+  verify_install "$platform"
 
   echo ""
-  "$BIN_DIR/basecamp" setup
+  "$BIN_DIR/$binary_name" setup
 }
 
 main "$@"
