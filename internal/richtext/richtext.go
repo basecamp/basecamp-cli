@@ -402,7 +402,7 @@ func RenderMarkdown(md string) (string, error) {
 		return "", err
 	}
 
-	return strings.TrimSpace(out), nil
+	return strings.TrimSpace(LinkifyURLs(out)), nil
 }
 
 // RenderMarkdownWithWidth renders Markdown for terminal display with a custom width.
@@ -421,7 +421,7 @@ func RenderMarkdownWithWidth(md string, width int) (string, error) {
 		return "", err
 	}
 
-	return strings.TrimSpace(out), nil
+	return strings.TrimSpace(LinkifyURLs(out)), nil
 }
 
 // HTMLToMarkdown converts HTML content to Markdown.

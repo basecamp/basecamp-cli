@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
@@ -20,9 +21,10 @@ type Preview struct {
 	width  int
 	height int
 
-	title   string
-	fields  []PreviewField
-	content *Content
+	title    string
+	titleURL string
+	fields   []PreviewField
+	content  *Content
 }
 
 // NewPreview creates a new preview pane.
@@ -33,9 +35,16 @@ func NewPreview(styles *tui.Styles) *Preview {
 	}
 }
 
-// SetTitle sets the preview title.
+// SetTitle sets the preview title and clears any associated URL.
+// Use SetTitleURL after SetTitle to make the title a clickable hyperlink.
 func (p *Preview) SetTitle(title string) {
 	p.title = title
+	p.titleURL = ""
+}
+
+// SetTitleURL sets a URL that makes the title a clickable OSC 8 hyperlink.
+func (p *Preview) SetTitleURL(url string) {
+	p.titleURL = url
 }
 
 // SetFields sets the key-value metadata fields.
@@ -92,11 +101,15 @@ func (p *Preview) View() string {
 
 	// Title
 	if p.title != "" {
+		titleText := p.title
+		if p.titleURL != "" {
+			titleText = richtext.Hyperlink(p.title, p.titleURL)
+		}
 		sections = append(sections, lipgloss.NewStyle().
 			Bold(true).
 			Foreground(theme.Primary).
 			Width(p.width).
-			Render(p.title))
+			Render(titleText))
 	}
 
 	// Fields — align keys by padding to the widest key

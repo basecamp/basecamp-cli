@@ -1786,3 +1786,91 @@ func TestRenderTableMarkdownHTMLCell(t *testing.T) {
 		t.Errorf("Table should have 3 lines (header, divider, data), got %d:\n%s", len(lines), out)
 	}
 }
+
+func TestRenderListRowHyperlinksStyledTitleField(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	styles := NewStyles(tui.ResolveTheme(false), true) // styled = true
+	data := []map[string]any{
+		{
+			"content":   "Fix bug",
+			"completed": false,
+			"due_on":    "",
+			"assignees": []any{},
+			"app_url":   "https://3.basecamp.com/123/todos/456",
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderList(&buf, schema, data, styles, enUS); err != nil {
+		t.Fatalf("RenderList failed: %v", err)
+	}
+
+	out := buf.String()
+	// The content field (role: title) should be wrapped in OSC 8
+	if !strings.Contains(out, "\x1b]8;;https://3.basecamp.com/123/todos/456\x07") {
+		t.Errorf("Styled list row should contain OSC 8 hyperlink for title field, got:\n%q", out)
+	}
+	if !strings.Contains(out, "Fix bug") {
+		t.Errorf("Styled list row should contain the text, got:\n%q", out)
+	}
+}
+
+func TestRenderListRowNoHyperlinkWhenUnstyled(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false) // styled = false
+	data := []map[string]any{
+		{
+			"content":   "Fix bug",
+			"completed": false,
+			"due_on":    "",
+			"assignees": []any{},
+			"app_url":   "https://3.basecamp.com/123/todos/456",
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderList(&buf, schema, data, styles, enUS); err != nil {
+		t.Fatalf("RenderList failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b]8;") {
+		t.Errorf("Unstyled list row should NOT contain OSC 8 sequences, got:\n%q", out)
+	}
+}
+
+func TestRenderDetailHeadlineHyperlink(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	styles := NewStyles(tui.ResolveTheme(false), true)
+	data := map[string]any{
+		"id":         float64(456),
+		"content":    "Fix bug",
+		"completed":  false,
+		"due_on":     "",
+		"assignees":  []any{},
+		"app_url":    "https://3.basecamp.com/123/todos/456",
+		"created_at": "2026-01-15T10:00:00Z",
+	}
+
+	var buf strings.Builder
+	if err := RenderDetail(&buf, schema, data, styles, enUS); err != nil {
+		t.Fatalf("RenderDetail failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b]8;;https://3.basecamp.com/123/todos/456\x07") {
+		t.Errorf("Styled detail headline should contain OSC 8 hyperlink, got:\n%q", out)
+	}
+}
