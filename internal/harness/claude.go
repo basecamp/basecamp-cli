@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func init() {
@@ -171,11 +172,23 @@ func pluginInstalled(data []byte) bool {
 		return false
 	}
 
-	// Try as map (key = plugin identifier)
+	// Try as map (key = plugin identifier, or v2 envelope with "plugins" key)
 	var pluginMap map[string]any
 	if err := json.Unmarshal(data, &pluginMap); err == nil {
+		// v2 format: {"version": 2, "plugins": {"basecamp@marketplace": [...]}}
+		if inner, ok := pluginMap["plugins"]; ok {
+			if innerMap, ok := inner.(map[string]any); ok {
+				for key := range innerMap {
+					if key == "basecamp" || matchesPluginKey(key) {
+						return true
+					}
+				}
+				return false
+			}
+		}
+		// v1 flat map: {"basecamp@basecamp": {...}}
 		for key := range pluginMap {
-			if key == "basecamp" || key == "basecamp@basecamp" {
+			if key == "basecamp" || matchesPluginKey(key) {
 				return true
 			}
 		}
@@ -190,7 +203,7 @@ func matchesBasecamp(p map[string]any) bool {
 	for _, field := range []string{"name", "package", "id"} {
 		if v, ok := p[field]; ok {
 			if s, ok := v.(string); ok {
-				if s == "basecamp" || s == "basecamp@basecamp" {
+				if matchesPluginKey(s) {
 					return true
 				}
 			}
@@ -199,10 +212,16 @@ func matchesBasecamp(p map[string]any) bool {
 	return false
 }
 
+// matchesPluginKey returns true if the key identifies the basecamp plugin
+// (e.g. "basecamp@basecamp", "basecamp@37signals").
+func matchesPluginKey(key string) bool {
+	return key == "basecamp" || strings.HasPrefix(key, "basecamp@")
+}
+
 func jsonContainsBasecamp(data []byte) bool {
 	// Fallback: raw string search for the plugin identifier
 	s := string(data)
-	return len(s) > 0 && (contains(s, `"basecamp@basecamp"`) || contains(s, `"basecamp"`))
+	return len(s) > 0 && contains(s, `"basecamp`)
 }
 
 func contains(s, substr string) bool {

@@ -58,6 +58,36 @@ func TestPluginInstalled_EmptyData(t *testing.T) {
 	assert.False(t, pluginInstalled(data))
 }
 
+func TestPluginInstalled_V2Envelope(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@basecamp":[{"scope":"user","version":"0.1.0"}]}}`)
+	assert.True(t, pluginInstalled(data))
+}
+
+func TestPluginInstalled_V2Envelope_AltMarketplace(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`)
+	assert.True(t, pluginInstalled(data))
+}
+
+func TestPluginInstalled_V2Envelope_NotFound(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"other-plugin@marketplace":[{"scope":"user","version":"1.0.0"}]}}`)
+	assert.False(t, pluginInstalled(data))
+}
+
+func TestPluginInstalled_V2Envelope_EmptyPlugins(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{}}`)
+	assert.False(t, pluginInstalled(data))
+}
+
+func TestPluginInstalled_ArrayFormat_AltMarketplace(t *testing.T) {
+	data := []byte(`[{"package": "basecamp@37signals", "version": "0.1.0"}]`)
+	assert.True(t, pluginInstalled(data))
+}
+
+func TestPluginInstalled_MapFormat_AltMarketplace(t *testing.T) {
+	data := []byte(`{"basecamp@37signals": {"version": "0.1.0"}}`)
+	assert.True(t, pluginInstalled(data))
+}
+
 func TestCheckClaudeSkillLink_Missing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
