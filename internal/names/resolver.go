@@ -154,12 +154,7 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 				}
 			}
 		}
-		// Fall back to stored identity ID for backward compatibility
-		// (works for endpoints that accept identity IDs)
-		if userID := r.auth.GetUserID(); userID != "" {
-			return userID, "me", nil
-		}
-		return "", "", output.ErrAuth("User identity not available. Run: basecamp auth login")
+		return "", "", output.ErrAuth("Could not resolve your identity. Run: basecamp auth login")
 	}
 
 	// Numeric ID passthrough
