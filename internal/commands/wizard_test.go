@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/skills"
 )
 
 // TestIsFirstRunUnauthenticated verifies isFirstRun returns true for unauthenticated,
@@ -157,6 +160,8 @@ func TestNewSetupCmdHasClaudeSubcommand(t *testing.T) {
 // valid JSON with no interleaved prose.
 func TestSetupClaudeJSONOutputPurity(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir()) // no claude binary
 
 	buf := &bytes.Buffer{}
 	app, _ := setupQuickstartTestApp(t, "", "")
@@ -184,6 +189,8 @@ func TestSetupClaudeJSONOutputPurity(t *testing.T) {
 // TestSetupClaudeSummaryStates verifies the three summary states.
 func TestSetupClaudeSummaryStates(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir()) // no claude binary
 
 	app, appBuf := setupQuickstartTestApp(t, "", "")
 	app.Flags.JSON = true
@@ -206,10 +213,10 @@ func TestSetupClaudeSummaryStates(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &envelope))
 
-	assert.Contains(t, envelope.Data, "claude_detected")
+	assert.Contains(t, envelope.Data, "agent_detected")
 	assert.Contains(t, envelope.Data, "plugin_installed")
 
-	detected, _ := envelope.Data["claude_detected"].(bool)
+	detected, _ := envelope.Data["agent_detected"].(bool)
 	if !detected {
 		assert.Equal(t, "Claude Code not detected", envelope.Summary)
 	} else {
@@ -220,4 +227,57 @@ func TestSetupClaudeSummaryStates(t *testing.T) {
 			assert.Equal(t, "Claude Code plugin not installed", envelope.Summary)
 		}
 	}
+}
+
+// TestSetupClaudeNonInteractiveInstallsSkill verifies that setup claude --json
+// installs the baseline skill even in non-interactive mode.
+func TestSetupClaudeNonInteractiveInstallsSkill(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// No claude binary on PATH, so the agent-specific steps are skipped,
+	// but the baseline skill should still be installed.
+	t.Setenv("PATH", home)
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// Baseline skill should exist
+	skillFile := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
+	got, readErr := os.ReadFile(skillFile)
+	require.NoError(t, readErr, "baseline skill file should be installed")
+	embedded, _ := skills.FS.ReadFile("basecamp/SKILL.md")
+	assert.Equal(t, string(embedded), string(got))
+}
+
+// TestBaselineSkillInstalled verifies the helper function.
+func TestBaselineSkillInstalled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	assert.False(t, baselineSkillInstalled(), "should be false when skill not present")
+
+	// Install it
+	skillDir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0o644))
+
+	assert.True(t, baselineSkillInstalled(), "should be true when SKILL.md exists")
+}
+
+// TestJoinNames verifies name joining with commas and "and".
+func TestJoinNames(t *testing.T) {
+	assert.Equal(t, "", joinNames(nil))
+	assert.Equal(t, "Claude Code", joinNames([]string{"Claude Code"}))
+	assert.Equal(t, "Claude Code and Cursor", joinNames([]string{"Claude Code", "Cursor"}))
+	assert.Equal(t, "A, B, and C", joinNames([]string{"A", "B", "C"}))
 }
