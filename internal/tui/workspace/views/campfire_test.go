@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -122,6 +123,20 @@ func TestWrapLine_Unicode(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestWrapLine_HyperlinkTruncation(t *testing.T) {
+	longURL := "https://example.com/" + strings.Repeat("a", 80)
+	word := ansi.SetHyperlink(longURL) + longURL + ansi.ResetHyperlink()
+
+	got := wrapLine(word, 30)
+
+	assert.LessOrEqual(t, ansi.StringWidth(got), 30,
+		"visible width must not exceed the wrap width")
+	assert.Contains(t, got, "\x1b]8;;"+longURL+"\x07",
+		"OSC 8 opener with full URL must be preserved")
+	assert.Contains(t, got, "\x1b]8;;\x07",
+		"OSC 8 reset sequence must be present")
 }
 
 func testCampfireWithLines(lines []workspace.CampfireLineInfo) *Campfire {
