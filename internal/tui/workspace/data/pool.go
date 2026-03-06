@@ -93,6 +93,8 @@ func (p *Pool[T]) SetCache(c *PoolCache) {
 
 	p.mu.Lock()
 	p.cache = c
+	m := p.metrics
+	seeded := false
 	// Only seed from cache if pool has no data yet.
 	if ok && !p.snapshot.HasData {
 		p.snapshot.Data = cachedData
@@ -101,8 +103,13 @@ func (p *Pool[T]) SetCache(c *PoolCache) {
 		p.snapshot.HasData = true
 		p.cachedFetchedAt = fetchedAt // preserve real time for age display
 		p.version++
+		seeded = true
 	}
+	key := p.key
 	p.mu.Unlock()
+	if seeded && m != nil {
+		m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: CacheSeeded})
+	}
 }
 
 // SetMetrics sets the metrics collector for this pool.
@@ -177,11 +184,14 @@ func (p *Pool[T]) Fetch(ctx context.Context) tea.Cmd {
 		elapsed := time.Since(start)
 
 		if m != nil {
-			evType := FetchComplete
+			ev := PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, Duration: elapsed}
 			if err != nil {
-				evType = FetchError
+				ev.EventType = FetchError
+				ev.Detail = err.Error()
+			} else {
+				ev.EventType = FetchComplete
 			}
-			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, EventType: evType, Duration: elapsed})
+			m.Record(ev)
 		}
 
 		p.mu.Lock()
@@ -258,9 +268,15 @@ func (p *Pool[T]) isFreshOrFetching() bool {
 // Invalidate marks current data as stale. Next FetchIfStale will re-fetch.
 func (p *Pool[T]) Invalidate() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.snapshot.HasData && p.snapshot.State == StateFresh {
+	invalidated := p.snapshot.HasData && p.snapshot.State == StateFresh
+	if invalidated {
 		p.snapshot.State = StateStale
+	}
+	m := p.metrics
+	key := p.key
+	p.mu.Unlock()
+	if invalidated && m != nil {
+		m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: PoolInvalidated})
 	}
 }
 
@@ -319,17 +335,27 @@ func (p *Pool[T]) SetPushMode(enabled bool) {
 // RecordHit resets the miss counter (new data arrived).
 func (p *Pool[T]) RecordHit() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	m := p.metrics
+	key := p.key
 	p.missCount = 0
 	p.cumulativeHits++
+	p.mu.Unlock()
+	if m != nil {
+		m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: CacheHit})
+	}
 }
 
 // RecordMiss increments the miss counter for adaptive backoff.
 func (p *Pool[T]) RecordMiss() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	m := p.metrics
+	key := p.key
 	p.missCount++
 	p.cumulativeMisses++
+	p.mu.Unlock()
+	if m != nil {
+		m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: CacheMiss})
+	}
 }
 
 // SetTerminalFocused marks whether the terminal window has OS focus.

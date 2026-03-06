@@ -19,29 +19,24 @@ import (
 const (
 	stateColWidth   = 7 // "loading" is the widest state
 	poolAgeColWidth = 5 // "999ms" is the widest realistic age
-	latColWidth     = 6 // "9999ms" is the widest realistic latency
-	feedAgeColWidth = 3 // "59s", "now", "5m"
 )
 
 // PoolMonitor is an interactive, focusable view showing pool health and
-// activity in a right sidebar. It replaces the former bottom MetricsPanel.
+// activity in a right sidebar. The bottom section shows a global activity
+// feed that is independent of the pool list cursor position.
 type PoolMonitor struct {
 	styles   *tui.Styles
 	statsFn  func() []data.PoolStatus
 	apdexFn  func() float64
 	eventsFn func(int) []data.PoolEvent
 
-	// Pool table (top section)
+	// Pool table
 	poolCursor int
 	poolScroll int
 	expanded   map[string]bool
 
-	// Activity feed (bottom section)
-	feedScroll int
-
 	// Focus
 	focused bool
-	section int // 0=pool table, 1=activity feed
 
 	width, height int
 }
@@ -68,7 +63,6 @@ func (v *PoolMonitor) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),
 		key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "expand")),
-		key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "section")),
 	}
 }
 
@@ -102,34 +96,20 @@ func (v *PoolMonitor) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 func (v *PoolMonitor) handleKey(msg tea.KeyPressMsg) {
 	switch msg.String() {
 	case "j", "down":
-		if v.section == 0 {
-			stats := v.statsFn()
-			if v.poolCursor < len(stats)-1 {
-				v.poolCursor++
-			}
-		} else {
-			v.feedScroll++
+		stats := v.statsFn()
+		if v.poolCursor < len(stats)-1 {
+			v.poolCursor++
 		}
 	case "k", "up":
-		if v.section == 0 {
-			if v.poolCursor > 0 {
-				v.poolCursor--
-			}
-		} else {
-			if v.feedScroll > 0 {
-				v.feedScroll--
-			}
+		if v.poolCursor > 0 {
+			v.poolCursor--
 		}
-	case " ":
-		if v.section == 0 {
-			stats := v.statsFn()
-			if v.poolCursor < len(stats) {
-				k := stats[v.poolCursor].Key
-				v.expanded[k] = !v.expanded[k]
-			}
+	case "space":
+		stats := v.statsFn()
+		if v.poolCursor < len(stats) {
+			k := stats[v.poolCursor].Key
+			v.expanded[k] = !v.expanded[k]
 		}
-	case "tab":
-		v.section = (v.section + 1) % 2
 	}
 }
 
@@ -194,7 +174,7 @@ func (v *PoolMonitor) View() string {
 	for i := visibleStart; i < len(stats) && rowCount < poolLines; i++ {
 		ps := stats[i]
 		cursor := " "
-		if v.focused && v.section == 0 && i == v.poolCursor {
+		if v.focused && i == v.poolCursor {
 			cursor = ">"
 		}
 
@@ -259,16 +239,16 @@ func (v *PoolMonitor) View() string {
 		lines = append(lines, ansi.Truncate(row, v.width, ""))
 		rowCount++
 
-		// Expanded detail line
-		if v.expanded[ps.Key] && rowCount < poolLines {
-			pollStr := "-"
-			if ps.PollInterval > 0 {
-				pollStr = formatDuration(ps.PollInterval)
+		// Expanded detail lines — multi-line, verbose, salience-driven
+		if v.expanded[ps.Key] {
+			details := v.poolDetail(ps)
+			for _, d := range details {
+				if rowCount >= poolLines {
+					break
+				}
+				lines = append(lines, ansi.Truncate(mutedStyle.Render(d), v.width, ""))
+				rowCount++
 			}
-			detail := fmt.Sprintf("  poll:%s h:%d m:%d f:%d e:%d %s",
-				pollStr, ps.HitCount, ps.MissCount, ps.FetchCount, ps.ErrorCount, formatDuration(ps.AvgLatency))
-			lines = append(lines, ansi.Truncate(mutedStyle.Render(detail), v.width, ""))
-			rowCount++
 		}
 	}
 
@@ -279,74 +259,55 @@ func (v *PoolMonitor) View() string {
 	}
 
 	// -- Divider --
-	events := v.eventsFn(50)
+	events := v.eventsFn(100)
 	divText := fmt.Sprintf("--- Activity (%d) ---", len(events))
-	divStyle := mutedStyle
-	if v.focused && v.section == 1 {
-		divStyle = secondaryStyle
-	}
-	lines = append(lines, ansi.Truncate(divStyle.Render(divText), v.width, ""))
+	lines = append(lines, ansi.Truncate(mutedStyle.Render(divText), v.width, ""))
 
-	// -- Activity feed --
+	// -- Activity feed (always global, reverse-chrono, wall-clock timestamps) --
 	if feedHeight < 0 {
 		feedHeight = 0
 	}
 
-	// Clamp feed scroll
-	if v.feedScroll > max(0, len(events)-feedHeight) {
-		v.feedScroll = max(0, len(events)-feedHeight)
-	}
-
-	feedStart := len(events) - feedHeight - v.feedScroll
-	if feedStart < 0 {
-		feedStart = 0
-	}
-	feedEnd := feedStart + feedHeight
-	if feedEnd > len(events) {
-		feedEnd = len(events)
-	}
-
-	// suffix column width: [latCol] [ageCol]
-	feedSuffixWidth := latColWidth + 1 + feedAgeColWidth
-
+	// Show newest first, up to feedHeight events
+	feedEnd := len(events) - 1
 	feedCount := 0
-	for i := feedStart; i < feedEnd; i++ {
+	for i := feedEnd; i >= 0 && feedCount < feedHeight; i-- {
 		ev := events[i]
-		keyStr := ev.PoolKey
-		maxKey := v.width - 2 - feedSuffixWidth - 1 // 2=indicator+space, 1=min gap
-		if maxKey < 8 {
-			maxKey = 8
-		}
-		if r := []rune(keyStr); len(r) > maxKey {
-			keyStr = string(r[:maxKey-1]) + "…"
+		ts := ev.Timestamp.Format("15:04:05")
+
+		// Indicator + description
+		var indicator, desc string
+		switch ev.EventType {
+		case data.FetchStart:
+			indicator = primaryStyle.Render("~")
+			desc = ev.PoolKey
+		case data.FetchComplete:
+			indicator = successStyle.Render("✓")
+			desc = ev.PoolKey + " " + formatDuration(ev.Duration)
+			if ev.DataSize > 0 {
+				desc += " " + formatSize(ev.DataSize)
+			}
+		case data.FetchError:
+			indicator = errorStyle.Render("✗")
+			desc = ev.PoolKey
+			if ev.Detail != "" {
+				desc += " " + truncate(ev.Detail, 20)
+			}
+		case data.CacheHit:
+			indicator = mutedStyle.Render("·")
+			desc = ev.PoolKey + " hit"
+		case data.CacheMiss:
+			indicator = secondaryStyle.Render("·")
+			desc = ev.PoolKey + " miss"
+		case data.CacheSeeded:
+			indicator = mutedStyle.Render("↑")
+			desc = ev.PoolKey + " seeded"
+		case data.PoolInvalidated:
+			indicator = secondaryStyle.Render("↻")
+			desc = ev.PoolKey + " stale"
 		}
 
-		var line string
-		switch ev.EventType {
-		case data.FetchComplete:
-			latStr := formatDuration(ev.Duration)
-			ageStr := formatAge(ev.Timestamp)
-			line = successStyle.Render("✓") + " " + keyStr
-			pad := v.width - lipgloss.Width(line) - feedSuffixWidth
-			if pad < 1 {
-				pad = 1
-			}
-			line += strings.Repeat(" ", pad) +
-				rjust(mutedStyle.Render(latStr), latColWidth) + " " +
-				rjust(mutedStyle.Render(ageStr), feedAgeColWidth)
-		case data.FetchError:
-			ageStr := formatAge(ev.Timestamp)
-			line = errorStyle.Render("✗") + " " + keyStr
-			pad := v.width - lipgloss.Width(line) - feedSuffixWidth
-			if pad < 1 {
-				pad = 1
-			}
-			line += strings.Repeat(" ", pad) +
-				rjust(errorStyle.Render("err"), latColWidth) + " " +
-				rjust(mutedStyle.Render(ageStr), feedAgeColWidth)
-		case data.FetchStart:
-			line = mutedStyle.Render("~ " + keyStr + " ...")
-		}
+		line := mutedStyle.Render(ts) + " " + indicator + " " + desc
 		lines = append(lines, ansi.Truncate(line, v.width, ""))
 		feedCount++
 	}
@@ -360,6 +321,59 @@ func (v *PoolMonitor) View() string {
 	return strings.Join(lines, "\n")
 }
 
+// poolDetail returns multi-line detail for an expanded pool, driven by salience.
+func (v *PoolMonitor) poolDetail(ps data.PoolStatus) []string {
+	var lines []string
+
+	// Line 1: timing — poll interval, avg latency, data age
+	var parts []string
+	if ps.PollInterval > 0 {
+		parts = append(parts, "poll "+formatDuration(ps.PollInterval))
+	}
+	if ps.AvgLatency > 0 {
+		parts = append(parts, "avg "+formatDuration(ps.AvgLatency))
+	}
+	ageSrc := ps.FetchedAt
+	if !ps.CachedFetchedAt.IsZero() {
+		ageSrc = ps.CachedFetchedAt
+	}
+	if !ageSrc.IsZero() {
+		parts = append(parts, "fetched "+ageSrc.Format("15:04:05"))
+	}
+	if len(parts) > 0 {
+		lines = append(lines, "  "+strings.Join(parts, " · "))
+	}
+
+	// Line 2: reliability — fetches, errors, error rate
+	parts = nil
+	if ps.FetchCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d fetches", ps.FetchCount))
+	}
+	if ps.ErrorCount > 0 {
+		rate := float64(ps.ErrorCount) / float64(ps.FetchCount+ps.ErrorCount) * 100
+		parts = append(parts, fmt.Sprintf("%d errors (%.0f%%)", ps.ErrorCount, rate))
+	}
+	if len(parts) > 0 {
+		lines = append(lines, "  "+strings.Join(parts, " · "))
+	}
+
+	// Line 3: freshness — hits, misses, hit ratio
+	total := ps.HitCount + ps.MissCount
+	if total > 0 {
+		ratio := float64(ps.HitCount) / float64(total) * 100
+		lines = append(lines, fmt.Sprintf("  %d hits · %d misses (%.0f%%)", ps.HitCount, ps.MissCount, ratio))
+	}
+
+	return lines
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
 // rjust right-justifies a (possibly ANSI-styled) string within the given width.
 func rjust(s string, width int) string {
 	pad := width - lipgloss.Width(s)
@@ -369,12 +383,17 @@ func rjust(s string, width int) string {
 	return strings.Repeat(" ", pad) + s
 }
 
-func formatAge(t time.Time) string {
-	d := time.Since(t)
-	if d < time.Second {
-		return "now"
+func formatSize(bytes int) string {
+	if bytes <= 0 {
+		return "-"
 	}
-	return formatDuration(d)
+	if bytes < 1000 {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	if bytes < 1000*1000 {
+		return fmt.Sprintf("%dk", bytes/1000)
+	}
+	return fmt.Sprintf("%dM", bytes/1000/1000)
 }
 
 func formatDuration(d time.Duration) string {
@@ -382,7 +401,13 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
 	if d < time.Minute {
-		return fmt.Sprintf("%.0fs", d.Seconds())
+		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
-	return fmt.Sprintf("%.0fm", d.Minutes())
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }

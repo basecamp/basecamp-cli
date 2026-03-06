@@ -5,22 +5,27 @@ import (
 	"time"
 )
 
-// PoolEventType classifies pool fetch events.
+// PoolEventType classifies pool lifecycle events.
 type PoolEventType int
 
 const (
 	FetchStart PoolEventType = iota
 	FetchComplete
 	FetchError
+	CacheHit
+	CacheMiss
+	CacheSeeded
+	PoolInvalidated
 )
 
-// PoolEvent records a single pool fetch event.
+// PoolEvent records a single pool lifecycle event.
 type PoolEvent struct {
 	Timestamp time.Time
 	PoolKey   string
 	EventType PoolEventType
 	Duration  time.Duration
 	DataSize  int
+	Detail    string // optional context (error message, etc.)
 }
 
 // PoolStats holds aggregate statistics for a single pool.

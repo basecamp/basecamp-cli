@@ -112,11 +112,14 @@ func (mp *MutatingPool[T]) Apply(ctx context.Context, mutation Mutation[T]) tea.
 		elapsed := time.Since(start)
 
 		if m != nil {
-			evType := FetchComplete
+			ev := PoolEvent{Timestamp: time.Now(), PoolKey: key, Duration: elapsed}
 			if err != nil {
-				evType = FetchError
+				ev.EventType = FetchError
+				ev.Detail = err.Error()
+			} else {
+				ev.EventType = FetchComplete
 			}
-			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: key, EventType: evType, Duration: elapsed})
+			m.Record(ev)
 		}
 
 		if err != nil {
@@ -165,11 +168,14 @@ func (mp *MutatingPool[T]) Fetch(ctx context.Context) tea.Cmd {
 		elapsed := time.Since(start)
 
 		if m != nil {
-			evType := FetchComplete
+			ev := PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, Duration: elapsed}
 			if err != nil {
-				evType = FetchError
+				ev.EventType = FetchError
+				ev.Detail = err.Error()
+			} else {
+				ev.EventType = FetchComplete
 			}
-			m.Record(PoolEvent{Timestamp: time.Now(), PoolKey: fetchKey, EventType: evType, Duration: elapsed})
+			m.Record(ev)
 		}
 
 		mp.mu.Lock()

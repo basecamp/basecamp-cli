@@ -348,6 +348,8 @@ func TestMutatingPoolApplyRecordsTelemetry(t *testing.T) {
 			assert.Equal(t, "items", e.PoolKey)
 		case FetchError:
 			t.Fatal("unexpected FetchError event")
+		case CacheHit, CacheMiss, CacheSeeded, PoolInvalidated:
+			// lifecycle events — not expected here
 		}
 	}
 	assert.True(t, hasStart, "should record FetchStart")
