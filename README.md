@@ -10,7 +10,6 @@
 
 ```bash
 curl -fsSL https://basecamp.com/install-cli | bash
-basecamp auth login
 ```
 
 That's it. You now have full access to Basecamp from your terminal.
