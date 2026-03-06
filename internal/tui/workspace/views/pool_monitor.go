@@ -163,7 +163,7 @@ func (v *PoolMonitor) View() string {
 	} else if apdex < 0.9 {
 		apdexColor = mutedStyle
 	}
-	header := headerStyle.Render("Pools") + " " + apdexColor.Render(fmt.Sprintf("%.2f", apdex))
+	header := headerStyle.Render("Pools") + " " + mutedStyle.Render("apdex") + " " + apdexColor.Render(fmt.Sprintf("%.2f", apdex))
 	lines = append(lines, ansi.Truncate(header, v.width, ""))
 
 	// -- Pool rows --
