@@ -1,0 +1,31 @@
+internal/commands/wizard_agents.go
+  6c6b763329f0666c 8,23,200,203,206-207,211-217,231-233,236-243,275-279,282-284,324,328-338
+internal/commands/wizard_test.go
+  6c6b763329f0666c 277-319
+internal/harness/claude.go
+  6c6b763329f0666c 16-21,23-24,124-151
+internal/commands/doctor_test.go
+  6c6b763329f0666c 530-567
+internal/harness/claude_test.go
+  6c6b763329f0666c 61-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "82dc3f01c88dfe2ab691b47eee5e5d2f3f325a24",
+  "prompts": {
+    "6c6b763329f0666c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a80f46f-578f-42bc-b659-918872b3f808",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 196,
+      "total_deletions": 11,
+      "accepted_lines": 194,
+      "overriden_lines": 0
+    }
+  }
+}
