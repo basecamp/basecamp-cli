@@ -1,0 +1,27 @@
+internal/harness/agent.go
+  6c6b763329f0666c 20,24-31
+internal/harness/claude.go
+  6c6b763329f0666c 224
+internal/harness/agent_test.go
+  6c6b763329f0666c 65-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "dc36a9500753039e4e129b5c7f08c8a54fc31435",
+  "prompts": {
+    "6c6b763329f0666c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a80f46f-578f-42bc-b659-918872b3f808",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 32,
+      "total_deletions": 5,
+      "accepted_lines": 32,
+      "overriden_lines": 0
+    }
+  }
+}
