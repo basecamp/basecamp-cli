@@ -47,6 +47,7 @@ type detailData struct {
 	comments   []detailComment
 	boosts     int
 	subscribed bool
+	appURL     string
 }
 
 // detailLoadedMsg is sent when the recording detail is fetched.
@@ -1261,6 +1262,7 @@ func (v *Detail) syncPreview() {
 	}
 
 	v.preview.SetTitle(v.data.title)
+	v.preview.SetTitleURL(v.data.appURL)
 
 	var fields []widget.PreviewField
 	if v.originView != "" {
@@ -1365,6 +1367,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				completed:  todo.Completed,
 				dueOn:      todo.DueOn,
 				boosts:     todo.BoostsCount,
+				appURL:     todo.AppURL,
 			}
 
 		case "message", "Message":
@@ -1388,6 +1391,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				createdAt:  msg.CreatedAt,
 				category:   category,
 				boosts:     msg.BoostsCount,
+				appURL:     msg.AppURL,
 			}
 
 		case "card", "Card":
@@ -1413,6 +1417,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				completed:  card.Completed,
 				dueOn:      card.DueOn,
 				boosts:     card.BoostsCount,
+				appURL:     card.AppURL,
 			}
 
 		default:
@@ -1429,6 +1434,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				Subject   string    `json:"subject"`
 				Content   string    `json:"content"`
 				Type      string    `json:"type"`
+				AppURL    string    `json:"app_url"`
 				CreatedAt time.Time `json:"created_at"`
 				Creator   *struct {
 					Name string `json:"name"`
@@ -1457,6 +1463,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 					content:    generic.Content,
 					creator:    creator,
 					createdAt:  generic.CreatedAt,
+					appURL:     generic.AppURL,
 				}
 			}
 		}
