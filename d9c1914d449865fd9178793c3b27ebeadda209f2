@@ -1,0 +1,27 @@
+internal/commands/doctor_test.go
+  6c6b763329f0666c 536,557-558
+internal/harness/claude_test.go
+  6c6b763329f0666c 64
+internal/harness/claude.go
+  6c6b763329f0666c 137-144,147-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "d9c1914d449865fd9178793c3b27ebeadda209f2",
+  "prompts": {
+    "6c6b763329f0666c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a80f46f-578f-42bc-b659-918872b3f808",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 46,
+      "overriden_lines": 0
+    }
+  }
+}
