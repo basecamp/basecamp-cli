@@ -1,0 +1,31 @@
+scripts/install.sh
+  ab1fe46829bec3c2 17-46,81,95,98,112,131,141,145,155,171,185,194-201,214-216,220,226-233,236-256,258-259,265,275-292,294,298,304-322
+internal/tui/forms.go
+  ab1fe46829bec3c2 6-7,10-15,17-23,25-28,31,36-38,51,54,58-60,65,68,72-74,99,107,111-113,116,124,128-130
+internal/commands/skill.go
+  ab1fe46829bec3c2 7-8,13,15,17-33,36-47,50-192,202-209,211-214,216-218,225-282
+internal/commands/skill_test.go
+  ab1fe46829bec3c2 207-279
+README.md
+  ab1fe46829bec3c2 3-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "3aedbd666e7040814ad11e039748a7b2cf81b97a",
+  "prompts": {
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 505,
+      "overriden_lines": 0
+    }
+  }
+}
