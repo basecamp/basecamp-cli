@@ -1,0 +1,25 @@
+internal/tui/workspace/views/checkins.go
+  6608fdc2837b6ed2 306-312
+internal/tui/workspace/views/checkins_test.go
+  6608fdc2837b6ed2 6-7,591-632
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "4cdfd1bd6fbb0a502d940b4c0b535eabb727e7a3",
+  "prompts": {
+    "6608fdc2837b6ed2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "250f8612-c115-46b1-b910-c35834995c73",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 51,
+      "overriden_lines": 0
+    }
+  }
+}
