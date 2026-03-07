@@ -1,0 +1,25 @@
+internal/tui/brand_anim.go
+  ab1fe46829bec3c2 6,114-117,119-121,125-139,141-143,145-165,169,209-210,212,214,222-226,228,231,236
+internal/tui/brand_test.go
+  ab1fe46829bec3c2 83-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "4769324edbdb2442a5323cbe2abf536aa921756e",
+  "prompts": {
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 93,
+      "total_deletions": 41,
+      "accepted_lines": 66,
+      "overriden_lines": 0
+    }
+  }
+}
