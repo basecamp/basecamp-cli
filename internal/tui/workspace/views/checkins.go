@@ -303,6 +303,13 @@ func (v *Checkins) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 			return v, workspace.SetStatus("Paste a file path or drag a file into the terminal", false)
 		}
 
+	case tea.PasteMsg:
+		if v.answering {
+			text, cmd := v.composer.ProcessPaste(msg.Content)
+			v.composer.InsertPaste(text)
+			return v, cmd
+		}
+
 	case spinner.TickMsg:
 		if v.loading || v.loadingAnswers || v.submitting {
 			var cmd tea.Cmd

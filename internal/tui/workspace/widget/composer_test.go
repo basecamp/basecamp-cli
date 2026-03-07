@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -209,6 +210,82 @@ func TestComposerSubmitEmpty(t *testing.T) {
 	}
 }
 
+func TestComposerSubmitInterceptsFilePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "photo.png")
+	os.WriteFile(path, []byte("PNG"), 0o644)
+
+	upload := func(ctx context.Context, p, fn, ct string) (string, error) {
+		return "sgid-456", nil
+	}
+
+	c := NewComposer(testStyles(), WithUploadFn(upload))
+	// Simulate dragged path arriving as typed text (no bracketed paste)
+	c.SetValue("'" + path + "'")
+
+	cmd := c.Submit()
+	if cmd == nil {
+		t.Fatal("expected attachment command")
+	}
+
+	// Value should be cleared (path was intercepted, not sent as text)
+	if c.Value() != "" {
+		t.Errorf("value should be empty after file interception, got %q", c.Value())
+	}
+
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
+	if c.Attachments()[0].Filename != "photo.png" {
+		t.Errorf("filename = %q, want photo.png", c.Attachments()[0].Filename)
+	}
+}
+
+func TestComposerSubmitInterceptsMultipleFiles(t *testing.T) {
+	dir := t.TempDir()
+	path1 := filepath.Join(dir, "a.png")
+	path2 := filepath.Join(dir, "b.pdf")
+	os.WriteFile(path1, []byte("PNG"), 0o644)
+	os.WriteFile(path2, []byte("%PDF"), 0o644)
+
+	c := NewComposer(testStyles())
+	// Terminal.app multi-file drag format: 'path1' 'path2'
+	c.SetValue("'" + path1 + "' '" + path2 + "'")
+
+	c.Submit() // triggers interception (cmd may be nil without upload fn)
+
+	if c.Value() != "" {
+		t.Errorf("value should be empty, got %q", c.Value())
+	}
+	if len(c.Attachments()) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(c.Attachments()))
+	}
+	if c.Attachments()[0].Filename != "a.png" {
+		t.Errorf("attachment[0] = %q, want a.png", c.Attachments()[0].Filename)
+	}
+	if c.Attachments()[1].Filename != "b.pdf" {
+		t.Errorf("attachment[1] = %q, want b.pdf", c.Attachments()[1].Filename)
+	}
+}
+
+func TestComposerSubmitDoesNotInterceptPlainText(t *testing.T) {
+	c := NewComposer(testStyles())
+	c.SetValue("just a message")
+
+	cmd := c.Submit()
+	if cmd == nil {
+		t.Fatal("expected submit command")
+	}
+	msg := cmd()
+	submitMsg, ok := msg.(ComposerSubmitMsg)
+	if !ok {
+		t.Fatalf("expected ComposerSubmitMsg, got %T", msg)
+	}
+	if submitMsg.Content.Markdown != "just a message" {
+		t.Errorf("markdown = %q, want %q", submitMsg.Content.Markdown, "just a message")
+	}
+}
+
 func TestComposerProcessPaste(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "test.pdf")
@@ -225,6 +302,61 @@ func TestComposerProcessPaste(t *testing.T) {
 		t.Errorf("expected 1 attachment, got %d", len(c.Attachments()))
 	}
 	_ = cmd // upload command (nil without upload fn)
+}
+
+func TestComposerProcessPasteShellEscaped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "my file (1).pdf")
+	os.WriteFile(path, []byte("%PDF"), 0o644)
+
+	// Shell-escaped form: spaces and parens escaped with backslashes
+	escaped := strings.ReplaceAll(dir, " ", `\ `) + `/my\ file\ \(1\).pdf`
+
+	c := NewComposer(testStyles())
+	text, _ := c.ProcessPaste(escaped)
+	if text != "" {
+		t.Errorf("remaining text = %q, want empty (file should be attached)", text)
+	}
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
+	if c.Attachments()[0].Filename != "my file (1).pdf" {
+		t.Errorf("filename = %q, want %q", c.Attachments()[0].Filename, "my file (1).pdf")
+	}
+}
+
+func TestComposerProcessPasteQuoted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "my file.pdf")
+	os.WriteFile(path, []byte("%PDF"), 0o644)
+
+	quoted := "'" + path + "'"
+
+	c := NewComposer(testStyles())
+	text, _ := c.ProcessPaste(quoted)
+	if text != "" {
+		t.Errorf("remaining text = %q, want empty", text)
+	}
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
+}
+
+func TestComposerProcessPasteFileURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "my file.pdf")
+	os.WriteFile(path, []byte("%PDF"), 0o644)
+
+	fileURL := "file://" + strings.ReplaceAll(path, " ", "%20")
+
+	c := NewComposer(testStyles())
+	text, _ := c.ProcessPaste(fileURL)
+	if text != "" {
+		t.Errorf("remaining text = %q, want empty", text)
+	}
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
 }
 
 func TestComposerProcessPasteNoFiles(t *testing.T) {

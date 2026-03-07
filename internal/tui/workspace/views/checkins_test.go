@@ -3,6 +3,8 @@ package views
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -584,6 +586,48 @@ func TestCheckins_ShortHelp_RightPane_ShowsNewAnswerWithSelection(t *testing.T) 
 		}
 	}
 	assert.True(t, found, "n hint should appear when question is selected")
+}
+
+// --- PasteMsg in answering mode ---
+
+func TestCheckins_PasteMsg_WhenAnswering_PlainText(t *testing.T) {
+	v := testCheckinsViewWithAnswers()
+	v.answering = true
+	v.composer.Focus()
+	v.composer.SetSize(80, 10)
+
+	_, cmd := v.Update(tea.PasteMsg{Content: "hello pasted text"})
+	_ = cmd
+
+	assert.Equal(t, "hello pasted text", v.composer.Value(),
+		"pasted text should be inserted into composer")
+}
+
+func TestCheckins_PasteMsg_WhenAnswering_FileAttachment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.pdf")
+	require.NoError(t, os.WriteFile(path, []byte("%PDF"), 0o644))
+
+	v := testCheckinsViewWithAnswers()
+	v.answering = true
+	v.composer.Focus()
+	v.composer.SetSize(80, 10)
+
+	// Paste a single-quoted file path (as some terminals produce)
+	escaped := `'` + path + `'`
+	_, _ = v.Update(tea.PasteMsg{Content: escaped})
+
+	require.Len(t, v.composer.Attachments(), 1, "file path should create an attachment")
+	assert.Equal(t, "report.pdf", v.composer.Attachments()[0].Filename)
+	assert.Empty(t, v.composer.Value(), "file path should not appear as text")
+}
+
+func TestCheckins_PasteMsg_WhenNotAnswering_Ignored(t *testing.T) {
+	v := testCheckinsViewWithAnswers()
+	v.answering = false
+
+	_, cmd := v.Update(tea.PasteMsg{Content: "should be ignored"})
+	assert.Nil(t, cmd, "paste should be ignored when not answering")
 }
 
 // --- truncateContent ---

@@ -322,10 +322,23 @@ func (c *Composer) AddAttachment(path string) tea.Cmd {
 }
 
 // Submit creates a tea.Cmd that uploads any pending attachments and returns ComposerSubmitMsg.
+// If the content is a single file path (e.g. typed or dragged without bracketed paste),
+// it is intercepted and attached rather than sent as text.
 func (c *Composer) Submit() tea.Cmd {
 	content := strings.TrimSpace(c.Value())
 	if content == "" && len(c.attachments) == 0 {
 		return nil
+	}
+
+	// Intercept file paths that arrived as typed input (no bracketed paste).
+	// Terminals like Terminal.app don't wrap drag-and-drop in paste sequences,
+	// so paths end up as plain text in the composer. Check if every non-empty
+	// line resolves to a file — if so, attach them all instead of sending as text.
+	if len(c.attachments) == 0 {
+		if ok, cmd := c.interceptFilePaths(content); ok {
+			c.SetValue("")
+			return cmd
+		}
 	}
 
 	attachments := make([]Attachment, len(c.attachments))
@@ -363,6 +376,70 @@ func (c *Composer) Submit() tea.Cmd {
 			},
 		}
 	}
+}
+
+// interceptFilePaths checks whether every segment in content resolves to a
+// regular file. Segments are split by newlines (bracketed paste) or by
+// quote-space-quote boundaries (Terminal.app multi-file drag: 'a' 'b').
+// Returns (true, cmd) if all segments are files and were attached,
+// (false, nil) if any segment is not a file.
+func (c *Composer) interceptFilePaths(content string) (bool, tea.Cmd) {
+	segments := splitDragSegments(content)
+	var paths []string
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		expanded := richtext.NormalizeDragPath(seg)
+		info, err := os.Stat(expanded)
+		if err != nil || !info.Mode().IsRegular() {
+			return false, nil
+		}
+		paths = append(paths, expanded)
+	}
+	if len(paths) == 0 {
+		return false, nil
+	}
+	var cmds []tea.Cmd
+	for _, p := range paths {
+		if cmd := c.AddAttachment(p); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if len(cmds) == 0 {
+		return true, nil
+	}
+	return true, tea.Batch(cmds...)
+}
+
+// splitDragSegments splits content into individual path segments. It handles
+// newline-separated paths (bracketed paste) and Terminal.app's format for
+// multiple dragged files: 'path one' 'path two'.
+func splitDragSegments(content string) []string {
+	// Multi-line: one path per line
+	if strings.Contains(content, "\n") {
+		lines := strings.Split(content, "\n")
+		result := make([]string, 0, len(lines))
+		for _, l := range lines {
+			result = append(result, strings.TrimSpace(l))
+		}
+		return result
+	}
+
+	// Single line with multiple single-quoted paths: 'a' 'b' 'c'
+	// Strip outer quotes, split on ' ' (the unquoted gap), then re-wrap each.
+	if len(content) > 2 && content[0] == '\'' && content[len(content)-1] == '\'' &&
+		strings.Contains(content, "' '") {
+		inner := content[1 : len(content)-1] // strip outer quotes
+		parts := strings.Split(inner, "' '")
+		result := make([]string, len(parts))
+		for i, p := range parts {
+			result[i] = "'" + p + "'"
+		}
+		return result
+	}
+
+	return []string{strings.TrimSpace(content)}
 }
 
 // Update processes messages for the composer.
@@ -576,13 +653,8 @@ func (c *Composer) ProcessPaste(text string) (string, tea.Cmd) {
 			continue
 		}
 
-		// Expand ~ to home directory
-		expanded := trimmed
-		if strings.HasPrefix(expanded, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				expanded = filepath.Join(filepath.Clean(home), expanded[2:])
-			}
-		}
+		// Normalize drag-and-drop paths (shell escapes, quotes, file:// URLs, ~)
+		expanded := richtext.NormalizeDragPath(trimmed)
 
 		// Check if it's a file path
 		info, err := os.Stat(expanded)
