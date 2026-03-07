@@ -1,0 +1,25 @@
+internal/tui/brand_anim.go
+  cfc69533d49d45f1 4,7,9,11,22,33-64,66-76,82-85,88-92,95-96,98-99,101,103-104,106-110,117,124,129-142,145-221,223-231,233-247,250-259,261,264,269-270,272-279,281-282,284-290,292-293,295-298,300-301,304-314,316-320,324-325,327,331-412,416-454,457-458,460-496
+internal/tui/brand_test.go
+  cfc69533d49d45f1 4,46-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "cbad3d88802d3bbfd530f392c9a55f5421064928",
+  "prompts": {
+    "cfc69533d49d45f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db083fd7-e406-442d-9c73-2627f0cc22b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 507,
+      "total_deletions": 161,
+      "accepted_lines": 460,
+      "overriden_lines": 0
+    }
+  }
+}
