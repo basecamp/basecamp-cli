@@ -414,7 +414,7 @@ func TestHubSetRecentProjectsReceivesAccountID(t *testing.T) {
 	// recents are scoped per-account. Before the fix, the callback was
 	// func() []int64 (no account parameter), causing cross-account leaks
 	// when two accounts shared the same numeric project ID.
-	h := NewHub(NewMultiStore(nil))
+	h := NewHub(NewMultiStore(nil), "")
 
 	var capturedIDs []string
 	h.SetRecentProjects(func(accountID string) []int64 {

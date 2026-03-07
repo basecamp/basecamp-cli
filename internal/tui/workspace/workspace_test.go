@@ -1036,7 +1036,7 @@ func TestWorkspace_TabConsumedWhenSidebarActive(t *testing.T) {
 	cmd := w.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	assert.True(t, w.sidebarFocused, "tab should switch focus to sidebar")
-	assert.Nil(t, cmd, "switchSidebarFocus returns nil")
+	_ = cmd // may be non-nil when blur/focus produce cmds
 
 	// The main view should NOT have received the tab key.
 	for _, m := range v.msgs {
@@ -1918,4 +1918,333 @@ func TestPoolMonitorResizeRefocusesMainView(t *testing.T) {
 		}
 	}
 	assert.True(t, hasFocus, "main view should be re-focused after monitor disappears on resize")
+}
+
+func TestGoToDepthClearsPoolMonitorFocus(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	pushTestView(w, "Root")
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Navigate deeper to create depth
+	w.navigate(ViewDock, Scope{ProjectID: 1, AccountID: "a"})
+	w.navigate(ViewTodos, Scope{ProjectID: 1, AccountID: "a"})
+
+	// Open and focus pool monitor via 3-state toggle
+	w.togglePoolMonitor() // open unfocused
+	w.togglePoolMonitor() // focus it
+	require.True(t, w.poolMonitorFocused)
+
+	// Breadcrumb jump via goToDepth should clear monitor focus
+	w.goToDepth(1)
+	assert.False(t, w.poolMonitorFocused, "goToDepth should clear pool monitor focus")
+	assert.True(t, w.poolMonitorActive(), "monitor should stay visible after goToDepth")
+
+	// Main view should have received FocusMsg
+	restored := w.router.Current().(*testView)
+	hasFocus := false
+	for _, m := range restored.msgs {
+		if _, ok := m.(FocusMsg); ok {
+			hasFocus = true
+		}
+	}
+	assert.True(t, hasFocus, "restored view should receive FocusMsg after goToDepth")
+}
+
+func TestEscPopsPoolMonitorFocusBeforeNavigating(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	pushTestView(w, "Root")
+	w.navigate(ViewDock, Scope{ProjectID: 1, AccountID: "a"})
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Open and focus pool monitor
+	w.togglePoolMonitor()
+	w.togglePoolMonitor() // focus it
+	require.True(t, w.poolMonitorFocused)
+	require.True(t, w.router.CanGoBack(), "should be able to go back")
+
+	initialDepth := w.router.Depth()
+
+	// First Esc: should pop focus, not navigate back
+	w.handleKey(keyMsg("esc"))
+	assert.False(t, w.poolMonitorFocused, "first Esc should clear monitor focus")
+	assert.Equal(t, initialDepth, w.router.Depth(), "first Esc should not navigate back")
+	assert.True(t, w.poolMonitorActive(), "monitor should stay visible")
+
+	// Main view should have received FocusMsg
+	mainView := w.router.Current().(*testView)
+	hasFocus := false
+	for _, m := range mainView.msgs {
+		if _, ok := m.(FocusMsg); ok {
+			hasFocus = true
+		}
+	}
+	assert.True(t, hasFocus, "main view should receive FocusMsg after Esc pops monitor focus")
+
+	// Second Esc: should navigate back
+	w.handleKey(keyMsg("esc"))
+	assert.Equal(t, initialDepth-1, w.router.Depth(), "second Esc should navigate back")
+}
+
+func TestEscPopsSidebarFocusBeforeNavigating(t *testing.T) {
+	w, _ := testWorkspace()
+
+	pushTestView(w, "Root")
+	w.navigate(ViewDock, Scope{ProjectID: 1, AccountID: "a"})
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Open sidebar and focus it
+	w.toggleSidebar()
+	require.True(t, w.sidebarActive())
+	w.switchSidebarFocus()
+	require.True(t, w.sidebarFocused)
+
+	initialDepth := w.router.Depth()
+
+	// First Esc: should pop sidebar focus, not navigate back
+	w.handleKey(keyMsg("esc"))
+	assert.False(t, w.sidebarFocused, "first Esc should clear sidebar focus")
+	assert.Equal(t, initialDepth, w.router.Depth(), "first Esc should not navigate back")
+
+	// Second Esc: should navigate back
+	w.handleKey(keyMsg("esc"))
+	assert.Equal(t, initialDepth-1, w.router.Depth(), "second Esc should navigate back")
+}
+
+func TestInputActiveBacktickTogglesPoolMonitor(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	// Push a view that captures input
+	inputView := pushTestView(w, "Search")
+	inputView.inputActive = true
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Backtick during inputActive should open pool monitor
+	w.handleKey(keyMsg("`"))
+	assert.True(t, w.showPoolMonitor, "backtick during inputActive should open pool monitor")
+	assert.False(t, w.poolMonitorFocused, "first backtick opens unfocused")
+
+	// Second backtick focuses it (3-state: closed → open → focused → closed)
+	w.handleKey(keyMsg("`"))
+	assert.True(t, w.showPoolMonitor, "monitor still open")
+	assert.True(t, w.poolMonitorFocused, "second backtick focuses")
+
+	// Third backtick closes it
+	w.handleKey(keyMsg("`"))
+	assert.False(t, w.showPoolMonitor, "third backtick closes pool monitor")
+}
+
+func TestSwitchAccountClearsPoolMonitorFocus(t *testing.T) {
+	session := testSessionWithContext("old-account", "Old")
+	w := testWorkspaceWithSession(session)
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	pushTestView(w, "Root")
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Open and focus pool monitor
+	w.togglePoolMonitor()
+	w.togglePoolMonitor() // focus it
+	require.True(t, w.poolMonitorFocused)
+
+	// Switch account
+	w.switchAccount("new-account", "New")
+
+	assert.False(t, w.poolMonitorFocused, "switchAccount should clear pool monitor focus")
+	assert.True(t, w.showPoolMonitor, "pool monitor should stay visible after switchAccount")
+}
+
+func TestEnterPassesThroughWhenPoolMonitorUnfocused(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	mainView := &testView{title: "Root"}
+	w.router.Push(mainView, Scope{}, ViewHome)
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Open pool monitor but leave focus on main view
+	w.togglePoolMonitor()
+	require.True(t, w.showPoolMonitor)
+	require.False(t, w.poolMonitorFocused, "monitor should open unfocused")
+
+	mainView.msgs = nil
+	w.handleKey(keyMsg("enter"))
+
+	// Enter should reach the main view, not be consumed by the monitor
+	found := false
+	for _, m := range mainView.msgs {
+		if km, ok := m.(tea.KeyPressMsg); ok && km.Code == tea.KeyEnter {
+			found = true
+		}
+	}
+	assert.True(t, found, "enter should reach main view when pool monitor is open but unfocused")
+
+	// Now focus the monitor via toggle — enter should NOT reach main view
+	w.togglePoolMonitor() // focuses it (3-state: open unfocused → focused)
+	require.True(t, w.poolMonitorFocused)
+
+	mainView.msgs = nil
+	w.handleKey(keyMsg("enter"))
+
+	found = false
+	for _, m := range mainView.msgs {
+		if km, ok := m.(tea.KeyPressMsg); ok && km.Code == tea.KeyEnter {
+			found = true
+		}
+	}
+	assert.False(t, found, "enter should be consumed by focused panel, not reach main view")
+}
+
+func TestTabReachesPoolMonitorWithoutSidebar(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	pushTestView(w, "Root")
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Open pool monitor (no sidebar)
+	w.togglePoolMonitor()
+	require.True(t, w.poolMonitorActive())
+	require.False(t, w.sidebarActive(), "sidebar should be closed")
+	require.False(t, w.poolMonitorFocused)
+
+	// Tab should cycle to pool monitor
+	w.handleKey(keyMsg("tab"))
+	assert.True(t, w.poolMonitorFocused, "tab should focus pool monitor when only monitor is active")
+
+	// Tab again returns to main
+	w.handleKey(keyMsg("tab"))
+	assert.False(t, w.poolMonitorFocused, "tab should cycle back to main")
+}
+
+func TestInputActiveTabCyclesToPoolMonitor(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	inputView := pushTestView(w, "Search")
+	inputView.inputActive = true
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	// Open pool monitor
+	w.togglePoolMonitor()
+	require.True(t, w.poolMonitorActive())
+
+	// Tab during inputActive should cycle to monitor
+	w.handleKey(keyMsg("tab"))
+	assert.True(t, w.poolMonitorFocused, "tab during inputActive should focus pool monitor")
+
+	// Tab again should cycle back to main
+	w.handleKey(keyMsg("tab"))
+	assert.False(t, w.poolMonitorFocused, "tab should cycle back to main")
+}
+
+func TestNumberKeysConsumedByFocusedPanel(t *testing.T) {
+	w, _ := testWorkspace()
+	w.poolMonitorFactory = func() View { return &testView{title: "Monitor"} }
+
+	pushTestView(w, "Root")
+	w.navigate(ViewDock, Scope{ProjectID: 1, AccountID: "a"})
+	w.navigate(ViewTodos, Scope{ProjectID: 1, AccountID: "a"})
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	w.relayout()
+
+	initialDepth := w.router.Depth()
+	require.Equal(t, 3, initialDepth)
+
+	// Open and focus pool monitor
+	w.togglePoolMonitor()
+	w.togglePoolMonitor() // focus it
+	require.True(t, w.poolMonitorFocused)
+
+	// Press '1' — should go to pool monitor, NOT trigger goToDepth
+	w.handleKey(keyMsg("1"))
+	assert.Equal(t, initialDepth, w.router.Depth(),
+		"number key should be consumed by focused panel, not trigger breadcrumb jump")
+	assert.True(t, w.poolMonitorFocused, "pool monitor should stay focused")
+
+	// Unfocus monitor — '1' should now trigger goToDepth
+	w.switchSidebarFocus() // monitor → main
+	require.False(t, w.poolMonitorFocused)
+	w.handleKey(keyMsg("1"))
+	assert.Equal(t, 1, w.router.Depth(), "number key without panel focus should jump to depth")
+}
+
+func TestDuplicateNavigationGuards(t *testing.T) {
+	w, _ := testWorkspace()
+	pushTestView(w, "Root")
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// Navigate to Hey
+	w.navigate(ViewHey, w.session.Scope())
+	depth := w.router.Depth()
+
+	// Hit ctrl+y again — should NOT push a duplicate
+	w.handleKey(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	assert.Equal(t, depth, w.router.Depth(), "duplicate Hey should not grow stack")
+
+	// Navigate to MyStuff
+	w.navigate(ViewMyStuff, w.session.Scope())
+	depth = w.router.Depth()
+
+	// Hit ctrl+s again
+	w.handleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	assert.Equal(t, depth, w.router.Depth(), "duplicate MyStuff should not grow stack")
+
+	// Navigate to Activity
+	w.navigate(ViewActivity, w.session.Scope())
+	depth = w.router.Depth()
+
+	// Hit ctrl+t again
+	w.handleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	assert.Equal(t, depth, w.router.Depth(), "duplicate Activity should not grow stack")
+}
+
+func TestDuplicateNavigationGuardsInputActive(t *testing.T) {
+	w, _ := testWorkspace()
+
+	inputView := pushTestView(w, "Root")
+	inputView.inputActive = true
+	w.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// Navigate to Hey
+	w.navigate(ViewHey, w.session.Scope())
+	heyView := w.router.Current().(*testView)
+	heyView.inputActive = true
+	depth := w.router.Depth()
+
+	// ctrl+y again during inputActive — should NOT push duplicate
+	w.handleKey(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	assert.Equal(t, depth, w.router.Depth(), "duplicate Hey during inputActive should not grow stack")
+
+	// Navigate to MyStuff
+	w.navigate(ViewMyStuff, w.session.Scope())
+	msView := w.router.Current().(*testView)
+	msView.inputActive = true
+	depth = w.router.Depth()
+
+	// ctrl+s again during inputActive
+	w.handleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	assert.Equal(t, depth, w.router.Depth(), "duplicate MyStuff during inputActive should not grow stack")
+
+	// Navigate to Activity
+	w.navigate(ViewActivity, w.session.Scope())
+	actView := w.router.Current().(*testView)
+	actView.inputActive = true
+	depth = w.router.Depth()
+
+	// ctrl+t again during inputActive
+	w.handleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	assert.Equal(t, depth, w.router.Depth(), "duplicate Activity during inputActive should not grow stack")
 }
