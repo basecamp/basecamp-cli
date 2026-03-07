@@ -1,0 +1,25 @@
+internal/commands/todos_test.go
+  abcfed966200a5f6 412-476
+internal/commands/todos.go
+  abcfed966200a5f6 38,284-300,869,872,875,892-898,900-901,903
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "cbb8edc430d17a0ca4933943646d82b8264db05a",
+  "prompts": {
+    "abcfed966200a5f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7df1ec4-9b88-4fe8-a8aa-b61c105a6da9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 195,
+      "total_deletions": 113,
+      "accepted_lines": 96,
+      "overriden_lines": 0
+    }
+  }
+}
