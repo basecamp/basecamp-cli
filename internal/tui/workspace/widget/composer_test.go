@@ -210,6 +210,55 @@ func TestComposerSubmitEmpty(t *testing.T) {
 	}
 }
 
+func TestComposerSubmitInterceptsFilePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "photo.png")
+	os.WriteFile(path, []byte("PNG"), 0o644)
+
+	upload := func(ctx context.Context, p, fn, ct string) (string, error) {
+		return "sgid-456", nil
+	}
+
+	c := NewComposer(testStyles(), WithUploadFn(upload))
+	// Simulate dragged path arriving as typed text (no bracketed paste)
+	c.SetValue("'" + path + "'")
+
+	cmd := c.Submit()
+	if cmd == nil {
+		t.Fatal("expected attachment command")
+	}
+
+	// Value should be cleared (path was intercepted, not sent as text)
+	if c.Value() != "" {
+		t.Errorf("value should be empty after file interception, got %q", c.Value())
+	}
+
+	if len(c.Attachments()) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(c.Attachments()))
+	}
+	if c.Attachments()[0].Filename != "photo.png" {
+		t.Errorf("filename = %q, want photo.png", c.Attachments()[0].Filename)
+	}
+}
+
+func TestComposerSubmitDoesNotInterceptPlainText(t *testing.T) {
+	c := NewComposer(testStyles())
+	c.SetValue("just a message")
+
+	cmd := c.Submit()
+	if cmd == nil {
+		t.Fatal("expected submit command")
+	}
+	msg := cmd()
+	submitMsg, ok := msg.(ComposerSubmitMsg)
+	if !ok {
+		t.Fatalf("expected ComposerSubmitMsg, got %T", msg)
+	}
+	if submitMsg.Content.Markdown != "just a message" {
+		t.Errorf("markdown = %q, want %q", submitMsg.Content.Markdown, "just a message")
+	}
+}
+
 func TestComposerProcessPaste(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "test.pdf")

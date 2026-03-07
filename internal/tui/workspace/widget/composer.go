@@ -322,10 +322,24 @@ func (c *Composer) AddAttachment(path string) tea.Cmd {
 }
 
 // Submit creates a tea.Cmd that uploads any pending attachments and returns ComposerSubmitMsg.
+// If the content is a single file path (e.g. typed or dragged without bracketed paste),
+// it is intercepted and attached rather than sent as text.
 func (c *Composer) Submit() tea.Cmd {
 	content := strings.TrimSpace(c.Value())
 	if content == "" && len(c.attachments) == 0 {
 		return nil
+	}
+
+	// Intercept file paths that arrived as typed input (no bracketed paste).
+	// Terminals like Terminal.app don't wrap drag-and-drop in paste sequences,
+	// so the path ends up as plain text in the composer.
+	if len(c.attachments) == 0 && !strings.Contains(content, "\n") {
+		expanded := richtext.NormalizeDragPath(content)
+		if info, err := os.Stat(expanded); err == nil && info.Mode().IsRegular() {
+			cmd := c.AddAttachment(expanded)
+			c.SetValue("")
+			return cmd
+		}
 	}
 
 	attachments := make([]Attachment, len(c.attachments))
