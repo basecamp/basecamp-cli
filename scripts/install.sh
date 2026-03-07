@@ -255,8 +255,8 @@ show_banner() {
     local text_line=6
 
     echo ""
-    if [[ -t 1 ]]; then
-      # Animated reveal on TTY
+    if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+      # Animated reveal on TTY (skip cursor movement when NO_COLOR is set)
       for line in "${logo[@]}"; do
         echo "${y}${line}${r}"
         sleep 0.03
