@@ -70,16 +70,20 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	var waitAnim func()
 	if app != nil && app.IsInteractive() && !app.IsMachineOutput() {
 		styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
-		aw, wait := tui.AnimateWordmarkAsync(cmd.OutOrStdout(), styles.Theme())
+		dest := cmd.OutOrStdout()
+		aw, wait := tui.AnimateWordmarkAsync(dest, styles.Theme())
 		fmt.Fprintln(aw)
 		waitAnim = wait
-		// Route app.OK output through the AnimWriter so it appears
-		// below the logo while the animation is still painting.
-		// Preserve the resolved format (e.g. Markdown via --md).
-		app.Output = output.New(output.Options{
-			Format: app.Output.EffectiveFormat(),
-			Writer: aw,
-		})
+		// Only reroute output when animation started (aw is an AnimWriter).
+		// When AnimateWordmarkAsync falls back to static (non-TTY dest),
+		// it returns the original writer — leave app.Output alone so its
+		// format resolution stays tied to the real destination.
+		if aw != dest {
+			app.Output = output.New(output.Options{
+				Format: app.Output.EffectiveFormat(),
+				Writer: aw,
+			})
+		}
 	}
 
 	// Determine auth status

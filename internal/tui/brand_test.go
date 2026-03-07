@@ -187,29 +187,34 @@ func TestAnimWriterCountsWraps(t *testing.T) {
 	assert.Equal(t, 3, aw.linesBelow)
 }
 
-func TestAnimateWordmarkWithInvalidStrategy(t *testing.T) {
-	var buf bytes.Buffer
-	// Invalid strategy name should fall back to default, not silently skip.
-	// On non-TTY, both valid and invalid strategies produce static output.
-	AnimateWordmarkWith(&buf, NoColorTheme(), "nonexistent-strategy")
+func TestInvalidStrategyFallsBackToDefault(t *testing.T) {
+	// Verify the animations map lookup + fallback directly.
+	// AnimateWordmarkWith on non-TTY hits static render before the lookup,
+	// so we test the map and trace function in isolation.
+	_, ok := animations["nonexistent"]
+	assert.False(t, ok)
 
-	output := buf.String()
-	assert.Contains(t, output, "⣿")
-	assert.Contains(t, output, "Basecamp")
+	// Fallback to DefaultAnimation produces cells
+	traceFn := animations[DefaultAnimation]
+	require.NotNil(t, traceFn)
+
+	grid, numLines := wordmarkGrid()
+	cells := traceFn(grid, numLines)
+	assert.Greater(t, len(cells), 0)
 }
 
-func TestAnimateWordmarkWithValidStrategy(t *testing.T) {
-	var buf bytes.Buffer
-	AnimateWordmarkWith(&buf, NoColorTheme(), "radial")
-
-	output := buf.String()
-	assert.Contains(t, output, "⣿")
-	assert.Contains(t, output, "Basecamp")
+func TestAllRegisteredStrategiesProduceCells(t *testing.T) {
+	grid, numLines := wordmarkGrid()
+	for name, traceFn := range animations {
+		cells := traceFn(grid, numLines)
+		assert.Greater(t, len(cells), 0, "strategy %q produced no cells", name)
+	}
 }
 
 func TestAnimationNamesContainsDefault(t *testing.T) {
 	names := AnimationNames()
 	assert.Contains(t, names, DefaultAnimation)
+	assert.Len(t, names, len(animations))
 }
 
 func TestRenderWordmarkTextOnCorrectLine(t *testing.T) {
