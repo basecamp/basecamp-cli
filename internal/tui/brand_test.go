@@ -139,6 +139,37 @@ func TestVisualLinesANSIWraps(t *testing.T) {
 	assert.Equal(t, 0, pw)
 }
 
+func TestVisualLinesExactFitPartialLine(t *testing.T) {
+	// Exactly cols chars without \n: deferred wrap — no row consumed yet,
+	// pendingW stays at cols to signal deferred state.
+	rows, pw := visualLines(strings.Repeat("x", 20), 20, 0)
+	assert.Equal(t, 0, rows)
+	assert.Equal(t, 20, pw)
+
+	// Next single char triggers the deferred wrap
+	rows, pw = visualLines("y", 20, pw)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 1, pw)
+}
+
+func TestVisualLinesExactFitPartialThenNewline(t *testing.T) {
+	// Deferred wrap at cols, then \n: one row consumed
+	rows, pw := visualLines(strings.Repeat("x", 20), 20, 0)
+	assert.Equal(t, 0, rows)
+	assert.Equal(t, 20, pw)
+
+	rows, pw = visualLines("\n", 20, pw)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesDoubleExactFitPartial(t *testing.T) {
+	// 40 chars in 20-col terminal without \n: 1 wrap + deferred at end
+	rows, pw := visualLines(strings.Repeat("x", 40), 20, 0)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 20, pw)
+}
+
 func TestAnimWriterCountsWraps(t *testing.T) {
 	var buf bytes.Buffer
 	aw := &AnimWriter{
@@ -154,6 +185,31 @@ func TestAnimWriterCountsWraps(t *testing.T) {
 	// Write a short line
 	fmt.Fprint(aw, "hi\n")
 	assert.Equal(t, 3, aw.linesBelow)
+}
+
+func TestAnimateWordmarkWithInvalidStrategy(t *testing.T) {
+	var buf bytes.Buffer
+	// Invalid strategy name should fall back to default, not silently skip.
+	// On non-TTY, both valid and invalid strategies produce static output.
+	AnimateWordmarkWith(&buf, NoColorTheme(), "nonexistent-strategy")
+
+	output := buf.String()
+	assert.Contains(t, output, "⣿")
+	assert.Contains(t, output, "Basecamp")
+}
+
+func TestAnimateWordmarkWithValidStrategy(t *testing.T) {
+	var buf bytes.Buffer
+	AnimateWordmarkWith(&buf, NoColorTheme(), "radial")
+
+	output := buf.String()
+	assert.Contains(t, output, "⣿")
+	assert.Contains(t, output, "Basecamp")
+}
+
+func TestAnimationNamesContainsDefault(t *testing.T) {
+	names := AnimationNames()
+	assert.Contains(t, names, DefaultAnimation)
 }
 
 func TestRenderWordmarkTextOnCorrectLine(t *testing.T) {

@@ -75,8 +75,9 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 		waitAnim = wait
 		// Route app.OK output through the AnimWriter so it appears
 		// below the logo while the animation is still painting.
+		// Preserve the resolved format (e.g. Markdown via --md).
 		app.Output = output.New(output.Options{
-			Format: output.FormatStyled,
+			Format: app.Output.EffectiveFormat(),
 			Writer: aw,
 		})
 	}

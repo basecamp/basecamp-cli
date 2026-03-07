@@ -489,10 +489,14 @@ func visualLines(s string, cols, pendingW int) (rows, newPendingW int) {
 			rows += max(1, (total+cols-1)/cols)
 			pendingW = 0
 		} else {
-			// Partial line: count wraps, update column position
-			if total >= cols {
-				rows += total / cols
-				pendingW = total % cols
+			// Partial line: count wraps, update column position.
+			// Use > (not >=) because terminals defer wrap at the right
+			// margin — the cursor stays at cols until the next printable
+			// character arrives, so exact-fit doesn't consume a row yet.
+			if total > cols {
+				wrapped := (total - 1) / cols
+				rows += wrapped
+				pendingW = total - wrapped*cols
 			} else {
 				pendingW = total
 			}
