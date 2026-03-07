@@ -1,0 +1,61 @@
+internal/tui/workspace/data/pool.go
+  4782c0985f174f65 96-97,106,108,110-112,187,189-192,194,271-272,275-279,328-329,332-335,341-342,345-348
+internal/tui/workspace/data/mutation.go
+  4782c0985f174f65 115,117-120,122,171,173-176,178
+internal/tui/workspace/data/mutation_test.go
+  4782c0985f174f65 351-352
+internal/tui/workspace/data/metrics.go
+  4782c0985f174f65 8,15-18,21,28
+internal/tui/workspace/views/pool_monitor.go
+  c3fde71168208b65 108-111,243,406,408-409
+  b1c50d55fd29c48b 25-26,404,407,410,412
+  4782c0985f174f65 107,242,244-250,262,264,266,271-272,274,276,278-279,281-283,285-288,291-294,296-307,309-310,324-376,386-391,393-396
+internal/tui/workspace/workspace_test.go
+  b1c50d55fd29c48b 1038,1921-2249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "3e45635028a03eef647d2f2d2ca2b7b2f66977cb",
+  "prompts": {
+    "4782c0985f174f65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf5b87e8-2630-4d70-88dd-355023677953",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 256,
+      "total_deletions": 197,
+      "accepted_lines": 159,
+      "overriden_lines": 0
+    },
+    "b1c50d55fd29c48b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c4099d2-f1ca-4514-b7d2-3d333764f53a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 38,
+      "total_deletions": 25,
+      "accepted_lines": 336,
+      "overriden_lines": 0
+    },
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 1,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
