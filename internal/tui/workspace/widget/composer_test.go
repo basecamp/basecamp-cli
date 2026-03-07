@@ -241,6 +241,33 @@ func TestComposerSubmitInterceptsFilePath(t *testing.T) {
 	}
 }
 
+func TestComposerSubmitInterceptsMultipleFiles(t *testing.T) {
+	dir := t.TempDir()
+	path1 := filepath.Join(dir, "a.png")
+	path2 := filepath.Join(dir, "b.pdf")
+	os.WriteFile(path1, []byte("PNG"), 0o644)
+	os.WriteFile(path2, []byte("%PDF"), 0o644)
+
+	c := NewComposer(testStyles())
+	// Terminal.app multi-file drag format: 'path1' 'path2'
+	c.SetValue("'" + path1 + "' '" + path2 + "'")
+
+	c.Submit() // triggers interception (cmd may be nil without upload fn)
+
+	if c.Value() != "" {
+		t.Errorf("value should be empty, got %q", c.Value())
+	}
+	if len(c.Attachments()) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(c.Attachments()))
+	}
+	if c.Attachments()[0].Filename != "a.png" {
+		t.Errorf("attachment[0] = %q, want a.png", c.Attachments()[0].Filename)
+	}
+	if c.Attachments()[1].Filename != "b.pdf" {
+		t.Errorf("attachment[1] = %q, want b.pdf", c.Attachments()[1].Filename)
+	}
+}
+
 func TestComposerSubmitDoesNotInterceptPlainText(t *testing.T) {
 	c := NewComposer(testStyles())
 	c.SetValue("just a message")
