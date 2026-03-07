@@ -152,16 +152,16 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 
 	selectedPath, err := tui.Select("  Where would you like to install the Basecamp skill?", options)
 	if err != nil {
-		fmt.Fprintln(w, styles.Muted.Render("  Installation cancelled."))
-		return nil //nolint:nilerr // user cancelled prompt
+		fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
+		return nil //nolint:nilerr // user canceled prompt
 	}
 
 	// Handle custom path
 	if selectedPath == "other" {
 		selectedPath, err = tui.Input("  Enter custom path", "/path/to/skills/basecamp/SKILL.md")
 		if err != nil || selectedPath == "" {
-			fmt.Fprintln(w, styles.Muted.Render("  Installation cancelled."))
-			return nil //nolint:nilerr // user cancelled prompt
+			fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
+			return nil //nolint:nilerr // user canceled prompt
 		}
 		selectedPath = normalizeSkillPath(selectedPath)
 	}
@@ -173,8 +173,8 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 		overwrite, confirmErr := tui.Confirm(
 			fmt.Sprintf("  File already exists at %s. Overwrite?", selectedPath), false)
 		if confirmErr != nil || !overwrite {
-			fmt.Fprintln(w, styles.Muted.Render("  Installation cancelled."))
-			return nil //nolint:nilerr // user cancelled or declined
+			fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
+			return nil //nolint:nilerr // user canceled or declined
 		}
 	} else if !os.IsNotExist(statErr) {
 		return fmt.Errorf("checking existing file: %w", statErr)

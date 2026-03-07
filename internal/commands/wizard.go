@@ -56,10 +56,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
 
 	// Step 1: Welcome
-	waitAnim, err := showWelcome(cmd.OutOrStdout(), styles)
-	if err != nil {
-		return err
-	}
+	waitAnim := showWelcome(cmd.OutOrStdout(), styles)
 	waitAnim()
 
 	// Step 2: Auth
@@ -119,7 +116,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 // showWelcome displays the welcome screen with animated logo.
 // Returns a wait function that must be called before interactive prompts.
 // All output goes to w so the command fully honors its output writer.
-func showWelcome(w io.Writer, styles *tui.Styles) (func(), error) {
+func showWelcome(w io.Writer, styles *tui.Styles) func() {
 	aw, waitAnim := tui.AnimateWordmarkAsync(w, styles.Theme())
 	fmt.Fprintln(aw)
 	fmt.Fprintln(aw, styles.Title.Render("Welcome to Basecamp"))
@@ -127,7 +124,7 @@ func showWelcome(w io.Writer, styles *tui.Styles) (func(), error) {
 	fmt.Fprintln(aw, styles.Body.Render(fmt.Sprintf("The command-line interface for Basecamp (v%s).", version.Version)))
 	fmt.Fprintln(aw, styles.Body.Render("Let's get you set up. This will only take a moment."))
 	fmt.Fprintln(aw)
-	return waitAnim, nil
+	return waitAnim
 }
 
 // wizardAuth handles the authentication flow with scope selection.

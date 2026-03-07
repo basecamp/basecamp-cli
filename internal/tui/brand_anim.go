@@ -268,7 +268,7 @@ func AnimateWordmarkAsync(w io.Writer, theme Theme) (io.Writer, func()) {
 // exits) and direction-continuity tiebreaker. Produces a finger-painting
 // effect: peak → mountain trail → counterclockwise outline sweep.
 func traceWarnsdorff(grid [][]rune, numLines int) []paintCell {
-	peakRow, peakCol := findInteriorPeak(grid, numLines)
+	peakRow, peakCol := findInteriorPeak(grid)
 	if peakRow < 0 {
 		return nil
 	}
@@ -508,7 +508,7 @@ func visualLines(s string, cols, pendingW int) (rows, newPendingW int) {
 // findInteriorPeak locates the interior mountain peak: the topmost row with
 // 3+ separate non-blank groups has outline-left, mountain-interior,
 // outline-right. The second group's first cell is the mountain peak.
-func findInteriorPeak(grid [][]rune, numLines int) (int, int) {
+func findInteriorPeak(grid [][]rune) (int, int) {
 	peakRow, peakCol := -1, -1
 	for r, row := range grid {
 		groups := 0
