@@ -1,0 +1,23 @@
+internal/tui/workspace/workspace_test.go
+  b1c50d55fd29c48b 1038,1921-2249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "86293187f92853db73d7c5be314a4b35221b86d3",
+  "prompts": {
+    "b1c50d55fd29c48b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c4099d2-f1ca-4514-b7d2-3d333764f53a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 331,
+      "overriden_lines": 0
+    }
+  }
+}
