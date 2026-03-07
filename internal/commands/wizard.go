@@ -104,8 +104,8 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 
 	// Step 7: Summary with next steps
 	// Interactive mode shows the rich checklist directly; non-interactive
-	// delegates to app.OK which renders the structured envelope.
-	if app.IsInteractive() {
+	// or machine-output mode delegates to app.OK which renders the structured envelope.
+	if app.IsInteractive() && !app.IsMachineOutput() {
 		showSuccess(cmd.OutOrStdout(), styles, result)
 		return nil
 	}
