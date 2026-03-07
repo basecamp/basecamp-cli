@@ -1,0 +1,27 @@
+internal/richtext/dragpath_test.go
+  6608fdc2837b6ed2 6,11-14,20,31,37,60-63,83,96,98,104,116-119,125-127
+internal/tui/workspace/views/checkins_test.go
+  6608fdc2837b6ed2 609,616
+internal/richtext/dragpath.go
+  6608fdc2837b6ed2 7,12-14,30,33,37-38,44-45,47,57,59-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "bc66ed705e811a6e22d1c9315e8dff370b0e745f",
+  "prompts": {
+    "6608fdc2837b6ed2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "250f8612-c115-46b1-b910-c35834995c73",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 62,
+      "total_deletions": 43,
+      "accepted_lines": 41,
+      "overriden_lines": 0
+    }
+  }
+}
