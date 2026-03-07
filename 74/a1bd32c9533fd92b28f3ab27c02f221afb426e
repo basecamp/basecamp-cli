@@ -1,0 +1,25 @@
+internal/tui/brand_test.go
+  cfc69533d49d45f1 190-203,206-211,217
+internal/commands/quickstart.go
+  cfc69533d49d45f1 73-74,77-81,86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "74a1bd32c9533fd92b28f3ab27c02f221afb426e",
+  "prompts": {
+    "cfc69533d49d45f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db083fd7-e406-442d-9c73-2627f0cc22b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 33,
+      "total_deletions": 24,
+      "accepted_lines": 29,
+      "overriden_lines": 0
+    }
+  }
+}
