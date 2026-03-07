@@ -1,0 +1,27 @@
+internal/commands/wizard.go
+  cfc69533d49d45f1 59
+internal/tui/brand_anim.go
+  cfc69533d49d45f1 271
+internal/commands/skill.go
+  cfc69533d49d45f1 155-156,163-164,176-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "7e3cc7f728428edd847e907b5f8ba41f4a32fbff",
+  "prompts": {
+    "cfc69533d49d45f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db083fd7-e406-442d-9c73-2627f0cc22b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 14,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
