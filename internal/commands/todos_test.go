@@ -409,3 +409,82 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 	assert.Equal(t, plainTextContent, content,
 		"Todo content should be plain text, not HTML-wrapped")
 }
+
+func TestTodosAssigneeWithoutProjectErrors(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "--assignee", "me")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "--assignee requires a project")
+	assert.Contains(t, e.Hint, "reports assigned")
+}
+
+func TestTodosOverdueWithoutProjectErrors(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "--overdue")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "--overdue requires a project")
+	assert.Contains(t, e.Hint, "reports overdue")
+}
+
+func TestTodosAssigneeWithConfigDefaultProceeds(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "--assignee", "me")
+	require.Error(t, err)
+
+	// Should proceed past the guard and fail on network (not the project error)
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotContains(t, e.Message, "--assignee requires a project")
+	}
+}
+
+func TestTodosAssigneeWithFlagProceeds(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "--assignee", "me", "--in", "123")
+	require.Error(t, err)
+
+	// Should proceed past the guard and fail on project fetch (network disabled)
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotContains(t, e.Message, "--assignee requires a project")
+	}
+}
+
+func TestTodosSweepWithoutProjectErrors(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "sweep", "--assignee", "me", "--comment", "test")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Sweep requires a project")
+}
+
+func TestTodosSweepOverdueWithoutProjectErrors(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "sweep", "--overdue", "--complete")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Sweep requires a project")
+}

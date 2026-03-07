@@ -35,7 +35,7 @@ func NewTodosCmd() *cobra.Command {
 		Use:         "todos",
 		Short:       "Manage todos",
 		Long:        "List, show, create, and manage Basecamp todos.",
-		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other recording types\nbasecamp done accepts multiple IDs: basecamp done 1 2 3\nCross-project assigned todos: use basecamp reports assigned --json (recordings lacks assignee data)\nUse basecamp todo --content \"text\" not basecamp todo \"text\""},
+		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other recording types\nbasecamp done accepts multiple IDs: basecamp done 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue\nUse basecamp todo --content \"text\" not basecamp todo \"text\""},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runTodosList(cmd, flags)
@@ -279,6 +279,24 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
+	}
+
+	// --assignee and --overdue filter within a single project. When no
+	// project is set anywhere (flag, global flag, config), the interactive
+	// picker would silently scope results to one arbitrary project. Error
+	// early and point to the Reports API for cross-project queries.
+	projectKnown := flags.project != "" || app.Flags.Project != "" || app.Config.ProjectID != ""
+	if !projectKnown {
+		if flags.assignee != "" {
+			return output.ErrUsageHint(
+				"--assignee requires a project (--in or default config)",
+				"For cross-project assigned todos: basecamp reports assigned")
+		}
+		if flags.overdue {
+			return output.ErrUsageHint(
+				"--overdue requires a project (--in or default config)",
+				"For cross-project overdue todos: basecamp reports overdue")
+		}
 	}
 
 	// Use project from flag or config, with interactive fallback
@@ -849,13 +867,13 @@ Actions (at least one required):
 
 Examples:
   # Preview overdue todos without taking action
-  basecamp todos sweep --overdue --dry-run
+  basecamp todos sweep --in <project> --overdue --dry-run
 
   # Complete all overdue todos with a comment
-  basecamp todos sweep --overdue --complete --comment "Cleaning up overdue items"
+  basecamp todos sweep --in <project> --overdue --complete --comment "Cleaning up overdue items"
 
   # Add comment to all todos assigned to me
-  basecamp todos sweep --assignee me --comment "Following up"`,
+  basecamp todos sweep --in <project> --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -872,7 +890,9 @@ Examples:
 				return output.ErrUsageHint("Sweep requires an action", "Use --comment and/or --complete")
 			}
 
-			// Resolve project, with interactive fallback
+			// Resolve project from flag, global flag, or config default.
+			// Don't fall through to interactive picker for sweep — acting
+			// on an arbitrary project chosen mid-flow is too risky.
 			if project == "" {
 				project = app.Flags.Project
 			}
@@ -880,10 +900,9 @@ Examples:
 				project = app.Config.ProjectID
 			}
 			if project == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				project = app.Config.ProjectID
+				return output.ErrUsageHint(
+					"Sweep requires a project",
+					"Use --in <project> or set a default with: basecamp config set project <name>")
 			}
 
 			// Resolve project name to ID

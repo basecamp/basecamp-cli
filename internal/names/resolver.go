@@ -27,11 +27,16 @@ type Resolver struct {
 	auth      *auth.Manager
 	accountID string
 
+	// resolveMeFn overrides the "me" resolution path. Nil in production
+	// (uses SDK People().Me), set in tests to return canned values.
+	resolveMeFn func(context.Context) (int64, string, error)
+
 	// Session-scoped cache
 	mu        sync.RWMutex
 	projects  []Project
 	people    []Person
 	todolists map[string][]Todolist // keyed by project ID
+	me        *Person               // cached /my/profile.json result
 }
 
 // Project represents a Basecamp project for name resolution.
@@ -75,6 +80,7 @@ func (r *Resolver) SetAccountID(accountID string) {
 		// Clear cache since data is account-specific
 		r.projects = nil
 		r.people = nil
+		r.me = nil
 		r.todolists = make(map[string][]Todolist)
 	}
 }
@@ -139,24 +145,21 @@ func (r *Resolver) ResolveProject(ctx context.Context, input string) (string, st
 // Special case: "me" resolves to the current user.
 // Returns the ID and the person's name for display.
 func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, string, error) {
-	// Handle "me" keyword — resolve via stored email against account people list.
-	// The stored user ID is a cross-account identity ID which doesn't match
-	// account-scoped person IDs, so we match by email instead.
-	if strings.ToLower(input) == "me" {
-		email := r.auth.GetUserEmail()
-		if email == "" {
-			return "", "", output.ErrAuth("Could not resolve your identity. Run: basecamp auth login")
+	// Handle "me" keyword — resolve via /my/profile.json which returns
+	// the authenticated user's account-scoped person record directly.
+	if strings.EqualFold(input, "me") {
+		if r.resolveMeFn != nil {
+			id, name, err := r.resolveMeFn(ctx)
+			if err != nil {
+				return "", "", err
+			}
+			return strconv.FormatInt(id, 10), name, nil
 		}
-		people, err := r.getPeople(ctx)
+		person, err := r.getMe(ctx)
 		if err != nil {
 			return "", "", err
 		}
-		for _, p := range people {
-			if strings.EqualFold(p.Email, email) {
-				return strconv.FormatInt(p.ID, 10), p.Name, nil
-			}
-		}
-		return "", "", output.ErrAuth(fmt.Sprintf("Your email (%s) was not found in this account. Check your account selection or run: basecamp auth login", email))
+		return strconv.FormatInt(person.ID, 10), person.Name, nil
 	}
 
 	// Numeric ID passthrough
@@ -265,10 +268,39 @@ func (r *Resolver) ClearCache() {
 	defer r.mu.Unlock()
 	r.projects = nil
 	r.people = nil
+	r.me = nil
 	r.todolists = make(map[string][]Todolist)
 }
 
 // Data fetching with caching
+
+func (r *Resolver) getMe(ctx context.Context) (*Person, error) {
+	r.mu.RLock()
+	if r.me != nil {
+		defer r.mu.RUnlock()
+		return r.me, nil
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.me != nil {
+		return r.me, nil
+	}
+
+	person, err := r.forAccount().People().Me(ctx)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+
+	r.me = &Person{
+		ID:    person.ID,
+		Name:  person.Name,
+		Email: person.EmailAddress,
+	}
+	return r.me, nil
+}
 
 func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {
 	r.mu.RLock()
