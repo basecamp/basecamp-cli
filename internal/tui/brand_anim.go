@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/lipgloss/v2"
@@ -15,6 +19,7 @@ const (
 	blankBraille  = '⠀' // U+2800
 	paintInterval = 25 * time.Millisecond
 	textInterval  = 35 * time.Millisecond
+	traceFrames   = 30 // target number of animation frames for the trace
 )
 
 // Paint trail colors — warm palette converging on brand yellow.
@@ -25,27 +30,409 @@ var (
 	lightTrail = []string{"#984038", "#906028", "#887020", "#808018"}
 )
 
-// AnimateWordmark draws the wordmark with a path-tracing paint animation.
-// Non-blank characters are revealed in waves radiating from the mountain peak
-// via BFS, each passing through a warm color trail before settling on brand
-// yellow. If w is not a TTY or NO_COLOR is active, falls back to static render.
+// paintCell is a single cell position in the wordmark grid.
+type paintCell struct {
+	row, col int
+}
+
+// TraceFunc computes the order in which non-blank cells are revealed.
+// It receives the rune grid and returns cells in first-visit order.
+type TraceFunc func(grid [][]rune, numLines int) []paintCell
+
+// Named animation strategies.
+var animations = map[string]TraceFunc{
+	"warnsdorff": traceWarnsdorff,
+	"outline-in": traceOutlineIn,
+	"radial":     traceRadial,
+	"scanline":   traceScanline,
+}
+
+// DefaultAnimation is the animation used when none is specified.
+const DefaultAnimation = "outline-in"
+
+// AnimationNames returns the registered animation strategy names.
+func AnimationNames() []string {
+	names := make([]string, 0, len(animations))
+	for name := range animations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// AnimateWordmark draws the wordmark with a paint animation.
+// Honors BASECAMP_ANIM to override the default strategy.
 func AnimateWordmark(w io.Writer, theme Theme) {
+	name := os.Getenv("BASECAMP_ANIM")
+	if name == "" {
+		name = DefaultAnimation
+	}
+	AnimateWordmarkWith(w, theme, name)
+}
+
+// AnimateWordmarkWith draws the wordmark using the named animation strategy.
+// Falls back to static render if w is not a TTY, NO_COLOR is active, or the
+// strategy name is unknown.
+func AnimateWordmarkWith(w io.Writer, theme Theme, strategy string) {
 	if _, noColor := theme.Primary.(lipgloss.NoColor); !isWriterTTY(w) || noColor {
 		fmt.Fprint(w, RenderWordmark(theme))
 		return
 	}
 
+	traceFn, ok := animations[strategy]
+	if !ok {
+		fmt.Fprint(w, RenderWordmark(theme))
+		return
+	}
+
+	grid, numLines := wordmarkGrid()
+	order := traceFn(grid, numLines)
+	if len(order) == 0 {
+		fmt.Fprint(w, RenderWordmark(theme))
+		return
+	}
+
+	batchSize := max(1, len(order)/traceFrames)
+	numBatches := (len(order) + batchSize - 1) / batchSize
+
+	styles, settled := trailStyles(theme)
+	textStyle := lipgloss.NewStyle().Foreground(BrandColor).Bold(true)
+
+	revealFrame := makeRevealGrid(grid, numLines)
+
+	// Phase 1: Trace — reveal one batch per frame
+	totalFrames := numBatches + settled
+	for frame := 0; frame < totalFrames; frame++ {
+		if frame < numBatches {
+			start := frame * batchSize
+			end := min(start+batchSize, len(order))
+			for _, c := range order[start:end] {
+				revealFrame[c.row][c.col] = frame
+			}
+		}
+
+		if frame > 0 {
+			fmt.Fprintf(w, "\033[%dA", numLines)
+		}
+		renderPaintFrame(w, grid, revealFrame, frame, styles, settled, numLines, "", textStyle)
+		time.Sleep(paintInterval)
+	}
+
+	// Phase 2: Reveal "Basecamp" letter by letter
+	for i := 1; i <= len(brandText); i++ {
+		fmt.Fprintf(w, "\033[%dA", numLines)
+		renderPaintFrame(w, grid, revealFrame, totalFrames, styles, settled, numLines, brandText[:i], textStyle)
+		time.Sleep(textInterval)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Non-blocking animation
+// ---------------------------------------------------------------------------
+
+// AnimWriter is a mutex-protected io.Writer that tracks newlines written
+// below the animation area. The animation goroutine uses this count to
+// cursor-up past both the logo and any caller output, then cursor-down
+// to restore the caller's write position.
+type AnimWriter struct {
+	w          io.Writer
+	mu         sync.Mutex
+	linesBelow int
+	done       chan struct{}
+	numLines   int // height of the animation area
+}
+
+// Write writes p through to the underlying writer and counts newlines.
+func (aw *AnimWriter) Write(p []byte) (int, error) {
+	aw.mu.Lock()
+	defer aw.mu.Unlock()
+	n, err := aw.w.Write(p)
+	aw.linesBelow += bytes.Count(p[:n], []byte{'\n'})
+	return n, err
+}
+
+// Wait blocks until the animation goroutine finishes. Idempotent.
+func (aw *AnimWriter) Wait() {
+	<-aw.done
+}
+
+// AnimateWordmarkAsync starts the animation in a background goroutine and
+// returns a writer for subsequent output plus a wait function. Output written
+// through the returned writer appears below the animating logo. Call wait
+// before any interactive prompts or output that bypasses the returned writer.
+// Falls back to static render (returning w unchanged and no-op wait) when
+// not a TTY or NO_COLOR is active.
+func AnimateWordmarkAsync(w io.Writer, theme Theme) (io.Writer, func()) {
+	if _, noColor := theme.Primary.(lipgloss.NoColor); !isWriterTTY(w) || noColor {
+		fmt.Fprint(w, RenderWordmark(theme))
+		return w, func() {}
+	}
+
+	name := os.Getenv("BASECAMP_ANIM")
+	if name == "" {
+		name = DefaultAnimation
+	}
+
+	traceFn, ok := animations[name]
+	if !ok {
+		fmt.Fprint(w, RenderWordmark(theme))
+		return w, func() {}
+	}
+
+	grid, numLines := wordmarkGrid()
+	order := traceFn(grid, numLines)
+	if len(order) == 0 {
+		fmt.Fprint(w, RenderWordmark(theme))
+		return w, func() {}
+	}
+
+	batchSize := max(1, len(order)/traceFrames)
+	numBatches := (len(order) + batchSize - 1) / batchSize
+
+	styles, settled := trailStyles(theme)
+	textStyle := lipgloss.NewStyle().Foreground(BrandColor).Bold(true)
+
+	revealFrame := makeRevealGrid(grid, numLines)
+
+	// Render frame 0 synchronously — first cells appear instantly
+	end := min(batchSize, len(order))
+	for _, c := range order[:end] {
+		revealFrame[c.row][c.col] = 0
+	}
+	renderPaintFrame(w, grid, revealFrame, 0, styles, settled, numLines, "", textStyle)
+
+	aw := &AnimWriter{
+		w:        w,
+		done:     make(chan struct{}),
+		numLines: numLines,
+	}
+
+	totalFrames := numBatches + settled
+	go func() {
+		defer close(aw.done)
+
+		// Phase 1: Trace — one batch per frame (from frame 1)
+		for frame := 1; frame < totalFrames; frame++ {
+			if frame < numBatches {
+				start := frame * batchSize
+				end := min(start+batchSize, len(order))
+				for _, c := range order[start:end] {
+					revealFrame[c.row][c.col] = frame
+				}
+			}
+
+			aw.mu.Lock()
+			fmt.Fprintf(w, "\033[%dA", numLines+aw.linesBelow)
+			renderPaintFrame(w, grid, revealFrame, frame, styles, settled, numLines, "", textStyle)
+			if aw.linesBelow > 0 {
+				fmt.Fprintf(w, "\033[%dB", aw.linesBelow)
+			}
+			aw.mu.Unlock()
+			time.Sleep(paintInterval)
+		}
+
+		// Phase 2: Reveal "Basecamp" letter by letter
+		for i := 1; i <= len(brandText); i++ {
+			aw.mu.Lock()
+			fmt.Fprintf(w, "\033[%dA", numLines+aw.linesBelow)
+			renderPaintFrame(w, grid, revealFrame, totalFrames, styles, settled, numLines, brandText[:i], textStyle)
+			if aw.linesBelow > 0 {
+				fmt.Fprintf(w, "\033[%dB", aw.linesBelow)
+			}
+			aw.mu.Unlock()
+			time.Sleep(textInterval)
+		}
+	}()
+
+	return aw, aw.Wait
+}
+
+// ---------------------------------------------------------------------------
+// Animation strategies
+// ---------------------------------------------------------------------------
+
+// traceWarnsdorff traces non-blank cells via DFS from the interior mountain
+// peak using Warnsdorff's heuristic (prefer neighbors with fewest unvisited
+// exits) and direction-continuity tiebreaker. Produces a finger-painting
+// effect: peak → mountain trail → counterclockwise outline sweep.
+func traceWarnsdorff(grid [][]rune, numLines int) []paintCell {
+	peakRow, peakCol := findInteriorPeak(grid, numLines)
+	if peakRow < 0 {
+		return nil
+	}
+
+	dirs := [8][2]int{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}}
+
+	type pos struct{ r, c int }
+	visited := make(map[pos]bool)
+
+	isNonBlank := func(r, c int) bool {
+		return r >= 0 && r < numLines && c >= 0 && c < len(grid[r]) && grid[r][c] != blankBraille
+	}
+
+	unvisitedCount := func(r, c int) int {
+		n := 0
+		for _, d := range dirs {
+			nr, nc := r+d[0], c+d[1]
+			if isNonBlank(nr, nc) && !visited[pos{nr, nc}] {
+				n++
+			}
+		}
+		return n
+	}
+
+	var path []paintCell
+
+	var dfs func(r, c, dr, dc int)
+	dfs = func(r, c, dr, dc int) {
+		p := pos{r, c}
+		if visited[p] {
+			return
+		}
+		visited[p] = true
+		path = append(path, paintCell{r, c})
+
+		type nb struct {
+			r, c, exits, dot int
+		}
+		var neighbors []nb
+		for _, d := range dirs {
+			nr, nc := r+d[0], c+d[1]
+			if !isNonBlank(nr, nc) || visited[pos{nr, nc}] {
+				continue
+			}
+			neighbors = append(neighbors, nb{
+				nr, nc,
+				unvisitedCount(nr, nc),
+				d[0]*dr + d[1]*dc, // direction continuity
+			})
+		}
+
+		// Warnsdorff: fewest exits first, then prefer continuing in same direction
+		sort.Slice(neighbors, func(i, j int) bool {
+			if neighbors[i].exits != neighbors[j].exits {
+				return neighbors[i].exits < neighbors[j].exits
+			}
+			return neighbors[i].dot > neighbors[j].dot
+		})
+
+		for _, n := range neighbors {
+			dfs(n.r, n.c, n.r-r, n.c-c)
+		}
+	}
+
+	// Initial direction: down-left, toward the mountain trail
+	dfs(peakRow, peakCol, 1, -1)
+
+	// Append any disconnected cells (shouldn't happen for this logo)
+	for r, row := range grid {
+		for c, ch := range row {
+			if ch != blankBraille && !visited[pos{r, c}] {
+				path = append(path, paintCell{r, c})
+			}
+		}
+	}
+
+	return path
+}
+
+// traceOutlineIn is the reverse of traceWarnsdorff: starts at the outline
+// top-left, sweeps clockwise around the circle, then traces inward to the
+// interior mountain peak.
+func traceOutlineIn(grid [][]rune, numLines int) []paintCell {
+	fwd := traceWarnsdorff(grid, numLines)
+	rev := make([]paintCell, len(fwd))
+	for i, c := range fwd {
+		rev[len(fwd)-1-i] = c
+	}
+	return rev
+}
+
+// traceRadial reveals cells in concentric rings expanding from the centroid
+// of all non-blank cells. Within each ring, cells are ordered by angle for
+// a smooth circular sweep.
+func traceRadial(grid [][]rune, numLines int) []paintCell {
+	type cell struct {
+		row, col int
+		dist     float64
+		angle    float64
+	}
+
+	// Find centroid of all non-blank cells
+	var cells []cell
+	var sumR, sumC float64
+	for r, row := range grid {
+		for c, ch := range row {
+			if ch != blankBraille {
+				sumR += float64(r)
+				sumC += float64(c)
+				cells = append(cells, cell{row: r, col: c})
+			}
+		}
+	}
+	if len(cells) == 0 {
+		return nil
+	}
+
+	centR := sumR / float64(len(cells))
+	centC := sumC / float64(len(cells))
+
+	// Compute distance and angle from centroid
+	for i := range cells {
+		dr := float64(cells[i].row) - centR
+		dc := float64(cells[i].col) - centC
+		cells[i].dist = math.Sqrt(dr*dr + dc*dc)
+		cells[i].angle = math.Atan2(dr, dc)
+	}
+
+	// Sort by distance (primary), angle (secondary)
+	sort.Slice(cells, func(i, j int) bool {
+		// Bin distances to create rings (~2 cell wide)
+		bi, bj := int(cells[i].dist/2.0), int(cells[j].dist/2.0)
+		if bi != bj {
+			return bi < bj
+		}
+		return cells[i].angle < cells[j].angle
+	})
+
+	path := make([]paintCell, len(cells))
+	for i, c := range cells {
+		path[i] = paintCell{c.row, c.col}
+	}
+	return path
+}
+
+// traceScanline reveals cells left-to-right, top-to-bottom — a simple
+// typewriter effect.
+func traceScanline(grid [][]rune, numLines int) []paintCell {
+	var path []paintCell
+	for r := 0; r < numLines; r++ {
+		for c, ch := range grid[r] {
+			if ch != blankBraille {
+				path = append(path, paintCell{r, c})
+			}
+		}
+	}
+	return path
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+// wordmarkGrid returns the wordmark as a rune grid and its line count.
+func wordmarkGrid() ([][]rune, int) {
 	lines := strings.Split(Wordmark, "\n")
 	numLines := len(lines)
 	grid := make([][]rune, numLines)
 	for i, line := range lines {
 		grid[i] = []rune(line)
 	}
+	return grid, numLines
+}
 
-	// BFS from peak to establish paint order
-	order, maxDist := paintOrder(grid, numLines)
-
-	// Build trail palette: intermediate warm colors + final brand yellow
+// trailStyles builds the warm trail palette plus final brand color.
+func trailStyles(theme Theme) ([]lipgloss.Style, int) {
 	trail := darkTrail
 	if !theme.Dark {
 		trail = lightTrail
@@ -55,115 +442,58 @@ func AnimateWordmark(w io.Writer, theme Theme) {
 		styles[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(hex))
 	}
 	styles[len(styles)-1] = lipgloss.NewStyle().Foreground(BrandColor)
-	settled := len(styles) - 1
+	return styles, len(styles) - 1
+}
 
-	textStyle := lipgloss.NewStyle().Foreground(BrandColor).Bold(true)
-
-	// State: BFS distance at which each cell was painted (-1 = not yet visible)
-	paintDist := make([][]int, numLines)
+// makeRevealGrid creates a frame-index grid initialized to -1 (unrevealed).
+func makeRevealGrid(grid [][]rune, numLines int) [][]int {
+	revealFrame := make([][]int, numLines)
 	for r, row := range grid {
-		paintDist[r] = make([]int, len(row))
-		for c := range paintDist[r] {
-			paintDist[r][c] = -1
+		revealFrame[r] = make([]int, len(row))
+		for c := range revealFrame[r] {
+			revealFrame[r][c] = -1
 		}
 	}
-
-	// Index cells by BFS distance for O(1) lookup per frame
-	byDist := make([][]paintCell, maxDist+1)
-	for _, c := range order {
-		byDist[c.dist] = append(byDist[c.dist], c)
-	}
-
-	// Phase 1: Paint — one BFS distance band per frame
-	totalFrames := maxDist + 1 + settled // paint + trail settle
-	for frame := 0; frame < totalFrames; frame++ {
-		// Reveal current distance band
-		if frame <= maxDist {
-			for _, c := range byDist[frame] {
-				paintDist[c.row][c.col] = frame
-			}
-		}
-
-		if frame > 0 {
-			fmt.Fprintf(w, "\033[%dA", numLines)
-		}
-		renderPaintFrame(w, grid, paintDist, frame, styles, settled, numLines, "", textStyle)
-		time.Sleep(paintInterval)
-	}
-
-	// Phase 2: Reveal "Basecamp" letter by letter
-	for i := 1; i <= len(brandText); i++ {
-		fmt.Fprintf(w, "\033[%dA", numLines)
-		renderPaintFrame(w, grid, paintDist, totalFrames, styles, settled, numLines, brandText[:i], textStyle)
-		time.Sleep(textInterval)
-	}
+	return revealFrame
 }
 
-type paintCell struct {
-	row, col, dist int
-}
-
-// paintOrder returns non-blank cells ordered by BFS distance from the peak
-// (topmost non-blank character), plus the maximum distance reached.
-func paintOrder(grid [][]rune, numLines int) ([]paintCell, int) {
-	// Find the peak (topmost non-blank character)
+// findInteriorPeak locates the interior mountain peak: the topmost row with
+// 3+ separate non-blank groups has outline-left, mountain-interior,
+// outline-right. The second group's first cell is the mountain peak.
+func findInteriorPeak(grid [][]rune, numLines int) (int, int) {
 	peakRow, peakCol := -1, -1
 	for r, row := range grid {
+		groups := 0
+		inGroup := false
+		secondGroupStart := -1
 		for c, ch := range row {
-			if ch != blankBraille {
-				peakRow = r
-				peakCol = c
-				goto found
+			if ch != blankBraille && !inGroup {
+				inGroup = true
+				groups++
+				if groups == 2 {
+					secondGroupStart = c
+				}
+			} else if ch == blankBraille {
+				inGroup = false
 			}
 		}
+		if groups >= 3 && secondGroupStart >= 0 {
+			peakRow = r
+			peakCol = secondGroupStart
+			break
+		}
 	}
-found:
 	if peakRow < 0 {
-		return nil, 0
-	}
-
-	// BFS (8-connected) from peak
-	type pos struct{ r, c int }
-	visited := make(map[pos]bool)
-	var ordered []paintCell
-	queue := []paintCell{{peakRow, peakCol, 0}}
-	visited[pos{peakRow, peakCol}] = true
-	maxDist := 0
-
-	dirs := [8][2]int{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}}
-	for len(queue) > 0 {
-		curr := queue[0]
-		queue = queue[1:]
-		ordered = append(ordered, curr)
-		if curr.dist > maxDist {
-			maxDist = curr.dist
-		}
-
-		for _, d := range dirs {
-			nr, nc := curr.row+d[0], curr.col+d[1]
-			if nr < 0 || nr >= numLines || nc < 0 || nc >= len(grid[nr]) {
-				continue
-			}
-			p := pos{nr, nc}
-			if visited[p] || grid[nr][nc] == blankBraille {
-				continue
-			}
-			visited[p] = true
-			queue = append(queue, paintCell{nr, nc, curr.dist + 1})
-		}
-	}
-
-	// Append any disconnected non-blank cells (shouldn't happen for this logo)
-	for r, row := range grid {
-		for c, ch := range row {
-			if ch != blankBraille && !visited[pos{r, c}] {
-				maxDist++
-				ordered = append(ordered, paintCell{r, c, maxDist})
+		// Fallback: topmost non-blank cell
+		for r, row := range grid {
+			for c, ch := range row {
+				if ch != blankBraille {
+					return r, c
+				}
 			}
 		}
 	}
-
-	return ordered, maxDist
+	return peakRow, peakCol
 }
 
 func renderPaintFrame(w io.Writer, grid [][]rune, paintDist [][]int, frame int, styles []lipgloss.Style, settled, numLines int, text string, textStyle lipgloss.Style) {

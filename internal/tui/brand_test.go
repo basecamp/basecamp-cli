@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -40,6 +41,21 @@ func TestRenderWordmarkWithColor(t *testing.T) {
 	assert.Contains(t, rendered, "⣿")
 	// "Basecamp" text appears
 	assert.Contains(t, rendered, "Basecamp")
+}
+
+func TestAnimateWordmarkAsyncNonTTY(t *testing.T) {
+	var buf bytes.Buffer
+	w, wait := AnimateWordmarkAsync(&buf, NoColorTheme())
+
+	// Non-TTY: returns original writer and no-op wait
+	assert.Equal(t, &buf, w)
+	wait() // must not block
+
+	// Static render was written
+	output := buf.String()
+	assert.Contains(t, output, "⣿")
+	assert.Contains(t, output, "Basecamp")
+	assert.NotContains(t, output, "\x1b[") // no ANSI escapes
 }
 
 func TestRenderWordmarkTextOnCorrectLine(t *testing.T) {
