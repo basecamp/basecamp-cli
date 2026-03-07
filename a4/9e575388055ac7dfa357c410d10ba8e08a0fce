@@ -1,0 +1,58 @@
+internal/tui/forms.go
+  ab1fe46829bec3c2 6-8,10-15,17-23,25-39,42,44-46,50-52,54,57,61-63,68,71,75-77,81-83,85,88,91-93,95-97,108,116,120-122,125,127,133,135,137-138,140-142,145,147,153,155,157,159-162,204,225,228,234-236
+internal/commands/skill.go
+  ab1fe46829bec3c2 7-9,13,15,17-34,36-47,50-194,199-211,213-284
+README.md
+  ab1fe46829bec3c2 3-19
+internal/commands/skill_test.go
+  ab1fe46829bec3c2 207-279
+internal/tui/brand_test.go
+  cfc69533d49d45f1 43-44
+  ab1fe46829bec3c2 1-42,45-56
+internal/tui/brand_anim.go
+  ab1fe46829bec3c2 1-27,32-37,43-44,47,59,70,75,79,84-89,91-96,98-99,121,123-124,126-127,142,145-146,149-150,153-155,157-159,162,167-204,207-235,237-238
+  cfc69533d49d45f1 28-31,38-42,46,48-58,60-69,73-74,77-78,81-83,90,97,102-113,117-119,122,125,128-130,132-138,141,143-144,147-148,151-152,156,161,166
+internal/tui/brand.go
+  ab1fe46829bec3c2 1-60
+internal/commands/wizard.go
+  cfc69533d49d45f1 59
+  ab1fe46829bec3c2 6,90,100,104-106,108-109,117-119,132-133,138,144,147,149,153-154,165-167,171,186,189,191,198-200,219-221,228-229,244,249-250,258-259,265,267,273,275,280,288,291-294,297,299,301,304,306,309,317,320,323-324,336,338
+internal/commands/quickstart.go
+  cfc69533d49d45f1 72-73,157
+  ab1fe46829bec3c2 12,69-71,74-75
+scripts/install.sh
+  ab1fe46829bec3c2 17-60,81,95,98,109,112,126,131,141,145,155,159,169,171,185,194-201,205,214-221,226-233,236-256,258-259,265,275-292,294,298-300,304,310-322,324-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "a49e575388055ac7dfa357c410d10ba8e08a0fce",
+  "prompts": {
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 223,
+      "total_deletions": 71,
+      "accepted_lines": 911,
+      "overriden_lines": 0
+    },
+    "cfc69533d49d45f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db083fd7-e406-442d-9c73-2627f0cc22b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 83,
+      "overriden_lines": 0
+    }
+  }
+}
