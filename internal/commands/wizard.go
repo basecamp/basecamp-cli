@@ -316,8 +316,7 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult) {
 			continue
 		}
 		for _, check := range agent.Checks() {
-			
-		fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
+			fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
 		}
 	}
 	fmt.Fprintln(w)

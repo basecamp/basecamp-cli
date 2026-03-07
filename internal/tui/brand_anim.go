@@ -70,8 +70,8 @@ func AnimateWordmark(w io.Writer, theme Theme) {
 }
 
 // AnimateWordmarkWith draws the wordmark using the named animation strategy.
-// Falls back to static render if w is not a TTY, NO_COLOR is active, or the
-// strategy name is unknown.
+// Unknown strategy names fall back to DefaultAnimation. Falls back to static
+// render if w is not a TTY or NO_COLOR is active.
 func AnimateWordmarkWith(w io.Writer, theme Theme, strategy string) {
 	if _, noColor := theme.Primary.(lipgloss.NoColor); !isWriterTTY(w) || noColor {
 		fmt.Fprint(w, RenderWordmark(theme))
