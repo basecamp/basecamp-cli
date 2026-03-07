@@ -5,22 +5,18 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-  id-token: write  # Required for keyless cosign signing via OIDC
-  security-events: write  # Required for SARIF upload in security scan
-  pull-requests: read
-  models: read
-
 jobs:
   security:
     name: Security scan
     uses: ./.github/workflows/security.yml
-    secrets: inherit
+    secrets:
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
   test:
     name: Test before release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       BASECAMP_NO_KEYRING: "1"
       GOPRIVATE: github.com/basecamp/basecamp-sdk
@@ -44,7 +40,9 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Configure git for private modules
-        run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
@@ -110,6 +108,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: release
+    permissions:
+      contents: write
+      id-token: write
+      models: read
     env:
       GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
@@ -132,7 +134,9 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Configure git for private modules
-        run: git config --global url."https://x-access-token:${{ steps.sdk-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+        env:
+          TOKEN: ${{ steps.sdk-token.outputs.token }}
+        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Verify tag is on main
         run: |
@@ -224,21 +228,14 @@ jobs:
         with:
           prompt-file: /tmp/prompt.yml
 
-      - name: Set changelog env
+      - name: Set changelog path
+        id: changelog
+        env:
+          RESPONSE_FILE: ${{ steps.ai-changelog.outputs.response-file }}
         run: |
-          RESPONSE_FILE="${{ steps.ai-changelog.outputs.response-file }}"
           if [ -n "$RESPONSE_FILE" ] && [ -f "$RESPONSE_FILE" ]; then
-            # Strip markdown code fences that AI models wrap around responses
             sed -i '/^```\(markdown\)\?$/d' "$RESPONSE_FILE"
-            DELIM="CHANGELOG_DELIM_$(openssl rand -hex 8)"
-            {
-              echo "RELEASE_CHANGELOG<<${DELIM}"
-              cat "$RESPONSE_FILE"
-              echo ""
-              echo "${DELIM}"
-            } >> $GITHUB_ENV
-          else
-            echo "RELEASE_CHANGELOG=" >> $GITHUB_ENV
+            echo "file=$RESPONSE_FILE" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Verify macOS signing secrets
@@ -262,13 +259,16 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
-      - name: Run GoReleaser
+      - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --clean
+          install-only: true
+
+      - name: Run GoReleaser
         env:
+          CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ steps.sdk-token.outputs.token }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -276,6 +276,12 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
+            RELEASE_CHANGELOG=$(cat "$CHANGELOG_FILE")
+            export RELEASE_CHANGELOG
+          fi
+          goreleaser release --clean
 
       - name: Publish to AUR
         env:
@@ -297,6 +303,8 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -318,6 +326,8 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -342,9 +352,11 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ steps.skills-token.outputs.token }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           TITLE="Skills sync failure"
-          BODY="The automatic skills sync from [basecamp-cli ${{ github.ref_name }}](https://github.com/basecamp/basecamp-cli/actions/runs/${{ github.run_id }}) failed. Check the workflow run for details."
+          BODY="The automatic skills sync from [basecamp-cli ${REF_NAME}](https://github.com/basecamp/basecamp-cli/actions/runs/${RUN_ID}) failed. Check the workflow run for details."
 
           # Check for existing open issue before creating a new one
           existing=$(gh issue list --repo basecamp/skills --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
@@ -355,4 +367,4 @@ jobs:
           fi
 
           # Always emit annotation so the failure is visible in the workflow summary
-          echo "::error::Skills sync to basecamp/skills failed for ${{ github.ref_name }}. See https://github.com/basecamp/basecamp-cli/actions/runs/${{ github.run_id }}"
+          echo "::error::Skills sync to basecamp/skills failed for ${REF_NAME}. See https://github.com/basecamp/basecamp-cli/actions/runs/${RUN_ID}"
