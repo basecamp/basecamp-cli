@@ -9,9 +9,13 @@ import (
 )
 
 // NormalizeDragPath normalizes a pasted/dragged path into a filesystem path.
-// It handles quoted paths, file:// URLs, shell-escaped characters (Unix only),
-// and tilde expansion. The result is cleaned with filepath.Clean for absolute
-// paths but returned unchanged for non-path inputs. Returns empty for empty input.
+// It handles quoted paths, file:// URLs, shell-escaped characters, and tilde
+// expansion. The result is cleaned with filepath.Clean for absolute paths but
+// returned unchanged for non-path inputs. Returns empty for empty input.
+//
+// This targets macOS and Linux terminals only. It compiles on Windows to avoid
+// breaking cross-compilation, but Windows drag-and-drop (e.g. file:// URLs
+// with drive letters) is not supported or tested.
 func NormalizeDragPath(raw string) string {
 	if raw == "" {
 		return ""
