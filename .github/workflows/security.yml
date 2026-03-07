@@ -9,9 +9,6 @@ on:
     # Weekly scan on Monday at 6am UTC
     - cron: '0 6 * * 1'
   workflow_call:  # Allow release.yml to invoke the full security suite
-    secrets:
-      RELEASE_APP_PRIVATE_KEY:
-        required: false
   workflow_dispatch:
 
 permissions:
@@ -64,30 +61,14 @@ jobs:
   gosec:
     name: Go Security Checker
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Run gosec
         run: |
@@ -115,29 +96,13 @@ jobs:
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4
