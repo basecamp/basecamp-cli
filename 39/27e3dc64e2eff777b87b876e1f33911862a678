@@ -1,0 +1,70 @@
+internal/tui/workspace/data/pool.go
+  4782c0985f174f65 179,181,183,245-246,306,314
+  c3fde71168208b65 93,95-96,102,206-207,283-292
+internal/tui/workspace/data/pool_cache.go
+  c3fde71168208b65 85-86
+internal/tui/workspace/data/mutation.go
+  c3fde71168208b65 190-193,196
+  4782c0985f174f65 115,117,119,168,170,172
+internal/tui/workspace/data/metrics.go
+  4782c0985f174f65 8,17
+internal/tui/workspace/views/pool_monitor.go
+  4782c0985f174f65 29-31,114,245,247-249,265,267-271,273,276-280,283-291,293,295-296,300-301,304,307-310,316-318,322-324,339-343,352-357
+  b1c50d55fd29c48b 18,365,367
+  c3fde71168208b65 28,52,115-116,153-154,191,193,237,241-242,246,326,344-346,349
+internal/tui/workspace/data/hub_test.go
+  c3fde71168208b65 373,395-409,412-413,415-421,426,430-446
+internal/tui/workspace/data/hub.go
+  c3fde71168208b65 42,454-456
+internal/tui/workspace/workspace_test.go
+  c3fde71168208b65 1880-1921
+  b1c50d55fd29c48b 1039,1879
+internal/tui/workspace/workspace.go
+  c3fde71168208b65 261-271,340-352,528-542,761-774,1151,1153-1154,1160,1162,1167,1183,1214,1268-1269,1386-1459
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "3927e3dc64e2eff777b87b876e1f33911862a678",
+  "prompts": {
+    "4782c0985f174f65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf5b87e8-2630-4d70-88dd-355023677953",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 256,
+      "total_deletions": 197,
+      "accepted_lines": 71,
+      "overriden_lines": 0
+    },
+    "b1c50d55fd29c48b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c4099d2-f1ca-4514-b7d2-3d333764f53a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 38,
+      "total_deletions": 25,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 1,
+      "accepted_lines": 266,
+      "overriden_lines": 0
+    }
+  }
+}

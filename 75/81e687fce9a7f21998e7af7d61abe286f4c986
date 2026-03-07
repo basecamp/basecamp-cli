@@ -1,0 +1,70 @@
+internal/tui/workspace/workspace_test.go
+  b1c50d55fd29c48b 1038,1921-2249
+  c3fde71168208b65 1879-1920
+internal/tui/workspace/views/pool_monitor.go
+  c3fde71168208b65 11,18-23,36,56,108-111,146-147,170-171,187,189,229,232,237-239,243,311,377-380,383,406,408-409
+  4782c0985f174f65 107,242,244-250,262,264,266,271-272,274,276,278-279,281-283,285-288,291-294,296-307,309-310,324-376,386-391,393-396
+  b1c50d55fd29c48b 25-26,404,407,410,412
+internal/tui/workspace/workspace.go
+  c3fde71168208b65 229-240,1142,1147,1151-1154,1159-1160,1162-1163,1168-1169,1185,1271,1284
+internal/tui/workspace/data/pool.go
+  4782c0985f174f65 179,181,183,245-246,306,314
+  c3fde71168208b65 93,95-96,102,206-207,283-292
+internal/tui/workspace/data/hub.go
+  c3fde71168208b65 42,454-455
+internal/tui/workspace/data/pool_cache.go
+  c3fde71168208b65 85-86
+internal/tui/workspace/data/hub_test.go
+  c3fde71168208b65 373,397-398,400-406,411,415-431
+internal/tui/workspace/data/mutation.go
+  c3fde71168208b65 190-193,196
+  4782c0985f174f65 115,117,119,168,170,172
+internal/tui/workspace/data/metrics.go
+  4782c0985f174f65 8,17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "7581e687fce9a7f21998e7af7d61abe286f4c986",
+  "prompts": {
+    "4782c0985f174f65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf5b87e8-2630-4d70-88dd-355023677953",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 256,
+      "total_deletions": 197,
+      "accepted_lines": 121,
+      "overriden_lines": 0
+    },
+    "b1c50d55fd29c48b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c4099d2-f1ca-4514-b7d2-3d333764f53a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 38,
+      "total_deletions": 25,
+      "accepted_lines": 336,
+      "overriden_lines": 0
+    },
+    "c3fde71168208b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54eacd52-648a-4b4f-8096-42a9fcc47215",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 1,
+      "accepted_lines": 157,
+      "overriden_lines": 0
+    }
+  }
+}
