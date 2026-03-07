@@ -1,0 +1,25 @@
+internal/commands/wizard.go
+  cfc69533d49d45f1 120-121,124,295,297-305
+internal/commands/quickstart.go
+  cfc69533d49d45f1 70,73-81,155,159-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "5c2d66b15f28a7736456b660dfca757e06da2555",
+  "prompts": {
+    "cfc69533d49d45f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db083fd7-e406-442d-9c73-2627f0cc22b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 30,
+      "overriden_lines": 0
+    }
+  }
+}
