@@ -1,0 +1,41 @@
+README.md
+  ab1fe46829bec3c2 3-36
+internal/tui/brand_test.go
+  ab1fe46829bec3c2 1-85,89-94,96-108
+internal/tui/brand_anim.go
+  ab1fe46829bec3c2 1-81,86-97,99-154,156-166,168-172,174-181,183-186,188-205,209,211-227,229-234,236,238-265,269-271,273-296,298-303,305-306,308-315,320-329,357,362,365-400,403-431,433-434
+internal/tui/brand.go
+  ab1fe46829bec3c2 1-60
+internal/commands/wizard.go
+  ab1fe46829bec3c2 6,120,151,161,165-167,169-170,292-302,307-308,313,319,322,324,328-329,340-342,346,361,364,366,373-375,394-396,403-404,419,424-425,433-434,440,442,448,450,455,463,466-469,472,474,476,479,481,484,488,490,493-494,506,508
+internal/commands/quickstart.go
+  ab1fe46829bec3c2 12,69-75
+scripts/install.sh
+  ab1fe46829bec3c2 17-60,81,95,98,109,112,126,131,141,145,155,159,169,171,185,194-201,205,214-221,226-233,236-256,258-259,265,275-292,294,298-300,304,310-322,324-327
+internal/commands/skill.go
+  ab1fe46829bec3c2 7-9,13,15,17-34,36-47,50-194,199-211,213-284
+internal/tui/forms.go
+  ab1fe46829bec3c2 6-8,10-15,17-23,25-39,42,44-46,50-52,54,57,61-63,68,71,75-77,81-83,85,88,91-93,95-97,108,116,120-122,125,127,133,135,137-138,140-142,145,147,153,155,157,159-162,204,225,228,234-236
+internal/commands/skill_test.go
+  ab1fe46829bec3c2 207-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "d4cfbc97432eb8b05ad966ed915654fc5d61aa5e",
+  "prompts": {
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 223,
+      "total_deletions": 71,
+      "accepted_lines": 1219,
+      "overriden_lines": 0
+    }
+  }
+}
