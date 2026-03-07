@@ -606,14 +606,14 @@ func TestCheckins_PasteMsg_WhenAnswering_PlainText(t *testing.T) {
 func TestCheckins_PasteMsg_WhenAnswering_FileAttachment(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.pdf")
-	os.WriteFile(path, []byte("%PDF"), 0o644)
+	require.NoError(t, os.WriteFile(path, []byte("%PDF"), 0o644))
 
 	v := testCheckinsViewWithAnswers()
 	v.answering = true
 	v.composer.Focus()
 	v.composer.SetSize(80, 10)
 
-	// Paste a shell-escaped file path (as iTerm2 would produce)
+	// Paste a single-quoted file path (as some terminals produce)
 	escaped := `'` + path + `'`
 	_, _ = v.Update(tea.PasteMsg{Content: escaped})
 
