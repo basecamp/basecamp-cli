@@ -67,10 +67,18 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Show animated wordmark on interactive TTY (not JSON/agent/piped/config-driven machine output)
+	var waitAnim func()
 	if app != nil && app.IsInteractive() && !app.IsMachineOutput() {
 		styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
-		tui.AnimateWordmark(cmd.OutOrStdout(), styles.Theme())
-		fmt.Fprintln(cmd.OutOrStdout())
+		aw, wait := tui.AnimateWordmarkAsync(cmd.OutOrStdout(), styles.Theme())
+		fmt.Fprintln(aw)
+		waitAnim = wait
+		// Route app.OK output through the AnimWriter so it appears
+		// below the logo while the animation is still painting.
+		app.Output = output.New(output.Options{
+			Format: output.FormatStyled,
+			Writer: aw,
+		})
 	}
 
 	// Determine auth status
@@ -154,8 +162,14 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return app.OK(json.RawMessage(data),
+	err = app.OK(json.RawMessage(data),
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
+
+	if waitAnim != nil {
+		waitAnim()
+	}
+
+	return err
 }
