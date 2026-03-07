@@ -1,0 +1,9 @@
+internal/tui/workspace/views/pool_monitor.go
+  b1c50d55fd29c48b 25-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "e68801a00e1c6b80f3ac7df336a45fa66c837ba4",
+  "prompts": {}
+}
