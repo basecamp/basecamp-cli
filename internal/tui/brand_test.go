@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -56,6 +57,103 @@ func TestAnimateWordmarkAsyncNonTTY(t *testing.T) {
 	assert.Contains(t, output, "⣿")
 	assert.Contains(t, output, "Basecamp")
 	assert.NotContains(t, output, "\x1b[") // no ANSI escapes
+}
+
+func TestVisualLinesNoWrap(t *testing.T) {
+	rows, pw := visualLines("hello\n", 80, 0)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesMultipleNewlines(t *testing.T) {
+	rows, pw := visualLines("hello\nworld\n", 80, 0)
+	assert.Equal(t, 2, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesSoftWrap(t *testing.T) {
+	// 25 chars in a 20-col terminal wraps to 2 visual rows
+	rows, pw := visualLines(strings.Repeat("x", 25)+"\n", 20, 0)
+	assert.Equal(t, 2, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesExactFit(t *testing.T) {
+	// Exactly cols chars: 1 visual row (deferred wrap, \n handles line break)
+	rows, pw := visualLines(strings.Repeat("x", 20)+"\n", 20, 0)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesPartialLine(t *testing.T) {
+	rows, pw := visualLines("hello", 80, 0)
+	assert.Equal(t, 0, rows)
+	assert.Equal(t, 5, pw)
+}
+
+func TestVisualLinesPartialLineThenNewline(t *testing.T) {
+	// First write: partial line
+	rows, pw := visualLines("hello", 80, 0)
+	assert.Equal(t, 0, rows)
+	assert.Equal(t, 5, pw)
+
+	// Second write: newline completes the line
+	rows, pw = visualLines(" world\n", 80, pw)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesContinuationWraps(t *testing.T) {
+	// pendingW=15, then 10 more chars + newline = 25 in 20-col terminal
+	rows, pw := visualLines(strings.Repeat("x", 10)+"\n", 20, 15)
+	assert.Equal(t, 2, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesEmptyLine(t *testing.T) {
+	rows, pw := visualLines("\n", 80, 0)
+	assert.Equal(t, 1, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesZeroCols(t *testing.T) {
+	// Fallback to \n counting when cols is unknown
+	rows, pw := visualLines("hello\nworld\n", 0, 0)
+	assert.Equal(t, 2, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesANSIEscapes(t *testing.T) {
+	// ANSI escapes don't count toward visual width
+	styled := "\x1b[1mhello\x1b[0m\n"
+	rows, pw := visualLines(styled, 10, 0)
+	assert.Equal(t, 1, rows) // "hello" is 5 chars, fits in 10 cols
+	assert.Equal(t, 0, pw)
+}
+
+func TestVisualLinesANSIWraps(t *testing.T) {
+	// 25 visible chars wrapped in ANSI escapes, 20-col terminal
+	styled := "\x1b[38;2;232;162;23m" + strings.Repeat("x", 25) + "\x1b[0m\n"
+	rows, pw := visualLines(styled, 20, 0)
+	assert.Equal(t, 2, rows)
+	assert.Equal(t, 0, pw)
+}
+
+func TestAnimWriterCountsWraps(t *testing.T) {
+	var buf bytes.Buffer
+	aw := &AnimWriter{
+		w:    &buf,
+		done: make(chan struct{}),
+		cols: 20,
+	}
+
+	// Write a line that wraps in 20 cols
+	fmt.Fprint(aw, strings.Repeat("x", 25)+"\n")
+	assert.Equal(t, 2, aw.linesBelow)
+
+	// Write a short line
+	fmt.Fprint(aw, "hi\n")
+	assert.Equal(t, 3, aw.linesBelow)
 }
 
 func TestRenderWordmarkTextOnCorrectLine(t *testing.T) {

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"math"
@@ -81,8 +80,7 @@ func AnimateWordmarkWith(w io.Writer, theme Theme, strategy string) {
 
 	traceFn, ok := animations[strategy]
 	if !ok {
-		fmt.Fprint(w, RenderWordmark(theme))
-		return
+		traceFn = animations[DefaultAnimation]
 	}
 
 	grid, numLines := wordmarkGrid()
@@ -130,24 +128,30 @@ func AnimateWordmarkWith(w io.Writer, theme Theme, strategy string) {
 // Non-blocking animation
 // ---------------------------------------------------------------------------
 
-// AnimWriter is a mutex-protected io.Writer that tracks newlines written
+// AnimWriter is a mutex-protected io.Writer that tracks terminal rows written
 // below the animation area. The animation goroutine uses this count to
 // cursor-up past both the logo and any caller output, then cursor-down
-// to restore the caller's write position.
+// to restore the caller's write position. When cols > 0, it accounts for
+// soft-wrapping at the terminal width.
 type AnimWriter struct {
 	w          io.Writer
 	mu         sync.Mutex
 	linesBelow int
 	done       chan struct{}
 	numLines   int // height of the animation area
+	cols       int // terminal width; 0 = fall back to \n counting
+	pendingW   int // visual width of the current unterminated line
 }
 
-// Write writes p through to the underlying writer and counts newlines.
+// Write writes p through to the underlying writer and counts visual rows
+// consumed, including rows added by soft-wrapping at the terminal width.
 func (aw *AnimWriter) Write(p []byte) (int, error) {
 	aw.mu.Lock()
 	defer aw.mu.Unlock()
 	n, err := aw.w.Write(p)
-	aw.linesBelow += bytes.Count(p[:n], []byte{'\n'})
+	rows, pw := visualLines(string(p[:n]), aw.cols, aw.pendingW)
+	aw.linesBelow += rows
+	aw.pendingW = pw
 	return n, err
 }
 
@@ -175,8 +179,7 @@ func AnimateWordmarkAsync(w io.Writer, theme Theme) (io.Writer, func()) {
 
 	traceFn, ok := animations[name]
 	if !ok {
-		fmt.Fprint(w, RenderWordmark(theme))
-		return w, func() {}
+		traceFn = animations[DefaultAnimation]
 	}
 
 	grid, numLines := wordmarkGrid()
@@ -201,10 +204,19 @@ func AnimateWordmarkAsync(w io.Writer, theme Theme) (io.Writer, func()) {
 	}
 	renderPaintFrame(w, grid, revealFrame, 0, styles, settled, numLines, "", textStyle)
 
+	// Query terminal width for soft-wrap accounting
+	var cols int
+	if f, ok := w.(*os.File); ok {
+		if width, _, err := term.GetSize(f.Fd()); err == nil {
+			cols = width
+		}
+	}
+
 	aw := &AnimWriter{
 		w:        w,
 		done:     make(chan struct{}),
 		numLines: numLines,
+		cols:     cols,
 	}
 
 	totalFrames := numBatches + settled
@@ -455,6 +467,38 @@ func makeRevealGrid(grid [][]rune, numLines int) [][]int {
 		}
 	}
 	return revealFrame
+}
+
+// visualLines counts terminal rows consumed by s, accounting for soft-wrapping
+// at cols. pendingW is the visual width already on the current line from a
+// previous write. Returns the number of rows and the updated pending width.
+// When cols <= 0, falls back to counting literal newlines.
+func visualLines(s string, cols, pendingW int) (rows, newPendingW int) {
+	if cols <= 0 {
+		return strings.Count(s, "\n"), 0
+	}
+
+	for _, seg := range strings.SplitAfter(s, "\n") {
+		if seg == "" {
+			continue
+		}
+		w := lipgloss.Width(strings.TrimSuffix(seg, "\n"))
+		total := pendingW + w
+
+		if strings.HasSuffix(seg, "\n") {
+			rows += max(1, (total+cols-1)/cols)
+			pendingW = 0
+		} else {
+			// Partial line: count wraps, update column position
+			if total >= cols {
+				rows += total / cols
+				pendingW = total % cols
+			} else {
+				pendingW = total
+			}
+		}
+	}
+	return rows, pendingW
 }
 
 // findInteriorPeak locates the interior mountain peak: the topmost row with
