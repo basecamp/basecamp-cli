@@ -1,0 +1,37 @@
+internal/commands/tui.go
+  1a1047285de85873 7,14,44-85,98-103,113
+internal/tui/workspace/workspace.go
+  1a1047285de85873 20,90-92,99-106,108,150-153,157-163,568-575,644,794,863,900,1026,1034,1082,1095,1148,1176,1309
+bin/devtools
+  1a1047285de85873 1-50
+internal/observability/hooks.go
+  1a1047285de85873 19-21,27,55-61,67,74,85,95-102,110,117,128,138-146,155,165-172
+internal/observability/tracer.go
+  1a1047285de85873 1-42,44-196
+internal/observability/tracer_test.go
+  1a1047285de85873 1-241
+internal/appctx/context.go
+  1a1047285de85873 41,206-212,215-219
+internal/cli/root.go
+  1a1047285de85873 104-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "a21340fb173a905650370b4342dc2ee95d985b52",
+  "prompts": {
+    "1a1047285de85873": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95b166d7-84ce-4369-8f7a-5a4aeaebc5ac",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 16,
+      "accepted_lines": 643,
+      "overriden_lines": 0
+    }
+  }
+}
