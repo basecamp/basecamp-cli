@@ -136,11 +136,11 @@ func (v *Checkins) ShortHelp() []key.Binding {
 		return filterHints()
 	}
 	if v.answering {
-		return []key.Binding{
-			key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "send")),
-			key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "$EDITOR")),
-			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
-		}
+		composerHelp := v.composer.ShortHelp()
+		bindings := make([]key.Binding, 0, len(composerHelp)+1)
+		bindings = append(bindings, composerHelp...)
+		bindings = append(bindings, key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")))
+		return bindings
 	}
 	if v.focus == checkinsPaneLeft {
 		return []key.Binding{
@@ -301,6 +301,13 @@ func (v *Checkins) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 	case widget.AttachFileRequestMsg:
 		if v.answering {
 			return v, workspace.SetStatus("Paste a file path or drag a file into the terminal", false)
+		}
+
+	case tea.PasteMsg:
+		if v.answering {
+			text, cmd := v.composer.ProcessPaste(msg.Content)
+			v.composer.InsertPaste(text)
+			return v, cmd
 		}
 
 	case spinner.TickMsg:
