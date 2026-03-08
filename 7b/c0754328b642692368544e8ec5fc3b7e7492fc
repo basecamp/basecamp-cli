@@ -1,0 +1,27 @@
+bin/devtools
+  1a1047285de85873 1-50
+internal/tui/workspace/workspace.go
+  1a1047285de85873 20,90-92,99-106,108,150-153,157-163,568-575,644,794,863,900,1026,1034,1082,1095,1148,1176,1309
+internal/commands/tui.go
+  1a1047285de85873 7,14,44-81,94-99,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "7bc0754328b642692368544e8ec5fc3b7e7492fc",
+  "prompts": {
+    "1a1047285de85873": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95b166d7-84ce-4369-8f7a-5a4aeaebc5ac",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 140,
+      "overriden_lines": 0
+    }
+  }
+}
