@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/views"
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -39,6 +41,48 @@ func NewTUICmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			trace, _ := cmd.Flags().GetBool("trace")
+
+			if trace {
+				if app.Tracer == nil {
+					// No tracer yet — create one with all categories
+					t, err := observability.NewTracer(observability.TraceAll,
+						observability.TracePath(app.Config.CacheDir))
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to start tracer: %v\n", err)
+					} else {
+						app.Tracer = t
+						if app.Hooks != nil {
+							app.Hooks.SetTracer(t)
+						}
+					}
+				} else {
+					// Env tracer exists but may be narrower (e.g. BASECAMP_TRACE=http).
+					// Widen to all categories so TUI events are captured too.
+					app.Tracer.EnableCategories(observability.TraceAll)
+				}
+			}
+
+			// Print trace path so devtools scripts can find it
+			if app.Tracer != nil {
+				fmt.Fprintf(os.Stderr, "Trace: %s\n", app.Tracer.Path())
+			}
+
+			// Suppress stderr TraceWriter during TUI (TUI owns stderr)
+			if app.Hooks != nil {
+				app.Hooks.SetLevel(0)
+			}
+
+			// Wire bubbletea debug logging to a separate file (plain text,
+			// not the structured JSON trace) so both remain parseable.
+			if app.Tracer != nil && app.Tracer.Enabled(observability.TraceTUI) {
+				debugPath := strings.TrimSuffix(app.Tracer.Path(), ".log") + ".debug.log"
+				f, err := tea.LogToFile(debugPath, "bubbletea")
+				if err == nil {
+					defer f.Close()
+				}
+			}
+
 			session := workspace.NewSession(app)
 			defer session.Shutdown()
 
@@ -51,7 +95,12 @@ func NewTUICmd() *cobra.Command {
 				session.SetInitialView(target, scope)
 			}
 
-			model := workspace.New(session, viewFactory, poolMonitorFactory(session))
+			// Pass tracer to workspace
+			var wsOpts []workspace.Option
+			if app.Tracer != nil {
+				wsOpts = append(wsOpts, workspace.WithTracer(app.Tracer))
+			}
+			model := workspace.New(session, viewFactory, poolMonitorFactory(session), wsOpts...)
 
 			p := tea.NewProgram(model)
 
@@ -60,6 +109,8 @@ func NewTUICmd() *cobra.Command {
 			return err
 		},
 	}
+
+	cmd.Flags().Bool("trace", false, "Enable trace logging to file")
 
 	return cmd
 }

@@ -101,6 +101,13 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 
+	cmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
+		if app := appctx.FromContext(cmd.Context()); app != nil {
+			app.Close()
+		}
+		return nil
+	}
+
 	// Allow flags anywhere in the command line
 	cmd.Flags().SetInterspersed(true)
 	cmd.PersistentFlags().SetInterspersed(true)
