@@ -156,6 +156,7 @@ set_no_admin_bypass() {
 
 audit_repo() {
   local repo=$1 env_name=$2 deploy_ref=$3 reviewer=$4 admin_bypass=$5
+  local drift=0
 
   printf "\n${CYAN}═══ %s ═══${NC}\n" "$repo"
 
@@ -164,7 +165,7 @@ audit_repo() {
 
   if [ -z "$env_json" ]; then
     fail "Environment '$env_name' does not exist"
-    return
+    return 1
   fi
   ok "Environment '$env_name' exists"
 
@@ -177,6 +178,7 @@ audit_repo() {
     ok "Required reviewers ($reviewer_count): $reviewer_names"
   else
     fail "No required reviewers configured (want: $reviewer)"
+    drift=1
   fi
 
   # Deployment branch policy
@@ -201,13 +203,18 @@ audit_repo() {
     warn "No deployment branch policy (any branch/tag can deploy)"
   fi
 
-  # Admin bypass — check if admins can bypass
+  # Admin bypass
   local prevent_self_review
   prevent_self_review=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
-  if [ "$prevent_self_review" = "true" ]; then
-    ok "Self-review prevention: enabled"
+  local want_prevent="true"
+  if [ "$admin_bypass" = "true" ]; then
+    want_prevent="false"
+  fi
+  if [ "$prevent_self_review" = "$want_prevent" ]; then
+    ok "Admin bypass: $([ "$admin_bypass" = "true" ] && echo "allowed (intended)" || echo "blocked")"
   else
-    warn "Self-review prevention: not enabled"
+    fail "Admin bypass: $([ "$prevent_self_review" = "true" ] && echo "blocked" || echo "allowed") (want: $([ "$admin_bypass" = "true" ] && echo "allowed" || echo "blocked"))"
+    drift=1
   fi
 
   # Secrets at env scope
@@ -240,18 +247,24 @@ audit_repo() {
   else
     info "No vars in environment scope"
   fi
+
+  return "$drift"
 }
 
 cmd_audit() {
   echo "Release Environment Audit"
   echo "========================="
 
+  local failures=0
   for entry in "${MANIFEST[@]}"; do
     IFS='|' read -r repo env_name deploy_ref reviewer admin_bypass <<< "$entry"
-    audit_repo "$repo" "$env_name" "$deploy_ref" "$reviewer" "$admin_bypass"
+    audit_repo "$repo" "$env_name" "$deploy_ref" "$reviewer" "$admin_bypass" || failures=$((failures + 1))
   done
 
   echo ""
+  if [ "$failures" -gt 0 ]; then
+    die "$failures repo(s) have configuration drift"
+  fi
 }
 
 # ── Apply ────────────────────────────────────────────────────────────────────
@@ -317,6 +330,28 @@ apply_repo() {
       ok "Deployment policy verified ($policy_count rules)"
     fi
   fi
+
+  # Verify admin bypass
+  local prevent_self_review
+  prevent_self_review=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
+  local want_prevent="true"
+  if [ "$admin_bypass" = "true" ]; then
+    want_prevent="false"
+  fi
+  if [ "$prevent_self_review" = "$want_prevent" ]; then
+    ok "Admin bypass: $([ "$admin_bypass" = "true" ] && echo "allowed (intended)" || echo "blocked")"
+  else
+    fail "DRIFT: Admin bypass is $([ "$prevent_self_review" = "true" ] && echo "blocked" || echo "allowed"), want $([ "$admin_bypass" = "true" ] && echo "allowed" || echo "blocked")"
+    drift=1
+  fi
+
+  # Print exact post-apply state
+  local reviewer_names
+  reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers[].reviewer | .slug // .login' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+  local policies
+  policies=$(gh api "repos/$repo/environments/$env_name/deployment-branch-policies" \
+    --jq '[.branch_policies[] | "\(.name) (\(.type))"] | join(", ")' 2>/dev/null || echo "none")
+  info "Post-apply: reviewers=[$reviewer_names] deploy=[$policies] admin_bypass=$admin_bypass self_review_prevention=$prevent_self_review"
 
   if [ "$drift" -ne 0 ]; then
     fail "State drift detected on $repo — manual investigation required"
