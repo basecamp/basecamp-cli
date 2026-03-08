@@ -275,23 +275,53 @@ apply_repo() {
 
   printf "\n${CYAN}═══ %s ═══${NC}\n" "$repo"
 
-  # Create environment if missing
-  if ! env_exists "$repo" "$env_name"; then
-    create_env "$repo" "$env_name"
-  else
-    ok "Environment '$env_name' already exists"
+  # Resolve reviewer team to ID
+  local org team_slug team_id
+  org=$(echo "$reviewer" | cut -d/ -f1)
+  team_slug=$(echo "$reviewer" | cut -d/ -f2)
+  team_id=$(gh api "orgs/$org/teams/$team_slug" --jq '.id' 2>/dev/null || echo "")
+  if [ -z "$team_id" ]; then
+    fail "Could not resolve team $reviewer to an ID"
+    return 1
   fi
 
-  # Set reviewers
-  set_reviewers "$repo" "$env_name" "$reviewer"
-
-  # Set deployment policy
-  set_deployment_policy "$repo" "$env_name" "$deploy_ref"
-
-  # Admin bypass
-  if [ "$admin_bypass" = "false" ]; then
-    set_no_admin_bypass "$repo" "$env_name"
+  local prevent_self_review="true"
+  if [ "$admin_bypass" = "true" ]; then
+    prevent_self_review="false"
   fi
+
+  # Single PUT with all protection settings to avoid overwrite race
+  info "Applying environment config (reviewers=$reviewer, deploy=$deploy_ref, prevent_self_review=$prevent_self_review)"
+  gh api --method PUT "repos/$repo/environments/$env_name" \
+    --input <(jq -n \
+      --argjson team_id "$team_id" \
+      --argjson prevent "$prevent_self_review" \
+      '{
+        reviewers: [{ type: "Team", id: $team_id }],
+        deployment_branch_policy: {
+          protected_branches: false,
+          custom_branch_policies: true
+        },
+        prevent_self_review: $prevent
+      }') >/dev/null
+
+  # Set deployment tag policy (must be done after enabling custom_branch_policies)
+  # Remove any existing policies first
+  local existing
+  existing=$(gh api "repos/$repo/environments/$env_name/deployment-branch-policies" \
+    --jq '.branch_policies[].id' 2>/dev/null || true)
+  for id in $existing; do
+    gh api --method DELETE \
+      "repos/$repo/environments/$env_name/deployment-branch-policies/$id" \
+      >/dev/null 2>/dev/null || true
+  done
+
+  # Add tag policy
+  gh api --method POST \
+    "repos/$repo/environments/$env_name/deployment-branch-policies" \
+    --field "name=$deploy_ref" \
+    --field "type=tag" >/dev/null
+  ok "Deployment tag policy set: $deploy_ref"
 
   # Read back and verify
   info "Verifying applied state..."
