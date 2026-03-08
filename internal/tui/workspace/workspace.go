@@ -17,6 +17,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
+	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/recents"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/chrome"
@@ -94,14 +95,25 @@ type Workspace struct {
 	// createBoost; tests can replace it with a spy.
 	createBoostFunc func(BoostTarget, string) tea.Cmd
 
+	// Observability
+	tracer *observability.Tracer
+
 	width, height int
 }
 
 // ViewFactory creates views for navigation targets.
 type ViewFactory func(target ViewTarget, session *Session, scope Scope) View
 
+// Option configures a Workspace.
+type Option func(*Workspace)
+
+// WithTracer attaches a Tracer for structured TUI event logging.
+func WithTracer(t *observability.Tracer) Option {
+	return func(w *Workspace) { w.tracer = t }
+}
+
 // New creates a new Workspace model.
-func New(session *Session, factory ViewFactory, poolMonitorFactory func() View) *Workspace {
+func New(session *Session, factory ViewFactory, poolMonitorFactory func() View, opts ...Option) *Workspace {
 	styles := session.Styles()
 	registry := DefaultActions()
 
@@ -139,7 +151,18 @@ func New(session *Session, factory ViewFactory, poolMonitorFactory func() View) 
 	}
 	w.createBoostFunc = w.createBoost
 
+	for _, opt := range opts {
+		opt(w)
+	}
+
 	return w
+}
+
+// trace logs a TUI trace event. Nil-safe.
+func (w *Workspace) trace(msg string, args ...any) {
+	if w.tracer != nil {
+		w.tracer.Log(observability.TraceTUI, msg, args...)
+	}
 }
 
 // Init implements tea.Model.
@@ -568,6 +591,14 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	inputActive := false
+	if view := w.router.Current(); view != nil {
+		if ic, ok := view.(InputCapturer); ok {
+			inputActive = ic.InputActive()
+		}
+	}
+	w.trace("key.press", "key", msg.String(), "inputActive", inputActive, "sidebarFocused", w.sidebarFocused)
+
 	// Help overlay consumes all keys when active
 	if w.pickingBoost {
 		switch msg.Code { //nolint:exhaustive // partial key handler
@@ -608,13 +639,6 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// When a view is capturing text input, only allow ctrl-chord globals
 	// (ctrl+p, ctrl+a, ctrl+y, ctrl+s). Skip single-key globals (q, r, ?, /, 1-9)
 	// so they reach the view's text input.
-	inputActive := false
-	if view := w.router.Current(); view != nil {
-		if ic, ok := view.(InputCapturer); ok {
-			inputActive = ic.InputActive()
-		}
-	}
-
 	if inputActive {
 		// ctrl+c always quits, even during input capture
 		if msg.String() == "ctrl+c" {
@@ -655,6 +679,7 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 		// Forward everything else to the view
+		w.trace("key.forward", "key", msg.String())
 		if view := w.router.Current(); view != nil {
 			updated, cmd := view.Update(msg)
 			w.replaceCurrentView(updated)
@@ -841,6 +866,7 @@ func (w *Workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
+	w.trace("navigate", "target", int(target), "depth", w.router.Depth(), "accountID", scope.AccountID)
 	w.confirmQuit = false
 	var cmds []tea.Cmd
 
@@ -914,6 +940,7 @@ func (w *Workspace) navigate(target ViewTarget, scope Scope) tea.Cmd {
 }
 
 func (w *Workspace) goBack() tea.Cmd {
+	w.trace("navigate.back", "depth", w.router.Depth())
 	w.confirmQuit = false
 	if !w.router.CanGoBack() {
 		return nil
@@ -956,6 +983,7 @@ func (w *Workspace) goBack() tea.Cmd {
 }
 
 func (w *Workspace) goToDepth(depth int) tea.Cmd {
+	w.trace("navigate.depth", "targetDepth", depth, "currentDepth", w.router.Depth())
 	if depth >= w.router.Depth() {
 		return nil
 	}
@@ -1087,6 +1115,7 @@ func (w *Workspace) syncAccountBadge(target ViewTarget) {
 }
 
 func (w *Workspace) openPalette() tea.Cmd {
+	w.trace("palette.open")
 	w.showPalette = true
 	w.syncPaletteActions()
 	w.palette.SetSize(w.width, w.viewHeight())
@@ -1094,6 +1123,7 @@ func (w *Workspace) openPalette() tea.Cmd {
 }
 
 func (w *Workspace) openQuickJump() tea.Cmd {
+	w.trace("quickjump.open")
 	w.showQuickJump = true
 	w.quickJump.SetSize(w.width, w.viewHeight())
 
@@ -1141,6 +1171,7 @@ func (w *Workspace) openQuickJump() tea.Cmd {
 }
 
 func (w *Workspace) openAccountSwitcher() tea.Cmd {
+	w.trace("account_switcher.open")
 	w.showAccountSwitcher = true
 	w.accountSwitcher.SetSize(w.width, w.viewHeight())
 
@@ -1153,6 +1184,7 @@ func (w *Workspace) openAccountSwitcher() tea.Cmd {
 }
 
 func (w *Workspace) toggleSidebar() tea.Cmd {
+	w.trace("sidebar.toggle", "wasOpen", w.showSidebar, "index", w.sidebarIndex)
 	if w.showSidebar && w.sidebarView != nil {
 		// Blur outgoing sidebar
 		w.sidebarView.Update(BlurMsg{})
@@ -1288,6 +1320,8 @@ func (w *Workspace) switchSidebarFocus() tea.Cmd {
 		}
 	}
 
+	w.trace("sidebar.focus", "from", int(current), "to", int(next))
+
 	// Blur current, focus next
 	var cmds []tea.Cmd
 	switch current {
@@ -1358,6 +1392,8 @@ func (w *Workspace) clearPoolMonitorFocus() tea.Cmd {
 }
 
 func (w *Workspace) switchAccount(accountID, accountName string) tea.Cmd {
+	w.trace("account.switch", "accountID", accountID, "accountName", accountName)
+
 	// Release pool monitor keyboard focus (stays visible)
 	blurCmd := w.clearPoolMonitorFocus()
 
@@ -1493,6 +1529,7 @@ func (w *Workspace) syncChrome() {
 const sidebarMinWidth = 100
 
 func (w *Workspace) relayout() {
+	w.trace("relayout", "width", w.width, "height", w.height, "sidebar", w.showSidebar, "poolMonitor", w.showPoolMonitor)
 	w.breadcrumb.SetWidth(w.width)
 	w.statusBar.SetWidth(w.width)
 	w.toast.SetWidth(w.width)

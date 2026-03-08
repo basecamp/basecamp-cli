@@ -5350,6 +5350,7 @@ FLAG basecamp tui --quiet type=bool
 FLAG basecamp tui --stats type=bool
 FLAG basecamp tui --styled type=bool
 FLAG basecamp tui --todolist type=string
+FLAG basecamp tui --trace type=bool
 FLAG basecamp tui --verbose type=count
 FLAG basecamp unassign --account type=string
 FLAG basecamp unassign --agent type=bool

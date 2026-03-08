@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# Launch the Basecamp TUI with a trace log tailed in a tmux split pane.
+#
+# Usage:
+#   bin/devtools [basecamp-tui-args...]
+#
+# Examples:
+#   bin/devtools                          # Launch TUI + trace tail
+#   bin/devtools 'https://3.basecamp.com/…' # Deep-link into a project
+#
+# Prerequisites: tmux
+#
+# The trace file is created under the standard cache dir. BASECAMP_TRACE is set
+# to the absolute path so the CLI treats it as "TraceAll + custom path".
+
+set -euo pipefail
+
+if ! command -v tmux &>/dev/null; then
+  echo "devtools requires tmux. Install it and try again." >&2
+  exit 1
+fi
+
+# Resolve the basecamp binary (prefer local build, then PATH).
+if [[ -z "${BASECAMP:-}" ]]; then
+  if [[ -x ./bin/basecamp ]]; then
+    BASECAMP=./bin/basecamp
+  elif ! BASECAMP=$(command -v basecamp); then
+    echo "devtools requires the basecamp binary on PATH or BASECAMP=/path/to/basecamp." >&2
+    exit 1
+  fi
+fi
+
+# Unique session name for concurrent launches.
+SESSION="basecamp-devtools-$$"
+
+# Create trace file so tail -f doesn't race the TUI's first write.
+TRACE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/basecamp"
+TRACE_FILE="${TRACE_DIR}/trace-devtools-$$.log"
+mkdir -p "$TRACE_DIR"
+: > "$TRACE_FILE"
+
+# tmux new-session and split-window accept shell-command as multiple arguments
+# and exec them directly (no sh -c), so every token stays a discrete argv entry.
+# This avoids all quoting/metacharacter issues with URLs or paths containing
+# spaces, &, etc.
+exec tmux new-session -s "$SESSION" \
+  env "BASECAMP_TRACE=${TRACE_FILE}" "$BASECAMP" tui "$@" \; \
+  split-window -h -l 40% tail -f "$TRACE_FILE" \; \
+  select-pane -t 0
