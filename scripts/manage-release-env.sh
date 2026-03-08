@@ -170,10 +170,10 @@ audit_repo() {
 
   # Reviewers
   local reviewer_count
-  reviewer_count=$(echo "$env_json" | jq '[.protection_rules[] | select(.type == "required_reviewers")] | .[0].reviewers | length // 0')
+  reviewer_count=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers | length // 0')
   if [ "$reviewer_count" -gt 0 ]; then
     local reviewer_names
-    reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules[] | select(.type == "required_reviewers")] | .[0].reviewers[].reviewer.slug // .[0].reviewers[].reviewer.login' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+    reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers[].reviewer | .slug // .login' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
     ok "Required reviewers ($reviewer_count): $reviewer_names"
   else
     fail "No required reviewers configured (want: $reviewer)"
@@ -203,7 +203,7 @@ audit_repo() {
 
   # Admin bypass — check if admins can bypass
   local prevent_self_review
-  prevent_self_review=$(echo "$env_json" | jq '.protection_rules[] | select(.type == "required_reviewers") | .prevent_self_review // false' 2>/dev/null | head -1)
+  prevent_self_review=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
   if [ "$prevent_self_review" = "true" ]; then
     ok "Self-review prevention: enabled"
   else
@@ -211,8 +211,10 @@ audit_repo() {
   fi
 
   # Secrets at env scope
+  local env_secrets_json
+  env_secrets_json=$(gh api "repos/$repo/environments/$env_name/secrets" 2>/dev/null || echo '{"secrets":[]}')
   local env_secrets
-  env_secrets=$(gh api "repos/$repo/environments/$env_name/secrets" --jq '[.secrets[].name] | join(", ")' 2>/dev/null || echo "")
+  env_secrets=$(echo "$env_secrets_json" | jq -r '[.secrets // [] | .[].name] | join(", ")' 2>/dev/null || echo "")
   if [ -n "$env_secrets" ]; then
     ok "Env-scoped secrets: $env_secrets"
   else
@@ -229,8 +231,10 @@ audit_repo() {
   fi
 
   # Vars
+  local env_vars_json
+  env_vars_json=$(gh api "repos/$repo/environments/$env_name/variables" 2>/dev/null || echo '{"variables":[]}')
   local env_vars
-  env_vars=$(gh api "repos/$repo/environments/$env_name/variables" --jq '[.variables[].name] | join(", ")' 2>/dev/null || echo "")
+  env_vars=$(echo "$env_vars_json" | jq -r '[.variables // [] | .[].name] | join(", ")' 2>/dev/null || echo "")
   if [ -n "$env_vars" ]; then
     ok "Env-scoped vars: $env_vars"
   else
@@ -288,7 +292,7 @@ apply_repo() {
 
   # Verify reviewers
   local reviewer_count
-  reviewer_count=$(echo "$env_json" | jq '[.protection_rules[] | select(.type == "required_reviewers")] | .[0].reviewers | length // 0')
+  reviewer_count=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers | length // 0')
   if [ "$reviewer_count" -eq 0 ]; then
     fail "DRIFT: Reviewers not set after apply"
     drift=1
