@@ -1,0 +1,40 @@
+internal/tui/workspace/widget/composer.go
+  6608fdc2837b6ed2 96-97,277,285,336-337,344-347,398-399,402-403,405-413,415,418,422-423,427,431-463,534-538,759-760,872-873,878-881
+  f346bbfae565e6ea 136,164-169,300-302,348-357,368,397,400-401,404,414,416,419-421,424-426,428-430,480,504-506,511-513,542-544,595-661,744-747,882-884,886
+internal/tui/workspace/widget/composer_test.go
+  f346bbfae565e6ea 477-774
+  6608fdc2837b6ed2 7,59-67,222-251,253-266,268-320,339-393,443-476
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "56496e0aeb2af3f34812ea1a6f73eca4f8a5daff",
+  "prompts": {
+    "6608fdc2837b6ed2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "250f8612-c115-46b1-b910-c35834995c73",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 326,
+      "overriden_lines": 0
+    },
+    "f346bbfae565e6ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3802856-203d-4aa8-bb83-5800b7dbcc5d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 419,
+      "overriden_lines": 0
+    }
+  }
+}
