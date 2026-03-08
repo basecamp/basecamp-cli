@@ -93,8 +93,8 @@ func defaultComposerKeyMap() composerKeyMap {
 			key.WithHelp("enter", "send"),
 		),
 		CtrlSend: key.NewBinding(
-			key.WithKeys("ctrl+enter"),
-			key.WithHelp("ctrl+enter", "send"),
+			key.WithKeys("ctrl+enter", "alt+enter"),
+			key.WithHelp("ctrl/alt+enter", "send"),
 		),
 		Editor: key.NewBinding(
 			key.WithKeys("ctrl+e"),
@@ -125,14 +125,15 @@ type Composer struct {
 	uploading    int // count of in-flight uploads
 
 	// Configuration
-	styles   *tui.Styles
-	keys     composerKeyMap
-	width    int
-	height   int
-	focused  bool
-	preview  bool // toggle: edit vs rendered preview
-	uploadFn UploadFunc
-	ctx      context.Context // cancellable context for upload operations
+	styles         *tui.Styles
+	keys           composerKeyMap
+	width          int
+	height         int
+	focused        bool
+	preview        bool // toggle: edit vs rendered preview
+	uploadFn       UploadFunc
+	ctx            context.Context // cancellable context for upload operations
+	attachDisabled bool            // when true, file attachments are not accepted
 }
 
 // ComposerOption configures a Composer.
@@ -158,6 +159,12 @@ func WithUploadFn(fn UploadFunc) ComposerOption {
 // (e.g., on account switch). Defaults to context.Background().
 func WithContext(ctx context.Context) ComposerOption {
 	return func(c *Composer) { c.ctx = ctx }
+}
+
+// WithAttachmentsDisabled prevents the composer from accepting file attachments.
+// Used for views like Campfire where the BC3 API does not support file uploads.
+func WithAttachmentsDisabled() ComposerOption {
+	return func(c *Composer) { c.attachDisabled = true }
 }
 
 // WithPlaceholder sets the placeholder text for both input widgets.
@@ -267,7 +274,7 @@ func (c *Composer) InsertPaste(text string) {
 	c.SetValue(existing + text)
 }
 
-// Reset clears all content and attachments.
+// Reset clears all content, attachments, and returns to quick mode.
 func (c *Composer) Reset() {
 	c.textInput.Reset()
 	c.textArea.Reset()
@@ -275,6 +282,7 @@ func (c *Composer) Reset() {
 	c.attachCursor = -1
 	c.uploading = 0
 	c.preview = false
+	c.mode = ComposerQuick
 }
 
 // Attachments returns the current attachment list.
@@ -289,6 +297,9 @@ func (c *Composer) HasContent() bool {
 
 // AddAttachment queues a file for attachment and triggers upload if an upload function is set.
 func (c *Composer) AddAttachment(path string) tea.Cmd {
+	if c.attachDisabled {
+		return nil
+	}
 	if err := richtext.ValidateFile(path); err != nil {
 		return func() tea.Msg {
 			return ComposerSubmitMsg{Err: err}
@@ -322,10 +333,28 @@ func (c *Composer) AddAttachment(path string) tea.Cmd {
 }
 
 // Submit creates a tea.Cmd that uploads any pending attachments and returns ComposerSubmitMsg.
+// If the content is a single file path (e.g. typed or dragged without bracketed paste),
+// it is intercepted and attached rather than sent as text.
 func (c *Composer) Submit() tea.Cmd {
 	content := strings.TrimSpace(c.Value())
 	if content == "" && len(c.attachments) == 0 {
 		return nil
+	}
+
+	// Intercept file paths that arrived as typed input (no bracketed paste).
+	// Terminals like Terminal.app don't wrap drag-and-drop in paste sequences,
+	// so paths end up as plain text in the composer. Check if every non-empty
+	// line resolves to a file — if so, attach them instead of sending as text.
+	// This works even when attachments already exist (e.g. user dragged a
+	// second file before auto-detect fired).
+	if content != "" && !c.attachDisabled {
+		if paths := c.detectFilePaths(content); len(paths) > 0 {
+			c.SetValue("")
+			for _, p := range paths {
+				c.addAttachmentSync(p)
+			}
+			content = ""
+		}
 	}
 
 	attachments := make([]Attachment, len(c.attachments))
@@ -336,7 +365,7 @@ func (c *Composer) Submit() tea.Cmd {
 	return func() tea.Msg {
 		// Upload any pending attachments
 		for i := range attachments {
-			if attachments[i].Status == AttachPending && uploadFn != nil {
+			if attachments[i].SGID == "" && uploadFn != nil {
 				attachments[i].Status = AttachUploading
 				sgid, err := uploadFn(
 					ctx,
@@ -365,6 +394,73 @@ func (c *Composer) Submit() tea.Cmd {
 	}
 }
 
+// detectFilePaths checks whether every segment in content resolves to a
+// regular file. Segments are split by newlines (bracketed paste) or by
+// quote-space-quote boundaries (Terminal.app multi-file drag: 'a' 'b').
+// Returns the resolved paths if all segments are files, nil otherwise.
+func (c *Composer) detectFilePaths(content string) []string {
+	segments := splitDragSegments(content)
+
+	var paths []string
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		expanded := richtext.NormalizeDragPath(seg)
+		info, err := os.Stat(expanded)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		paths = append(paths, expanded)
+	}
+	return paths
+}
+
+// addAttachmentSync adds a file as an attachment without starting an async
+// upload. The Submit closure will upload it inline.
+func (c *Composer) addAttachmentSync(path string) {
+	att := Attachment{
+		Path:        path,
+		Filename:    filepath.Base(path),
+		ContentType: richtext.DetectMIME(path),
+		Status:      AttachPending,
+	}
+	c.attachments = append(c.attachments, att)
+	if c.mode == ComposerQuick {
+		c.expandToRich()
+	}
+}
+
+// splitDragSegments splits content into individual path segments. It handles
+// newline-separated paths (bracketed paste) and Terminal.app's format for
+// multiple dragged files: 'path one' 'path two'.
+func splitDragSegments(content string) []string {
+	// Multi-line: one path per line
+	if strings.Contains(content, "\n") {
+		lines := strings.Split(content, "\n")
+		result := make([]string, 0, len(lines))
+		for _, l := range lines {
+			result = append(result, strings.TrimSpace(l))
+		}
+		return result
+	}
+
+	// Single line with multiple single-quoted paths: 'a' 'b' 'c'
+	// Strip outer quotes, split on ' ' (the unquoted gap), then re-wrap each.
+	if len(content) > 2 && content[0] == '\'' && content[len(content)-1] == '\'' &&
+		strings.Contains(content, "' '") {
+		inner := content[1 : len(content)-1] // strip outer quotes
+		parts := strings.Split(inner, "' '")
+		result := make([]string, len(parts))
+		for i, p := range parts {
+			result[i] = "'" + p + "'"
+		}
+		return result
+	}
+
+	return []string{strings.TrimSpace(content)}
+}
+
 // Update processes messages for the composer.
 func (c *Composer) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -381,7 +477,7 @@ func (c *Composer) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, c.keys.Editor):
 		return c.OpenEditor()
 
-	case key.Matches(msg, c.keys.AttachFile):
+	case key.Matches(msg, c.keys.AttachFile) && !c.attachDisabled:
 		return func() tea.Msg { return AttachFileRequestMsg{} }
 
 	case key.Matches(msg, c.keys.Preview) && c.mode == ComposerRich:
@@ -403,13 +499,18 @@ func (c *Composer) handleQuickKey(msg tea.KeyPressMsg) tea.Cmd {
 		// Check for auto-expand triggers before forwarding to textinput
 		if c.autoExpand && shouldExpand(msg) {
 			c.expandToRich()
-			// Forward the key to the textarea
 			var cmd tea.Cmd
 			c.textArea, cmd = c.textArea.Update(msg)
+			if attachCmd := c.tryAutoAttachIfDrag(); attachCmd != nil {
+				return attachCmd
+			}
 			return cmd
 		}
 		var cmd tea.Cmd
 		c.textInput, cmd = c.textInput.Update(msg)
+		if attachCmd := c.tryAutoAttachIfDrag(); attachCmd != nil {
+			return attachCmd
+		}
 		return cmd
 	}
 }
@@ -430,9 +531,17 @@ func (c *Composer) handleRichKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, c.keys.CtrlSend):
 		return c.Submit()
+	// Enter sends when the only content is attachments (no text). This covers
+	// terminals like Terminal.app where ctrl+enter is indistinguishable from
+	// enter, making the common drag-and-drop→send flow work everywhere.
+	case key.Matches(msg, c.keys.Send) && strings.TrimSpace(c.textArea.Value()) == "" && len(c.attachments) > 0:
+		return c.Submit()
 	default:
 		var cmd tea.Cmd
 		c.textArea, cmd = c.textArea.Update(msg)
+		if attachCmd := c.tryAutoAttachIfDrag(); attachCmd != nil {
+			return attachCmd
+		}
 		return cmd
 	}
 }
@@ -479,6 +588,73 @@ func (c *Composer) handleUploadResult(msg attachUploadedMsg) tea.Cmd {
 			c.attachments[msg.index].SGID = msg.sgid
 			c.attachments[msg.index].Status = AttachUploaded
 		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Drag auto-detection
+//
+// After each keystroke, if the composer value starts with a path-like character
+// (/, ', ", ~), the value is checked synchronously against the filesystem. If
+// every segment resolves to a regular file, the text is replaced with
+// attachment chips. Otherwise, text stays — no async messages required.
+//
+// Submit-time interception in Submit() acts as a fallback safety net.
+// ---------------------------------------------------------------------------
+
+func isDragTrigger(r rune) bool {
+	switch r {
+	case '/', '\'', '"', '~':
+		return true
+	}
+	return false
+}
+
+// tryAutoAttachIfDrag checks if the current value looks like a dragged file
+// path and, if every segment resolves to a regular file, clears the text and
+// attaches them. Called synchronously after each keystroke — no async routing.
+func (c *Composer) tryAutoAttachIfDrag() tea.Cmd {
+	if c.attachDisabled {
+		return nil
+	}
+	val := c.Value()
+	if val == "" {
+		return nil
+	}
+	runes := []rune(val)
+	if !isDragTrigger(runes[0]) {
+		return nil
+	}
+
+	content := strings.TrimSpace(val)
+	segments := splitDragSegments(content)
+	var paths []string
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		expanded := richtext.NormalizeDragPath(seg)
+		info, err := os.Stat(expanded)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil // not all files — leave text as-is
+		}
+		paths = append(paths, expanded)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+
+	// All segments are files — clear text and attach
+	c.SetValue("")
+	var cmds []tea.Cmd
+	for _, p := range paths {
+		if cmd := c.AddAttachment(p); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if len(cmds) > 0 {
+		return tea.Batch(cmds...)
 	}
 	return nil
 }
@@ -565,6 +741,10 @@ func (c *Composer) HandleEditorReturn(msg EditorReturnMsg) tea.Cmd {
 // ProcessPaste handles pasted text, detecting file paths and adding them as attachments.
 // Returns remaining text that should be inserted, and any commands to execute.
 func (c *Composer) ProcessPaste(text string) (string, tea.Cmd) {
+	if c.attachDisabled {
+		return text, nil
+	}
+
 	lines := strings.Split(text, "\n")
 	var textLines []string
 	var cmds []tea.Cmd
@@ -576,13 +756,8 @@ func (c *Composer) ProcessPaste(text string) (string, tea.Cmd) {
 			continue
 		}
 
-		// Expand ~ to home directory
-		expanded := trimmed
-		if strings.HasPrefix(expanded, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				expanded = filepath.Join(filepath.Clean(home), expanded[2:])
-			}
-		}
+		// Normalize drag-and-drop paths (shell escapes, quotes, file:// URLs, ~)
+		expanded := richtext.NormalizeDragPath(trimmed)
 
 		// Check if it's a file path
 		info, err := os.Stat(expanded)
@@ -694,9 +869,19 @@ func (c *Composer) attachBarHeight() int {
 }
 
 // ShortHelp returns context-appropriate key bindings for the status bar.
+// The send binding adapts: in rich mode with only attachments (empty text),
+// it shows "enter" since plain Enter sends; otherwise it shows "ctrl/alt+enter".
 func (c *Composer) ShortHelp() []key.Binding {
 	if c.mode == ComposerQuick {
 		return []key.Binding{c.keys.Send, c.keys.Editor}
 	}
-	return []key.Binding{c.keys.CtrlSend, c.keys.Editor, c.keys.AttachFile}
+	sendKey := c.keys.CtrlSend
+	if strings.TrimSpace(c.textArea.Value()) == "" && len(c.attachments) > 0 {
+		sendKey = c.keys.Send
+	}
+	bindings := []key.Binding{sendKey, c.keys.Editor}
+	if !c.attachDisabled {
+		bindings = append(bindings, c.keys.AttachFile)
+	}
+	return bindings
 }
