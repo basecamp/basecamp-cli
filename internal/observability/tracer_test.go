@@ -117,7 +117,7 @@ func TestParseTraceEnv_HTTP(t *testing.T) {
 	t.Setenv("BASECAMP_TRACE", "http")
 	t.Setenv("BASECAMP_DEBUG", "")
 
-	tr := ParseTraceEnv()
+	tr := ParseTraceEnvWithCacheDir(t.TempDir())
 	require.NotNil(t, tr)
 	defer tr.Close()
 
@@ -129,7 +129,7 @@ func TestParseTraceEnv_TUI(t *testing.T) {
 	t.Setenv("BASECAMP_TRACE", "tui")
 	t.Setenv("BASECAMP_DEBUG", "")
 
-	tr := ParseTraceEnv()
+	tr := ParseTraceEnvWithCacheDir(t.TempDir())
 	require.NotNil(t, tr)
 	defer tr.Close()
 
@@ -143,7 +143,7 @@ func TestParseTraceEnv_All(t *testing.T) {
 			t.Setenv("BASECAMP_TRACE", val)
 			t.Setenv("BASECAMP_DEBUG", "")
 
-			tr := ParseTraceEnv()
+			tr := ParseTraceEnvWithCacheDir(t.TempDir())
 			require.NotNil(t, tr)
 			defer tr.Close()
 
@@ -174,7 +174,7 @@ func TestParseTraceEnv_DebugBackcompat(t *testing.T) {
 			t.Setenv("BASECAMP_TRACE", "")
 			t.Setenv("BASECAMP_DEBUG", val)
 
-			tr := ParseTraceEnv()
+			tr := ParseTraceEnvWithCacheDir(t.TempDir())
 			require.NotNil(t, tr)
 			defer tr.Close()
 

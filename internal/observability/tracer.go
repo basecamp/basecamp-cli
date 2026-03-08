@@ -120,10 +120,10 @@ func TracePath(cacheDir string) string {
 //
 // Values:
 //
-//	"http"       → TraceHTTP
-//	"tui"        → TraceTUI
-//	"all" or "1" → TraceAll
-//	path (/, ., ~) → TraceAll + custom path
+//	"http"              → TraceHTTP
+//	"tui"               → TraceTUI
+//	"all", "1", "true"  → TraceAll
+//	path (/, ., ~)      → TraceAll + custom path
 //
 // Errors are reported to stderr and return nil (best-effort).
 func ParseTraceEnv() *Tracer {

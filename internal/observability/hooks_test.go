@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCLIHooks_SetLevel(t *testing.T) {
@@ -202,4 +204,39 @@ func TestCLIHooks_NilWriter(t *testing.T) {
 	summary := collector.Summary()
 	assert.Equal(t, 1, summary.TotalOperations)
 	assert.Equal(t, 1, summary.TotalRequests)
+}
+
+func TestCLIHooks_TracerIntegration(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/trace.log"
+	tracer, err := NewTracer(TraceHTTP, path)
+	require.NoError(t, err)
+
+	h := NewCLIHooks(0, nil, nil) // level 0 = no stderr output
+	h.SetTracer(tracer)
+
+	ctx := context.Background()
+	op := basecamp.OperationInfo{Service: "Projects", Operation: "List"}
+	ctx = h.OnOperationStart(ctx, op)
+
+	info := basecamp.RequestInfo{Method: "GET", URL: "/projects.json", Attempt: 1}
+	result := basecamp.RequestResult{StatusCode: 200, Duration: 25 * time.Millisecond}
+	reqCtx := h.OnRequestStart(ctx, info)
+	h.OnRequestEnd(reqCtx, info, result)
+
+	h.OnOperationEnd(ctx, op, nil, 30*time.Millisecond)
+
+	tracer.Close()
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	output := string(data)
+
+	// Verify structured trace events were written
+	assert.Contains(t, output, "operation.start")
+	assert.Contains(t, output, "operation.end")
+	assert.Contains(t, output, "request.start")
+	assert.Contains(t, output, "request.end")
+	assert.Contains(t, output, "Projects")
+	assert.Contains(t, output, "/projects.json")
 }
