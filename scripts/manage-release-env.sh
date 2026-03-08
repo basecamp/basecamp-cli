@@ -90,68 +90,6 @@ env_exists() {
   gh api "repos/$repo/environments/$env_name" --silent 2>/dev/null
 }
 
-create_env() {
-  local repo=$1 env_name=$2
-  info "Creating environment '$env_name' on $repo"
-  gh api --method PUT "repos/$repo/environments/$env_name" \
-    --input /dev/null >/dev/null
-}
-
-set_deployment_policy() {
-  local repo=$1 env_name=$2 ref_pattern=$3
-  info "Setting deployment branch policy: $ref_pattern"
-  # Enable custom branch policies (disable "all branches")
-  gh api --method PUT "repos/$repo/environments/$env_name" \
-    --field "deployment_branch_policy[custom_branch_policies]=true" \
-    --field "deployment_branch_policy[protected_branches]=false" >/dev/null
-
-  # Remove any existing policies first
-  local existing
-  existing=$(gh api "repos/$repo/environments/$env_name/deployment-branch-policies" \
-    --jq '.branch_policies[].id' 2>/dev/null || true)
-  for id in $existing; do
-    gh api --method DELETE \
-      "repos/$repo/environments/$env_name/deployment-branch-policies/$id" \
-      >/dev/null 2>/dev/null || true
-  done
-
-  # Add tag policy
-  gh api --method POST \
-    "repos/$repo/environments/$env_name/deployment-branch-policies" \
-    --field "name=$ref_pattern" \
-    --field "type=tag" >/dev/null
-}
-
-set_reviewers() {
-  local repo=$1 env_name=$2 reviewer=$3
-  info "Setting required reviewer: $reviewer"
-
-  # Resolve team slug to ID
-  local org team_slug team_id
-  org=$(echo "$reviewer" | cut -d/ -f1)
-  team_slug=$(echo "$reviewer" | cut -d/ -f2)
-  team_id=$(gh api "orgs/$org/teams/$team_slug" --jq '.id' 2>/dev/null || echo "")
-
-  if [ -z "$team_id" ]; then
-    fail "Could not resolve team $reviewer to an ID"
-    return 1
-  fi
-
-  gh api --method PUT "repos/$repo/environments/$env_name" \
-    --input <(jq -n \
-      --argjson team_id "$team_id" \
-      '{
-        reviewers: [{ type: "Team", id: $team_id }]
-      }') >/dev/null
-}
-
-set_no_admin_bypass() {
-  local repo=$1 env_name=$2
-  info "Disabling admin bypass"
-  gh api --method PUT "repos/$repo/environments/$env_name" \
-    --field "prevent_self_review=true" >/dev/null 2>/dev/null || true
-}
-
 # ── Audit ────────────────────────────────────────────────────────────────────
 
 audit_repo() {
@@ -174,8 +112,16 @@ audit_repo() {
   reviewer_count=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers | length // 0')
   if [ "$reviewer_count" -gt 0 ]; then
     local reviewer_names
-    reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers[].reviewer | .slug // .login' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+    reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers // [] | [.[].reviewer | .slug // .login] | join(", ")' 2>/dev/null || echo "")
     ok "Required reviewers ($reviewer_count): $reviewer_names"
+
+    # Verify expected team is a reviewer
+    local expected_slug
+    expected_slug=$(echo "$reviewer" | cut -d/ -f2)
+    if ! echo "$reviewer_names" | grep -q "$expected_slug"; then
+      fail "Expected reviewer '$reviewer' not found (have: $reviewer_names)"
+      drift=1
+    fi
   else
     fail "No required reviewers configured (want: $reviewer)"
     drift=1
@@ -377,7 +323,7 @@ apply_repo() {
 
   # Print exact post-apply state
   local reviewer_names
-  reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers[].reviewer | .slug // .login' 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+  reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers // [] | [.[].reviewer | .slug // .login] | join(", ")' 2>/dev/null || echo "")
   local policies
   policies=$(gh api "repos/$repo/environments/$env_name/deployment-branch-policies" \
     --jq '[.branch_policies[] | "\(.name) (\(.type))"] | join(", ")' 2>/dev/null || echo "none")

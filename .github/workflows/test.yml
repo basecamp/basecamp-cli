@@ -16,28 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASECAMP_NO_KEYRING: "1"
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Check SDK provenance
         run: make provenance-check
@@ -62,29 +47,13 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
@@ -94,29 +63,13 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Run govulncheck
         # @latest intentional — pinning delays scanning improvements and
@@ -130,28 +83,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASECAMP_NO_KEYRING: "1"
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Run tests with race detector
         run: go test -race -v ./...
@@ -161,28 +99,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASECAMP_NO_KEYRING: "1"
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Cache BATS
         id: cache-bats
@@ -205,30 +128,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASECAMP_NO_KEYRING: "1"
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
-
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Build and snapshot PR surface
         run: |
@@ -257,20 +165,10 @@ jobs:
     continue-on-error: true
     env:
       BASECAMP_NO_KEYRING: "1"
-      GOPRIVATE: github.com/basecamp/basecamp-sdk
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 2
-
-      - name: Generate token for private SDK access
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
-        with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: basecamp
-          repositories: basecamp-sdk
 
       - name: Check for benchmark-relevant changes
         id: filter
@@ -290,12 +188,6 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: 'go.mod'
-
-      - name: Configure git for private modules
-        if: steps.filter.outputs.bench == 'true'
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Run benchmarks
         if: steps.filter.outputs.bench == 'true'

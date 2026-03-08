@@ -20,6 +20,9 @@ jobs:
   security:
     name: Security scan
     uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
 
   test:
     name: Test before release
