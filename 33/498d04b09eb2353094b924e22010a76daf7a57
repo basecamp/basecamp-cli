@@ -1,0 +1,38 @@
+internal/richtext/dragpath.go
+  6608fdc2837b6ed2 1-42,48-61,63-65
+internal/richtext/dragpath_test.go
+  6608fdc2837b6ed2 1-16,20-27,31-33,37-58,60-79,83-100,104-119,121-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "33498d04b09eb2353094b924e22010a76daf7a57",
+  "prompts": {
+    "6608fdc2837b6ed2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "250f8612-c115-46b1-b910-c35834995c73",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 502,
+      "overriden_lines": 0
+    },
+    "f346bbfae565e6ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3802856-203d-4aa8-bb83-5800b7dbcc5d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 419,
+      "overriden_lines": 0
+    }
+  }
+}
