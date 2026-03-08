@@ -16,15 +16,14 @@ func TestNewTracer(t *testing.T) {
 
 	tr, err := NewTracer(TraceHTTP, path)
 	require.NoError(t, err)
-	defer tr.Close()
 
 	assert.Equal(t, path, tr.Path())
 	assert.True(t, tr.Enabled(TraceHTTP))
 	assert.False(t, tr.Enabled(TraceTUI))
 
-	// Write an event and verify file has content
+	// Write an event, close to flush, then verify file content
 	tr.Log(TraceHTTP, "test.event", "key", "value")
-	tr.Close()
+	require.NoError(t, tr.Close())
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -50,11 +49,10 @@ func TestTracer_HTTPOnly_SkipsTUI(t *testing.T) {
 
 	tr, err := NewTracer(TraceHTTP, path)
 	require.NoError(t, err)
-	defer tr.Close()
 
 	tr.Log(TraceTUI, "tui.event", "key", "should-not-appear")
 	tr.Log(TraceHTTP, "http.event", "key", "should-appear")
-	tr.Close()
+	require.NoError(t, tr.Close())
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

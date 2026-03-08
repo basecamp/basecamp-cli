@@ -208,7 +208,9 @@ func (a *App) ApplyFlags() {
 	// Pass the resolved cache dir so trace files land alongside other CLI state.
 	if t := observability.ParseTraceEnvWithCacheDir(a.Config.CacheDir); t != nil {
 		a.Tracer = t
-		a.Hooks.SetTracer(t)
+		if a.Hooks != nil {
+			a.Hooks.SetTracer(t)
+		}
 	}
 }
 

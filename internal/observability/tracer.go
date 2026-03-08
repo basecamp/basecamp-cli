@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // TraceCategories is a bitmask of trace event categories.
@@ -19,10 +20,12 @@ const (
 
 // Tracer writes structured JSON trace events to a file.
 // All methods are nil-safe — a nil *Tracer is a no-op.
+// The categories field uses atomic access so EnableCategories is safe
+// to call concurrently with Log/Enabled from other goroutines.
 type Tracer struct {
 	logger *slog.Logger
 	file   *os.File
-	cats   TraceCategories
+	cats   atomic.Int32
 	path   string
 }
 
@@ -37,12 +40,13 @@ func NewTracer(categories TraceCategories, path string) (*Tracer, error) {
 		return nil, fmt.Errorf("tracer: open file: %w", err)
 	}
 	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{Level: slog.LevelInfo})
-	return &Tracer{
+	t := &Tracer{
 		logger: slog.New(handler),
 		file:   f,
-		cats:   categories,
 		path:   path,
-	}, nil
+	}
+	t.cats.Store(int32(categories)) //nolint:gosec // bitmask values are bounded (max 3)
+	return t, nil
 }
 
 // Close flushes and closes the trace file. Nil-safe.
@@ -63,20 +67,25 @@ func (t *Tracer) Path() string {
 
 // Enabled reports whether cat is active. Nil-safe.
 func (t *Tracer) Enabled(cat TraceCategories) bool {
-	return t != nil && t.cats&cat != 0
+	return t != nil && TraceCategories(t.cats.Load())&cat != 0
 }
 
 // EnableCategories adds categories to the active set (bitwise OR).
-// Nil-safe.
+// Nil-safe. Safe for concurrent use.
 func (t *Tracer) EnableCategories(cats TraceCategories) {
 	if t != nil {
-		t.cats |= cats
+		for {
+			old := t.cats.Load()
+			if t.cats.CompareAndSwap(old, old|int32(cats)) { //nolint:gosec // bitmask values are bounded (max 3)
+				return
+			}
+		}
 	}
 }
 
 // Log writes a structured trace event if cat is enabled. Nil-safe.
 func (t *Tracer) Log(cat TraceCategories, msg string, args ...any) {
-	if t == nil || t.cats&cat == 0 {
+	if t == nil || TraceCategories(t.cats.Load())&cat == 0 {
 		return
 	}
 	t.logger.Info(msg, args...)

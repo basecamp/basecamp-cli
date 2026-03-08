@@ -48,9 +48,13 @@ func NewTUICmd() *cobra.Command {
 					// No tracer yet — create one with all categories
 					t, err := observability.NewTracer(observability.TraceAll,
 						observability.TracePath(app.Config.CacheDir))
-					if err == nil {
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to start tracer: %v\n", err)
+					} else {
 						app.Tracer = t
-						app.Hooks.SetTracer(t)
+						if app.Hooks != nil {
+							app.Hooks.SetTracer(t)
+						}
 					}
 				} else {
 					// Env tracer exists but may be narrower (e.g. BASECAMP_TRACE=http).
