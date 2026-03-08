@@ -38,6 +38,7 @@ type App struct {
 	// Observability
 	Collector *observability.SessionCollector
 	Hooks     *observability.CLIHooks
+	Tracer    *observability.Tracer
 
 	// Flags holds the global flag values
 	Flags GlobalFlags
@@ -201,6 +202,20 @@ func (a *App) ApplyFlags() {
 	// Apply verbose level to hooks for trace output
 	if a.Hooks != nil {
 		a.Hooks.SetLevel(verboseLevel)
+	}
+
+	// Initialize file-based tracer from BASECAMP_TRACE (or BASECAMP_DEBUG backcompat).
+	// Pass the resolved cache dir so trace files land alongside other CLI state.
+	if t := observability.ParseTraceEnvWithCacheDir(a.Config.CacheDir); t != nil {
+		a.Tracer = t
+		a.Hooks.SetTracer(t)
+	}
+}
+
+// Close releases resources held by the App (e.g. trace file handles).
+func (a *App) Close() {
+	if a.Tracer != nil {
+		a.Tracer.Close()
 	}
 }
 

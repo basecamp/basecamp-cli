@@ -16,11 +16,15 @@ var _ basecamp.Hooks = (*CLIHooks)(nil)
 //   - 0: Silent (collect stats only, no output)
 //   - 1: Operations only (log SDK operations)
 //   - 2: Operations + requests (log both operations and HTTP requests)
+//
+// An optional Tracer writes structured JSON events to a file,
+// independent of the verbosity level.
 type CLIHooks struct {
 	mu        sync.Mutex
 	level     int
 	collector *SessionCollector
 	writer    *TraceWriter
+	tracer    *Tracer
 }
 
 // NewCLIHooks creates a new CLIHooks with the given verbosity level.
@@ -48,16 +52,26 @@ func (h *CLIHooks) Level() int {
 	return h.level
 }
 
+// SetTracer attaches a file-based Tracer for structured logging.
+func (h *CLIHooks) SetTracer(t *Tracer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.tracer = t
+}
+
 // OnOperationStart is called when a semantic SDK operation begins.
 func (h *CLIHooks) OnOperationStart(ctx context.Context, op basecamp.OperationInfo) context.Context {
 	h.mu.Lock()
 	level := h.level
 	writer := h.writer
+	tracer := h.tracer
 	h.mu.Unlock()
 
 	if level >= 1 && writer != nil {
 		writer.WriteOperationStart(op)
 	}
+
+	tracer.Log(TraceHTTP, "operation.start", "service", op.Service, "operation", op.Operation)
 
 	return ctx
 }
@@ -68,6 +82,7 @@ func (h *CLIHooks) OnOperationEnd(ctx context.Context, op basecamp.OperationInfo
 	level := h.level
 	collector := h.collector
 	writer := h.writer
+	tracer := h.tracer
 	h.mu.Unlock()
 
 	if collector != nil {
@@ -77,6 +92,14 @@ func (h *CLIHooks) OnOperationEnd(ctx context.Context, op basecamp.OperationInfo
 	if level >= 1 && writer != nil {
 		writer.WriteOperationEnd(op, err, duration)
 	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+	tracer.Log(TraceHTTP, "operation.end",
+		"service", op.Service, "operation", op.Operation,
+		"duration_ms", duration.Milliseconds(), "error", errStr)
 }
 
 // OnRequestStart is called before an HTTP request is sent.
@@ -84,11 +107,14 @@ func (h *CLIHooks) OnRequestStart(ctx context.Context, info basecamp.RequestInfo
 	h.mu.Lock()
 	level := h.level
 	writer := h.writer
+	tracer := h.tracer
 	h.mu.Unlock()
 
 	if level >= 2 && writer != nil {
 		writer.WriteRequestStart(info)
 	}
+
+	tracer.Log(TraceHTTP, "request.start", "method", info.Method, "url", scrubURL(info.URL))
 
 	return ctx
 }
@@ -99,6 +125,7 @@ func (h *CLIHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInfo, 
 	collector := h.collector
 	writer := h.writer
 	level := h.level
+	tracer := h.tracer
 	h.mu.Unlock()
 
 	if collector != nil {
@@ -108,6 +135,15 @@ func (h *CLIHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInfo, 
 	if level >= 2 && writer != nil {
 		writer.WriteRequestEnd(info, result)
 	}
+
+	var errStr string
+	if result.Error != nil {
+		errStr = result.Error.Error()
+	}
+	tracer.Log(TraceHTTP, "request.end",
+		"method", info.Method, "url", scrubURL(info.URL),
+		"status", result.StatusCode, "duration_ms", result.Duration.Milliseconds(),
+		"cached", result.FromCache, "error", errStr)
 }
 
 // OnRetry is called before a retry attempt.
@@ -116,6 +152,7 @@ func (h *CLIHooks) OnRetry(ctx context.Context, info basecamp.RequestInfo, attem
 	collector := h.collector
 	writer := h.writer
 	level := h.level
+	tracer := h.tracer
 	h.mu.Unlock()
 
 	if collector != nil {
@@ -125,4 +162,12 @@ func (h *CLIHooks) OnRetry(ctx context.Context, info basecamp.RequestInfo, attem
 	if level >= 2 && writer != nil {
 		writer.WriteRetry(info, attempt, err)
 	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+	tracer.Log(TraceHTTP, "retry",
+		"method", info.Method, "url", scrubURL(info.URL),
+		"attempt", attempt, "error", errStr)
 }
