@@ -115,10 +115,10 @@ audit_repo() {
     reviewer_names=$(echo "$env_json" | jq -r '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers // [] | [.[].reviewer | .slug // .login] | join(", ")' 2>/dev/null || echo "")
     ok "Required reviewers ($reviewer_count): $reviewer_names"
 
-    # Verify expected team is a reviewer
+    # Verify expected team is a reviewer (exact match, not substring)
     local expected_slug
     expected_slug=$(echo "$reviewer" | cut -d/ -f2)
-    if ! echo "$reviewer_names" | grep -q "$expected_slug"; then
+    if ! echo "$env_json" | jq -e '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers // [] | [.[].reviewer | .slug // .login] | any(. == "'"$expected_slug"'")' >/dev/null 2>&1; then
       fail "Expected reviewer '$reviewer' not found (have: $reviewer_names)"
       drift=1
     fi
@@ -294,7 +294,15 @@ apply_repo() {
     fail "DRIFT: Reviewers not set after apply"
     drift=1
   else
-    ok "Reviewers verified"
+    # Verify correct team
+    local expected_slug
+    expected_slug=$(echo "$reviewer" | cut -d/ -f2)
+    if echo "$env_json" | jq -e '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].reviewers // [] | [.[].reviewer | .slug // .login] | any(. == "'"$expected_slug"'")' >/dev/null 2>&1; then
+      ok "Reviewers verified ($expected_slug)"
+    else
+      fail "DRIFT: Expected reviewer $reviewer not found after apply"
+      drift=1
+    fi
   fi
 
   # Verify deployment policy
