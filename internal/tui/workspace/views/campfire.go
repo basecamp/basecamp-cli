@@ -1,12 +1,9 @@
 package views
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -130,26 +127,10 @@ func NewCampfire(session *workspace.Session) *Campfire {
 
 	pool := session.Hub().CampfireLines(scope.ProjectID, scope.ToolID)
 
-	// Create upload function for the composer — capture client at construction time.
-	client := session.AccountClient()
-	uploadFn := func(ctx context.Context, path, filename, contentType string) (string, error) {
-		f, err := os.Open(path)
-		if err != nil {
-			return "", err
-		}
-		defer f.Close()
-		resp, err := client.Attachments().Create(ctx, filename, contentType, io.Reader(f))
-		if err != nil {
-			return "", err
-		}
-		return resp.AttachableSGID, nil
-	}
-
 	comp := widget.NewComposer(styles,
 		widget.WithMode(widget.ComposerQuick),
 		widget.WithAutoExpand(true),
-		widget.WithUploadFn(uploadFn),
-		widget.WithContext(session.Context()),
+		widget.WithAttachmentsDisabled(),
 		widget.WithPlaceholder("Type a message..."),
 	)
 
@@ -405,21 +386,9 @@ func (v *Campfire) handleComposerSubmit(msg widget.ComposerSubmitMsg) tea.Cmd {
 		return v.sendLine(content.Markdown, false)
 	}
 
-	// Rich content: convert markdown to HTML and embed attachments
+	// Rich content: convert markdown to HTML (attachments are disabled for campfire —
+	// the BC3 API only supports file uploads via the web-only Chats::UploadsController).
 	html := richtext.MarkdownToHTML(content.Markdown)
-	if len(content.Attachments) > 0 {
-		refs := make([]richtext.AttachmentRef, 0, len(content.Attachments))
-		for _, att := range content.Attachments {
-			if att.Status == widget.AttachUploaded {
-				refs = append(refs, richtext.AttachmentRef{
-					SGID:        att.SGID,
-					Filename:    att.Filename,
-					ContentType: att.ContentType,
-				})
-			}
-		}
-		html = richtext.EmbedAttachments(html, refs)
-	}
 	return v.sendLine(html, true)
 }
 
