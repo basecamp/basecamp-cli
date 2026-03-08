@@ -149,18 +149,23 @@ audit_repo() {
     warn "No deployment branch policy (any branch/tag can deploy)"
   fi
 
-  # Admin bypass
-  local prevent_self_review
-  prevent_self_review=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
-  local want_prevent="true"
-  if [ "$admin_bypass" = "true" ]; then
-    want_prevent="false"
-  fi
-  if [ "$prevent_self_review" = "$want_prevent" ]; then
+  # Admin bypass (can_admins_bypass is a top-level env field, separate from prevent_self_review)
+  local actual_admin_bypass
+  actual_admin_bypass=$(echo "$env_json" | jq 'if has("can_admins_bypass") then .can_admins_bypass else true end')
+  if [ "$actual_admin_bypass" = "$admin_bypass" ]; then
     ok "Admin bypass: $([ "$admin_bypass" = "true" ] && echo "allowed (intended)" || echo "blocked")"
   else
-    fail "Admin bypass: $([ "$prevent_self_review" = "true" ] && echo "blocked" || echo "allowed") (want: $([ "$admin_bypass" = "true" ] && echo "allowed" || echo "blocked"))"
+    fail "Admin bypass: $([ "$actual_admin_bypass" = "true" ] && echo "allowed" || echo "blocked") (want: $([ "$admin_bypass" = "true" ] && echo "allowed" || echo "blocked"))"
     drift=1
+  fi
+
+  # Self-review prevention
+  local prevent_self_review
+  prevent_self_review=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
+  if [ "$prevent_self_review" = "true" ]; then
+    ok "Self-review prevention: enabled"
+  else
+    warn "Self-review prevention: disabled"
   fi
 
   # Secrets at env scope
@@ -232,23 +237,26 @@ apply_repo() {
   fi
 
   local prevent_self_review="true"
+  local can_admins_bypass="$admin_bypass"
   if [ "$admin_bypass" = "true" ]; then
     prevent_self_review="false"
   fi
 
   # Single PUT with all protection settings to avoid overwrite race
-  info "Applying environment config (reviewers=$reviewer, deploy=$deploy_ref, prevent_self_review=$prevent_self_review)"
+  info "Applying environment config (reviewers=$reviewer, deploy=$deploy_ref, can_admins_bypass=$can_admins_bypass, prevent_self_review=$prevent_self_review)"
   gh api --method PUT "repos/$repo/environments/$env_name" \
     --input <(jq -n \
       --argjson team_id "$team_id" \
       --argjson prevent "$prevent_self_review" \
+      --argjson bypass "$can_admins_bypass" \
       '{
         reviewers: [{ type: "Team", id: $team_id }],
         deployment_branch_policy: {
           protected_branches: false,
           custom_branch_policies: true
         },
-        prevent_self_review: $prevent
+        prevent_self_review: $prevent,
+        can_admins_bypass: $bypass
       }') >/dev/null
 
   # Set deployment tag policy (must be done after enabling custom_branch_policies)
@@ -308,17 +316,22 @@ apply_repo() {
   fi
 
   # Verify admin bypass
-  local prevent_self_review
-  prevent_self_review=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
-  local want_prevent="true"
-  if [ "$admin_bypass" = "true" ]; then
-    want_prevent="false"
-  fi
-  if [ "$prevent_self_review" = "$want_prevent" ]; then
+  local actual_admin_bypass
+  actual_admin_bypass=$(echo "$env_json" | jq 'if has("can_admins_bypass") then .can_admins_bypass else true end')
+  if [ "$actual_admin_bypass" = "$admin_bypass" ]; then
     ok "Admin bypass: $([ "$admin_bypass" = "true" ] && echo "allowed (intended)" || echo "blocked")"
   else
-    fail "DRIFT: Admin bypass is $([ "$prevent_self_review" = "true" ] && echo "blocked" || echo "allowed"), want $([ "$admin_bypass" = "true" ] && echo "allowed" || echo "blocked")"
+    fail "DRIFT: can_admins_bypass=$actual_admin_bypass, want $admin_bypass"
     drift=1
+  fi
+
+  # Verify self-review prevention
+  local actual_prevent
+  actual_prevent=$(echo "$env_json" | jq '[.protection_rules // [] | .[] | select(.type == "required_reviewers")] | .[0].prevent_self_review // false' 2>/dev/null)
+  if [ "$actual_prevent" = "true" ]; then
+    ok "Self-review prevention: enabled"
+  else
+    warn "Self-review prevention: not enabled"
   fi
 
   # Print exact post-apply state
@@ -327,7 +340,7 @@ apply_repo() {
   local policies
   policies=$(gh api "repos/$repo/environments/$env_name/deployment-branch-policies" \
     --jq '[.branch_policies[] | "\(.name) (\(.type))"] | join(", ")' 2>/dev/null || echo "none")
-  info "Post-apply: reviewers=[$reviewer_names] deploy=[$policies] admin_bypass=$admin_bypass self_review_prevention=$prevent_self_review"
+  info "Post-apply: reviewers=[$reviewer_names] deploy=[$policies] can_admins_bypass=$actual_admin_bypass prevent_self_review=$actual_prevent"
 
   if [ "$drift" -ne 0 ]; then
     fail "State drift detected on $repo — manual investigation required"
