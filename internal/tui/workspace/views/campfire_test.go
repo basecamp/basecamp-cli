@@ -152,7 +152,7 @@ func testCampfireWithLines(lines []workspace.CampfireLineInfo) *Campfire {
 }
 
 func TestCampfire_MessageGrouping(t *testing.T) {
-	now := time.Now()
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	v := testCampfireWithLines([]workspace.CampfireLineInfo{
 		{ID: 1, Body: "hello", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: now},
 		{ID: 2, Body: "world", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: now.Add(30 * time.Second)},
@@ -168,7 +168,7 @@ func TestCampfire_MessageGrouping(t *testing.T) {
 }
 
 func TestCampfire_DifferentSender_BreaksGroup(t *testing.T) {
-	now := time.Now()
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	v := testCampfireWithLines([]workspace.CampfireLineInfo{
 		{ID: 1, Body: "hi", Creator: "Alice", CreatedAt: "9:00am", CreatedAtTS: now},
 		{ID: 2, Body: "hey", Creator: "Bob", CreatedAt: "9:01am", CreatedAtTS: now.Add(time.Minute)},
