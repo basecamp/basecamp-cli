@@ -1,0 +1,48 @@
+README.md
+  ab1fe46829bec3c2 12
+internal/tui/workspace/views/checkins.go
+  6608fdc2837b6ed2 306-312
+internal/tui/workspace/views/checkins_test.go
+  6608fdc2837b6ed2 6-7,591-632
+internal/richtext/dragpath.go
+  6608fdc2837b6ed2 1-62
+internal/tui/workspace/widget/composer.go
+  6608fdc2837b6ed2 579-580
+internal/tui/workspace/widget/composer_test.go
+  6608fdc2837b6ed2 7,231-285
+internal/richtext/dragpath_test.go
+  6608fdc2837b6ed2 1-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "8af2a6cd38baca4dbaacbc7dfad2a9b61cd45f39",
+  "prompts": {
+    "6608fdc2837b6ed2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "250f8612-c115-46b1-b910-c35834995c73",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 285,
+      "overriden_lines": 0
+    },
+    "ab1fe46829bec3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "251e64fc-8abe-4717-b78c-0732b9b2332e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 3,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
