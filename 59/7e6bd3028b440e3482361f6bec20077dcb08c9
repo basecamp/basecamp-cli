@@ -1,0 +1,29 @@
+internal/appctx/context.go
+  1a1047285de85873 211-213
+internal/observability/tracer.go
+  1a1047285de85873 9,23-24,28,43,48-49,70,74,77-82,88
+internal/observability/tracer_test.go
+  1a1047285de85873 24,26,55
+internal/commands/tui.go
+  1a1047285de85873 51-53,55-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "597e6bd3028b440e3482361f6bec20077dcb08c9",
+  "prompts": {
+    "1a1047285de85873": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95b166d7-84ce-4369-8f7a-5a4aeaebc5ac",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 16,
+      "accepted_lines": 28,
+      "overriden_lines": 0
+    }
+  }
+}
