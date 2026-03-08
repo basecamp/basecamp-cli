@@ -1,0 +1,23 @@
+scripts/manage-release-env.sh
+  165812755f1f6651 173,176,206,214-215,217,234-235,237,295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "f18a502ccd0475379b4e91260562599a877b9c83",
+  "prompts": {
+    "165812755f1f6651": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53851ff7-25d6-4cc9-8bcd-36a4a307b96f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 6,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
