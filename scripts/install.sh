@@ -68,7 +68,7 @@ get_latest_version() {
   local url version
   # Follow the releases/latest redirect to get the version from the final URL.
   # Avoids the GitHub API (no rate limiting) and grep/sed (better Windows compat).
-  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null)
+  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null) || true
   version="${url##*/}"
   version="${version#v}"
   if [[ -z "$version" || "$version" == "latest" ]]; then
