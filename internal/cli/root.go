@@ -48,6 +48,21 @@ func NewRootCmd() *cobra.Command {
 			// work correctly.
 			bareRoot := cmd.Parent() == nil && len(args) == 0
 
+			// initBareRootApp creates a minimal app from the given config
+			// (or a default config if nil) so wizard detection, machine-
+			// output checks, and preference resolution still work when
+			// the bare-root path tolerates an error.
+			initBareRootApp := func(cfg *config.Config) {
+				if cfg == nil {
+					cfg = config.Default()
+				}
+				resolvePreferences(cmd, cfg, &flags)
+				app := appctx.NewApp(cfg)
+				app.Flags = flags
+				app.ApplyFlags()
+				cmd.SetContext(appctx.WithApp(cmd.Context(), app))
+			}
+
 			// Load configuration (without profile-specific overrides first)
 			cfg, err := config.Load(config.FlagOverrides{
 				Account:  flags.Account,
@@ -57,7 +72,8 @@ func NewRootCmd() *cobra.Command {
 			})
 			if err != nil {
 				if bareRoot {
-					return nil // fall through to help
+					initBareRootApp(nil)
+					return nil
 				}
 				return err
 			}
@@ -66,13 +82,7 @@ func NewRootCmd() *cobra.Command {
 			profileName, err := resolveProfile(cfg, flags)
 			if err != nil {
 				if bareRoot {
-					// Profile failed but config loaded — create app
-					// with base config so wizard/mode detection works.
-					resolvePreferences(cmd, cfg, &flags)
-					app := appctx.NewApp(cfg)
-					app.Flags = flags
-					app.ApplyFlags()
-					cmd.SetContext(appctx.WithApp(cmd.Context(), app))
+					initBareRootApp(cfg)
 					return nil
 				}
 				return err
@@ -101,11 +111,7 @@ func NewRootCmd() *cobra.Command {
 			if !isConfigCmd(cmd) {
 				if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
 					if bareRoot {
-						resolvePreferences(cmd, cfg, &flags)
-						app := appctx.NewApp(cfg)
-						app.Flags = flags
-						app.ApplyFlags()
-						cmd.SetContext(appctx.WithApp(cmd.Context(), app))
+						initBareRootApp(cfg)
 						return nil
 					}
 					source := cfg.Sources["base_url"]
