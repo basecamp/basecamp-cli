@@ -349,11 +349,20 @@ func (c *Composer) Submit() tea.Cmd {
 	// second file before auto-detect fired).
 	if content != "" && !c.attachDisabled {
 		if paths := c.detectFilePaths(content); len(paths) > 0 {
-			c.SetValue("")
+			allValid := true
 			for _, p := range paths {
-				c.addAttachmentSync(p)
+				if err := richtext.ValidateFile(p); err != nil {
+					allValid = false
+					break
+				}
 			}
-			content = ""
+			if allValid {
+				c.SetValue("")
+				for _, p := range paths {
+					c.addAttachmentSync(p)
+				}
+				content = ""
+			}
 		}
 	}
 

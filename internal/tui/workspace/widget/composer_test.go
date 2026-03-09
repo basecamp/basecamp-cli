@@ -640,6 +640,35 @@ func TestSubmitInterceptsFilePathsWithExistingAttachments(t *testing.T) {
 	}
 }
 
+func TestSubmitInterceptRejectsInvalidFiles(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.txt")
+	os.WriteFile(good, []byte("ok"), 0o644)
+	missing := filepath.Join(dir, "nope.txt") // does not exist
+
+	c := NewComposer(testStyles(), WithUploadFn(
+		func(ctx context.Context, p, fn, ct string) (string, error) {
+			return "sgid-" + fn, nil
+		},
+	))
+
+	// Compose text that looks like two dragged paths, one invalid
+	c.SetValue(good + "\n" + missing)
+
+	cmd := c.Submit()
+	if cmd == nil {
+		t.Fatal("expected submit command")
+	}
+	msg := cmd().(ComposerSubmitMsg)
+	// Invalid file means interception is skipped — text sent as markdown
+	if msg.Content.Markdown == "" {
+		t.Error("expected text to be sent as markdown when file validation fails")
+	}
+	if len(msg.Content.Attachments) != 0 {
+		t.Errorf("expected 0 attachments, got %d", len(msg.Content.Attachments))
+	}
+}
+
 func TestCampfireFlowAutoDetectThenSubmit(t *testing.T) {
 	// End-to-end test mimicking the campfire drag-and-submit flow:
 	// 1. Quick mode composer with upload function (like campfire)
