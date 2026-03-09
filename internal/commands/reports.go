@@ -81,7 +81,7 @@ func newReportsAssignedCmd() *cobra.Command {
 		Long: `View todos assigned to a specific person.
 
 If no person is specified, defaults to "me" (the current user).
-Results can be grouped by bucket (project) or date.`,
+Results can be grouped by project or date.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -110,10 +110,14 @@ Results can be grouped by bucket (project) or date.`,
 			// Build options
 			var opts *basecamp.AssignedTodosOptions
 			if groupBy != "" {
-				if groupBy != "bucket" && groupBy != "date" {
-					return output.ErrUsage("--group-by must be 'bucket' or 'date'")
+				if groupBy != "bucket" && groupBy != "project" && groupBy != "date" {
+					return output.ErrUsage("--group-by must be 'project' or 'date'")
 				}
-				opts = &basecamp.AssignedTodosOptions{GroupBy: groupBy}
+				apiGroupBy := groupBy
+				if apiGroupBy == "project" {
+					apiGroupBy = "bucket"
+				}
+				opts = &basecamp.AssignedTodosOptions{GroupBy: apiGroupBy}
 			}
 
 			result, err := app.Account().Reports().AssignedTodos(cmd.Context(), personID, opts)
@@ -163,7 +167,7 @@ Results can be grouped by bucket (project) or date.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&groupBy, "group-by", "", "Group results by 'bucket' or 'date'")
+	cmd.Flags().StringVar(&groupBy, "group-by", "", "Group results by 'project' or 'date'")
 
 	return cmd
 }
