@@ -1,0 +1,25 @@
+internal/commands/search.go
+  6f414f157363725a 83
+internal/commands/reports.go
+  6f414f157363725a 113-114,116-120,170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "feba29c8aa2933e6cab96001d4c8ccf1d33d04a8",
+  "prompts": {
+    "6f414f157363725a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bbd500d-0345-4d4c-a296-501c9e6ab242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 6,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
