@@ -71,7 +71,7 @@ get_latest_version() {
   url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null) || true
   version="${url##*/}"
   version="${version#v}"
-  if [[ -z "$version" || "$version" == "latest" ]]; then
+  if [[ ! $version =~ ^[0-9]+\.[0-9]+ ]]; then
     error "Could not determine latest version. Check your network connection."
   fi
   echo "$version"
