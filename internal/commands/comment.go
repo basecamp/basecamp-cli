@@ -367,7 +367,7 @@ Supports batch commenting on multiple items at once.`,
 					}
 					return fmt.Errorf("failed to comment on items %s: %w", strings.Join(failed, ", "), converted)
 				}
-				return output.ErrUsage(fmt.Sprintf("Failed to comment on all recordings: %s", strings.Join(failed, ", ")))
+				return output.ErrUsage(fmt.Sprintf("Failed to comment on all items: %s", strings.Join(failed, ", ")))
 			}
 
 			// Build result
