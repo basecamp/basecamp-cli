@@ -33,11 +33,10 @@ func NewFilesCmd() *cobra.Command {
 		Use:     "files",
 		Aliases: []string{"file"},
 		Short:   "Manage Docs & Files",
-		Long: `Manage Docs & Files (vaults, uploads, documents).
+		Long: `Manage Docs & Files.
 
-A vault is a container for documents, uploads (files), and subvaults (folders).
-Each project has one root vault in its dock.`,
-		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, vaults for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocuments support Markdown content\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
+Each project has a root folder containing documents, uploads, and subfolders.`,
+		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, folders for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocuments support Markdown content\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runFilesList(cmd, project, vaultID)
@@ -67,7 +66,7 @@ func NewVaultsCmd() *cobra.Command {
 	cmd := NewFilesCmd()
 	cmd.Use = "vaults"
 	cmd.Aliases = []string{"vault", "folders"}
-	cmd.Short = "Manage vaults/folders (alias for files)"
+	cmd.Short = "Manage folders (alias for files)"
 	return cmd
 }
 
@@ -141,7 +140,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 
 	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid vault ID")
+		return output.ErrUsage("Invalid folder ID")
 	}
 
 	// Get vault details using SDK
@@ -320,7 +319,7 @@ func runFoldersList(cmd *cobra.Command, project, vaultID string, limit, page int
 
 	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid vault ID")
+		return output.ErrUsage("Invalid folder ID")
 	}
 
 	// Build pagination options
@@ -406,7 +405,7 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 
 			vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid vault ID")
+				return output.ErrUsage("Invalid folder ID")
 			}
 
 			// Create folder using SDK
@@ -532,7 +531,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 
 	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid vault ID")
+		return output.ErrUsage("Invalid folder ID")
 	}
 
 	// Build pagination options
@@ -660,7 +659,7 @@ func runDocsList(cmd *cobra.Command, project, vaultID string, limit, page int, a
 
 	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid vault ID")
+		return output.ErrUsage("Invalid folder ID")
 	}
 
 	// Build pagination options
@@ -756,7 +755,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 			vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid vault ID")
+				return output.ErrUsage("Invalid folder ID")
 			}
 
 			// Create document using SDK
