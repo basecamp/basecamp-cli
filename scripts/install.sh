@@ -307,6 +307,9 @@ main() {
 
   if [[ -n "$VERSION" ]]; then
     version="$VERSION"
+    if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+      error "Invalid version '${version}'. Expected semver format (e.g. 1.2.3)."
+    fi
   else
     version=$(get_latest_version)
   fi
