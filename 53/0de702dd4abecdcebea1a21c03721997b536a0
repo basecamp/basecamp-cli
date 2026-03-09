@@ -1,0 +1,23 @@
+internal/commands/recordings.go
+  6f414f157363725a 29-30,34,70-71,74-75,145-146,173-174,177-178,245-246,263-264,266,282-283,285,301-302,304,327,360,368,382,384,400,420,422,431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "530de702dd4abecdcebea1a21c03721997b536a0",
+  "prompts": {
+    "6f414f157363725a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bbd500d-0345-4d4c-a296-501c9e6ab242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 33,
+      "total_deletions": 33,
+      "accepted_lines": 33,
+      "overriden_lines": 0
+    }
+  }
+}
