@@ -1,0 +1,29 @@
+internal/commands/subscriptions.go
+  6f414f157363725a 18-20,22,24,51,53,55,77,109-111,113,129,138,158-160,162,178,185,207,209,211,229,231,233,259,304
+internal/commands/show.go
+  6f414f157363725a 21-22,105,109,130,151
+e2e/events.bats
+  6f414f157363725a 27
+internal/commands/events.go
+  6f414f157363725a 22-24,26,30-31,35,37,62,83,86,88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "543e0bf6a34fcd9645a40b29861ae1ba80162d0e",
+  "prompts": {
+    "6f414f157363725a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bbd500d-0345-4d4c-a296-501c9e6ab242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 49,
+      "total_deletions": 49,
+      "accepted_lines": 48,
+      "overriden_lines": 0
+    }
+  }
+}
