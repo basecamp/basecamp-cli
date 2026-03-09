@@ -65,9 +65,13 @@ detect_platform() {
 }
 
 get_latest_version() {
-  local version
-  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
-  if [[ -z "$version" ]]; then
+  local url version
+  # Follow the releases/latest redirect to get the version from the final URL.
+  # Avoids the GitHub API (no rate limiting) and grep/sed (better Windows compat).
+  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null) || true
+  version="${url##*/}"
+  version="${version#v}"
+  if [[ ! $version =~ ^[0-9]+\.[0-9]+ ]]; then
     error "Could not determine latest version. Check your network connection."
   fi
   echo "$version"

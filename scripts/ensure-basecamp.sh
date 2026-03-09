@@ -68,9 +68,11 @@ install_basecamp() {
   # Get platform
   platform=$(detect_platform) || return 1
 
-  # Get latest version
-  version=$(curl -fsSL "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
-  if [[ -z "$version" ]]; then
+  # Get latest version via redirect (avoids GitHub API rate limits and grep/sed on Windows)
+  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/basecamp/basecamp-cli/releases/latest" 2>/dev/null) || true
+  version="${url##*/}"
+  version="${version#v}"
+  if [[ ! $version =~ ^[0-9]+\.[0-9]+ ]]; then
     echo "Could not determine latest version" >&2
     return 1
   fi
