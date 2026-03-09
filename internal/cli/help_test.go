@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -130,6 +132,61 @@ func TestBareRootWithAgentFlagDoesNotShowHelp(t *testing.T) {
 	err := cmd.Execute()
 	require.NoError(t, err)
 
+	assert.NotContains(t, buf.String(), "CORE COMMANDS")
+}
+
+func TestBareRootWithConfigFormatJSONDoesNotShowHelp(t *testing.T) {
+	// Config-driven format=json should route to quickstart, not help.
+	// This exercises the IsMachineOutput() check through PersistentPreRunE.
+	tmpDir := t.TempDir()
+	bcDir := filepath.Join(tmpDir, "basecamp")
+	require.NoError(t, os.MkdirAll(bcDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(bcDir, "config.json"),
+		[]byte(`{"format":"json","onboarded":true}`),
+		0o644,
+	))
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewQuickStartCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// Help text should not appear — quickstart ran instead
+	assert.NotContains(t, buf.String(), "CORE COMMANDS")
+}
+
+func TestBareRootBadProfileResolvesPreferences(t *testing.T) {
+	// When bareRoot tolerates a bad profile, it should still resolve
+	// preferences from config (hints, stats). Verify by checking that
+	// PersistentPreRunE doesn't error and help text is suppressed
+	// (quickstart ran with config-driven format).
+	tmpDir := t.TempDir()
+	bcDir := filepath.Join(tmpDir, "basecamp")
+	require.NoError(t, os.MkdirAll(bcDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(bcDir, "config.json"),
+		[]byte(`{"format":"json","hints":true,"stats":true,"onboarded":true,"profiles":{"work":{}}}`),
+		0o644,
+	))
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_PROFILE", "nonexistent")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewQuickStartCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// Should not show help — config-driven JSON mode routes to quickstart
 	assert.NotContains(t, buf.String(), "CORE COMMANDS")
 }
 

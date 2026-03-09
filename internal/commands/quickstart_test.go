@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -107,4 +108,53 @@ func TestQuickstartWithNoConfig(t *testing.T) {
 	cmd := NewQuickStartCmd()
 	err := executeQuickstartCommand(cmd, app)
 	require.NoError(t, err, "quickstart should not error with empty config")
+}
+
+func TestRunQuickStartDefaultWithConfigFormatJSON(t *testing.T) {
+	// Config-driven format=json should route to quickstart (not help).
+	// Exercises the IsMachineOutput() check in RunQuickStartDefault.
+	app, buf := setupQuickstartTestApp(t, "", "")
+	app.Config.Format = "json"
+
+	cmd := &cobra.Command{Use: "basecamp", RunE: RunQuickStartDefault}
+	err := executeQuickstartCommand(cmd, app)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), `"version"`)
+}
+
+func TestRunQuickStartDefaultWithConfigFormatQuiet(t *testing.T) {
+	app, buf := setupQuickstartTestApp(t, "", "")
+	app.Config.Format = "quiet"
+
+	cmd := &cobra.Command{Use: "basecamp", RunE: RunQuickStartDefault}
+	err := executeQuickstartCommand(cmd, app)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), `"version"`)
+}
+
+func TestRunQuickStartDefaultIncludesBreadcrumbsWhenHintsEnabled(t *testing.T) {
+	// When hints are enabled (via resolvePreferences from config), quickstart
+	// output should include breadcrumbs. This verifies preferences are applied
+	// before quickstart runs.
+	app, buf := setupQuickstartTestApp(t, "", "")
+	app.Flags.Hints = true
+
+	cmd := &cobra.Command{Use: "basecamp", RunE: RunQuickStartDefault}
+	err := executeQuickstartCommand(cmd, app)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), `"breadcrumbs"`)
+}
+
+func TestRunQuickStartDefaultSuppressesBreadcrumbsWithoutHints(t *testing.T) {
+	// Default (hints=false) should suppress breadcrumbs.
+	app, buf := setupQuickstartTestApp(t, "", "")
+
+	cmd := &cobra.Command{Use: "basecamp", RunE: RunQuickStartDefault}
+	err := executeQuickstartCommand(cmd, app)
+	require.NoError(t, err)
+
+	assert.NotContains(t, buf.String(), `"breadcrumbs"`)
 }

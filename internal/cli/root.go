@@ -68,6 +68,7 @@ func NewRootCmd() *cobra.Command {
 				if bareRoot {
 					// Profile failed but config loaded — create app
 					// with base config so wizard/mode detection works.
+					resolvePreferences(cmd, cfg, &flags)
 					app := appctx.NewApp(cfg)
 					app.Flags = flags
 					app.ApplyFlags()
@@ -100,6 +101,7 @@ func NewRootCmd() *cobra.Command {
 			if !isConfigCmd(cmd) {
 				if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
 					if bareRoot {
+						resolvePreferences(cmd, cfg, &flags)
 						app := appctx.NewApp(cfg)
 						app.Flags = flags
 						app.ApplyFlags()
