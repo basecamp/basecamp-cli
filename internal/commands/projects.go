@@ -3,7 +3,9 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -121,6 +123,15 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 	}
 
 	projects := result.Projects
+
+	// Sort alphabetically by name (API returns reverse_chronologically).
+	// Only sort when we have the full result set — alphabetizing a partial
+	// page would create a misleading view.
+	if page == 0 && limit == 0 {
+		sort.Slice(projects, func(i, j int) bool {
+			return strings.ToLower(projects[i].Name) < strings.ToLower(projects[j].Name)
+		})
+	}
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.
 	// Only cache when listing all active projects (no filter/pagination), as filtered
