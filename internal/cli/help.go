@@ -141,6 +141,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	}
 	flags := []flagEntry{
 		{"-j", "--json", "Output as JSON"},
+		{"-m", "--md", "Output as Markdown"},
 		{"-q", "--quiet", "Quiet output"},
 		{"-p", "--project", "Project ID or name"},
 		{"-v", "--verbose", "Verbose output"},
