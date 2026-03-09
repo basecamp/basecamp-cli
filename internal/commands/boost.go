@@ -56,7 +56,7 @@ You can pass either an ID or a Basecamp URL:
   basecamp boost list 789 --project my-project
   basecamp boost list https://3.basecamp.com/123/buckets/456/todos/789
 
-Use --event to list boosts on a specific event within the recording.`,
+Use --event to list boosts on a specific event within the item.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -232,7 +232,7 @@ You can pass either an ID or a Basecamp URL:
   basecamp boost create 789 "🎉" --project my-project
   basecamp boost create https://3.basecamp.com/123/buckets/456/todos/789 "👍"
 
-Use --event to boost a specific event within the recording.`,
+Use --event to boost a specific event within the item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -386,7 +386,7 @@ func NewBoostShortcutCmd() *cobra.Command {
 		Short: "React with an emoji",
 		Long: `React to an item with an emoji (shortcut for boost create).
 
-Content as positional argument, --on for the recording:
+Content as positional argument, --on for the item:
   basecamp react "🎉" --on 789 --project my-project
   basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.ExactArgs(1),

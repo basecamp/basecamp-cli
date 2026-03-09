@@ -137,7 +137,11 @@ Results can be grouped by project or date.`,
 
 			summary := fmt.Sprintf("%d todos assigned to %s", todoCount, displayName)
 			if result.GroupedBy != "" {
-				summary += fmt.Sprintf(" (grouped by %s)", result.GroupedBy)
+				displayGroupBy := result.GroupedBy
+				if displayGroupBy == "bucket" {
+					displayGroupBy = "project"
+				}
+				summary += fmt.Sprintf(" (grouped by %s)", displayGroupBy)
 			}
 
 			respOpts := []output.ResponseOption{

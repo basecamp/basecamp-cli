@@ -587,7 +587,7 @@ func emitAgentHelp(cmd *cobra.Command) {
 		}
 	}
 
-	// Subcommands
+	// Subcommands (include aliases so the CLI surface snapshot tracks them)
 	for _, sub := range cmd.Commands() {
 		if sub.IsAvailableCommand() || sub.Name() == "help" {
 			info.Subcommands = append(info.Subcommands, agentSubcommand{
@@ -595,6 +595,13 @@ func emitAgentHelp(cmd *cobra.Command) {
 				Short: sub.Short,
 				Path:  sub.CommandPath(),
 			})
+			for _, alias := range sub.Aliases {
+				info.Subcommands = append(info.Subcommands, agentSubcommand{
+					Name:  alias,
+					Short: sub.Short,
+					Path:  strings.Replace(sub.CommandPath(), sub.Name(), alias, 1),
+				})
+			}
 		}
 	}
 
