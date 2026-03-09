@@ -24,6 +24,6 @@ load test_helper
   run basecamp events --help
   assert_success
   assert_output_contains "basecamp events"
-  assert_output_contains "recording_id"
+  assert_output_contains "id|url"
   assert_output_contains "audit"
 }

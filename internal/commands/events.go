@@ -19,22 +19,22 @@ func NewEventsCmd() *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "events <recording_id|url>",
-		Short: "View recording event history",
-		Long: `View the event history (audit trail) for any recording.
+		Use:   "events <id|url>",
+		Short: "View change history",
+		Long: `View the event history (audit trail) for any item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp events 789
   basecamp events https://3.basecamp.com/123/buckets/456/todos/789
 
-Events track all changes to a recording. Common event actions:
-- created - Recording was created
+Events track all changes to an item. Common event actions:
+- created - Item was created
 - completed/uncompleted - Todo completion state changed
 - assignment_changed - Assignees were added/removed
 - content_changed - Content was edited
-- archived/unarchived - Recording status changed
+- archived/unarchived - Status changed
 - commented_on - A comment was added`,
-		Annotations: map[string]string{"agent_notes": "Events show change history for a specific recording"},
+		Annotations: map[string]string{"agent_notes": "Events show change history for a specific item"},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -59,7 +59,7 @@ Events track all changes to a recording. Common event actions:
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid recording ID")
+				return output.ErrUsage("Invalid ID")
 			}
 
 			// Build pagination options
@@ -80,12 +80,12 @@ Events track all changes to a recording. Common event actions:
 			events := eventsResult.Events
 
 			respOpts := []output.ResponseOption{
-				output.WithSummary(fmt.Sprintf("%d events for recording #%s", len(events), recordingIDStr)),
+				output.WithSummary(fmt.Sprintf("%d events for #%s", len(events), recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
-						Action:      "recording",
+						Action:      "show",
 						Cmd:         fmt.Sprintf("basecamp show %s", recordingIDStr),
-						Description: "View the recording",
+						Description: "View item",
 					},
 				),
 			}

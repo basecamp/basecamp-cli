@@ -18,13 +18,13 @@ func NewShowCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "show [type] <id|url>",
-		Short: "Show any recording by ID",
-		Long: `Show details of any Basecamp recording by ID or URL.
+		Short: "Show any item by ID or URL",
+		Long: `Show details of any Basecamp item by ID or URL.
 
 	Types: todo, todolist, message, comment, card, card-table, document,
 	       schedule-entry, checkin, forward, upload
 
-	If no type specified, uses generic recording lookup.
+	If no type specified, uses generic lookup.
 
 	You can also pass a Basecamp URL directly:
 	  basecamp show https://3.basecamp.com/123/buckets/456/todos/789
@@ -102,11 +102,11 @@ func NewShowCmd() *cobra.Command {
 			if resp.StatusCode == http.StatusNoContent {
 				if recordType == "" || recordType == "recording" || recordType == "recordings" {
 					return output.ErrUsageHint(
-						fmt.Sprintf("Recording %s not found or type required", id),
+						fmt.Sprintf("Item %s not found or type required", id),
 						"Specify a type: basecamp show todo|todolist|message|comment|card|document <id>",
 					)
 				}
-				return output.ErrNotFound("recording", id)
+				return output.ErrNotFound("item", id)
 			}
 
 			// Parse response for summary
@@ -127,7 +127,7 @@ func NewShowCmd() *cobra.Command {
 				title = title[:57] + "..."
 			}
 
-			itemType := "Recording"
+			itemType := "Item"
 			if t, ok := data["type"].(string); ok && t != "" {
 				itemType = t
 			}
@@ -148,7 +148,7 @@ func NewShowCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type (todo, todolist, message, comment, card, card-table, document)")
+	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (todo, todolist, message, comment, card, card-table, document)")
 
 	return cmd
 }
