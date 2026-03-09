@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
-	"github.com/basecamp/cli/oauthcallback"
 	"github.com/basecamp/cli/pkce"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
@@ -478,7 +477,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
-		code, err = oauthcallback.WaitForCallback(waitCtx, state, listener, "")
+		code, err = waitForCallback(waitCtx, state, listener)
 		if err != nil {
 			return nil, err
 		}
