@@ -599,7 +599,7 @@ func emitAgentHelp(cmd *cobra.Command) {
 				info.Subcommands = append(info.Subcommands, agentSubcommand{
 					Name:  alias,
 					Short: sub.Short,
-					Path:  strings.Replace(sub.CommandPath(), sub.Name(), alias, 1),
+					Path:  strings.TrimSuffix(sub.CommandPath(), sub.Name()) + alias,
 				})
 			}
 		}

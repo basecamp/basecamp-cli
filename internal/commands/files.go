@@ -45,7 +45,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.PersistentFlags().StringVar(&vaultID, "vault", "", "Vault/folder ID (default: root)")
+	cmd.PersistentFlags().StringVar(&vaultID, "vault", "", "Folder ID (default: root)")
 	cmd.PersistentFlags().StringVar(&vaultID, "folder", "", "Folder ID (alias for --vault)")
 
 	cmd.AddCommand(
@@ -91,8 +91,8 @@ func NewUploadsCmd() *cobra.Command {
 func newFilesListCmd(project, vaultID *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List all items in a vault",
-		Long:  "List all folders, documents, and uploads in a vault.",
+		Short: "List all items in a folder",
+		Long:  "List all folders, documents, and uploads in a folder.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFilesList(cmd, *project, *vaultID)
 		},
@@ -232,7 +232,7 @@ func newFoldersCmd(project, vaultID *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "folders",
 		Aliases: []string{"folder", "vaults", "vault"},
-		Short:   "Manage folders/vaults",
+		Short:   "Manage folders",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFoldersList(cmd, *project, *vaultID, limit, page, all)
 		},
@@ -257,7 +257,7 @@ func newFoldersListCmd(project, vaultID *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List folders in a vault",
+		Short: "List folders in a folder",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFoldersList(cmd, *project, *vaultID, limit, page, all)
 		},
@@ -469,7 +469,7 @@ func newUploadsListCmd(project, vaultID *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List uploaded files in a vault",
+		Short: "List uploaded files in a folder",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUploadsList(cmd, *project, *vaultID, limit, page, all)
 		},
@@ -597,7 +597,7 @@ func newDocsListCmd(project, vaultID *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List documents in a vault",
+		Short: "List documents in a folder",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDocsList(cmd, *project, *vaultID, limit, page, all)
 		},
