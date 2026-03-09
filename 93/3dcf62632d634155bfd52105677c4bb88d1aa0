@@ -1,0 +1,29 @@
+internal/tui/workspace/widget/composer.go
+  f346bbfae565e6ea 397-402,412-414,643-645
+internal/richtext/dragpath.go
+  f346bbfae565e6ea 13-15,27,31-36,47-49,77-82
+internal/tui/workspace/widget/composer_test.go
+  f346bbfae565e6ea 7,341-343,382-384
+internal/richtext/dragpath_test.go
+  f346bbfae565e6ea 7,122-132,137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "933dcf62632d634155bfd52105677c4bb88d1aa0",
+  "prompts": {
+    "f346bbfae565e6ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3802856-203d-4aa8-bb83-5800b7dbcc5d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 54,
+      "total_deletions": 9,
+      "accepted_lines": 54,
+      "overriden_lines": 0
+    }
+  }
+}
