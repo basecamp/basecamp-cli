@@ -128,8 +128,12 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 	// Only sort when we have the full result set — alphabetizing a partial
 	// page would create a misleading view.
 	if page == 0 && limit == 0 {
+		keys := make([]string, len(projects))
+		for i := range projects {
+			keys[i] = strings.ToLower(projects[i].Name)
+		}
 		sort.Slice(projects, func(i, j int) bool {
-			return strings.ToLower(projects[i].Name) < strings.ToLower(projects[j].Name)
+			return keys[i] < keys[j]
 		})
 	}
 

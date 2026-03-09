@@ -13,7 +13,18 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/commands"
 )
 
+// isolateHelpTest sets env vars for hermetic help tests: disables keyring
+// and isolates config/cache dirs to a temp directory.
+func isolateHelpTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+}
+
 func TestRootHelpContainsCategoryHeaders(t *testing.T) {
+	isolateHelpTest(t)
+
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
 	cmd.AddCommand(commands.NewProjectsCmd())
@@ -35,6 +46,8 @@ func TestRootHelpContainsCategoryHeaders(t *testing.T) {
 }
 
 func TestRootHelpContainsExamples(t *testing.T) {
+	isolateHelpTest(t)
+
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
 	cmd.SetOut(&buf)
@@ -48,6 +61,8 @@ func TestRootHelpContainsExamples(t *testing.T) {
 }
 
 func TestRootHelpContainsLearnMore(t *testing.T) {
+	isolateHelpTest(t)
+
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
 	cmd.SetOut(&buf)
@@ -60,6 +75,8 @@ func TestRootHelpContainsLearnMore(t *testing.T) {
 }
 
 func TestSubcommandGetsDefaultHelp(t *testing.T) {
+	isolateHelpTest(t)
+
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
 	todos := commands.NewTodosCmd()
@@ -76,6 +93,8 @@ func TestSubcommandGetsDefaultHelp(t *testing.T) {
 }
 
 func TestAgentHelpProducesJSON(t *testing.T) {
+	isolateHelpTest(t)
+
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
 	cmd.SetOut(&buf)
@@ -92,9 +111,8 @@ func TestBareRootToleratesBadProfile(t *testing.T) {
 	// In non-TTY test environments the bare root falls through to quickstart
 	// (not help), so we only assert no error — the important thing is that
 	// a bad profile doesn't crash.
+	isolateHelpTest(t)
 	t.Setenv("BASECAMP_PROFILE", "nonexistent")
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	cmd := NewRootCmd()
 	cmd.SetOut(&bytes.Buffer{})
@@ -107,7 +125,7 @@ func TestBareRootWithJSONFlagDoesNotShowHelp(t *testing.T) {
 	// basecamp --json should NOT show help text — it runs quickstart which
 	// writes JSON to app.Output (stdout). We verify help is not rendered;
 	// JSON correctness is covered by e2e tests.
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	isolateHelpTest(t)
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
@@ -122,7 +140,7 @@ func TestBareRootWithJSONFlagDoesNotShowHelp(t *testing.T) {
 
 func TestBareRootWithAgentFlagDoesNotShowHelp(t *testing.T) {
 	// basecamp --agent should NOT show help text — it runs quickstart
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	isolateHelpTest(t)
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
@@ -138,6 +156,7 @@ func TestBareRootWithAgentFlagDoesNotShowHelp(t *testing.T) {
 func TestBareRootWithConfigFormatJSONDoesNotShowHelp(t *testing.T) {
 	// Config-driven format=json should route to quickstart, not help.
 	// This exercises the IsMachineOutput() check through PersistentPreRunE.
+	isolateHelpTest(t)
 	tmpDir := t.TempDir()
 	bcDir := filepath.Join(tmpDir, "basecamp")
 	require.NoError(t, os.MkdirAll(bcDir, 0o755))
@@ -147,7 +166,6 @@ func TestBareRootWithConfigFormatJSONDoesNotShowHelp(t *testing.T) {
 		0o644,
 	))
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
@@ -166,6 +184,7 @@ func TestBareRootBadProfileResolvesPreferences(t *testing.T) {
 	// preferences from config (hints, stats). Verify by checking that
 	// PersistentPreRunE doesn't error and help text is suppressed
 	// (quickstart ran with config-driven format).
+	isolateHelpTest(t)
 	tmpDir := t.TempDir()
 	bcDir := filepath.Join(tmpDir, "basecamp")
 	require.NoError(t, os.MkdirAll(bcDir, 0o755))
@@ -176,7 +195,6 @@ func TestBareRootBadProfileResolvesPreferences(t *testing.T) {
 	))
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 	t.Setenv("BASECAMP_PROFILE", "nonexistent")
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
@@ -194,6 +212,8 @@ func TestRootHelpUsesLiveCommandDescriptions(t *testing.T) {
 	// Help descriptions should come from the registered commands' Short field,
 	// not from the catalog. This catches drift between catalog copy and actual
 	// command metadata.
+	isolateHelpTest(t)
+
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
 	search := commands.NewSearchCmd()

@@ -546,9 +546,10 @@ func TestRenderListTodosNoPaddingOnContent(t *testing.T) {
 		t.Fatalf("Expected 2 lines, got %d:\n%s", len(lines), buf.String())
 	}
 
-	// Content (title role) should NOT be padded to max width
-	assert.True(t, strings.HasPrefix(lines[0], "Short  "), "Short content should not be padded, got: %q", lines[0])
-	assert.False(t, strings.HasPrefix(lines[0], "Short                    "), "Content should not be left-padded to max width, got: %q", lines[0])
+	// Content (title role) should have a two-space column separator after the
+	// value, NOT be padded to the max content width (34 chars).
+	assert.True(t, strings.HasPrefix(lines[0], "Short  "), "expected two-space separator after Short, got: %q", lines[0])
+	assert.False(t, strings.HasPrefix(lines[0], "Short   "), "content should not be padded beyond two-space separator, got: %q", lines[0])
 }
 
 // =============================================================================
