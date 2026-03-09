@@ -62,7 +62,7 @@ func RunQuickStartDefault(cmd *cobra.Command, args []string) error {
 	if app != nil && isFirstRun(app) {
 		return runWizard(cmd, app)
 	}
-	if app == nil || !app.IsInteractive() {
+	if app != nil && !app.IsInteractive() {
 		return runQuickStart(cmd, args)
 	}
 	return cmd.Help()
