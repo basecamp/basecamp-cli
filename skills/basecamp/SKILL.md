@@ -88,7 +88,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 
 Always pass `--json` or `--md` explicitly — auto-detection depends on config and may not produce the format you expect. Use `--md` when composing reports, summarizing data, or displaying results inline. `--agent` is for headless integration scripts.
 
-**Other modes:** `--quiet` (success: raw JSON, no envelope; errors: `{ok:false,...}`), `--ids-only`, `--count`, `--styled` (force ANSI), `-v` / `-vv` (verbose/trace).
+**Other modes:** `--quiet` (success: raw JSON, no envelope; errors: `{ok:false,...}`), `--ids-only`, `--count`, `--stats` (session statistics), `--styled` (force ANSI), `-v` / `-vv` (verbose/trace).
 
 ### CLI Introspection
 
