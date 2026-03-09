@@ -72,7 +72,7 @@ install_basecamp() {
   url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/basecamp/basecamp-cli/releases/latest" 2>/dev/null) || true
   version="${url##*/}"
   version="${version#v}"
-  if [[ ! $version =~ ^[0-9]+\.[0-9]+ ]]; then
+  if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
     echo "Could not determine latest version" >&2
     return 1
   fi
