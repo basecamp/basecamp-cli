@@ -73,7 +73,7 @@ install_basecamp() {
   version="${url##*/}"
   version="${version#v}"
   if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Could not determine latest version" >&2
+    echo "Could not determine latest version (resolved '${version:-<empty>}' from '${url:-<no URL>}')" >&2
     return 1
   fi
 
