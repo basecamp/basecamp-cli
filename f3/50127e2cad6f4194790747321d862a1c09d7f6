@@ -1,0 +1,23 @@
+scripts/ensure-basecamp.sh
+  1c749d0015e34433 71-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "f350127e2cad6f4194790747321d862a1c09d7f6",
+  "prompts": {
+    "1c749d0015e34433": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "705342d6-1355-4609-8df7-fb24997adad7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    }
+  }
+}
