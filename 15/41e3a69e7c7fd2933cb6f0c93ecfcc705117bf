@@ -1,0 +1,27 @@
+internal/cli/help_test.go
+  3b024b264e0a41c1 89-92,95,98
+e2e/core.bats
+  3b024b264e0a41c1 16,18,21-22
+internal/commands/quickstart.go
+  3b024b264e0a41c1 57-59,65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "1541e3a69e7c7fd2933cb6f0c93ecfcc705117bf",
+  "prompts": {
+    "3b024b264e0a41c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "502ce4f7-c7e9-4a15-a012-49d3233e226c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 12,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}
