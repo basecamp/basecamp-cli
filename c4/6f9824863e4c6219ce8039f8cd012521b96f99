@@ -1,0 +1,25 @@
+internal/tui/workspace/widget/composer_test.go
+  f346bbfae565e6ea 643-671
+internal/tui/workspace/widget/composer.go
+  f346bbfae565e6ea 352,354-357,359-363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "c46f9824863e4c6219ce8039f8cd012521b96f99",
+  "prompts": {
+    "f346bbfae565e6ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3802856-203d-4aa8-bb83-5800b7dbcc5d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 41,
+      "total_deletions": 3,
+      "accepted_lines": 40,
+      "overriden_lines": 0
+    }
+  }
+}
