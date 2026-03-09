@@ -35,7 +35,7 @@ func NewTodosCmd() *cobra.Command {
 		Use:         "todos",
 		Short:       "Manage todos",
 		Long:        "List, show, create, and manage Basecamp todos.",
-		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other recording types\nbasecamp done accepts multiple IDs: basecamp done 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue\nUse basecamp todo --content \"text\" not basecamp todo \"text\""},
+		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other content types\nbasecamp done accepts multiple IDs: basecamp done 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue\nUse basecamp todo --content \"text\" not basecamp todo \"text\""},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runTodosList(cmd, flags)

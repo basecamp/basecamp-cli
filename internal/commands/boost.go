@@ -18,11 +18,11 @@ func NewBoostsCmd() *cobra.Command {
 		Use:     "boost [action]",
 		Aliases: []string{"boosts"},
 		Short:   "Manage boosts (reactions)",
-		Long: `Manage boosts (emoji reactions) on recordings.
+		Long: `Manage boosts (emoji reactions) on items.
 
-Use 'basecamp boost list <recording-id>' to see boosts on a recording.
+Use 'basecamp boost list <id>' to see boosts on an item.
 Use 'basecamp boost show <boost-id>' to view a specific boost.
-Use 'basecamp boost create <recording-id> "emoji"' to boost a recording.
+Use 'basecamp boost create <id> "emoji"' to boost an item.
 Use 'basecamp boost delete <boost-id>' to remove a boost.`,
 		Annotations: map[string]string{"agent_notes": "Boost content is typically an emoji but can be text\nbasecamp react is a shortcut for boost create"},
 		Args:        cobra.MinimumNArgs(0),
@@ -48,15 +48,15 @@ func newBoostListCmd(project *string) *cobra.Command {
 	var eventID string
 
 	cmd := &cobra.Command{
-		Use:   "list <recording-id|url>",
-		Short: "List boosts on a recording",
-		Long: `List boosts on a recording.
+		Use:   "list <id|url>",
+		Short: "List boosts on an item",
+		Long: `List boosts on an item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp boost list 789 --project my-project
   basecamp boost list https://3.basecamp.com/123/buckets/456/todos/789
 
-Use --event to list boosts on a specific event within the recording.`,
+Use --event to list boosts on a specific event within the item.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -99,7 +99,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 
 	recordingIDInt, err := strconv.ParseInt(recordingID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid recording ID")
+		return output.ErrUsage("Invalid ID")
 	}
 
 	if eventID != "" {
@@ -140,7 +140,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 			output.Breadcrumb{
 				Action:      "create",
 				Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --project %s", recordingID, resolvedProjectID),
-				Description: "Boost this recording",
+				Description: "Boost this item",
 			},
 		),
 	)
@@ -224,15 +224,15 @@ func newBoostCreateCmd(project *string) *cobra.Command {
 	var eventID string
 
 	cmd := &cobra.Command{
-		Use:   "create <recording-id|url> <content>",
-		Short: "Boost a recording",
-		Long: `Boost a recording with an emoji reaction.
+		Use:   "create <id|url> <content>",
+		Short: "Boost an item",
+		Long: `Boost an item with an emoji reaction.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp boost create 789 "🎉" --project my-project
   basecamp boost create https://3.basecamp.com/123/buckets/456/todos/789 "👍"
 
-Use --event to boost a specific event within the recording.`,
+Use --event to boost a specific event within the item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -275,7 +275,7 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 
 	recordingIDInt, err := strconv.ParseInt(recordingID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid recording ID")
+		return output.ErrUsage("Invalid ID")
 	}
 
 	if eventID != "" {
@@ -331,7 +331,7 @@ func newBoostDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <boost-id|url>",
 		Short: "Delete a boost",
-		Long: `Delete a boost from a recording.
+		Long: `Delete a boost.
 
 You can pass either a boost ID or a Basecamp URL:
   basecamp boost delete 789
@@ -365,7 +365,7 @@ You can pass either a boost ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "basecamp boost list <recording-id> --project <project>",
+						Cmd:         "basecamp boost list <id> --project <project>",
 						Description: "View boosts",
 					},
 				),
@@ -383,10 +383,10 @@ func NewBoostShortcutCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "react <content>",
-		Short: "Boost a recording",
-		Long: `Boost a recording with an emoji reaction (shortcut for boost create).
+		Short: "React with an emoji",
+		Long: `React to an item with an emoji (shortcut for boost create).
 
-Content as positional argument, --on for the recording:
+Content as positional argument, --on for the item:
   basecamp react "🎉" --on 789 --project my-project
   basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789`,
 		Args: cobra.ExactArgs(1),
@@ -406,8 +406,8 @@ Content as positional argument, --on for the recording:
 		},
 	}
 
-	cmd.Flags().StringVarP(&recording, "on", "r", "", "Recording ID or URL to boost")
-	cmd.Flags().StringVar(&recording, "recording", "", "Recording ID or URL (alias for --on)")
+	cmd.Flags().StringVarP(&recording, "on", "r", "", "ID or URL to react to")
+	cmd.Flags().StringVar(&recording, "recording", "", "ID or URL (alias for --on)")
 	cmd.Flags().StringVar(&eventID, "event", "", "Event ID (for event-specific boosts)")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")

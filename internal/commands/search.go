@@ -80,7 +80,7 @@ Use 'basecamp search metadata' to see available search scopes.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         "basecamp show <id> --project <bucket.id>",
+						Cmd:         "basecamp show <id> --project <project_id>",
 						Description: "Show result details",
 					},
 				),

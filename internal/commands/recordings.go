@@ -26,12 +26,12 @@ func NewRecordingsCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "recordings [type]",
-		Short: "List recordings across projects",
-		Long: `List recordings across projects by type.
+		Short: "Browse content across projects",
+		Long: `Browse content across projects by type.
 
 Provides filtered view of content across all projects.
 Type is required: todos, messages, documents, comments, cards, uploads.`,
-		Annotations: map[string]string{"agent_notes": "Recordings does NOT include assignee data — cannot filter by person\nFor assigned todos use: basecamp reports assigned --json\nDefault status is active — use --status archived or --status trashed for other states\nTypes: todos, messages, documents, comments, cards, uploads"},
+		Annotations: map[string]string{"agent_notes": "Does NOT include assignee data — cannot filter by person\nFor assigned todos use: basecamp reports assigned --json\nDefault status is active — use --status archived or --status trashed for other states\nTypes: todos, messages, documents, comments, cards, uploads"},
 		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("assignee") {
@@ -67,12 +67,12 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Filter by project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
-	cmd.Flags().StringVarP(&recordingType, "type", "t", "", "Recording type (Todo, Message, Document, Comment, Kanban::Card, Upload)")
-	cmd.Flags().StringVarP(&status, "status", "s", "active", "Recording status (active, trashed, archived)")
+	cmd.Flags().StringVarP(&recordingType, "type", "t", "", "Content type (todo, message, document, comment, card, upload)")
+	cmd.Flags().StringVarP(&status, "status", "s", "active", "Status filter (active, trashed, archived)")
 	cmd.Flags().StringVar(&sortBy, "sort", "updated_at", "Sort field (updated_at, created_at)")
 	cmd.Flags().StringVar(&direction, "direction", "desc", "Sort direction (asc, desc)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of items to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all items (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Not supported — use reports assigned instead")
 	_ = cmd.Flags().MarkHidden("assignee")
@@ -142,8 +142,8 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list [type]",
-		Short: "List recordings by type",
-		Long:  "List all recordings of a specific type across projects.",
+		Short: "List content by type",
+		Long:  "List all items of a specific type across projects.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("assignee") {
@@ -170,12 +170,12 @@ func newRecordingsListCmd(project *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordingType, "type", "t", "", "Recording type")
-	cmd.Flags().StringVarP(&status, "status", "s", "active", "Recording status (active, trashed, archived)")
+	cmd.Flags().StringVarP(&recordingType, "type", "t", "", "Content type")
+	cmd.Flags().StringVarP(&status, "status", "s", "active", "Status filter (active, trashed, archived)")
 	cmd.Flags().StringVar(&sortBy, "sort", "updated_at", "Sort field")
 	cmd.Flags().StringVar(&direction, "direction", "desc", "Sort direction (asc, desc)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of recordings to fetch (0 = default 100)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all recordings (no limit)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of items to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all items (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Not supported — use reports assigned instead")
 	_ = cmd.Flags().MarkHidden("assignee")
@@ -242,8 +242,8 @@ func runRecordingsList(cmd *cobra.Command, app *appctx.App, recordingType, proje
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         "basecamp show <id> --project <bucket.id>",
-				Description: "Show recording (use bucket.id from result)",
+				Cmd:         "basecamp show <id> --project <project_id>",
+				Description: "Show item details",
 			},
 		),
 	}
@@ -260,10 +260,10 @@ func newRecordingsTrashCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "trash <id|url>",
 		Aliases: []string{"trashed"},
-		Short:   "Move a recording to trash",
-		Long: `Move a recording to the trash.
+		Short:   "Move an item to trash",
+		Long: `Move an item to the trash.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp recordings trash 789
   basecamp recordings trash https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
@@ -279,10 +279,10 @@ func newRecordingsArchiveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "archive <id|url>",
 		Aliases: []string{"archived"},
-		Short:   "Archive a recording",
-		Long: `Archive a recording to remove it from active view.
+		Short:   "Archive an item",
+		Long: `Archive an item to remove it from active view.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp recordings archive 789
   basecamp recordings archive https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
@@ -298,10 +298,10 @@ func newRecordingsRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "restore <id|url>",
 		Aliases: []string{"active"},
-		Short:   "Restore a recording",
-		Long: `Restore a recording from trash or archive to active status.
+		Short:   "Restore an item",
+		Long: `Restore an item from trash or archive to active status.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp recordings restore 789
   basecamp recordings restore https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
@@ -324,7 +324,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 	// Parse recording ID
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid recording ID")
+		return output.ErrUsage("Invalid ID")
 	}
 
 	// Call appropriate SDK method based on status
@@ -357,7 +357,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 		statusMsg = fmt.Sprintf("Changed to %s", newStatus)
 	}
 
-	summary := fmt.Sprintf("%s recording #%s", statusMsg, recordingIDStr)
+	summary := fmt.Sprintf("%s #%s", statusMsg, recordingIDStr)
 
 	return app.OK(map[string]any{"id": recordingID, "status": newStatus},
 		output.WithSummary(summary),
@@ -365,7 +365,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 			output.Breadcrumb{
 				Action:      "show",
 				Cmd:         fmt.Sprintf("basecamp show %s", recordingIDStr),
-				Description: "View recording",
+				Description: "View item",
 			},
 		),
 	)
@@ -379,9 +379,9 @@ func newRecordingsVisibilityCmd() *cobra.Command {
 		Use:     "visibility <id|url>",
 		Aliases: []string{"client-visibility"},
 		Short:   "Set client visibility",
-		Long: `Set whether a recording is visible to clients.
+		Long: `Set whether an item is visible to clients.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp recordings visibility 789 --visible
   basecamp recordings visibility https://3.basecamp.com/123/buckets/456/recordings/789 --visible`,
 		Args: cobra.ExactArgs(1),
@@ -397,7 +397,7 @@ You can pass either a recording ID or a Basecamp URL:
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid recording ID")
+				return output.ErrUsage("Invalid ID")
 			}
 
 			// Determine visibility
@@ -417,9 +417,9 @@ You can pass either a recording ID or a Basecamp URL:
 
 			var summary string
 			if isVisible {
-				summary = fmt.Sprintf("Recording #%s now visible to clients", recordingIDStr)
+				summary = fmt.Sprintf("#%s now visible to clients", recordingIDStr)
 			} else {
-				summary = fmt.Sprintf("Recording #%s now hidden from clients", recordingIDStr)
+				summary = fmt.Sprintf("#%s now hidden from clients", recordingIDStr)
 			}
 
 			return app.OK(recording,
@@ -428,7 +428,7 @@ You can pass either a recording ID or a Basecamp URL:
 					output.Breadcrumb{
 						Action:      "show",
 						Cmd:         fmt.Sprintf("basecamp show %s", recordingIDStr),
-						Description: "View recording",
+						Description: "View item",
 					},
 				),
 			)

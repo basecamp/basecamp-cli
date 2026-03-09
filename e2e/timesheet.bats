@@ -77,7 +77,7 @@ load test_helper
   assert_output_contains "basecamp timesheet"
   assert_output_contains "report"
   assert_output_contains "project"
-  assert_output_contains "recording"
+  assert_output_contains "item"
 }
 
 

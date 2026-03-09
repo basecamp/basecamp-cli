@@ -15,13 +15,13 @@ import (
 // NewSubscriptionsCmd creates the subscriptions command for managing recording subscriptions.
 func NewSubscriptionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "subscriptions <recording_id|url>",
-		Short: "Manage recording subscriptions",
-		Long: `Manage recording subscriptions (who gets notified on changes).
+		Use:   "subscriptions <id|url>",
+		Short: "Manage notification subscriptions",
+		Long: `Manage notification subscriptions (who gets notified on changes).
 
-Subscriptions control who receives notifications when a recording is updated,
+Subscriptions control who receives notifications when an item is updated,
 commented on, or otherwise changed.`,
-		Annotations: map[string]string{"agent_notes": "Subscriptions control email/push notifications for a recording"},
+		Annotations: map[string]string{"agent_notes": "Subscriptions control email/push notifications for an item"},
 		Args:        cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -48,11 +48,11 @@ commented on, or otherwise changed.`,
 
 func newSubscriptionsShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <recording_id|url>",
+		Use:   "show <id|url>",
 		Short: "Show current subscribers",
-		Long: `Display all current subscribers for a recording.
+		Long: `Display all current subscribers for an item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp subscriptions show 789
   basecamp subscriptions show https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
@@ -74,7 +74,7 @@ func runSubscriptionsShow(cmd *cobra.Command, recordingIDStr string) error {
 
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid recording ID")
+		return output.ErrUsage("Invalid ID")
 	}
 
 	subscription, err := app.Account().Subscriptions().Get(cmd.Context(), recordingID)
@@ -106,11 +106,11 @@ func runSubscriptionsShow(cmd *cobra.Command, recordingIDStr string) error {
 
 func newSubscriptionsSubscribeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "subscribe <recording_id|url>",
-		Short: "Subscribe yourself to a recording",
-		Long: `Subscribe yourself to receive notifications for a recording.
+		Use:   "subscribe <id|url>",
+		Short: "Subscribe yourself",
+		Long: `Subscribe yourself to receive notifications for an item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp subscriptions subscribe 789
   basecamp subscriptions subscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
@@ -126,7 +126,7 @@ You can pass either a recording ID or a Basecamp URL:
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid recording ID")
+				return output.ErrUsage("Invalid ID")
 			}
 
 			subscription, err := app.Account().Subscriptions().Subscribe(cmd.Context(), recordingID)
@@ -135,7 +135,7 @@ You can pass either a recording ID or a Basecamp URL:
 			}
 
 			return app.OK(subscription,
-				output.WithSummary(fmt.Sprintf("Subscribed to recording #%s", recordingIDStr)),
+				output.WithSummary(fmt.Sprintf("Subscribed to #%s", recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -155,11 +155,11 @@ You can pass either a recording ID or a Basecamp URL:
 
 func newSubscriptionsUnsubscribeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "unsubscribe <recording_id|url>",
-		Short: "Unsubscribe yourself from a recording",
-		Long: `Unsubscribe yourself from notifications for a recording.
+		Use:   "unsubscribe <id|url>",
+		Short: "Unsubscribe yourself",
+		Long: `Unsubscribe yourself from notifications for an item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp subscriptions unsubscribe 789
   basecamp subscriptions unsubscribe https://3.basecamp.com/123/buckets/456/recordings/789`,
 		Args: cobra.ExactArgs(1),
@@ -175,14 +175,14 @@ You can pass either a recording ID or a Basecamp URL:
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid recording ID")
+				return output.ErrUsage("Invalid ID")
 			}
 
 			// Unsubscribe - ignore errors for idempotency
 			_ = app.Account().Subscriptions().Unsubscribe(cmd.Context(), recordingID)
 
 			return app.OK(map[string]any{},
-				output.WithSummary(fmt.Sprintf("Unsubscribed from recording #%s", recordingIDStr)),
+				output.WithSummary(fmt.Sprintf("Unsubscribed from #%s", recordingIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -204,11 +204,11 @@ func newSubscriptionsAddCmd() *cobra.Command {
 	var peopleIDs string
 
 	cmd := &cobra.Command{
-		Use:   "add <recording_id|url> [person_ids]",
+		Use:   "add <id|url> [person_ids]",
 		Short: "Add people to subscribers",
-		Long: `Add people to the subscribers list for a recording.
+		Long: `Add people to the subscribers list for an item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp subscriptions add 789 --people 1,2,3
   basecamp subscriptions add https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
 		Args: cobra.RangeArgs(1, 2),
@@ -226,11 +226,11 @@ func newSubscriptionsRemoveCmd() *cobra.Command {
 	var peopleIDs string
 
 	cmd := &cobra.Command{
-		Use:   "remove <recording_id|url> [person_ids]",
+		Use:   "remove <id|url> [person_ids]",
 		Short: "Remove people from subscribers",
-		Long: `Remove people from the subscribers list for a recording.
+		Long: `Remove people from the subscribers list for an item.
 
-You can pass either a recording ID or a Basecamp URL:
+You can pass either an ID or a Basecamp URL:
   basecamp subscriptions remove 789 --people 1,2,3
   basecamp subscriptions remove https://3.basecamp.com/123/buckets/456/recordings/789 --people 1,2,3`,
 		Args: cobra.RangeArgs(1, 2),
@@ -256,7 +256,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string, peopleIDs, mode s
 
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid recording ID")
+		return output.ErrUsage("Invalid ID")
 	}
 
 	// Person IDs can come from second argument or --people flag
@@ -301,7 +301,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string, peopleIDs, mode s
 	}
 
 	return app.OK(subscription,
-		output.WithSummary(fmt.Sprintf("%s subscribers for recording #%s", actionWord, recordingIDStr)),
+		output.WithSummary(fmt.Sprintf("%s subscribers for #%s", actionWord, recordingIDStr)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",

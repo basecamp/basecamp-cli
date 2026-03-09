@@ -52,9 +52,9 @@ func CommandCategories() []CommandCategory {
 				{Name: "message", Category: "shortcut", Description: "Post a message"},
 				{Name: "card", Category: "shortcut", Description: "Create a card"},
 				{Name: "comment", Category: "shortcut", Description: "Add a comment"},
-				{Name: "assign", Category: "shortcut", Description: "Assign a recording"},
+				{Name: "assign", Category: "shortcut", Description: "Assign someone to an item"},
 				{Name: "unassign", Category: "shortcut", Description: "Remove assignment"},
-				{Name: "react", Category: "shortcut", Description: "Boost a recording"},
+				{Name: "react", Category: "shortcut", Description: "React with an emoji"},
 			},
 		},
 		{
@@ -70,7 +70,7 @@ func CommandCategories() []CommandCategory {
 			Name: "Scheduling & Time",
 			Commands: []CommandInfo{
 				{Name: "schedule", Category: "scheduling", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},
-				{Name: "timesheet", Category: "scheduling", Description: "Manage time tracking", Actions: []string{"report", "project", "recording"}},
+				{Name: "timesheet", Category: "scheduling", Description: "Manage time tracking", Actions: []string{"report", "project", "item"}},
 				{Name: "checkins", Category: "scheduling", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
 				{Name: "timeline", Category: "scheduling", Description: "View activity timelines", Actions: []string{}},
 				{Name: "reports", Category: "scheduling", Description: "View reports", Actions: []string{"assignable", "assigned", "overdue", "schedule"}},
@@ -100,9 +100,9 @@ func CommandCategories() []CommandCategory {
 			Name: "Search & Browse",
 			Commands: []CommandInfo{
 				{Name: "search", Category: "search", Description: "Search across projects"},
-				{Name: "recordings", Category: "search", Description: "Browse recordings by type/status", Actions: []string{"list", "trash", "archive", "restore", "visibility"}},
-				{Name: "show", Category: "search", Description: "Show any recording by ID"},
-				{Name: "events", Category: "search", Description: "View recording change history"},
+				{Name: "recordings", Category: "search", Description: "Browse content by type across projects", Actions: []string{"list", "trash", "archive", "restore", "visibility"}},
+				{Name: "show", Category: "search", Description: "Show any item by ID"},
+				{Name: "events", Category: "search", Description: "View change history"},
 				{Name: "url", Category: "search", Description: "Parse Basecamp URLs"},
 			},
 		},

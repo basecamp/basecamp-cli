@@ -454,7 +454,7 @@ func transformCobraError(err error) error {
 		flag := after
 		// Special cases for flags with custom error messages
 		if flag == "--on" {
-			return output.ErrUsage("--on requires a recording ID")
+			return output.ErrUsage("--on requires an ID")
 		}
 		return output.ErrUsage(flag + " requires a value")
 	}
@@ -501,7 +501,7 @@ func transformCobraError(err error) error {
 			case "to":
 				return output.ErrUsage("Position required")
 			case "on":
-				return output.ErrUsage("Recording ID required")
+				return output.ErrUsage("ID required")
 			default:
 				return output.ErrUsage(flag + " required")
 			}
@@ -587,7 +587,7 @@ func emitAgentHelp(cmd *cobra.Command) {
 		}
 	}
 
-	// Subcommands
+	// Subcommands (include aliases so the CLI surface snapshot tracks them)
 	for _, sub := range cmd.Commands() {
 		if sub.IsAvailableCommand() || sub.Name() == "help" {
 			info.Subcommands = append(info.Subcommands, agentSubcommand{
@@ -595,6 +595,13 @@ func emitAgentHelp(cmd *cobra.Command) {
 				Short: sub.Short,
 				Path:  sub.CommandPath(),
 			})
+			for _, alias := range sub.Aliases {
+				info.Subcommands = append(info.Subcommands, agentSubcommand{
+					Name:  alias,
+					Short: sub.Short,
+					Path:  strings.TrimSuffix(sub.CommandPath(), sub.Name()) + alias,
+				})
+			}
 		}
 	}
 
