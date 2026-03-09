@@ -132,9 +132,25 @@ func RenderList(w io.Writer, schema *EntitySchema, data []map[string]any, styles
 		return nil
 	}
 
+	// Pre-pass: compute max width for meta-role columns (e.g. IDs) so they
+	// right-align. Non-meta columns are left as-is to avoid wasting space
+	// on variable-length content like todo titles.
+	widths := make([]int, len(columns))
+	for i, col := range columns {
+		if schema.Fields[col].Role != "meta" {
+			continue
+		}
+		for _, item := range data {
+			formatted := singleLine(FormatField(schema.Fields[col], col, item[col], locale))
+			if len(formatted) > widths[i] {
+				widths[i] = len(formatted)
+			}
+		}
+	}
+
 	// Render each row as a compact line
 	for _, item := range data {
-		renderListRow(&b, schema, columns, item, styles, locale)
+		renderListRow(&b, schema, columns, widths, item, styles, locale)
 	}
 
 	_, err := io.WriteString(w, b.String())
@@ -296,12 +312,17 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 	}
 }
 
-func renderListRow(b *strings.Builder, schema *EntitySchema, columns []string, data map[string]any, styles Styles, locale Locale) {
+func renderListRow(b *strings.Builder, schema *EntitySchema, columns []string, widths []int, data map[string]any, styles Styles, locale Locale) {
 	parts := make([]string, 0, len(columns))
-	for _, col := range columns {
+	for i, col := range columns {
 		spec := schema.Fields[col]
 		val := data[col]
 		formatted := singleLine(FormatField(spec, col, val, locale))
+
+		// Right-align meta columns (IDs) when width was computed
+		if widths[i] > 0 && spec.Role == "meta" {
+			formatted = fmt.Sprintf("%*s", widths[i], formatted)
+		}
 
 		if styles.Styled && spec.Role == "title" {
 			formatted = hyperlinkFromData(formatted, data)

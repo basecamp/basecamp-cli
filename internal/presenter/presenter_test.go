@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
@@ -489,6 +491,64 @@ func TestRenderListTodos(t *testing.T) {
 	if !strings.Contains(out, "Write tests") {
 		t.Errorf("Output should contain 'Write tests', got:\n%s", out)
 	}
+}
+
+func TestRenderListProjectsRightAlignsID(t *testing.T) {
+	schema := LookupByName("project")
+	if schema == nil {
+		t.Fatal("Expected project schema")
+	}
+
+	data := []map[string]any{
+		{"id": float64(5), "name": "Alpha"},
+		{"id": float64(12345), "name": "Beta"},
+		{"id": float64(99), "name": "Gamma"},
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var buf strings.Builder
+	if err := RenderList(&buf, schema, data, styles, enUS); err != nil {
+		t.Fatalf("RenderList failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("Expected 3 lines, got %d:\n%s", len(lines), buf.String())
+	}
+
+	// ID column should be right-aligned: "    5" and "12345" and "   99"
+	assert.True(t, strings.HasPrefix(lines[0], "    5"), "ID 5 should be right-padded, got: %q", lines[0])
+	assert.True(t, strings.HasPrefix(lines[1], "12345"), "ID 12345 should have no padding, got: %q", lines[1])
+	assert.True(t, strings.HasPrefix(lines[2], "   99"), "ID 99 should be right-padded, got: %q", lines[2])
+}
+
+func TestRenderListTodosNoPaddingOnContent(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{"content": "Short", "completed": false, "due_on": "", "assignees": []any{}},
+		{"content": "A much longer todo item name here", "completed": true, "due_on": "", "assignees": []any{}},
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var buf strings.Builder
+	if err := RenderList(&buf, schema, data, styles, enUS); err != nil {
+		t.Fatalf("RenderList failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Expected 2 lines, got %d:\n%s", len(lines), buf.String())
+	}
+
+	// Content (title role) should NOT be padded to max width
+	assert.True(t, strings.HasPrefix(lines[0], "Short  "), "Short content should not be padded, got: %q", lines[0])
+	assert.False(t, strings.HasPrefix(lines[0], "Short                    "), "Content should not be left-padded to max width, got: %q", lines[0])
 }
 
 // =============================================================================
