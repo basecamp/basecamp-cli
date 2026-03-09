@@ -69,27 +69,43 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 
 **MUST follow these rules:**
 
-1. **Always use `--json`** for structured, predictable output
+1. **Choose the right output mode** — `--json` when you need to parse data; `--md` when presenting results to a human (see Output Modes below)
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Rich text fields accept Markdown** - the CLI converts to HTML automatically
+5. **Content fields accept Markdown** — `--content` on messages, comments, todos, documents, and cards accepts Markdown syntax. The CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
 
+**Choosing a mode:**
+
+| Goal | Flag | Format |
+|------|------|--------|
+| Parse data, pipe to jq | `--json` | JSON envelope: `{ok, data, summary, breadcrumbs, meta}` |
+| Show results to a user | `--md` / `-m` | GFM tables, task lists, structured Markdown |
+| Automation / scripting | `--agent` | Raw JSON data (no envelope) + no interactive prompts |
+
+`--json` is the default when piped (no flag needed). Use `--md` when composing reports, summarizing data, or displaying results inline. `--agent` is for headless integration scripts.
+
+**Other modes:** `--quiet` (raw JSON, no envelope), `--ids-only`, `--count`, `--styled` (force ANSI), `-v` / `-vv` (verbose/trace).
+
+### CLI Introspection
+
+Navigate unfamiliar commands with `--agent --help` — returns structured JSON describing any command:
+
 ```bash
-basecamp <cmd> --json      # JSON envelope with data, summary, breadcrumbs (recommended)
-basecamp <cmd> --quiet     # Raw JSON data only, no envelope
-basecamp <cmd> --agent     # Machine-readable, no interactive prompts
-basecamp <cmd> --ids-only  # Just IDs, one per line
-basecamp <cmd> --count     # Just the count
-basecamp <cmd> --stats     # Include session stats in output
-basecamp <cmd> --md / --markdown / -m  # Markdown output (portable, pipeable to glow/bat)
-basecamp <cmd> --styled    # Force ANSI-styled output even when piped
-basecamp <cmd> -v          # Verbose: show operations
-basecamp <cmd> -vv         # Very verbose: show operations + HTTP requests
+basecamp todos --agent --help
 ```
+
+```json
+{"command":"todos","path":"basecamp todos","short":"...","usage":"...","notes":["..."],
+ "subcommands":[{"name":"sweep","short":"...","path":"basecamp todos sweep"}],
+ "flags":[{"name":"assignee","type":"string","usage":"..."}],
+ "inherited_flags":[{"name":"json","shorthand":"j","type":"bool"}]}
+```
+
+Walk the tree: start at `basecamp --agent --help` for top-level commands, then drill into any subcommand. Commands include `notes` with domain-specific agent hints (e.g., "Cards do NOT support --assignee filtering").
 
 ### Pagination
 
