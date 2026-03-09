@@ -1,0 +1,27 @@
+internal/presenter/presenter_test.go
+  3b024b264e0a41c1 549-552
+internal/commands/projects.go
+  3b024b264e0a41c1 131-134,136
+internal/cli/help_test.go
+  3b024b264e0a41c1 16-24,26-27,49-50,64-65,78-79,96-97,114,128,143,159,187,215-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "4e27d4d2e7d6ae80b299d429ff4ddf99accebcd2",
+  "prompts": {
+    "3b024b264e0a41c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "502ce4f7-c7e9-4a15-a012-49d3233e226c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 35,
+      "total_deletions": 10,
+      "accepted_lines": 35,
+      "overriden_lines": 0
+    }
+  }
+}
