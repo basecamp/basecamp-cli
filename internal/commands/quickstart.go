@@ -54,13 +54,17 @@ func NewQuickStartCmd() *cobra.Command {
 
 // RunQuickStartDefault is called when basecamp is run with no args.
 // If this is a first run (unauthenticated, interactive TTY, no BASECAMP_TOKEN),
-// it runs the setup wizard. Otherwise, it falls through to the quick-start output.
+// it runs the setup wizard. Machine-output modes (--json, --agent, --quiet, non-TTY)
+// preserve the quick-start envelope. Interactive TTY shows help.
 func RunQuickStartDefault(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 	if app != nil && isFirstRun(app) {
 		return runWizard(cmd, app)
 	}
-	return runQuickStart(cmd, args)
+	if app != nil && app.IsMachineOutput() {
+		return runQuickStart(cmd, args)
+	}
+	return cmd.Help()
 }
 
 func runQuickStart(cmd *cobra.Command, args []string) error {

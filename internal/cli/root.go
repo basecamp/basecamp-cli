@@ -41,6 +41,13 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
+			// Bare root (no subcommand, no args) will show help or
+			// quickstart depending on mode. Tolerate config/profile
+			// errors so bad config doesn't block help, while still
+			// loading the app so wizard detection and IsMachineOutput
+			// work correctly.
+			bareRoot := cmd.Parent() == nil && len(args) == 0
+
 			// Load configuration (without profile-specific overrides first)
 			cfg, err := config.Load(config.FlagOverrides{
 				Account:  flags.Account,
@@ -49,12 +56,24 @@ func NewRootCmd() *cobra.Command {
 				CacheDir: flags.CacheDir,
 			})
 			if err != nil {
+				if bareRoot {
+					return nil // fall through to help
+				}
 				return err
 			}
 
 			// Resolve profile
 			profileName, err := resolveProfile(cfg, flags)
 			if err != nil {
+				if bareRoot {
+					// Profile failed but config loaded — create app
+					// with base config so wizard/mode detection works.
+					app := appctx.NewApp(cfg)
+					app.Flags = flags
+					app.ApplyFlags()
+					cmd.SetContext(appctx.WithApp(cmd.Context(), app))
+					return nil
+				}
 				return err
 			}
 			if profileName != "" {
@@ -80,6 +99,13 @@ func NewRootCmd() *cobra.Command {
 			// without being locked out by the validation they need to repair.
 			if !isConfigCmd(cmd) {
 				if err := hostutil.RequireSecureURL(cfg.BaseURL); err != nil {
+					if bareRoot {
+						app := appctx.NewApp(cfg)
+						app.Flags = flags
+						app.ApplyFlags()
+						cmd.SetContext(appctx.WithApp(cmd.Context(), app))
+						return nil
+					}
 					source := cfg.Sources["base_url"]
 					if source == "" {
 						source = "unknown"
@@ -145,14 +171,19 @@ func NewRootCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("profile", completer.ProfileCompletion())
 
-	// Override help to support --help --agent for structured JSON output.
-	defaultHelp := cmd.HelpFunc()
-	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
-		if agent, _ := c.Root().PersistentFlags().GetBool("agent"); agent {
-			emitAgentHelp(c)
-			return
+	// Custom root help: gh-style curated categories for root, agent JSON for
+	// --agent, default cobra help for subcommands.
+	cmd.SetHelpFunc(rootHelpFunc(cmd.HelpFunc()))
+
+	// Compact usage for the root command only — prevents cobra from dumping
+	// all 55 commands on error. Subcommands inherit cobra's default.
+	defaultUsageFunc := cmd.UsageFunc()
+	cmd.SetUsageFunc(func(c *cobra.Command) error {
+		if c == cmd {
+			fmt.Fprintf(c.OutOrStderr(), "Usage: basecamp <command> [flags]\n\nRun 'basecamp --help' for a list of commands.\n")
+			return nil
 		}
-		defaultHelp(c, args)
+		return defaultUsageFunc(c)
 	})
 
 	return cmd

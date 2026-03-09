@@ -13,12 +13,12 @@ load test_helper
 }
 
 
-# Quick start
+# No args shows help
 
-@test "basecamp with no args shows quick start" {
+@test "basecamp with no args shows help" {
   run basecamp
   assert_success
-  assert_output_contains "basecamp"
+  assert_output_contains "CORE COMMANDS"
 }
 
 @test "basecamp --json with no args outputs JSON" {
@@ -34,7 +34,7 @@ load test_helper
 @test "basecamp --help shows help" {
   run basecamp --help
   assert_success
-  assert_output_contains "Available Commands"
+  assert_output_contains "CORE COMMANDS"
   assert_output_contains "basecamp"
 }
 

@@ -27,8 +27,8 @@ type CommandCategory struct {
 	Commands []CommandInfo `json:"commands"`
 }
 
-// commandCategories returns all command categories for the catalog.
-func commandCategories() []CommandCategory {
+// CommandCategories returns all command categories for the catalog.
+func CommandCategories() []CommandCategory {
 	return []CommandCategory{
 		{
 			Name: "Core Commands",
@@ -103,7 +103,7 @@ func commandCategories() []CommandCategory {
 				{Name: "recordings", Category: "search", Description: "Browse recordings by type/status", Actions: []string{"list", "trash", "archive", "restore", "visibility"}},
 				{Name: "show", Category: "search", Description: "Show any recording by ID"},
 				{Name: "events", Category: "search", Description: "View recording change history"},
-				{Name: "url", Category: "search", Description: "Open Basecamp URL in browser"},
+				{Name: "url", Category: "search", Description: "Parse Basecamp URLs"},
 			},
 		},
 		{
@@ -143,7 +143,7 @@ func commandCategories() []CommandCategory {
 // CatalogCommandNames returns all command names from the catalog.
 // Used by tests to verify catalog matches registered commands.
 func CatalogCommandNames() []string {
-	categories := commandCategories()
+	categories := CommandCategories()
 	// Count total commands for preallocation
 	total := 0
 	for _, cat := range categories {
@@ -167,7 +167,7 @@ func NewCommandsCmd() *cobra.Command {
 		Long:    "List all available basecamp commands organized by category.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			categories := commandCategories()
+			categories := CommandCategories()
 
 			// For styled terminal output, render grouped columns directly
 			if app.Output.EffectiveFormat() == output.FormatStyled {
