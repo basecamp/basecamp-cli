@@ -1,0 +1,11 @@
+e2e/core.bats
+  3b024b264e0a41c1 16,18,21,37
+internal/commands/quickstart.go
+  3b024b264e0a41c1 57-58,64-65,67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "87878b10d0ac0b33eefb7b373ebe1f7e9da7056a",
+  "prompts": {}
+}
