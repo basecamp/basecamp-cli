@@ -1,0 +1,23 @@
+internal/cli/root.go
+  3b024b264e0a41c1 51-58,64-65,75-76,85,114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "061651b37d0595beac035bbaf4651b5024672477",
+  "prompts": {
+    "3b024b264e0a41c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "502ce4f7-c7e9-4a15-a012-49d3233e226c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 19,
+      "total_deletions": 13,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}
