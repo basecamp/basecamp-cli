@@ -48,7 +48,7 @@ load test_helper
 
   run basecamp comment "test" --on
   assert_failure
-  assert_output_contains "--on requires a recording ID"
+  assert_output_contains "--on requires an ID"
 }
 
 @test "cards --column without value shows error" {

@@ -26,15 +26,15 @@ func NewCommentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "comments",
 		Short:       "List and manage comments",
-		Long:        "List, show, and update comments on recordings.",
-		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent recording, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on recordings (todos, messages, cards, etc.) — not on other comments"},
+		Long:        "List, show, and update comments on items.",
+		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
 			return runCommentsList(cmd, recordingID, limit, page, all)
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for")
+	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "ID of item to list comments for")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
@@ -55,14 +55,14 @@ func newCommentsListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List comments on a recording",
-		Long:  "List all comments on a recording.",
+		Short: "List comments on an item",
+		Long:  "List all comments on an item.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCommentsList(cmd, recordingID, limit, page, all)
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "Recording ID to list comments for (required)")
+	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "ID of item to list comments for (required)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
@@ -87,7 +87,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 
 	// Validate user input first, before checking account
 	if recordingID == "" {
-		return output.ErrUsage("Recording ID required")
+		return output.ErrUsage("ID required (use --on <id>)")
 	}
 
 	// Extract recording ID from URL if --on is a URL
@@ -99,7 +99,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 
 	recID, err := strconv.ParseInt(recordingID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid recording ID")
+		return output.ErrUsage("Invalid ID")
 	}
 
 	// Build pagination options
@@ -121,7 +121,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 
 	// Build response options
 	respOpts := []output.ResponseOption{
-		output.WithSummary(fmt.Sprintf("%d comments on recording #%s", len(comments), recordingID)),
+		output.WithSummary(fmt.Sprintf("%d comments on #%s", len(comments), recordingID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
@@ -262,11 +262,11 @@ func NewCommentCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "comment",
-		Short: "Add a comment to recordings",
-		Long: `Add a comment to one or more Basecamp recordings (todos, messages, etc.)
+		Short: "Add a comment",
+		Long: `Add a comment to one or more Basecamp items (todos, messages, cards, etc.)
 
-Supports batch commenting on multiple recordings at once.`,
-		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent recording, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on recordings (todos, messages, cards, etc.) — not on other comments"},
+Supports batch commenting on multiple items at once.`,
+		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -392,7 +392,7 @@ Supports batch commenting on multiple recordings at once.`,
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "Comment content (required)")
 	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose content")
-	cmd.Flags().StringSliceVarP(&recordingIDs, "on", "r", nil, "Recording ID(s) to comment on (required)")
+	cmd.Flags().StringSliceVarP(&recordingIDs, "on", "r", nil, "ID(s) to comment on (required)")
 	// Note: Required flags are validated manually in RunE for better error messages
 
 	return cmd
