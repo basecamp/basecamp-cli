@@ -1,0 +1,29 @@
+internal/cli/root.go
+  6f414f157363725a 457,504
+internal/commands/comment.go
+  6f414f157363725a 29-30,37,58-59,65,90,102,124,265-266,268-269,395
+internal/commands/boost.go
+  6f414f157363725a 21,23,25,51-53,55,102,143,227-229,231,278,334,368,386-387,409-410
+e2e/errors.bats
+  6f414f157363725a 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "56e922ff24d8fa29120fc71511bd7c18a99d5371",
+  "prompts": {
+    "6f414f157363725a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bbd500d-0345-4d4c-a296-501c9e6ab242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 37,
+      "total_deletions": 37,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
