@@ -86,19 +86,19 @@ func TestAgentHelpProducesJSON(t *testing.T) {
 }
 
 func TestBareRootToleratesBadProfile(t *testing.T) {
-	// Bare basecamp should show help even when profile env is broken
+	// Bare basecamp should not error when profile env is broken.
+	// In non-TTY test environments the bare root falls through to quickstart
+	// (not help), so we only assert no error — the important thing is that
+	// a bad profile doesn't crash.
 	t.Setenv("BASECAMP_PROFILE", "nonexistent")
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	var buf bytes.Buffer
 	cmd := NewRootCmd()
-	cmd.SetOut(&buf)
+	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	require.NoError(t, err)
-
-	out := buf.String()
-	assert.Contains(t, out, "CORE COMMANDS")
 }
 
 func TestBareRootWithJSONFlagDoesNotShowHelp(t *testing.T) {

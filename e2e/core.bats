@@ -13,12 +13,13 @@ load test_helper
 }
 
 
-# No args shows help
+# No args — non-TTY produces quickstart JSON, --help shows curated help
 
-@test "basecamp with no args shows help" {
+@test "basecamp with no args outputs quickstart JSON (non-TTY)" {
   run basecamp
   assert_success
-  assert_output_contains "CORE COMMANDS"
+  is_valid_json
+  assert_json_not_null ".data.version"
 }
 
 @test "basecamp --json with no args outputs JSON" {
