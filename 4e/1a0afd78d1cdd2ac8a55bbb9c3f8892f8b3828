@@ -1,0 +1,25 @@
+internal/presenter/render.go
+  3b024b264e0a41c1 135-150,153,315,317,322-325
+internal/presenter/presenter_test.go
+  3b024b264e0a41c1 8-9,496-553
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "4e1a0afd78d1cdd2ac8a55bbb9c3f8892f8b3828",
+  "prompts": {
+    "3b024b264e0a41c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "502ce4f7-c7e9-4a15-a012-49d3233e226c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 555,
+      "total_deletions": 96,
+      "accepted_lines": 485,
+      "overriden_lines": 0
+    }
+  }
+}
