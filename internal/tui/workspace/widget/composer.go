@@ -394,10 +394,12 @@ func (c *Composer) Submit() tea.Cmd {
 	}
 }
 
-// detectFilePaths checks whether every segment in content resolves to a
-// regular file. Segments are split by newlines (bracketed paste) or by
-// quote-space-quote boundaries (Terminal.app multi-file drag: 'a' 'b').
-// Returns the resolved paths if all segments are files, nil otherwise.
+// detectFilePaths checks whether every segment in content resolves to an
+// absolute regular file. Segments are split by newlines (bracketed paste)
+// or by quote-space-quote boundaries (Terminal.app multi-file drag: 'a' 'b').
+// Returns the resolved paths if all segments are absolute files, nil otherwise.
+// Requires absolute paths to avoid false positives from messages that happen
+// to match relative filenames (e.g. "README").
 func (c *Composer) detectFilePaths(content string) []string {
 	segments := splitDragSegments(content)
 
@@ -407,6 +409,9 @@ func (c *Composer) detectFilePaths(content string) []string {
 			continue
 		}
 		expanded := richtext.NormalizeDragPath(seg)
+		if !filepath.IsAbs(expanded) {
+			return nil
+		}
 		info, err := os.Stat(expanded)
 		if err != nil || !info.Mode().IsRegular() {
 			return nil
@@ -635,6 +640,9 @@ func (c *Composer) tryAutoAttachIfDrag() tea.Cmd {
 			continue
 		}
 		expanded := richtext.NormalizeDragPath(seg)
+		if !filepath.IsAbs(expanded) {
+			return nil // relative paths could be false positives
+		}
 		info, err := os.Stat(expanded)
 		if err != nil || !info.Mode().IsRegular() {
 			return nil // not all files — leave text as-is

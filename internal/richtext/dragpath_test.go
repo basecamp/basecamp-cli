@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -118,11 +119,22 @@ func TestNormalizeDragPath(t *testing.T) {
 			raw:  "hello world",
 			want: "hello world",
 		},
+		{
+			name: "quoted non-path unchanged",
+			raw:  `"hello world"`,
+			want: `"hello world"`,
+		},
+		{
+			name:     "non-path shell escape unchanged",
+			raw:      `hello\ world`,
+			want:     `hello\ world`,
+			unixOnly: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.unixOnly && runtime.GOOS == "windows" {
+			if (tt.unixOnly || strings.HasPrefix(tt.want, "/")) && runtime.GOOS == "windows" {
 				t.Skip("Unix-only test")
 			}
 			got := NormalizeDragPath(tt.raw)

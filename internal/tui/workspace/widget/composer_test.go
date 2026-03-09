@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -337,6 +338,9 @@ func TestComposerProcessPaste(t *testing.T) {
 }
 
 func TestComposerProcessPasteShellEscaped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-only test")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "my file (1).pdf")
 	os.WriteFile(path, []byte("%PDF"), 0o644)
@@ -375,6 +379,9 @@ func TestComposerProcessPasteQuoted(t *testing.T) {
 }
 
 func TestComposerProcessPasteFileURL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-only test")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "my file.pdf")
 	os.WriteFile(path, []byte("%PDF"), 0o644)
