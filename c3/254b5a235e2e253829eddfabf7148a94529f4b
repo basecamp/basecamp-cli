@@ -1,0 +1,23 @@
+internal/commands/projects.go
+  3b024b264e0a41c1 6,8,127-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "c3254b5a235e2e253829eddfabf7148a94529f4b",
+  "prompts": {
+    "3b024b264e0a41c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "502ce4f7-c7e9-4a15-a012-49d3233e226c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 395,
+      "overriden_lines": 0
+    }
+  }
+}
