@@ -23,10 +23,10 @@ func NewTimesheetCmd() *cobra.Command {
 		Short: "Manage time tracking",
 		Long: `Manage time tracking.
 
-Timesheet entries track time logged against any recording (todo, message,
+Timesheet entries track time logged against any item (todo, message,
 document, etc.). The account-wide report defaults to the last month if no
 date range is specified.`,
-		Annotations: map[string]string{"agent_notes": "Time is logged against recordings (todos, cards, messages, etc.)\nbasecamp clock is a shortcut for timesheet entry create\nUse basecamp reports assigned --json to see assigned items, then clock time against them"},
+		Annotations: map[string]string{"agent_notes": "Time is logged against items (todos, cards, messages, etc.)\nbasecamp clock is a shortcut for timesheet entry create\nUse basecamp reports assigned --json to see assigned items, then clock time against them"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTimesheetReport(cmd, startDate, endDate, personID)
 		},
@@ -104,9 +104,9 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID string)
 				Description: "View project timesheet",
 			},
 			output.Breadcrumb{
-				Action:      "recording",
-				Cmd:         "basecamp timesheet recording <id>",
-				Description: "View recording timesheet",
+				Action:      "item",
+				Cmd:         "basecamp timesheet item <id>",
+				Description: "View item timesheet",
 			},
 		),
 	)
@@ -175,9 +175,9 @@ func newTimesheetProjectCmd(project *string) *cobra.Command {
 						Description: "View account-wide report",
 					},
 					output.Breadcrumb{
-						Action:      "recording",
-						Cmd:         "basecamp timesheet recording <id>",
-						Description: "View recording timesheet",
+						Action:      "item",
+						Cmd:         "basecamp timesheet item <id>",
+						Description: "View item timesheet",
 					},
 				),
 			)
@@ -189,10 +189,11 @@ func newTimesheetProjectCmd(project *string) *cobra.Command {
 
 func newTimesheetRecordingCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "recording <id>",
-		Short: "View recording timesheet",
-		Long:  "View timesheet entries for a specific recording.",
-		Args:  cobra.ExactArgs(1),
+		Use:     "item <id>",
+		Aliases: []string{"recording"},
+		Short:   "View item timesheet",
+		Long:    "View timesheet entries for a specific item.",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -218,7 +219,7 @@ func newTimesheetRecordingCmd(project *string) *cobra.Command {
 			recordingIDStr := args[0]
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid recording ID")
+				return output.ErrUsage("Invalid ID")
 			}
 
 			entries, err := app.Account().Timesheet().RecordingReport(cmd.Context(), recordingID, nil)

@@ -211,7 +211,7 @@ CMD basecamp templates update
 CMD basecamp timeline
 CMD basecamp timesheet
 CMD basecamp timesheet project
-CMD basecamp timesheet recording
+CMD basecamp timesheet item
 CMD basecamp timesheet report
 CMD basecamp todo
 CMD basecamp todolistgroups
@@ -4660,30 +4660,30 @@ FLAG basecamp timesheet project --styled type=bool
 FLAG basecamp timesheet project --to type=string
 FLAG basecamp timesheet project --todolist type=string
 FLAG basecamp timesheet project --verbose type=count
-FLAG basecamp timesheet recording --account type=string
-FLAG basecamp timesheet recording --agent type=bool
-FLAG basecamp timesheet recording --cache-dir type=string
-FLAG basecamp timesheet recording --count type=bool
-FLAG basecamp timesheet recording --end type=string
-FLAG basecamp timesheet recording --from type=string
-FLAG basecamp timesheet recording --hints type=bool
-FLAG basecamp timesheet recording --ids-only type=bool
-FLAG basecamp timesheet recording --in type=string
-FLAG basecamp timesheet recording --json type=bool
-FLAG basecamp timesheet recording --markdown type=bool
-FLAG basecamp timesheet recording --md type=bool
-FLAG basecamp timesheet recording --no-hints type=bool
-FLAG basecamp timesheet recording --no-stats type=bool
-FLAG basecamp timesheet recording --person type=string
-FLAG basecamp timesheet recording --profile type=string
-FLAG basecamp timesheet recording --project type=string
-FLAG basecamp timesheet recording --quiet type=bool
-FLAG basecamp timesheet recording --start type=string
-FLAG basecamp timesheet recording --stats type=bool
-FLAG basecamp timesheet recording --styled type=bool
-FLAG basecamp timesheet recording --to type=string
-FLAG basecamp timesheet recording --todolist type=string
-FLAG basecamp timesheet recording --verbose type=count
+FLAG basecamp timesheet item --account type=string
+FLAG basecamp timesheet item --agent type=bool
+FLAG basecamp timesheet item --cache-dir type=string
+FLAG basecamp timesheet item --count type=bool
+FLAG basecamp timesheet item --end type=string
+FLAG basecamp timesheet item --from type=string
+FLAG basecamp timesheet item --hints type=bool
+FLAG basecamp timesheet item --ids-only type=bool
+FLAG basecamp timesheet item --in type=string
+FLAG basecamp timesheet item --json type=bool
+FLAG basecamp timesheet item --markdown type=bool
+FLAG basecamp timesheet item --md type=bool
+FLAG basecamp timesheet item --no-hints type=bool
+FLAG basecamp timesheet item --no-stats type=bool
+FLAG basecamp timesheet item --person type=string
+FLAG basecamp timesheet item --profile type=string
+FLAG basecamp timesheet item --project type=string
+FLAG basecamp timesheet item --quiet type=bool
+FLAG basecamp timesheet item --start type=string
+FLAG basecamp timesheet item --stats type=bool
+FLAG basecamp timesheet item --styled type=bool
+FLAG basecamp timesheet item --to type=string
+FLAG basecamp timesheet item --todolist type=string
+FLAG basecamp timesheet item --verbose type=count
 FLAG basecamp timesheet report --account type=string
 FLAG basecamp timesheet report --agent type=bool
 FLAG basecamp timesheet report --cache-dir type=string
@@ -6362,7 +6362,7 @@ SUB basecamp templates update
 SUB basecamp timeline
 SUB basecamp timesheet
 SUB basecamp timesheet project
-SUB basecamp timesheet recording
+SUB basecamp timesheet item
 SUB basecamp timesheet report
 SUB basecamp todo
 SUB basecamp todolistgroups
