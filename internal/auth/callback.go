@@ -46,20 +46,34 @@ const callbackPage = `<!DOCTYPE html>
       text-align: center;
     }
 
-    .icon {
-      block-size: 48px;
-      align-items: center;
-      border-radius: 50%%;
-      display: inline-flex;
-      inline-size: 48px;
-      justify-content: center;
-      margin-bottom: 20px;
+    .logo {
+      display: inline-block;
+      margin-block-end: 4px;
+      position: relative;
     }
 
-    .icon-success { background: #e6f4ea; }
-    .icon-error   { background: #fce8e6; }
+    .logo svg { display: block; }
 
-    .icon svg { width: 24px; height: 24px; }
+    .badge {
+      align-items: center;
+      block-size: 24px;
+      border: 2px solid #fff;
+      border-radius: 50%%;
+      bottom: -2px;
+      display: flex;
+      inline-size: 24px;
+      justify-content: center;
+      position: absolute;
+      right: -2px;
+    }
+
+    .badge svg {
+      block-size: 14px;
+      inline-size: 14px;
+    }
+
+    .badge-success { background: #34a853; }
+    .badge-error   { background: #d93025; }
 
     h1 {
       font-size: 20px;
@@ -84,21 +98,33 @@ const callbackPage = `<!DOCTYPE html>
 
 var (
 	callbackSuccess = fmt.Sprintf(callbackPage, `
-    <div class="icon icon-success">
-      <svg fill="none" viewBox="0 0 24 24" stroke="#34a853" stroke-width="2.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+    <div class="logo">
+      <svg width="69" height="69" viewBox="0 0 69 69" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="34.07" cy="34.07" r="34.07" fill="#FFE200"/>
+        <path d="M34.26 51.82C27.2241 51.9201 20.4903 48.9654 15.8 43.72C15.3147 43.1745 15.1652 42.4079 15.41 41.72C16.67 38.31 20.08 30.4 24.46 30.37C26.71 30.37 28.31 32.11 29.64 33.51C30.0795 33.997 30.5506 34.4547 31.05 34.88C32.05 33.88 34.05 30.53 35.63 27.17C36.0967 26.1648 37.2898 25.7283 38.295 26.195C39.3002 26.6617 39.7367 27.8548 39.27 28.86C34.54 39 32 39 31.2 39C29.35 39 28.02 37.59 26.73 36.22C26.15 35.61 24.95 34.34 24.48 34.34V34.34C23.48 34.51 21.22 38.04 19.62 41.91C23.4848 45.8006 28.7775 47.9336 34.26 47.81C42.19 47.81 48.11 45.66 50.66 41.87C49.78 31.81 44.24 18.15 34.26 18.15C25.82 18.15 19.46 24.03 15.36 35.63C14.9927 36.6738 13.8488 37.2223 12.805 36.855C11.7612 36.4877 11.2127 35.3438 11.58 34.3C16.31 20.93 23.94 14.15 34.26 14.15C47.75 14.15 53.96 31.38 54.71 42.24C54.7368 42.6341 54.6464 43.0273 54.45 43.37C51.31 48.82 44.14 51.82 34.26 51.82Z" fill="#1D2D35"/>
       </svg>
+      <div class="badge badge-success">
+        <svg fill="none" viewBox="0 0 24 24" stroke="#fff" stroke-width="3">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+        </svg>
+      </div>
     </div>
-    <h1>Basecamp authorization successful</h1>
+    <h1>Authorization successful</h1>
     <p>You can close this window and return to your terminal.</p>`)
 
 	callbackError = fmt.Sprintf(callbackPage, `
-    <div class="icon icon-error">
-      <svg fill="none" viewBox="0 0 24 24" stroke="#d93025" stroke-width="2.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+    <div class="logo">
+      <svg width="69" height="69" viewBox="0 0 69 69" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="34.07" cy="34.07" r="34.07" fill="#FFE200"/>
+        <path d="M34.26 51.82C27.2241 51.9201 20.4903 48.9654 15.8 43.72C15.3147 43.1745 15.1652 42.4079 15.41 41.72C16.67 38.31 20.08 30.4 24.46 30.37C26.71 30.37 28.31 32.11 29.64 33.51C30.0795 33.997 30.5506 34.4547 31.05 34.88C32.05 33.88 34.05 30.53 35.63 27.17C36.0967 26.1648 37.2898 25.7283 38.295 26.195C39.3002 26.6617 39.7367 27.8548 39.27 28.86C34.54 39 32 39 31.2 39C29.35 39 28.02 37.59 26.73 36.22C26.15 35.61 24.95 34.34 24.48 34.34V34.34C23.48 34.51 21.22 38.04 19.62 41.91C23.4848 45.8006 28.7775 47.9336 34.26 47.81C42.19 47.81 48.11 45.66 50.66 41.87C49.78 31.81 44.24 18.15 34.26 18.15C25.82 18.15 19.46 24.03 15.36 35.63C14.9927 36.6738 13.8488 37.2223 12.805 36.855C11.7612 36.4877 11.2127 35.3438 11.58 34.3C16.31 20.93 23.94 14.15 34.26 14.15C47.75 14.15 53.96 31.38 54.71 42.24C54.7368 42.6341 54.6464 43.0273 54.45 43.37C51.31 48.82 44.14 51.82 34.26 51.82Z" fill="#1D2D35"/>
       </svg>
+      <div class="badge badge-error">
+        <svg fill="none" viewBox="0 0 24 24" stroke="#fff" stroke-width="3">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </div>
     </div>
-    <h1>Basecamp authorization failed </h1>
+    <h1>Authorization failed</h1>
     <p>Something went wrong. Please return to your terminal and try again.</p>`)
 )
 
