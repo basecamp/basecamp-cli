@@ -69,8 +69,7 @@ install_basecamp() {
   platform=$(detect_platform) || return 1
 
   # Get latest version via redirect (avoids GitHub API rate limits and grep/sed on Windows)
-  local url
-  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/basecamp/basecamp-cli/releases/latest" 2>/dev/null)
+  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/basecamp/basecamp-cli/releases/latest" 2>/dev/null) || true
   version="${url##*/}"
   version="${version#v}"
   if [[ -z "$version" || "$version" == "latest" ]]; then
