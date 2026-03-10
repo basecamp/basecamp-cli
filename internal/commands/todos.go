@@ -90,7 +90,10 @@ func NewTodoCmd() *cobra.Command {
 			if len(args) == 0 {
 				return missingArg(cmd, "<content>")
 			}
-			content := strings.Join(args, " ")
+			content := strings.TrimSpace(strings.Join(args, " "))
+			if content == "" {
+				return cmd.Help()
+			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -621,7 +624,10 @@ func newTodosCreateCmd() *cobra.Command {
 			if len(args) == 0 {
 				return missingArg(cmd, "<content>")
 			}
-			content := strings.Join(args, " ")
+			content := strings.TrimSpace(strings.Join(args, " "))
+			if content == "" {
+				return cmd.Help()
+			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err

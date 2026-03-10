@@ -1176,6 +1176,8 @@ You can pass either an item ID or a Basecamp URL:
   basecamp files update 789 --content "new content" --in my-project`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			title = strings.TrimSpace(title)
+			content = strings.TrimSpace(content)
 			if title == "" && content == "" && itemType == "" {
 				return noChanges(cmd)
 			}
