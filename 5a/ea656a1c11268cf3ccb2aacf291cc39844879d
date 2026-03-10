@@ -1,0 +1,61 @@
+internal/commands/people.go
+  3c6f3e7b533552d6 377,451
+internal/commands/url.go
+  3c6f3e7b533552d6 44
+internal/commands/projects.go
+  3c6f3e7b533552d6 231,233-235,283
+internal/commands/templates.go
+  3c6f3e7b533552d6 161,173-179,239
+internal/commands/api.go
+  3c6f3e7b533552d6 73-75,121-123
+internal/commands/files.go
+  3c6f3e7b533552d6 363,368-369,705,709-711,985
+internal/commands/todos.go
+  3c6f3e7b533552d6 83,516,580,719,739,826,1110,1197
+internal/commands/campfire.go
+  3c6f3e7b533552d6 281,299
+internal/commands/webhooks.go
+  3c6f3e7b533552d6 104,164,171-172,174-175,311
+internal/commands/search.go
+  3c6f3e7b533552d6 43
+internal/commands/tools.go
+  3c6f3e7b533552d6 219-221,223-225
+internal/commands/comment.go
+  3c6f3e7b533552d6 49,142,195-197,199,269,299
+internal/commands/schedule.go
+  3c6f3e7b533552d6 381,393,395,400,610
+internal/commands/todolistgroups.go
+  3c6f3e7b533552d6 93,203,205-207,296,301,304,311
+internal/commands/todolists.go
+  3c6f3e7b533552d6 245,247-249,345
+internal/commands/checkins.go
+  3c6f3e7b533552d6 217,223,332,337-338,466,472-473,549,684,690,800,804,806-807,809-811,813,891-892,895,903-904
+internal/commands/cards.go
+  3c6f3e7b533552d6 291,300-303,445,527-528,733,742-745,982,987-988,1072,1364-1366,1505,1509,1604-1606,1626,1751-1753
+internal/commands/lineup.go
+  3c6f3e7b533552d6 45,66-72,127-129,153
+internal/commands/messagetypes.go
+  3c6f3e7b533552d6 134,146-152,216
+internal/commands/messages.go
+  3c6f3e7b533552d6 220,350,522
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "5aea656a1c11268cf3ccb2aacf291cc39844879d",
+  "prompts": {
+    "3c6f3e7b533552d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b1e1b0b-e8e0-4223-9980-dea01e701afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 235,
+      "overriden_lines": 0
+    }
+  }
+}
