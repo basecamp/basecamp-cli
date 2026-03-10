@@ -1,0 +1,27 @@
+.surface-skill-drift
+  7f5420d52c88d3a5 1-14
+scripts/check-skill-drift.sh
+  7f5420d52c88d3a5 1-123
+Makefile
+  7f5420d52c88d3a5 274,327-331,452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "e417e0e3a08ac3ca36162bcb991415be580a4d6f",
+  "prompts": {
+    "7f5420d52c88d3a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e3b8ee5b-9f30-403e-bddf-bfc9523b2242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 144,
+      "overriden_lines": 0
+    }
+  }
+}
