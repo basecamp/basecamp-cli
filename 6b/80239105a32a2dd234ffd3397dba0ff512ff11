@@ -1,0 +1,31 @@
+internal/commands/files.go
+  5d63aeb85efadd4d 134
+internal/commands/recordings.go
+  5d63aeb85efadd4d 65
+internal/commands/cards.go
+  5d63aeb85efadd4d 1416
+e2e/errors.bats
+  5d63aeb85efadd4d 174-175
+internal/cli/root.go
+  5d63aeb85efadd4d 477,480-481,483
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "6b80239105a32a2dd234ffd3397dba0ff512ff11",
+  "prompts": {
+    "5d63aeb85efadd4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621df13c-1ed3-47d7-b0ed-8e1c88a44cf5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
