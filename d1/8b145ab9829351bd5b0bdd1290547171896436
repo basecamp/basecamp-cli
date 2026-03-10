@@ -1,0 +1,25 @@
+internal/tui/resolve/dock_test.go
+  7842b425071796f5 1-188
+internal/commands/todos_test.go
+  7842b425071796f5 491-605
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "d18b145ab9829351bd5b0bdd1290547171896436",
+  "prompts": {
+    "7842b425071796f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db94e381-c127-4d1f-8007-a12a3f152dc7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 303,
+      "overriden_lines": 0
+    }
+  }
+}
