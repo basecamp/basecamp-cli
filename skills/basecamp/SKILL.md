@@ -130,14 +130,14 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Task | Command |
 |------|---------|
 | List projects | `basecamp projects list --json` |
-| My todos (in project)      | `basecamp todos --assignee me --in <project> --json` |
+| My todos (in project)      | `basecamp todos list --assignee me --in <project> --json` |
 | My todos (cross-project)   | `basecamp reports assigned --json` (defaults to "me") |
 | All todos (cross-project)  | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
-| Overdue todos | `basecamp todos --overdue --in <project> --json` |
+| Overdue todos | `basecamp todos list --overdue --in <project> --json` |
 | Create todo | `basecamp todo "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
 | Complete todo | `basecamp done <id> --json` |
-| List cards | `basecamp cards --in <project> --json` |
+| List cards | `basecamp cards list --in <project> --json` |
 | Create card | `basecamp card "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> --in <project> --json` |
 | Post message | `basecamp message "Title" "Body" --in <project> --json` |
@@ -268,11 +268,11 @@ basecamp projects update <id> --name "New"        # Update
 ### Todos
 
 ```bash
-basecamp todos --in <project> --json              # List in project
-basecamp todos --assignee me --in <project>       # My todos
-basecamp todos --overdue --in <project>           # Overdue only
-basecamp todos --status completed --in <project>  # Completed
-basecamp todos --list <todolist_id> --in <project> # In specific list
+basecamp todos list --in <project> --json              # List in project
+basecamp todos list --assignee me --in <project>       # My todos
+basecamp todos list --overdue --in <project>           # Overdue only
+basecamp todos list --status completed --in <project>  # Completed
+basecamp todos list --list <todolist_id> --in <project> # In specific list
 basecamp todo "Task" --in <project> --list <list> --assignee me --due tomorrow
 basecamp done <id> [id...]                        # Complete (multiple OK)
 basecamp reopen <id>                              # Uncomplete
@@ -287,7 +287,7 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 Todolists are containers for todos. Create a todolist before adding todos.
 
 ```bash
-basecamp todolists --in <project> --json                          # List todolists
+basecamp todolists list --in <project> --json                          # List todolists
 basecamp todolists show <id> --in <project>                       # Show details
 basecamp todolists create "Name" --in <project> --json            # Create
 basecamp todolists create "Name" --description "Desc" --in <project>
@@ -299,9 +299,9 @@ basecamp todolists update <id> --name "New" --in <project>        # Update
 **Note:** Cards do NOT support `--assignee` filtering like todos. Fetch all cards and filter client-side if needed. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
 
 ```bash
-basecamp cards --in <project> --json              # All cards
-basecamp cards --card-table <id> --in <project>   # Cards from specific table (required if multiple)
-basecamp cards --column <id> --in <project>       # Cards in column
+basecamp cards list --in <project> --json              # All cards
+basecamp cards list --card-table <id> --in <project>   # Cards from specific table (required if multiple)
+basecamp cards list --column <id> --in <project>       # Cards in column
 basecamp cards columns --in <project> --json      # List columns (needs --card-table if multiple)
 basecamp cards show <id> --in <project>           # Card details
 basecamp card "Title" "<p>Body</p>" --in <project> --column <id>
@@ -336,7 +336,7 @@ basecamp cards column watch <id>                  # Subscribe to column
 ### Messages
 
 ```bash
-basecamp messages --in <project> --json           # List messages
+basecamp messages list --in <project> --json           # List messages
 basecamp messages show <id> --in <project>        # Show message
 basecamp message "Title" "Body" --in <project>
 basecamp messages update <id> --title "New" --body "Updated"
@@ -362,8 +362,8 @@ basecamp comments update <id> "Updated" --in <project>
 ### Files & Documents
 
 ```bash
-basecamp files --in <project> --json              # List all (folders, files, docs)
-basecamp files --vault <folder_id> --in <project> # List folder contents
+basecamp files list --in <project> --json              # List all (folders, files, docs)
+basecamp files list --vault <folder_id> --in <project> # List folder contents
 basecamp files show <id> --in <project>           # Show item (auto-detects type)
 basecamp files download <id> --in <project>       # Download file
 basecamp files download <id> --out ./dir          # Download to specific dir
@@ -464,7 +464,7 @@ basecamp templates construction <template_id> <construction_id>  # Check status
 ### Webhooks
 
 ```bash
-basecamp webhooks --in <project> --json           # List webhooks
+basecamp webhooks list --in <project> --json           # List webhooks
 basecamp webhooks show <id> --in <project>        # Webhook details
 basecamp webhooks create "https://..." --in <project>
 basecamp webhooks create "https://..." --types "Todo,Comment" --in <project>
@@ -646,13 +646,13 @@ Common data extraction patterns for the output envelope:
 
 ```bash
 # Extract fields from data array
-basecamp todos --in <project> --json | jq '.data[] | select(.completed == false) | .title'
-basecamp todos --in <project> --json | jq '.data | length'
-basecamp todos --in <project> --json | jq '.data[] | {id, title, status}'
+basecamp todos list --in <project> --json | jq '.data[] | select(.completed == false) | .title'
+basecamp todos list --in <project> --json | jq '.data | length'
+basecamp todos list --in <project> --json | jq '.data[] | {id, title, status}'
 
 # Access envelope metadata
-basecamp todos --in <project> --json | jq '.breadcrumbs[0].cmd'
-basecamp todos --in <project> --json | jq '.meta.stats.requests'
+basecamp todos list --in <project> --json | jq '.breadcrumbs[0].cmd'
+basecamp todos list --in <project> --json | jq '.meta.stats.requests'
 ```
 
 ## Exit Codes
