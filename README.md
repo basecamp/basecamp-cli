@@ -103,7 +103,8 @@ OAuth 2.1 with automatic token refresh. First login opens your browser:
 
 ```bash
 basecamp auth login              # Authenticate with Basecamp
-basecamp auth login --scope read # Read-only access (BC3 OAuth only)
+basecamp auth login --scope read # Read-only access (BC3 OAuth only, default)
+basecamp auth login --scope full # Full read+write access (BC3 OAuth only)
 basecamp auth token              # Print token for scripts
 ```
 

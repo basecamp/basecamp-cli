@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1177,13 +1178,13 @@ func TestCredentialWrite_OverwriteExisting(t *testing.T) {
 
 func TestLoginLaunchpadClearsScope(t *testing.T) {
 	// Server that fails OAuth discovery (404 on .well-known), forcing Launchpad fallback.
-	tokenCalled := false
+	var tokenCalled atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/oauth-authorization-server":
 			http.NotFound(w, r) // force Launchpad fallback
 		case "/authorization/token":
-			tokenCalled = true
+			tokenCalled.Store(true)
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"access_token":"lp-tok","token_type":"bearer","refresh_token":"lp-ref"}`)
 		default:
@@ -1254,7 +1255,7 @@ func TestLoginLaunchpadClearsScope(t *testing.T) {
 
 	out := <-ch
 	require.NoError(t, out.err)
-	require.True(t, tokenCalled, "token endpoint should have been called")
+	require.True(t, tokenCalled.Load(), "token endpoint should have been called")
 
 	// Result scope should be empty for Launchpad
 	assert.Equal(t, "", out.result.Scope, "Launchpad login should clear scope")
