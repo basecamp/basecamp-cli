@@ -110,8 +110,6 @@ bench-cpu:
 	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
 	@echo "CPU profile saved to profiles/cpu.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/cpu.pprof"
-	@echo ""
-	@echo "Note: For full multi-package profiling, use 'make collect-profile'"
 
 # Run benchmarks with memory profiling (profiles first package only due to Go limitation)
 .PHONY: bench-mem
@@ -121,8 +119,6 @@ bench-mem:
 	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
 	@echo "Memory profile saved to profiles/mem.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/mem.pprof"
-	@echo ""
-	@echo "Note: For full multi-package profiling, use 'make collect-profile'"
 
 # Save current benchmarks as baseline for comparison
 .PHONY: bench-save
@@ -250,9 +246,11 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
 
-# Clean all
+# Clean all (including profiling and benchmark artifacts)
 .PHONY: clean-all
 clean-all: clean
+	rm -rf profiles/
+	rm -f benchmarks-*.txt
 
 # Install to GOPATH/bin
 .PHONY: install
@@ -457,7 +455,7 @@ help:
 	@echo "  tidy           Tidy go.mod dependencies"
 	@echo "  verify         Verify dependencies"
 	@echo "  clean          Remove build artifacts"
-	@echo "  clean-all      Remove all artifacts"
+	@echo "  clean-all      Remove all artifacts (including profiles)"
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  check            Run all checks (local CI gate)"
 	@echo "  check-naming     Guard against stale bcq/BCQ references"
