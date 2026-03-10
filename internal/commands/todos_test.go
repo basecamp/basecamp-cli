@@ -123,59 +123,48 @@ func TestTodosCreateShowsHelpWithoutContent(t *testing.T) {
 	require.NoError(t, err, "expected help output, not an error")
 }
 
-// TestTodosShowRequiresID tests that todos show requires an ID argument.
-func TestTodosShowRequiresID(t *testing.T) {
+// TestTodosShowShowsHelpWithoutID tests that todos show shows help when no ID given.
+func TestTodosShowShowsHelpWithoutID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "show")
-	require.Error(t, err)
-
-	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
+	require.NoError(t, err, "expected help output, not an error")
 }
 
-// TestTodosCompleteRequiresID tests that todos complete requires an ID argument.
-func TestTodosCompleteRequiresID(t *testing.T) {
+// TestTodosCompleteShowsHelpWithoutID tests that todos complete shows help when no ID given.
+func TestTodosCompleteShowsHelpWithoutID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "complete")
-	require.Error(t, err)
-
-	// Cobra validates required args
-	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
+	require.NoError(t, err, "expected help output, not an error")
 }
 
-// TestTodosUncompleteRequiresID tests that todos uncomplete requires an ID argument.
-func TestTodosUncompleteRequiresID(t *testing.T) {
+// TestTodosUncompleteShowsHelpWithoutID tests that todos uncomplete shows help when no ID given.
+func TestTodosUncompleteShowsHelpWithoutID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "uncomplete")
-	require.Error(t, err)
-
-	// Cobra validates required args
-	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
+	require.NoError(t, err, "expected help output, not an error")
 }
 
-// TestTodosPositionRequiresID tests that todos position requires an ID argument.
-func TestTodosPositionRequiresID(t *testing.T) {
+// TestTodosPositionShowsHelpWithoutID tests that todos position shows help when no ID given.
+func TestTodosPositionShowsHelpWithoutID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewTodosCmd()
 
-	err := executeTodosCommand(cmd, app, "position", "--to", "1")
-	require.Error(t, err)
-
-	// Cobra validates required args
-	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
+	err := executeTodosCommand(cmd, app, "position")
+	require.NoError(t, err, "expected help output, not an error")
 }
 
 // TestTodosPositionRequiresPosition tests that todos position requires --to.
@@ -188,8 +177,7 @@ func TestTodosPositionRequiresPosition(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "position", "456")
 	require.Error(t, err)
 
-	// Cobra validates required flags
-	assert.Equal(t, `required flag(s) "to" not set`, err.Error())
+	assert.Equal(t, "--to is required (1 = top)", err.Error())
 }
 
 // TestTodoShortcutRequiresContent tests that todo shortcut requires content.
@@ -219,32 +207,26 @@ func TestTodoShortcutRequiresProject(t *testing.T) {
 	assert.Equal(t, "Project ID required", e.Message)
 }
 
-// TestDoneRequiresID tests that done command requires an ID.
-func TestDoneRequiresID(t *testing.T) {
+// TestDoneShowsHelpWithoutID tests that done command shows help when no ID given.
+func TestDoneShowsHelpWithoutID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewDoneCmd()
 
 	err := executeTodosCommand(cmd, app)
-	require.Error(t, err)
-
-	// Cobra validates required args
-	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
+	require.NoError(t, err, "expected help output, not an error")
 }
 
-// TestReopenRequiresID tests that reopen command requires an ID.
-func TestReopenRequiresID(t *testing.T) {
+// TestReopenShowsHelpWithoutID tests that reopen command shows help when no ID given.
+func TestReopenShowsHelpWithoutID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewReopenCmd()
 
 	err := executeTodosCommand(cmd, app)
-	require.Error(t, err)
-
-	// Cobra validates required args
-	assert.Equal(t, "requires at least 1 arg(s), only received 0", err.Error())
+	require.NoError(t, err, "expected help output, not an error")
 }
 
 // TestTodosSubcommands tests that all expected subcommands exist.

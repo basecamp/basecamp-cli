@@ -21,14 +21,14 @@ func NewShowCmd() *cobra.Command {
 		Short: "Show any item by ID or URL",
 		Long: `Show details of any Basecamp item by ID or URL.
 
-	Types: todo, todolist, message, comment, card, card-table, document,
-	       schedule-entry, checkin, forward, upload
+Types: todo, todolist, message, comment, card, card-table, document,
+       schedule-entry, checkin, forward, upload
 
-	If no type specified, uses generic lookup.
+If no type specified, uses generic lookup.
 
-	You can also pass a Basecamp URL directly:
-	  basecamp show https://3.basecamp.com/123/buckets/456/todos/789
-	  basecamp show todo 789`,
+You can also pass a Basecamp URL directly:
+  basecamp show https://3.basecamp.com/123/buckets/456/todos/789
+  basecamp show todo 789`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

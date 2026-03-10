@@ -369,11 +369,13 @@ func newPeopleAddCmd() *cobra.Command {
 	var projectID string
 
 	cmd := &cobra.Command{
-		Use:   "add <person-id> [person-id...]",
+		Use:   "add <person-id>...",
 		Short: "Add people to a project",
 		Long:  "Grant people access to a project.",
-		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return runPeopleAdd(cmd, args, projectID)
 		},
 	}
@@ -441,11 +443,13 @@ func newPeopleRemoveCmd() *cobra.Command {
 	var projectID string
 
 	cmd := &cobra.Command{
-		Use:   "remove <person-id> [person-id...]",
+		Use:   "remove <person-id>...",
 		Short: "Remove people from a project",
 		Long:  "Revoke people's access to a project.",
-		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return runPeopleRemove(cmd, args, projectID)
 		},
 	}

@@ -508,11 +508,14 @@ func newTodosShowCmd() *cobra.Command {
 		Short: "Show todo details",
 		Long: `Display detailed information about a todo.
 
-	You can pass either a todo ID or a Basecamp URL:
-	  basecamp todos show 789
-	  basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
-		Args: cobra.ExactArgs(1),
+You can pass either a todo ID or a Basecamp URL:
+  basecamp todos show 789
+  basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -704,15 +707,17 @@ func newTodosCreateCmd() *cobra.Command {
 
 func newTodosCompleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "complete <id|url> [id|url...]",
+		Use:   "complete <id|url>...",
 		Short: "Complete todo(s)",
 		Long: `Mark one or more todos as completed.
 
-	You can pass either todo IDs or Basecamp URLs:
-	  basecamp todos complete 789
-	  basecamp todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
-		Args: cobra.MinimumNArgs(1),
+You can pass either todo IDs or Basecamp URLs:
+  basecamp todos complete 789
+  basecamp todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return completeTodos(cmd, args)
 		},
 	}
@@ -722,15 +727,17 @@ func newTodosCompleteCmd() *cobra.Command {
 
 func newDoneCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "done <id|url> [id|url...]",
+		Use:   "done <id|url>...",
 		Short: "Complete todo(s)",
 		Long: `Mark one or more todos as completed.
 
-	You can pass either todo IDs or Basecamp URLs:
-	  basecamp done 789
-	  basecamp done https://3.basecamp.com/123/buckets/456/todos/789`,
-		Args: cobra.MinimumNArgs(1),
+You can pass either todo IDs or Basecamp URLs:
+  basecamp done 789
+  basecamp done https://3.basecamp.com/123/buckets/456/todos/789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return completeTodos(cmd, args)
 		},
 	}
@@ -806,16 +813,18 @@ func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 
 func newTodosUncompleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "uncomplete <id|url> [id|url...]",
+		Use:     "uncomplete <id|url>...",
 		Aliases: []string{"reopen"},
 		Short:   "Reopen todo(s)",
 		Long: `Reopen one or more completed todos.
 
-	You can pass either todo IDs or Basecamp URLs:
-	  basecamp todos uncomplete 789
-	  basecamp todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
-		Args: cobra.MinimumNArgs(1),
+You can pass either todo IDs or Basecamp URLs:
+  basecamp todos uncomplete 789
+  basecamp todos uncomplete https://3.basecamp.com/123/buckets/456/todos/789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return reopenTodos(cmd, args)
 		},
 	}
@@ -1089,15 +1098,17 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, todosetFlag,
 
 func newReopenCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "reopen <id|url> [id|url...]",
+		Use:   "reopen <id|url>...",
 		Short: "Reopen todo(s)",
 		Long: `Reopen one or more completed todos.
 
-	You can pass either todo IDs or Basecamp URLs:
-	  basecamp reopen 789
-	  basecamp reopen https://3.basecamp.com/123/buckets/456/todos/789`,
-		Args: cobra.MinimumNArgs(1),
+You can pass either todo IDs or Basecamp URLs:
+  basecamp reopen 789
+  basecamp reopen https://3.basecamp.com/123/buckets/456/todos/789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return reopenTodos(cmd, args)
 		},
 	}
@@ -1181,8 +1192,11 @@ func newTodosPositionCmd() *cobra.Command {
 You can pass either a todo ID or a Basecamp URL:
   basecamp todos position 789 --to 1
   basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
-		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -1224,7 +1238,6 @@ You can pass either a todo ID or a Basecamp URL:
 
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
-	_ = cmd.MarkFlagRequired("to")
 
 	return cmd
 }
