@@ -22,17 +22,6 @@ func NewSubscriptionsCmd() *cobra.Command {
 Subscriptions control who receives notifications when an item is updated,
 commented on, or otherwise changed.`,
 		Annotations: map[string]string{"agent_notes": "Subscriptions control email/push notifications for an item"},
-		Args:        cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-			return ensureAccount(cmd, app)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubscriptionsShow(cmd, args[0])
-		},
 	}
 
 	cmd.AddCommand(

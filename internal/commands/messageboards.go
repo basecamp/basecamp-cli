@@ -22,14 +22,11 @@ func NewMessageboardsCmd() *cobra.Command {
 
 A message board is the container that holds all messages in a project.
 Each project has exactly one message board in its dock.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMessageboardShow(cmd, project, boardID)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.Flags().StringVarP(&boardID, "board", "b", "", "Message board ID (auto-detected from project)")
+	cmd.PersistentFlags().StringVarP(&boardID, "board", "b", "", "Message board ID (auto-detected from project)")
 
 	cmd.AddCommand(newMessageboardShowCmd(&project, &boardID))
 

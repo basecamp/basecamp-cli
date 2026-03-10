@@ -27,37 +27,6 @@ Use 'basecamp campfire list' to see campfires in a project.
 Use 'basecamp campfire messages' to view recent messages.
 Use 'basecamp campfire post "message"' to post a message.`,
 		Annotations: map[string]string{"agent_notes": "Each project has one campfire (the chat room)\nContent supports Markdown — converted to HTML automatically\nCampfire is project-scoped, no cross-project campfire queries"},
-		Args:        cobra.MinimumNArgs(0),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Handle numeric ID as first arg: basecamp campfire 123 messages
-			if len(args) > 0 && isNumeric(args[0]) {
-				campfireID = args[0]
-				if len(args) > 1 {
-					// Dispatch to subcommand
-					switch args[1] {
-					case "messages":
-						return runCampfireMessages(cmd, app, campfireID, project, 25)
-					case "post":
-						if len(args) > 2 {
-							return runCampfirePost(cmd, app, campfireID, project, args[2], contentType)
-						}
-						// Show help when invoked with no message content
-						return cmd.Help()
-					default:
-						return runCampfireMessages(cmd, app, campfireID, project, 25)
-					}
-				}
-				return runCampfireMessages(cmd, app, campfireID, project, 25)
-			}
-
-			// Default to list
-			return runCampfireList(cmd, app, project, false)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")

@@ -24,9 +24,6 @@ func NewTemplatesCmd() *cobra.Command {
 Templates allow you to create new projects with predefined structure,
 tools, and content.`,
 		Annotations: map[string]string{"agent_notes": "Construction from template is asynchronous — poll construction until status=completed to get the new project ID"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTemplatesList(cmd, status)
-		},
 	}
 
 	cmd.PersistentFlags().StringVar(&status, "status", "active", "Filter: active, archived, trashed")

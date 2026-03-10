@@ -23,14 +23,11 @@ func NewTodosetsCmd() *cobra.Command {
 A todoset is the container that holds all todolists in a project.
 Most projects have one todoset, but some may have multiple. Use --todoset
 to select a specific one.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTodosetShow(cmd, project, todosetID)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.Flags().StringVarP(&todosetID, "todoset", "t", "", "Todoset ID (auto-detected from project)")
+	cmd.PersistentFlags().StringVarP(&todosetID, "todoset", "t", "", "Todoset ID (auto-detected from project)")
 
 	cmd.AddCommand(newTodosetShowCmd(&project, &todosetID))
 

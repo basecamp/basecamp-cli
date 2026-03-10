@@ -239,10 +239,9 @@ func TestCampfirePostDefaultOmitsContentType(t *testing.T) {
 		"content_type should not be sent when --content-type is not specified")
 }
 
-// TestCampfireNumericIDPostContentType exercises the numeric-ID dispatch path:
-// `basecamp campfire <id> post <msg> --content-type text/html` which goes through the
-// parent command's RunE rather than the post subcommand.
-func TestCampfireNumericIDPostContentType(t *testing.T) {
+// TestCampfirePostViaSubcommandWithCampfireFlag verifies the proper way to post
+// to a specific campfire: `basecamp campfire post <msg> --campfire <id>`.
+func TestCampfirePostViaSubcommandWithCampfireFlag(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockCampfireCreateTransport{}
@@ -271,10 +270,9 @@ func TestCampfireNumericIDPostContentType(t *testing.T) {
 		}),
 	}
 
-	// This hits the isNumeric(args[0]) branch in NewCampfireCmd().RunE
 	cmd := NewCampfireCmd()
-	err := executeCampfireCommand(cmd, app, "789", "post", "<b>Hello</b>", "--content-type", "text/html")
-	require.NoError(t, err, "numeric-ID dispatch should succeed")
+	err := executeCampfireCommand(cmd, app, "post", "<b>Hello</b>", "--campfire", "789", "--content-type", "text/html")
+	require.NoError(t, err, "post via subcommand with --campfire flag should succeed")
 	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
 
 	var requestBody map[string]any
@@ -282,7 +280,7 @@ func TestCampfireNumericIDPostContentType(t *testing.T) {
 	require.NoError(t, err, "expected valid JSON in request body")
 
 	assert.Equal(t, "text/html", requestBody["content_type"],
-		"content_type should be sent via numeric-ID dispatch path")
+		"content_type should be sent via subcommand path")
 	assert.Equal(t, "<b>Hello</b>", requestBody["content"],
-		"content should be passed through numeric-ID dispatch path")
+		"content should be passed through subcommand path")
 }

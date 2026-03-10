@@ -33,9 +33,6 @@ Config locations:
   - Repo:   <git-root>/.basecamp/config.json
   - Local:  .basecamp/config.json`,
 		Annotations: map[string]string{"agent_notes": "config init creates .basecamp/config.json in the current directory\nconfig project interactively selects a project and saves it\nPer-repo config is committed to git — share project defaults with your team\nbasecamp api is an escape hatch for endpoints not yet wrapped by a dedicated command"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConfigShow(cmd)
-		},
 	}
 
 	cmd.AddCommand(
