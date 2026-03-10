@@ -90,7 +90,7 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	}
 	// Show help when invoked with no arguments
 	if todolist == "" {
-		return missingArg(cmd, "<todolist>")
+		return output.ErrUsage("--list is required")
 	}
 
 	resolvedTodolistID, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, resolvedProjectID)

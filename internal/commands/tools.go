@@ -217,10 +217,10 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with insufficient arguments
 			if len(args) == 0 {
-				return missingArg(cmd, "<tool-name>")
+				return missingArg(cmd, "<id>")
 			}
 			if len(args) < 2 {
-				return missingArg(cmd, "<status>")
+				return missingArg(cmd, "<title>")
 			}
 
 			app := appctx.FromContext(cmd.Context())
