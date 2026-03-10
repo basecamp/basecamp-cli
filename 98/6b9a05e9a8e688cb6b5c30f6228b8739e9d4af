@@ -1,0 +1,27 @@
+internal/commands/todolistgroups.go
+  3c6f3e7b533552d6 93
+internal/commands/tools.go
+  3c6f3e7b533552d6 220,223
+internal/commands/people.go
+  3c6f3e7b533552d6 377,451
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "986b9a05e9a8e688cb6b5c30f6228b8739e9d4af",
+  "prompts": {
+    "3c6f3e7b533552d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b1e1b0b-e8e0-4223-9980-dea01e701afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 5,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
