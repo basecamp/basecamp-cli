@@ -1,0 +1,41 @@
+e2e/lineup.bats
+  3c6f3e7b533552d6 27-28,37-38,50-51,60-61,85,94
+e2e/campfire.bats
+  3c6f3e7b533552d6 54-55
+e2e/cards_columns_steps.bats
+  3c6f3e7b533552d6 9,16,19,23,26,33,45-46,79-80,185-186,262-263,285-286,337-338
+e2e/templates.bats
+  3c6f3e7b533552d6 27-28
+e2e/messagetypes.bats
+  3c6f3e7b533552d6 27-28
+e2e/boost.bats
+  3c6f3e7b533552d6 15-16
+e2e/errors.bats
+  3c6f3e7b533552d6 18,22,25,28,32,35,57,61,64,148,152,154-155,158,162,164-165
+e2e/schedule.bats
+  3c6f3e7b533552d6 84-85
+e2e/files.bats
+  3c6f3e7b533552d6 48,52,54-55,58,63-64,67,72-73,76,81-82,177,179-180
+e2e/checkins.bats
+  3c6f3e7b533552d6 54-55,73-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "de2d5cc29f2b0027eceb17bbfab5256255c5dbca",
+  "prompts": {
+    "3c6f3e7b533552d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b1e1b0b-e8e0-4223-9980-dea01e701afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 75,
+      "overriden_lines": 0
+    }
+  }
+}
