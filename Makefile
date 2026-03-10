@@ -271,7 +271,7 @@ replace-check:
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e check-naming check-surface provenance-check tidy-check
+check: fmt-check vet lint test test-e2e check-naming check-surface check-skill-drift provenance-check tidy-check
 
 # Full pre-flight for release: check + replace-check + vuln + race + surface compat
 .PHONY: release-check
@@ -323,6 +323,11 @@ check-surface-compat: build
 	else \
 		echo "First release — no baseline to compare against"; \
 	fi
+
+# Verify skill references match current CLI surface (catches stale commands/flags)
+.PHONY: check-skill-drift
+check-skill-drift:
+	@scripts/check-skill-drift.sh
 
 # Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
 .PHONY: check-naming
@@ -444,6 +449,7 @@ help:
 	@echo "  check          Run all checks (local CI gate)"
 	@echo "  check-surface  Generate CLI surface snapshot (validates --help --agent output)"
 	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
+	@echo "  check-skill-drift  Verify skill references match CLI surface"
 	@echo ""
 	@echo "Dependencies:"
 	@echo "  update-nix-hash   Recompute Nix vendorHash via Docker"
