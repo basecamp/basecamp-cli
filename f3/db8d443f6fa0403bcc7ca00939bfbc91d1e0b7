@@ -1,0 +1,27 @@
+internal/auth/auth_test.go
+  ea1721fdf2944aeb 834,880,885,963,968,1024,1029,1086,1092,1177-1355
+internal/config/config_test.go
+  ea1721fdf2944aeb 18
+internal/commands/profile_test.go
+  ea1721fdf2944aeb 606-607,626,629-630
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "f3db8d443f6fa0403bcc7ca00939bfbc91d1e0b7",
+  "prompts": {
+    "ea1721fdf2944aeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2abbb63-7fe7-4341-b9d5-d2066ea3c737",
+        "model": "unknown"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 199,
+      "overriden_lines": 0
+    }
+  }
+}
