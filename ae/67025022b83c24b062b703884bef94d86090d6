@@ -1,0 +1,27 @@
+internal/commands/helpers.go
+  7842b425071796f5 85-86,158-166
+internal/tui/resolve/todolist.go
+  7842b425071796f5 148-149,151,153,155-157,159
+internal/tui/resolve/dock.go
+  7842b425071796f5 159,163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "ae67025022b83c24b062b703884bef94d86090d6",
+  "prompts": {
+    "7842b425071796f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db94e381-c127-4d1f-8007-a12a3f152dc7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 365,
+      "total_deletions": 51,
+      "accepted_lines": 360,
+      "overriden_lines": 0
+    }
+  }
+}
