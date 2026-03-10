@@ -1,0 +1,23 @@
+scripts/check-skill-drift.sh
+  7f5420d52c88d3a5 27-30,33-35,42-45,53-55,64-67,75-77,84,92,95-98,100,114-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "a1e7967e4b4f7ecf26ee12473e6f885c30349888",
+  "prompts": {
+    "7f5420d52c88d3a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e3b8ee5b-9f30-403e-bddf-bfc9523b2242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 32,
+      "total_deletions": 16,
+      "accepted_lines": 31,
+      "overriden_lines": 0
+    }
+  }
+}
