@@ -1,0 +1,25 @@
+internal/commands/todolists.go
+  b5756bff233fa21b 198,378
+internal/commands/edit_test.go
+  b5756bff233fa21b 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "2747acfa10606b28462977737bede3d3a1c35a9e",
+  "prompts": {
+    "b5756bff233fa21b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dbd1a40-e27d-43af-9370-600331e182d9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
