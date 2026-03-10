@@ -134,11 +134,12 @@ func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, pa
 	todolists := todolistsResult.Todolists
 
 	respOpts := []output.ResponseOption{
+		output.WithEntity("todolist"),
 		output.WithSummary(fmt.Sprintf("%d todolists", len(todolists))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "todos",
-				Cmd:         fmt.Sprintf("basecamp todos --list <id> --in %s", resolvedProjectID),
+				Cmd:         "basecamp todos --list <id>",
 				Description: "List todos in list",
 			},
 			output.Breadcrumb{
@@ -198,11 +199,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				projectID = app.Config.ProjectID
 			}
 
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
 			// Parse todolist ID as int64
 			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
 			if err != nil {
@@ -216,17 +212,18 @@ You can pass either a todolist ID or a Basecamp URL:
 			}
 
 			return app.OK(todolist,
+				output.WithEntity("todolist"),
 				output.WithSummary(fmt.Sprintf("Todolist: %s", todolist.Name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "todos",
-						Cmd:         fmt.Sprintf("basecamp todos --list %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todos --list %s", todolistIDStr),
 						Description: "List todos",
 					},
 					output.Breadcrumb{
-						Action:      "create",
-						Cmd:         fmt.Sprintf("basecamp todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
-						Description: "Create todo",
+						Action:      "add_todo",
+						Cmd:         fmt.Sprintf("basecamp todo <content> --list %s", todolistIDStr),
+						Description: "Add todo",
 					},
 				),
 			)
@@ -306,16 +303,17 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 			todolistIDStr := fmt.Sprintf("%d", todolist.ID)
 
 			return app.OK(todolist,
+				output.WithEntity("todolist"),
 				output.WithSummary(fmt.Sprintf("Created todolist #%s: %s", todolistIDStr, name)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp todolists show %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todolists show %s", todolistIDStr),
 						Description: "View todolist",
 					},
 					output.Breadcrumb{
 						Action:      "add_todo",
-						Cmd:         fmt.Sprintf("basecamp todos create --content <text> --list %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todo <content> --list %s", todolistIDStr),
 						Description: "Add todo",
 					},
 				),
@@ -377,11 +375,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				projectID = app.Config.ProjectID
 			}
 
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
 			// Parse todolist ID as int64
 			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
 			if err != nil {
@@ -401,12 +394,18 @@ You can pass either a todolist ID or a Basecamp URL:
 			}
 
 			return app.OK(todolist,
+				output.WithEntity("todolist"),
 				output.WithSummary(fmt.Sprintf("Updated todolist #%s", todolistIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp todolists show %s --in %s", todolistIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp todolists show %s", todolistIDStr),
 						Description: "View todolist",
+					},
+					output.Breadcrumb{
+						Action:      "todos",
+						Cmd:         fmt.Sprintf("basecamp todos --list %s", todolistIDStr),
+						Description: "List todos",
 					},
 				),
 			)

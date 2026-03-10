@@ -367,7 +367,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp todos create --content <text> --in %s --list %s", project, resolvedTodolist),
+				Cmd:         fmt.Sprintf("basecamp todo <content> --list %s", resolvedTodolist),
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
@@ -480,7 +480,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp todos create --content <text> --in %s --list <list>", project),
+				Cmd:         "basecamp todo <content> --list <list>",
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{

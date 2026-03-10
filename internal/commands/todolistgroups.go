@@ -116,7 +116,7 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp todolistgroups create \"name\" --list %s --in %s", todolist, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp todolistgroups create \"name\" --list %s", todolist),
 				Description: "Create group",
 			},
 			output.Breadcrumb{

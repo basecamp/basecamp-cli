@@ -1,0 +1,58 @@
+entity: todolist
+kind: recording
+type_key: "Todolist"
+
+identity:
+  label: name
+  id: id
+
+headline:
+  default:
+    template: "{{.name}}"
+
+fields:
+  name:
+    role: title
+    emphasis: primary
+    format: text
+
+  description:
+    role: body
+    format: text
+    collapse: true
+
+  completed:
+    role: detail
+    emphasis: muted
+    format: boolean
+    labels:
+      "true": completed
+      "false": active
+
+  completed_ratio:
+    role: detail
+    format: text
+
+  comments_count:
+    role: detail
+    format: number
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  id:
+    role: meta
+    emphasis: muted
+
+views:
+  list:
+    columns: [name, completed_ratio, completed]
+  detail:
+    sections:
+      - fields: [name, description]
+      - heading: Status
+        fields: [completed, completed_ratio, comments_count]
+      - heading: Metadata
+        fields: [id, created_at]
