@@ -164,9 +164,9 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		return code, resolve, nil
 	case err := <-errCh:
 		shutdown()
-		return "", resolve, err
+		return "", func(bool) {}, err
 	case <-ctx.Done():
 		shutdown()
-		return "", resolve, ctx.Err()
+		return "", func(bool) {}, ctx.Err()
 	}
 }
