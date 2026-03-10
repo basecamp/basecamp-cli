@@ -1,0 +1,29 @@
+e2e/errors.bats
+  3c6f3e7b533552d6 45,50-52,112,117-119,122,127-129,138-139,242-243,252-253,262-263,266,272,275,279,281-282,291-292,301-302,311-312,315,319,321-322,331-332
+e2e/messagetypes.bats
+  3c6f3e7b533552d6 75
+e2e/webhooks.bats
+  3c6f3e7b533552d6 9,13,16,47-48
+e2e/templates.bats
+  3c6f3e7b533552d6 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "0bb3249e105394f0eba1a28f9e4b7283f9320d13",
+  "prompts": {
+    "3c6f3e7b533552d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b1e1b0b-e8e0-4223-9980-dea01e701afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 76,
+      "overriden_lines": 0
+    }
+  }
+}
