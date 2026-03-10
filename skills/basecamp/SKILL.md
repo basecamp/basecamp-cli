@@ -183,7 +183,8 @@ basecamp comment 123 "Reply" --in <project>
 
 ```
 Need to find something?
-├── Know the type + project? → basecamp <type> --in <project> --json
+├── Know the type + project? → basecamp <type> list --in <project> --json
+│   (some groups have default list behavior; use --agent --help if unsure)
 ├── My assigned work? → basecamp reports assigned --json (defaults to "me")
 ├── Browse by type cross-project? → basecamp recordings <type> --json
 │   (types: todos, messages, documents, comments, cards, uploads)
