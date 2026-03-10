@@ -16,9 +16,6 @@ import (
 func NewForwardsCmd() *cobra.Command {
 	var project string
 	var inboxID string
-	var limit int
-	var page int
-	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "forwards",
@@ -28,17 +25,11 @@ func NewForwardsCmd() *cobra.Command {
 Forwards are emails forwarded into Basecamp. Each project has an inbox
 that can receive forwarded emails.`,
 		Annotations: map[string]string{"agent_notes": "Forwards are emails sent into a Basecamp project's inbox\nEach project has one inbox (forward container)\nContent supports Markdown"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runForwardsList(cmd, project, inboxID, limit, page, all)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&inboxID, "inbox", "", "Inbox ID (auto-detected from project)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newForwardsListCmd(&project, &inboxID),

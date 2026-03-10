@@ -21,9 +21,6 @@ func NewMessagetypesCmd() *cobra.Command {
 
 Message types categorize messages on the message board. Each type has a name
 and an emoji icon that appears alongside messages of that type.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMessagetypesList(cmd)
-		},
 	}
 
 	cmd.AddCommand(

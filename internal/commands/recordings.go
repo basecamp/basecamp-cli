@@ -34,6 +34,15 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 		Annotations: map[string]string{"agent_notes": "Does NOT include assignee data — cannot filter by person\nFor assigned todos use: basecamp reports assigned --json\nDefault status is active — use --status archived or --status trashed for other states\nTypes: todos, messages, documents, comments, cards, uploads"},
 		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked bare (no type given) — skip account check
+			effectiveType := normalizeRecordingType(recordingType)
+			if len(args) > 0 {
+				effectiveType = normalizeRecordingType(args[0])
+			}
+			if effectiveType == "" && !cmd.Flags().Changed("assignee") {
+				return nil // RunE will show help
+			}
+
 			if cmd.Flags().Changed("assignee") {
 				return recordingsAssigneeRedirect(assignee, project)
 			}
@@ -46,7 +55,6 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Validate type before checking account
 			// Normalize both flag and positional arg values
 			effectiveType := normalizeRecordingType(recordingType)
 			if len(args) > 0 {
@@ -54,10 +62,7 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 			}
 
 			if effectiveType == "" {
-				return output.ErrUsageHint(
-					"Type required",
-					"Use --type or shorthand: basecamp recordings todos|messages|documents|comments|cards|uploads",
-				)
+				return cmd.Help()
 			}
 
 			return runRecordingsList(cmd, app, effectiveType, project, status, sortBy, direction, limit, page, all)
