@@ -24,23 +24,25 @@ cmd_checked=0
 flag_checked=0
 new_drift=0
 
-# Load baseline of known drift (if any)
-declare -A known_drift
-if [ -f "$BASELINE" ]; then
-  while IFS= read -r entry; do
-    [[ -z "$entry" || "$entry" == \#* ]] && continue
-    known_drift["$entry"]=1
-  done < "$BASELINE"
-fi
+# Check whether an entry is in the baseline file (avoids Bash 4+ associative arrays).
+is_baselined() {
+  [ -f "$BASELINE" ] && grep -qxF "$1" "$BASELINE"
+}
 
 # Resolve a candidate command path to the longest matching CMD in .surface.
-# Prints the match (or nothing).
+# Prints the match (or nothing). Rejects fallback to bare "basecamp" —
+# every extracted candidate has at least one subcommand word, so matching
+# only the root means none of the subcommands exist.
 resolve_cmd() {
   local candidate="$1"
   read -ra parts <<< "$candidate"
   for ((i=${#parts[@]}; i>=1; i--)); do
     local try="${parts[*]:0:$i}"
     if grep -qxF "CMD $try" "$SURFACE"; then
+      # Reject bare root — candidate always has subcommand tokens
+      if [ "$try" = "basecamp" ] && [ "${#parts[@]}" -gt 1 ]; then
+        return
+      fi
       echo "$try"
       return
     fi
@@ -48,7 +50,9 @@ resolve_cmd() {
 }
 
 # Check whether a flag exists on a command or any of its subcommands.
-# Returns 0 if found, 1 if not.
+# Descendant matching is intentional: Cobra commands inherit flags and shortcut
+# commands delegate to subcommands (e.g. "basecamp cards --in" runs "cards list"
+# which has --in). Strict matching would produce false positives.
 # Note: uses grep -c instead of grep -q to avoid pipefail + SIGPIPE false negatives.
 flag_exists() {
   local cmd="$1" flag="$2"
@@ -57,6 +61,10 @@ flag_exists() {
   [ "$count" -gt 0 ]
 }
 
+# Strip YAML frontmatter — trigger keywords (e.g. "basecamp project") are
+# natural-language match phrases, not CLI command references.
+skill_body=$(awk '/^---$/{n++; next} n>=2' "$SKILL")
+
 # --- Phase 1: Command references ---
 # Extract "basecamp <subcommand>..." patterns, resolve to longest matching CMD.
 while IFS= read -r candidate; do
@@ -64,14 +72,16 @@ while IFS= read -r candidate; do
 
   if [ -z "$matched" ]; then
     key="CMD ${candidate}"
-    if [ -z "${known_drift[$key]+x}" ]; then
+    if is_baselined "$key"; then
+      : # known drift
+    else
       echo "DRIFT: command not in surface: $candidate"
       new_drift=$((new_drift + 1))
     fi
     errors=$((errors + 1))
   fi
   cmd_checked=$((cmd_checked + 1))
-done < <(grep -oE 'basecamp( [a-z][-a-z0-9]+)+' "$SKILL" | sort -u)
+done < <(echo "$skill_body" | grep -oE 'basecamp( [a-z][-a-z0-9]+)+' | sort -u)
 
 # --- Phase 2: Flag references ---
 # For lines with "basecamp <cmd> ... --flag", verify each flag exists on the
@@ -79,11 +89,15 @@ done < <(grep -oE 'basecamp( [a-z][-a-z0-9]+)+' "$SKILL" | sort -u)
 tmpfile=$(mktemp)
 trap 'rm -f "$tmpfile"' EXIT
 
-grep -nE 'basecamp [a-z].+--[a-z]' "$SKILL" > "$tmpfile" || true
+echo "$skill_body" | grep -nE 'basecamp [a-z].+--[a-z]' > "$tmpfile" || true
 
 while IFS=: read -r lineno line; do
-  cmd_candidate=$(echo "$line" | grep -oE 'basecamp( [a-z][-a-z0-9]+)+' | head -1)
-  [ -z "$cmd_candidate" ] && continue
+  # Extract command candidate using BASH_REMATCH to avoid grep|head SIGPIPE
+  if [[ "$line" =~ basecamp(\ [a-z][-a-z0-9]+)+ ]]; then
+    cmd_candidate="${BASH_REMATCH[0]}"
+  else
+    continue
+  fi
 
   matched=$(resolve_cmd "$cmd_candidate")
   [ -z "$matched" ] && continue
@@ -97,7 +111,9 @@ while IFS=: read -r lineno line; do
       : # found
     else
       key="FLAG ${matched} ${flag}"
-      if [ -z "${known_drift[$key]+x}" ]; then
+      if is_baselined "$key"; then
+        : # known drift
+      else
         echo "DRIFT: flag ${flag} not found on ${matched} (line ${lineno})"
         new_drift=$((new_drift + 1))
       fi
