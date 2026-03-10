@@ -83,6 +83,14 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/card_tables/%s.json", id)
 			case "document", "documents":
 				endpoint = fmt.Sprintf("/documents/%s.json", id)
+			case "schedule-entry", "schedule_entry":
+				endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
+			case "checkin", "check-in", "check_in":
+				endpoint = fmt.Sprintf("/questions/%s.json", id)
+			case "forward", "forwards":
+				endpoint = fmt.Sprintf("/forwards/%s.json", id)
+			case "upload", "uploads":
+				endpoint = fmt.Sprintf("/uploads/%s.json", id)
 			case "", "recording", "recordings":
 				// Generic recording lookup
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
