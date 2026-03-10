@@ -45,12 +45,13 @@ def parse_args(argv)
     when "--tag"     then opts[:tags] << argv.shift
     when "--json"    then opts[:json] = true
     when "--verbose" then opts[:verbose] = true
-    when "--samples" then opts[:samples] = argv.shift.to_i
-    when "--save"    then opts[:save] = argv.shift
-    when "--compare" then opts[:compare] = argv.shift
+    when "--samples" then opts[:samples] = Integer(argv.shift || abort("--samples requires a value"))
+    when "--save"    then opts[:save] = argv.shift || abort("--save requires a name")
+    when "--compare" then opts[:compare] = argv.shift || abort("--compare requires a name")
     else                  opts[:cases] << arg
     end
   end
+  abort "--samples must be >= 1" if opts[:samples] < 1
   opts
 end
 
@@ -69,7 +70,11 @@ def load_cases(opts)
           else
             Dir[CASES_DIR.join("*.yml").to_s].sort
           end
-  cases = files.map { |f| YAML.load_file(f).merge("file" => f) }
+  cases = files.map do |f|
+    data = YAML.safe_load_file(f, permitted_classes: [], permitted_symbols: [], aliases: false)
+    abort "#{f}: expected YAML mapping, got #{data.class}" unless data.is_a?(Hash)
+    data.merge("file" => f)
+  end
   if opts[:tags].any?
     cases.select { |c| (opts[:tags] & (c["tags"] || [])).any? }
   else
@@ -199,9 +204,9 @@ cases.each do |c|
     status = passed ? "\e[32mPASS\e[0m" : "\e[31mFAIL\e[0m"
     warn "#{status} #{name}"
     unless passed
-      best = sample_results.min_by { |r| r[:failures].length }
-      best[:failures].each { |f| warn "     #{f}" }
-      warn "     trace: #{best[:trace].inspect}" if opts[:verbose]
+      rep = sample_results.reject { |r| r[:pass] }.first
+      rep[:failures].each { |f| warn "     #{f}" }
+      warn "     trace: #{rep[:trace].inspect}" if opts[:verbose]
     end
   end
 
@@ -216,9 +221,11 @@ if opts[:save]
     model: opts[:model], skill: opts[:skill], samples: opts[:samples],
     timestamp: Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
     results: results.map { |r|
-      best = r[:samples].min_by { |s| s[:failures].length }
+      rep = r[:passed] \
+        ? r[:samples].first \
+        : r[:samples].reject { |s| s[:pass] }.first
       { name: r[:name], passed: r[:passed],
-        failures: best[:failures], trace: best[:trace] }
+        failures: rep[:failures], trace: rep[:trace] }
     }
   }
   File.write(RESULTS_DIR.join("#{opts[:save]}.json"), JSON.pretty_generate(snapshot))

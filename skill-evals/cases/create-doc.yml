@@ -1,5 +1,5 @@
 task: Create a document titled "API Guide" with body "Getting started with the API" in project 12345
 tags: [domain]
 accept:
-  - 'files doc create.*API Guide|docs create.*API Guide'
+  - 'files doc create.*API Guide.*Getting started|docs create.*API Guide.*Getting started'
   - '--(in|project) 12345'
