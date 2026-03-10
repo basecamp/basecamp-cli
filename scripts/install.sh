@@ -71,8 +71,8 @@ get_latest_version() {
   url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null) || true
   version="${url##*/}"
   version="${version#v}"
-  if [[ ! $version =~ ^[0-9]+\.[0-9]+ ]]; then
-    error "Could not determine latest version. Check your network connection."
+  if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    error "Could not determine latest version (resolved '${version:-<empty>}' from '${url:-<no URL>}'). Check your network connection or repository tags."
   fi
   echo "$version"
 }
@@ -307,6 +307,9 @@ main() {
 
   if [[ -n "$VERSION" ]]; then
     version="$VERSION"
+    if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+      error "Invalid version '${version}'. Expected semver format (e.g. 1.2.3 or 1.2.3-rc.1)."
+    fi
   else
     version=$(get_latest_version)
   fi
