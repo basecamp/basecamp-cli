@@ -97,7 +97,7 @@ load test_helper
   create_global_config '{"account_id": 99999}'
 
   # Run with verbose and capture stderr
-  run bash -c "basecamp -v projects 2>&1"
+  run bash -c "basecamp -v projects list 2>&1"
 
   # Check for SDK operation tracing output (format: [timestamp] Calling/Failed <Service>.<Method>)
   assert_output_contains "Calling"

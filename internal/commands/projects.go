@@ -29,7 +29,13 @@ func NewProjectsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.SetHelpFunc(renderProjectsHelp)
+	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if agent, _ := c.Root().PersistentFlags().GetBool("agent"); agent {
+			c.Root().HelpFunc()(c, args)
+			return
+		}
+		renderProjectsHelp(c, args)
+	})
 
 	cmd.AddCommand(
 		newProjectsListCmd(),
@@ -42,7 +48,7 @@ func NewProjectsCmd() *cobra.Command {
 	return cmd
 }
 
-func renderProjectsHelp(cmd *cobra.Command, args []string) {
+func renderProjectsHelp(cmd *cobra.Command, _ []string) {
 	r := output.NewRenderer(cmd.OutOrStdout(), false)
 	var b strings.Builder
 
