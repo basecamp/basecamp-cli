@@ -1,0 +1,25 @@
+internal/commands/files.go
+  7f5420d52c88d3a5 133-134
+.surface-skill-drift
+  7f5420d52c88d3a5 13-14,17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "7c8f4add1dc569fed9ac8b0b5403622e5c0dc5d1",
+  "prompts": {
+    "7f5420d52c88d3a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e3b8ee5b-9f30-403e-bddf-bfc9523b2242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 8,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
