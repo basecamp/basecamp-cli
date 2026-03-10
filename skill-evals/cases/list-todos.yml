@@ -1,0 +1,8 @@
+task: List todos assigned to me in project 12345
+tags: [calling-convention]
+accept:
+  - 'todos list'
+  - '--assignee me'
+  - '--(in|project) 12345'
+reject:
+  - '^todos\s+--'

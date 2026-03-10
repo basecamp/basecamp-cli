@@ -1,0 +1,6 @@
+task: Find items mentioning "quarterly goals"
+tags: [semantics]
+accept:
+  - 'search.*quarterly goals'
+reject:
+  - 'recordings'

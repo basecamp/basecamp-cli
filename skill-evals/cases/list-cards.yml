@@ -1,0 +1,7 @@
+task: List cards in project 12345
+tags: [calling-convention]
+accept:
+  - 'cards list'
+  - '--(in|project) 12345'
+reject:
+  - '^cards\s+--'

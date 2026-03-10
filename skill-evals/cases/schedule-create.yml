@@ -1,0 +1,7 @@
+task: Create a meeting "Standup" tomorrow 9am-9:30am in project 12345
+tags: [domain]
+accept:
+  - 'schedule create.*Standup'
+  - '--starts-at'
+  - '--ends-at'
+  - '--(in|project) 12345'

@@ -1,0 +1,6 @@
+task: Mark todo 98765 as complete
+tags: [shortcuts]
+accept:
+  - '(done|todos complete).*98765'
+reject:
+  - '--id'

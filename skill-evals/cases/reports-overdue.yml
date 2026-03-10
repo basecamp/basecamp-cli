@@ -1,0 +1,6 @@
+task: Find overdue todos across all projects
+tags: [semantics]
+accept:
+  - 'reports overdue'
+reject:
+  - 'todos list.*--overdue'

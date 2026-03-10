@@ -1,0 +1,5 @@
+task: Browse all archived todos across projects
+tags: [semantics]
+accept:
+  - 'recordings.*todos'
+  - '--status archived'

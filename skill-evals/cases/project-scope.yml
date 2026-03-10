@@ -1,0 +1,8 @@
+task: List overdue todos in project 12345
+tags: [workflow]
+accept:
+  - 'todos list'
+  - '--overdue'
+  - '--(in|project) 12345'
+reject:
+  - 'reports'

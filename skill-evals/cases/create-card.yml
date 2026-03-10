@@ -1,0 +1,9 @@
+task: Create a card "Design review" in project 77777
+tags: [calling-convention, create]
+accept:
+  - 'card(s create)? .*Design review'
+  - '--(in|project) 77777'
+reject:
+  - '--title .*Design'
+  - '--body'
+  - '--content'

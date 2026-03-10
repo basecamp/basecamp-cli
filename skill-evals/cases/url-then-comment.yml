@@ -1,0 +1,10 @@
+task: Comment "Done!" on https://3.basecamp.com/123/buckets/456/todos/789
+tags: [workflow]
+mocks:
+  - match: 'url parse'
+    output: '{"ok":true,"data":{"account_id":"123","project_id":"456","recording_id":"789"}}'
+  - match: 'comment'
+    output: '{"ok":true,"data":{"id":999}}'
+expect_sequence:
+  - match: 'url parse.*3\.basecamp\.com/123/buckets/456/todos/789'
+  - match: 'comment.*789.*Done'

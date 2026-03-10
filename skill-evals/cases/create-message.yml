@@ -1,0 +1,10 @@
+task: Post a message titled "Weekly Update" with body "Here are this week's highlights" in project 55555
+tags: [calling-convention, create]
+accept:
+  - 'message(s create)? .*Weekly Update'
+  - '--(in|project) 55555'
+reject:
+  - '--subject'
+  - '--title'
+  - '--body'
+  - '--content'

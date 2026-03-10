@@ -1,0 +1,260 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Skill evals runner — verifies SKILL.md teaches correct CLI usage
+# via tool-calling traces against deterministic assertions.
+
+require "yaml"
+require "json"
+require "net/http"
+require "uri"
+require "pathname"
+
+ROOT = Pathname.new(__dir__)
+DEFAULT_SKILL = ROOT.join("..", "skills", "basecamp", "SKILL.md")
+CASES_DIR = ROOT.join("cases")
+RESULTS_DIR = ROOT.join("results")
+GENERIC = '{"ok":true,"data":{},"summary":"Success"}'
+MAX_TURNS = 10
+
+TOOL = {
+  "name" => "basecamp",
+  "description" => "Run a basecamp CLI command. Pass the arguments exactly as you would after 'basecamp' on the command line.",
+  "input_schema" => {
+    "type" => "object",
+    "properties" => {
+      "args" => {
+        "type" => "string",
+        "description" => "Arguments after 'basecamp', e.g. 'todo \"Buy milk\" --in 12345 --json'"
+      }
+    },
+    "required" => ["args"]
+  }
+}.freeze
+
+def parse_args(argv)
+  opts = {
+    model: "claude-sonnet-4-20250514", skill: DEFAULT_SKILL.to_s,
+    samples: 1, cases: [], tags: [],
+    json: false, verbose: false, save: nil, compare: nil
+  }
+  while (arg = argv.shift)
+    case arg
+    when "--model"   then opts[:model] = argv.shift
+    when "--skill"   then opts[:skill] = argv.shift
+    when "--tag"     then opts[:tags] << argv.shift
+    when "--json"    then opts[:json] = true
+    when "--verbose" then opts[:verbose] = true
+    when "--samples" then opts[:samples] = argv.shift.to_i
+    when "--save"    then opts[:save] = argv.shift
+    when "--compare" then opts[:compare] = argv.shift
+    else                  opts[:cases] << arg
+    end
+  end
+  opts
+end
+
+def resolve_case_path(f)
+  return f if File.exist?(f)
+
+  rooted = ROOT.join(f).to_s
+  return rooted if File.exist?(rooted)
+
+  abort "Case file not found: #{f}"
+end
+
+def load_cases(opts)
+  files = if opts[:cases].any?
+            opts[:cases].map { |f| resolve_case_path(f) }
+          else
+            Dir[CASES_DIR.join("*.yml").to_s].sort
+          end
+  cases = files.map { |f| YAML.load_file(f).merge("file" => f) }
+  if opts[:tags].any?
+    cases.select { |c| (opts[:tags] & (c["tags"] || [])).any? }
+  else
+    cases
+  end
+end
+
+def resolve_mock(mocks, args)
+  return GENERIC unless mocks
+
+  mock = mocks.find { |m| Regexp.new(m["match"]).match?(args) }
+  mock ? mock["output"] : GENERIC
+end
+
+def api_call(model, system, messages, api_key)
+  uri = URI("https://api.anthropic.com/v1/messages")
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = true
+  http.read_timeout = 120
+
+  req = Net::HTTP::Post.new(uri)
+  req["x-api-key"] = api_key
+  req["anthropic-version"] = "2023-06-01"
+  req["content-type"] = "application/json"
+  req.body = JSON.generate(
+    model: model, max_tokens: 2048, system: system,
+    messages: messages, tools: [TOOL]
+  )
+
+  res = http.request(req)
+  raise "API error #{res.code}: #{res.body}" unless res.code == "200"
+
+  JSON.parse(res.body)
+end
+
+def run_case(c, model, skill_text, api_key, verbose: false)
+  system = "#{skill_text}\n\nUse the basecamp tool to complete the task. " \
+           "Each tool call is one CLI invocation. When done, respond with text."
+  context = c["context"] ? "\n\nContext: #{c["context"]}" : ""
+  messages = [{ "role" => "user", "content" => "#{c["task"]}#{context}" }]
+  trace = []
+
+  exhausted = false
+  MAX_TURNS.times do |turn|
+    resp = api_call(model, system, messages, api_key)
+    tool_uses = resp["content"].select { |b| b["type"] == "tool_use" }
+    break if tool_uses.empty?
+
+    messages << { "role" => "assistant", "content" => resp["content"] }
+    results = tool_uses.map do |tu|
+      args = tu.dig("input", "args") || ""
+      trace << args
+      warn "  tool: basecamp #{args}" if verbose
+      { "type" => "tool_result", "tool_use_id" => tu["id"], "content" => resolve_mock(c["mocks"], args) }
+    end
+    messages << { "role" => "user", "content" => results }
+    exhausted = true if turn == MAX_TURNS - 1
+  end
+
+  [trace, exhausted]
+end
+
+def grade(c, trace)
+  failures = []
+
+  (c["accept"] || []).each do |pat|
+    unless trace.any? { |t| Regexp.new(pat).match?(t) }
+      failures << "accept: /#{pat}/ not matched"
+    end
+  end
+
+  (c["reject"] || []).each do |pat|
+    hit = trace.find { |t| Regexp.new(pat).match?(t) }
+    failures << "reject: /#{pat}/ matched '#{hit}'" if hit
+  end
+
+  if c["expect_sequence"]
+    idx = -1
+    c["expect_sequence"].each do |step|
+      pat = step["match"]
+      found = (idx + 1...trace.length).find { |i| Regexp.new(pat).match?(trace[i]) }
+      if found
+        idx = found
+      else
+        failures << "expect_sequence: /#{pat}/ not found after index #{idx}"
+      end
+    end
+  end
+
+  if c["max_commands"] && trace.length > c["max_commands"]
+    failures << "max_commands: #{trace.length} > #{c["max_commands"]}"
+  end
+
+  failures
+end
+
+# --- Main ---
+
+opts = parse_args(ARGV.dup)
+api_key = ENV["ANTHROPIC_API_KEY"]
+abort "ANTHROPIC_API_KEY not set" unless api_key && !api_key.empty?
+
+skill_text = File.read(opts[:skill])
+cases = load_cases(opts)
+abort "No cases found" if cases.empty?
+
+warn "Running #{cases.length} cases (model: #{opts[:model]}, samples: #{opts[:samples]})\n\n" unless opts[:json]
+
+results = []
+pass_count = 0
+
+cases.each do |c|
+  name = File.basename(c["file"], ".yml")
+
+  sample_results = opts[:samples].times.map do |i|
+    warn "  [#{name}] sample #{i + 1}/#{opts[:samples]}..." if opts[:verbose] && opts[:samples] > 1
+    trace, exhausted = run_case(c, opts[:model], skill_text, api_key, verbose: opts[:verbose])
+    failures = grade(c, trace)
+    failures << "max_turns: exhausted #{MAX_TURNS} tool rounds without completing" if exhausted
+    { trace: trace, failures: failures, pass: failures.empty? }
+  end
+
+  passes = sample_results.count { |r| r[:pass] }
+  passed = passes > opts[:samples] / 2.0
+
+  unless opts[:json]
+    status = passed ? "\e[32mPASS\e[0m" : "\e[31mFAIL\e[0m"
+    warn "#{status} #{name}"
+    unless passed
+      best = sample_results.min_by { |r| r[:failures].length }
+      best[:failures].each { |f| warn "     #{f}" }
+      warn "     trace: #{best[:trace].inspect}" if opts[:verbose]
+    end
+  end
+
+  pass_count += 1 if passed
+  results << { name: name, passed: passed, samples: sample_results }
+end
+
+# Save snapshot
+if opts[:save]
+  RESULTS_DIR.mkpath
+  snapshot = {
+    model: opts[:model], skill: opts[:skill], samples: opts[:samples],
+    timestamp: Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    results: results.map { |r|
+      best = r[:samples].min_by { |s| s[:failures].length }
+      { name: r[:name], passed: r[:passed],
+        failures: best[:failures], trace: best[:trace] }
+    }
+  }
+  File.write(RESULTS_DIR.join("#{opts[:save]}.json"), JSON.pretty_generate(snapshot))
+  warn "\nSaved to results/#{opts[:save]}.json" unless opts[:json]
+end
+
+# Compare against baseline
+if opts[:compare]
+  baseline_file = RESULTS_DIR.join("#{opts[:compare]}.json")
+  abort "Baseline '#{opts[:compare]}' not found at #{baseline_file}" unless baseline_file.exist?
+
+  baseline = JSON.parse(baseline_file.read)
+  baseline_results = baseline.is_a?(Array) ? baseline : baseline["results"]
+  baseline_map = baseline_results.to_h { |r| [r["name"], r["passed"]] }
+
+  warn "\n--- Comparison vs #{opts[:compare]} ---" unless opts[:json]
+  results.each do |r|
+    prev = baseline_map[r[:name]]
+    if prev.nil?
+      warn "  NEW  #{r[:name]}: #{r[:passed] ? "pass" : "fail"}" unless opts[:json]
+    elsif prev != r[:passed]
+      dir = r[:passed] ? "\e[32m+ fixed\e[0m" : "\e[31m- regressed\e[0m"
+      warn "  #{dir}  #{r[:name]}" unless opts[:json]
+    end
+  end
+end
+
+# Summary
+total = results.length
+warn "\n#{pass_count}/#{total} passed" unless opts[:json]
+
+if opts[:json]
+  puts JSON.generate(
+    total: total, passed: pass_count, failed: total - pass_count,
+    results: results.map { |r| { name: r[:name], passed: r[:passed] } }
+  )
+end
+
+exit(pass_count == total ? 0 : 1)

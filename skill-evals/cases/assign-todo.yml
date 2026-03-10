@@ -1,0 +1,5 @@
+task: Assign todo 12345 to Alice
+tags: [shortcuts]
+accept:
+  - 'assign.*12345'
+  - '--to Alice'

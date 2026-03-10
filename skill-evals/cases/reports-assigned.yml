@@ -1,0 +1,6 @@
+task: List all my assigned todos across projects
+tags: [semantics]
+accept:
+  - 'reports assigned'
+reject:
+  - 'todos list'

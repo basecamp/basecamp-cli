@@ -1,0 +1,7 @@
+task: List todolists in project 12345
+tags: [calling-convention]
+accept:
+  - 'todolists list'
+  - '--(in|project) 12345'
+reject:
+  - '^todolists\s+--'

@@ -1,0 +1,11 @@
+task: List all projects in machine-readable format
+tags: [workflow]
+mocks:
+  - match: 'projects list'
+    output: '{"ok":true,"data":[{"id":111,"name":"Redesign"},{"id":222,"name":"Other"}],"summary":"2 projects"}'
+accept:
+  - 'projects list'
+  - '--(json|agent)'
+reject:
+  - '--md'
+max_commands: 3

@@ -1,0 +1,6 @@
+task: Complete todos 111, 222, and 333
+tags: [shortcuts]
+accept:
+  - 'done.*(111.*222.*333|111,222,333)'
+reject:
+  - '--id'

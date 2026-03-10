@@ -392,6 +392,11 @@ tools:
 	@command -v jq >/dev/null 2>&1 || echo "NOTE: jq is also required (install via your package manager)"
 
 
+# Run skill evals (requires ANTHROPIC_API_KEY and Ruby)
+.PHONY: skill-eval
+skill-eval:
+	$(MAKE) -C skill-evals eval
+
 # Sync skills to basecamp/skills distribution repo
 # Usage: make sync-skills TAG=v1.2.3
 .PHONY: sync-skills

@@ -1,0 +1,7 @@
+task: List people in project 12345
+tags: [domain]
+accept:
+  - 'people list'
+  - '--project 12345'
+reject:
+  - '--in'

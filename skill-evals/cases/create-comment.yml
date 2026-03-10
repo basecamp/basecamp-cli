@@ -1,0 +1,7 @@
+task: Comment "Looks good!" on recording 54321 in project 99999
+tags: [calling-convention, create]
+accept:
+  - 'comment(s create)? .*54321.*Looks good'
+  - '--(in|project) 99999'
+reject:
+  - '--content .*Looks'

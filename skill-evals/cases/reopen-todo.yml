@@ -1,0 +1,4 @@
+task: Reopen todo 98765
+tags: [shortcuts]
+accept:
+  - '(reopen|todos uncomplete).*98765'

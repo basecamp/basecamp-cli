@@ -1,0 +1,7 @@
+task: Create a todo "Buy milk" in project 12345
+tags: [calling-convention, create]
+accept:
+  - 'todo(s create)? .*Buy milk'
+  - '--(in|project) 12345'
+reject:
+  - '--content'

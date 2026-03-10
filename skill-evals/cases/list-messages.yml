@@ -1,0 +1,7 @@
+task: List messages in project 12345
+tags: [calling-convention]
+accept:
+  - 'messages list'
+  - '--(in|project) 12345'
+reject:
+  - '^messages\s+--'

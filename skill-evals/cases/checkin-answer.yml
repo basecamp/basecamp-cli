@@ -1,0 +1,5 @@
+task: Answer check-in question 456 with "Shipped v2" in project 12345
+tags: [domain]
+accept:
+  - 'checkins answer create.*456.*Shipped'
+  - '--(in|project) 12345'

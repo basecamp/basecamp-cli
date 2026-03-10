@@ -1,0 +1,5 @@
+task: Create a webhook for https://example.com/hook in project 12345
+tags: [domain]
+accept:
+  - 'webhooks create.*example\.com'
+  - '--(in|project) 12345'

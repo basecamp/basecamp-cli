@@ -135,7 +135,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | All todos (cross-project) | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
 | Overdue todos (cross-project) | `basecamp reports overdue --json` |
-| Assign todo | `basecamp assign <id> --to <person> --json` |
+| Assign todo | `basecamp assign <id> --to <person> --in <project> --json` |
 | Create todo | `basecamp todo "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
 | Complete todo | `basecamp done <id> --json` |
@@ -280,8 +280,8 @@ basecamp todos list --list <todolist_id> --in <project> # In specific list
 basecamp todo "Task" --in <project> --list <list> --assignee me --due tomorrow
 basecamp done <id> [id...]                              # Complete (multiple OK)
 basecamp reopen <id>                                    # Uncomplete
-basecamp assign <id> --to <person>                      # Assign (person: ID, email, or "me")
-basecamp unassign <id> --from <person>                  # Remove assignee
+basecamp assign <id> --to <person> --in <project>       # Assign (person: ID, email, or "me")
+basecamp unassign <id> --from <person> --in <project>   # Remove assignee
 basecamp todos position <id> --to 1                     # Move to top
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 ```

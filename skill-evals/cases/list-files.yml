@@ -1,0 +1,7 @@
+task: List files in project 12345
+tags: [calling-convention]
+accept:
+  - 'files list'
+  - '--(in|project) 12345'
+reject:
+  - '^files\s+--'
