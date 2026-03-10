@@ -44,7 +44,6 @@ archives:
         formats:
           - zip
     files:
-      - LICENSE*
       - MIT-LICENSE
       - README*
       - completions/*
