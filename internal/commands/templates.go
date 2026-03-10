@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -81,7 +82,24 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 		}
 	}
 
-	return app.OK(templates,
+	// Strip status and updated_at — they're noise in list output
+	type templateListItem struct {
+		ID          int64     `json:"id"`
+		Name        string    `json:"name"`
+		Description string    `json:"description"`
+		CreatedAt   time.Time `json:"created_at"`
+	}
+	items := make([]templateListItem, len(templates))
+	for i, t := range templates {
+		items[i] = templateListItem{
+			ID:          t.ID,
+			Name:        t.Name,
+			Description: t.Description,
+			CreatedAt:   t.CreatedAt,
+		}
+	}
+
+	return app.OK(items,
 		output.WithSummary(fmt.Sprintf("%d templates", len(templates))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
