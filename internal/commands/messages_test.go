@@ -204,8 +204,8 @@ func TestMessageShortcutRequiresProject(t *testing.T) {
 
 	cmd := NewMessageCmd()
 
-	// Need to set subject to bypass that validation
-	err := executeMessagesCommand(cmd, app, "--subject", "Test")
+	// Need to set title to bypass that validation
+	err := executeMessagesCommand(cmd, app, "Test")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -299,7 +299,7 @@ func TestMessageShortcutSubscribeMutualExclusion(t *testing.T) {
 
 	cmd := NewMessageCmd()
 
-	err := executeMessagesCommand(cmd, app, "--subject", "Test", "--subscribe", "me", "--no-subscribe")
+	err := executeMessagesCommand(cmd, app, "Test", "--subscribe", "me", "--no-subscribe")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -329,7 +329,7 @@ func TestMessageShortcutSubscribeEmptyIsError(t *testing.T) {
 
 	cmd := NewMessageCmd()
 
-	err := executeMessagesCommand(cmd, app, "--subject", "Test", "--subscribe", "")
+	err := executeMessagesCommand(cmd, app, "Test", "--subscribe", "")
 	require.Error(t, err)
 
 	var e *output.Error

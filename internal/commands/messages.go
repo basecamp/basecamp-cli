@@ -145,7 +145,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp message --subject <text> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp message <title> --in %s", resolvedProjectID),
 				Description: "Post new message",
 			},
 		),
@@ -194,7 +194,7 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment <text> --on %s", messageIDStr),
+						Cmd:         fmt.Sprintf("basecamp comment <text> %s", messageIDStr),
 						Description: "Add comment",
 					},
 				),
@@ -502,8 +502,6 @@ You can pass either a message ID or a Basecamp URL:
 
 // NewMessageCmd creates the message command (shortcut for creating messages).
 func NewMessageCmd() *cobra.Command {
-	var subject string
-	var content string
 	var edit bool
 	var project string
 	var messageBoard string
@@ -512,30 +510,38 @@ func NewMessageCmd() *cobra.Command {
 	var noSubscribe bool
 
 	cmd := &cobra.Command{
-		Use:   "message",
+		Use:   "message <title> [body]",
 		Short: "Post a new message",
 		Long:  "Post a message to a project's message board. Shortcut for 'basecamp messages create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			// Show help when invoked with no title
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			subject := args[0]
+
+			// Body from second positional arg or --editor
+			var body string
+			if len(args) > 1 {
+				body = args[1]
+			}
+
 			// Validate user input first, before checking account
-			if edit && content != "" {
-				return output.ErrUsage("cannot combine --edit and --content")
+			if edit && body != "" {
+				return output.ErrUsage("cannot combine --edit and body argument")
 			}
 			if edit {
 				fi, err := os.Stdin.Stat()
 				if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
 					return output.ErrUsage("cannot use --edit when stdin is not a terminal")
 				}
-				content, err = editor.Open("")
-				if err != nil {
-					return output.ErrUsage(err.Error())
+				var editorErr error
+				body, editorErr = editor.Open("")
+				if editorErr != nil {
+					return output.ErrUsage(editorErr.Error())
 				}
-			}
-
-			app := appctx.FromContext(cmd.Context())
-
-			// Show help when invoked with no subject
-			if subject == "" {
-				return cmd.Help()
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -583,7 +589,7 @@ func NewMessageCmd() *cobra.Command {
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateMessageRequest{
 				Subject:       subject,
-				Content:       richtext.MarkdownToHTML(content),
+				Content:       richtext.MarkdownToHTML(body),
 				Subscriptions: subs,
 			}
 			if draft {
@@ -615,9 +621,6 @@ func NewMessageCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&subject, "subject", "s", "", "Message subject (required)")
-	cmd.Flags().StringVarP(&content, "content", "b", "", "Message body content")
-	cmd.Flags().StringVar(&content, "body", "", "Message body content (alias for --content)")
 	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose message body")
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
