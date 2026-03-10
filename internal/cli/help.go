@@ -217,6 +217,33 @@ func renderCommandHelp(cmd *cobra.Command) {
 		b.WriteString("\n")
 	}
 
+	// ARGUMENTS
+	if args := ParseArgs(cmd); len(args) > 0 {
+		b.WriteString("\n")
+		b.WriteString(r.Header.Render("ARGUMENTS"))
+		b.WriteString("\n")
+
+		// Compute max display width for alignment
+		maxDisplay := 0
+		displays := make([]string, len(args))
+		for i, a := range args {
+			displays[i] = ArgDisplay(a)
+			if len(displays[i]) > maxDisplay {
+				maxDisplay = len(displays[i])
+			}
+		}
+		for i, a := range args {
+			desc := a.Description
+			if !a.Required {
+				desc += " (optional)"
+			}
+			if a.Variadic {
+				desc += " (one or more)"
+			}
+			fmt.Fprintf(&b, "  %-*s  %s\n", maxDisplay, displays[i], desc)
+		}
+	}
+
 	// COMMANDS
 	if cmd.HasAvailableSubCommands() {
 		var entries []helpEntry

@@ -595,6 +595,7 @@ type agentHelpInfo struct {
 	Long           string            `json:"long,omitempty"`
 	Usage          string            `json:"usage"`
 	Notes          []string          `json:"notes,omitempty"`
+	Args           []ArgInfo         `json:"args,omitempty"`
 	Subcommands    []agentSubcommand `json:"subcommands,omitempty"`
 	Flags          []agentFlag       `json:"flags,omitempty"`
 	InheritedFlags []agentFlag       `json:"inherited_flags,omitempty"`
@@ -623,6 +624,9 @@ func emitAgentHelp(cmd *cobra.Command) {
 		Long:    cmd.Long,
 		Usage:   cmd.UseLine(),
 	}
+
+	// Structured positional args from Use: string
+	info.Args = ParseArgs(cmd)
 
 	// Extract notes from Annotations["agent_notes"]
 	if notes, ok := cmd.Annotations["agent_notes"]; ok && notes != "" {

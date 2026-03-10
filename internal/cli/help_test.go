@@ -368,3 +368,64 @@ func TestRootHelpUsesLiveCommandDescriptions(t *testing.T) {
 	// The help screen should show the command's actual Short, not the catalog's
 	assert.Contains(t, out, search.Short)
 }
+
+func TestAgentHelpIncludesArgs(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewTodoCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"todo", "--help", "--agent"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, `"args"`)
+	assert.Contains(t, out, `"name":"content"`)
+	assert.Contains(t, out, `"required":true`)
+	assert.Contains(t, out, `"kind":"text"`)
+}
+
+func TestAgentHelpOmitsArgsWhenEmpty(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewProjectsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"projects", "list", "--help", "--agent"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.NotContains(t, out, `"args"`)
+}
+
+func TestLeafCommandHelpShowsArguments(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewShowCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"show", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "ARGUMENTS")
+	assert.Contains(t, out, "[type]")
+	assert.Contains(t, out, "<id|url>")
+}
+
+func TestGroupCommandHelpOmitsArguments(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewPeopleCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"people", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.NotContains(t, out, "ARGUMENTS")
+}
