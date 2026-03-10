@@ -91,7 +91,7 @@ func NoComments() Message {
 		Title: "No comments",
 		Body:  "This item has no comments yet.",
 		Hints: []string{
-			"Add a comment with: basecamp comment --on <id> --content <text>",
+			"Add a comment with: basecamp comment <text> <id>",
 		},
 	}
 }

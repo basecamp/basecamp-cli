@@ -545,7 +545,7 @@ func newTodosShowCmd() *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment --on %d --content <text>", todoID),
+						Cmd:         fmt.Sprintf("basecamp comment <text> %d", todoID),
 						Description: "Add comment",
 					},
 				),

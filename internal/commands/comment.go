@@ -113,7 +113,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
-				Cmd:         fmt.Sprintf("basecamp comment <text> --on %s", recordingID),
+				Cmd:         fmt.Sprintf("basecamp comment <text> %s", recordingID),
 				Description: "Add comment",
 			},
 			output.Breadcrumb{
