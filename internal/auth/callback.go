@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-//go:embed callback.html callback_success.html callback_error.html callback_denied.html callback_invalid.html
+//go:embed callback.html callback_success.html callback_error.html callback_denied.html callback_invalid.html callback_exchange_failed.html
 var callbackFS embed.FS
 
 var callbackTmpl = template.Must(template.ParseFS(callbackFS, "callback.html"))
@@ -28,34 +28,55 @@ func renderCallback(filename string) string {
 }
 
 var (
-	callbackSuccess = renderCallback("callback_success.html")
-	callbackError   = renderCallback("callback_error.html")
-	callbackDenied  = renderCallback("callback_denied.html")
-	callbackInvalid = renderCallback("callback_invalid.html")
+	callbackSuccess        = renderCallback("callback_success.html")
+	callbackError          = renderCallback("callback_error.html")
+	callbackDenied         = renderCallback("callback_denied.html")
+	callbackInvalid        = renderCallback("callback_invalid.html")
+	callbackExchangeFailed = renderCallback("callback_exchange_failed.html")
 )
 
 // waitForCallback starts a local HTTP server on the provided listener and
 // waits for the OAuth provider to redirect back with an authorization code.
 // It validates the state parameter for CSRF protection and returns the code.
-func waitForCallback(ctx context.Context, expectedState string, listener net.Listener) (string, error) {
+//
+// On success the returned resolve function must be called to signal the
+// outcome of the token exchange: true for success, false for failure. The
+// HTTP response to the browser is deferred until resolve is called so the
+// user sees an accurate result page. resolve is safe to call multiple times;
+// only the first call takes effect.
+//
+// On error (state mismatch, OAuth error, missing code, context cancellation)
+// the handler responds immediately and the returned resolve is a no-op.
+func waitForCallback(ctx context.Context, expectedState string, listener net.Listener) (string, func(bool), error) {
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
-	var once sync.Once
+	doneCh := make(chan bool, 1)
 
+	var shutdownOnce sync.Once
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 
 	shutdown := func() { //nolint:contextcheck // fire-and-forget shutdown; no parent context to propagate
-		once.Do(func() {
+		shutdownOnce.Do(func() {
 			go func() {
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = server.Shutdown(shutdownCtx)
 			}()
+		})
+	}
+
+	var resolveOnce sync.Once
+	resolve := func(success bool) {
+		resolveOnce.Do(func() {
+			select {
+			case doneCh <- success:
+			default:
+			}
 		})
 	}
 
@@ -115,24 +136,37 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 			return
 		}
 
+		// Signal code to caller; defer the browser response until the
+		// token exchange result arrives via doneCh.
 		select {
 		case codeCh <- code:
 		default:
 		}
-		_, _ = fmt.Fprint(w, callbackSuccess)
+
+		select {
+		case success := <-doneCh:
+			if success {
+				_, _ = fmt.Fprint(w, callbackSuccess)
+			} else {
+				_, _ = fmt.Fprint(w, callbackExchangeFailed)
+			}
+		case <-r.Context().Done():
+			// Client disconnected or server shutting down.
+		}
 		shutdown()
 	})
 	server.Handler = mux
 
-	defer shutdown()
 	go func() { _ = server.Serve(listener) }()
 
 	select {
 	case code := <-codeCh:
-		return code, nil
+		return code, resolve, nil
 	case err := <-errCh:
-		return "", err
+		shutdown()
+		return "", resolve, err
 	case <-ctx.Done():
-		return "", ctx.Err()
+		shutdown()
+		return "", resolve, ctx.Err()
 	}
 }

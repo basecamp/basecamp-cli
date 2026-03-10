@@ -38,6 +38,35 @@ func readBody(t *testing.T, resp *http.Response) string {
 	return string(body)
 }
 
+// httpGetBody performs a GET in a goroutine and returns a channel that delivers
+// the response body. Used for the success path where the HTTP response is
+// deferred until resolve() is called.
+func httpGetBody(ctx context.Context, url string) <-chan string {
+	ch := make(chan string, 1)
+	go func() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			ch <- ""
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			ch <- ""
+			return
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		ch <- string(body)
+	}()
+	return ch
+}
+
+type callbackResult struct {
+	code    string
+	resolve func(bool)
+	err     error
+}
+
 func TestWaitForCallback_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -46,32 +75,70 @@ func TestWaitForCallback_Success(t *testing.T) {
 	addr := ln.Addr().String()
 	state := "test-state-123"
 
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
+	resultCh := make(chan callbackResult, 1)
 	go func() {
-		code, err := waitForCallback(ctx, state, ln)
-		if err != nil {
-			errCh <- err
-		} else {
-			codeCh <- code
-		}
+		code, resolve, err := waitForCallback(ctx, state, ln)
+		resultCh <- callbackResult{code, resolve, err}
 	}()
 
 	time.Sleep(50 * time.Millisecond)
 
-	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=%s&code=auth-code-456", addr, state))
-	body := readBody(t, resp)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, body, "Authorization successful")
+	// HTTP response is deferred until resolve() — must be async.
+	bodyCh := httpGetBody(ctx, fmt.Sprintf("http://%s/callback?state=%s&code=auth-code-456", addr, state))
 
+	var r callbackResult
 	select {
-	case code := <-codeCh:
-		assert.Equal(t, "auth-code-456", code)
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
+	case r = <-resultCh:
+		require.NoError(t, r.err)
+		assert.Equal(t, "auth-code-456", r.code)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for callback")
+	}
+
+	r.resolve(true)
+
+	select {
+	case body := <-bodyCh:
+		assert.Contains(t, body, "Authorization successful")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for HTTP response")
+	}
+}
+
+func TestWaitForCallback_ExchangeFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ln := listenLocal(t)
+	addr := ln.Addr().String()
+	state := "test-state-456"
+
+	resultCh := make(chan callbackResult, 1)
+	go func() {
+		code, resolve, err := waitForCallback(ctx, state, ln)
+		resultCh <- callbackResult{code, resolve, err}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	bodyCh := httpGetBody(ctx, fmt.Sprintf("http://%s/callback?state=%s&code=some-code", addr, state))
+
+	var r callbackResult
+	select {
+	case r = <-resultCh:
+		require.NoError(t, r.err)
+		assert.Equal(t, "some-code", r.code)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for callback")
+	}
+
+	r.resolve(false)
+
+	select {
+	case body := <-bodyCh:
+		assert.Contains(t, body, "could not be completed")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for HTTP response")
 	}
 }
 
@@ -84,7 +151,7 @@ func TestWaitForCallback_StateMismatch(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "expected-state", ln)
+		_, _, err := waitForCallback(ctx, "expected-state", ln)
 		errCh <- err
 	}()
 
@@ -111,7 +178,7 @@ func TestWaitForCallback_OAuthError(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "state", ln)
+		_, _, err := waitForCallback(ctx, "state", ln)
 		errCh <- err
 	}()
 
@@ -138,7 +205,7 @@ func TestWaitForCallback_OAuthErrorWithDescription(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "state", ln)
+		_, _, err := waitForCallback(ctx, "state", ln)
 		errCh <- err
 	}()
 
@@ -166,7 +233,7 @@ func TestWaitForCallback_OAuthErrorServerError(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "state", ln)
+		_, _, err := waitForCallback(ctx, "state", ln)
 		errCh <- err
 	}()
 
@@ -195,7 +262,7 @@ func TestWaitForCallback_OAuthErrorWithBadState(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "expected-state", ln)
+		_, _, err := waitForCallback(ctx, "expected-state", ln)
 		errCh <- err
 	}()
 
@@ -223,7 +290,7 @@ func TestWaitForCallback_MissingCode(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "state", ln)
+		_, _, err := waitForCallback(ctx, "state", ln)
 		errCh <- err
 	}()
 
@@ -248,7 +315,7 @@ func TestWaitForCallback_ContextCancellation(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := waitForCallback(ctx, "state", ln)
+		_, _, err := waitForCallback(ctx, "state", ln)
 		errCh <- err
 	}()
 
@@ -270,16 +337,10 @@ func TestWaitForCallback_IgnoresNonCallbackPaths(t *testing.T) {
 	ln := listenLocal(t)
 	addr := ln.Addr().String()
 
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
+	resultCh := make(chan callbackResult, 1)
 	go func() {
-		code, err := waitForCallback(ctx, "state-123", ln)
-		if err != nil {
-			errCh <- err
-		} else {
-			codeCh <- code
-		}
+		code, resolve, err := waitForCallback(ctx, "state-123", ln)
+		resultCh <- callbackResult{code, resolve, err}
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -289,17 +350,24 @@ func TestWaitForCallback_IgnoresNonCallbackPaths(t *testing.T) {
 	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
-	// The real callback should still work after the spurious request
-	resp = httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=state-123&code=real-code", addr))
-	body := readBody(t, resp)
-	assert.Contains(t, body, "Authorization successful")
+	// The real callback's response is deferred until resolve().
+	bodyCh := httpGetBody(ctx, fmt.Sprintf("http://%s/callback?state=state-123&code=real-code", addr))
+
+	var r callbackResult
+	select {
+	case r = <-resultCh:
+		require.NoError(t, r.err)
+		assert.Equal(t, "real-code", r.code)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for callback")
+	}
+
+	r.resolve(true)
 
 	select {
-	case code := <-codeCh:
-		assert.Equal(t, "real-code", code)
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
+	case body := <-bodyCh:
+		assert.Contains(t, body, "Authorization successful")
 	case <-time.After(3 * time.Second):
-		t.Fatal("timeout")
+		t.Fatal("timeout waiting for HTTP response")
 	}
 }

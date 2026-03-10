@@ -429,6 +429,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 	}
 
 	var code string
+	resolve := func(bool) {} // no-op default for remote mode
 
 	if opts.Remote {
 		// Remote/headless mode: prompt user to paste callback URL
@@ -477,14 +478,16 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
-		code, err = waitForCallback(waitCtx, state, listener)
+		code, resolve, err = waitForCallback(waitCtx, state, listener)
 		if err != nil {
 			return nil, err
 		}
 	}
+	defer resolve(false) // safety net: signal failure if we return without explicit resolve
 
 	// Exchange code for tokens
 	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds, &opts)
+	resolve(err == nil)
 	if err != nil {
 		return nil, err
 	}
