@@ -1,0 +1,25 @@
+internal/commands/edit_test.go
+  b5756bff233fa21b 14,18
+internal/commands/todolists.go
+  b5756bff233fa21b 199,375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "98db030f42fd3b71b0a805c02feebed25142f1ab",
+  "prompts": {
+    "b5756bff233fa21b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dbd1a40-e27d-43af-9370-600331e182d9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 9,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
