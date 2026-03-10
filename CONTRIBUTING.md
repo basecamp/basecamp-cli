@@ -3,22 +3,11 @@
 ## Development Setup
 
 ```bash
-# Clone
 git clone https://github.com/basecamp/basecamp-cli
 cd basecamp-cli
-
-# Install dev tools (golangci-lint, govulncheck, etc.)
-make tools
-
-# Build
-make build
-
-# Run tests
-make test        # Go unit tests
-make test-e2e    # End-to-end tests (requires bats-core)
-
-# Run all checks
-make check       # fmt-check, vet, lint, test, test-e2e
+bin/setup             # Install toolchain and dev tools
+make build            # Build
+bin/ci                # Verify everything passes
 ```
 
 ## SDK Development
@@ -45,11 +34,13 @@ The `go.work` file is gitignored - your local setup won't affect the repo.
 
 ## Pull Request Process
 
-1. **Run checks locally** before pushing:
+1. **Run CI locally** before pushing:
    ```bash
-   make check
-   make lint
+   bin/ci
    ```
+   This runs formatting, vetting, linting, unit tests, e2e tests, naming checks,
+   CLI surface checks, provenance checks, and tidy checks. Fix anything that fails
+   before pushing.
 
 2. **Add tests** for new functionality
 
