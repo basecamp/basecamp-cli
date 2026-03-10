@@ -15,15 +15,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// FilesListResult represents the combined contents of a vault.
-type FilesListResult struct {
-	VaultID    int64               `json:"vault_id"`
-	VaultTitle string              `json:"vault_title"`
-	Folders    []basecamp.Vault    `json:"folders"`
-	Files      []basecamp.Upload   `json:"files"`
-	Documents  []basecamp.Document `json:"documents"`
-}
-
 // NewFilesCmd creates the files command group.
 func NewFilesCmd() *cobra.Command {
 	var project string
@@ -177,13 +168,22 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		documents = documentsResult.Documents
 	}
 
-	// Build result
-	result := FilesListResult{
-		VaultID:    vaultIDNum,
-		VaultTitle: vaultTitle,
-		Folders:    folders,
-		Files:      uploads,
-		Documents:  documents,
+	// Slim output to id, name, type, size
+	type fileListItem struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Size string `json:"size,omitempty"`
+	}
+	var items []fileListItem
+	for _, f := range folders {
+		items = append(items, fileListItem{ID: f.ID, Name: f.Title, Type: "Folder"})
+	}
+	for _, u := range uploads {
+		items = append(items, fileListItem{ID: u.ID, Name: u.Title, Type: "Upload", Size: humanSize(u.ByteSize)})
+	}
+	for _, d := range documents {
+		items = append(items, fileListItem{ID: d.ID, Name: d.Title, Type: "Document"})
 	}
 
 	summary := fmt.Sprintf("%d folders, %d files, %d documents", len(folders), len(uploads), len(documents))
@@ -217,7 +217,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		))
 	}
 
-	return app.OK(result, respOpts...)
+	return app.OK(items, respOpts...)
 }
 
 func newFoldersCmd(project, vaultID *string) *cobra.Command {
@@ -1279,6 +1279,20 @@ func createFile(path string) (*os.File, error) {
 // copyFileContent copies from reader to writer and returns bytes written.
 func copyFileContent(dst *os.File, src io.Reader) (int64, error) {
 	return io.Copy(dst, src)
+}
+
+// humanSize formats bytes as a human-readable string (e.g., "9.1mb").
+func humanSize(bytes int64) string {
+	switch {
+	case bytes >= 1_000_000_000:
+		return fmt.Sprintf("%.1fgb", float64(bytes)/1_000_000_000)
+	case bytes >= 1_000_000:
+		return fmt.Sprintf("%.1fmb", float64(bytes)/1_000_000)
+	case bytes >= 1_000:
+		return fmt.Sprintf("%.1fkb", float64(bytes)/1_000)
+	default:
+		return fmt.Sprintf("%db", bytes)
+	}
 }
 
 // getVaultID retrieves the root vault ID from a project's dock, handling multi-dock projects.
