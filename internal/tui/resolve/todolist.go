@@ -57,9 +57,17 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 		}, nil
 	}
 
-	// No todolists found
+	// No todolists found — create a default "Tasks" list
 	if len(todolists) == 0 {
-		return nil, output.ErrNotFoundHint("todolists", projectID, "Create a todolist first")
+		created, err := r.createDefaultTodolist(ctx, projectID, "")
+		if err != nil {
+			return nil, err
+		}
+		return &ResolvedValue{
+			Value:  fmt.Sprintf("%d", created.ID),
+			Label:  created.Name,
+			Source: SourceDefault,
+		}, nil
 	}
 
 	// 4. Multiple todolists - need interactive prompt
@@ -146,6 +154,28 @@ func todolistToPickerItem(tl basecamp.Todolist) tui.PickerItem {
 		Title:       tl.Name,
 		Description: description,
 	}
+}
+
+// createDefaultTodolist creates a "Tasks" todolist in the project's todoset.
+func (r *Resolver) createDefaultTodolist(ctx context.Context, projectID, explicitTodosetID string) (*basecamp.Todolist, error) {
+	projectIDInt, err := strconv.ParseInt(projectID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid project ID: %w", err)
+	}
+
+	todosetID, err := r.getTodosetID(ctx, projectIDInt, explicitTodosetID)
+	if err != nil {
+		return nil, err
+	}
+
+	todolist, err := r.sdk.ForAccount(r.config.AccountID).Todolists().Create(ctx, todosetID, &basecamp.CreateTodolistRequest{
+		Name: "Tasks",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create default todolist: %w", err)
+	}
+
+	return todolist, nil
 }
 
 // getTodosetID resolves the todoset ID from a project's dock.
