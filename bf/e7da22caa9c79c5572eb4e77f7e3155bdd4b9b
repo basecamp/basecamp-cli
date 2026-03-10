@@ -1,0 +1,35 @@
+scripts/check-cli-surface.sh
+  61e7956c3c88ba49 42-43
+internal/commands/doc_contract_test.go
+  61e7956c3c88ba49 1-202
+internal/cli/args_test.go
+  61e7956c3c88ba49 1-133
+internal/cli/args.go
+  61e7956c3c88ba49 1-125,127-130,132-155
+internal/cli/root.go
+  61e7956c3c88ba49 598,628-630
+internal/cli/help_test.go
+  61e7956c3c88ba49 371-431
+internal/cli/help.go
+  61e7956c3c88ba49 220-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "bfe7da22caa9c79c5572eb4e77f7e3155bdd4b9b",
+  "prompts": {
+    "61e7956c3c88ba49": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a2aac46-b954-498b-a927-fc16918b07e2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 582,
+      "overriden_lines": 0
+    }
+  }
+}
