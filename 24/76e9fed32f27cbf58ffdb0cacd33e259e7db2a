@@ -1,0 +1,23 @@
+.github/workflows/test.yml
+  a681bf941cc87143 161-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "2476e9fed32f27cbf58ffdb0cacd33e259e7db2a",
+  "prompts": {
+    "a681bf941cc87143": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "767c6563-c1c2-40e6-97ab-395195837e45",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 33,
+      "total_deletions": 0,
+      "accepted_lines": 33,
+      "overriden_lines": 0
+    }
+  }
+}
