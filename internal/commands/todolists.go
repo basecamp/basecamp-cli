@@ -43,14 +43,14 @@ to disambiguate when needed.`,
 
 func newTodolistsListCmd(project, todosetID *string) *cobra.Command {
 	var limit, page int
-	var all bool
+	var all, archived bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List todolists",
 		Long:  "List all todolists in a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTodolistsList(cmd, *project, *todosetID, limit, page, all)
+			return runTodolistsList(cmd, *project, *todosetID, limit, page, all, archived)
 		},
 	}
 
@@ -58,11 +58,12 @@ func newTodolistsListCmd(project, todosetID *string) *cobra.Command {
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&archived, "archived", false, "Show archived todolists")
 
 	return cmd
 }
 
-func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, page int, all bool) error {
+func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, page int, all, archived bool) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -117,6 +118,9 @@ func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, pa
 
 	// Build pagination options
 	opts := &basecamp.TodolistListOptions{}
+	if archived {
+		opts.Status = "archived"
+	}
 	if all {
 		opts.Limit = 0 // SDK treats 0 as "fetch all" for todolists
 	} else if limit > 0 {

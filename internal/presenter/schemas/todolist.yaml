@@ -48,7 +48,7 @@ fields:
 
 views:
   list:
-    columns: [name, completed_ratio, completed]
+    columns: [id, name, completed_ratio]
   detail:
     sections:
       - fields: [name, description]
