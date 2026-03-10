@@ -513,8 +513,8 @@ basecamp people list --json                          # All people in account
 basecamp people list --project <project> --json    # People on project
 basecamp me --json                                 # Current user
 basecamp people show <id> --json                   # Person details
-basecamp people add <id> --in <project>            # Add to project
-basecamp people remove <id> --in <project>         # Remove from project
+basecamp people add <id> --project <project>       # Add to project
+basecamp people remove <id> --project <project>    # Remove from project
 ```
 
 ### Search
