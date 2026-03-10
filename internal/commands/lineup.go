@@ -39,7 +39,7 @@ They apply to the entire Basecamp account.`,
 
 func newLineupCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "create <name> [date]",
+		Use:   "create <name> <date>",
 		Short: "Create a new lineup marker",
 		Long: `Create a new lineup marker with a name and date.
 
@@ -62,15 +62,14 @@ The date accepts natural language dates:
 			if name == "" {
 				return missingArg(cmd, "<name>")
 			}
+			if date == "" {
+				return missingArg(cmd, "<date>")
+			}
 
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			if date == "" {
-				return output.ErrUsage("Marker date is required")
 			}
 
 			// Parse natural date if needed

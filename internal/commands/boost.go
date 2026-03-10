@@ -393,9 +393,9 @@ Content as positional argument, --on for the item:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			content := args[0]
 
-			// Show help when invoked with no recording target
+			// Require a recording target
 			if recording == "" {
-				return cmd.Help()
+				return output.ErrUsage("--on or --recording required")
 			}
 
 			app := appctx.FromContext(cmd.Context())
