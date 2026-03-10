@@ -1,0 +1,27 @@
+internal/auth/callback_error.html
+  b5756bff233fa21b 1-13
+internal/auth/callback.html
+  b5756bff233fa21b 1-84
+internal/auth/callback_success.html
+  b5756bff233fa21b 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "d6a71e4195310ea7c39c8650b1b9c3c848708ced",
+  "prompts": {
+    "b5756bff233fa21b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dbd1a40-e27d-43af-9370-600331e182d9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 110,
+      "overriden_lines": 0
+    }
+  }
+}
