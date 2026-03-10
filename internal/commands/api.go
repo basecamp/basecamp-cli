@@ -254,7 +254,7 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 			},
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         "basecamp projects",
+				Cmd:         "basecamp projects list",
 				Description: "List projects with formatting",
 			},
 		)

@@ -148,7 +148,7 @@ func newWebhooksShowCmd() *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "basecamp webhooks",
+						Cmd:         "basecamp webhooks list",
 						Description: "Back to webhooks",
 					},
 				),
@@ -239,7 +239,7 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "basecamp webhooks",
+						Cmd:         "basecamp webhooks list",
 						Description: "List webhooks",
 					},
 				),
@@ -328,7 +328,7 @@ func newWebhooksUpdateCmd() *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "basecamp webhooks",
+						Cmd:         "basecamp webhooks list",
 						Description: "List webhooks",
 					},
 				),
@@ -377,7 +377,7 @@ func newWebhooksDeleteCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         "basecamp webhooks",
+						Cmd:         "basecamp webhooks list",
 						Description: "List webhooks",
 					},
 				),

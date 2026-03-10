@@ -131,8 +131,8 @@ func runMe(cmd *cobra.Command, args []string) error {
 	} else {
 		// Account configured - show next steps
 		breadcrumbs = append(breadcrumbs,
-			output.Breadcrumb{Action: "projects", Cmd: "basecamp projects", Description: "List your projects"},
-			output.Breadcrumb{Action: "todos", Cmd: "basecamp todos --assignee me", Description: "Your assigned todos"},
+			output.Breadcrumb{Action: "projects", Cmd: "basecamp projects list", Description: "List your projects"},
+			output.Breadcrumb{Action: "todos", Cmd: "basecamp todos list --assignee me", Description: "Your assigned todos"},
 		)
 	}
 	breadcrumbs = append(breadcrumbs, output.Breadcrumb{Action: "auth", Cmd: "basecamp auth status", Description: "Auth status"})

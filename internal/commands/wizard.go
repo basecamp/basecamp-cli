@@ -199,6 +199,9 @@ func wizardAccount(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (str
 	fmt.Fprintln(w, styles.Heading.Render("  Step 2: Select Account"))
 	fmt.Fprintln(w)
 
+	// Clear any existing account so the picker always shows
+	app.Config.AccountID = ""
+
 	resolved, err := app.Resolve().Account(cmd.Context())
 	if err != nil {
 		return "", err
@@ -334,8 +337,8 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult) {
 	descStyle := styles.Muted
 
 	examples := []struct{ cmd, desc string }{
-		{"basecamp projects", "List your projects"},
-		{"basecamp todos", "List to-dos"},
+		{"basecamp projects list", "List your projects"},
+		{"basecamp todos list", "List to-dos"},
 		{"basecamp todo -c \"Buy milk\"", "Create a to-do"},
 		{"basecamp search \"quarterly\"", "Search across Basecamp"},
 	}
@@ -385,11 +388,11 @@ func wizardSummaryLine(result WizardResult) string {
 // wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
 func wizardBreadcrumbs(result WizardResult) []output.Breadcrumb {
 	crumbs := []output.Breadcrumb{
-		{Action: "list_projects", Cmd: "basecamp projects", Description: "List projects"},
+		{Action: "list_projects", Cmd: "basecamp projects list", Description: "List projects"},
 	}
 	if result.ProjectID != "" {
 		crumbs = append(crumbs,
-			output.Breadcrumb{Action: "list_todos", Cmd: "basecamp todos", Description: "List to-dos"},
+			output.Breadcrumb{Action: "list_todos", Cmd: "basecamp todos list", Description: "List to-dos"},
 			output.Breadcrumb{Action: "search", Cmd: "basecamp search \"query\"", Description: "Search Basecamp"},
 		)
 	} else {

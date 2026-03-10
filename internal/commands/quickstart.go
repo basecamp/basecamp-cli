@@ -113,7 +113,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 
 	// Commands info
 	commandsInfo := CommandsInfo{
-		QuickStart: []string{"basecamp projects", "basecamp todos", "basecamp search \"query\""},
+		QuickStart: []string{"basecamp projects list", "basecamp todos list", "basecamp search \"query\""},
 		Common:     []string{"basecamp todo \"content\"", "basecamp done <id>", "basecamp comment \"text\" <id>"},
 	}
 
@@ -148,8 +148,8 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 
 	// Build breadcrumbs
 	breadcrumbs := []output.Breadcrumb{
-		{Action: "list_projects", Cmd: "basecamp projects", Description: "List projects"},
-		{Action: "list_todos", Cmd: "basecamp todos", Description: "List todos"},
+		{Action: "list_projects", Cmd: "basecamp projects list", Description: "List projects"},
+		{Action: "list_todos", Cmd: "basecamp todos list", Description: "List todos"},
 	}
 	if authInfo.Status == "unauthenticated" {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
