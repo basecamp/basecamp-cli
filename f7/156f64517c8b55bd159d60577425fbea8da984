@@ -1,0 +1,77 @@
+skill-evals/cases/reopen-todo.yml
+  a681bf941cc87143 1-4
+skill-evals/cases/complete-multiple.yml
+  a681bf941cc87143 1-6
+skill-evals/cases/create-todo.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/webhook-create.yml
+  a681bf941cc87143 1-5
+skill-evals/cases/create-comment.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/create-doc.yml
+  a681bf941cc87143 1-5
+skill-evals/cases/list-cards.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/list-todolists.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/list-messages.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/people-in-project.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/checkin-answer.yml
+  a681bf941cc87143 1-5
+skill-evals/cases/reports-assigned.yml
+  a681bf941cc87143 1-6
+skill-evals/cases/schedule-create.yml
+  a681bf941cc87143 1-7
+skill-evals/cases/search.yml
+  a681bf941cc87143 1-6
+skill-evals/cases/list-todos.yml
+  a681bf941cc87143 1-8
+skill-evals/cases/reports-overdue.yml
+  a681bf941cc87143 1-6
+skill-evals/cases/assign-todo.yml
+  a681bf941cc87143 1-5
+skill-evals/cases/create-card.yml
+  a681bf941cc87143 1-9
+skill-evals/cases/list-files.yml
+  a681bf941cc87143 1-7
+skill-evals/Makefile
+  a681bf941cc87143 1-18
+skill-evals/cases/project-scope.yml
+  a681bf941cc87143 1-8
+skill-evals/cases/create-message.yml
+  a681bf941cc87143 1-10
+skill-evals/cases/url-then-comment.yml
+  a681bf941cc87143 1-10
+skill-evals/cases/complete-todo.yml
+  a681bf941cc87143 1-6
+skill-evals/run
+  a681bf941cc87143 1-260
+skill-evals/cases/recordings-browse.yml
+  a681bf941cc87143 1-5
+skill-evals/cases/agent-output-mode.yml
+  a681bf941cc87143 1-11
+Makefile
+  a681bf941cc87143 395-399
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "f7156f64517c8b55bd159d60577425fbea8da984",
+  "prompts": {
+    "a681bf941cc87143": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "767c6563-c1c2-40e6-97ab-395195837e45",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 454,
+      "overriden_lines": 0
+    }
+  }
+}
