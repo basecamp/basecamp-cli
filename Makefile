@@ -28,15 +28,6 @@ VERSION_PKG := github.com/basecamp/basecamp-cli/internal/version
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)
 BUILD_FLAGS := -trimpath -ldflags "$(LDFLAGS)"
 
-# PGO (Profile-Guided Optimization)
-PGO_PROFILE := default.pgo
-HAS_PGO := $(shell test -f $(PGO_PROFILE) && echo 1 || echo 0)
-ifeq ($(HAS_PGO),1)
-    PGO_FLAGS := -pgo=$(PGO_PROFILE)
-else
-    PGO_FLAGS :=
-endif
-
 # Default target
 .PHONY: all
 all: check
@@ -45,18 +36,6 @@ all: check
 .PHONY: build
 build: check-toolchain
 	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp
-
-# Build with PGO optimization (requires default.pgo)
-.PHONY: build-pgo
-build-pgo:
-	@if [ ! -f $(PGO_PROFILE) ]; then \
-		echo "Warning: $(PGO_PROFILE) not found. Run 'make collect-profile' first."; \
-		echo "Building without PGO..."; \
-		CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
-	else \
-		echo "Building with PGO optimization..."; \
-		CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) $(PGO_FLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/basecamp; \
-	fi
 
 # Build for all platforms
 .PHONY: build-all
@@ -161,22 +140,6 @@ bench-compare:
 	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-current.txt
 	@command -v benchstat >/dev/null 2>&1 || go install golang.org/x/perf/cmd/benchstat@latest
 	benchstat benchmarks-baseline.txt benchmarks-current.txt
-
-# ============================================================================
-# Profile-Guided Optimization (PGO)
-# ============================================================================
-
-# Collect PGO profile from benchmarks
-.PHONY: collect-profile
-collect-profile:
-	./scripts/collect-profile.sh
-
-# Clean PGO and profiling artifacts
-.PHONY: clean-pgo
-clean-pgo:
-	rm -f $(PGO_PROFILE)
-	rm -rf profiles/
-	rm -f benchmarks-*.txt
 
 # Guard against Go toolchain mismatch (mise environment)
 .PHONY: check-toolchain
@@ -287,9 +250,9 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
 
-# Clean all (including PGO artifacts)
+# Clean all
 .PHONY: clean-all
-clean-all: clean clean-pgo
+clean-all: clean
 
 # Install to GOPATH/bin
 .PHONY: install
@@ -453,7 +416,6 @@ help:
 	@echo ""
 	@echo "Build:"
 	@echo "  build          Build the binary"
-	@echo "  build-pgo      Build with PGO optimization (requires profile)"
 	@echo "  build-all      Build for all platforms"
 	@echo "  build-darwin   Build for macOS (arm64 + amd64)"
 	@echo "  build-linux    Build for Linux (arm64 + amd64)"
@@ -473,10 +435,6 @@ help:
 	@echo "  bench-mem      Run benchmarks with memory profiling"
 	@echo "  bench-save     Save current benchmarks as baseline"
 	@echo "  bench-compare  Compare against baseline (requires benchstat)"
-	@echo ""
-	@echo "PGO (Profile-Guided Optimization):"
-	@echo "  collect-profile  Generate PGO profile from benchmarks"
-	@echo "  clean-pgo        Remove PGO artifacts"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  check-toolchain  Guard against Go toolchain mismatch"
@@ -499,7 +457,7 @@ help:
 	@echo "  tidy           Tidy go.mod dependencies"
 	@echo "  verify         Verify dependencies"
 	@echo "  clean          Remove build artifacts"
-	@echo "  clean-all      Remove all artifacts (including PGO)"
+	@echo "  clean-all      Remove all artifacts"
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  check            Run all checks (local CI gate)"
 	@echo "  check-naming     Guard against stale bcq/BCQ references"
