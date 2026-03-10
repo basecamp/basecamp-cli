@@ -1413,7 +1413,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				cardID = args[0]
 			}
 			if cardID == "" {
-				return output.ErrUsage("Card ID required (basecamp cards steps <card_id>)")
+				return cmd.Help()
 			}
 
 			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)

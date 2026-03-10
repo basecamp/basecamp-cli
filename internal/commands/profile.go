@@ -123,7 +123,7 @@ func newProfileShowCmd() *cobra.Command {
 			} else if app.Config.DefaultProfile != "" {
 				name = app.Config.DefaultProfile
 			} else {
-				return output.ErrUsage("Profile name required (no active or default profile)")
+				return cmd.Help()
 			}
 
 			p, ok := app.Config.Profiles[name]

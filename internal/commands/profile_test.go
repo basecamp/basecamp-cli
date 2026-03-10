@@ -412,8 +412,7 @@ func TestProfileShowNoProfileAvailable(t *testing.T) {
 
 	cmd := newProfileShowCmd()
 	err := executeProfileCommand(cmd, app)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Profile name required")
+	require.NoError(t, err) // shows help when no profile available
 }
 
 func TestProfileShowNonexistent(t *testing.T) {

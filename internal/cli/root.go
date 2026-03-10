@@ -267,6 +267,15 @@ func Execute() {
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
 	if err != nil {
+		// When a command receives zero args but requires some, show help instead of an error.
+		// This gives users discoverable usage info rather than a terse "ID required" JSON message.
+		// Also applies when a required flag is missing and no positional args were given —
+		// the user invoked the command bare, so help is more useful than a flag error.
+		if isMissingArgsError(err) || isBareRequiredFlagError(err, executedCmd) {
+			_ = executedCmd.Help()
+			os.Exit(0)
+		}
+
 		// Transform Cobra errors to match Bash CLI error format
 		err = transformCobraError(err)
 
@@ -442,6 +451,25 @@ func isConfigCmd(cmd *cobra.Command) bool {
 		}
 	}
 	return false
+}
+
+// isMissingArgsError returns true when cobra rejects a command because zero
+// positional arguments were supplied but the command requires at least one.
+func isMissingArgsError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "arg(s), received 0") ||
+		(strings.Contains(msg, "requires at least") && strings.Contains(msg, "received 0"))
+}
+
+// isBareRequiredFlagError returns true when a required flag is missing AND the
+// user supplied zero positional arguments — they invoked the command bare.
+func isBareRequiredFlagError(err error, cmd *cobra.Command) bool {
+	if !strings.HasPrefix(err.Error(), "required flag(s)") {
+		return false
+	}
+	// ArgsLenAtDash returns -1 when no dash separator is used.
+	// Flags().NArg() gives the number of non-flag args cobra parsed.
+	return cmd.Flags().NArg() == 0
 }
 
 // transformCobraError transforms Cobra's default error messages to match the

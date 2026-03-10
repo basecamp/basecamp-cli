@@ -129,8 +129,8 @@ func TestCardsColumnColorShowsHelp(t *testing.T) {
 	assert.NoError(t, err, "expected help output, not error")
 }
 
-// TestCardsStepsRequiresCardID tests that card ID is required for steps command.
-func TestCardsStepsRequiresCardID(t *testing.T) {
+// TestCardsStepsShowsHelpWithoutCardID tests that help is shown when card ID is missing.
+func TestCardsStepsShowsHelpWithoutCardID(t *testing.T) {
 	app, _ := setupTestApp(t)
 
 	// Configure app with project
@@ -139,14 +139,8 @@ func TestCardsStepsRequiresCardID(t *testing.T) {
 	project := ""
 	cmd := newCardsStepsCmd(&project)
 
-	err := executeCommand(cmd, app) // no card ID
-	require.NotNil(t, err, "expected error, got nil")
-
-	// Check error type
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Card ID required (basecamp cards steps <card_id>)", e.Message)
-	}
+	err := executeCommand(cmd, app) // no card ID → shows help
+	require.NoError(t, err)
 }
 
 // TestCardsStepCreateShowsHelpWithoutTitle tests that help is shown when --title is missing.
