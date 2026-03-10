@@ -74,7 +74,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
 5. **Content fields accept Markdown** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp recordings <type>` for browsing by type.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
 
@@ -125,7 +125,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). For assigned work cross-project, use `basecamp reports assigned`. For browsing by type, use `basecamp recordings <type>`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp reports overdue`, `basecamp recordings <type>`.
 
 | Task | Command |
 |------|---------|
@@ -133,7 +133,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | My todos (in project) | `basecamp todos list --assignee me --in <project> --json` |
 | My todos (cross-project) | `basecamp reports assigned --json` (defaults to "me") |
 | All todos (cross-project) | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
-| Overdue todos | `basecamp todos list --overdue --in <project> --json` |
+| Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
+| Overdue todos (cross-project) | `basecamp reports overdue --json` |
+| Assign todo | `basecamp assign <id> --to <person> --json` |
 | Create todo | `basecamp todo "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
 | Complete todo | `basecamp done <id> --json` |
@@ -186,6 +188,7 @@ Need to find something?
 ├── Know the type + project? → basecamp <type> list --in <project> --json
 │   (some groups have default list behavior; use --agent --help if unsure)
 ├── My assigned work? → basecamp reports assigned --json (defaults to "me")
+├── Overdue across projects? → basecamp reports overdue --json
 ├── Browse by type cross-project? → basecamp recordings <type> --json
 │   (types: todos, messages, documents, comments, cards, uploads)
 │   Note: Defaults to active status; use --status archived for archived items
@@ -277,6 +280,8 @@ basecamp todos list --list <todolist_id> --in <project> # In specific list
 basecamp todo "Task" --in <project> --list <list> --assignee me --due tomorrow
 basecamp done <id> [id...]                              # Complete (multiple OK)
 basecamp reopen <id>                                    # Uncomplete
+basecamp assign <id> --to <person>                      # Assign (person: ID, email, or "me")
+basecamp unassign <id> --from <person>                  # Remove assignee
 basecamp todos position <id> --to 1                     # Move to top
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 ```
