@@ -41,12 +41,15 @@ func TestEditContentMutualExclusion(t *testing.T) {
 		}
 	})
 
-	t.Run("message --edit --content", func(t *testing.T) {
-		err := runCmdWithFlags(NewMessageCmd, map[string]string{"subject": "Test", "content": "some text", "edit": "true"})
+	t.Run("message --edit with positional body", func(t *testing.T) {
+		err := runCmdWithFlagsAndArgs(NewMessageCmd,
+			map[string]string{"edit": "true"},
+			[]string{"Test", "some body"},
+		)
 		if err == nil {
-			t.Fatal("expected error for --edit + --content, got nil")
+			t.Fatal("expected error for --edit + body argument, got nil")
 		}
-		if !strings.Contains(err.Error(), "cannot combine --edit and --content") {
+		if !strings.Contains(err.Error(), "cannot combine") {
 			t.Errorf("error = %q, want 'cannot combine' message", err)
 		}
 	})
@@ -71,6 +74,7 @@ func TestEditRejectsPipedStdin(t *testing.T) {
 		name   string
 		newCmd func() *cobra.Command
 		flags  map[string]string
+		args   []string
 	}{
 		{
 			name:   "comment --edit piped stdin",
@@ -80,13 +84,14 @@ func TestEditRejectsPipedStdin(t *testing.T) {
 		{
 			name:   "message --edit piped stdin",
 			newCmd: NewMessageCmd,
-			flags:  map[string]string{"subject": "Test", "edit": "true"},
+			flags:  map[string]string{"edit": "true"},
+			args:   []string{"Test"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := runCmdWithFlags(tt.newCmd, tt.flags)
+			err := runCmdWithFlagsAndArgs(tt.newCmd, tt.flags, tt.args)
 			if err == nil {
 				t.Fatal("expected error for --edit with piped stdin, got nil")
 			}

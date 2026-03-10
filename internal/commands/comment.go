@@ -173,7 +173,7 @@ You can pass either a comment ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp comments update %s --content <text>", commentIDStr),
+						Cmd:         fmt.Sprintf("basecamp comments update %s <text>", commentIDStr),
 						Description: "Update comment",
 					},
 				),
@@ -184,18 +184,20 @@ You can pass either a comment ID or a Basecamp URL:
 }
 
 func newCommentsUpdateCmd() *cobra.Command {
-	var content string
-
 	cmd := &cobra.Command{
-		Use:   "update <id|url>",
+		Use:   "update <id|url> [content]",
 		Short: "Update a comment",
 		Long: `Update an existing comment's content.
 
 You can pass either a comment ID or a Basecamp URL:
-  basecamp comments update 789 --content "new text"
-  basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 --content "new text"`,
-		Args: cobra.ExactArgs(1),
+  basecamp comments update 789 "new text"
+  basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 "new text"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no args
+			if len(args) < 2 {
+				return cmd.Help()
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -205,10 +207,7 @@ You can pass either a comment ID or a Basecamp URL:
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
 			commentIDStr, _ := extractCommentWithProject(args[0])
 
-			// Show help when invoked with no content
-			if content == "" {
-				return cmd.Help()
-			}
+			content := strings.Join(args[1:], " ")
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
 			if err != nil {
@@ -238,8 +237,6 @@ You can pass either a comment ID or a Basecamp URL:
 			)
 		},
 	}
-
-	cmd.Flags().StringVarP(&content, "content", "c", "", "New content (required)")
 
 	return cmd
 }
