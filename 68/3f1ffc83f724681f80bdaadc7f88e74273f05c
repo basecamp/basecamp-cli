@@ -1,0 +1,157 @@
+internal/commands/campfire.go
+  3c6f3e7b533552d6 281,299
+internal/commands/todolistgroups.go
+  3c6f3e7b533552d6 93,203,205-207,296,301,304,311
+internal/commands/files.go
+  3c6f3e7b533552d6 363,368-369,705,709-711,985
+e2e/cards_columns_steps.bats
+  3c6f3e7b533552d6 9,16,19,23,26,33,45-46,79-80,185-186,262-263,285-286,337-338
+e2e/checkins.bats
+  3c6f3e7b533552d6 54-55,73-74
+internal/commands/todolists.go
+  3c6f3e7b533552d6 248,250-252,348
+skills/basecamp/SKILL.md
+  3c6f3e7b533552d6 76,406,493,618-625,627-640
+  5d63aeb85efadd4d 136,140,186-187,276,304,482-486,517-518,650-652,655-656
+internal/commands/search.go
+  3c6f3e7b533552d6 43
+.surface-breaking
+  3c6f3e7b533552d6 1-4
+internal/commands/helpers.go
+  3c6f3e7b533552d6 7,19-79
+e2e/boost.bats
+  3c6f3e7b533552d6 15-16
+internal/commands/schedule.go
+  3c6f3e7b533552d6 381,393,395,400,610
+internal/commands/people.go
+  3c6f3e7b533552d6 377,451
+e2e/messagetypes.bats
+  3c6f3e7b533552d6 27-28,76
+internal/commands/api.go
+  3c6f3e7b533552d6 73-75,121-123
+e2e/files.bats
+  3c6f3e7b533552d6 48,52,54-55,58,63-64,67,72-73,76,81-82,177,179-180
+internal/commands/url.go
+  3c6f3e7b533552d6 44
+e2e/lineup.bats
+  3c6f3e7b533552d6 27-28,37-38,50-51,60-61,85,94
+internal/commands/tools.go
+  3c6f3e7b533552d6 219-221,223-225
+internal/commands/checkins.go
+  3c6f3e7b533552d6 217,223,332,337-338,466,472-473,549,684,690,800,804,806-807,809-811,813,891-892,895,903-904
+e2e/campfire.bats
+  3c6f3e7b533552d6 54-55
+e2e/errors.bats
+  3c6f3e7b533552d6 18,22,25,28,32,35,47,52-54,57,61,64,115,120-122,125,130-132,141-142,148,152,154-155,158,162,164-165,247-248,257-258,267-268,271,277,280,284,286-287,296-297,306-307,316-317,320,324,326-327,336-337
+internal/commands/webhooks.go
+  3c6f3e7b533552d6 104,164,171-172,174-175,311
+e2e/schedule.bats
+  3c6f3e7b533552d6 84-85
+internal/commands/comment.go
+  3c6f3e7b533552d6 49,142,195-197,199,272,302
+internal/commands/projects.go
+  3c6f3e7b533552d6 231,233-235,283
+internal/commands/cards.go
+  3c6f3e7b533552d6 291,300-303,445,527-528,733,742-745,982,987-988,1072,1364-1366,1505,1509,1604-1606,1626,1751-1753
+internal/commands/helpers_test.go
+  3c6f3e7b533552d6 4,9,111-216
+internal/commands/templates.go
+  3c6f3e7b533552d6 161,173-179,239
+e2e/webhooks.bats
+  3c6f3e7b533552d6 9,13,16,47-48
+internal/commands/messagetypes.go
+  3c6f3e7b533552d6 134,146-152,216
+internal/commands/boost.go
+  3c6f3e7b533552d6 396,398
+e2e/templates.bats
+  3c6f3e7b533552d6 27-28,67
+internal/commands/lineup.go
+  3c6f3e7b533552d6 45,66-75,126-128,152
+internal/commands/messages.go
+  3c6f3e7b533552d6 220,350,522
+internal/commands/todos.go
+  3c6f3e7b533552d6 83,516,580,721,743,832,1118,1205
+internal/auth/callback_success.html
+  b5756bff233fa21b 1-13
+internal/auth/callback_error.html
+  b5756bff233fa21b 1-13
+internal/commands/edit_test.go
+  3c6f3e7b533552d6 13
+  b5756bff233fa21b 14
+internal/auth/callback.html
+  b5756bff233fa21b 1-62,64-85
+  319f82eb5e5c25c5 63
+internal/auth/callback_denied.html
+  319f82eb5e5c25c5 1-13
+internal/auth/callback_invalid.html
+  319f82eb5e5c25c5 1-13
+internal/auth/callback_exchange_failed.html
+  319f82eb5e5c25c5 1-13
+internal/auth/callback_test.go
+  b5756bff233fa21b 18,24-32,160,187,214,222-235,237-264,266-271,274-283,299,349
+  319f82eb5e5c25c5 6,33-40,161-162,188-189,215-216,272-273,300-301
+internal/auth/callback.go
+  319f82eb5e5c25c5 18,20-29,59,73-82,90-110,116-119,149-155,167
+  b5756bff233fa21b 7,63-68,115,121
+internal/auth/auth.go
+  319f82eb5e5c25c5 451
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "683f1ffc83f724681f80bdaadc7f88e74273f05c",
+  "prompts": {
+    "319f82eb5e5c25c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35333dfe-a2f6-4789-b5d6-423dbe712fe7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 115,
+      "overriden_lines": 0
+    },
+    "3c6f3e7b533552d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b1e1b0b-e8e0-4223-9980-dea01e701afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 484,
+      "overriden_lines": 0
+    },
+    "5d63aeb85efadd4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621df13c-1ed3-47d7-b0ed-8e1c88a44cf5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 18,
+      "overriden_lines": 0
+    },
+    "b5756bff233fa21b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dbd1a40-e27d-43af-9370-600331e182d9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 9,
+      "accepted_lines": 193,
+      "overriden_lines": 0
+    }
+  }
+}
