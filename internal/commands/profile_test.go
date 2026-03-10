@@ -603,16 +603,15 @@ func TestProfileCreateDefaultValues(t *testing.T) {
 	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0700))
 
-	// Simulate create with no flags: defaults are base_url=production, scope=read
+	// Simulate create with no flags: defaults are base_url=production, no scope
+	// (scope is determined post-login by the auth layer, not pre-set)
 	baseURL := "https://3.basecampapi.com"
-	scope := "read"
 
 	configData := map[string]any{
 		"default_profile": "defaults-test",
 		"profiles": map[string]any{
 			"defaults-test": map[string]any{
 				"base_url": baseURL,
-				"scope":    scope,
 			},
 		},
 	}
@@ -624,26 +623,11 @@ func TestProfileCreateDefaultValues(t *testing.T) {
 	profile := profiles["defaults-test"].(map[string]any)
 
 	assert.Equal(t, "https://3.basecampapi.com", profile["base_url"], "default base_url should be production API")
-	assert.Equal(t, "read", profile["scope"], "default scope should be 'read'")
+	assert.Nil(t, profile["scope"], "scope should not be set before login")
 }
 
-func TestProfileCreateRejectsInvalidScope(t *testing.T) {
-	app, _ := setupProfileTestApp(t, nil)
-
-	root := &cobra.Command{Use: "basecamp"}
-	profileCmd := NewProfileCmd()
-	root.AddCommand(profileCmd)
-
-	root.SetArgs([]string{"profile", "create", "bad-scope", "--scope", "admin"})
-	ctx := appctx.WithApp(context.Background(), app)
-	root.SetContext(ctx)
-	root.SetOut(&bytes.Buffer{})
-	root.SetErr(&bytes.Buffer{})
-
-	err := root.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Invalid scope")
-}
+// TestProfileCreateRejectsInvalidScope was removed: scope validation
+// moved to Login() in auth.go (provider-aware, single source of truth).
 
 func TestProfileDeleteRemovesFromConfig(t *testing.T) {
 	cfg := &config.Config{

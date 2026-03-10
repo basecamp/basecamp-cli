@@ -831,7 +831,7 @@ func TestLoginRemoteAndLocalMutuallyExclusive(t *testing.T) {
 	m := NewManager(cfg, http.DefaultClient)
 	m.store = newTestStore(t, tmpDir)
 
-	err := m.Login(context.Background(), LoginOptions{
+	_, err := m.Login(context.Background(), LoginOptions{
 		Remote: true,
 		Local:  true,
 	})
@@ -877,11 +877,12 @@ func TestLoginRemoteMode(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- m.Login(context.Background(), LoginOptions{
+		_, err := m.Login(context.Background(), LoginOptions{
 			Remote:      true,
 			Logger:      sl.log,
 			InputReader: pr,
 		})
+		errCh <- err
 	}()
 
 	// Wait for the auth URL to be logged (deterministic, no sleep)
@@ -959,11 +960,12 @@ func TestLoginRemoteMode_StateMismatch(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- m.Login(context.Background(), LoginOptions{
+		_, err := m.Login(context.Background(), LoginOptions{
 			Remote:      true,
 			Logger:      sl.log,
 			InputReader: pr,
 		})
+		errCh <- err
 	}()
 
 	// Wait until Login has logged the auth URL (meaning it's now reading from pr)
@@ -1019,11 +1021,12 @@ func TestLoginRemoteMode_EmptyInput(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- m.Login(context.Background(), LoginOptions{
+		_, err := m.Login(context.Background(), LoginOptions{
 			Remote:      true,
 			Logger:      sl.log,
 			InputReader: pr,
 		})
+		errCh <- err
 	}()
 
 	select {
@@ -1080,12 +1083,13 @@ func TestLoginRemoteMode_CustomRedirectURI(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- m.Login(context.Background(), LoginOptions{
+		_, err := m.Login(context.Background(), LoginOptions{
 			Remote:      true,
 			RedirectURI: "http://localhost:9999/my-cb",
 			Logger:      sl.log,
 			InputReader: pr,
 		})
+		errCh <- err
 	}()
 
 	// Wait for auth URL deterministically
@@ -1169,4 +1173,183 @@ func TestCredentialWrite_OverwriteExisting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "token-2", loaded.AccessToken)
 	assert.Equal(t, "bc3", loaded.OAuthType)
+}
+
+func TestLoginLaunchpadClearsScope(t *testing.T) {
+	// Server that fails OAuth discovery (404 on .well-known), forcing Launchpad fallback.
+	tokenCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			http.NotFound(w, r) // force Launchpad fallback
+		case "/authorization/token":
+			tokenCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"lp-tok","token_type":"bearer","refresh_token":"lp-ref"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	// Point Launchpad URL at our test server
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	// Custom logger that detects Launchpad auth URL (/authorization/new)
+	authReady := make(chan string, 1)
+	var logMu sync.Mutex
+	signaled := false
+	logger := func(msg string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		if !signaled {
+			trimmed := strings.TrimSpace(msg)
+			if strings.HasPrefix(trimmed, "http") && strings.Contains(trimmed, "/authorization/new") {
+				signaled = true
+				authReady <- trimmed
+			}
+		}
+	}
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	type loginOut struct {
+		result *LoginResult
+		err    error
+	}
+	ch := make(chan loginOut, 1)
+	go func() {
+		result, err := m.Login(context.Background(), LoginOptions{
+			Scope:       "read", // explicit scope should be cleared for Launchpad
+			Remote:      true,
+			Logger:      logger,
+			InputReader: pr,
+		})
+		ch <- loginOut{result, err}
+	}()
+
+	// Wait for auth URL
+	var authURL string
+	select {
+	case authURL = <-authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL")
+	}
+
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	state := u.Query().Get("state")
+
+	// Write callback
+	callbackURL := fmt.Sprintf("http://127.0.0.1:8976/callback?code=test-code&state=%s\n", state)
+	_, _ = pw.Write([]byte(callbackURL))
+	pw.Close()
+
+	out := <-ch
+	require.NoError(t, out.err)
+	require.True(t, tokenCalled, "token endpoint should have been called")
+
+	// Result scope should be empty for Launchpad
+	assert.Equal(t, "", out.result.Scope, "Launchpad login should clear scope")
+	assert.Equal(t, "launchpad", out.result.OAuthType)
+
+	// Stored credentials should have empty scope
+	creds, err := m.store.Load(srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "", creds.Scope, "stored scope should be empty for Launchpad")
+}
+
+func TestLoginBC3DefaultsToRead(t *testing.T) {
+	// BC3 mock server with successful discovery
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"authorization_endpoint": "%s/authorize",
+				"token_endpoint": "%s/token",
+				"registration_endpoint": "%s/register"
+			}`, base, base, base)
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"client_id":"test-client"}`)
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"bc3-tok","token_type":"bearer","refresh_token":"bc3-ref"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	type loginOut struct {
+		result *LoginResult
+		err    error
+	}
+	ch := make(chan loginOut, 1)
+	go func() {
+		result, err := m.Login(context.Background(), LoginOptions{
+			// No scope specified — should default to "read" for BC3
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+		ch <- loginOut{result, err}
+	}()
+
+	var authURL string
+	select {
+	case authURL = <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL")
+	}
+
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	state := u.Query().Get("state")
+
+	callbackURL := fmt.Sprintf("http://127.0.0.1:8976/callback?code=test-code&state=%s\n", state)
+	_, _ = pw.Write([]byte(callbackURL))
+	pw.Close()
+
+	out := <-ch
+	require.NoError(t, out.err)
+	assert.Equal(t, "read", out.result.Scope, "BC3 should default to read scope")
+	assert.Equal(t, "bc3", out.result.OAuthType)
+
+	creds, err := m.store.Load(srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "read", creds.Scope, "stored scope should be 'read' for BC3 default")
+}
+
+func TestLoginRejectsInvalidScope(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, http.DefaultClient)
+	m.store = newTestStore(t, tmpDir)
+
+	_, err := m.Login(context.Background(), LoginOptions{
+		Scope: "admin",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid scope")
 }

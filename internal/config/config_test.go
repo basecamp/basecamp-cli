@@ -15,7 +15,7 @@ func TestDefault(t *testing.T) {
 
 	// Check default values
 	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL)
-	assert.Equal(t, "read", cfg.Scope)
+	assert.Equal(t, "", cfg.Scope)
 	assert.True(t, cfg.CacheEnabled)
 	assert.Equal(t, "auto", cfg.Format)
 	assert.NotNil(t, cfg.Sources)
