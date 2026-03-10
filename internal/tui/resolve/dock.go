@@ -156,10 +156,11 @@ func (r *Resolver) multiToolError(tools []DockTool, friendlyName string) error {
 		fmt.Fprintf(&toolList, "\n  - %s (ID: %d)", title, tool.ID)
 	}
 
+	flagName := strings.ReplaceAll(friendlyName, " ", "-")
 	return &output.Error{
 		Code:    output.CodeAmbiguous,
 		Message: fmt.Sprintf("Project has %d %ss", len(tools), friendlyName),
-		Hint:    fmt.Sprintf("Specify ID directly. Available:%s", toolList.String()),
+		Hint:    fmt.Sprintf("Use --%s <id> to select one. Available:%s", flagName, toolList.String()),
 	}
 }
 

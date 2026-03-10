@@ -145,19 +145,16 @@ func todolistToPickerItem(tl basecamp.Todolist) tui.PickerItem {
 	}
 }
 
-// getTodosetID retrieves the todoset ID from a project's dock.
+// getTodosetID resolves the todoset ID from a project's dock.
+// Routes through Resolver.Todoset() to handle multi-todoset projects correctly.
 func (r *Resolver) getTodosetID(ctx context.Context, projectID int64) (int64, error) {
-	project, err := r.sdk.ForAccount(r.config.AccountID).Projects().Get(ctx, projectID)
+	result, err := r.Todoset(ctx, fmt.Sprintf("%d", projectID), "")
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch project: %w", err)
+		return 0, err
 	}
-
-	// Find enabled todoset in dock
-	for _, tool := range project.Dock {
-		if tool.Name == "todoset" && tool.Enabled {
-			return tool.ID, nil
-		}
+	id, err := strconv.ParseInt(result.ToolID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid todoset ID: %w", err)
 	}
-
-	return 0, output.ErrNotFoundHint("todoset", fmt.Sprintf("%d", projectID), "Project has no todoset enabled")
+	return id, nil
 }
