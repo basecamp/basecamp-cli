@@ -633,7 +633,8 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		return err
 	}
 
-	// Validate file
+	// Normalize drag/paste paths and validate
+	filePath = richtext.NormalizeDragPath(filePath)
 	if err := richtext.ValidateFile(filePath); err != nil {
 		return fmt.Errorf("%s: %w", filePath, err)
 	}
@@ -680,9 +681,9 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 	if err != nil {
 		return fmt.Errorf("%s: %w", filePath, err)
 	}
+	defer f.Close()
 
 	resp, err := app.Account().Attachments().Create(cmd.Context(), filename, contentType, f)
-	f.Close()
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -1217,7 +1218,12 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: richtext.MarkdownToHTML(content)}
+					docHTML := richtext.MarkdownToHTML(content)
+					docHTML, err = resolveLocalImages(cmd, app, docHTML)
+					if err != nil {
+						return err
+					}
+					req := &basecamp.UpdateDocumentRequest{Title: title, Content: docHTML}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -1249,7 +1255,12 @@ You can pass either an item ID or a Basecamp URL:
 				// Try document first (most common update case)
 				_, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: richtext.MarkdownToHTML(content)}
+					docHTML := richtext.MarkdownToHTML(content)
+					docHTML, resolveErr := resolveLocalImages(cmd, app, docHTML)
+					if resolveErr != nil {
+						return resolveErr
+					}
+					req := &basecamp.UpdateDocumentRequest{Title: title, Content: docHTML}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)

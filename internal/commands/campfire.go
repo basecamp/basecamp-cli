@@ -391,7 +391,8 @@ The file is uploaded as a campfire line (chat message with an attachment).`,
 }
 
 func runCampfireUpload(cmd *cobra.Command, app *appctx.App, campfireID, project, filePath string) error {
-	// Validate file
+	// Normalize drag/paste paths and validate
+	filePath = richtext.NormalizeDragPath(filePath)
 	if err := richtext.ValidateFile(filePath); err != nil {
 		return fmt.Errorf("%s: %w", filePath, err)
 	}

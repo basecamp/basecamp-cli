@@ -886,8 +886,14 @@ You can pass either an answer ID or a Basecamp URL:
 				return output.ErrUsage("Invalid answer ID")
 			}
 
+			answerHTML := richtext.MarkdownToHTML(content)
+			answerHTML, resolveErr := resolveLocalImages(cmd, app, answerHTML)
+			if resolveErr != nil {
+				return resolveErr
+			}
+
 			req := &basecamp.UpdateAnswerRequest{
-				Content: richtext.MarkdownToHTML(content),
+				Content: answerHTML,
 			}
 
 			err = app.Account().Checkins().UpdateAnswer(cmd.Context(), answerID, req)

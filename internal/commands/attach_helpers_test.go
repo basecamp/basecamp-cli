@@ -47,6 +47,10 @@ func TestIsNonFileURI(t *testing.T) {
 	// Bare filename with digits/dots/hyphens (not a URI scheme)
 	assert.False(t, isNonFileURI("photo-2024.png"))
 	assert.False(t, isNonFileURI("my.screenshot.png"))
+
+	// Windows drive-letter paths → false (not URI schemes)
+	assert.False(t, isNonFileURI(`C:\images\pic.png`))
+	assert.False(t, isNonFileURI(`D:/photos/img.jpg`))
 }
 
 func TestImgTagPattern(t *testing.T) {
@@ -140,6 +144,8 @@ func TestClassifyImageSrc(t *testing.T) {
 		{"filename with dots", "my.screenshot.2024.png", "shot", imgUpload, false},
 		{"filename with hyphens", "photo-final-v2.png", "photo", imgUpload, false},
 		{"nested relative", "assets/images/photo.png", "photo", imgUpload, false},
+		{"windows backslash", `C:\images\pic.png`, "win", imgUpload, false},
+		{"windows forward slash", "D:/photos/img.jpg", "win", imgUpload, false},
 
 		// Placeholder: error
 		{"question mark", "?", "chart", imgPlaceholder, true},

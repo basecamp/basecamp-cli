@@ -23,7 +23,7 @@ func isRemoteURL(src string) bool {
 
 // uriSchemePattern matches a URI scheme per RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
 // followed by ":". Only matches at the start of the string.
-var uriSchemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+\-.]*:`)
+var uriSchemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+\-.]+:`)
 
 // isNonFileURI returns true for URI schemes that are clearly not local file
 // paths (data:, cid:, blob:, ftp:, etc.). These should be left untouched.

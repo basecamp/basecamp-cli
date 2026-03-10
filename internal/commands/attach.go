@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 
@@ -85,14 +86,16 @@ func uploadAttachments(cmd *cobra.Command, app *appctx.App, paths []string) ([]r
 	refs := make([]richtext.AttachmentRef, 0, len(paths))
 
 	for _, path := range paths {
-		if err := richtext.ValidateFile(path); err != nil {
+		normalized := richtext.NormalizeDragPath(path)
+
+		if err := richtext.ValidateFile(normalized); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 
-		contentType := richtext.DetectMIME(path)
-		filename := filepath.Base(path)
+		contentType := richtext.DetectMIME(normalized)
+		filename := filepath.Base(normalized)
 
-		f, err := os.Open(path)
+		f, err := os.Open(normalized)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
@@ -122,30 +125,30 @@ func uploadAttachments(cmd *cobra.Command, app *appctx.App, paths []string) ([]r
 //   - Local path exists: upload, replace <img> with <bc-attachment>
 //   - Local path missing: error
 //   - Placeholder (? or empty): error
-func resolveLocalImages(cmd *cobra.Command, app *appctx.App, html string) (string, error) {
+func resolveLocalImages(cmd *cobra.Command, app *appctx.App, htmlStr string) (string, error) {
 	// Quick bail: no images
-	if !hasImgTag(html) {
-		return html, nil
+	if !hasImgTag(htmlStr) {
+		return htmlStr, nil
 	}
 
 	// Find all <img> tags
-	matches := imgTagPattern.FindAllStringSubmatchIndex(html, -1)
+	matches := imgTagPattern.FindAllStringSubmatchIndex(htmlStr, -1)
 	if len(matches) == 0 {
-		return html, nil
+		return htmlStr, nil
 	}
 
 	// Process in reverse order so replacements don't shift indices
-	result := html
+	result := htmlStr
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		fullStart, fullEnd := m[0], m[1]
 		srcStart, srcEnd := m[2], m[3]
 		altStart, altEnd := m[4], m[5]
 
-		src := html[srcStart:srcEnd]
+		src := html.UnescapeString(htmlStr[srcStart:srcEnd])
 		alt := ""
 		if altStart >= 0 {
-			alt = html[altStart:altEnd]
+			alt = htmlStr[altStart:altEnd]
 		}
 
 		action, classErr := classifyImageSrc(src, alt)
