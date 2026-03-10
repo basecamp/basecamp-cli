@@ -101,9 +101,9 @@ func NewTodoCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			// Validate user input first, before checking account
+			// Show help when invoked with no content
 			if content == "" {
-				return output.ErrUsage("Todo content required")
+				return cmd.Help()
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -596,9 +596,9 @@ func newTodosCreateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			// Validate user input first, before checking account
+			// Show help when invoked with no content
 			if content == "" {
-				return output.ErrUsage("Todo content required")
+				return cmd.Help()
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
