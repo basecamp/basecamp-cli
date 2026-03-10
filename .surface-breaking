@@ -1,4 +1,0 @@
-FLAG basecamp projects --all type=bool
-FLAG basecamp projects --limit type=int
-FLAG basecamp projects --page type=int
-FLAG basecamp projects --status type=string
