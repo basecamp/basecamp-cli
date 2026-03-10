@@ -73,8 +73,9 @@ func newAPIPostCmd() *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no data
 			if data == "" {
-				return output.ErrUsage("--data is required")
+				return cmd.Help()
 			}
 
 			path := parsePath(args[0])
@@ -102,7 +103,6 @@ func newAPIPostCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required)")
-	_ = cmd.MarkFlagRequired("data") // Error only if flag doesn't exist
 
 	return cmd
 }
@@ -121,8 +121,9 @@ func newAPIPutCmd() *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no data
 			if data == "" {
-				return output.ErrUsage("--data is required")
+				return cmd.Help()
 			}
 
 			path := parsePath(args[0])
@@ -150,7 +151,6 @@ func newAPIPutCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required)")
-	_ = cmd.MarkFlagRequired("data") // Error only if flag doesn't exist
 
 	return cmd
 }

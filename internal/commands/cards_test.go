@@ -117,7 +117,7 @@ func executeCommand(cmd *cobra.Command, app *appctx.App, args ...string) error {
 }
 
 // TestCardsColumnColorRequiresColor tests that --color is required for color command.
-func TestCardsColumnColorRequiresColor(t *testing.T) {
+func TestCardsColumnColorShowsHelp(t *testing.T) {
 	app, _ := setupTestApp(t)
 
 	// Configure app with project
@@ -126,13 +126,7 @@ func TestCardsColumnColorRequiresColor(t *testing.T) {
 	cmd := newCardsColumnColorCmd()
 
 	err := executeCommand(cmd, app, "456") // column ID but no --color
-	require.NotNil(t, err, "expected error, got nil")
-
-	// Check error type
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "--color is required", e.Message)
-	}
+	assert.NoError(t, err, "expected help output, not error")
 }
 
 // TestCardsStepsRequiresCardID tests that card ID is required for steps command.
@@ -155,23 +149,20 @@ func TestCardsStepsRequiresCardID(t *testing.T) {
 	}
 }
 
-// TestCardsStepCreateRequiresTitle tests that --title is required for step create.
-func TestCardsStepCreateRequiresTitle(t *testing.T) {
+// TestCardsStepCreateShowsHelpWithoutTitle tests that help is shown when --title is missing.
+func TestCardsStepCreateShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
 	project := ""
 	cmd := newCardsStepCreateCmd(&project)
 
-	// Only card flag, no title
-	err := executeCommand(cmd, app, "--card", "456")
-	require.NotNil(t, err, "expected error, got nil")
-
-	// Cobra validates required flags first
-	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
+	// No title — shows help
+	err := executeCommand(cmd, app)
+	assert.NoError(t, err)
 }
 
-// TestCardsStepCreateRequiresCard tests that --card is required for step create.
+// TestCardsStepCreateRequiresCard tests that --card is required for step create when title is given.
 func TestCardsStepCreateRequiresCard(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
@@ -183,8 +174,10 @@ func TestCardsStepCreateRequiresCard(t *testing.T) {
 	err := executeCommand(cmd, app, "--title", "My step")
 	require.NotNil(t, err, "expected error, got nil")
 
-	// Cobra validates required flags first
-	assert.Equal(t, `required flag(s) "card" not set`, err.Error())
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--card is required", e.Message)
+	}
 }
 
 // TestCardsStepUpdateRequiresFields tests that at least one field is required for step update.
@@ -204,20 +197,15 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 }
 
 // TestCardsStepMoveRequiresCard tests that --card is required for step move.
-func TestCardsStepMoveRequiresCard(t *testing.T) {
+func TestCardsStepMoveShowsHelp(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := newCardsStepMoveCmd()
 
-	// Step ID and position but no card
+	// Step ID and position but no card — shows help
 	err := executeCommand(cmd, app, "456", "--position", "1")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "--card is required", e.Message)
-	}
+	assert.NoError(t, err, "expected help output, not error")
 }
 
 // TestCardsStepMoveRequiresPosition tests that --position is required for step move.
@@ -270,8 +258,8 @@ func TestCardsListColumnNameRequiresCardTable(t *testing.T) {
 	}
 }
 
-// TestCardsColumnCreateRequiresTitle tests that --title is required for column create.
-func TestCardsColumnCreateRequiresTitle(t *testing.T) {
+// TestCardsColumnCreateShowsHelpWithoutTitle tests that help is shown when --title is missing.
+func TestCardsColumnCreateShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
@@ -280,16 +268,7 @@ func TestCardsColumnCreateRequiresTitle(t *testing.T) {
 	cmd := newCardsColumnCreateCmd(&project, &cardTable)
 
 	err := executeCommand(cmd, app)
-	require.NotNil(t, err, "expected error, got nil")
-
-	// Check if it's a Cobra required flag error or our custom error
-	var e *output.Error
-	if errors.As(err, &e) {
-		assert.Equal(t, "--title is required", e.Message)
-	} else {
-		// Cobra validates required flags with a different error format
-		assert.Equal(t, `required flag(s) "title" not set`, err.Error())
-	}
+	assert.NoError(t, err)
 }
 
 // TestCardsColumnUpdateRequiresFields tests that at least one field is required for column update.
@@ -327,8 +306,8 @@ func TestCardsColumnMoveRequiresPosition(t *testing.T) {
 	}
 }
 
-// TestCardsMoveRequiresTo tests that --to is required for cards move.
-func TestCardsMoveRequiresTo(t *testing.T) {
+// TestCardsMoveShowsHelpWithoutTo tests that help is shown when --to is missing.
+func TestCardsMoveShowsHelpWithoutTo(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
@@ -336,12 +315,9 @@ func TestCardsMoveRequiresTo(t *testing.T) {
 	cardTable := "999"
 	cmd := newCardsMoveCmd(&project, &cardTable)
 
-	// Card ID but no --to
+	// Card ID but no --to — shows help
 	err := executeCommand(cmd, app, "456")
-	require.NotNil(t, err, "expected error, got nil")
-
-	// Cobra validates required flags
-	assert.Equal(t, `required flag(s) "to" not set`, err.Error())
+	assert.NoError(t, err)
 }
 
 // TestCardsMoveRequiresCardTable tests that --card-table is required for cards move when using --to with a column name.
@@ -363,19 +339,16 @@ func TestCardsMoveRequiresCardTable(t *testing.T) {
 	}
 }
 
-// TestCardShortcutRequiresTitle tests that --title is required for card shortcut.
-func TestCardShortcutRequiresTitle(t *testing.T) {
+// TestCardShortcutShowsHelpWithoutTitle tests that help is shown when --title is missing.
+func TestCardShortcutShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewCardCmd()
 
-	// No --title flag
+	// No --title flag — shows help
 	err := executeCommand(cmd, app)
-	require.NotNil(t, err, "expected error, got nil")
-
-	// Cobra validates required flags
-	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
+	assert.NoError(t, err)
 }
 
 // TestCardsColumnsRequiresProject tests that Project ID required for columns listing.
@@ -681,17 +654,15 @@ func TestFormatCardTableMatches(t *testing.T) {
 // Cards Create Validation Tests
 // =============================================================================
 
-// TestCardsCreateRequiresTitle tests that --title is required for card creation.
-func TestCardsCreateRequiresTitle(t *testing.T) {
+// TestCardsCreateShowsHelpWithoutTitle tests that help is shown when --title is missing.
+func TestCardsCreateShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "create")
-	require.NotNil(t, err, "expected error, got nil")
-
-	assert.Equal(t, `required flag(s) "title" not set`, err.Error())
+	assert.NoError(t, err)
 }
 
 // TestCardsUpdateRequiresCardID tests that card ID is required for update.
@@ -711,19 +682,14 @@ func TestCardsUpdateRequiresCardID(t *testing.T) {
 }
 
 // TestCardsUpdateRequiresFields tests that at least one field is required for update.
-func TestCardsUpdateRequiresFields(t *testing.T) {
+func TestCardsUpdateShowsHelp(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewCardsCmd()
 
-	err := executeCommand(cmd, app, "update", "456") // card ID but no fields
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "At least one field required", e.Message)
-	}
+	err := executeCommand(cmd, app, "update", "456") // card ID but no fields — shows help
+	assert.NoError(t, err, "expected help output, not error")
 }
 
 // TestCardsShowRequiresCardID tests that card ID is required for show.

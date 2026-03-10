@@ -46,7 +46,8 @@ Use 'basecamp campfire post "message"' to post a message.`,
 						if len(args) > 2 {
 							return runCampfirePost(cmd, app, campfireID, project, args[2], contentType)
 						}
-						return output.ErrUsage("Message content required")
+						// Show help when invoked with no message content
+						return cmd.Help()
 					default:
 						return runCampfireMessages(cmd, app, campfireID, project, 25)
 					}
@@ -293,8 +294,9 @@ for rich text (HTML) messages.`,
 				messageContent = args[0]
 			}
 
+			// Show help when invoked with no message content
 			if messageContent == "" {
-				return output.ErrUsage("Message content required")
+				return cmd.Help()
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {

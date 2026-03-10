@@ -246,6 +246,7 @@ CMD basecamp tools update
 CMD basecamp tui
 CMD basecamp unassign
 CMD basecamp upgrade
+CMD basecamp version
 CMD basecamp uploads
 CMD basecamp uploads documents
 CMD basecamp uploads documents create
@@ -929,21 +930,17 @@ FLAG basecamp card update --todolist type=string
 FLAG basecamp card update --verbose type=count
 FLAG basecamp cards --account type=string
 FLAG basecamp cards --agent type=bool
-FLAG basecamp cards --all type=bool
 FLAG basecamp cards --cache-dir type=string
 FLAG basecamp cards --card-table type=string
-FLAG basecamp cards --column type=string
 FLAG basecamp cards --count type=bool
 FLAG basecamp cards --hints type=bool
 FLAG basecamp cards --ids-only type=bool
 FLAG basecamp cards --in type=string
 FLAG basecamp cards --json type=bool
-FLAG basecamp cards --limit type=int
 FLAG basecamp cards --markdown type=bool
 FLAG basecamp cards --md type=bool
 FLAG basecamp cards --no-hints type=bool
 FLAG basecamp cards --no-stats type=bool
-FLAG basecamp cards --page type=int
 FLAG basecamp cards --profile type=string
 FLAG basecamp cards --project type=string
 FLAG basecamp cards --quiet type=bool
@@ -1742,19 +1739,15 @@ FLAG basecamp comment --todolist type=string
 FLAG basecamp comment --verbose type=count
 FLAG basecamp comments --account type=string
 FLAG basecamp comments --agent type=bool
-FLAG basecamp comments --all type=bool
 FLAG basecamp comments --cache-dir type=string
 FLAG basecamp comments --count type=bool
 FLAG basecamp comments --hints type=bool
 FLAG basecamp comments --ids-only type=bool
 FLAG basecamp comments --json type=bool
-FLAG basecamp comments --limit type=int
 FLAG basecamp comments --markdown type=bool
 FLAG basecamp comments --md type=bool
 FLAG basecamp comments --no-hints type=bool
 FLAG basecamp comments --no-stats type=bool
-FLAG basecamp comments --on type=string
-FLAG basecamp comments --page type=int
 FLAG basecamp comments --profile type=string
 FLAG basecamp comments --project type=string
 FLAG basecamp comments --quiet type=bool
@@ -3122,20 +3115,17 @@ FLAG basecamp messageboards show --todolist type=string
 FLAG basecamp messageboards show --verbose type=count
 FLAG basecamp messages --account type=string
 FLAG basecamp messages --agent type=bool
-FLAG basecamp messages --all type=bool
 FLAG basecamp messages --cache-dir type=string
 FLAG basecamp messages --count type=bool
 FLAG basecamp messages --hints type=bool
 FLAG basecamp messages --ids-only type=bool
 FLAG basecamp messages --in type=string
 FLAG basecamp messages --json type=bool
-FLAG basecamp messages --limit type=int
 FLAG basecamp messages --markdown type=bool
 FLAG basecamp messages --md type=bool
 FLAG basecamp messages --message-board type=string
 FLAG basecamp messages --no-hints type=bool
 FLAG basecamp messages --no-stats type=bool
-FLAG basecamp messages --page type=int
 FLAG basecamp messages --profile type=string
 FLAG basecamp messages --project type=string
 FLAG basecamp messages --quiet type=bool
@@ -4854,26 +4844,22 @@ FLAG basecamp todolistgroups update --todolist type=string
 FLAG basecamp todolistgroups update --verbose type=count
 FLAG basecamp todolists --account type=string
 FLAG basecamp todolists --agent type=bool
-FLAG basecamp todolists --all type=bool
 FLAG basecamp todolists --cache-dir type=string
 FLAG basecamp todolists --count type=bool
 FLAG basecamp todolists --hints type=bool
 FLAG basecamp todolists --ids-only type=bool
 FLAG basecamp todolists --in type=string
 FLAG basecamp todolists --json type=bool
-FLAG basecamp todolists --limit type=int
 FLAG basecamp todolists --markdown type=bool
 FLAG basecamp todolists --md type=bool
 FLAG basecamp todolists --no-hints type=bool
 FLAG basecamp todolists --no-stats type=bool
-FLAG basecamp todolists --page type=int
 FLAG basecamp todolists --profile type=string
 FLAG basecamp todolists --project type=string
 FLAG basecamp todolists --quiet type=bool
 FLAG basecamp todolists --stats type=bool
 FLAG basecamp todolists --styled type=bool
 FLAG basecamp todolists --todolist type=string
-FLAG basecamp todolists --todoset type=string
 FLAG basecamp todolists --verbose type=count
 FLAG basecamp todolists create --account type=string
 FLAG basecamp todolists create --agent type=bool
@@ -4962,30 +4948,21 @@ FLAG basecamp todolists update --todolist type=string
 FLAG basecamp todolists update --verbose type=count
 FLAG basecamp todos --account type=string
 FLAG basecamp todos --agent type=bool
-FLAG basecamp todos --all type=bool
-FLAG basecamp todos --assignee type=string
 FLAG basecamp todos --cache-dir type=string
 FLAG basecamp todos --count type=bool
 FLAG basecamp todos --hints type=bool
 FLAG basecamp todos --ids-only type=bool
-FLAG basecamp todos --in type=string
 FLAG basecamp todos --json type=bool
-FLAG basecamp todos --limit type=int
-FLAG basecamp todos --list type=string
 FLAG basecamp todos --markdown type=bool
 FLAG basecamp todos --md type=bool
 FLAG basecamp todos --no-hints type=bool
 FLAG basecamp todos --no-stats type=bool
-FLAG basecamp todos --overdue type=bool
-FLAG basecamp todos --page type=int
 FLAG basecamp todos --profile type=string
 FLAG basecamp todos --project type=string
 FLAG basecamp todos --quiet type=bool
 FLAG basecamp todos --stats type=bool
-FLAG basecamp todos --status type=string
 FLAG basecamp todos --styled type=bool
 FLAG basecamp todos --todolist type=string
-FLAG basecamp todos --todoset type=string
 FLAG basecamp todos --verbose type=count
 FLAG basecamp todos complete --account type=string
 FLAG basecamp todos complete --agent type=bool
@@ -5392,6 +5369,24 @@ FLAG basecamp upgrade --stats type=bool
 FLAG basecamp upgrade --styled type=bool
 FLAG basecamp upgrade --todolist type=string
 FLAG basecamp upgrade --verbose type=count
+FLAG basecamp version --account type=string
+FLAG basecamp version --agent type=bool
+FLAG basecamp version --cache-dir type=string
+FLAG basecamp version --count type=bool
+FLAG basecamp version --hints type=bool
+FLAG basecamp version --ids-only type=bool
+FLAG basecamp version --json type=bool
+FLAG basecamp version --markdown type=bool
+FLAG basecamp version --md type=bool
+FLAG basecamp version --no-hints type=bool
+FLAG basecamp version --no-stats type=bool
+FLAG basecamp version --profile type=string
+FLAG basecamp version --project type=string
+FLAG basecamp version --quiet type=bool
+FLAG basecamp version --stats type=bool
+FLAG basecamp version --styled type=bool
+FLAG basecamp version --todolist type=string
+FLAG basecamp version --verbose type=count
 FLAG basecamp uploads --account type=string
 FLAG basecamp uploads --agent type=bool
 FLAG basecamp uploads --cache-dir type=string
@@ -6399,6 +6394,7 @@ SUB basecamp tools update
 SUB basecamp tui
 SUB basecamp unassign
 SUB basecamp upgrade
+SUB basecamp version
 SUB basecamp uploads
 SUB basecamp uploads documents
 SUB basecamp uploads documents create

@@ -30,30 +30,12 @@ type todosListFlags struct {
 
 // NewTodosCmd creates the todos command group.
 func NewTodosCmd() *cobra.Command {
-	var flags todosListFlags
-
 	cmd := &cobra.Command{
 		Use:         "todos",
 		Short:       "Manage todos",
 		Long:        "List, show, create, and manage Basecamp todos.",
 		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other content types\nbasecamp done accepts multiple IDs: basecamp done 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue\nUse basecamp todo --content \"text\" not basecamp todo \"text\""},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runTodosList(cmd, flags)
-		},
 	}
-
-	// Allow flags on root command for default list behavior
-	// Note: can't use -a for assignee since it conflicts with global -a for account
-	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID or name")
-	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
-	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
-	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
-	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
-	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
-	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
-	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newTodosListCmd(),
@@ -64,11 +46,6 @@ func NewTodosCmd() *cobra.Command {
 		newTodosSweepCmd(),
 		newTodosPositionCmd(),
 	)
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
 	return cmd
 }

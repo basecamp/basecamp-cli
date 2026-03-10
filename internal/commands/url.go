@@ -40,7 +40,8 @@ from Basecamp URLs.`,
 			var url string
 			if args[0] == "parse" {
 				if len(args) < 2 {
-					return output.ErrUsage("URL required")
+					// Show help when invoked with no URL
+					return cmd.Help()
 				}
 				url = args[1]
 			} else {

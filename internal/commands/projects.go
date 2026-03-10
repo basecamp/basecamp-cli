@@ -237,8 +237,9 @@ func newProjectsCreateCmd() *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("--name is required")
+				return cmd.Help()
 			}
 
 			req := &basecamp.CreateProjectRequest{
@@ -260,7 +261,6 @@ func newProjectsCreateCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Project name (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Project description")
-	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -290,8 +290,9 @@ func newProjectsUpdateCmd() *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
+			// Show help when invoked with no flags
 			if name == "" && description == "" {
-				return output.ErrUsage("At least one of --name or --description is required")
+				return cmd.Help()
 			}
 
 			// For update, we need to provide name (required by SDK)

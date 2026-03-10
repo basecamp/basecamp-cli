@@ -37,10 +37,6 @@ func NewFilesCmd() *cobra.Command {
 
 Each project has a root folder containing documents, uploads, and subfolders.`,
 		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, folders for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocuments support Markdown content\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runFilesList(cmd, project, vaultID)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -370,8 +366,9 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("--name is required")
+				return cmd.Help()
 			}
 
 			// Resolve project, with interactive fallback
@@ -432,7 +429,6 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Folder name (required)")
-	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -714,8 +710,9 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no arguments
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 
 			// Resolve subscription flags before project (fail fast on bad input)
@@ -798,7 +795,6 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (default: published)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
-	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -999,8 +995,9 @@ You can pass either an item ID or a Basecamp URL:
 				return output.ErrUsage("Invalid item ID")
 			}
 
+			// Show help when invoked with no arguments
 			if title == "" && content == "" {
-				return output.ErrUsage("at least one of --title or --content is required")
+				return cmd.Help()
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback

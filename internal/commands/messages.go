@@ -19,8 +19,6 @@ import (
 func NewMessagesCmd() *cobra.Command {
 	var project string
 	var messageBoard string
-	var limit, page int
-	var all bool
 
 	cmd := &cobra.Command{
 		Use:         "messages",
@@ -28,18 +26,11 @@ func NewMessagesCmd() *cobra.Command {
 		Short:       "Manage message board messages",
 		Long:        "List, show, create, and manage messages in a project's message board.",
 		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runMessagesList(cmd, project, messageBoard, limit, page, all)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of messages to fetch (0 = default 100)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all messages (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newMessagesListCmd(&project, &messageBoard),
@@ -243,12 +234,13 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 
 			app := appctx.FromContext(cmd.Context())
 
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
+			// Show help when invoked with no subject
+			if subject == "" {
+				return cmd.Help()
 			}
 
-			if subject == "" {
-				return output.ErrUsage("--subject is required")
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Resolve subscription flags before project (fail fast on bad input)
@@ -333,7 +325,6 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
-	_ = cmd.MarkFlagRequired("subject")
 
 	return cmd
 }
@@ -366,8 +357,9 @@ You can pass either a message ID or a Basecamp URL:
 				return output.ErrUsage("Invalid message ID")
 			}
 
+			// Show help when invoked with no flags
 			if subject == "" && content == "" {
-				return output.ErrUsage("at least one of --subject or --content is required")
+				return cmd.Help()
 			}
 
 			// Build SDK request
@@ -541,12 +533,13 @@ func NewMessageCmd() *cobra.Command {
 
 			app := appctx.FromContext(cmd.Context())
 
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
+			// Show help when invoked with no subject
+			if subject == "" {
+				return cmd.Help()
 			}
 
-			if subject == "" {
-				return output.ErrUsage("--subject is required")
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Resolve subscription flags before project (fail fast on bad input)
@@ -632,7 +625,6 @@ func NewMessageCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
-	_ = cmd.MarkFlagRequired("subject")
 
 	return cmd
 }

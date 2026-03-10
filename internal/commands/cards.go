@@ -19,30 +19,18 @@ import (
 // NewCardsCmd creates the cards command group.
 func NewCardsCmd() *cobra.Command {
 	var project string
-	var column string
 	var cardTable string
-	var limit int
-	var page int
-	var all bool
 
 	cmd := &cobra.Command{
 		Use:         "cards",
 		Short:       "Manage cards in Card Tables",
 		Long:        "List, show, create, and manage cards in Card Tables (Kanban boards).",
 		Annotations: map[string]string{"agent_notes": "Cards do NOT support --assignee filtering like todos — fetch all and filter client-side\nIf a project has multiple card tables, you must specify --card-table <id>\nAssign/unassign shortcuts work on cards: basecamp assign <card_id> --to <person>\nCross-project cards: basecamp recordings cards --json"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runCardsList(cmd, project, column, cardTable, limit, page, all)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
-	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newCardsListCmd(&project, &cardTable),
@@ -306,8 +294,9 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no title
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 
 			// Column name (non-numeric) requires --card-table for resolution
@@ -431,7 +420,6 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	cmd.Flags().StringVarP(&content, "content", "b", "", "Card body/description")
 	cmd.Flags().StringVar(&content, "body", "", "Card body/description (alias for --content)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
-	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -466,8 +454,9 @@ You can pass either a card ID or a Basecamp URL:
 				return output.ErrUsage("Invalid card ID")
 			}
 
+			// Show help when invoked with no update fields
 			if title == "" && content == "" && due == "" && assignee == "" {
-				return output.ErrUsage("At least one field required")
+				return cmd.Help()
 			}
 
 			req := &basecamp.UpdateCardRequest{}
@@ -547,8 +536,9 @@ You can pass either a card ID or a Basecamp URL:
 				return output.ErrUsage("Invalid card ID")
 			}
 
+			// Show help when invoked with no target column
 			if targetColumn == "" {
-				return output.ErrUsage("--to is required")
+				return cmd.Help()
 			}
 
 			// Check if --to is a column name (not numeric) - requires --card-table
@@ -654,7 +644,6 @@ You can pass either a card ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name (required)")
-	_ = cmd.MarkFlagRequired("to")
 
 	return cmd
 }
@@ -747,8 +736,9 @@ func NewCardCmd() *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no title
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 
 			// Column name (non-numeric) requires --card-table for resolution
@@ -874,7 +864,6 @@ func NewCardCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
 	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
-	_ = cmd.MarkFlagRequired("title")
 
 	cmd.AddCommand(
 		newCardsUpdateCmd(),
@@ -994,8 +983,9 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no title
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 
 			// Resolve project, with interactive fallback
@@ -1059,7 +1049,6 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Column title (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Column description")
-	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -1382,8 +1371,9 @@ You can pass either a column ID or a Basecamp URL:
 				return output.ErrUsage("Invalid column ID")
 			}
 
+			// Show help when invoked with no color flag
 			if color == "" {
-				return output.ErrUsage("--color is required")
+				return cmd.Help()
 			}
 
 			col, err := app.Account().CardColumns().SetColor(cmd.Context(), columnID, color)
@@ -1516,8 +1506,9 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no title
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 			if cardID == "" {
 				return output.ErrUsage("--card is required")
@@ -1589,8 +1580,6 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVarP(&cardID, "card", "c", "", "Card ID (required)")
 	cmd.Flags().StringVarP(&dueOn, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&assignees, "assignees", "", "Assignees (IDs or names, comma-separated)")
-	_ = cmd.MarkFlagRequired("title")
-	_ = cmd.MarkFlagRequired("card")
 
 	return cmd
 }
@@ -1761,8 +1750,9 @@ You can pass either a step ID or a Basecamp URL:
 				return output.ErrUsage("Step ID must be numeric")
 			}
 
+			// Show help when invoked with no card flag
 			if cardID == "" {
-				return output.ErrUsage("--card is required")
+				return cmd.Help()
 			}
 			if position < 0 {
 				return output.ErrUsage("--position is required (0-indexed)")

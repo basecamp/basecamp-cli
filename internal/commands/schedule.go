@@ -393,8 +393,9 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				entrySummary = args[0]
 			}
 
+			// Show help when invoked with no arguments
 			if entrySummary == "" {
-				return output.ErrUsage("Summary required")
+				return cmd.Help()
 			}
 			if startsAt == "" {
 				return output.ErrUsage("--starts-at required (ISO 8601 datetime)")

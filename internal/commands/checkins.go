@@ -218,8 +218,9 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		Short: "Show or manage a question",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
 			if len(args) == 0 {
-				return output.ErrUsage("Question ID required")
+				return cmd.Help()
 			}
 			return runCheckinsQuestionShow(cmd, *project, args[0])
 		},
@@ -333,8 +334,9 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				return err
 			}
 
+			// Show help when invoked with no arguments
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 
 			// Resolve project, with interactive fallback
@@ -441,7 +443,6 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 	cmd.Flags().StringVarP(&frequency, "frequency", "f", "", "Schedule frequency (default: every_day)")
 	cmd.Flags().StringVar(&timeOfDay, "time", "", "Time to ask (default: 5:00pm)")
 	cmd.Flags().StringVarP(&days, "days", "d", "", "Days to ask, comma-separated (default: 1,2,3,4,5)")
-	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }
@@ -536,8 +537,9 @@ You can pass either a question ID or a Basecamp URL:
 				req.Schedule = schedule
 			}
 
+			// Show help when invoked with no arguments
 			if req.Title == "" && req.Schedule == nil {
-				return output.ErrUsage("at least one of --title, --frequency, --time, or --days is required")
+				return cmd.Help()
 			}
 
 			question, err := app.Account().Checkins().UpdateQuestion(cmd.Context(), questionID, req)
@@ -677,8 +679,9 @@ func newCheckinsAnswerCmd(project *string) *cobra.Command {
 		Short: "Show or manage an answer",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
 			if len(args) == 0 {
-				return output.ErrUsage("Answer ID required")
+				return cmd.Help()
 			}
 			return runCheckinsAnswerShow(cmd, *project, args[0])
 		},
@@ -804,8 +807,9 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				questionID = args[0]
 			}
 
+			// Show help when invoked with no arguments
 			if questionID == "" {
-				return output.ErrUsage("--question is required")
+				return cmd.Help()
 			}
 			if content == "" {
 				return output.ErrUsage("--content is required")
@@ -899,8 +903,9 @@ You can pass either an answer ID or a Basecamp URL:
 			// Extract ID and project from URL if provided
 			answerIDStr, urlProjectID := extractWithProject(args[0])
 
+			// Show help when invoked with no arguments
 			if content == "" {
-				return output.ErrUsage("--content is required")
+				return cmd.Help()
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
@@ -970,7 +975,6 @@ You can pass either an answer ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "New answer content (required)")
-	_ = cmd.MarkFlagRequired("content")
 
 	return cmd
 }

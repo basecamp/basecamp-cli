@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -125,4 +128,22 @@ func TestResolvePreferences(t *testing.T) {
 			assert.Equal(t, tt.wantVerbose, flags.Verbose, "Verbose")
 		})
 	}
+}
+
+func TestVersionSubcommand(t *testing.T) {
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	root := NewRootCmd()
+	root.AddCommand(commands.NewVersionCmd())
+
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"version"})
+
+	err := root.Execute()
+	require.NoError(t, err)
+	assert.Equal(t, "basecamp version 1.2.3\n", buf.String())
 }

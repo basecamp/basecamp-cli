@@ -226,8 +226,9 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid tool ID")
 			}
 
+			// Show help when invoked with no arguments
 			if title == "" {
-				return output.ErrUsage("--title is required")
+				return cmd.Help()
 			}
 
 			// Resolve project, with interactive fallback
@@ -274,7 +275,6 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title (required)")
-	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
 }

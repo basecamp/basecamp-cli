@@ -26,24 +26,6 @@ func NewWebhooksCmd() *cobra.Command {
 Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 		Annotations: map[string]string{"agent_notes": "Event types: Todo, Todolist, Message, Comment, Document, Upload, Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer"},
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-			return ensureAccount(cmd, app)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for unknown subcommand
-			if len(args) > 0 {
-				return output.ErrUsageHint(
-					"Unknown webhooks action: "+args[0],
-					"Run 'basecamp webhooks -h' for available commands",
-				)
-			}
-			// Default to list when called without subcommand
-			return runWebhooksList(cmd, &project)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project name, URL, or ID")
@@ -218,8 +200,9 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 				return output.ErrUsage("Invalid project ID")
 			}
 
+			// Show help when invoked with no url
 			if url == "" {
-				return output.ErrUsage("--url is required")
+				return cmd.Help()
 			}
 
 			// Build type array from comma-separated string if specified
@@ -266,7 +249,6 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 
 	cmd.Flags().StringVar(&url, "url", "", "Webhook payload URL (must be HTTPS)")
 	cmd.Flags().StringVar(&types, "types", "", "Comma-separated event types (default: all)")
-	_ = cmd.MarkFlagRequired("url")
 
 	return cmd
 }
@@ -326,8 +308,9 @@ func newWebhooksUpdateCmd() *cobra.Command {
 				hasChanges = true
 			}
 
+			// Show help when invoked with no flags
 			if !hasChanges {
-				return output.ErrUsage("at least one of --url, --types, --active, or --inactive is required")
+				return cmd.Help()
 			}
 
 			webhook, err := app.Account().Webhooks().Update(cmd.Context(), webhookID, req)

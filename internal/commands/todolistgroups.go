@@ -24,17 +24,6 @@ func NewTodolistgroupsCmd() *cobra.Command {
 		Long: `Manage todolist groups (folders for organizing todolists).
 
 Todolist groups allow you to organize todolists into collapsible sections.`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-			return ensureAccount(cmd, app)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runTodolistgroupsList(cmd, project, todolist)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -99,8 +88,9 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	if todolist == "" {
 		todolist = app.Config.TodolistID
 	}
+	// Show help when invoked with no arguments
 	if todolist == "" {
-		return output.ErrUsage("--list is required")
+		return cmd.Help()
 	}
 
 	resolvedTodolistID, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, resolvedProjectID)
@@ -219,8 +209,9 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("--name is required")
+				return cmd.Help()
 			}
 
 			// Resolve project, with interactive fallback
@@ -292,7 +283,6 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Group name (required)")
-	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -317,8 +307,9 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 
 			groupIDStr := args[0]
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("--name is required")
+				return cmd.Help()
 			}
 
 			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
@@ -344,7 +335,6 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name (required)")
-	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }

@@ -19,25 +19,12 @@ import (
 
 // NewCommentsCmd creates the comments command group (list/show/update).
 func NewCommentsCmd() *cobra.Command {
-	var recordingID string
-	var limit, page int
-	var all bool
-
 	cmd := &cobra.Command{
 		Use:         "comments",
 		Short:       "List and manage comments",
 		Long:        "List, show, and update comments on items.",
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runCommentsList(cmd, recordingID, limit, page, all)
-		},
 	}
-
-	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "ID of item to list comments for")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newCommentsListCmd(),
@@ -66,7 +53,6 @@ func newCommentsListCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
-	_ = cmd.MarkFlagRequired("on")
 
 	return cmd
 }
@@ -216,8 +202,9 @@ You can pass either a comment ID or a Basecamp URL:
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
 			commentIDStr, _ := extractCommentWithProject(args[0])
 
+			// Show help when invoked with no content
 			if content == "" {
-				return output.ErrUsage("--content is required")
+				return cmd.Help()
 			}
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
@@ -249,7 +236,6 @@ You can pass either a comment ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&content, "content", "c", "", "New content (required)")
-	_ = cmd.MarkFlagRequired("content")
 
 	return cmd
 }
@@ -284,9 +270,12 @@ Supports batch commenting on multiple items at once.`,
 				}
 			}
 
-			// Validate user input first, before checking account
+			// Show help when invoked with no content flags; keep error if editor was opened
 			if content == "" {
-				return output.ErrUsage("Comment content required")
+				if edit {
+					return output.ErrUsage("Comment content required")
+				}
+				return cmd.Help()
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {

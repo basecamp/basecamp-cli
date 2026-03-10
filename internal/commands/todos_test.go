@@ -86,19 +86,14 @@ func executeTodosCommand(cmd *cobra.Command, app *appctx.App, args ...string) er
 	return cmd.Execute()
 }
 
-// TestTodosRequiresProject tests that Project ID required for todos.
-func TestTodosRequiresProject(t *testing.T) {
+// TestTodosShowsHelp tests that help is shown when called without subcommand.
+func TestTodosShowsHelp(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
-	// No project in config
 
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app)
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "Project ID required", e.Message)
+	assert.NoError(t, err)
 }
 
 // TestTodosListRequiresProject tests that todos list requires --project.
@@ -402,11 +397,11 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 		"Todo content should be plain text, not HTML-wrapped")
 }
 
-func TestTodosAssigneeWithoutProjectErrors(t *testing.T) {
+func TestTodosListAssigneeWithoutProjectErrors(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 
 	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "--assignee", "me")
+	err := executeTodosCommand(cmd, app, "list", "--assignee", "me")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -415,11 +410,11 @@ func TestTodosAssigneeWithoutProjectErrors(t *testing.T) {
 	assert.Contains(t, e.Hint, "reports assigned")
 }
 
-func TestTodosOverdueWithoutProjectErrors(t *testing.T) {
+func TestTodosListOverdueWithoutProjectErrors(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 
 	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "--overdue")
+	err := executeTodosCommand(cmd, app, "list", "--overdue")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -428,12 +423,12 @@ func TestTodosOverdueWithoutProjectErrors(t *testing.T) {
 	assert.Contains(t, e.Hint, "reports overdue")
 }
 
-func TestTodosAssigneeWithConfigDefaultProceeds(t *testing.T) {
+func TestTodosListAssigneeWithConfigDefaultProceeds(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "--assignee", "me")
+	err := executeTodosCommand(cmd, app, "list", "--assignee", "me")
 	require.Error(t, err)
 
 	// Should proceed past the guard and fail on network (not the project error)
@@ -443,11 +438,11 @@ func TestTodosAssigneeWithConfigDefaultProceeds(t *testing.T) {
 	}
 }
 
-func TestTodosAssigneeWithFlagProceeds(t *testing.T) {
+func TestTodosListAssigneeWithFlagProceeds(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 
 	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "--assignee", "me", "--in", "123")
+	err := executeTodosCommand(cmd, app, "list", "--assignee", "me", "--in", "123")
 	require.Error(t, err)
 
 	// Should proceed past the guard and fail on project fetch (network disabled)
@@ -538,11 +533,11 @@ func setupMultiTodosetApp(t *testing.T) *appctx.App {
 	}
 }
 
-func TestTodosMultiTodosetAmbiguousError(t *testing.T) {
+func TestTodosListMultiTodosetAmbiguousError(t *testing.T) {
 	app := setupMultiTodosetApp(t)
 
 	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app)
+	err := executeTodosCommand(cmd, app, "list")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -553,13 +548,13 @@ func TestTodosMultiTodosetAmbiguousError(t *testing.T) {
 	assert.Contains(t, e.Hint, "Design (ID: 200)")
 }
 
-func TestTodosMultiTodosetExplicitFlagWorks(t *testing.T) {
+func TestTodosListMultiTodosetExplicitFlagWorks(t *testing.T) {
 	app := setupMultiTodosetApp(t)
 
 	cmd := NewTodosCmd()
 	// --todoset 100 should bypass ambiguity — will proceed to fetch todolists
 	// which the transport doesn't handle, so it'll fail with a different error
-	err := executeTodosCommand(cmd, app, "--todoset", "100")
+	err := executeTodosCommand(cmd, app, "list", "--todoset", "100")
 	// Should NOT be an ambiguous error
 	if err != nil {
 		var e *output.Error
@@ -570,11 +565,11 @@ func TestTodosMultiTodosetExplicitFlagWorks(t *testing.T) {
 	}
 }
 
-func TestTodolistsMultiTodosetAmbiguousError(t *testing.T) {
+func TestTodolistsListMultiTodosetAmbiguousError(t *testing.T) {
 	app := setupMultiTodosetApp(t)
 
 	cmd := NewTodolistsCmd()
-	err := executeTodosCommand(cmd, app)
+	err := executeTodosCommand(cmd, app, "list")
 	require.Error(t, err)
 
 	var e *output.Error

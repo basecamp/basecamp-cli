@@ -147,8 +147,9 @@ func newMessagetypesCreateCmd() *cobra.Command {
 				name = args[0]
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("Name is required")
+				return cmd.Help()
 			}
 
 			if icon == "" {

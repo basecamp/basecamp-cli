@@ -16,8 +16,6 @@ import (
 func NewTodolistsCmd() *cobra.Command {
 	var project string
 	var todosetID string
-	var limit, page int
-	var all bool
 
 	cmd := &cobra.Command{
 		Use:     "todolists",
@@ -28,25 +26,10 @@ func NewTodolistsCmd() *cobra.Command {
 A "todoset" is the container; "todolists" are the actual lists inside it.
 Most projects have one todoset, but some may have multiple. Use --todoset
 to disambiguate when needed.`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-			return ensureAccount(cmd, app)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runTodolistsList(cmd, project, todosetID, limit, page, all)
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.Flags().StringVarP(&todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newTodolistsListCmd(&project, &todosetID),
@@ -270,8 +253,9 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 				return err
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("--name is required")
+				return cmd.Help()
 			}
 
 			// Resolve project, with interactive fallback
@@ -341,7 +325,6 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Todolist name (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
-	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -372,8 +355,9 @@ You can pass either a todolist ID or a Basecamp URL:
 			// Extract ID and project from URL if provided
 			todolistIDStr, urlProjectID := extractWithProject(args[0])
 
+			// Show help when invoked with no flags
 			if name == "" && description == "" {
-				return output.ErrUsage("at least one of --name or --description is required")
+				return cmd.Help()
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback

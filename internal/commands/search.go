@@ -38,8 +38,9 @@ Use 'basecamp search metadata' to see available search scopes.`,
 				return runSearchMetadata(cmd, app)
 			}
 
+			// Show help when invoked with no query
 			if len(args) == 0 {
-				return output.ErrUsage("Search query required")
+				return cmd.Help()
 			}
 
 			query := args[0]

@@ -69,8 +69,9 @@ The --date flag accepts natural language dates:
 				date = args[1]
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("Marker name is required")
+				return cmd.Help()
 			}
 
 			if date == "" {

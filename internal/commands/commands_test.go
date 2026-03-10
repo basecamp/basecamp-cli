@@ -19,10 +19,6 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 	for _, cmd := range root.Commands() {
 		registered[cmd.Name()] = true
 	}
-	// version is accessed via --version flag, not as a subcommand, but we
-	// include it in the catalog for documentation. Add it to registered set.
-	registered["version"] = true
-
 	// Get catalog command names
 	catalog := make(map[string]bool)
 	for _, name := range commands.CatalogCommandNames() {
@@ -105,6 +101,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewTodolistgroupsCmd())
 	root.AddCommand(commands.NewMCPCmd())
 	root.AddCommand(commands.NewCommandsCmd())
+	root.AddCommand(commands.NewVersionCmd())
 	root.AddCommand(commands.NewTimelineCmd())
 	root.AddCommand(commands.NewReportsCmd())
 	root.AddCommand(commands.NewCompletionCmd())

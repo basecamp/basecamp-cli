@@ -174,8 +174,9 @@ func newTemplatesCreateCmd() *cobra.Command {
 				name = args[0]
 			}
 
+			// Show help when invoked with no arguments
 			if name == "" {
-				return output.ErrUsage("Template name is required")
+				return cmd.Help()
 			}
 
 			req := &basecamp.CreateTemplateRequest{

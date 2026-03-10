@@ -86,19 +86,14 @@ func executeMessagesCommand(cmd *cobra.Command, app *appctx.App, args ...string)
 	return cmd.Execute()
 }
 
-// TestMessagesRequiresProject tests that Project ID required for messages.
-func TestMessagesRequiresProject(t *testing.T) {
+// TestMessagesShowsHelp tests that help is shown when called without subcommand.
+func TestMessagesShowsHelp(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
-	// No project in config
 
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app)
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "Project ID required", e.Message)
+	assert.NoError(t, err)
 }
 
 // TestMessagesListRequiresProject tests that messages list requires --project.
@@ -116,18 +111,15 @@ func TestMessagesListRequiresProject(t *testing.T) {
 	assert.Equal(t, "Project ID required", e.Message)
 }
 
-// TestMessagesCreateRequiresSubject tests that messages create requires --subject.
-func TestMessagesCreateRequiresSubject(t *testing.T) {
+// TestMessagesCreateShowsHelpWithoutSubject tests that help is shown when --subject is missing.
+func TestMessagesCreateShowsHelpWithoutSubject(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "create")
-	require.Error(t, err)
-
-	// Cobra validates required flags
-	assert.Equal(t, `required flag(s) "subject" not set`, err.Error())
+	assert.NoError(t, err)
 }
 
 // TestMessagesShowRequiresID tests that messages show requires an ID argument.
@@ -184,32 +176,25 @@ func TestMessagesUpdateRequiresID(t *testing.T) {
 }
 
 // TestMessagesUpdateRequiresContent tests that messages update requires --subject or --content.
-func TestMessagesUpdateRequiresContent(t *testing.T) {
+func TestMessagesUpdateShowsHelpWithoutContent(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "update", "456")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "at least one of --subject or --content is required", e.Message)
+	assert.NoError(t, err)
 }
 
-// TestMessageShortcutRequiresSubject tests that message command requires --subject.
-func TestMessageShortcutRequiresSubject(t *testing.T) {
+// TestMessageShortcutShowsHelpWithoutSubject tests that help is shown when --subject is missing.
+func TestMessageShortcutShowsHelpWithoutSubject(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewMessageCmd()
 
 	err := executeMessagesCommand(cmd, app)
-	require.Error(t, err)
-
-	// Cobra validates required flags
-	assert.Equal(t, `required flag(s) "subject" not set`, err.Error())
+	assert.NoError(t, err)
 }
 
 // TestMessageShortcutRequiresProject tests that message command requires --project.

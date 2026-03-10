@@ -249,6 +249,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewTodolistgroupsCmd())
 	cmd.AddCommand(commands.NewMCPCmd())
 	cmd.AddCommand(commands.NewCommandsCmd())
+	cmd.AddCommand(commands.NewVersionCmd())
 	cmd.AddCommand(commands.NewTimelineCmd())
 	cmd.AddCommand(commands.NewReportsCmd())
 	cmd.AddCommand(commands.NewCompletionCmd())
