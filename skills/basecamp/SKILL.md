@@ -155,8 +155,8 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post to campfire | `basecamp campfire post --content "Message" --in <project> --json` |
 | Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
 | Search | `basecamp search "query" --json` |
-| Assign todo | `basecamp assign <id> --to me --in <project>` |
-| React to item | `basecamp react "🎉" --on <id> --in <project>` |
+| Assign todo | `basecamp assign <id> --to me --in <project> --json` |
+| React to item | `basecamp react "🎉" --on <id> --in <project> --json` |
 | Overdue (cross-project) | `basecamp reports overdue --json` |
 | Event history | `basecamp events <id> --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
@@ -323,9 +323,9 @@ basecamp todosets show <id> --in <project> --json     # Show specific todoset by
 Todolist groups are organizational folders that group todolists together within a project.
 
 ```bash
-basecamp todolistgroups list --in <project> --json             # List groups
+basecamp todolistgroups list --list <todolist_id> --in <project> --json             # List groups
 basecamp todolistgroups show <id> --in <project>               # Show group
-basecamp todolistgroups create "Group Name" --in <project>     # Create group
+basecamp todolistgroups create --list <todolist_id> "Group Name" --in <project>     # Create group
 basecamp todolistgroups update <id> "New Name" --in <project>  # Rename group
 basecamp todolistgroups position <id> --position 1 --in <project>  # Reorder
 ```
