@@ -130,15 +130,9 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 		return output.ErrUsage("Invalid folder ID")
 	}
 
-	// Get vault details using SDK
-	vault, err := app.Account().Vaults().Get(cmd.Context(), vaultIDNum)
-	if err != nil {
+	// Validate vault exists
+	if _, err := app.Account().Vaults().Get(cmd.Context(), vaultIDNum); err != nil {
 		return convertSDKError(err)
-	}
-
-	vaultTitle := vault.Title
-	if vaultTitle == "" {
-		vaultTitle = "Docs & Files"
 	}
 
 	// Get folders (subvaults) using SDK

@@ -6,6 +6,10 @@
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build setup, testing, and PR workflow.
 
+The standard development loop in this repo: make changes, run `bin/ci`, fix
+what it catches, repeat until green, then push. Treat `bin/ci` as your
+inner-loop companion, not a final hurdle.
+
 ## Repository Structure
 
 ```
@@ -49,11 +53,31 @@ Key endpoints used by the CLI:
 
 ## Testing
 
+`bin/ci` is the local CI gate. It runs every check that remote CI runs:
+formatting, vetting, linting, unit tests, e2e tests, naming conventions,
+CLI surface snapshots, skill drift detection, SDK provenance, and go mod tidy.
+Run it early and often — after finishing a feature, after fixing a bug, before
+pushing. If you're about to `git push` and haven't run `bin/ci` in this
+session, stop and run it first.
+
+**Skill drift**: when you change CLI commands or flags, `check-skill-drift`
+verifies that `skills/basecamp/SKILL.md` still references valid commands and
+flags from the `.surface` snapshot. If you add, rename, or remove commands/flags,
+update the skill to match.
+
+```bash
+bin/ci                # The single command — run this
+```
+
+When iterating on a specific area, use targeted make targets for faster
+feedback, then finish with `bin/ci` before pushing:
+
 ```bash
 make build            # Build binary to ./bin/basecamp
-make test             # Run Go unit tests
-make test-e2e         # Run BATS end-to-end tests
-make check            # All checks (fmt-check, vet, lint, test, test-e2e)
+make test             # Go unit tests
+make test-e2e         # BATS end-to-end tests
+make lint             # Linter
+make check            # All checks (what bin/ci runs)
 ```
 
 Requirements: Go 1.26+, [bats-core](https://github.com/bats-core/bats-core) for e2e tests.
