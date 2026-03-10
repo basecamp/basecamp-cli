@@ -3,7 +3,8 @@ name: basecamp
 description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
-  subscriptions, lineup, and campfire. Use for ANY Basecamp question or action.
+  subscriptions, lineup, campfire, boosts, reports, timesheet, forwards, message types,
+  and raw API access. Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
   - basecamp
@@ -17,6 +18,11 @@ triggers:
   - basecamp file
   - basecamp document
   - basecamp schedule
+  - basecamp boost
+  - basecamp react
+  - basecamp report
+  - basecamp timesheet
+  - basecamp assign
   - basecamp checkin
   - basecamp check-in
   - basecamp timeline
@@ -32,6 +38,10 @@ triggers:
   - create todo
   - move card
   - download file
+  - react to
+  - boost
+  - assign todo
+  - time tracking
   # Search and discovery
   - search basecamp
   - find in basecamp
@@ -63,7 +73,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, and campfire.
+Full CLI coverage: 130+ endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, campfire, boosts, reports, timesheet, forwards, message types, and raw API access.
 
 ## Agent Invariants
 
@@ -145,9 +155,14 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post to campfire | `basecamp campfire post --content "Message" --in <project> --json` |
 | Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
 | Search | `basecamp search "query" --json` |
+| Assign todo | `basecamp assign <id> --to me --in <project>` |
+| React to item | `basecamp react "🎉" --on <id> --in <project>` |
+| Overdue (cross-project) | `basecamp reports overdue --json` |
+| Event history | `basecamp events <id> --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Download file | `basecamp files download <id> --in <project>` |
 | Watch timeline | `basecamp timeline --watch` |
+| Raw API call | `basecamp api get <path> --json` |
 
 ## URL Parsing
 
@@ -294,6 +309,29 @@ basecamp todolists create --name "Name" --description "Desc" --in <project>
 basecamp todolists update <id> --name "New" --in <project>        # Update
 ```
 
+### Todosets
+
+Todosets are the top-level "To-dos" dock container in a project that holds all todolists.
+
+```bash
+basecamp todosets show --in <project> --json          # Show todoset (auto-detected)
+basecamp todosets show <id> --in <project> --json     # Show specific todoset by ID
+```
+
+### Todolist Groups
+
+Todolist groups are organizational folders that group todolists together within a project.
+
+```bash
+basecamp todolistgroups list --in <project> --json             # List groups
+basecamp todolistgroups show <id> --in <project>               # Show group
+basecamp todolistgroups create "Group Name" --in <project>     # Create group
+basecamp todolistgroups update <id> "New Name" --in <project>  # Rename group
+basecamp todolistgroups position <id> --position 1 --in <project>  # Reorder
+```
+
+**Aliases:** `tlgroups`, `tlgroup`, `todolistgroup`
+
 ### Cards (Kanban)
 
 **Note:** Cards do NOT support `--assignee` filtering like todos. Fetch all cards and filter client-side if needed. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
@@ -351,6 +389,27 @@ basecamp message "Bot update" "Done" --no-subscribe --in <project>
 basecamp message "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
 ```
 
+### Messageboards
+
+Messageboards are the container dock item that holds all messages in a project. Each project has exactly one.
+
+```bash
+basecamp messageboards show --in <project> --json     # Show message board (auto-detected)
+basecamp messageboards show <id> --in <project>       # Show specific board by ID
+```
+
+### Message Types
+
+Message types are categories (e.g., Announcement, FYI, Pitch) that can be applied when posting messages.
+
+```bash
+basecamp messagetypes list --json                      # List message types
+basecamp messagetypes show <id> --json                 # Show type details
+basecamp messagetypes create "Pitch" --icon "💡"       # Create type with emoji
+basecamp messagetypes update <id> --name "New" --icon "🔥"  # Update type
+basecamp messagetypes delete <id>                      # Delete type
+```
+
 ### Comments
 
 ```bash
@@ -358,6 +417,33 @@ basecamp comments list <recording_id> --in <project> --json
 basecamp comment <recording_id> "Text" --in <project>
 basecamp comments update <id> "Updated" --in <project>
 ```
+
+### Assign / Unassign
+
+Standalone commands for managing todo assignments. Supports "me", numeric person IDs, or email addresses.
+
+```bash
+basecamp assign <todo_id> --to me --in <project>           # Assign to yourself
+basecamp assign <todo_id> --to "alice@example.com" --in <project>  # Assign by email
+basecamp unassign <todo_id> --from me --in <project>       # Remove yourself
+basecamp unassign <todo_id> --from <person_id> --in <project>  # Remove by ID
+```
+
+**Note:** Omitting `--to` or `--from` prompts interactively for a person.
+
+### Boosts / React
+
+Emoji reactions on any recording. `react` is a shortcut for `boost create`.
+
+```bash
+basecamp boost list <id|url> --in <project> --json    # List boosts on item
+basecamp boost show <boost_id> --in <project>         # Show a boost
+basecamp boost create <id|url> "🎉" --in <project>   # Boost an item
+basecamp boost delete <boost_id> --in <project>       # Remove a boost
+basecamp react "👍" --on <id|url> --in <project>      # Shortcut for boost create
+```
+
+**Flags:** `--event` (for event-specific boosts on items with multiple events)
 
 ### Files & Documents
 
@@ -375,6 +461,8 @@ basecamp files update <id> --title "New" --content "Updated"
 ```
 
 **Subcommands:** `folders`, `uploads`, `documents` (each with pagination flags)
+
+**Aliases:** `vaults` / `folders` and `uploads` are top-level aliases for `files` — they run the same command with the same subcommands.
 
 ### Schedule
 
@@ -445,6 +533,82 @@ basecamp recordings archive <id> --in <project>   # Archive
 basecamp recordings restore <id> --in <project>   # Restore to active
 basecamp recordings visibility <id> --visible --in <project>  # Show to clients
 basecamp recordings visibility <id> --hidden      # Hide from clients
+```
+
+### Events
+
+View change history (audit trail) for any recording. Shows actions like created, completed, assignment_changed, content_changed, archived, and commented_on.
+
+```bash
+basecamp events <id|url> --json                       # Event history for an item
+basecamp events <id|url> --limit 20 --json            # Last 20 events
+basecamp events <id|url> --all --json                 # All events
+```
+
+### Reports
+
+Cross-project reports. Account-wide — no `--in <project>` needed.
+
+```bash
+basecamp reports assigned --json                       # My assigned todos (defaults to "me")
+basecamp reports assigned <person> --json              # Todos assigned to someone
+basecamp reports assigned --group-by project --json    # Group by project
+basecamp reports assigned --group-by date --json       # Group by date
+basecamp reports overdue --json                        # Overdue todos across projects
+basecamp reports assignable --json                     # People who can be assigned
+basecamp reports schedule --json                       # Upcoming schedule entries
+basecamp reports schedule --start "2024-03-15" --end "2024-03-31"
+```
+
+### Timesheet
+
+Time tracking. Entries track time logged against any item (todos, cards, messages, etc.).
+
+```bash
+basecamp timesheet report --json                       # Account-wide timesheet
+basecamp timesheet report --start "2024-03-01" --end "2024-03-31"
+basecamp timesheet report --person <id> --json         # Person's timesheet
+basecamp timesheet project --in <project> --json       # Project timesheet
+basecamp timesheet item <id> --in <project> --json     # Item timesheet
+```
+
+**Flags:** `--start`/`--from`, `--end`/`--to` (ISO 8601 dates), `--person` (filter by person ID)
+
+### Forwards
+
+Manage email forwards in a project's inbox. Forwards are emails sent into Basecamp.
+
+```bash
+basecamp forwards list --in <project> --json           # List forwards
+basecamp forwards show <id> --in <project>             # Show a forward
+basecamp forwards inbox --in <project> --json          # Show inbox details
+basecamp forwards replies <forward_id> --in <project>  # List replies
+basecamp forwards reply <forward_id> <reply_id> --in <project>  # Show reply
+```
+
+### Tools
+
+Manage project dock tools — the sidebar navigation items (Campfire, Schedule, Docs & Files, etc.).
+
+```bash
+basecamp tools show <id> --in <project> --json         # Show tool details
+basecamp tools create "Title" --source <tool_id> --in <project>  # Clone a tool
+basecamp tools update <id> "New Title" --in <project>  # Rename
+basecamp tools enable <id> --in <project>              # Enable (show in dock)
+basecamp tools disable <id> --in <project>             # Disable (hide from dock)
+basecamp tools reposition <id> --position 2 --in <project>  # Reorder
+basecamp tools trash <id> --in <project>               # Permanently trash
+```
+
+### API (Raw Access)
+
+Make raw API requests to any Basecamp endpoint. Useful for operations not yet covered by dedicated commands.
+
+```bash
+basecamp api get /projects.json --json                 # GET request
+basecamp api post /buckets/<id>/todolists.json -d '{"name":"List"}'  # POST
+basecamp api put /buckets/<id>/todos/<id>.json -d '{"content":"Updated"}'
+basecamp api delete /buckets/<id>/todos/<id>.json      # DELETE
 ```
 
 ### Templates
