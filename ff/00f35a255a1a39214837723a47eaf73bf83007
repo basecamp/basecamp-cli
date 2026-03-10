@@ -1,0 +1,27 @@
+internal/commands/doctor_test.go
+  ea1721fdf2944aeb 578-611
+internal/commands/profile.go
+  ea1721fdf2944aeb 234,241-242,251-261,278,285-286
+internal/commands/profile_test.go
+  ea1721fdf2944aeb 632-737
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "ff00f35a255a1a39214837723a47eaf73bf83007",
+  "prompts": {
+    "ea1721fdf2944aeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2abbb63-7fe7-4341-b9d5-d2066ea3c737",
+        "model": "unknown"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 172,
+      "total_deletions": 40,
+      "accepted_lines": 158,
+      "overriden_lines": 0
+    }
+  }
+}
