@@ -1771,7 +1771,6 @@ FLAG basecamp comments list --markdown type=bool
 FLAG basecamp comments list --md type=bool
 FLAG basecamp comments list --no-hints type=bool
 FLAG basecamp comments list --no-stats type=bool
-FLAG basecamp comments list --on type=string
 FLAG basecamp comments list --page type=int
 FLAG basecamp comments list --profile type=string
 FLAG basecamp comments list --project type=string

@@ -37,20 +37,21 @@ func NewCommentsCmd() *cobra.Command {
 }
 
 func newCommentsListCmd() *cobra.Command {
-	var recordingID string
 	var limit, page int
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   "list <id|url>",
 		Short: "List comments on an item",
 		Long:  "List all comments on an item.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCommentsList(cmd, recordingID, limit, page, all)
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return runCommentsList(cmd, args[0], limit, page, all)
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordingID, "on", "r", "", "ID of item to list comments for (required)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
@@ -72,12 +73,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
-	// Validate user input first, before checking account
-	if recordingID == "" {
-		return output.ErrUsage("ID required (use --on <id>)")
-	}
-
-	// Extract recording ID from URL if --on is a URL
+	// Extract recording ID from URL if provided
 	recordingID = extractID(recordingID)
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -141,8 +137,11 @@ func newCommentsShowCmd() *cobra.Command {
 You can pass either a comment ID or a Basecamp URL:
   basecamp comments show 789
   basecamp comments show https://3.basecamp.com/123/buckets/456/todos/111#__recording_789`,
-		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err

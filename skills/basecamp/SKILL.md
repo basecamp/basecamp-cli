@@ -354,7 +354,7 @@ basecamp message "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
 ### Comments
 
 ```bash
-basecamp comments list --on <recording_id> --in <project> --json
+basecamp comments list <recording_id> --in <project> --json
 basecamp comment <recording_id> "Text" --in <project>
 basecamp comments update <id> "Updated" --in <project>
 ```

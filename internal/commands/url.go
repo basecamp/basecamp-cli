@@ -214,7 +214,7 @@ func runURLParse(app *appctx.App, url string) error {
 				},
 				output.Breadcrumb{
 					Action:      "comments",
-					Cmd:         fmt.Sprintf("basecamp comments list --on %s --in %s", recordingID, bucketID),
+					Cmd:         fmt.Sprintf("basecamp comments list %s --in %s", recordingID, bucketID),
 					Description: "List comments",
 				},
 			)
