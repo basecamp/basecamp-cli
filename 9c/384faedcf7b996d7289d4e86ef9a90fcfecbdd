@@ -1,0 +1,27 @@
+README.md
+  ea1721fdf2944aeb 106-107
+internal/auth/auth_test.go
+  ea1721fdf2944aeb 15,1181,1187,1258
+install.md
+  ea1721fdf2944aeb 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "9c384faedcf7b996d7289d4e86ef9a90fcfecbdd",
+  "prompts": {
+    "ea1721fdf2944aeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2abbb63-7fe7-4341-b9d5-d2066ea3c737",
+        "model": "unknown"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 5,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
