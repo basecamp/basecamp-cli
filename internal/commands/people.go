@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -258,7 +259,29 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 		updatePeopleCache(people, app.Config.CacheDir)
 	}
 
-	summary := fmt.Sprintf("%d people", len(people))
+	// Slim output and sort by name
+	type personListItem struct {
+		ID       int64  `json:"id"`
+		Name     string `json:"name"`
+		Title    string `json:"title"`
+		Employee bool   `json:"employee"`
+		Admin    bool   `json:"admin"`
+	}
+	items := make([]personListItem, len(people))
+	for i, p := range people {
+		items[i] = personListItem{
+			ID:       p.ID,
+			Name:     p.Name,
+			Title:    p.Title,
+			Employee: p.Employee,
+			Admin:    p.Admin,
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+
+	summary := fmt.Sprintf("%d people", len(items))
 	breadcrumbs := []output.Breadcrumb{
 		{Action: "show", Cmd: "basecamp people show <id>", Description: "Show person details"},
 	}
@@ -269,11 +292,11 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 	}
 
 	// Add truncation notice if results may be limited
-	if notice := output.TruncationNotice(len(people), 0, all, limit); notice != "" {
+	if notice := output.TruncationNotice(len(items), 0, all, limit); notice != "" {
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 
-	return app.OK(people, respOpts...)
+	return app.OK(items, respOpts...)
 }
 
 // updatePeopleCache updates the completion cache with fresh people data.
