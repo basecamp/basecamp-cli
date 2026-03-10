@@ -231,6 +231,10 @@ Examples:
 				profileCfg.AccountID = accountID
 			}
 
+			// Snapshot in-memory config before mutation
+			prevActiveProfile := app.Config.ActiveProfile
+			prevBaseURL := app.Config.BaseURL
+
 			// Set up in-memory config for the login flow (no persistence yet)
 			if app.Config.Profiles == nil {
 				app.Config.Profiles = make(map[string]*config.ProfileConfig)
@@ -248,9 +252,10 @@ Examples:
 				Logger:    func(msg string) { fmt.Println(msg) },
 			})
 			if err != nil {
-				// Clean up in-memory state
+				// Restore in-memory state
 				delete(app.Config.Profiles, name)
-				app.Config.ActiveProfile = ""
+				app.Config.ActiveProfile = prevActiveProfile
+				app.Config.BaseURL = prevBaseURL
 				return err
 			}
 
