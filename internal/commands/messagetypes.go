@@ -128,17 +128,11 @@ func newMessagetypesCreateCmd() *cobra.Command {
 	var icon string
 
 	cmd := &cobra.Command{
-		Use:   "create [name]",
+		Use:   "create <name>",
 		Short: "Create a new message type",
 		Long:  "Create a new message type with a name and emoji icon.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Name from positional arg or flag
 			if len(args) > 0 && name == "" {
 				name = args[0]
@@ -146,7 +140,13 @@ func newMessagetypesCreateCmd() *cobra.Command {
 
 			// Show help when invoked with no arguments
 			if name == "" {
-				return cmd.Help()
+				return missingArg(cmd, "<name>")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			if icon == "" {
@@ -210,7 +210,7 @@ func newMessagetypesUpdateCmd() *cobra.Command {
 			}
 
 			if name == "" && icon == "" {
-				return output.ErrUsage("Use --name or --icon to update")
+				return noChanges(cmd)
 			}
 
 			req := &basecamp.UpdateMessageTypeRequest{

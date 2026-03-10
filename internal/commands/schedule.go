@@ -364,16 +364,11 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var noSubscribe bool
 
 	cmd := &cobra.Command{
-		Use:   "create [summary]",
+		Use:   "create <summary>",
 		Short: "Create a schedule entry",
 		Long:  "Create a new entry in the project schedule.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			entrySummary := summary
 			if len(args) > 0 {
 				entrySummary = args[0]
@@ -381,8 +376,14 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 
 			// Show help when invoked with no arguments
 			if entrySummary == "" {
-				return cmd.Help()
+				return missingArg(cmd, "<summary>")
 			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
 			if startsAt == "" {
 				return output.ErrUsage("--starts-at required (ISO 8601 datetime)")
 			}
@@ -592,7 +593,7 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 
 			if !hasChanges {
-				return output.ErrUsage("No update fields provided")
+				return noChanges(cmd)
 			}
 
 			entry, err := app.Account().Schedules().UpdateEntry(cmd.Context(), entryIDInt, req)

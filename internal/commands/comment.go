@@ -46,7 +46,7 @@ func newCommentsListCmd() *cobra.Command {
 		Long:  "List all comments on an item.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<id|url>")
 			}
 			return runCommentsList(cmd, args[0], limit, page, all)
 		},
@@ -139,7 +139,7 @@ You can pass either a comment ID or a Basecamp URL:
   basecamp comments show https://3.basecamp.com/123/buckets/456/todos/111#__recording_789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<id|url>")
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -192,9 +192,11 @@ You can pass either a comment ID or a Basecamp URL:
   basecamp comments update 789 "new text"
   basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 "new text"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no args
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>")
+			}
 			if len(args) < 2 {
-				return cmd.Help()
+				return missingArg(cmd, "<content>")
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -267,7 +269,7 @@ Comma-separated IDs add the same comment to multiple items:
 
 			// Show help when invoked with no args
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<id|url>")
 			}
 
 			// First arg is always the recording ID(s)
@@ -297,7 +299,7 @@ Comma-separated IDs add the same comment to multiple items:
 				if edit {
 					return output.ErrUsage("Comment content required")
 				}
-				return cmd.Help()
+				return missingArg(cmd, "<content>")
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {

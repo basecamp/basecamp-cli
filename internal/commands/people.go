@@ -397,7 +397,7 @@ func newPeopleAddCmd() *cobra.Command {
 		Long:  "Grant people access to a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<person>...")
 			}
 			return runPeopleAdd(cmd, args, projectID)
 		},
@@ -471,7 +471,7 @@ func newPeopleRemoveCmd() *cobra.Command {
 		Long:  "Revoke people's access to a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<person>...")
 			}
 			return runPeopleRemove(cmd, args, projectID)
 		},

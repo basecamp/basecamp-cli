@@ -39,7 +39,7 @@ They apply to the entire Basecamp account.`,
 
 func newLineupCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "create [name] [date]",
+		Use:   "create <name> [date]",
 		Short: "Create a new lineup marker",
 		Long: `Create a new lineup marker with a name and date.
 
@@ -49,12 +49,6 @@ The date accepts natural language dates:
 - Explicit: 2024-03-15 (YYYY-MM-DD)`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			name := ""
 			date := ""
 			if len(args) > 0 {
@@ -66,7 +60,13 @@ The date accepts natural language dates:
 
 			// Show help when invoked with no arguments
 			if name == "" {
-				return cmd.Help()
+				return missingArg(cmd, "<name>")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			if date == "" {
@@ -119,15 +119,15 @@ You can pass either a marker ID or a Basecamp URL:
   basecamp lineup update 789 "new name"
   basecamp lineup update 789 "new name" 2024-03-15`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
 			}
 
 			markerIDStr := extractID(args[0])
@@ -147,7 +147,7 @@ You can pass either a marker ID or a Basecamp URL:
 
 			// Show help when no update fields provided
 			if name == "" && date == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			req := &basecamp.UpdateMarkerRequest{}

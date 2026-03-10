@@ -68,14 +68,14 @@ func newAPIPostCmd() *cobra.Command {
 		Long:  "Make a raw POST request to any Basecamp API endpoint.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no data
+			if data == "" {
+				return missingArg(cmd, "--data")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Show help when invoked with no data
-			if data == "" {
-				return cmd.Help()
 			}
 
 			path := parsePath(args[0])
@@ -116,14 +116,14 @@ func newAPIPutCmd() *cobra.Command {
 		Long:  "Make a raw PUT request to any Basecamp API endpoint.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no data
+			if data == "" {
+				return missingArg(cmd, "--data")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Show help when invoked with no data
-			if data == "" {
-				return cmd.Help()
 			}
 
 			path := parsePath(args[0])

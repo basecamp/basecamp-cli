@@ -286,21 +286,21 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 		Short: "Create a new card",
 		Long:  "Create a new card in a project's card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Show help when invoked with no title
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<title>")
 			}
 
 			title := args[0]
 			var content string
 			if len(args) > 1 {
 				content = args[1]
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Column name (non-numeric) requires --card-table for resolution
@@ -442,7 +442,7 @@ You can pass either a card ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" && content == "" && due == "" && assignee == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -521,6 +521,11 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no target column
+			if targetColumn == "" {
+				return missingArg(cmd, "--to")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -533,11 +538,6 @@ You can pass either a card ID or a Basecamp URL:
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
-			}
-
-			// Show help when invoked with no target column
-			if targetColumn == "" {
-				return cmd.Help()
 			}
 
 			// Check if --to is a column name (not numeric) - requires --card-table
@@ -728,21 +728,21 @@ func NewCardCmd() *cobra.Command {
 		Long:  "Create a card in a project's card table. Shortcut for 'basecamp cards create'.",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Show help when invoked with no title
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<title>")
 			}
 
 			title := args[0]
 			var content string
 			if len(args) > 1 {
 				content = args[1]
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Column name (non-numeric) requires --card-table for resolution
@@ -977,18 +977,18 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 		Short: "Create a column",
 		Long:  "Create a new column in the card table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no title
+			if len(args) == 0 {
+				return missingArg(cmd, "<title>")
+			}
+
+			title := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no title
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			title := args[0]
 
 			// Resolve project, with interactive fallback
 			projectID := *project
@@ -1069,7 +1069,7 @@ You can pass either a column ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" && description == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -1359,6 +1359,11 @@ You can pass either a column ID or a Basecamp URL:
   basecamp cards column color https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --color blue`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no color flag
+			if color == "" {
+				return missingArg(cmd, "--color")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -1370,11 +1375,6 @@ You can pass either a column ID or a Basecamp URL:
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
-			}
-
-			// Show help when invoked with no color flag
-			if color == "" {
-				return cmd.Help()
 			}
 
 			col, err := app.Account().CardColumns().SetColor(cmd.Context(), columnID, color)
@@ -1398,7 +1398,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 	var cardID string
 
 	cmd := &cobra.Command{
-		Use:   "steps",
+		Use:   "steps <card-id|url>",
 		Short: "List steps on a card",
 		Long:  "Display all steps (checklist items) on a card.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1413,7 +1413,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				cardID = args[0]
 			}
 			if cardID == "" {
-				return cmd.Help()
+				return missingArg(cmd, "card-id|url")
 			}
 
 			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)
@@ -1500,18 +1500,19 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 		Short: "Create a step",
 		Long:  "Add a new step (checklist item) to a card.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no title
+			if len(args) == 0 {
+				return missingArg(cmd, "<title>")
+			}
+
+			title := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Show help when invoked with no title
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			title := args[0]
 			if cardID == "" {
 				return output.ErrUsage("--card is required")
 			}
@@ -1598,15 +1599,15 @@ You can pass either a step ID or a Basecamp URL:
   basecamp cards step update 789 "new title"
   basecamp cards step update https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 "new title"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no args
+			if len(args) == 0 {
+				return missingArg(cmd, "<step_id|url>")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Show help when invoked with no args
-			if len(args) == 0 {
-				return cmd.Help()
 			}
 
 			// Extract ID from URL if provided
@@ -1622,7 +1623,7 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			if len(args) < 2 && dueOn == "" && assignees == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			req := &basecamp.UpdateStepRequest{}
@@ -1745,6 +1746,11 @@ You can pass either a step ID or a Basecamp URL:
   basecamp cards step move https://3.basecamp.com/123/buckets/456/card_tables/cards/steps/789 --card 456 --position 0`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no card flag
+			if cardID == "" {
+				return missingArg(cmd, "--card")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -1756,11 +1762,6 @@ You can pass either a step ID or a Basecamp URL:
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Step ID must be numeric")
-			}
-
-			// Show help when invoked with no card flag
-			if cardID == "" {
-				return cmd.Help()
 			}
 			if position < 0 {
 				return output.ErrUsage("--position is required (0-indexed)")
