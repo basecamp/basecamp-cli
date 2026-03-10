@@ -1,0 +1,47 @@
+internal/commands/wizard.go
+  ea1721fdf2944aeb 137,165,168,173-174,187-189
+internal/commands/doctor.go
+  ea1721fdf2944aeb 572-574,576,583-585,587
+internal/auth/auth.go
+  ea1721fdf2944aeb 209-215,313,315,318-320,328,342-356,362,376,378,403,410,432,439,444-448,450
+internal/config/config.go
+  ea1721fdf2944aeb 113
+internal/commands/auth.go
+  ea1721fdf2944aeb 89-94,99-101,119-120,252,259,266-268,270-271,290
+internal/auth/auth_test.go
+  ea1721fdf2944aeb 834,880,885,963,968,1024,1029,1086,1092,1177-1355
+internal/config/config_test.go
+  ea1721fdf2944aeb 18
+README.md
+  ea1721fdf2944aeb 105-106
+install.md
+  ea1721fdf2944aeb 86,140
+skills/basecamp/SKILL.md
+  ea1721fdf2944aeb 599-600
+internal/commands/doctor_test.go
+  ea1721fdf2944aeb 578-611
+internal/commands/profile.go
+  ea1721fdf2944aeb 155,159-162,172-175,226,234,241-242,251-261,278,284-286,303-304,318-320,330
+internal/commands/profile_test.go
+  ea1721fdf2944aeb 606-607,626,629-630,632-737
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "0aec5550ac7b2203d2562b51e3ce37c514dfd262",
+  "prompts": {
+    "ea1721fdf2944aeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2abbb63-7fe7-4341-b9d5-d2066ea3c737",
+        "model": "unknown"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 2,
+      "accepted_lines": 451,
+      "overriden_lines": 0
+    }
+  }
+}
