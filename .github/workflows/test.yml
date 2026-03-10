@@ -191,7 +191,7 @@ jobs:
 
       - name: Run benchmarks
         if: steps.filter.outputs.bench == 'true'
-        run: go test -bench=. -benchmem -count=3 ./internal/... | tee benchmarks.txt
+        run: go test -bench=. -benchmem -count=3 -run='^$' ./internal/... | tee benchmarks.txt
 
       - name: Download previous benchmark baseline
         if: steps.filter.outputs.bench == 'true'
