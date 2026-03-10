@@ -82,8 +82,7 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 			}
 			toolList = append(toolList, fmt.Sprintf("%s (ID: %d)", title, tool.ID))
 		}
-		flagName := strings.ReplaceAll(friendlyName, " ", "-")
-		hint := fmt.Sprintf("Use --%s <id> to select one. Available:\n  - %s", flagName, strings.Join(toolList, "\n  - "))
+		hint := fmt.Sprintf("Specify the ID directly. Available:\n  - %s", strings.Join(toolList, "\n  - "))
 		return "", &output.Error{
 			Code:    output.CodeAmbiguous,
 			Message: fmt.Sprintf("Project has %d %ss", len(matches), friendlyName),

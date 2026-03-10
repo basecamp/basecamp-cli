@@ -30,7 +30,9 @@ type DockToolResult struct {
 // 2. Single tool of type exists - use it automatically
 // 3. Interactive prompt (if terminal is interactive)
 // 4. Error listing available tools (if not interactive)
-func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID, friendlyName string) (*DockToolResult, error) {
+//
+// flagName is the CLI flag to suggest in error messages (e.g. "todoset" for --todoset).
+func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID, friendlyName, flagName string) (*DockToolResult, error) {
 	// 1. If explicit ID provided, use it directly
 	if explicitID != "" {
 		return &DockToolResult{
@@ -61,7 +63,7 @@ func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID
 	default:
 		// Multiple tools - try interactive prompt
 		if !r.IsInteractive() {
-			return nil, r.multiToolError(tools, friendlyName)
+			return nil, r.multiToolError(tools, friendlyName, flagName)
 		}
 
 		return r.promptForDockTool(tools, friendlyName)
@@ -146,7 +148,7 @@ func (r *Resolver) promptForDockTool(tools []DockTool, friendlyName string) (*Do
 }
 
 // multiToolError creates an error message listing available tools.
-func (r *Resolver) multiToolError(tools []DockTool, friendlyName string) error {
+func (r *Resolver) multiToolError(tools []DockTool, friendlyName, flagName string) error {
 	var toolList strings.Builder
 	for _, tool := range tools {
 		title := tool.Title
@@ -156,7 +158,6 @@ func (r *Resolver) multiToolError(tools []DockTool, friendlyName string) error {
 		fmt.Fprintf(&toolList, "\n  - %s (ID: %d)", title, tool.ID)
 	}
 
-	flagName := strings.ReplaceAll(friendlyName, " ", "-")
 	return &output.Error{
 		Code:    output.CodeAmbiguous,
 		Message: fmt.Sprintf("Project has %d %ss", len(tools), friendlyName),
@@ -168,35 +169,35 @@ func (r *Resolver) multiToolError(tools []DockTool, friendlyName string) error {
 
 // Campfire resolves a campfire ID from a project.
 func (r *Resolver) Campfire(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "chat", explicitID, "campfire")
+	return r.DockTool(ctx, projectID, "chat", explicitID, "campfire", "campfire")
 }
 
 // MessageBoard resolves a message board ID from a project.
 func (r *Resolver) MessageBoard(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "message_board", explicitID, "message board")
+	return r.DockTool(ctx, projectID, "message_board", explicitID, "message board", "board")
 }
 
 // Todoset resolves a todoset ID from a project.
 func (r *Resolver) Todoset(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "todoset", explicitID, "todoset")
+	return r.DockTool(ctx, projectID, "todoset", explicitID, "todoset", "todoset")
 }
 
 // Schedule resolves a schedule ID from a project.
 func (r *Resolver) Schedule(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "schedule", explicitID, "schedule")
+	return r.DockTool(ctx, projectID, "schedule", explicitID, "schedule", "schedule")
 }
 
 // Vault resolves a vault (Docs & Files) ID from a project.
 func (r *Resolver) Vault(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "vault", explicitID, "vault")
+	return r.DockTool(ctx, projectID, "vault", explicitID, "vault", "vault")
 }
 
 // Inbox resolves an inbox ID from a project.
 func (r *Resolver) Inbox(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "inbox", explicitID, "inbox")
+	return r.DockTool(ctx, projectID, "inbox", explicitID, "inbox", "inbox")
 }
 
 // Questionnaire resolves a questionnaire (Automatic Check-ins) ID from a project.
 func (r *Resolver) Questionnaire(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "questionnaire", explicitID, "questionnaire")
+	return r.DockTool(ctx, projectID, "questionnaire", explicitID, "questionnaire", "questionnaire")
 }
