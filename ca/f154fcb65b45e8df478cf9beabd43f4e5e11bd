@@ -1,0 +1,23 @@
+internal/auth/callback_exchange_failed.html
+  319f82eb5e5c25c5 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "caf154fcb65b45e8df478cf9beabd43f4e5e11bd",
+  "prompts": {
+    "319f82eb5e5c25c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35333dfe-a2f6-4789-b5d6-423dbe712fe7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 13,
+      "overriden_lines": 0
+    }
+  }
+}
