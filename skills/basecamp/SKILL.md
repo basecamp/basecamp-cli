@@ -73,7 +73,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Content fields accept Markdown** — the body argument on messages and comments accepts Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+5. **Content fields accept Markdown** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
@@ -261,7 +261,7 @@ basecamp files download <upload_id> --in <project> --out ./downloads
 ```bash
 basecamp projects list --json                     # List all
 basecamp projects show <id> --json                # Show details
-basecamp projects create "Name" --json              # Create
+basecamp projects create "Name" --json             # Create
 basecamp projects update <id> --name "New"        # Update
 ```
 
@@ -289,7 +289,7 @@ Todolists are containers for todos. Create a todolist before adding todos.
 ```bash
 basecamp todolists --in <project> --json                          # List todolists
 basecamp todolists show <id> --in <project>                       # Show details
-basecamp todolists create "Name" --in <project> --json             # Create
+basecamp todolists create "Name" --in <project> --json            # Create
 basecamp todolists create "Name" --description "Desc" --in <project>
 basecamp todolists update <id> --name "New" --in <project>        # Update
 ```
@@ -402,7 +402,7 @@ basecamp checkins answers <question_id> --in <project>  # List answers
 basecamp checkins answer <id> --in <project>      # Answer details
 basecamp checkins question create "What did you work on?" --in <project>
 basecamp checkins question update <id> "New question" --frequency every_week
-basecamp checkins answer create "My answer" --question <id> --in <project>
+basecamp checkins answer create <question-id> "My answer" --in <project>
 basecamp checkins answer update <id> "Updated" --in <project>
 ```
 
@@ -466,8 +466,8 @@ basecamp templates construction <template_id> <construction_id>  # Check status
 ```bash
 basecamp webhooks --in <project> --json           # List webhooks
 basecamp webhooks show <id> --in <project>        # Webhook details
-basecamp webhooks create --url "https://..." --in <project>
-basecamp webhooks create --url "https://..." --types "Todo,Comment" --in <project>
+basecamp webhooks create "https://..." --in <project>
+basecamp webhooks create "https://..." --types "Todo,Comment" --in <project>
 basecamp webhooks update <id> --active --in <project>
 basecamp webhooks update <id> --inactive          # Disable
 basecamp webhooks delete <id> --in <project>
@@ -489,7 +489,7 @@ basecamp subscriptions remove <id> --people 1,2,3     # Remove people
 
 ```bash
 basecamp lineup create "Milestone" "2024-03-15"   # Create marker
-basecamp lineup create "Launch" tomorrow
+basecamp lineup create "Launch" tomorrow          # Natural date parsing
 basecamp lineup update <id> "New Name" "+7"
 basecamp lineup delete <id>
 ```
@@ -614,9 +614,29 @@ basecamp auth status                              # Verify auth working
 cat ~/.config/basecamp/accounts.json              # Check available accounts
 ```
 
-**Invalid flag errors:** Shortcut commands use positional arguments:
-- `basecamp todo "text"` (not `basecamp todo --content "text"`)
-- `basecamp card "title"` (not `basecamp card --title "title"`)
+**Required arguments are positional (not flags):**
+- `basecamp todo "Buy milk"` (not `--content`)
+- `basecamp card "New feature"` (not `--title`)
+- `basecamp message "Subject" "Body"` (not `--subject`)
+- `basecamp campfire post "Hello"` (not `--content`)
+- `basecamp comment <id> "Text"` (not a flag)
+- `basecamp webhooks create "https://..." --in <project>` (not `--url`)
+- `basecamp checkins answer create <question-id> "content"` (not `--question`)
+
+**Missing argument errors (code: "usage"):**
+When a required positional argument is missing, the CLI returns a structured error naming
+the specific argument. Use this for elicitation:
+
+```bash
+$ basecamp todo --json
+{"ok": false, "error": "<content> required", "code": "usage",
+ "hint": "Usage: basecamp todo <content>"}
+
+$ basecamp comments create 123 --json
+{"ok": false, "error": "<content> required", "code": "usage", ...}
+```
+
+The `error` field names the missing `<arg>` — use it to prompt the user for the specific value.
 
 **URL malformed (curl exit 3):** Special characters in content. Use plain text or properly escaped HTML.
 
