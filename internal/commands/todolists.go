@@ -200,7 +200,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				if err := ensureProject(cmd, app); err != nil {
 					return err
 				}
-				projectID = app.Config.ProjectID
 			}
 
 			// Parse todolist ID as int64
@@ -376,7 +375,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				if err := ensureProject(cmd, app); err != nil {
 					return err
 				}
-				projectID = app.Config.ProjectID
 			}
 
 			// Parse todolist ID as int64
