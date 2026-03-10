@@ -199,7 +199,11 @@ func renderCommandHelp(cmd *cobra.Command) {
 	b.WriteString("\n")
 	b.WriteString(r.Header.Render("USAGE"))
 	b.WriteString("\n")
-	b.WriteString("  " + cmd.UseLine() + "\n")
+	if cmd.HasAvailableSubCommands() && !cmd.Runnable() {
+		b.WriteString("  " + cmd.CommandPath() + " <command> [flags]\n")
+	} else {
+		b.WriteString("  " + cmd.UseLine() + "\n")
+	}
 
 	// ALIASES
 	if len(cmd.Aliases) > 0 {
@@ -246,12 +250,15 @@ func renderCommandHelp(cmd *cobra.Command) {
 	}
 
 	// INHERITED FLAGS
-	inheritedUsage := strings.TrimRight(cmd.InheritedFlags().FlagUsages(), "\n")
-	if inheritedUsage != "" {
+	// Parent-defined persistent flags (--project, --campfire, etc.) always
+	// show — they carry required context. Root-level global flags are curated
+	// to the essentials so leaf help isn't 20+ lines of noise.
+	inherited := filterInheritedFlags(cmd)
+	if inherited != "" {
 		b.WriteString("\n")
 		b.WriteString(r.Header.Render("INHERITED FLAGS"))
 		b.WriteString("\n")
-		b.WriteString(inheritedUsage)
+		b.WriteString(inherited)
 		b.WriteString("\n")
 	}
 
@@ -271,7 +278,7 @@ func renderCommandHelp(cmd *cobra.Command) {
 	b.WriteString("\n")
 	if cmd.HasAvailableSubCommands() {
 		b.WriteString("  " + cmd.CommandPath() + " <command> --help\n")
-	} else if cmd.HasParent() && cmd.Parent() != cmd.Root() {
+	} else if cmd.HasParent() {
 		b.WriteString("  " + cmd.Parent().CommandPath() + " --help\n")
 	}
 

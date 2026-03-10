@@ -122,7 +122,11 @@ func TestLeafCommandHelp(t *testing.T) {
 	assert.Contains(t, out, "USAGE")
 	assert.Contains(t, out, "FLAGS")
 	assert.NotContains(t, out, "COMMANDS")
-	assert.Contains(t, out, "INHERITED FLAGS")
+	// Inherited flags are curated: salient root flags shown, noise hidden
+	assert.Contains(t, out, "--json")
+	assert.Contains(t, out, "--quiet")
+	assert.NotContains(t, out, "--verbose")
+	assert.NotContains(t, out, "--styled")
 	// Leaf LEARN MORE points back to parent
 	assert.Contains(t, out, "basecamp projects --help")
 }
@@ -159,6 +163,26 @@ func TestGroupCommandShowsPersistentLocalFlags(t *testing.T) {
 			assert.Contains(t, buf.String(), tt.wantFlag)
 		})
 	}
+}
+
+func TestRootLevelLeafCommandHelp(t *testing.T) {
+	// Root-level leaf commands (no subcommands, parent is root) must still
+	// render a complete LEARN MORE section pointing to the root.
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewDoneCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"done", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "USAGE")
+	assert.Contains(t, out, "INHERITED FLAGS")
+	assert.Contains(t, out, "LEARN MORE")
+	assert.Contains(t, out, "basecamp --help")
+	assert.NotContains(t, out, "COMMANDS")
 }
 
 func TestLeafCommandInheritsParentPersistentFlags(t *testing.T) {
