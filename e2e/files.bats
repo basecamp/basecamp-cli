@@ -196,13 +196,13 @@ load test_helper
   assert_output_contains "Docs & Files"
 }
 
-@test "uploads routes to files command" {
+@test "uploads command shows upload-specific help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp uploads --help
   assert_success
-  assert_output_contains "Docs & Files"
+  assert_output_contains "uploaded files"
 }
 
 @test "docs routes to files command" {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewFilesCmd creates the files command group.
@@ -69,12 +70,28 @@ func NewDocsCmd() *cobra.Command {
 	return cmd
 }
 
-// NewUploadsCmd creates the uploads command alias.
+// NewUploadsCmd creates the top-level uploads command.
 func NewUploadsCmd() *cobra.Command {
-	cmd := NewFilesCmd()
-	cmd.Use = "uploads"
-	cmd.Aliases = []string{"upload"}
-	cmd.Short = "Manage file uploads (alias for files)"
+	var project string
+	var vaultID string
+
+	cmd := &cobra.Command{
+		Use:   "uploads",
+		Short: "Manage uploaded files",
+		Long:  "List, show, and upload files in a project's Docs & Files area.",
+	}
+
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.PersistentFlags().StringVar(&vaultID, "vault", "", "Folder ID (default: root)")
+	cmd.PersistentFlags().StringVar(&vaultID, "folder", "", "Folder ID (alias for --vault)")
+
+	cmd.AddCommand(
+		newUploadsListCmd(&project, &vaultID),
+		newUploadsCreateCmd(&project, &vaultID),
+		newFilesShowCmd(&project),
+	)
+
 	return cmd
 }
 
@@ -448,6 +465,7 @@ func newUploadsCmd(project, vaultID *string) *cobra.Command {
 
 	cmd.AddCommand(
 		newUploadsListCmd(project, vaultID),
+		newUploadsCreateCmd(project, vaultID),
 	)
 
 	return cmd
@@ -550,6 +568,151 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 				Action:      "show",
 				Cmd:         fmt.Sprintf("basecamp files show <id> --in %s", resolvedProjectID),
 				Description: "Show file details",
+			},
+		),
+	)
+}
+
+func newUploadsCreateCmd(project, vaultID *string) *cobra.Command {
+	var description string
+
+	cmd := &cobra.Command{
+		Use:   "create <file>",
+		Short: "Upload a file to Docs & Files",
+		Long: `Upload a file to a project's Docs & Files area.
+
+Two-step process: the file is first uploaded as an attachment, then created
+as an upload in the target folder (vault).`,
+		Example: `  basecamp uploads create ./report.pdf --in my-project
+  basecamp uploads create ./photo.png --folder 123 --description "Site photo"`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runUploadFile(cmd, *project, *vaultID, args[0], description)
+		},
+	}
+
+	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+
+	return cmd
+}
+
+// NewUploadCmd creates the top-level 'upload' shortcut command.
+func NewUploadCmd() *cobra.Command {
+	var project string
+	var vaultID string
+	var description string
+
+	cmd := &cobra.Command{
+		Use:   "upload <file>",
+		Short: "Upload a file to Docs & Files",
+		Long: `Upload a file to a project's Docs & Files area.
+
+Shortcut for 'basecamp uploads create'. The file is uploaded as an
+attachment and then created as an upload in the target folder.`,
+		Example: `  basecamp upload ./report.pdf --in my-project
+  basecamp upload ./photo.png --folder 123 --description "Site photo"`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runUploadFile(cmd, project, vaultID, args[0], description)
+		},
+	}
+
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.Flags().StringVar(&vaultID, "vault", "", "Folder ID (default: root)")
+	cmd.Flags().StringVar(&vaultID, "folder", "", "Folder ID (alias for --vault)")
+	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+
+	return cmd
+}
+
+func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description string) error {
+	app := appctx.FromContext(cmd.Context())
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	// Validate file
+	if err := richtext.ValidateFile(filePath); err != nil {
+		return fmt.Errorf("%s: %w", filePath, err)
+	}
+
+	// Resolve project, with interactive fallback
+	projectID := project
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	// Get vault ID
+	resolvedVaultID := vaultID
+	if resolvedVaultID == "" {
+		resolvedVaultID, err = getVaultID(cmd, app, resolvedProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	vaultIDNum, err := strconv.ParseInt(resolvedVaultID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid folder ID")
+	}
+
+	// Step 1: Upload attachment
+	contentType := richtext.DetectMIME(filePath)
+	filename := filepath.Base(filePath)
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("%s: %w", filePath, err)
+	}
+
+	resp, err := app.Account().Attachments().Create(cmd.Context(), filename, contentType, f)
+	f.Close()
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// Step 2: Create upload in vault
+	req := &basecamp.CreateUploadRequest{
+		AttachableSGID: resp.AttachableSGID,
+		BaseName:       strings.TrimSuffix(filename, filepath.Ext(filename)),
+	}
+	if description != "" {
+		req.Description = richtext.MarkdownToHTML(description)
+	}
+
+	upload, err := app.Account().Uploads().Create(cmd.Context(), vaultIDNum, req)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.OK(upload,
+		output.WithSummary(fmt.Sprintf("Uploaded %s (#%d)", filename, upload.ID)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp files show %d --in %s", upload.ID, resolvedProjectID),
+				Description: "View upload",
+			},
+			output.Breadcrumb{
+				Action:      "list",
+				Cmd:         fmt.Sprintf("basecamp files uploads --in %s", resolvedProjectID),
+				Description: "List uploads",
 			},
 		),
 	)
@@ -692,6 +855,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	var draft bool
 	var subscribe string
 	var noSubscribe bool
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [content]",
@@ -755,9 +919,27 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 			}
 
 			// Create document using SDK
+			// Convert Markdown content to HTML
+			html := richtext.MarkdownToHTML(content)
+
+			// Resolve inline images
+			html, imgErr := resolveLocalImages(cmd, app, html)
+			if imgErr != nil {
+				return imgErr
+			}
+
+			// Upload explicit --attach files and embed
+			if len(attachFiles) > 0 {
+				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+				if attachErr != nil {
+					return attachErr
+				}
+				html = richtext.EmbedAttachments(html, refs)
+			}
+
 			req := &basecamp.CreateDocumentRequest{
 				Title:         title,
-				Content:       content,
+				Content:       html,
 				Subscriptions: subs,
 			}
 			if draft {
@@ -792,6 +974,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (default: published)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
 }
@@ -1034,7 +1217,7 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
+					req := &basecamp.UpdateDocumentRequest{Title: title, Content: richtext.MarkdownToHTML(content)}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -1066,7 +1249,7 @@ You can pass either an item ID or a Basecamp URL:
 				// Try document first (most common update case)
 				_, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: content}
+					req := &basecamp.UpdateDocumentRequest{Title: title, Content: richtext.MarkdownToHTML(content)}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)

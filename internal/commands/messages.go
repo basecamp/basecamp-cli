@@ -215,6 +215,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	var draft bool
 	var subscribe string
 	var noSubscribe bool
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
@@ -294,9 +295,26 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(body)
+
+			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
+			html, err = resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Upload explicit --attach files and embed
+			if len(attachFiles) > 0 {
+				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+				if attachErr != nil {
+					return attachErr
+				}
+				html = richtext.EmbedAttachments(html, refs)
+			}
+
 			req := &basecamp.CreateMessageRequest{
 				Subject:       title,
-				Content:       richtext.MarkdownToHTML(body),
+				Content:       html,
 				Subscriptions: subs,
 			}
 
@@ -334,6 +352,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
 }
@@ -515,6 +534,7 @@ func NewMessageCmd() *cobra.Command {
 	var draft bool
 	var subscribe string
 	var noSubscribe bool
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "message <title> [body]",
@@ -597,9 +617,26 @@ use --message-board <id> to specify which one.`,
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(body)
+
+			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
+			html, err = resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Upload explicit --attach files and embed
+			if len(attachFiles) > 0 {
+				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+				if attachErr != nil {
+					return attachErr
+				}
+				html = richtext.EmbedAttachments(html, refs)
+			}
+
 			req := &basecamp.CreateMessageRequest{
 				Subject:       title,
-				Content:       richtext.MarkdownToHTML(body),
+				Content:       html,
 				Subscriptions: subs,
 			}
 			if draft {
@@ -638,6 +675,7 @@ use --message-board <id> to specify which one.`,
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
 }

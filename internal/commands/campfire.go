@@ -2,6 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewCampfireCmd creates the campfire command for real-time chat.
@@ -38,6 +41,7 @@ Use 'basecamp campfire post "message"' to post a message.`,
 		newCampfireListCmd(&project),
 		newCampfireMessagesCmd(&project, &campfireID),
 		newCampfirePostCmd(&project, &campfireID, &contentType),
+		newCampfireUploadCmd(&project, &campfireID),
 		newCampfireLineShowCmd(&project, &campfireID),
 		newCampfireLineDeleteCmd(&project, &campfireID),
 	)
@@ -362,6 +366,106 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 	return app.OK(line,
 		output.WithSummary(summary),
 		output.WithEntity("campfire_line"),
+		output.WithBreadcrumbs(breadcrumbs...),
+	)
+}
+
+func newCampfireUploadCmd(project, campfireID *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "upload <file>",
+		Short: "Upload a file to Campfire",
+		Long: `Upload a file directly to a Campfire chat room.
+
+The file is uploaded as a campfire line (chat message with an attachment).`,
+		Example: `  basecamp campfire upload ./screenshot.png --in my-project`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			return runCampfireUpload(cmd, app, *campfireID, *project, args[0])
+		},
+	}
+	return cmd
+}
+
+func runCampfireUpload(cmd *cobra.Command, app *appctx.App, campfireID, project, filePath string) error {
+	// Validate file
+	if err := richtext.ValidateFile(filePath); err != nil {
+		return fmt.Errorf("%s: %w", filePath, err)
+	}
+
+	// Resolve project only when needed (campfire ID not provided, or for breadcrumbs)
+	var resolvedProjectID string
+	if campfireID == "" {
+		projectID := project
+		if projectID == "" {
+			projectID = app.Flags.Project
+		}
+		if projectID == "" {
+			projectID = app.Config.ProjectID
+		}
+		if projectID == "" {
+			if err := ensureProject(cmd, app); err != nil {
+				return err
+			}
+			projectID = app.Config.ProjectID
+		}
+
+		var err error
+		resolvedProjectID, _, err = app.Names.ResolveProject(cmd.Context(), projectID)
+		if err != nil {
+			return err
+		}
+
+		campfireID, err = getCampfireID(cmd, app, resolvedProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid campfire ID")
+	}
+
+	contentType := richtext.DetectMIME(filePath)
+	filename := filepath.Base(filePath)
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("%s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	line, err := app.Account().Campfires().CreateUpload(cmd.Context(), campfireIDInt, filename, contentType, f)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// Build breadcrumbs
+	var breadcrumbs []output.Breadcrumb
+	if resolvedProjectID != "" {
+		breadcrumbs = append(breadcrumbs,
+			output.Breadcrumb{
+				Action:      "messages",
+				Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", campfireID, resolvedProjectID),
+				Description: "View messages",
+			},
+		)
+	} else {
+		breadcrumbs = append(breadcrumbs,
+			output.Breadcrumb{
+				Action:      "messages",
+				Cmd:         fmt.Sprintf("basecamp campfire %s messages", campfireID),
+				Description: "View messages",
+			},
+		)
+	}
+
+	return app.OK(line,
+		output.WithSummary(fmt.Sprintf("Uploaded %s (#%d)", filename, line.ID)),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }

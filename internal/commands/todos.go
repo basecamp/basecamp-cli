@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // todosListFlags holds the flags for the todos list command.
@@ -72,6 +73,8 @@ func NewTodoCmd() *cobra.Command {
 	var todolist string
 	var assignee string
 	var due string
+	var description string
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "todo <content>",
@@ -145,6 +148,29 @@ func NewTodoCmd() *cobra.Command {
 			req := &basecamp.CreateTodoRequest{
 				Content: content,
 			}
+
+			// Process description with Markdown + attachments
+			if description != "" || len(attachFiles) > 0 {
+				descHTML := richtext.MarkdownToHTML(description)
+
+				// Resolve inline images
+				descHTML, descErr := resolveLocalImages(cmd, app, descHTML)
+				if descErr != nil {
+					return descErr
+				}
+
+				// Upload explicit --attach files and embed
+				if len(attachFiles) > 0 {
+					refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+					if attachErr != nil {
+						return attachErr
+					}
+					descHTML = richtext.EmbedAttachments(descHTML, refs)
+				}
+
+				req.Description = descHTML
+			}
+
 			if due != "" {
 				// Parse natural language date
 				parsedDue := dateparse.Parse(due)
@@ -202,6 +228,8 @@ func NewTodoCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date")
+	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -576,6 +604,8 @@ func newTodosCreateCmd() *cobra.Command {
 	var todolist string
 	var assignee string
 	var due string
+	var description string
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "create <content>",
@@ -649,6 +679,29 @@ func newTodosCreateCmd() *cobra.Command {
 			req := &basecamp.CreateTodoRequest{
 				Content: content,
 			}
+
+			// Process description with Markdown + attachments
+			if description != "" || len(attachFiles) > 0 {
+				descHTML := richtext.MarkdownToHTML(description)
+
+				// Resolve inline images
+				descHTML, descErr := resolveLocalImages(cmd, app, descHTML)
+				if descErr != nil {
+					return descErr
+				}
+
+				// Upload explicit --attach files and embed
+				if len(attachFiles) > 0 {
+					refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+					if attachErr != nil {
+						return attachErr
+					}
+					descHTML = richtext.EmbedAttachments(descHTML, refs)
+				}
+
+				req.Description = descHTML
+			}
+
 			if due != "" {
 				// Parse natural language date
 				parsedDue := dateparse.Parse(due)
@@ -706,6 +759,8 @@ func newTodosCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee ID (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)

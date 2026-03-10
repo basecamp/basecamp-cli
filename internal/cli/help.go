@@ -44,7 +44,7 @@ var curatedCategories = []struct {
 	{
 		heading:  "SHORTCUTS",
 		category: "Shortcut Commands",
-		include:  map[string]bool{"todo": true, "done": true, "comment": true, "message": true, "card": true},
+		include:  map[string]bool{"todo": true, "done": true, "comment": true, "message": true, "card": true, "attach": true, "upload": true},
 	},
 	{
 		heading:  "SEARCH & BROWSE",

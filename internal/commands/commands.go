@@ -39,7 +39,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "todosets", Category: "core", Description: "View to-do set containers", Actions: []string{"show"}},
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position"}},
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "pin", "unpin", "trash", "archive", "restore"}},
-				{Name: "campfire", Category: "core", Description: "Chat in Campfire rooms", Actions: []string{"list", "messages", "post", "line", "delete"}},
+				{Name: "campfire", Category: "core", Description: "Chat in Campfire rooms", Actions: []string{"list", "messages", "post", "upload", "line", "delete"}},
 				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "columns", "steps", "trash", "archive", "restore"}},
 			},
 		},
@@ -55,6 +55,8 @@ func CommandCategories() []CommandCategory {
 				{Name: "assign", Category: "shortcut", Description: "Assign someone to an item"},
 				{Name: "unassign", Category: "shortcut", Description: "Remove assignment"},
 				{Name: "react", Category: "shortcut", Description: "React with an emoji"},
+				{Name: "attach", Category: "shortcut", Description: "Upload and stage an attachment"},
+				{Name: "upload", Category: "shortcut", Description: "Upload a file to Docs & Files"},
 			},
 		},
 		{

@@ -255,6 +255,7 @@ func NewCommentCmd() *cobra.Command {
 
 func newCommentsCreateCmd() *cobra.Command {
 	var edit bool
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "create <id|url> <content>",
@@ -314,8 +315,25 @@ Comma-separated IDs add the same comment to multiple items:
 
 			// Create comments on all recordings
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(content)
+
+			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
+			html, err := resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Upload explicit --attach files and embed
+			if len(attachFiles) > 0 {
+				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+				if attachErr != nil {
+					return attachErr
+				}
+				html = richtext.EmbedAttachments(html, refs)
+			}
+
 			req := &basecamp.CreateCommentRequest{
-				Content: richtext.MarkdownToHTML(content),
+				Content: html,
 			}
 
 			var commented []string
@@ -408,6 +426,7 @@ Comma-separated IDs add the same comment to multiple items:
 	}
 
 	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose content")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
 }

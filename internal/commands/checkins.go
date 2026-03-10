@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewCheckinsCmd creates the checkins command group.
@@ -727,6 +728,7 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 
 func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 	var groupOn string
+	var attachFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "create <question-id> <content>",
@@ -773,8 +775,25 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid question ID")
 			}
 
+			html := richtext.MarkdownToHTML(content)
+
+			// Resolve inline images
+			html, imgErr := resolveLocalImages(cmd, app, html)
+			if imgErr != nil {
+				return imgErr
+			}
+
+			// Upload explicit --attach files and embed
+			if len(attachFiles) > 0 {
+				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
+				if attachErr != nil {
+					return attachErr
+				}
+				html = richtext.EmbedAttachments(html, refs)
+			}
+
 			req := &basecamp.CreateAnswerRequest{
-				Content: fmt.Sprintf("<div>%s</div>", content),
+				Content: html,
 				GroupOn: groupOn,
 			}
 
@@ -807,6 +826,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22)")
+	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
 }
@@ -867,7 +887,7 @@ You can pass either an answer ID or a Basecamp URL:
 			}
 
 			req := &basecamp.UpdateAnswerRequest{
-				Content: fmt.Sprintf("<div>%s</div>", content),
+				Content: richtext.MarkdownToHTML(content),
 			}
 
 			err = app.Account().Checkins().UpdateAnswer(cmd.Context(), answerID, req)
