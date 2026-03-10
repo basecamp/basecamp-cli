@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "f9a8cafc9499550ed40055819c0267d259513b7c",
+  "prompts": {
+    "7f5420d52c88d3a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e3b8ee5b-9f30-403e-bddf-bfc9523b2242",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 203,
+      "total_deletions": 49,
+      "accepted_lines": 180,
+      "overriden_lines": 0
+    }
+  }
+}
