@@ -1,0 +1,23 @@
+internal/commands/profile.go
+  ea1721fdf2944aeb 234-237,255,257-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "64429a26671134a4a7798edff1866fa463f0fd45",
+  "prompts": {
+    "ea1721fdf2944aeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2abbb63-7fe7-4341-b9d5-d2066ea3c737",
+        "model": "unknown"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 2,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
