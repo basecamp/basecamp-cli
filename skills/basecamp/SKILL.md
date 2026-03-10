@@ -478,8 +478,8 @@ basecamp webhooks delete <id> --in <project>
 ### Subscriptions
 
 ```bash
-basecamp subscriptions <recording_id> --in <project>  # Who's subscribed
-basecamp subscriptions subscribe <id> --in <project>  # Subscribe yourself
+basecamp subscriptions <recording_id>                  # Who's subscribed
+basecamp subscriptions subscribe <id>                  # Subscribe yourself
 basecamp subscriptions unsubscribe <id>               # Unsubscribe
 basecamp subscriptions add <id> --people 1,2,3        # Add people
 basecamp subscriptions remove <id> --people 1,2,3     # Remove people
