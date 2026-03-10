@@ -1,0 +1,27 @@
+internal/commands/todos.go
+  7842b425071796f5 22,50,249,350,412,423-424,852,920,1005,1023,1034-1035
+internal/commands/todolists.go
+  7842b425071796f5 18,29-30,40,46,52,54,61,70,74,82,123-124,255,297-298,304,316,341
+internal/commands/todosets.go
+  7842b425071796f5 24-25,86-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "3d48d86d6c9ecb323a26909a22b53e89434c311d",
+  "prompts": {
+    "7842b425071796f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db94e381-c127-4d1f-8007-a12a3f152dc7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 339,
+      "overriden_lines": 0
+    }
+  }
+}
