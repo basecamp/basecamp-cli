@@ -268,7 +268,7 @@ You can pass either a card ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment <text> %s", cardIDStr),
+						Cmd:         fmt.Sprintf("basecamp comment %s <text>", cardIDStr),
 						Description: "Add comment",
 					},
 				),

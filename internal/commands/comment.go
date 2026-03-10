@@ -113,7 +113,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
-				Cmd:         fmt.Sprintf("basecamp comment <text> %s", recordingID),
+				Cmd:         fmt.Sprintf("basecamp comment %s <text>", recordingID),
 				Description: "Add comment",
 			},
 			output.Breadcrumb{
@@ -244,28 +244,36 @@ You can pass either a comment ID or a Basecamp URL:
 // NewCommentCmd creates the 'comment' shortcut (alias for 'comments create').
 func NewCommentCmd() *cobra.Command {
 	cmd := newCommentsCreateCmd()
-	cmd.Use = "comment [content]"
+	cmd.Use = "comment <id|url> <content>"
 	cmd.Short = "Add a comment (shortcut for 'comments create')"
 	return cmd
 }
 
 func newCommentsCreateCmd() *cobra.Command {
 	var edit bool
-	var recordingIDs []string
 
 	cmd := &cobra.Command{
-		Use:   "create [content]",
+		Use:   "create <id|url> <content>",
 		Short: "Add a comment",
-		Long: `Add a comment to one or more Basecamp items (todos, messages, cards, etc.)
+		Long: `Add a comment to a Basecamp item (todo, message, card, etc.)
 
-Supports batch commenting on multiple items at once.`,
+The first argument is the item ID or URL to comment on.
+Supports batch commenting with comma-separated IDs.`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			// Show help when invoked with no args
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+
+			// First arg is always the recording ID(s)
+			recordingArg := args[0]
+
 			var content string
-			if len(args) > 0 {
-				content = strings.Join(args, " ")
+			if len(args) > 1 {
+				content = strings.Join(args[1:], " ")
 			}
 
 			if edit && content != "" {
@@ -294,27 +302,12 @@ Supports batch commenting on multiple items at once.`,
 				return err
 			}
 
-			// If no recording specified, try interactive resolution
-			if len(recordingIDs) == 0 {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				target, err := app.Resolve().Comment(cmd.Context(), "", app.Config.ProjectID)
-				if err != nil {
-					return err
-				}
-				recordingIDs = []string{fmt.Sprintf("%d", target.RecordingID)}
-			}
-
 			// Expand comma-separated IDs and extract from URLs
 			var expandedIDs []string
-			for _, id := range recordingIDs {
-				parts := strings.SplitSeq(id, ",")
-				for p := range parts {
-					p = strings.TrimSpace(p)
-					if p != "" {
-						expandedIDs = append(expandedIDs, extractID(p))
-					}
+			for p := range strings.SplitSeq(recordingArg, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					expandedIDs = append(expandedIDs, extractID(p))
 				}
 			}
 
@@ -402,7 +395,6 @@ Supports batch commenting on multiple items at once.`,
 	}
 
 	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose content")
-	cmd.Flags().StringSliceVarP(&recordingIDs, "on", "r", nil, "ID(s) to comment on (required)")
 
 	return cmd
 }

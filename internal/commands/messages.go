@@ -194,7 +194,7 @@ You can pass either a message ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment <text> %s", messageIDStr),
+						Cmd:         fmt.Sprintf("basecamp comment %s <text>", messageIDStr),
 						Description: "Add comment",
 					},
 				),

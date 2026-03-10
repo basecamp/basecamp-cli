@@ -42,13 +42,12 @@ load test_helper
   assert_output_contains "--campfire requires a value"
 }
 
-@test "comment --on without value shows error" {
+@test "comment without recording ID shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp comment "test" --on
-  assert_failure
-  assert_output_contains "--on requires an ID"
+  run basecamp comment
+  assert_success
 }
 
 @test "cards --column without value shows error" {
@@ -117,13 +116,12 @@ load test_helper
   assert_output_contains "Create a new todo"
 }
 
-@test "comment without content shows error" {
+@test "comment without content shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp comment --on 123
-  assert_failure
-  assert_output_contains "Comment content required"
+  run basecamp comment 123
+  assert_success
 }
 
 @test "campfire post without message shows error" {

@@ -30,8 +30,8 @@ func runCmdWithFlagsAndArgs(newCmd func() *cobra.Command, flags map[string]strin
 func TestEditContentMutualExclusion(t *testing.T) {
 	t.Run("comment --edit with positional content", func(t *testing.T) {
 		err := runCmdWithFlagsAndArgs(NewCommentCmd,
-			map[string]string{"edit": "true", "on": "12345"},
-			[]string{"some text"},
+			map[string]string{"edit": "true"},
+			[]string{"12345", "some text"},
 		)
 		if err == nil {
 			t.Fatal("expected error for --edit + positional content, got nil")
@@ -79,7 +79,8 @@ func TestEditRejectsPipedStdin(t *testing.T) {
 		{
 			name:   "comment --edit piped stdin",
 			newCmd: NewCommentCmd,
-			flags:  map[string]string{"edit": "true", "on": "12345"},
+			flags:  map[string]string{"edit": "true"},
+			args:   []string{"12345"},
 		},
 		{
 			name:   "message --edit piped stdin",
@@ -124,7 +125,7 @@ func TestEditEmptyAborts(t *testing.T) {
 		devNull.Close()
 	})
 
-	err = runCmdWithFlags(NewCommentCmd, map[string]string{"edit": "true", "on": "12345"})
+	err = runCmdWithFlagsAndArgs(NewCommentCmd, map[string]string{"edit": "true"}, []string{"12345"})
 	if err == nil {
 		t.Fatal("expected error for empty editor content, got nil")
 	}
@@ -145,9 +146,8 @@ func TestEditWithoutContentAllowed(t *testing.T) {
 	cmd := NewCommentCmd()
 	cmd.SetContext(context.Background())
 	cmd.Flags().Set("edit", "true")
-	cmd.Flags().Set("on", "12345")
 
-	err := cmd.RunE(cmd, nil)
+	err := cmd.RunE(cmd, []string{"12345"})
 	if err == nil {
 		t.Skip("RunE succeeded unexpectedly (needs app context)")
 	}

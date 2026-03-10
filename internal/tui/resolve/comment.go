@@ -49,7 +49,7 @@ func (r *Resolver) Comment(ctx context.Context, onFlag string, projectID string)
 
 	// 2. Try interactive prompt if available
 	if !r.IsInteractive() {
-		return nil, output.ErrUsage("--on is required (recording ID to comment on)")
+		return nil, output.ErrUsage("recording ID is required")
 	}
 
 	// Fetch recent recordings from the project to show as options

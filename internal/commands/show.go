@@ -136,7 +136,7 @@ func NewShowCmd() *cobra.Command {
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "comment",
-					Cmd:         fmt.Sprintf("basecamp comment \"text\" %s", id),
+					Cmd:         fmt.Sprintf("basecamp comment %s <text>", id),
 					Description: "Add comment",
 				},
 			}

@@ -92,5 +92,5 @@ affordances:
     label: "Reopen"
     when: "{{.completed}}"
   - action: comment
-    cmd: "basecamp comment <text> {{.id}}"
+    cmd: "basecamp comment {{.id}} <text>"
     label: "Add comment"

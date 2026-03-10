@@ -140,10 +140,10 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | List cards | `basecamp cards --in <project> --json` |
 | Create card | `basecamp card --title "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> --in <project> --json` |
-| Post message | `basecamp message --subject "Title" --content "Body" --in <project> --json` |
-| Post silently | `basecamp message --subject "Title" --content "Body" --no-subscribe --in <project> --json` |
+| Post message | `basecamp message "Title" "Body" --in <project> --json` |
+| Post silently | `basecamp message "Title" "Body" --no-subscribe --in <project> --json` |
 | Post to campfire | `basecamp campfire post --content "Message" --in <project> --json` |
-| Add comment | `basecamp comment --content "Text" --on <recording_id> --in <project> --json` |
+| Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Download file | `basecamp files download <id> --in <project>` |
@@ -174,7 +174,7 @@ Returns: `account_id`, `project_id`, `type`, `recording_id`, `comment_id` (from 
 # Comments are flat - reply to the parent recording_id, not the comment_id
 basecamp url parse "https://...messages/123#__recording_456" --json
 # Returns recording_id: 123 (parent), comment_id: 456 (fragment) - comment on 123, not 456
-basecamp comment --content "Reply" --on 123 --in <project>
+basecamp comment 123 "Reply" --in <project>
 ```
 
 ## Decision Trees
@@ -211,7 +211,7 @@ Want to change something?
 # Get commit info and comment on todo (use printf %q for safe quoting)
 COMMIT=$(git rev-parse --short HEAD)
 MSG=$(git log -1 --format=%s)
-basecamp comment --content "Commit $COMMIT: $(printf '%s' "$MSG")" --on <todo_id> --in <project>
+basecamp comment <todo_id> "Commit $COMMIT: $(printf '%s' "$MSG")" --in <project>
 
 # Complete when done
 basecamp done <todo_id>
@@ -347,16 +347,16 @@ basecamp messages unpin <id>                      # Unpin
 **Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards)
 
 ```bash
-basecamp message --subject "Bot update" --content "Done" --no-subscribe --in <project>
-basecamp message --subject "FYI" --content "Note" --subscribe "Alice,bob@x.com" --in <project>
+basecamp message "Bot update" "Done" --no-subscribe --in <project>
+basecamp message "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
 ```
 
 ### Comments
 
 ```bash
-basecamp comments --on <recording_id> --in <project> --json
-basecamp comment --content "Text" --on <recording_id> --in <project>
-basecamp comments update <id> --content "Updated" --in <project>
+basecamp comments list --on <recording_id> --in <project> --json
+basecamp comment <recording_id> "Text" --in <project>
+basecamp comments update <id> "Updated" --in <project>
 ```
 
 ### Files & Documents

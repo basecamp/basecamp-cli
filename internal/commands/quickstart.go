@@ -114,7 +114,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	// Commands info
 	commandsInfo := CommandsInfo{
 		QuickStart: []string{"basecamp projects list", "basecamp todos list", "basecamp search \"query\""},
-		Common:     []string{"basecamp todo \"content\"", "basecamp done <id>", "basecamp comment \"text\" <id>"},
+		Common:     []string{"basecamp todo \"content\"", "basecamp done <id>", "basecamp comment <id> <text>"},
 	}
 
 	// Build response
