@@ -73,7 +73,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Content fields accept Markdown** — the body argument on messages and comments accepts Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+5. **Content fields accept Markdown** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
@@ -130,14 +130,14 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Task | Command |
 |------|---------|
 | List projects | `basecamp projects list --json` |
-| My todos (in project)      | `basecamp todos --assignee me --in <project> --json` |
-| My todos (cross-project)   | `basecamp reports assigned --json` (defaults to "me") |
-| All todos (cross-project)  | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
-| Overdue todos | `basecamp todos --overdue --in <project> --json` |
+| My todos (in project) | `basecamp todos list --assignee me --in <project> --json` |
+| My todos (cross-project) | `basecamp reports assigned --json` (defaults to "me") |
+| All todos (cross-project) | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
+| Overdue todos | `basecamp todos list --overdue --in <project> --json` |
 | Create todo | `basecamp todo "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
 | Complete todo | `basecamp done <id> --json` |
-| List cards | `basecamp cards --in <project> --json` |
+| List cards | `basecamp cards list --in <project> --json` |
 | Create card | `basecamp card "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> --in <project> --json` |
 | Post message | `basecamp message "Title" "Body" --in <project> --json` |
@@ -183,7 +183,8 @@ basecamp comment 123 "Reply" --in <project>
 
 ```
 Need to find something?
-├── Know the type + project? → basecamp <type> --in <project> --json
+├── Know the type + project? → basecamp <type> list --in <project> --json
+│   (some groups have default list behavior; use --agent --help if unsure)
 ├── My assigned work? → basecamp reports assigned --json (defaults to "me")
 ├── Browse by type cross-project? → basecamp recordings <type> --json
 │   (types: todos, messages, documents, comments, cards, uploads)
@@ -259,24 +260,24 @@ basecamp files download <upload_id> --in <project> --out ./downloads
 ### Projects
 
 ```bash
-basecamp projects list --json                     # List all
-basecamp projects show <id> --json                # Show details
-basecamp projects create "Name" --json              # Create
-basecamp projects update <id> --name "New"        # Update
+basecamp projects list --json               # List all
+basecamp projects show <id> --json          # Show details
+basecamp projects create "Name" --json      # Create
+basecamp projects update <id> --name "New"  # Update
 ```
 
 ### Todos
 
 ```bash
-basecamp todos --in <project> --json              # List in project
-basecamp todos --assignee me --in <project>       # My todos
-basecamp todos --overdue --in <project>           # Overdue only
-basecamp todos --status completed --in <project>  # Completed
-basecamp todos --list <todolist_id> --in <project> # In specific list
+basecamp todos list --in <project> --json               # List in project
+basecamp todos list --assignee me --in <project>        # My todos
+basecamp todos list --overdue --in <project>            # Overdue only
+basecamp todos list --status completed --in <project>   # Completed
+basecamp todos list --list <todolist_id> --in <project> # In specific list
 basecamp todo "Task" --in <project> --list <list> --assignee me --due tomorrow
-basecamp done <id> [id...]                        # Complete (multiple OK)
-basecamp reopen <id>                              # Uncomplete
-basecamp todos position <id> --to 1               # Move to top
+basecamp done <id> [id...]                              # Complete (multiple OK)
+basecamp reopen <id>                                    # Uncomplete
+basecamp todos position <id> --to 1                     # Move to top
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 ```
 
@@ -287,11 +288,11 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 Todolists are containers for todos. Create a todolist before adding todos.
 
 ```bash
-basecamp todolists --in <project> --json                          # List todolists
-basecamp todolists show <id> --in <project>                       # Show details
-basecamp todolists create "Name" --in <project> --json             # Create
+basecamp todolists list --in <project> --json              # List todolists
+basecamp todolists show <id> --in <project>                # Show details
+basecamp todolists create "Name" --in <project> --json     # Create
 basecamp todolists create "Name" --description "Desc" --in <project>
-basecamp todolists update <id> --name "New" --in <project>        # Update
+basecamp todolists update <id> --name "New" --in <project> # Update
 ```
 
 ### Cards (Kanban)
@@ -299,14 +300,14 @@ basecamp todolists update <id> --name "New" --in <project>        # Update
 **Note:** Cards do NOT support `--assignee` filtering like todos. Fetch all cards and filter client-side if needed. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
 
 ```bash
-basecamp cards --in <project> --json              # All cards
-basecamp cards --card-table <id> --in <project>   # Cards from specific table (required if multiple)
-basecamp cards --column <id> --in <project>       # Cards in column
-basecamp cards columns --in <project> --json      # List columns (needs --card-table if multiple)
-basecamp cards show <id> --in <project>           # Card details
+basecamp cards list --in <project> --json             # All cards
+basecamp cards list --card-table <id> --in <project>  # Specific table (required if multiple)
+basecamp cards list --column <id> --in <project>      # Cards in column
+basecamp cards columns --in <project> --json          # List columns (needs --card-table if multiple)
+basecamp cards show <id> --in <project>               # Card details
 basecamp card "Title" "<p>Body</p>" --in <project> --column <id>
 basecamp cards update <id> --title "New" --due tomorrow --assignee me
-basecamp cards move <id> --to <column_id>         # Move to column (numeric ID)
+basecamp cards move <id> --to <column_id>             # Move to column (numeric ID)
 basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
 ```
 
@@ -336,12 +337,12 @@ basecamp cards column watch <id>                  # Subscribe to column
 ### Messages
 
 ```bash
-basecamp messages --in <project> --json           # List messages
-basecamp messages show <id> --in <project>        # Show message
+basecamp messages list --in <project> --json  # List messages
+basecamp messages show <id> --in <project>    # Show message
 basecamp message "Title" "Body" --in <project>
 basecamp messages update <id> --title "New" --body "Updated"
-basecamp messages pin <id> --in <project>         # Pin to top
-basecamp messages unpin <id>                      # Unpin
+basecamp messages pin <id> --in <project>     # Pin to top
+basecamp messages unpin <id>                  # Unpin
 ```
 
 **Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards)
@@ -362,11 +363,11 @@ basecamp comments update <id> "Updated" --in <project>
 ### Files & Documents
 
 ```bash
-basecamp files --in <project> --json              # List all (folders, files, docs)
-basecamp files --vault <folder_id> --in <project> # List folder contents
-basecamp files show <id> --in <project>           # Show item (auto-detects type)
-basecamp files download <id> --in <project>       # Download file
-basecamp files download <id> --out ./dir          # Download to specific dir
+basecamp files list --in <project> --json               # List all (folders, files, docs)
+basecamp files list --vault <folder_id> --in <project>  # List folder contents
+basecamp files show <id> --in <project>                 # Show item (auto-detects type)
+basecamp files download <id> --in <project>             # Download file
+basecamp files download <id> --out ./dir                # Download to specific dir
 basecamp files folder create "Folder" --in <project>
 basecamp files doc create "Doc" "Body" --in <project>
 basecamp files doc create "Draft" --draft --in <project>
@@ -402,7 +403,7 @@ basecamp checkins answers <question_id> --in <project>  # List answers
 basecamp checkins answer <id> --in <project>      # Answer details
 basecamp checkins question create "What did you work on?" --in <project>
 basecamp checkins question update <id> "New question" --frequency every_week
-basecamp checkins answer create "My answer" --question <id> --in <project>
+basecamp checkins answer create <question-id> "My answer" --in <project>
 basecamp checkins answer update <id> "Updated" --in <project>
 ```
 
@@ -464,12 +465,12 @@ basecamp templates construction <template_id> <construction_id>  # Check status
 ### Webhooks
 
 ```bash
-basecamp webhooks --in <project> --json           # List webhooks
-basecamp webhooks show <id> --in <project>        # Webhook details
-basecamp webhooks create --url "https://..." --in <project>
-basecamp webhooks create --url "https://..." --types "Todo,Comment" --in <project>
+basecamp webhooks list --in <project> --json  # List webhooks
+basecamp webhooks show <id> --in <project>    # Webhook details
+basecamp webhooks create "https://..." --in <project>
+basecamp webhooks create "https://..." --types "Todo,Comment" --in <project>
 basecamp webhooks update <id> --active --in <project>
-basecamp webhooks update <id> --inactive          # Disable
+basecamp webhooks update <id> --inactive      # Disable
 basecamp webhooks delete <id> --in <project>
 ```
 
@@ -478,18 +479,18 @@ basecamp webhooks delete <id> --in <project>
 ### Subscriptions
 
 ```bash
-basecamp subscriptions <recording_id> --in <project>  # Who's subscribed
-basecamp subscriptions subscribe <id> --in <project>  # Subscribe yourself
-basecamp subscriptions unsubscribe <id>               # Unsubscribe
-basecamp subscriptions add <id> --people 1,2,3        # Add people
-basecamp subscriptions remove <id> --people 1,2,3     # Remove people
+basecamp subscriptions <recording_id>              # Who's subscribed
+basecamp subscriptions subscribe <id>              # Subscribe yourself
+basecamp subscriptions unsubscribe <id>            # Unsubscribe
+basecamp subscriptions add <id> --people 1,2,3     # Add people
+basecamp subscriptions remove <id> --people 1,2,3  # Remove people
 ```
 
 ### Lineup (Account-wide Markers)
 
 ```bash
 basecamp lineup create "Milestone" "2024-03-15"   # Create marker
-basecamp lineup create "Launch" tomorrow
+basecamp lineup create "Launch" tomorrow          # Natural date parsing
 basecamp lineup update <id> "New Name" "+7"
 basecamp lineup delete <id>
 ```
@@ -509,12 +510,12 @@ basecamp campfire delete <line_id> --in <project> # Delete line
 ### People
 
 ```bash
-basecamp people --json                            # All people in account
-basecamp people --in <project> --json             # People on project
-basecamp me --json                                # Current user
-basecamp people show <id> --json                  # Person details
-basecamp people add <id> --in <project>           # Add to project
-basecamp people remove <id> --in <project>        # Remove from project
+basecamp people list --json                          # All people in account
+basecamp people list --project <project> --json    # People on project
+basecamp me --json                                 # Current user
+basecamp people show <id> --json                   # Person details
+basecamp people add <id> --project <project>       # Add to project
+basecamp people remove <id> --project <project>    # Remove from project
 ```
 
 ### Search
@@ -614,9 +615,29 @@ basecamp auth status                              # Verify auth working
 cat ~/.config/basecamp/accounts.json              # Check available accounts
 ```
 
-**Invalid flag errors:** Shortcut commands use positional arguments:
-- `basecamp todo "text"` (not `basecamp todo --content "text"`)
-- `basecamp card "title"` (not `basecamp card --title "title"`)
+**Required arguments are positional (not flags):**
+- `basecamp todo "Buy milk"` (not `--content`)
+- `basecamp card "New feature"` (not `--title`)
+- `basecamp message "Subject" "Body"` (not `--subject`)
+- `basecamp campfire post "Hello"` (not `--content`)
+- `basecamp comment <id> "Text"` (not a flag)
+- `basecamp webhooks create "https://..." --in <project>` (not `--url`)
+- `basecamp checkins answer create <question-id> "content"` (not `--question`)
+
+**Missing argument errors (code: "usage"):**
+When a required positional argument is missing, the CLI returns a structured error naming
+the specific argument. Use this for elicitation:
+
+```bash
+$ basecamp todo --json
+{"ok": false, "error": "<content> required", "code": "usage",
+ "hint": "Usage: basecamp todo <content>"}
+
+$ basecamp comments create 123 --json
+{"ok": false, "error": "<content> required", "code": "usage", ...}
+```
+
+The `error` field names the missing `<arg>` — use it to prompt the user for the specific value.
 
 **URL malformed (curl exit 3):** Special characters in content. Use plain text or properly escaped HTML.
 
@@ -626,13 +647,13 @@ Common data extraction patterns for the output envelope:
 
 ```bash
 # Extract fields from data array
-basecamp todos --in <project> --json | jq '.data[] | select(.completed == false) | .title'
-basecamp todos --in <project> --json | jq '.data | length'
-basecamp todos --in <project> --json | jq '.data[] | {id, title, status}'
+basecamp todos list --in <project> --json | jq '.data[] | select(.completed == false) | .title'
+basecamp todos list --in <project> --json | jq '.data | length'
+basecamp todos list --in <project> --json | jq '.data[] | {id, title, status}'
 
 # Access envelope metadata
-basecamp todos --in <project> --json | jq '.breadcrumbs[0].cmd'
-basecamp todos --in <project> --json | jq '.meta.stats.requests'
+basecamp todos list --in <project> --json | jq '.breadcrumbs[0].cmd'
+basecamp todos list --in <project> --json | jq '.meta.stats.requests'
 ```
 
 ## Exit Codes

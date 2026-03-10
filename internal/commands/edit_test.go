@@ -10,11 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runCmdWithFlags creates a command, sets flags, and runs it with a background context.
-func runCmdWithFlags(newCmd func() *cobra.Command, flags map[string]string) error {
-	return runCmdWithFlagsAndArgs(newCmd, flags, nil)
-}
-
+// runCmdWithFlagsAndArgs creates a command, sets flags, sets args, and runs it.
 func runCmdWithFlagsAndArgs(newCmd func() *cobra.Command, flags map[string]string, args []string) error {
 	cmd := newCmd()
 	cmd.SetContext(context.Background())

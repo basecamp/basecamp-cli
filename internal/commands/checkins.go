@@ -42,70 +42,6 @@ on a schedule (e.g., "What did you work on today?").`,
 	return cmd
 }
 
-func runCheckinsShow(cmd *cobra.Command, project, questionnaireID string) error {
-	app := appctx.FromContext(cmd.Context())
-
-	if err := ensureAccount(cmd, app); err != nil {
-		return err
-	}
-
-	// Resolve project, with interactive fallback
-	projectID := project
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-	if err != nil {
-		return err
-	}
-
-	// Get questionnaire ID
-	resolvedQuestionnaireID := questionnaireID
-	if resolvedQuestionnaireID == "" {
-		resolvedQuestionnaireID, err = getQuestionnaireID(cmd, app, resolvedProjectID)
-		if err != nil {
-			return err
-		}
-	}
-
-	qID, err := strconv.ParseInt(resolvedQuestionnaireID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid questionnaire ID")
-	}
-
-	questionnaire, err := app.Account().Checkins().GetQuestionnaire(cmd.Context(), qID)
-	if err != nil {
-		return convertSDKError(err)
-	}
-
-	name := questionnaire.Name
-	if name == "" {
-		name = "Automatic Check-ins"
-	}
-	summary := fmt.Sprintf("%s (%d questions)", name, questionnaire.QuestionsCount)
-
-	return app.OK(questionnaire,
-		output.WithSummary(summary),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "questions",
-				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", resolvedProjectID),
-				Description: "View questions",
-			},
-		),
-	)
-}
-
 func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 	var limit int
 	var page int
@@ -210,13 +146,13 @@ func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
 
 func newCheckinsQuestionCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "question [id|url]",
+		Use:   "question <id|url>",
 		Short: "Show or manage a question",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no arguments
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<id|url>")
 			}
 			return runCheckinsQuestionShow(cmd, *project, args[0])
 		},
@@ -323,18 +259,18 @@ func newCheckinsQuestionCreateCmd(project *string) *cobra.Command {
 Frequency options: every_day, every_week, every_other_week, every_month, on_certain_days
 Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<title>")
+			}
+
+			title := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			title := args[0]
 
 			// Resolve project, with interactive fallback
 			projectID := *project
@@ -457,19 +393,19 @@ You can pass either a question ID or a Basecamp URL:
   basecamp checkins question update 789 "new question" --in my-project
   basecamp checkins question update 789 --frequency every_week --in my-project`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>")
+			}
+
+			// Extract ID and project from URL if provided
+			questionIDStr, urlProjectID := extractWithProject(args[0])
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			// Extract ID and project from URL if provided
-			questionIDStr, urlProjectID := extractWithProject(args[0])
 
 			title := ""
 			if len(args) > 1 {
@@ -541,9 +477,8 @@ You can pass either a question ID or a Basecamp URL:
 				req.Schedule = schedule
 			}
 
-			// Show help when invoked with no arguments
 			if req.Title == "" && req.Schedule == nil {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			question, err := app.Account().Checkins().UpdateQuestion(cmd.Context(), questionID, req)
@@ -678,13 +613,13 @@ You can pass either a question ID or a Basecamp URL:
 
 func newCheckinsAnswerCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "answer [id|url]",
+		Use:   "answer <id|url>",
 		Short: "Show or manage an answer",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no arguments
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<id|url>")
 			}
 			return runCheckinsAnswerShow(cmd, *project, args[0])
 		},
@@ -791,29 +726,26 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 }
 
 func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
-	var questionID string
 	var groupOn string
 
 	cmd := &cobra.Command{
-		Use:   "create <content>",
+		Use:   "create <question-id> <content>",
 		Short: "Create an answer to a question",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<question-id>")
+			}
+			if len(args) < 2 {
+				return missingArg(cmd, "<content>")
+			}
+
+			questionID := args[0]
+			content := strings.Join(args[1:], " ")
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			content := strings.Join(args, " ")
-
-			// Show help when no question specified
-			if questionID == "" {
-				return output.ErrUsage("--question is required")
 			}
 
 			// Resolve project, with interactive fallback
@@ -874,7 +806,6 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&questionID, "question", "", "Question ID to answer (required)")
 	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22)")
 
 	return cmd
@@ -889,21 +820,23 @@ func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 You can pass either an answer ID or a Basecamp URL:
   basecamp checkins answer update 789 "updated answer" --in my-project`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>")
 			}
-
-			// Show help when invoked with no arguments
 			if len(args) < 2 {
-				return cmd.Help()
+				return missingArg(cmd, "<content>")
 			}
 
 			// Extract ID and project from URL if provided
 			answerIDStr, urlProjectID := extractWithProject(args[0])
 
 			content := strings.Join(args[1:], " ")
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project

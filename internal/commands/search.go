@@ -40,7 +40,7 @@ Use 'basecamp search metadata' to see available search scopes.`,
 
 			// Show help when invoked with no query
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<query>")
 			}
 
 			query := args[0]

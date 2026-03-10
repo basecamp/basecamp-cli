@@ -1,0 +1,4 @@
+FLAG basecamp checkin answer create --question type=string
+FLAG basecamp checkins answer create --question type=string
+FLAG basecamp webhook create --url type=string
+FLAG basecamp webhooks create --url type=string

@@ -226,6 +226,13 @@ func newProjectsCreateCmd() *cobra.Command {
 		Short: "Create a new project",
 		Long:  "Create a new Basecamp project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<name>")
+			}
+
+			name := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -235,13 +242,6 @@ func newProjectsCreateCmd() *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			name := args[0]
 
 			req := &basecamp.CreateProjectRequest{
 				Name:        name,
@@ -280,7 +280,7 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if name == "" && description == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			app := appctx.FromContext(cmd.Context())

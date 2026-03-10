@@ -358,18 +358,18 @@ func newFoldersCreateCmd(project, vaultID *string) *cobra.Command {
 		Use:   "create <name>",
 		Short: "Create a new folder",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<name>")
+			}
+
+			name := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			name := args[0]
 
 			// Resolve project, with interactive fallback
 			projectID := *project
@@ -700,18 +700,18 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 		Use:   "create <title> [content]",
 		Short: "Create a new document",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<title>")
+			}
+
+			title := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			title := args[0]
 			content := ""
 			if len(args) > 1 {
 				content = args[1]
@@ -982,7 +982,7 @@ You can pass either an item ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" && content == "" && itemType == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			app := appctx.FromContext(cmd.Context())

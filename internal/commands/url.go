@@ -32,16 +32,18 @@ func NewURLCmd() *cobra.Command {
 Extracts components like account ID, project ID, type, and recording ID
 from Basecamp URLs.`,
 		Annotations: map[string]string{"agent_notes": "Always parse URLs before acting on them: basecamp url parse \"<url>\" --json\nReturns: account_id, bucket_id, type, recording_id, comment_id (from fragment)\nReplying to comments: comments are flat — reply to the parent recording_id, not the comment_id from the URL fragment"},
-		Args:        cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<url>")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			// Handle "basecamp url parse <url>" or "basecamp url <url>"
 			var url string
 			if args[0] == "parse" {
 				if len(args) < 2 {
-					// Show help when invoked with no URL
-					return cmd.Help()
+					return missingArg(cmd, "<url>")
 				}
 				url = args[1]
 			} else {

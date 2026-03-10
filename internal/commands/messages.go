@@ -217,7 +217,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<title>")
 			}
 			title := args[0]
 
@@ -347,7 +347,7 @@ You can pass either a message ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" && body == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -519,7 +519,7 @@ func NewMessageCmd() *cobra.Command {
 
 			// Show help when invoked with no title
 			if len(args) == 0 {
-				return cmd.Help()
+				return missingArg(cmd, "<title>")
 			}
 			subject := args[0]
 

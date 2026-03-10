@@ -200,7 +200,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				if err := ensureProject(cmd, app); err != nil {
 					return err
 				}
-				projectID = app.Config.ProjectID
 			}
 
 			// Parse todolist ID as int64
@@ -244,6 +243,13 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 		Short: "Create a new todolist",
 		Long:  "Create a new todolist in a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<name>")
+			}
+
+			name := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -252,13 +258,6 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			name := args[0]
 
 			// Resolve project, with interactive fallback
 			projectID := *project
@@ -346,7 +345,7 @@ You can pass either a todolist ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if name == "" && description == "" {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -376,7 +375,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				if err := ensureProject(cmd, app); err != nil {
 					return err
 				}
-				projectID = app.Config.ProjectID
 			}
 
 			// Parse todolist ID as int64

@@ -90,7 +90,7 @@ func runTodolistgroupsList(cmd *cobra.Command, project, todolist string) error {
 	}
 	// Show help when invoked with no arguments
 	if todolist == "" {
-		return cmd.Help()
+		return output.ErrUsage("--list is required")
 	}
 
 	resolvedTodolistID, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, resolvedProjectID)
@@ -198,6 +198,13 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 		Short: "Create a todolist group",
 		Long:  "Create a new group in a todolist.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<name>")
+			}
+
+			name := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -206,13 +213,6 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			name := args[0]
 
 			// Resolve project, with interactive fallback
 			projectID := *project
@@ -291,6 +291,19 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 		Aliases: []string{"rename"},
 		Short:   "Update a todolist group",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with no arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<id>")
+			}
+
+			// Show help when no name provided
+			if len(args) < 2 {
+				return missingArg(cmd, "<name>")
+			}
+
+			groupIDStr := args[0]
+			name := args[1]
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -299,20 +312,6 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return cmd.Help()
-			}
-
-			groupIDStr := args[0]
-
-			// Show help when no name provided
-			if len(args) < 2 {
-				return cmd.Help()
-			}
-
-			name := args[1]
 
 			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
 			if err != nil {

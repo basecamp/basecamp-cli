@@ -51,7 +51,8 @@ load test_helper
 
   run basecamp campfire post
   assert_failure
-  assert_output_contains "Message content required"
+  assert_json_value '.error' '<message> required'
+  assert_json_value '.code' 'usage'
 }
 
 
@@ -129,14 +130,13 @@ load test_helper
 
 # Unknown action - Cobra treats unknown args as command arguments, not subcommands
 
-@test "campfire unknown action shows error" {
+@test "campfire unknown action shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp campfire foobar
-  # Cobra doesn't have a distinct "unknown subcommand" error for this pattern
-  # It falls through to the default behavior which requires a project
-  assert_failure
+  # Parent command with no RunE — cobra shows help for unknown subcommands
+  assert_success
 }
 
 

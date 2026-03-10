@@ -6,31 +6,32 @@ load test_helper
 
 # Card create tests
 
-@test "card --help shows help with --content option" {
+@test "card --help shows help with positional args" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp card --help
   assert_success
   assert_output_contains "basecamp card"
-  assert_output_contains "--content"
-  assert_output_contains "--title"
+  assert_output_contains "<title>"
 }
 
-@test "card --content without value shows error" {
+@test "card --content is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp card --title "Test" --content
+  # Content is now a positional arg, not a flag
+  run basecamp card "Test" --content
   assert_failure
-  assert_output_contains "--content requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "card with unknown option shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp card --title "Test" --foo
+  # Title is now positional, not --title
+  run basecamp card "Test" --foo
   assert_failure
   assert_output_contains "Unknown option: --foo"
 }
@@ -39,9 +40,10 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp card --content "Body only"
+  run basecamp card
   assert_failure
-  assert_output_contains "title required"
+  assert_json_value '.error' '<title> required'
+  assert_json_value '.code' 'usage'
 }
 
 
@@ -74,7 +76,8 @@ load test_helper
 
   run basecamp cards column create
   assert_failure
-  assert_output_contains "title required"
+  assert_json_value '.error' '<title> required'
+  assert_json_value '.code' 'usage'
 }
 
 
@@ -179,7 +182,8 @@ load test_helper
 
   run basecamp cards column color 456
   assert_failure
-  assert_output_contains "--color is required"
+  assert_json_value '.error' '--color required'
+  assert_json_value '.code' 'usage'
 }
 
 
@@ -234,7 +238,7 @@ load test_helper
 
   run basecamp cards steps
   assert_failure
-  assert_output_contains "ID required"
+  assert_output_contains "required"
 }
 
 @test "cards steps without project shows error" {
@@ -255,7 +259,8 @@ load test_helper
 
   run basecamp cards step create --card 456
   assert_failure
-  assert_output_contains "title required"
+  assert_json_value '.error' '<title> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "cards step create without card shows error" {
@@ -277,7 +282,8 @@ load test_helper
 
   run basecamp cards step update
   assert_failure
-  assert_output_contains "ID required"
+  assert_json_value '.error' '<step_id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "cards step update without fields shows error" {
@@ -328,7 +334,8 @@ load test_helper
 
   run basecamp cards step move 456 --position 1
   assert_failure
-  assert_output_contains "--card is required"
+  assert_json_value '.error' '--card required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "cards step move without position shows error" {

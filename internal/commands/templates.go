@@ -173,17 +173,11 @@ func newTemplatesCreateCmd() *cobra.Command {
 	var description string
 
 	cmd := &cobra.Command{
-		Use:   "create [name]",
+		Use:   "create <name>",
 		Short: "Create a new template",
 		Long:  "Create a new project template.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Name from positional arg or flag
 			if len(args) > 0 && name == "" {
 				name = args[0]
@@ -191,7 +185,13 @@ func newTemplatesCreateCmd() *cobra.Command {
 
 			// Show help when invoked with no arguments
 			if name == "" {
-				return cmd.Help()
+				return missingArg(cmd, "<name>")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			req := &basecamp.CreateTemplateRequest{
@@ -251,7 +251,7 @@ func newTemplatesUpdateCmd() *cobra.Command {
 			}
 
 			if name == "" && description == "" {
-				return output.ErrUsage("Use --name or --description to update")
+				return noChanges(cmd)
 			}
 
 			// SDK requires name for update, fetch current if not provided

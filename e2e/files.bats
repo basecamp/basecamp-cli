@@ -45,40 +45,41 @@ load test_helper
 
 # Missing context errors
 
-@test "files without project shows error" {
+@test "files without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # Group command without project shows help
   run basecamp files
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "Docs & Files"
 }
 
-@test "vaults without project shows error" {
+@test "vaults without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp vaults
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "Docs & Files"
 }
 
-@test "uploads without project shows error" {
+@test "uploads without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp uploads
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "Docs & Files"
 }
 
-@test "docs without project shows error" {
+@test "docs without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp docs
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "Docs & Files"
 }
 
 
@@ -173,9 +174,10 @@ load test_helper
 
 @test "files error returns proper JSON envelope" {
   create_credentials
-  create_global_config '{"account_id": 99999}'
+  create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp files
+  # Use a subcommand that actually returns a JSON error
+  run basecamp files show
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'

@@ -215,15 +215,18 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 		Short:   "Rename a dock tool",
 		Long:    "Update a dock tool's title.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Show help when invoked with insufficient arguments
+			if len(args) == 0 {
+				return missingArg(cmd, "<id>")
+			}
+			if len(args) < 2 {
+				return missingArg(cmd, "<title>")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Show help when invoked with insufficient arguments
-			if len(args) < 2 {
-				return cmd.Help()
 			}
 
 			toolID, err := strconv.ParseInt(args[0], 10, 64)

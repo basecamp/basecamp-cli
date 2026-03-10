@@ -247,7 +247,7 @@ func newCampfirePostCmd(project, campfireID, contentType *string) *cobra.Command
 	var content string
 
 	cmd := &cobra.Command{
-		Use:   "post [message]",
+		Use:   "post <message>",
 		Short: "Post a message",
 		Long: `Post a message to a Campfire.
 
@@ -265,7 +265,7 @@ for rich text (HTML) messages.`,
 
 			// Show help when invoked with no message content
 			if messageContent == "" {
-				return cmd.Help()
+				return missingArg(cmd, "<message>")
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {

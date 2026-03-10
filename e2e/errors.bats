@@ -15,22 +15,24 @@ load test_helper
   assert_output_contains "--project requires a value"
 }
 
-@test "todos --list without value shows error" {
+@test "todos --list is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # --list was removed; todolist is set via config or interactive selection
   run basecamp todos --list
   assert_failure
-  assert_output_contains "--list requires a value"
+  assert_output_contains "Unknown option"
 }
 
-@test "todos --assignee without value shows error" {
+@test "todos --assignee is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # --assignee was removed; use basecamp reports assigned instead
   run basecamp todos --assignee
   assert_failure
-  assert_output_contains "--assignee requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "campfire --campfire without value shows error" {
@@ -42,21 +44,24 @@ load test_helper
   assert_output_contains "--campfire requires a value"
 }
 
-@test "comment without recording ID shows help" {
+@test "comment without recording ID shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp comment
-  assert_success
+  assert_failure
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
-@test "cards --column without value shows error" {
+@test "cards --column is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # --column was removed; use 'basecamp cards column' subcommand instead
   run basecamp cards --column
   assert_failure
-  assert_output_contains "--column requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "recordings --type without value shows error" {
@@ -107,21 +112,24 @@ load test_helper
 
 # Missing content errors
 
-@test "todo create without content shows help" {
+@test "todo create without content shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
   run basecamp todos create
-  assert_success
-  assert_output_contains "Create a new todo"
+  assert_failure
+  assert_json_value '.error' '<content> required'
+  assert_json_value '.code' 'usage'
 }
 
-@test "comment without content shows help" {
+@test "comment without content shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp comment 123
-  assert_success
+  assert_failure
+  assert_json_value '.error' '<content> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "campfire post without message shows error" {
@@ -130,28 +138,31 @@ load test_helper
 
   run basecamp campfire post
   assert_failure
-  assert_output_contains "Message content required"
+  assert_json_value '.error' '<message> required'
+  assert_json_value '.code' 'usage'
 }
 
 
 # Missing context errors
 
-@test "todos without project shows error" {
+@test "todos without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # Group command without project shows help with subcommand list
   run basecamp todos
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
-@test "cards without project shows error" {
+@test "cards without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # Group command without project shows help with subcommand list
   run basecamp cards
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "recordings without type shows error" {
@@ -160,7 +171,7 @@ load test_helper
 
   run basecamp recordings
   assert_failure
-  assert_output_contains "Type required"
+  assert_output_contains "type required"
 }
 
 
@@ -233,7 +244,8 @@ load test_helper
 
   run basecamp search
   assert_failure
-  assert_output_contains "Search query required"
+  assert_json_value '.error' '<query> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "reopen without id shows error" {
@@ -242,7 +254,8 @@ load test_helper
 
   run basecamp reopen
   assert_failure
-  assert_output_contains "Todo ID(s) required"
+  assert_json_value '.error' '<id|url>... required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "todos position without id shows error" {
@@ -251,26 +264,27 @@ load test_helper
 
   run basecamp todos position --to 1
   assert_failure
-  # Go returns generic "ID required", Bash returned "Todo ID required"
-  assert_output_contains "ID required"
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
-@test "todos position without position shows error" {
+@test "todos position without --to shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
   run basecamp todos position 123
   assert_failure
-  assert_output_contains "Position required"
+  assert_output_contains "required"
 }
 
-@test "comments list without recording shows error" {
+@test "comments without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
+  # Group command (no RunE) shows subcommand help
   run basecamp comments
-  assert_failure
-  assert_output_contains "ID required"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "comments show without id shows error" {
@@ -279,19 +293,18 @@ load test_helper
 
   run basecamp comments show
   assert_failure
-  # Go returns generic "ID required", Bash returned "ID required"
-  assert_output_contains "ID required"
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "comments update without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  # Note: Go interprets "new content" as the ID positional arg, then fails on missing --content
-  # This is a slight behavior difference from Bash but the error handling is correct
   run basecamp comments update
   assert_failure
-  assert_output_contains "ID required"
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "comments update without content shows error" {
@@ -300,16 +313,18 @@ load test_helper
 
   run basecamp comments update 123
   assert_failure
-  assert_output_contains "Content required"
+  assert_json_value '.error' '<content> required'
+  assert_json_value '.code' 'usage'
 }
 
-@test "messages without project shows error" {
+@test "messages without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # Group command (no RunE) shows subcommand help
   run basecamp messages
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "message without subject shows error" {
@@ -318,7 +333,8 @@ load test_helper
 
   run basecamp message
   assert_failure
-  assert_output_contains "Message subject required"
+  assert_json_value '.error' '<title> required'
+  assert_json_value '.code' 'usage'
 }
 
 # Search JSON cleanliness

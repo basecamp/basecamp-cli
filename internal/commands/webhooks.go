@@ -101,7 +101,7 @@ func runWebhooksList(cmd *cobra.Command, project *string) error {
 			},
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         "basecamp webhooks create --url <url>",
+				Cmd:         "basecamp webhooks create <url>",
 				Description: "Create webhook",
 			},
 		),
@@ -158,17 +158,21 @@ func newWebhooksShowCmd() *cobra.Command {
 }
 
 func newWebhooksCreateCmd(project *string) *cobra.Command {
-	var url string
 	var types string
 
 	cmd := &cobra.Command{
-		Use:   "create",
+		Use:   "create <url> [flags]",
 		Short: "Create a new webhook",
 		Long: `Create a new webhook for notifications.
 
 Event types: Todo, Todolist, Message, Comment, Document, Upload,
 Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<url>")
+			}
+			url := args[0]
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -198,11 +202,6 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
-			}
-
-			// Show help when invoked with no url
-			if url == "" {
-				return cmd.Help()
 			}
 
 			// Build type array from comma-separated string if specified
@@ -247,7 +246,6 @@ Vault, Schedule::Entry, Kanban::Card, Question, Question::Answer`,
 		},
 	}
 
-	cmd.Flags().StringVar(&url, "url", "", "Webhook payload URL (must be HTTPS)")
 	cmd.Flags().StringVar(&types, "types", "", "Comma-separated event types (default: all)")
 
 	return cmd
@@ -310,7 +308,7 @@ func newWebhooksUpdateCmd() *cobra.Command {
 
 			// Show help when invoked with no flags
 			if !hasChanges {
-				return cmd.Help()
+				return noChanges(cmd)
 			}
 
 			webhook, err := app.Account().Webhooks().Update(cmd.Context(), webhookID, req)
