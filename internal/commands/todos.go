@@ -751,7 +751,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 	// Extract IDs from URLs (handles both plain IDs and URLs)
 	extractedIDs := extractIDs(todoIDs)
 
-	var completed []string
+	var completedTodos []basecamp.Todo
 	var failed []string
 
 	for _, todoIDStr := range extractedIDs {
@@ -763,30 +763,44 @@ func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 		err = app.Account().Todos().Complete(cmd.Context(), todoID)
 		if err != nil {
 			failed = append(failed, todoIDStr)
+			continue
+		}
+		// Fetch the completed todo to show it
+		todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+		if err != nil {
+			// Completed but couldn't fetch — still count it
+			completedTodos = append(completedTodos, basecamp.Todo{ID: todoID})
 		} else {
-			completed = append(completed, todoIDStr)
+			completedTodos = append(completedTodos, *todo)
 		}
 	}
 
-	result := map[string]any{
-		"completed": completed,
-		"failed":    failed,
-	}
-
-	summary := fmt.Sprintf("Completed %d todo(s)", len(completed))
+	summary := fmt.Sprintf("Completed %d todo(s)", len(completedTodos))
 	if len(failed) > 0 {
-		summary = fmt.Sprintf("Completed %d, failed %d", len(completed), len(failed))
+		summary = fmt.Sprintf("Completed %d, failed %d", len(completedTodos), len(failed))
 	}
 
-	return app.OK(result,
+	breadcrumbs := []output.Breadcrumb{
+		{
+			Action:      "reopen",
+			Cmd:         fmt.Sprintf("basecamp reopen %s", extractedIDs[0]),
+			Description: "Reopen todo",
+		},
+	}
+
+	// Return single todo directly (like basecamp todo does), list for multiple
+	if len(completedTodos) == 1 {
+		return app.OK(completedTodos[0],
+			output.WithEntity("todo"),
+			output.WithSummary(summary),
+			output.WithBreadcrumbs(breadcrumbs...),
+		)
+	}
+
+	return app.OK(completedTodos,
+		output.WithEntity("todo"),
 		output.WithSummary(summary),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "reopen",
-				Cmd:         fmt.Sprintf("basecamp reopen %s", todoIDs[0]),
-				Description: "Reopen a todo",
-			},
-		),
+		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }
 
@@ -1104,7 +1118,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 	// Extract IDs from URLs (handles both plain IDs and URLs)
 	extractedIDs := extractIDs(todoIDs)
 
-	var reopened []string
+	var reopenedTodos []basecamp.Todo
 	var failed []string
 
 	for _, todoIDStr := range extractedIDs {
@@ -1116,30 +1130,42 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 		err = app.Account().Todos().Uncomplete(cmd.Context(), todoID)
 		if err != nil {
 			failed = append(failed, todoIDStr)
+			continue
+		}
+		// Fetch the reopened todo to show it
+		todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+		if err != nil {
+			reopenedTodos = append(reopenedTodos, basecamp.Todo{ID: todoID})
 		} else {
-			reopened = append(reopened, todoIDStr)
+			reopenedTodos = append(reopenedTodos, *todo)
 		}
 	}
 
-	result := map[string]any{
-		"reopened": reopened,
-		"failed":   failed,
-	}
-
-	summary := fmt.Sprintf("Reopened %d todo(s)", len(reopened))
+	summary := fmt.Sprintf("Reopened %d todo(s)", len(reopenedTodos))
 	if len(failed) > 0 {
-		summary = fmt.Sprintf("Reopened %d, failed %d", len(reopened), len(failed))
+		summary = fmt.Sprintf("Reopened %d, failed %d", len(reopenedTodos), len(failed))
 	}
 
-	return app.OK(result,
+	breadcrumbs := []output.Breadcrumb{
+		{
+			Action:      "complete",
+			Cmd:         fmt.Sprintf("basecamp done %s", extractedIDs[0]),
+			Description: "Complete todo",
+		},
+	}
+
+	if len(reopenedTodos) == 1 {
+		return app.OK(reopenedTodos[0],
+			output.WithEntity("todo"),
+			output.WithSummary(summary),
+			output.WithBreadcrumbs(breadcrumbs...),
+		)
+	}
+
+	return app.OK(reopenedTodos,
+		output.WithEntity("todo"),
 		output.WithSummary(summary),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "complete",
-				Cmd:         fmt.Sprintf("basecamp done %s", todoIDs[0]),
-				Description: "Complete again",
-			},
-		),
+		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }
 
