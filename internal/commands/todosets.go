@@ -21,7 +21,8 @@ func NewTodosetsCmd() *cobra.Command {
 		Long: `View todoset container for a project.
 
 A todoset is the container that holds all todolists in a project.
-Each project has exactly one todoset in its dock.`,
+Most projects have one todoset, but some may have multiple. Use --todoset
+to select a specific one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTodosetShow(cmd, project, todosetID)
 		},
@@ -82,13 +83,10 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		return err
 	}
 
-	// Get todoset ID - use provided ID or fetch from project dock
-	resolvedTodosetID := todosetID
-	if resolvedTodosetID == "" {
-		resolvedTodosetID, err = getTodosetID(cmd, app, resolvedProjectID)
-		if err != nil {
-			return err
-		}
+	// Get todoset ID - use provided ID or resolve from project dock
+	resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todosetID)
+	if err != nil {
+		return err
 	}
 
 	// Parse todoset ID as int64

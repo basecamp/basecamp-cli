@@ -19,6 +19,7 @@ import (
 type todosListFlags struct {
 	project  string
 	todolist string
+	todoset  string
 	assignee string
 	status   string
 	overdue  bool
@@ -46,6 +47,7 @@ func NewTodosCmd() *cobra.Command {
 	// Note: can't use -a for assignee since it conflicts with global -a for account
 	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID or name")
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
+	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
@@ -244,6 +246,7 @@ func newTodosListCmd() *cobra.Command {
 	// Note: can't use -a for assignee since it conflicts with global -a for account
 	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID or name")
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
+	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
@@ -344,7 +347,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	}
 
 	// Otherwise, get all todos from project's todoset
-	return listAllTodos(cmd, app, project, flags.assignee, flags.status, flags.overdue, flags.limit, flags.all)
+	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, flags.status, flags.overdue, flags.limit, flags.all)
 }
 
 func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit, page int, all bool) error {
@@ -406,7 +409,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	return app.OK(todos, respOpts...)
 }
 
-func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status string, overdue bool, limit int, all bool) error {
+func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, status string, overdue bool, limit int, all bool) error {
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
 	if assignee != "" {
@@ -417,8 +420,8 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, assignee, status
 		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
-	// Get todoset ID from project dock
-	todosetIDStr, err := getTodosetID(cmd, app, project)
+	// Get todoset ID from project dock (with interactive fallback for multi-todoset projects)
+	todosetIDStr, err := ensureTodoset(cmd, app, project, todosetFlag)
 	if err != nil {
 		return err
 	}
@@ -846,6 +849,7 @@ type SweepResult struct {
 
 func newTodosSweepCmd() *cobra.Command {
 	var project string
+	var todoset string
 	var assignee string
 	var comment string
 	var overdueOnly bool
@@ -913,7 +917,7 @@ Examples:
 			project = resolvedProject
 
 			// Get matching todos using existing listAllTodos logic
-			matchingTodos, err := getTodosForSweep(cmd, app, project, assignee, overdueOnly)
+			matchingTodos, err := getTodosForSweep(cmd, app, project, todoset, assignee, overdueOnly)
 			if err != nil {
 				return err
 			}
@@ -998,6 +1002,7 @@ Examples:
 
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.Flags().StringVarP(&todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().BoolVar(&overdueOnly, "overdue", false, "Filter overdue todos")
 	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Comment to add to matching todos")
@@ -1015,7 +1020,7 @@ Examples:
 }
 
 // getTodosForSweep gets todos matching the sweep filters.
-func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee string, overdue bool) ([]basecamp.Todo, error) {
+func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee string, overdue bool) ([]basecamp.Todo, error) {
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
 	if assignee != "" {
@@ -1026,8 +1031,8 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, assignee str
 		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
-	// Get todoset ID from project dock
-	todosetIDStr, err := getTodosetID(cmd, app, project)
+	// Get todoset ID from project dock (with interactive fallback for multi-todoset projects)
+	todosetIDStr, err := ensureTodoset(cmd, app, project, todosetFlag)
 	if err != nil {
 		return nil, err
 	}
