@@ -1,0 +1,23 @@
+internal/commands/doc_contract_test.go
+  61e7956c3c88ba49 111,189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "1e0c98e10dd1dd3b3930fc884479eb9021578799",
+  "prompts": {
+    "61e7956c3c88ba49": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a2aac46-b954-498b-a927-fc16918b07e2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
