@@ -56,7 +56,7 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      0, // disabled: success handler blocks until resolve() signals exchange outcome
 		IdleTimeout:       30 * time.Second,
 	}
 
