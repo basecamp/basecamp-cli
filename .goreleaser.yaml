@@ -123,6 +123,7 @@ release:
     name: basecamp-cli
   draft: false
   prerelease: auto
+  replace_existing_artifacts: true
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
     {{ if .Env.RELEASE_CHANGELOG }}{{ .Env.RELEASE_CHANGELOG }}
