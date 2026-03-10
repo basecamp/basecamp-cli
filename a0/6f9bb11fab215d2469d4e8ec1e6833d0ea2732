@@ -1,0 +1,21 @@
+internal/commands/campfire.go
+  4cd0fb4759d95f05 5-6,14,44,371-470
+internal/cli/help.go
+  4cd0fb4759d95f05 47
+e2e/files.bats
+  4cd0fb4759d95f05 199,205
+internal/cli/root.go
+  4cd0fb4759d95f05 264-265
+internal/commands/commands.go
+  4cd0fb4759d95f05 42,58-59,66
+internal/commands/files.go
+  4cd0fb4759d95f05 16,70,72-91,465,573-610,613,616-644,647,651-659,661-662,664-667,669,671,675,678,680-681,686,691,695,700,715-717,855,919-936,939,974,1217,1249
+internal/commands/commands_test.go
+  4cd0fb4759d95f05 114-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "a06f9bb11fab215d2469d4e8ec1e6833d0ea2732",
+  "prompts": {}
+}
