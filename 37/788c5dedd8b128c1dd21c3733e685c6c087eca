@@ -1,0 +1,122 @@
+internal/commands/campfire.go
+  3c6f3e7b533552d6 250,268
+internal/commands/todos.go
+  3c6f3e7b533552d6 83,516,580,721,743,832,1118,1205
+internal/commands/templates.go
+  3c6f3e7b533552d6 158,170-176,188-194,236,254
+internal/commands/webhooks.go
+  3c6f3e7b533552d6 104,163-164,170-172,174-176,178-179,309,311
+internal/commands/projects.go
+  3c6f3e7b533552d6 231,233-235,238,240-242,283
+internal/commands/schedule.go
+  3c6f3e7b533552d6 367,374,376,379,381,386-387,596-597
+internal/commands/comment.go
+  3c6f3e7b533552d6 49,142,195-199,201,272,274,302,304
+internal/commands/cards.go
+  3c6f3e7b533552d6 291,294-297,300-303,445,527-528,532-533,733,736-739,742-745,981-982,987-988,1072,1364-1366,1369-1371,1505,1509,1512,1604-1606,1610-1612,1626-1627,1751-1753,1757-1759
+  5d63aeb85efadd4d 1401,1416
+internal/commands/messagetypes.go
+  3c6f3e7b533552d6 131,137-149,213
+internal/commands/api.go
+  3c6f3e7b533552d6 73-75,78-80,121-123,126-128
+internal/commands/recordings.go
+  5d63aeb85efadd4d 65
+internal/commands/files.go
+  3c6f3e7b533552d6 362-363,368-369,703-705,709-711,985
+internal/commands/url.go
+  3c6f3e7b533552d6 44
+internal/commands/search.go
+  3c6f3e7b533552d6 43
+internal/commands/messages.go
+  3c6f3e7b533552d6 220,350,522
+e2e/webhooks.bats
+  3c6f3e7b533552d6 9,13-14,16-17,47-49
+internal/commands/todolists.go
+  3c6f3e7b533552d6 248,250-252,254,256-258,347-348
+internal/commands/tools.go
+  3c6f3e7b533552d6 219-221,223-225,227-229,231
+internal/commands/people.go
+  3c6f3e7b533552d6 377,400,451,474
+internal/commands/todolistgroups.go
+  3c6f3e7b533552d6 93,203,205-207,210,212-214,295-296,300-301,304,311
+.surface-breaking
+  3c6f3e7b533552d6 1-4
+internal/commands/boost.go
+  3c6f3e7b533552d6 396,398
+internal/commands/edit_test.go
+  3c6f3e7b533552d6 13
+internal/commands/lineup.go
+  3c6f3e7b533552d6 42,57-74,123-125,127-129,148-149
+internal/commands/checkins.go
+  3c6f3e7b533552d6 149,155,263-264,269-270,398-399,404-405,480-481,615-616,621-622,730,732,734,736,738-739,741-743,745,818-819,822-824,826-827,835-836
+e2e/forwards.bats
+  5d63aeb85efadd4d 9,14-15
+e2e/errors.bats
+  3c6f3e7b533552d6 18,22-23,25-26,28-29,32,34-35,37,47,49,52-54,56-58,61-62,64,66,69,115,120-122,125-128,130-133,138-142,148,150-152,154-155,158,162-166,169,173,175-176,247-248,257-258,260-261,267-268,270-271,277,280-281,284-287,291,294,296-298,300-301,306-307,309-310,316-317,320-321,324,326-327,331-332,335-337,340,342-343,352-353
+  5d63aeb85efadd4d 174
+e2e/messageboards.bats
+  5d63aeb85efadd4d 9,14-15
+e2e/schedule.bats
+  3c6f3e7b533552d6 84-86
+  5d63aeb85efadd4d 39,44-45
+e2e/boost.bats
+  3c6f3e7b533552d6 15-17
+e2e/messagetypes.bats
+  3c6f3e7b533552d6 27-29,76-77
+e2e/checkins.bats
+  5d63aeb85efadd4d 30,35-36
+  3c6f3e7b533552d6 54-56,73-76
+e2e/cards_columns_steps.bats
+  3c6f3e7b533552d6 9,16,18-19,22-23,26,33,45-48,79-80,82-83,185-186,189-190,262-263,267-268,285-286,291-292,337-338,344-345
+  5d63aeb85efadd4d 241
+e2e/campfire.bats
+  5d63aeb85efadd4d 133,138-139
+  3c6f3e7b533552d6 54-56
+e2e/lineup.bats
+  3c6f3e7b533552d6 27-29,37-40,50-51,53-54,60-61,64-65,85,89,94,98
+  5d63aeb85efadd4d 7,9,14-15
+e2e/templates.bats
+  3c6f3e7b533552d6 27-29,67-68
+e2e/todosets.bats
+  5d63aeb85efadd4d 9,14-15
+e2e/files.bats
+  3c6f3e7b533552d6 48,52-56,58-59,63-65,67-68,72-74,76-77,81-83,177-182
+skills/basecamp/SKILL.md
+  3c6f3e7b533552d6 76,406-407,493-494,618-625,627-646,648-649,653-654,657-661
+  5d63aeb85efadd4d 136,140,186-188,276-277,304,482-487,517-519,650-652,655-656,671-673,676-677
+internal/cli/root.go
+  5d63aeb85efadd4d 270-272,274,277,476-492
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "37788c5dedd8b128c1dd21c3733e685c6c087eca",
+  "prompts": {
+    "3c6f3e7b533552d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b1e1b0b-e8e0-4223-9980-dea01e701afa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 528,
+      "overriden_lines": 0
+    },
+    "5d63aeb85efadd4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621df13c-1ed3-47d7-b0ed-8e1c88a44cf5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 76,
+      "overriden_lines": 0
+    }
+  }
+}
