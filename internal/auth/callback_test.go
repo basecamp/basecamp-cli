@@ -14,10 +14,19 @@ import (
 
 func listenLocal(t *testing.T) net.Listener {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 	return ln
+}
+
+func httpGet(ctx context.Context, t *testing.T, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
 }
 
 func TestWaitForCallback_Success(t *testing.T) {
@@ -42,8 +51,7 @@ func TestWaitForCallback_Success(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?state=%s&code=auth-code-456", addr, state))
-	require.NoError(t, err)
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=%s&code=auth-code-456", addr, state))
 	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -72,8 +80,7 @@ func TestWaitForCallback_StateMismatch(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?state=wrong-state&code=abc", addr))
-	require.NoError(t, err)
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=wrong-state&code=abc", addr))
 	_ = resp.Body.Close()
 
 	select {
@@ -99,8 +106,7 @@ func TestWaitForCallback_OAuthError(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?error=access_denied", addr))
-	require.NoError(t, err)
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&state=state", addr))
 	_ = resp.Body.Close()
 
 	select {
@@ -126,14 +132,40 @@ func TestWaitForCallback_OAuthErrorWithDescription(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?error=access_denied&error_description=User+denied+access", addr))
-	require.NoError(t, err)
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&error_description=User+denied+access&state=state", addr))
 	_ = resp.Body.Close()
 
 	select {
 	case err := <-errCh:
 		assert.Contains(t, err.Error(), "access_denied")
 		assert.Contains(t, err.Error(), "User denied access")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWaitForCallback_OAuthErrorWithBadState(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ln := listenLocal(t)
+	addr := ln.Addr().String()
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := waitForCallback(ctx, "expected-state", ln)
+		errCh <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&state=wrong", addr))
+	_ = resp.Body.Close()
+
+	select {
+	case err := <-errCh:
+		assert.Contains(t, err.Error(), "state mismatch")
+		assert.NotContains(t, err.Error(), "OAuth error")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout")
 	}
@@ -154,8 +186,7 @@ func TestWaitForCallback_MissingCode(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Get(fmt.Sprintf("http://%s/callback?state=state", addr))
-	require.NoError(t, err)
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=state", addr))
 	_ = resp.Body.Close()
 
 	select {
@@ -210,14 +241,12 @@ func TestWaitForCallback_IgnoresNonCallbackPaths(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Request to /favicon.ico should get 404 and not kill the server
-	resp, err := http.Get(fmt.Sprintf("http://%s/favicon.ico", addr))
-	require.NoError(t, err)
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/favicon.ico", addr))
 	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	// The real callback should still work after the spurious request
-	resp, err = http.Get(fmt.Sprintf("http://%s/callback?state=state-123&code=real-code", addr))
-	require.NoError(t, err)
+	resp = httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=state-123&code=real-code", addr))
 	_ = resp.Body.Close()
 
 	select {

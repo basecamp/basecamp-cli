@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -143,10 +144,13 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		IdleTimeout:       30 * time.Second,
 	}
 
-	shutdown := func() {
+	shutdown := func() { //nolint:contextcheck // fire-and-forget shutdown; no parent context to propagate
 		once.Do(func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			go func() { defer cancel(); _ = server.Shutdown(shutdownCtx) }()
+			go func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = server.Shutdown(shutdownCtx)
+			}()
 		})
 	}
 
@@ -158,13 +162,9 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		code := r.URL.Query().Get("code")
 		errParam := r.URL.Query().Get("error")
 
-		if errParam != "" {
-			msg := "OAuth error: " + errParam
-			if desc := r.URL.Query().Get("error_description"); desc != "" {
-				msg += " — " + desc
-			}
+		if state != expectedState {
 			select {
-			case errCh <- fmt.Errorf("%s", msg):
+			case errCh <- fmt.Errorf("state mismatch: CSRF protection failed"):
 			default:
 			}
 			_, _ = fmt.Fprint(w, callbackError)
@@ -172,9 +172,13 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 			return
 		}
 
-		if state != expectedState {
+		if errParam != "" {
+			msg := "OAuth error: " + errParam
+			if desc := r.URL.Query().Get("error_description"); desc != "" {
+				msg += " — " + desc
+			}
 			select {
-			case errCh <- fmt.Errorf("state mismatch: CSRF protection failed"):
+			case errCh <- errors.New(msg):
 			default:
 			}
 			_, _ = fmt.Fprint(w, callbackError)
