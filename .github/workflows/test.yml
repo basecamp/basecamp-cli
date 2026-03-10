@@ -158,6 +158,39 @@ jobs:
         if: always()
         run: git worktree remove /tmp/baseline-tree --force 2>/dev/null || true
 
+  skill-eval:
+    name: Skill Evals
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check for skill or eval changes
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        with:
+          filters: |
+            skill:
+              - 'skills/basecamp/SKILL.md'
+              - 'skill-evals/**'
+
+      - name: Set up Ruby
+        if: steps.filter.outputs.skill == 'true'
+        uses: ruby/setup-ruby@13e7a03dc3ac6c3798f4570bfead2aed4d96abfb # v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Run skill evals
+        if: steps.filter.outputs.skill == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY not configured, skipping skill evals"
+            exit 0
+          fi
+          make skill-eval
+
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
