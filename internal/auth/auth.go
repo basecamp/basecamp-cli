@@ -206,6 +206,13 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	return m.store.Save(origin, creds)
 }
 
+// LoginResult holds the outcome of a successful Login().
+// Callers use this to determine the effective scope instead of their input.
+type LoginResult struct {
+	OAuthType string // "bc3" or "launchpad"
+	Scope     string // effective scope: "read"/"full" for BC3, "" for Launchpad
+}
+
 // LoginOptions configures the login flow.
 type LoginOptions struct {
 	Scope     string
@@ -303,9 +310,14 @@ func resolveOAuthCallback(opts *LoginOptions) (redirectURI string, listenAddr st
 }
 
 // Login initiates the OAuth login flow.
-func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
+func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, error) {
 	if opts.Remote && opts.Local {
-		return output.ErrUsage("--remote and --local are mutually exclusive")
+		return nil, output.ErrUsage("--remote and --local are mutually exclusive")
+	}
+
+	// Validate scope early (single source of truth)
+	if opts.Scope != "" && opts.Scope != "read" && opts.Scope != "full" {
+		return nil, output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
 
 	opts.defaults()
@@ -313,7 +325,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	// Resolve redirect URI and listener address
 	redirectURI, listenAddr, err := resolveOAuthCallback(&opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	opts.RedirectURI = redirectURI
 
@@ -327,13 +339,27 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	// Discover OAuth config
 	oauthCfg, oauthType, err := m.discoverOAuth(ctx, opts.log)
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	// Apply provider-aware scope rules
+	effectiveScope := opts.Scope
+	if oauthType == "launchpad" {
+		if effectiveScope != "" {
+			opts.log("Launchpad does not support OAuth scopes; --scope ignored")
+		}
+		effectiveScope = ""
+	} else {
+		// BC3: default to "read" when no scope specified
+		if effectiveScope == "" {
+			effectiveScope = "read"
+		}
 	}
 
 	// Load or register client credentials
 	clientCreds, err := m.loadClientCredentials(ctx, oauthCfg, oauthType, &opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Generate PKCE challenge (for BC3)
@@ -347,9 +373,9 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	state := pkce.GenerateState()
 
 	// Build authorization URL
-	authURL, err := m.buildAuthURL(oauthCfg, oauthType, opts.Scope, state, codeChallenge, clientCreds.ClientID, &opts)
+	authURL, err := m.buildAuthURL(oauthCfg, oauthType, effectiveScope, state, codeChallenge, clientCreds.ClientID, &opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var code string
@@ -374,14 +400,14 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 
 		code, err = readCallbackInput(waitCtx, reader, state)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		// Local mode: start listener and wait for callback
 		lc := net.ListenConfig{}
 		listener, listenErr := lc.Listen(ctx, "tcp", listenAddr)
 		if listenErr != nil {
-			return fmt.Errorf("failed to start callback server: %w", listenErr)
+			return nil, fmt.Errorf("failed to start callback server: %w", listenErr)
 		}
 		defer func() { _ = listener.Close() }()
 
@@ -403,21 +429,25 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 
 		code, err = oauthcallback.WaitForCallback(waitCtx, state, listener, "")
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// Exchange code for tokens
 	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds, &opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	creds.OAuthType = oauthType
 	creds.TokenEndpoint = oauthCfg.TokenEndpoint
-	creds.Scope = opts.Scope
+	creds.Scope = effectiveScope
 
-	return m.store.Save(credKey, creds)
+	if err := m.store.Save(credKey, creds); err != nil {
+		return nil, err
+	}
+
+	return &LoginResult{OAuthType: oauthType, Scope: effectiveScope}, nil
 }
 
 // Logout removes stored credentials.

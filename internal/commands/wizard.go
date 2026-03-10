@@ -134,7 +134,7 @@ func showWelcome(w io.Writer, styles *tui.Styles) func() {
 	return waitAnim
 }
 
-// wizardAuth handles the authentication flow with scope selection.
+// wizardAuth handles the authentication flow.
 func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 	w := cmd.OutOrStdout()
 
@@ -159,30 +159,19 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 
 	fmt.Fprintln(w, styles.Heading.Render("  Step 1: Authentication"))
 	fmt.Fprintln(w)
-
-	// Let user choose scope (map to OAuth scopes: "read" or "full")
-	scope, err := tui.Select("  What access level do you need?", []tui.SelectOption{
-		{Value: "read", Label: "Read-only (recommended for browsing)"},
-		{Value: "full", Label: "Full access (read + write)"},
-	})
-	if err != nil {
-		return fmt.Errorf("scope selection canceled: %w", err)
-	}
-
-	fmt.Fprintln(w)
 	fmt.Fprintln(w, styles.Muted.Render("  Opening browser for Basecamp login..."))
 	fmt.Fprintln(w)
 
-	if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
-		Scope:  scope,
+	result, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 		Logger: func(msg string) { fmt.Fprintln(w, "  "+msg) },
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Try to fetch user profile for a friendly greeting
-	resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
-	if err == nil {
+	resp, profileErr := app.SDK.Get(cmd.Context(), "/my/profile.json")
+	if profileErr == nil {
 		var profile struct {
 			ID    int    `json:"id"`
 			Name  string `json:"name"`
@@ -194,6 +183,10 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 		}
 	} else {
 		fmt.Fprintln(w, styles.Success.Render("  Authentication successful."))
+	}
+
+	if result.Scope != "" {
+		fmt.Fprintln(w, styles.Muted.Render(fmt.Sprintf("  Access: %s", result.Scope)))
 	}
 	fmt.Fprintln(w)
 

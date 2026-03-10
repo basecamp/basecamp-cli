@@ -110,7 +110,7 @@ func Default() *Config {
 
 	return &Config{
 		BaseURL:          "https://3.basecampapi.com",
-		Scope:            "read",
+		Scope:            "",
 		CacheDir:         filepath.Join(cacheDir, "basecamp"),
 		CacheEnabled:     true,
 		Format:           "auto",

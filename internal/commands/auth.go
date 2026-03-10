@@ -86,11 +86,19 @@ func newAuthStatusCmd() *cobra.Command {
 				return err
 			}
 
+			// Suppress scope for Launchpad (scopes are not supported)
+			effectiveScope := creds.Scope
+			if creds.OAuthType == "launchpad" {
+				effectiveScope = ""
+			}
+
 			status := map[string]any{
 				"authenticated": true,
 				"source":        "oauth",
 				"oauth_type":    creds.OAuthType,
-				"scope":         creds.Scope,
+			}
+			if effectiveScope != "" {
+				status["scope"] = effectiveScope
 			}
 			if app.Config.ActiveProfile != "" {
 				status["profile"] = app.Config.ActiveProfile
@@ -108,8 +116,8 @@ func newAuthStatusCmd() *cobra.Command {
 			}
 
 			summary := "Authenticated"
-			if creds.Scope != "" {
-				summary += fmt.Sprintf(" (scope: %s)", creds.Scope)
+			if effectiveScope != "" {
+				summary += fmt.Sprintf(" (scope: %s)", effectiveScope)
 			}
 
 			return app.OK(status, output.WithSummary(summary))
@@ -232,14 +240,6 @@ func buildLoginCmd(use string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if scope != "" && scope != "read" && scope != "full" {
-				return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
-			}
-
-			if scope == "" {
-				scope = "read"
-			}
-
 			w := cmd.OutOrStdout()
 			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
 
@@ -248,27 +248,27 @@ func buildLoginCmd(use string) *cobra.Command {
 			} else {
 				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
 			}
-			if scope == "read" {
-				fmt.Fprintln(w, r.Muted.Render("Scope: read-only (use --scope full for write access)"))
-			} else {
-				fmt.Fprintln(w, r.Muted.Render("Scope: full (read and write access)"))
-			}
 
-			if err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
+			result, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
 				Remote:    remote,
 				Local:     local,
 				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
 
 			fmt.Fprintln(w)
 			fmt.Fprintln(w, r.Success.Render("Authentication successful!"))
 
-			resp, err := app.SDK.Get(cmd.Context(), "/my/profile.json")
-			if err == nil {
+			if result.Scope != "" {
+				fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Access: %s", result.Scope)))
+			}
+
+			resp, profileErr := app.SDK.Get(cmd.Context(), "/my/profile.json")
+			if profileErr == nil {
 				var profile struct {
 					ID    int    `json:"id"`
 					Name  string `json:"name"`
@@ -287,7 +287,7 @@ func buildLoginCmd(use string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' (default) or 'full'")
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (BC3 only)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")

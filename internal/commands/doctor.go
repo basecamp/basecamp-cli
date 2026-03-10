@@ -569,14 +569,22 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 	check.Status = "pass"
 	if store.UsingKeyring() {
 		if verbose {
-			check.Message = fmt.Sprintf("Stored in keyring (scope: %s, type: %s)", creds.Scope, creds.OAuthType)
+			if creds.OAuthType == "launchpad" || creds.Scope == "" {
+				check.Message = fmt.Sprintf("Stored in keyring (type: %s)", creds.OAuthType)
+			} else {
+				check.Message = fmt.Sprintf("Stored in keyring (scope: %s, type: %s)", creds.Scope, creds.OAuthType)
+			}
 		} else {
 			check.Message = "Stored in system keyring"
 		}
 	} else {
 		credsPath := filepath.Join(config.GlobalConfigDir(), "credentials.json")
 		if verbose {
-			check.Message = fmt.Sprintf("%s (scope: %s, type: %s)", credsPath, creds.Scope, creds.OAuthType)
+			if creds.OAuthType == "launchpad" || creds.Scope == "" {
+				check.Message = fmt.Sprintf("%s (type: %s)", credsPath, creds.OAuthType)
+			} else {
+				check.Message = fmt.Sprintf("%s (scope: %s, type: %s)", credsPath, creds.Scope, creds.OAuthType)
+			}
 		} else {
 			check.Message = credsPath
 		}
