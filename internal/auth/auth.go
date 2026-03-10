@@ -487,7 +487,6 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 
 	// Exchange code for tokens
 	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds, &opts)
-	resolve(err == nil)
 	if err != nil {
 		return nil, err
 	}
@@ -500,6 +499,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		return nil, err
 	}
 
+	resolve(true)
 	return &LoginResult{OAuthType: oauthType, Scope: effectiveScope}, nil
 }
 
