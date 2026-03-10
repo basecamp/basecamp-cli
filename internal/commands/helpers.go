@@ -75,7 +75,7 @@ func isMachineOutput(cmd *cobra.Command) bool {
 		}
 	}
 	return false
-}
+} 6fdc5e2 (Add missingArg/noChanges helpers for bifurcated missing-arg behavior)
 
 // DockTool represents a tool in a project's dock.
 type DockTool struct {
