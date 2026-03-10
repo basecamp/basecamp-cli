@@ -1,0 +1,25 @@
+internal/cli/help.go
+  6921866741cd6f1d 201-203,205,279
+internal/cli/help_test.go
+  6921866741cd6f1d 164-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "0acaad5d885802126a6d64b9f21b7073e7f08d49",
+  "prompts": {
+    "6921866741cd6f1d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "62fa8c41-b086-47ed-8a45-b0cc2e2a84fd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 26,
+      "total_deletions": 2,
+      "accepted_lines": 25,
+      "overriden_lines": 0
+    }
+  }
+}
