@@ -886,7 +886,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 
 func newCheckinsAnswerUpdateCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "update <id|url> [content]",
+		Use:   "update <id|url> <content>",
 		Short: "Update an answer",
 		Long: `Update an existing check-in answer.
 

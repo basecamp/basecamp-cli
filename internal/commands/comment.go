@@ -184,7 +184,7 @@ You can pass either a comment ID or a Basecamp URL:
 
 func newCommentsUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "update <id|url> [content]",
+		Use:   "update <id|url> <content>",
 		Short: "Update a comment",
 		Long: `Update an existing comment's content.
 

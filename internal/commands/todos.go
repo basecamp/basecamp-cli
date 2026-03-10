@@ -69,7 +69,7 @@ func NewTodoCmd() *cobra.Command {
 	var due string
 
 	cmd := &cobra.Command{
-		Use:   "todo [content]",
+		Use:   "todo <content>",
 		Short: "Create a new todo (shortcut for 'todos create')",
 		Long:  "Create a new todo in a project. Shortcut for 'basecamp todos create'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -563,7 +563,7 @@ func newTodosCreateCmd() *cobra.Command {
 	var due string
 
 	cmd := &cobra.Command{
-		Use:   "create [content]",
+		Use:   "create <content>",
 		Short: "Create a new todo",
 		Long:  "Create a new todo in a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -287,7 +287,7 @@ func newTodolistgroupsCreateCmd(project, todolist *string) *cobra.Command {
 
 func newTodolistgroupsUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "update <id> [name]",
+		Use:     "update <id> <name>",
 		Aliases: []string{"rename"},
 		Short:   "Update a todolist group",
 		RunE: func(cmd *cobra.Command, args []string) error {
