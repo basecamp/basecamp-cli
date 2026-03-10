@@ -327,6 +327,7 @@ Supports batch commenting on multiple items at once.`,
 			var commented []string
 			var commentIDs []string
 			var failed []string
+			var lastComment *basecamp.Comment
 			var firstAPIErr error // Capture first API error for better error reporting
 
 			for _, recordingIDStr := range expandedIDs {
@@ -345,6 +346,7 @@ Supports batch commenting on multiple items at once.`,
 					continue
 				}
 
+				lastComment = comment
 				commentIDs = append(commentIDs, fmt.Sprintf("%d", comment.ID))
 				commented = append(commented, recordingIDStr)
 			}
@@ -371,7 +373,14 @@ Supports batch commenting on multiple items at once.`,
 				return output.ErrUsage(fmt.Sprintf("Failed to comment on all items: %s", strings.Join(failed, ", ")))
 			}
 
-			// Build result
+			// Single comment: return the comment object directly
+			if len(commented) == 1 && len(failed) == 0 && lastComment != nil {
+				return app.OK(lastComment,
+					output.WithSummary(fmt.Sprintf("Commented on #%s", commented[0])),
+				)
+			}
+
+			// Batch: build result map
 			result := map[string]any{
 				"commented_recordings": commented,
 				"comment_ids":          commentIDs,
