@@ -40,9 +40,9 @@ def parse_args(argv)
   }
   while (arg = argv.shift)
     case arg
-    when "--model"   then opts[:model] = argv.shift
-    when "--skill"   then opts[:skill] = argv.shift
-    when "--tag"     then opts[:tags] << argv.shift
+    when "--model"   then opts[:model] = argv.shift || abort("--model requires a value")
+    when "--skill"   then opts[:skill] = argv.shift || abort("--skill requires a path")
+    when "--tag"     then opts[:tags] << (argv.shift || abort("--tag requires a value"))
     when "--json"    then opts[:json] = true
     when "--verbose" then opts[:verbose] = true
     when "--samples" then opts[:samples] = Integer(argv.shift || abort("--samples requires a value"))
