@@ -1,0 +1,39 @@
+e2e/cards_columns_steps.bats
+  5d63aeb85efadd4d 241
+e2e/errors.bats
+  5d63aeb85efadd4d 174
+e2e/schedule.bats
+  5d63aeb85efadd4d 39,44-45
+e2e/todosets.bats
+  5d63aeb85efadd4d 9,14-15
+e2e/checkins.bats
+  5d63aeb85efadd4d 30,35-36
+e2e/messageboards.bats
+  5d63aeb85efadd4d 9,14-15
+e2e/forwards.bats
+  5d63aeb85efadd4d 9,14-15
+e2e/lineup.bats
+  5d63aeb85efadd4d 7,9,14-15
+e2e/campfire.bats
+  5d63aeb85efadd4d 133,138-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "a7c772bb3da47b3d6c4b2fca8c162024e8f5e8da",
+  "prompts": {
+    "5d63aeb85efadd4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621df13c-1ed3-47d7-b0ed-8e1c88a44cf5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 24,
+      "overriden_lines": 0
+    }
+  }
+}
