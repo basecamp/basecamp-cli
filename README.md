@@ -102,8 +102,8 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 OAuth 2.1 with automatic token refresh. First login opens your browser:
 
 ```bash
-basecamp auth login              # Read-only access (default)
-basecamp auth login --scope full # Full read/write access
+basecamp auth login              # Authenticate with Basecamp
+basecamp auth login --scope read # Read-only access (BC3 OAuth only)
 basecamp auth token              # Print token for scripts
 ```
 

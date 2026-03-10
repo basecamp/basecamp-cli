@@ -83,7 +83,7 @@ Opens browser for OAuth. Grant access when prompted.
 **Verify:**
 ```bash
 basecamp auth status
-# Expected: Authenticated (scope: read)
+# Expected: Authenticated
 ```
 
 ---
@@ -137,7 +137,7 @@ cat ~/.config/basecamp/config.json
 basecamp auth logout && basecamp auth login
 ```
 
-**Permission denied (read-only):**
+**Permission denied (read-only, BC3 OAuth only):**
 ```bash
 basecamp auth login --scope full
 ```

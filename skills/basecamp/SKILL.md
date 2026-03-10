@@ -596,8 +596,8 @@ basecamp doctor --json                            # Check CLI health, auth, conn
 **Authentication errors:**
 ```bash
 basecamp auth status                              # Check auth
-basecamp auth login                               # Re-authenticate (full access)
-basecamp auth login --scope read                  # Read-only access
+basecamp auth login                               # Re-authenticate
+basecamp auth login --scope full                  # Full access (BC3 OAuth only)
 ```
 
 **Network errors / localhost URLs:**
