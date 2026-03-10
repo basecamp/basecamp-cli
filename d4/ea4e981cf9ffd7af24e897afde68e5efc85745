@@ -1,0 +1,23 @@
+internal/commands/helpers.go
+  61e7956c3c88ba49 78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "d4ea4e981cf9ffd7af24e897afde68e5efc85745",
+  "prompts": {
+    "61e7956c3c88ba49": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a2aac46-b954-498b-a927-fc16918b07e2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 578,
+      "total_deletions": 3,
+      "accepted_lines": 576,
+      "overriden_lines": 0
+    }
+  }
+}
