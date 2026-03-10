@@ -10,5 +10,8 @@ FLAG basecamp people remove --in
 FLAG basecamp show --in
 FLAG basecamp subscriptions --in
 FLAG basecamp subscriptions subscribe --in
+FLAG basecamp checkins answer create --question
+FLAG basecamp message --subject
 FLAG basecamp timeline --limit
 FLAG basecamp todo --content
+FLAG basecamp webhooks create --url
