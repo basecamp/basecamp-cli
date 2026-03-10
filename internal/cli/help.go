@@ -6,35 +6,26 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// rootHelpFunc returns a help function that renders gh-style help for the root
-// command, agent JSON when --agent is set, and falls through to cobra's default
-// for subcommands.
-func rootHelpFunc(defaultHelp func(*cobra.Command, []string)) func(*cobra.Command, []string) {
+// rootHelpFunc returns a help function that renders styled help for all
+// commands: agent JSON when --agent is set, curated categories for root,
+// and a consistent styled layout for every subcommand.
+func rootHelpFunc() func(*cobra.Command, []string) {
 	return func(cmd *cobra.Command, args []string) {
-		// --agent → structured JSON help
 		if agent, _ := cmd.Root().PersistentFlags().GetBool("agent"); agent {
 			emitAgentHelp(cmd)
 			return
 		}
-
-		// Commands with registered custom help renderers
-		if fn, ok := commands.CustomHelp(cmd); ok {
-			fn(cmd, args)
+		if cmd == cmd.Root() {
+			renderRootHelp(cmd.OutOrStdout(), cmd)
 			return
 		}
-
-		// Subcommands use cobra's default help
-		if cmd != cmd.Root() {
-			defaultHelp(cmd, args)
-			return
-		}
-
-		renderRootHelp(cmd.OutOrStdout(), cmd)
+		renderCommandHelp(cmd)
 	}
 }
 
@@ -185,4 +176,137 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	b.WriteString("  basecamp <command> -h  Help for any command\n")
 
 	fmt.Fprint(w, b.String())
+}
+
+// renderCommandHelp renders styled help for any non-root command, reading
+// structure from cobra's command tree rather than hardcoding per-command.
+func renderCommandHelp(cmd *cobra.Command) {
+	w := cmd.OutOrStdout()
+	r := output.NewRenderer(w, false)
+	var b strings.Builder
+
+	// Description
+	desc := cmd.Long
+	if desc == "" {
+		desc = cmd.Short
+	}
+	if desc != "" {
+		b.WriteString(desc)
+		b.WriteString("\n")
+	}
+
+	// USAGE
+	b.WriteString("\n")
+	b.WriteString(r.Header.Render("USAGE"))
+	b.WriteString("\n")
+	b.WriteString("  " + cmd.UseLine() + "\n")
+
+	// ALIASES
+	if len(cmd.Aliases) > 0 {
+		b.WriteString("\n")
+		b.WriteString(r.Header.Render("ALIASES"))
+		b.WriteString("\n")
+		b.WriteString("  " + cmd.Name())
+		for _, a := range cmd.Aliases {
+			b.WriteString(", " + a)
+		}
+		b.WriteString("\n")
+	}
+
+	// COMMANDS
+	if cmd.HasAvailableSubCommands() {
+		var entries []helpEntry
+		maxName := 0
+		for _, sub := range cmd.Commands() {
+			if !sub.IsAvailableCommand() {
+				continue
+			}
+			entries = append(entries, helpEntry{name: sub.Name(), desc: sub.Short})
+			if len(sub.Name()) > maxName {
+				maxName = len(sub.Name())
+			}
+		}
+		b.WriteString("\n")
+		b.WriteString(r.Header.Render("COMMANDS"))
+		b.WriteString("\n")
+		for _, e := range entries {
+			fmt.Fprintf(&b, "  %-*s  %s\n", maxName, e.name, e.desc)
+		}
+	}
+
+	// FLAGS (all local flags: persistent + non-persistent)
+	localFlags := cmd.LocalFlags()
+	localUsage := strings.TrimRight(localFlags.FlagUsages(), "\n")
+	if localUsage != "" {
+		b.WriteString("\n")
+		b.WriteString(r.Header.Render("FLAGS"))
+		b.WriteString("\n")
+		b.WriteString(localUsage)
+		b.WriteString("\n")
+	}
+
+	// INHERITED FLAGS
+	inheritedUsage := strings.TrimRight(cmd.InheritedFlags().FlagUsages(), "\n")
+	if inheritedUsage != "" {
+		b.WriteString("\n")
+		b.WriteString(r.Header.Render("INHERITED FLAGS"))
+		b.WriteString("\n")
+		b.WriteString(inheritedUsage)
+		b.WriteString("\n")
+	}
+
+	// EXAMPLES
+	if cmd.Example != "" {
+		b.WriteString("\n")
+		b.WriteString(r.Header.Render("EXAMPLES"))
+		b.WriteString("\n")
+		for _, line := range strings.Split(cmd.Example, "\n") {
+			b.WriteString(r.Muted.Render(line) + "\n")
+		}
+	}
+
+	// LEARN MORE
+	b.WriteString("\n")
+	b.WriteString(r.Header.Render("LEARN MORE"))
+	b.WriteString("\n")
+	if cmd.HasAvailableSubCommands() {
+		b.WriteString("  " + cmd.CommandPath() + " <command> --help\n")
+	} else if cmd.HasParent() && cmd.Parent() != cmd.Root() {
+		b.WriteString("  " + cmd.Parent().CommandPath() + " --help\n")
+	}
+
+	fmt.Fprint(w, b.String())
+}
+
+// salientRootFlags is the curated set of root-level global flags shown in
+// inherited flag sections. Parent-defined persistent flags always appear;
+// only root globals are filtered to this set.
+var salientRootFlags = map[string]bool{
+	"account": true,
+	"json":    true,
+	"md":      true,
+	"project": true,
+	"quiet":   true,
+}
+
+// filterInheritedFlags returns formatted flag usages for inherited flags,
+// keeping all parent-defined persistent flags and curating root globals
+// to the salient set. Provenance is determined by pointer identity: if the
+// flag object is the same pointer as the one on root's PersistentFlags,
+// it truly originates from root. A parent that redefines the same name
+// (e.g. --project on messages) produces a different pointer and always
+// passes through.
+func filterInheritedFlags(cmd *cobra.Command) string {
+	root := cmd.Root()
+	filtered := pflag.NewFlagSet("inherited", pflag.ContinueOnError)
+
+	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
+		rootFlag := root.PersistentFlags().Lookup(f.Name)
+		if rootFlag != nil && rootFlag == f && !salientRootFlags[f.Name] {
+			return
+		}
+		filtered.AddFlag(f)
+	})
+
+	return strings.TrimRight(filtered.FlagUsages(), "\n")
 }

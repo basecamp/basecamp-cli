@@ -158,24 +158,6 @@ func CatalogCommandNames() []string {
 	return names
 }
 
-// HelpFunc is a function that renders help for a command.
-type HelpFunc func(cmd *cobra.Command, args []string)
-
-var customHelp = map[*cobra.Command]HelpFunc{}
-
-// RegisterCustomHelp registers a custom help renderer for a command.
-// rootHelpFunc dispatches to these before falling through to cobra's default,
-// so --agent mode and child commands are handled correctly.
-func RegisterCustomHelp(cmd *cobra.Command, fn HelpFunc) {
-	customHelp[cmd] = fn
-}
-
-// CustomHelp returns the registered custom help function for a command, if any.
-func CustomHelp(cmd *cobra.Command) (HelpFunc, bool) {
-	fn, ok := customHelp[cmd]
-	return fn, ok
-}
-
 // NewCommandsCmd creates the commands listing command.
 func NewCommandsCmd() *cobra.Command {
 	return &cobra.Command{

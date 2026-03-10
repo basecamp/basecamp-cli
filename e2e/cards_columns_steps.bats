@@ -192,7 +192,7 @@ load test_helper
   run basecamp cards column foobar
   # Cobra doesn't error on unknown args, shows help
   assert_success
-  assert_output_contains "Available Commands"
+  assert_output_contains "COMMANDS"
 }
 
 
@@ -362,5 +362,5 @@ load test_helper
   run basecamp cards step foobar
   # Cobra doesn't error on unknown args, shows help
   assert_success
-  assert_output_contains "Available Commands"
+  assert_output_contains "COMMANDS"
 }

@@ -179,9 +179,9 @@ func NewRootCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("profile", completer.ProfileCompletion())
 
-	// Custom root help: gh-style curated categories for root, agent JSON for
-	// --agent, default cobra help for subcommands.
-	cmd.SetHelpFunc(rootHelpFunc(cmd.HelpFunc()))
+	// Styled help: curated categories for root, agent JSON for --agent,
+	// renderCommandHelp for all subcommands.
+	cmd.SetHelpFunc(rootHelpFunc())
 
 	// Compact usage for the root command only — prevents cobra from dumping
 	// all 55 commands on error. Subcommands inherit cobra's default.

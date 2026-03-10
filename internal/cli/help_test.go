@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -74,7 +75,7 @@ func TestRootHelpContainsLearnMore(t *testing.T) {
 	assert.Contains(t, out, "basecamp <command> -h")
 }
 
-func TestSubcommandGetsDefaultHelp(t *testing.T) {
+func TestSubcommandGetsStyledHelp(t *testing.T) {
 	isolateHelpTest(t)
 
 	var buf bytes.Buffer
@@ -86,10 +87,127 @@ func TestSubcommandGetsDefaultHelp(t *testing.T) {
 	_ = cmd.Execute()
 
 	out := buf.String()
-	// Subcommand help should NOT have our curated categories
+	assert.Contains(t, out, "USAGE")
+	assert.Contains(t, out, "COMMANDS")
 	assert.NotContains(t, out, "CORE COMMANDS")
-	// Should contain the subcommand's own description
-	assert.Contains(t, out, "todos")
+}
+
+func TestCommandHelpRendersExample(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewProjectsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"projects", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "EXAMPLES")
+	assert.Contains(t, out, "basecamp projects list")
+	assert.Contains(t, out, "INHERITED FLAGS")
+}
+
+func TestLeafCommandHelp(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewProjectsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"projects", "list", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "USAGE")
+	assert.Contains(t, out, "FLAGS")
+	assert.NotContains(t, out, "COMMANDS")
+	assert.Contains(t, out, "INHERITED FLAGS")
+	// Leaf LEARN MORE points back to parent
+	assert.Contains(t, out, "basecamp projects --help")
+}
+
+func TestGroupCommandShowsPersistentLocalFlags(t *testing.T) {
+	// Commands that define their own persistent flags (--project, --in, etc.)
+	// must show them in FLAGS. This catches regressions where LocalFlags() is
+	// accidentally replaced with LocalNonPersistentFlags().
+	isolateHelpTest(t)
+
+	tests := []struct {
+		name     string
+		command  string
+		addCmd   func() *cobra.Command
+		wantFlag string
+	}{
+		{"messages --project", "messages", commands.NewMessagesCmd, "--project"},
+		{"messages --in", "messages", commands.NewMessagesCmd, "--in"},
+		{"messages --message-board", "messages", commands.NewMessagesCmd, "--message-board"},
+		{"campfire --project", "campfire", commands.NewCampfireCmd, "--project"},
+		{"campfire --campfire", "campfire", commands.NewCampfireCmd, "--campfire"},
+		{"campfire --content-type", "campfire", commands.NewCampfireCmd, "--content-type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd := NewRootCmd()
+			cmd.AddCommand(tt.addCmd())
+			cmd.SetOut(&buf)
+			cmd.SetArgs([]string{tt.command, "--help"})
+			_ = cmd.Execute()
+
+			assert.Contains(t, buf.String(), tt.wantFlag)
+		})
+	}
+}
+
+func TestLeafCommandInheritsParentPersistentFlags(t *testing.T) {
+	// Leaf commands must show parent-defined persistent flags in INHERITED
+	// FLAGS. These flags carry required context (--project, --campfire, etc.)
+	// and hiding them breaks discoverability.
+	isolateHelpTest(t)
+
+	tests := []struct {
+		name      string
+		args      []string
+		addCmd    func() *cobra.Command
+		wantFlags []string
+	}{
+		{
+			"messages create inherits --project",
+			[]string{"messages", "create", "--help"},
+			commands.NewMessagesCmd,
+			[]string{"--project", "--in", "--message-board"},
+		},
+		{
+			"campfire post inherits --project and --campfire",
+			[]string{"campfire", "post", "--help"},
+			commands.NewCampfireCmd,
+			[]string{"--project", "--campfire", "--content-type"},
+		},
+		{
+			"timesheet report inherits date and person flags",
+			[]string{"timesheet", "report", "--help"},
+			commands.NewTimesheetCmd,
+			[]string{"--project", "--start", "--end", "--person"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd := NewRootCmd()
+			cmd.AddCommand(tt.addCmd())
+			cmd.SetOut(&buf)
+			cmd.SetArgs(tt.args)
+			_ = cmd.Execute()
+
+			out := buf.String()
+			for _, flag := range tt.wantFlags {
+				assert.Contains(t, out, flag)
+			}
+		})
+	}
 }
 
 func TestAgentHelpProducesJSON(t *testing.T) {
