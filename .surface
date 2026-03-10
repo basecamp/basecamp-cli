@@ -4865,6 +4865,7 @@ FLAG basecamp todolists create --verbose type=count
 FLAG basecamp todolists list --account type=string
 FLAG basecamp todolists list --agent type=bool
 FLAG basecamp todolists list --all type=bool
+FLAG basecamp todolists list --archived type=bool
 FLAG basecamp todolists list --cache-dir type=string
 FLAG basecamp todolists list --count type=bool
 FLAG basecamp todolists list --hints type=bool
