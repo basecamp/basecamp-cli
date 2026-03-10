@@ -1,0 +1,35 @@
+internal/commands/todolists.go
+  b5756bff233fa21b 198,378
+internal/auth/callback.html
+  b5756bff233fa21b 1-84
+internal/auth/callback_error.html
+  b5756bff233fa21b 1-13
+internal/auth/callback_success.html
+  b5756bff233fa21b 1-13
+internal/commands/edit_test.go
+  b5756bff233fa21b 14
+internal/auth/callback.go
+  b5756bff233fa21b 5,147,149-153,165,167,175,181
+internal/auth/callback_test.go
+  b5756bff233fa21b 17,23-31,54,83,109,135,147-173,189,244,249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "fda46406b8e90338e03af7ed5f8f042cc2e0e4a2",
+  "prompts": {
+    "b5756bff233fa21b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dbd1a40-e27d-43af-9370-600331e182d9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 168,
+      "overriden_lines": 0
+    }
+  }
+}
