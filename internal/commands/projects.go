@@ -18,34 +18,16 @@ import (
 
 // NewProjectsCmd creates the projects command group.
 func NewProjectsCmd() *cobra.Command {
-	var status string
-	var limit, page int
-	var all bool
-
 	cmd := &cobra.Command{
 		Use:         "projects",
 		Aliases:     []string{"project"},
 		Short:       "Manage projects",
 		Long:        "List, show, create, and manage Basecamp projects.",
 		Annotations: map[string]string{"agent_notes": "Project IDs appear in Basecamp URLs as the buckets segment: /buckets/<project_id>/...\nbasecamp config project sets the default project for the current repo\nCreating a project returns its ID — use it with basecamp config set project_id <id>"},
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-			return ensureAccount(cmd, app)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to list when called without subcommand
-			return runProjectsList(cmd, status, limit, page, all)
+			return cmd.Help()
 		},
 	}
-
-	// Allow flags on root command for default list behavior
-	cmd.Flags().StringVar(&status, "status", "", "Filter by status (active, archived, trashed)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
 		newProjectsListCmd(),
