@@ -267,13 +267,14 @@ func Execute() {
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
 	if err != nil {
-		// When a command receives zero args but requires some, show help instead of an error.
-		// This gives users discoverable usage info rather than a terse "ID required" JSON message.
-		// Also applies when a required flag is missing and no positional args were given —
-		// the user invoked the command bare, so help is more useful than a flag error.
+		// When a command receives zero args but requires some, show help instead of an error —
+		// but only for interactive human users. Machine consumers (--agent, --json, piped stdout)
+		// need the structured error to flow through transformCobraError.
 		if isMissingArgsError(err) || isBareRequiredFlagError(err, executedCmd) {
-			_ = executedCmd.Help()
-			os.Exit(0)
+			if !isMachineConsumer(cmd) {
+				_ = executedCmd.Help()
+				os.Exit(0)
+			}
 		}
 
 		// Transform Cobra errors to match Bash CLI error format
@@ -470,6 +471,23 @@ func isBareRequiredFlagError(err error, cmd *cobra.Command) bool {
 	// ArgsLenAtDash returns -1 when no dash separator is used.
 	// Flags().NArg() gives the number of non-flag args cobra parsed.
 	return cmd.Flags().NArg() == 0
+}
+
+// isMachineConsumer returns true when the root command's flags indicate a
+// non-interactive consumer: --agent, --json, or stdout piped to a non-TTY.
+func isMachineConsumer(root *cobra.Command) bool {
+	pf := root.PersistentFlags()
+	if agent, _ := pf.GetBool("agent"); agent {
+		return true
+	}
+	if jsonFlag, _ := pf.GetBool("json"); jsonFlag {
+		return true
+	}
+	fi, err := os.Stdout.Stat()
+	if err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+		return true
+	}
+	return false
 }
 
 // transformCobraError transforms Cobra's default error messages to match the
