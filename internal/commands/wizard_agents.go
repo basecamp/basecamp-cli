@@ -134,7 +134,7 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 		return nil
 	}
 
-	fmt.Fprintln(w, styles.Heading.Render("  Coding Agent Setup"))
+	fmt.Fprintln(w, styles.Heading.Render("  Step 5: Coding Agent Setup"))
 	fmt.Fprintln(w)
 
 	// Show detected agents
