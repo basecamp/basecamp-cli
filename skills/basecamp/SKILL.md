@@ -509,8 +509,8 @@ basecamp campfire delete <line_id> --in <project> # Delete line
 ### People
 
 ```bash
-basecamp people --json                            # All people in account
-basecamp people --in <project> --json             # People on project
+basecamp people list --json                            # All people in account
+basecamp people list --project <project> --json        # People on project
 basecamp me --json                                # Current user
 basecamp people show <id> --json                  # Person details
 basecamp people add <id> --in <project>           # Add to project
