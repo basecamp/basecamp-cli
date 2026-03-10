@@ -129,7 +129,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 | Task | Command |
 |------|---------|
-| List projects | `basecamp projects --json` |
+| List projects | `basecamp projects list --json` |
 | My todos (in project)      | `basecamp todos --assignee me --in <project> --json` |
 | My todos (cross-project)   | `basecamp reports assigned --json` (defaults to "me") |
 | All todos (cross-project)  | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
@@ -259,7 +259,7 @@ basecamp files download <upload_id> --in <project> --out ./downloads
 ### Projects
 
 ```bash
-basecamp projects --json                          # List all
+basecamp projects list --json                     # List all
 basecamp projects show <id> --json                # Show details
 basecamp projects create --name "Name" --json     # Create
 basecamp projects update <id> --name "New"        # Update
