@@ -474,14 +474,13 @@ func isBareRequiredFlagError(err error, cmd *cobra.Command) bool {
 }
 
 // isMachineConsumer returns true when the root command's flags indicate a
-// non-interactive consumer: --agent, --json, or stdout piped to a non-TTY.
+// non-interactive consumer: --agent, --json, --quiet, etc., or stdout piped to a non-TTY.
 func isMachineConsumer(root *cobra.Command) bool {
 	pf := root.PersistentFlags()
-	if agent, _ := pf.GetBool("agent"); agent {
-		return true
-	}
-	if jsonFlag, _ := pf.GetBool("json"); jsonFlag {
-		return true
+	for _, flag := range []string{"agent", "json", "quiet", "ids-only", "count"} {
+		if v, _ := pf.GetBool(flag); v {
+			return true
+		}
 	}
 	fi, err := os.Stdout.Stat()
 	if err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {

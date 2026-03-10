@@ -1413,7 +1413,7 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 				cardID = args[0]
 			}
 			if cardID == "" {
-				return missingArg(cmd, "card-id|url")
+				return missingArg(cmd, "<card-id|url>")
 			}
 
 			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)

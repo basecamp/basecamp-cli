@@ -171,7 +171,8 @@ load test_helper
 
   run basecamp recordings
   assert_failure
-  assert_output_contains "type required"
+  assert_json_value '.error' '<type> required'
+  assert_json_value '.code' 'usage'
 }
 
 

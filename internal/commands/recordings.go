@@ -62,7 +62,7 @@ Type is required: todos, messages, documents, comments, cards, uploads.`,
 			}
 
 			if effectiveType == "" {
-				return missingArg(cmd, "type")
+				return missingArg(cmd, "<type>")
 			}
 
 			return runRecordingsList(cmd, app, effectiveType, project, status, sortBy, direction, limit, page, all)
