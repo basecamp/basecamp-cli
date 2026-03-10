@@ -39,6 +39,8 @@ walk_commands() {
   # Emit: every record carries the full command path to stay unique after sort
   echo "$json" | jq -r --arg path "$cmd_path" '
     "CMD \($path)",
+    ((.args // []) | to_entries | .[] |
+      "ARG \($path) \(.key | tostring | if length < 2 then "0" + . else . end) \(if .value.required then "<" else "[" end)\(.value.name)\(if .value.required then ">" else "]" end)\(if .value.variadic then "..." else "" end)"),
     ((.flags // []) | sort_by(.name) | .[] |
       "FLAG \($path) --\(.name) type=\(.type)"),
     ((.subcommands // []) | sort_by(.name) | .[] |
