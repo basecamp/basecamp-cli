@@ -575,3 +575,37 @@ func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
 	check := checkLegacyInstall()
 	assert.Nil(t, check)
 }
+
+func TestDoctorVerboseHidesLaunchpadScope(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "12345")
+
+	// Store Launchpad credentials with a legacy "read" scope
+	store := app.Auth.GetStore()
+	require.NoError(t, store.Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "launchpad",
+		Scope:       "read",
+	}))
+
+	check := checkCredentials(app, true)
+	assert.Equal(t, "pass", check.Status)
+	assert.NotContains(t, check.Message, "scope:", "Launchpad scope should not appear in verbose output")
+	assert.Contains(t, check.Message, "type: launchpad")
+}
+
+func TestDoctorVerboseShowsBC3Scope(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "12345")
+
+	// Store BC3 credentials with scope
+	store := app.Auth.GetStore()
+	require.NoError(t, store.Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "bc3",
+		Scope:       "read",
+	}))
+
+	check := checkCredentials(app, true)
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "scope: read", "BC3 scope should appear in verbose output")
+	assert.Contains(t, check.Message, "type: bc3")
+}

@@ -231,7 +231,34 @@ Examples:
 				profileCfg.AccountID = accountID
 			}
 
-			// Write profile to global config
+			// Set up in-memory config for the login flow (no persistence yet)
+			if app.Config.Profiles == nil {
+				app.Config.Profiles = make(map[string]*config.ProfileConfig)
+			}
+			app.Config.Profiles[name] = profileCfg
+			app.Config.ActiveProfile = name
+			app.Config.BaseURL = profileCfg.BaseURL
+
+			// Start OAuth login flow — must succeed before we persist anything
+			loginResult, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
+				Scope:     scope,
+				NoBrowser: noBrowser,
+				Remote:    remote,
+				Local:     local,
+				Logger:    func(msg string) { fmt.Println(msg) },
+			})
+			if err != nil {
+				// Clean up in-memory state
+				delete(app.Config.Profiles, name)
+				app.Config.ActiveProfile = ""
+				return err
+			}
+
+			// Login succeeded — persist profile to config
+			if loginResult.Scope != "" {
+				profileCfg.Scope = loginResult.Scope
+			}
+
 			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 			if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
 				return fmt.Errorf("failed to create config directory: %w", err)
@@ -248,12 +275,15 @@ Examples:
 				profilesMap = make(map[string]any)
 			}
 
-			// Add profile
+			// Add profile with effective scope
 			profileEntry := map[string]any{
 				"base_url": profileCfg.BaseURL,
 			}
 			if profileCfg.AccountID != "" {
 				profileEntry["account_id"] = profileCfg.AccountID
+			}
+			if profileCfg.Scope != "" {
+				profileEntry["scope"] = profileCfg.Scope
 			}
 			profilesMap[name] = profileEntry
 			configData["profiles"] = profilesMap
@@ -267,44 +297,6 @@ Examples:
 			// Write config atomically
 			if err := atomicWriteJSON(configPath, configData); err != nil {
 				return err
-			}
-
-			// Update in-memory config and start login
-			if app.Config.Profiles == nil {
-				app.Config.Profiles = make(map[string]*config.ProfileConfig)
-			}
-			app.Config.Profiles[name] = profileCfg
-			app.Config.ActiveProfile = name
-			app.Config.BaseURL = profileCfg.BaseURL
-
-			// Start OAuth login flow for the new profile
-			loginResult, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
-				Scope:     scope,
-				NoBrowser: noBrowser,
-				Remote:    remote,
-				Local:     local,
-				Logger:    func(msg string) { fmt.Println(msg) },
-			})
-			if err != nil {
-				return err
-			}
-
-			// Patch persisted profile config with effective scope from login
-			if loginResult.Scope != "" {
-				profileCfg.Scope = loginResult.Scope
-
-				// Re-read config, update scope, re-write atomically
-				if data, readErr := os.ReadFile(configPath); readErr == nil { //nolint:gosec // G304: Path is from trusted config location
-					var cfgMap map[string]any
-					if json.Unmarshal(data, &cfgMap) == nil {
-						if profiles, ok := cfgMap["profiles"].(map[string]any); ok {
-							if entry, ok := profiles[name].(map[string]any); ok {
-								entry["scope"] = loginResult.Scope
-								_ = atomicWriteJSON(configPath, cfgMap)
-							}
-						}
-					}
-				}
 			}
 
 			// Try to fetch and store user profile

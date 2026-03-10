@@ -629,6 +629,112 @@ func TestProfileCreateDefaultValues(t *testing.T) {
 // TestProfileCreateRejectsInvalidScope was removed: scope validation
 // moved to Login() in auth.go (provider-aware, single source of truth).
 
+func TestProfileShowHidesLaunchpadScope(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:  "https://3.basecampapi.com",
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+		Profiles: map[string]*config.ProfileConfig{
+			"prod": {BaseURL: "https://3.basecampapi.com", Scope: "read"},
+		},
+	}
+	app, buf := setupProfileTestApp(t, cfg)
+
+	// Store Launchpad credentials with a legacy "read" scope
+	store := app.Auth.GetStore()
+	require.NoError(t, store.Save("profile:prod", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "launchpad",
+		Scope:       "read",
+	}))
+
+	cmd := newProfileShowCmd()
+	err := executeProfileCommand(cmd, app, "prod")
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.NotContains(t, out, "credential_scope", "Launchpad credential scope should be suppressed")
+	assert.NotContains(t, out, `"scope"`, "Launchpad profile scope should be suppressed")
+}
+
+func TestProfileShowDisplaysBC3Scope(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:  "https://3.basecampapi.com",
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+		Profiles: map[string]*config.ProfileConfig{
+			"dev": {BaseURL: "https://bc3.example.com", Scope: "read"},
+		},
+	}
+	app, buf := setupProfileTestApp(t, cfg)
+
+	// Store BC3 credentials with scope
+	store := app.Auth.GetStore()
+	require.NoError(t, store.Save("profile:dev", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "bc3",
+		Scope:       "read",
+	}))
+
+	cmd := newProfileShowCmd()
+	err := executeProfileCommand(cmd, app, "dev")
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "credential_scope", "BC3 credential scope should be shown")
+}
+
+func TestAuthStatusHidesLaunchpadScope(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:  "https://3.basecampapi.com",
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+	}
+	app, buf := setupProfileTestApp(t, cfg)
+
+	// Store Launchpad credentials with a legacy "read" scope
+	store := app.Auth.GetStore()
+	require.NoError(t, store.Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "launchpad",
+		Scope:       "read",
+		ExpiresAt:   9999999999,
+	}))
+
+	cmd := newAuthStatusCmd()
+	err := executeProfileCommand(cmd, app)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.NotContains(t, out, `"scope"`, "Launchpad scope should be suppressed in auth status")
+	assert.Contains(t, out, "launchpad", "OAuth type should still be shown")
+}
+
+func TestAuthStatusDisplaysBC3Scope(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:  "https://3.basecampapi.com",
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+	}
+	app, buf := setupProfileTestApp(t, cfg)
+
+	// Store BC3 credentials with scope
+	store := app.Auth.GetStore()
+	require.NoError(t, store.Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "bc3",
+		Scope:       "read",
+		ExpiresAt:   9999999999,
+	}))
+
+	cmd := newAuthStatusCmd()
+	err := executeProfileCommand(cmd, app)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, `"scope"`, "BC3 scope should be shown in auth status")
+}
+
 func TestProfileDeleteRemovesFromConfig(t *testing.T) {
 	cfg := &config.Config{
 		BaseURL:        "https://3.basecampapi.com",
