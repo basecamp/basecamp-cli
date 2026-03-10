@@ -1,0 +1,23 @@
+internal/cli/args.go
+  61e7956c3c88ba49 116-118,120-125,127,129-130,132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "ac52558fa3c05ed73cbe24ef581aa2ec6db22160",
+  "prompts": {
+    "61e7956c3c88ba49": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a2aac46-b954-498b-a927-fc16918b07e2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 8,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
