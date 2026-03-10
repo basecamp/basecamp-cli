@@ -63,7 +63,7 @@ load test_helper
 
   run basecamp templates update 123
   assert_failure
-  assert_output_contains "Use --name"
+  assert_output_contains "No update fields specified"
 }
 
 

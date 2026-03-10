@@ -72,7 +72,7 @@ load test_helper
 
   run basecamp messagetypes update 456
   assert_failure
-  assert_output_contains "Use --name"
+  assert_output_contains "No update fields specified"
 }
 
 

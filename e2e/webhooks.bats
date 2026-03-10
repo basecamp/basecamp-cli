@@ -6,20 +6,21 @@ load test_helper
 
 # Flag parsing errors
 
-@test "webhooks create --url without value shows error" {
+@test "webhooks create --url is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
+  # URL is now a positional arg, not a flag
   run basecamp webhooks create --url
   assert_failure
-  assert_output_contains "--url requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "webhooks create --types without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp webhooks create --url https://example.com/hook --types
+  run basecamp webhooks create https://example.com/hook --types
   assert_failure
   assert_output_contains "--types requires a value"
 }
@@ -43,8 +44,8 @@ load test_helper
 
   run basecamp webhooks create
   assert_failure
-  # Go returns "url required", Bash returned "Webhook URL required"
-  assert_output_contains "url required"
+  assert_json_value '.error' '<url> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "webhooks update without id shows error" {
