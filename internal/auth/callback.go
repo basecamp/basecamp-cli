@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-//go:embed callback.html callback_success.html callback_error.html
+//go:embed callback.html callback_success.html callback_error.html callback_denied.html callback_invalid.html
 var callbackFS embed.FS
 
 var callbackTmpl = template.Must(template.ParseFS(callbackFS, "callback.html"))
@@ -30,6 +30,8 @@ func renderCallback(filename string) string {
 var (
 	callbackSuccess = renderCallback("callback_success.html")
 	callbackError   = renderCallback("callback_error.html")
+	callbackDenied  = renderCallback("callback_denied.html")
+	callbackInvalid = renderCallback("callback_invalid.html")
 )
 
 // waitForCallback starts a local HTTP server on the provided listener and
@@ -70,7 +72,21 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 			case errCh <- fmt.Errorf("state mismatch: CSRF protection failed"):
 			default:
 			}
-			_, _ = fmt.Fprint(w, callbackError)
+			_, _ = fmt.Fprint(w, callbackInvalid)
+			shutdown()
+			return
+		}
+
+		if errParam == "access_denied" {
+			msg := "OAuth error: " + errParam
+			if desc := r.URL.Query().Get("error_description"); desc != "" {
+				msg += " — " + desc
+			}
+			select {
+			case errCh <- errors.New(msg):
+			default:
+			}
+			_, _ = fmt.Fprint(w, callbackDenied)
 			shutdown()
 			return
 		}

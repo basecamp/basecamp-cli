@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"testing"
@@ -29,6 +30,14 @@ func httpGet(ctx context.Context, t *testing.T, url string) *http.Response {
 	return resp
 }
 
+func readBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(body)
+}
+
 func TestWaitForCallback_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -52,8 +61,9 @@ func TestWaitForCallback_Success(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=%s&code=auth-code-456", addr, state))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, "Authorization successful")
 
 	select {
 	case code := <-codeCh:
@@ -81,7 +91,8 @@ func TestWaitForCallback_StateMismatch(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=wrong-state&code=abc", addr))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
+	assert.Contains(t, body, "invalid or expired")
 
 	select {
 	case err := <-errCh:
@@ -107,7 +118,8 @@ func TestWaitForCallback_OAuthError(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&state=state", addr))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
+	assert.Contains(t, body, "chose not to authorize")
 
 	select {
 	case err := <-errCh:
@@ -133,12 +145,42 @@ func TestWaitForCallback_OAuthErrorWithDescription(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&error_description=User+denied+access&state=state", addr))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
+	assert.Contains(t, body, "chose not to authorize")
 
 	select {
 	case err := <-errCh:
 		assert.Contains(t, err.Error(), "access_denied")
 		assert.Contains(t, err.Error(), "User denied access")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWaitForCallback_OAuthErrorServerError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ln := listenLocal(t)
+	addr := ln.Addr().String()
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := waitForCallback(ctx, "state", ln)
+		errCh <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=server_error&error_description=Internal+error&state=state", addr))
+	body := readBody(t, resp)
+	assert.Contains(t, body, "Authorization failed")
+	assert.NotContains(t, body, "chose not to authorize")
+
+	select {
+	case err := <-errCh:
+		assert.Contains(t, err.Error(), "server_error")
+		assert.Contains(t, err.Error(), "Internal error")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout")
 	}
@@ -160,7 +202,8 @@ func TestWaitForCallback_OAuthErrorWithBadState(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&state=wrong", addr))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
+	assert.Contains(t, body, "invalid or expired")
 
 	select {
 	case err := <-errCh:
@@ -187,7 +230,8 @@ func TestWaitForCallback_MissingCode(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=state", addr))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
+	assert.Contains(t, body, "Authorization failed")
 
 	select {
 	case err := <-errCh:
@@ -247,7 +291,8 @@ func TestWaitForCallback_IgnoresNonCallbackPaths(t *testing.T) {
 
 	// The real callback should still work after the spurious request
 	resp = httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=state-123&code=real-code", addr))
-	_ = resp.Body.Close()
+	body := readBody(t, resp)
+	assert.Contains(t, body, "Authorization successful")
 
 	select {
 	case code := <-codeCh:
