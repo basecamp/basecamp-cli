@@ -1,0 +1,29 @@
+e2e/errors.bats
+  5d63aeb85efadd4d 174-175
+internal/commands/cards.go
+  5d63aeb85efadd4d 1416
+internal/commands/recordings.go
+  5d63aeb85efadd4d 65
+internal/cli/root.go
+  5d63aeb85efadd4d 477,480-481,483
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "707f71b2a521d4c05609f048db53be2504bd8018",
+  "prompts": {
+    "5d63aeb85efadd4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621df13c-1ed3-47d7-b0ed-8e1c88a44cf5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
