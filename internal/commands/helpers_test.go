@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -105,4 +107,110 @@ func TestApplySubscribeFlags_CommaOnlyRequiresAtLeastOne(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T", err)
 	assert.Contains(t, e.Message, "at least one person")
+}
+
+// newTestCmd creates a minimal cobra.Command for testing missingArg/noChanges.
+// The --agent flag on the root simulates machine-output detection.
+func newTestCmd(agent bool, example string) *cobra.Command {
+	root := &cobra.Command{Use: "basecamp"}
+	root.PersistentFlags().Bool("agent", false, "")
+	root.PersistentFlags().Bool("json", false, "")
+
+	child := &cobra.Command{
+		Use:     "test <arg>",
+		Example: example,
+	}
+	// Capture output so cmd.Help() doesn't write to real stdout
+	child.SetOut(&bytes.Buffer{})
+	child.SetContext(context.Background())
+	root.AddCommand(child)
+
+	if agent {
+		_ = root.PersistentFlags().Set("agent", "true")
+	}
+	return child
+}
+
+func TestMissingArg_AgentMode(t *testing.T) {
+	cmd := newTestCmd(true, "  basecamp test \"hello\"")
+
+	err := missingArg(cmd, "<arg>")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "<arg> required", e.Message)
+	assert.Contains(t, e.Hint, "Usage: basecamp test")
+	assert.Contains(t, e.Hint, "Example: basecamp test \"hello\"")
+}
+
+func TestMissingArg_AgentMode_NoExample(t *testing.T) {
+	cmd := newTestCmd(true, "")
+
+	err := missingArg(cmd, "<query>")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "<query> required", e.Message)
+	assert.Contains(t, e.Hint, "Usage:")
+	assert.NotContains(t, e.Hint, "Example:")
+}
+
+func TestMissingArg_InteractiveMode(t *testing.T) {
+	cmd := newTestCmd(false, "")
+
+	// In interactive (non-agent) mode, missingArg returns nil (cmd.Help() succeeds)
+	err := missingArg(cmd, "<arg>")
+	assert.NoError(t, err)
+}
+
+func TestNoChanges_AgentMode(t *testing.T) {
+	cmd := newTestCmd(true, "  basecamp test 123 --title \"New\"")
+
+	err := noChanges(cmd)
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "No update fields specified", e.Message)
+	assert.Contains(t, e.Hint, "Usage:")
+	assert.Contains(t, e.Hint, "Example:")
+}
+
+func TestNoChanges_InteractiveMode(t *testing.T) {
+	cmd := newTestCmd(false, "")
+
+	err := noChanges(cmd)
+	assert.NoError(t, err)
+}
+
+func TestIsMachineOutput_AgentFlag(t *testing.T) {
+	cmd := newTestCmd(true, "")
+	assert.True(t, isMachineOutput(cmd))
+}
+
+func TestIsMachineOutput_NoFlags(t *testing.T) {
+	cmd := newTestCmd(false, "")
+	// With a buffer (not a real file), the file stat fallback won't trigger
+	assert.False(t, isMachineOutput(cmd))
+}
+
+func TestIsMachineOutput_JSONFlag(t *testing.T) {
+	cmd := newTestCmd(false, "")
+	_ = cmd.Root().PersistentFlags().Set("json", "true")
+	assert.True(t, isMachineOutput(cmd))
+}
+
+func TestMissingArg_MultiLineExample(t *testing.T) {
+	cmd := newTestCmd(true, "  basecamp test \"first\"\n  basecamp test \"second\"")
+
+	err := missingArg(cmd, "<arg>")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	// Should only include the first example line
+	assert.Contains(t, e.Hint, "Example: basecamp test \"first\"")
+	assert.NotContains(t, e.Hint, "second")
 }

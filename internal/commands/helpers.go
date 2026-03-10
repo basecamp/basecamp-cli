@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,67 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
+
+// missingArg shows help in interactive TTY mode, returns a structured
+// usage error naming the missing argument in machine/agent mode.
+// The hint includes both the usage pattern and a concrete example
+// (if cmd.Example is set).
+func missingArg(cmd *cobra.Command, arg string) error {
+	if isMachineOutput(cmd) {
+		hint := "Usage: " + cmd.UseLine()
+		if cmd.Example != "" {
+			if first, _, ok := strings.Cut(cmd.Example, "\n"); ok {
+				hint += "\nExample: " + strings.TrimSpace(first)
+			} else {
+				hint += "\nExample: " + strings.TrimSpace(cmd.Example)
+			}
+		}
+		return output.ErrUsageHint(arg+" required", hint)
+	}
+	return cmd.Help()
+}
+
+// noChanges shows help in interactive TTY mode, returns a structured
+// usage error in machine/agent mode when an update command has no fields.
+func noChanges(cmd *cobra.Command) error {
+	if isMachineOutput(cmd) {
+		hint := "Usage: " + cmd.UseLine()
+		if cmd.Example != "" {
+			if first, _, ok := strings.Cut(cmd.Example, "\n"); ok {
+				hint += "\nExample: " + strings.TrimSpace(first)
+			} else {
+				hint += "\nExample: " + strings.TrimSpace(cmd.Example)
+			}
+		}
+		return output.ErrUsageHint("No update fields specified", hint)
+	}
+	return cmd.Help()
+}
+
+// isMachineOutput returns true when the command is running in a non-interactive
+// context: --agent, --json, --quiet, piped stdout, etc.
+func isMachineOutput(cmd *cobra.Command) bool {
+	if app := appctx.FromContext(cmd.Context()); app != nil {
+		if app.IsMachineOutput() {
+			return true
+		}
+	}
+	// Fallback: check output-mode flags directly (app may not be initialized)
+	pf := cmd.Root().PersistentFlags()
+	for _, flag := range []string{"agent", "json", "quiet", "ids-only", "count"} {
+		if v, _ := pf.GetBool(flag); v {
+			return true
+		}
+	}
+	// Non-TTY stdout → machine consumer (matches FormatAuto behavior)
+	if f, ok := cmd.OutOrStdout().(*os.File); ok {
+		fi, err := f.Stat()
+		if err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // DockTool represents a tool in a project's dock.
 type DockTool struct {
