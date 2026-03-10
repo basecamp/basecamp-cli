@@ -488,3 +488,118 @@ func TestTodosSweepOverdueWithoutProjectErrors(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	assert.Contains(t, e.Message, "Sweep requires a project")
 }
+
+// multiTodosetTransport returns a project with multiple todosets in its dock.
+type multiTodosetTransport struct{}
+
+func (multiTodosetTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		if strings.Contains(req.URL.Path, "/projects.json") {
+			body = `[{"id": 123, "name": "Test"}]`
+		} else if strings.Contains(req.URL.Path, "/projects/") {
+			body = `{"id": 123, "dock": [
+				{"name": "todoset", "id": 100, "title": "Engineering", "enabled": true},
+				{"name": "todoset", "id": 200, "title": "Design", "enabled": true}
+			]}`
+		} else {
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+	return nil, errors.New("unexpected request")
+}
+
+func setupMultiTodosetApp(t *testing.T) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(multiTodosetTransport{}),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+}
+
+func TestTodosMultiTodosetAmbiguousError(t *testing.T) {
+	app := setupMultiTodosetApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app)
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "--todoset <id>")
+	assert.Contains(t, e.Hint, "Engineering (ID: 100)")
+	assert.Contains(t, e.Hint, "Design (ID: 200)")
+}
+
+func TestTodosMultiTodosetExplicitFlagWorks(t *testing.T) {
+	app := setupMultiTodosetApp(t)
+
+	cmd := NewTodosCmd()
+	// --todoset 100 should bypass ambiguity — will proceed to fetch todolists
+	// which the transport doesn't handle, so it'll fail with a different error
+	err := executeTodosCommand(cmd, app, "--todoset", "100")
+	// Should NOT be an ambiguous error
+	if err != nil {
+		var e *output.Error
+		if errors.As(err, &e) {
+			assert.NotEqual(t, output.CodeAmbiguous, e.Code,
+				"--todoset should bypass multi-todoset ambiguity")
+		}
+	}
+}
+
+func TestTodolistsMultiTodosetAmbiguousError(t *testing.T) {
+	app := setupMultiTodosetApp(t)
+
+	cmd := NewTodolistsCmd()
+	err := executeTodosCommand(cmd, app)
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "--todoset <id>")
+}
+
+func TestTodolistsCreateMultiTodosetAmbiguousError(t *testing.T) {
+	app := setupMultiTodosetApp(t)
+
+	cmd := NewTodolistsCmd()
+	err := executeTodosCommand(cmd, app, "create", "--name", "Test List")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "--todoset <id>")
+}

@@ -15,6 +15,7 @@ import (
 // NewTodolistsCmd creates the todolists command group.
 func NewTodolistsCmd() *cobra.Command {
 	var project string
+	var todosetID string
 	var limit, page int
 	var all bool
 
@@ -25,7 +26,8 @@ func NewTodolistsCmd() *cobra.Command {
 		Long: `Manage todolists in a project.
 
 A "todoset" is the container; "todolists" are the actual lists inside it.
-Each project has one todoset containing multiple todolists.`,
+Most projects have one todoset, but some may have multiple. Use --todoset
+to disambiguate when needed.`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -35,27 +37,28 @@ Each project has one todoset containing multiple todolists.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default to list when called without subcommand
-			return runTodolistsList(cmd, project, limit, page, all)
+			return runTodolistsList(cmd, project, todosetID, limit, page, all)
 		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.Flags().StringVarP(&todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	cmd.AddCommand(
-		newTodolistsListCmd(&project),
+		newTodolistsListCmd(&project, &todosetID),
 		newTodolistsShowCmd(&project),
-		newTodolistsCreateCmd(&project),
+		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
 	)
 
 	return cmd
 }
 
-func newTodolistsListCmd(project *string) *cobra.Command {
+func newTodolistsListCmd(project, todosetID *string) *cobra.Command {
 	var limit, page int
 	var all bool
 
@@ -64,10 +67,11 @@ func newTodolistsListCmd(project *string) *cobra.Command {
 		Short: "List todolists",
 		Long:  "List all todolists in a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTodolistsList(cmd, *project, limit, page, all)
+			return runTodolistsList(cmd, *project, *todosetID, limit, page, all)
 		},
 	}
 
+	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of todolists to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all todolists (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
@@ -75,7 +79,7 @@ func newTodolistsListCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all bool) error {
+func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -116,8 +120,8 @@ func runTodolistsList(cmd *cobra.Command, project string, limit, page int, all b
 		return err
 	}
 
-	// Get todoset from project dock
-	todosetIDStr, err := getTodosetID(cmd, app, resolvedProjectID)
+	// Get todoset from project dock (with interactive fallback for multi-todoset projects)
+	todosetIDStr, err := ensureTodoset(cmd, app, resolvedProjectID, todosetFlag)
 	if err != nil {
 		return err
 	}
@@ -248,7 +252,7 @@ You can pass either a todolist ID or a Basecamp URL:
 	return cmd
 }
 
-func newTodolistsCreateCmd(project *string) *cobra.Command {
+func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	var name string
 	var description string
 
@@ -290,14 +294,14 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			// Get todoset from project dock
-			todosetIDStr, err := getTodosetID(cmd, app, resolvedProjectID)
+			// Get todoset from project dock (with interactive fallback for multi-todoset projects)
+			todosetIDStr, err := ensureTodoset(cmd, app, resolvedProjectID, *todosetID)
 			if err != nil {
 				return err
 			}
 
 			// Parse todoset ID as int64
-			todosetID, err := strconv.ParseInt(todosetIDStr, 10, 64)
+			tsID, err := strconv.ParseInt(todosetIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todoset ID")
 			}
@@ -309,7 +313,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 			}
 
 			// Create todolist via SDK
-			todolist, err := app.Account().Todolists().Create(cmd.Context(), todosetID, req)
+			todolist, err := app.Account().Todolists().Create(cmd.Context(), tsID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -334,6 +338,7 @@ func newTodolistsCreateCmd(project *string) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Todolist name (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
 	_ = cmd.MarkFlagRequired("name")

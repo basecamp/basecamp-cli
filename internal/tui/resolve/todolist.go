@@ -43,7 +43,8 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 	}
 
 	// Fetch todolists to check count (needed for both interactive and non-interactive paths)
-	todolists, err := r.fetchTodolists(ctx, projectID)
+	// No explicit todoset ID in this path — will prompt/error on multi-todoset projects
+	todolists, err := r.fetchTodolists(ctx, projectID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +93,9 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 }
 
 // fetchTodolists retrieves all todolists for a project.
-func (r *Resolver) fetchTodolists(ctx context.Context, projectID string) ([]basecamp.Todolist, error) {
+// explicitTodosetID, if non-empty, selects a specific todoset; otherwise
+// the todoset is resolved automatically (prompting on multi-todoset projects).
+func (r *Resolver) fetchTodolists(ctx context.Context, projectID, explicitTodosetID string) ([]basecamp.Todolist, error) {
 	// Ensure account is configured
 	if r.config.AccountID == "" {
 		return nil, output.ErrUsage("Account must be resolved before fetching todolists")
@@ -105,7 +108,7 @@ func (r *Resolver) fetchTodolists(ctx context.Context, projectID string) ([]base
 	}
 
 	// Get todoset ID from project dock
-	todosetID, err := r.getTodosetID(ctx, projectIDInt)
+	todosetID, err := r.getTodosetID(ctx, projectIDInt, explicitTodosetID)
 	if err != nil {
 		return nil, err
 	}
@@ -145,19 +148,17 @@ func todolistToPickerItem(tl basecamp.Todolist) tui.PickerItem {
 	}
 }
 
-// getTodosetID retrieves the todoset ID from a project's dock.
-func (r *Resolver) getTodosetID(ctx context.Context, projectID int64) (int64, error) {
-	project, err := r.sdk.ForAccount(r.config.AccountID).Projects().Get(ctx, projectID)
+// getTodosetID resolves the todoset ID from a project's dock.
+// Routes through Resolver.Todoset() to handle multi-todoset projects correctly.
+// explicitTodosetID, if non-empty, bypasses resolution and uses the given ID.
+func (r *Resolver) getTodosetID(ctx context.Context, projectID int64, explicitTodosetID string) (int64, error) {
+	result, err := r.Todoset(ctx, fmt.Sprintf("%d", projectID), explicitTodosetID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch project: %w", err)
+		return 0, err
 	}
-
-	// Find enabled todoset in dock
-	for _, tool := range project.Dock {
-		if tool.Name == "todoset" && tool.Enabled {
-			return tool.ID, nil
-		}
+	id, err := strconv.ParseInt(result.ToolID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid todoset ID: %w", err)
 	}
-
-	return 0, output.ErrNotFoundHint("todoset", fmt.Sprintf("%d", projectID), "Project has no todoset enabled")
+	return id, nil
 }

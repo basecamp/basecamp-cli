@@ -82,7 +82,7 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 			}
 			toolList = append(toolList, fmt.Sprintf("%s (ID: %d)", title, tool.ID))
 		}
-		hint := fmt.Sprintf("Specify ID directly. Available:\n  - %s", strings.Join(toolList, "\n  - "))
+		hint := fmt.Sprintf("Specify the ID directly. Available:\n  - %s", strings.Join(toolList, "\n  - "))
 		return "", &output.Error{
 			Code:    output.CodeAmbiguous,
 			Message: fmt.Sprintf("Project has %d %ss", len(matches), friendlyName),
@@ -154,9 +154,15 @@ func ensureProject(cmd *cobra.Command, app *appctx.App) error {
 	return nil
 }
 
-// getTodosetID retrieves the todoset ID from a project's dock.
-func getTodosetID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "todoset", "", "todoset")
+// ensureTodoset resolves the todoset ID from a project, with interactive fallback.
+// If explicitTodosetID is provided (e.g. from --todoset flag), it is used directly.
+// Otherwise, auto-selects when one todoset exists, or prompts when multiple exist.
+func ensureTodoset(cmd *cobra.Command, app *appctx.App, projectID, explicitTodosetID string) (string, error) {
+	resolved, err := app.Resolve().Todoset(cmd.Context(), projectID, explicitTodosetID)
+	if err != nil {
+		return "", err
+	}
+	return resolved.ToolID, nil
 }
 
 // ensureTodolist resolves the todolist ID if not already configured.
