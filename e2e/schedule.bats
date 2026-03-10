@@ -36,13 +36,13 @@ load test_helper
 
 # Missing context errors
 
-@test "schedule without project shows error" {
+@test "schedule without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp schedule
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "schedule entries without project shows error" {
@@ -81,7 +81,8 @@ load test_helper
 
   run basecamp schedule create --starts-at "2024-01-15T10:00:00Z" --ends-at "2024-01-15T11:00:00Z"
   assert_failure
-  assert_output_contains "Summary required"
+  assert_json_value '.error' '<summary> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "schedule create without starts-at shows error" {

@@ -24,7 +24,8 @@ load test_helper
 
   run basecamp templates create
   assert_failure
-  assert_output_contains "Template name is required"
+  assert_json_value '.error' '<name> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "templates create --name without value shows error" {

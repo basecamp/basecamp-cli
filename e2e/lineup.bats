@@ -4,15 +4,15 @@
 load test_helper
 
 
-# Missing action
+# Bare parent command
 
-@test "lineup without action shows error" {
+@test "lineup without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp lineup
-  assert_failure
-  assert_output_contains "Action required"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 
@@ -24,7 +24,8 @@ load test_helper
 
   run basecamp lineup create
   assert_failure
-  assert_output_contains "Marker name"
+  assert_json_value '.error' '<name> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "lineup create without date shows error" {
@@ -33,7 +34,8 @@ load test_helper
 
   run basecamp lineup create "Alpha Release"
   assert_failure
-  assert_output_contains "Marker date"
+  assert_json_value '.error' '<date> required'
+  assert_json_value '.code' 'usage'
 }
 
 
@@ -45,7 +47,8 @@ load test_helper
 
   run basecamp lineup update
   assert_failure
-  assert_output_contains "ID required"
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "lineup update without name or date shows error" {
@@ -54,7 +57,8 @@ load test_helper
 
   run basecamp lineup update 123
   assert_failure
-  assert_output_contains "Provide --name"
+  assert_json_value '.error' 'No update fields specified'
+  assert_json_value '.code' 'usage'
 }
 
 
@@ -78,7 +82,7 @@ load test_helper
 
   run basecamp lineup create --name
   assert_failure
-  assert_output_contains "--name requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "lineup create --date without value shows error" {
@@ -87,7 +91,7 @@ load test_helper
 
   run basecamp lineup create "Alpha" --date
   assert_failure
-  assert_output_contains "--date requires a value"
+  assert_output_contains "Unknown option"
 }
 
 

@@ -6,13 +6,13 @@ load test_helper
 
 # Missing context errors
 
-@test "forwards without project shows error" {
+@test "forwards without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp forwards
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "forwards show without id shows error" {

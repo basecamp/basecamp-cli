@@ -6,13 +6,13 @@ load test_helper
 
 # Missing project errors
 
-@test "messageboards without project shows error" {
+@test "messageboards without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp messageboards
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "messageboards show without project shows error" {

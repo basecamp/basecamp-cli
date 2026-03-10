@@ -12,7 +12,8 @@ load test_helper
 
   run basecamp react "👍"
   assert_failure
-  assert_output_contains "--on or --recording required"
+  assert_json_value '.error' '--on or --recording required'
+  assert_json_value '.code' 'usage'
 }
 
 

@@ -27,13 +27,13 @@ load test_helper
 
 # Missing context errors
 
-@test "checkins without project shows error" {
+@test "checkins without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp checkins
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "checkins questions without project shows error" {
@@ -51,7 +51,8 @@ load test_helper
 
   run basecamp checkins question
   assert_failure
-  assert_output_contains "ID required"
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "checkins answers without question id shows error" {
@@ -69,7 +70,8 @@ load test_helper
 
   run basecamp checkins answer
   assert_failure
-  assert_output_contains "Answer ID required"
+  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.code' 'usage'
 }
 
 

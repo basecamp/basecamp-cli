@@ -24,7 +24,8 @@ load test_helper
 
   run basecamp messagetypes create --icon "test"
   assert_failure
-  assert_output_contains "Name is required"
+  assert_json_value '.error' '<name> required'
+  assert_json_value '.code' 'usage'
 }
 
 @test "messagetypes create without icon shows error" {

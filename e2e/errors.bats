@@ -15,22 +15,24 @@ load test_helper
   assert_output_contains "--project requires a value"
 }
 
-@test "todos --list without value shows error" {
+@test "todos --list is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # --list was removed; todolist is set via config or interactive selection
   run basecamp todos --list
   assert_failure
-  assert_output_contains "--list requires a value"
+  assert_output_contains "Unknown option"
 }
 
-@test "todos --assignee without value shows error" {
+@test "todos --assignee is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # --assignee was removed; use basecamp reports assigned instead
   run basecamp todos --assignee
   assert_failure
-  assert_output_contains "--assignee requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "campfire --campfire without value shows error" {
@@ -52,13 +54,14 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
-@test "cards --column without value shows error" {
+@test "cards --column is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # --column was removed; use 'basecamp cards column' subcommand instead
   run basecamp cards --column
   assert_failure
-  assert_output_contains "--column requires a value"
+  assert_output_contains "Unknown option"
 }
 
 @test "recordings --type without value shows error" {
@@ -142,22 +145,24 @@ load test_helper
 
 # Missing context errors
 
-@test "todos without project shows error" {
+@test "todos without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # Group command without project shows help with subcommand list
   run basecamp todos
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
-@test "cards without project shows error" {
+@test "cards without project shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
+  # Group command without project shows help with subcommand list
   run basecamp cards
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "recordings without type shows error" {
@@ -166,7 +171,7 @@ load test_helper
 
   run basecamp recordings
   assert_failure
-  assert_output_contains "Type required"
+  assert_output_contains "type required"
 }
 
 

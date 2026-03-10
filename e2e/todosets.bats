@@ -6,13 +6,13 @@ load test_helper
 
 # Missing project errors
 
-@test "todosets without project shows error" {
+@test "todosets without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp todosets
-  assert_failure
-  assert_output_contains "project"
+  assert_success
+  assert_output_contains "COMMANDS"
 }
 
 @test "todosets show without project shows error" {
