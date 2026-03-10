@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/basecamp/cli/credstore"
 )
@@ -22,7 +23,8 @@ type Credentials struct {
 
 // Store wraps credstore.Store with typed Credentials marshaling.
 type Store struct {
-	inner *credstore.Store
+	inner   *credstore.Store
+	warnOnce sync.Once
 }
 
 // NewStore creates a credential store.
@@ -32,10 +34,16 @@ func NewStore(fallbackDir string) *Store {
 		DisableEnvVar: "BASECAMP_NO_KEYRING",
 		FallbackDir:   fallbackDir,
 	})
-	if w := s.FallbackWarning(); w != "" {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
-	}
 	return &Store{inner: s}
+}
+
+// warnFallback prints the keyring fallback warning once, on first credential write.
+func (s *Store) warnFallback() {
+	s.warnOnce.Do(func() {
+		if w := s.inner.FallbackWarning(); w != "" {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		}
+	})
 }
 
 // Load retrieves credentials for the given origin.
@@ -53,6 +61,7 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 
 // Save stores credentials for the given origin.
 func (s *Store) Save(origin string, creds *Credentials) error {
+	s.warnFallback()
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return err
