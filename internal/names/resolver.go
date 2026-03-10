@@ -419,16 +419,20 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 		return nil, nil
 	}
 
-	// Fetch todolists from todoset
+	// Fetch all pages of todolists from todoset
 	todolistsPath := fmt.Sprintf("/todosets/%d/todolists.json", todosetID)
-	resp, err := r.forAccount().Get(ctx, todolistsPath)
+	pages, err := r.forAccount().GetAll(ctx, todolistsPath)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
 
-	var todolists []Todolist
-	if err := json.Unmarshal(resp.Data, &todolists); err != nil {
-		return nil, err
+	todolists := make([]Todolist, 0, len(pages))
+	for _, page := range pages {
+		var tl Todolist
+		if err := json.Unmarshal(page, &tl); err != nil {
+			return nil, err
+		}
+		todolists = append(todolists, tl)
 	}
 
 	r.todolists[projectID] = todolists
