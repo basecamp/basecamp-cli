@@ -150,7 +150,8 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		})
 	}
 
-	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 		state := r.URL.Query().Get("state")
@@ -158,8 +159,12 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		errParam := r.URL.Query().Get("error")
 
 		if errParam != "" {
+			msg := "OAuth error: " + errParam
+			if desc := r.URL.Query().Get("error_description"); desc != "" {
+				msg += " — " + desc
+			}
 			select {
-			case errCh <- fmt.Errorf("OAuth error: %s", errParam):
+			case errCh <- fmt.Errorf("%s", msg):
 			default:
 			}
 			_, _ = fmt.Fprint(w, callbackError)
@@ -194,7 +199,9 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		_, _ = fmt.Fprint(w, callbackSuccess)
 		shutdown()
 	})
+	server.Handler = mux
 
+	defer shutdown()
 	go func() { _ = server.Serve(listener) }()
 
 	select {
@@ -204,7 +211,5 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 		return "", err
 	case <-ctx.Done():
 		return "", ctx.Err()
-	case <-time.After(5 * time.Minute):
-		return "", fmt.Errorf("authentication timeout waiting for callback on %s", listener.Addr())
 	}
 }
