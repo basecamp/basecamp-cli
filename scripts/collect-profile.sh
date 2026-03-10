@@ -39,6 +39,7 @@ for pkg in $PACKAGES; do
     BASECAMP_NO_KEYRING=1 go test -cpuprofile="$profile_file" \
         -bench=. \
         -benchtime=3s \
+        -run='^$' \
         -count=1 \
         "$pkg" >/dev/null 2>&1 || true
     if [[ -f "$profile_file" && -s "$profile_file" ]]; then
