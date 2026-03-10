@@ -294,8 +294,8 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				return missingArg(cmd, "<title>")
 			}
 
-			title := strings.TrimSpace(args[0])
-			if title == "" {
+			title := args[0]
+			if strings.TrimSpace(title) == "" {
 				return cmd.Help()
 			}
 			var content string
@@ -447,9 +447,7 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards update 789 --body "new body"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			title = strings.TrimSpace(title)
-			content = strings.TrimSpace(content)
-			if title == "" && content == "" && due == "" && assignee == "" {
+			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && due == "" && assignee == "" {
 				return noChanges(cmd)
 			}
 

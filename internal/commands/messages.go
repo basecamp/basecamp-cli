@@ -230,15 +230,15 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 			if len(args) == 0 {
 				return missingArg(cmd, "<title>")
 			}
-			title := strings.TrimSpace(args[0])
+			title := args[0]
 
 			// Body from second positional arg or --editor
 			var body string
 			if len(args) > 1 {
-				body = strings.TrimSpace(args[1])
+				body = args[1]
 			}
 
-			if title == "" {
+			if strings.TrimSpace(title) == "" {
 				return cmd.Help()
 			}
 
@@ -380,9 +380,7 @@ You can pass either a message ID or a Basecamp URL:
   basecamp messages update 789 --body "new body"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			title = strings.TrimSpace(title)
-			body = strings.TrimSpace(body)
-			if title == "" && body == "" {
+			if strings.TrimSpace(title) == "" && strings.TrimSpace(body) == "" {
 				return noChanges(cmd)
 			}
 

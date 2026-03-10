@@ -268,8 +268,7 @@ for rich text (HTML) messages.`,
 			}
 
 			// Show help when invoked with no message content
-			messageContent = strings.TrimSpace(messageContent)
-			if messageContent == "" {
+			if strings.TrimSpace(messageContent) == "" {
 				return missingArg(cmd, "<message>")
 			}
 
