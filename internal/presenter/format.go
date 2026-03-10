@@ -17,6 +17,8 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 		return formatDate(val, locale)
 	case "relative_time":
 		return formatRelativeTime(val, locale)
+	case "person":
+		return formatPerson(val)
 	case "people":
 		return formatPeople(val)
 	case "number":
@@ -127,6 +129,16 @@ func formatPeople(val any) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// formatPerson formats a single person object (map with "name" field).
+func formatPerson(val any) string {
+	if m, ok := val.(map[string]any); ok {
+		if name, ok := m["name"].(string); ok {
+			return name
+		}
+	}
+	return ""
 }
 
 // singleLine returns the first non-empty line from s, trimmed.

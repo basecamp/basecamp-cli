@@ -16,6 +16,10 @@ fields:
     emphasis: primary
     format: text
 
+  creator:
+    role: detail
+    format: person
+
   created_at:
     role: meta
     emphasis: muted
@@ -27,9 +31,9 @@ fields:
 
 views:
   list:
-    columns: [content, created_at]
+    columns: [id, content, creator, created_at]
   detail:
     sections:
       - fields: [content]
       - heading: Metadata
-        fields: [id, created_at]
+        fields: [id, created_at, creator]
