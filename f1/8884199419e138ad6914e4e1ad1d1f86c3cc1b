@@ -1,0 +1,31 @@
+e2e/cards_columns_steps.bats
+  6921866741cd6f1d 195,365
+internal/commands/projects.go
+  6921866741cd6f1d 27-30
+internal/cli/root.go
+  6921866741cd6f1d 184
+internal/cli/help_test.go
+  6921866741cd6f1d 10,78,90-91,93-131,134-165,168-230
+internal/cli/help.go
+  6921866741cd6f1d 9,15-18,24-25,28,180-204,206-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "f18884199419e138ad6914e4e1ad1d1f86c3cc1b",
+  "prompts": {
+    "6921866741cd6f1d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "62fa8c41-b086-47ed-8a45-b0cc2e2a84fd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 4,
+      "accepted_lines": 289,
+      "overriden_lines": 0
+    }
+  }
+}
