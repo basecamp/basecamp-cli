@@ -383,6 +383,28 @@ func TestList_BoostWithExtra_Alignment(t *testing.T) {
 	assert.Contains(t, view, "boosts", "Boost count should be visible")
 }
 
+func TestList_BoostSingularPlural(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(60, 10)
+	l.SetFocused(true)
+
+	l.SetItems([]ListItem{
+		{ID: "1", Title: "One boost item", Boosts: 1},
+		{ID: "2", Title: "Many boost item", Boosts: 5},
+	})
+
+	view := l.View()
+	assert.Contains(t, view, "1 boost")
+	assert.NotContains(t, view, "1 boosts")
+	assert.Contains(t, view, "5 boosts")
+}
+
+func TestList_BoostLabel(t *testing.T) {
+	assert.Equal(t, "1 boost", boostLabel(1))
+	assert.Equal(t, "2 boosts", boostLabel(2))
+	assert.Equal(t, "99 boosts", boostLabel(99))
+}
+
 func TestList_LongFilter_NoOverflow(t *testing.T) {
 	l := NewList(tui.NewStyles())
 	l.SetSize(40, 20)
