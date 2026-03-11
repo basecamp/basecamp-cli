@@ -1,0 +1,33 @@
+internal/tui/resolve/account.go
+  ace56a3dc2169407 70,115-119
+internal/commands/commands.go
+  ace56a3dc2169407 37-38,41,43,63-66,95,112
+internal/commands/commands_test.go
+  ace56a3dc2169407 57
+internal/commands/wizard.go
+  ace56a3dc2169407 210-214
+internal/cli/root.go
+  ace56a3dc2169407 205
+internal/commands/accounts.go
+  ace56a3dc2169407 1-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "2103da085c5d25eb4bb6ab9d94231472bb6338cf",
+  "prompts": {
+    "ace56a3dc2169407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e19d22cb-48c9-41df-8e2a-00ef8512a962",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 246,
+      "overriden_lines": 0
+    }
+  }
+}
