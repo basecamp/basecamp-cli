@@ -1,0 +1,25 @@
+internal/commands/show_test.go
+  b14defc1fa7673f6 1-53
+internal/commands/show.go
+  b14defc1fa7673f6 126-142,181-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "3b98d31bcce05c12fd6adbcfce6118684ad6e2ed",
+  "prompts": {
+    "b14defc1fa7673f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13184e33-0454-4203-ac6c-b3806fac6e4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 103,
+      "overriden_lines": 0
+    }
+  }
+}
