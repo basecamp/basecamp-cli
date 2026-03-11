@@ -111,8 +111,8 @@ func TestMessagesListRequiresProject(t *testing.T) {
 	assert.Equal(t, "Project ID required", e.Message)
 }
 
-// TestMessagesCreateShowsHelpWithoutSubject tests that help is shown when --subject is missing.
-func TestMessagesCreateShowsHelpWithoutSubject(t *testing.T) {
+// TestMessagesCreateShowsHelpWithoutTitle tests that help is shown when title is missing.
+func TestMessagesCreateShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "123"
 
@@ -173,7 +173,7 @@ func TestMessagesUpdateRequiresID(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestMessagesUpdateRequiresContent tests that messages update requires --subject or --content.
+// TestMessagesUpdateShowsHelpWithoutContent tests that messages update requires --title or --body.
 func TestMessagesUpdateShowsHelpWithoutContent(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "123"
@@ -184,8 +184,8 @@ func TestMessagesUpdateShowsHelpWithoutContent(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestMessageShortcutShowsHelpWithoutSubject tests that help is shown when --subject is missing.
-func TestMessageShortcutShowsHelpWithoutSubject(t *testing.T) {
+// TestMessageShortcutShowsHelpWithoutTitle tests that help is shown when title is missing.
+func TestMessageShortcutShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "123"
 
