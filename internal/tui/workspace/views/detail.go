@@ -1307,15 +1307,23 @@ func (v *Detail) syncPreview() {
 		})
 	}
 	if v.data.boosts > 0 {
-		boostValue := fmt.Sprintf("%d boosts", v.data.boosts)
+		boostValue := boostLabel(v.data.boosts)
 		if len(v.data.boostDetails) > 0 {
+			const maxShown = 3
 			var parts []string
-			for _, b := range v.data.boostDetails {
+			limit := len(v.data.boostDetails)
+			if limit > maxShown {
+				limit = maxShown
+			}
+			for _, b := range v.data.boostDetails[:limit] {
 				if b.booster != "" {
 					parts = append(parts, fmt.Sprintf("%s %s", b.content, b.booster))
 				} else {
 					parts = append(parts, b.content)
 				}
+			}
+			if extra := len(v.data.boostDetails) - limit; extra > 0 {
+				parts = append(parts, fmt.Sprintf("+%d more", extra))
 			}
 			boostValue = strings.Join(parts, ", ")
 		}
@@ -1568,4 +1576,12 @@ func titleCase(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// boostLabel returns "1 boost" or "N boosts".
+func boostLabel(n int) string {
+	if n == 1 {
+		return "1 boost"
+	}
+	return fmt.Sprintf("%d boosts", n)
 }

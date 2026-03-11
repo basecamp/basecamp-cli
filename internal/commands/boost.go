@@ -25,7 +25,7 @@ characters max) or emoji.
 
 Use 'basecamp boost list <id>' to see boosts on an item.
 Use 'basecamp boost show <boost-id>' to view a specific boost.
-Use 'basecamp boost create <id> "emoji"' to boost an item.
+Use 'basecamp boost create <id> "content"' to boost an item.
 Use 'basecamp boost delete <boost-id>' to remove a boost.
 
 Tip: In the TUI, press 'b' on any item to boost interactively.
