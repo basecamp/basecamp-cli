@@ -1,0 +1,55 @@
+internal/auth/callback_exchange_failed.html
+  319f82eb5e5c25c5 1-13
+internal/auth/callback_error.html
+  b5756bff233fa21b 1-13
+internal/auth/callback_success.html
+  b5756bff233fa21b 1-13
+internal/commands/edit_test.go
+  b5756bff233fa21b 14
+internal/auth/callback_test.go
+  b5756bff233fa21b 18,24-32,50,70-72,93,120,147,155-204,207-216,232,273-275,288,299-301,303
+  319f82eb5e5c25c5 6,33-40,63-64,94-95,121-122,148-149,205-206,233-234,293-295
+internal/auth/callback.go
+  319f82eb5e5c25c5 18,20-29,48,58-61,69-89,95-98,121,134
+  b5756bff233fa21b 7,52-57,94,100
+internal/auth/callback_invalid.html
+  319f82eb5e5c25c5 1-13
+internal/auth/callback.html
+  319f82eb5e5c25c5 63
+  b5756bff233fa21b 1-62,64-85
+internal/auth/callback_denied.html
+  319f82eb5e5c25c5 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "60739d31f687252cd2bbf19824866651b6c1fc08",
+  "prompts": {
+    "319f82eb5e5c25c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35333dfe-a2f6-4789-b5d6-423dbe712fe7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 107,
+      "overriden_lines": 0
+    },
+    "b5756bff233fa21b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dbd1a40-e27d-43af-9370-600331e182d9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 9,
+      "accepted_lines": 206,
+      "overriden_lines": 0
+    }
+  }
+}
