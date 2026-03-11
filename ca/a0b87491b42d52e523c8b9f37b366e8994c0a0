@@ -1,0 +1,29 @@
+internal/presenter/format.go
+  5539cc013863ffb0 144-145,147,150-153,156,159
+internal/output/render.go
+  5539cc013863ffb0 670-672
+internal/output/output_test.go
+  5539cc013863ffb0 2130-2154,2157-2245
+internal/presenter/presenter_test.go
+  5539cc013863ffb0 9,1650,1652-1653,1664-1694,1706-1707,1970-2074
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "caa0b87491b42d52e523c8b9f37b366e8994c0a0",
+  "prompts": {
+    "5539cc013863ffb0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e719e90-e8ae-43e2-bebc-8221234b28e5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 268,
+      "overriden_lines": 0
+    }
+  }
+}
