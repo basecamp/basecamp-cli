@@ -373,90 +373,87 @@ func (l *List) View() string {
 	}
 
 	theme := l.styles.Theme()
-
-	if l.loading {
-		return lipgloss.NewStyle().
-			Width(l.width).
-			Foreground(theme.Muted).
-			Render("Loading…")
-	}
-
 	var b strings.Builder
 
-	// Filter bar
-	if l.filtering || l.filter != "" {
-		prefix := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("/")
-		filterText := l.filter
-		cursor := ""
-		if l.filtering {
-			cursor = lipgloss.NewStyle().Foreground(theme.Primary).Render("\u2588")
-		}
-		counts := lipgloss.NewStyle().Foreground(theme.Muted).
-			Render(fmt.Sprintf("%d/%d", len(l.filtered), len(l.items)))
-
-		countsWidth := lipgloss.Width(counts)
-		prefixWidth := lipgloss.Width(prefix)
-		cursorWidth := lipgloss.Width(cursor)
-		maxFilterWidth := l.width - countsWidth - prefixWidth - cursorWidth - 2
-		if maxFilterWidth > 0 && lipgloss.Width(filterText) > maxFilterWidth {
-			filterText = Truncate(filterText, maxFilterWidth)
-		}
-
-		left := prefix + filterText + cursor
-		leftWidth := lipgloss.Width(left)
-		gap := l.width - leftWidth - countsWidth
-		if gap < 1 {
-			gap = 1
-		}
-		b.WriteString(left + strings.Repeat(" ", gap) + counts)
-		b.WriteString("\n")
-	}
-
-	if len(l.filtered) == 0 {
-		if l.filter != "" {
-			b.WriteString(lipgloss.NewStyle().
-				Width(l.width).
-				Foreground(theme.Muted).
-				Render("No matches"))
-			return b.String()
-		}
-		if l.emptyMsg != nil {
-			b.WriteString(l.renderEmptyMessage(theme))
-			return b.String()
-		}
+	if l.loading {
 		b.WriteString(lipgloss.NewStyle().
 			Width(l.width).
 			Foreground(theme.Muted).
-			Render(l.emptyText))
-		return b.String()
-	}
+			Render("Loading…"))
+	} else {
+		// Filter bar
+		if l.filtering || l.filter != "" {
+			prefix := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("/")
+			filterText := l.filter
+			cursor := ""
+			if l.filtering {
+				cursor = lipgloss.NewStyle().Foreground(theme.Primary).Render("\u2588")
+			}
+			counts := lipgloss.NewStyle().Foreground(theme.Muted).
+				Render(fmt.Sprintf("%d/%d", len(l.filtered), len(l.items)))
 
-	visibleHeight := l.visibleHeight()
-	end := l.offset + visibleHeight
-	if end > len(l.filtered) {
-		end = len(l.filtered)
-	}
+			countsWidth := lipgloss.Width(counts)
+			prefixWidth := lipgloss.Width(prefix)
+			cursorWidth := lipgloss.Width(cursor)
+			maxFilterWidth := l.width - countsWidth - prefixWidth - cursorWidth - 2
+			if maxFilterWidth > 0 && lipgloss.Width(filterText) > maxFilterWidth {
+				filterText = Truncate(filterText, maxFilterWidth)
+			}
 
-	for i := l.offset; i < end; i++ {
-		item := l.filtered[i]
-		isSelected := i == l.cursor && l.focused
-
-		line := l.renderItem(item, isSelected, theme)
-		b.WriteString(line)
-		if i < end-1 {
+			left := prefix + filterText + cursor
+			leftWidth := lipgloss.Width(left)
+			gap := l.width - leftWidth - countsWidth
+			if gap < 1 {
+				gap = 1
+			}
+			b.WriteString(left + strings.Repeat(" ", gap) + counts)
 			b.WriteString("\n")
+		}
+
+		if len(l.filtered) == 0 {
+			if l.filter != "" {
+				b.WriteString(lipgloss.NewStyle().
+					Width(l.width).
+					Foreground(theme.Muted).
+					Render("No matches"))
+			} else if l.emptyMsg != nil {
+				b.WriteString(l.renderEmptyMessage(theme))
+			} else {
+				b.WriteString(lipgloss.NewStyle().
+					Width(l.width).
+					Foreground(theme.Muted).
+					Render(l.emptyText))
+			}
+		} else {
+			visibleHeight := l.visibleHeight()
+			end := l.offset + visibleHeight
+			if end > len(l.filtered) {
+				end = len(l.filtered)
+			}
+
+			for i := l.offset; i < end; i++ {
+				item := l.filtered[i]
+				isSelected := i == l.cursor && l.focused
+
+				line := l.renderItem(item, isSelected, theme)
+				b.WriteString(line)
+				if i < end-1 {
+					b.WriteString("\n")
+				}
+			}
+
+			// Scroll indicator
+			if len(l.filtered) > visibleHeight {
+				b.WriteString("\n")
+				b.WriteString(lipgloss.NewStyle().
+					Foreground(theme.Muted).
+					Render(fmt.Sprintf(" %d/%d", l.cursor+1, len(l.filtered))))
+			}
 		}
 	}
 
-	// Scroll indicator
-	if len(l.filtered) > visibleHeight {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().
-			Foreground(theme.Muted).
-			Render(fmt.Sprintf(" %d/%d", l.cursor+1, len(l.filtered))))
-	}
-
-	return b.String()
+	// Pad output to allocated height to prevent content area collapse
+	return lipgloss.NewStyle().Width(l.width).Height(l.height).Render(b.String())
 }
 
 func (l *List) renderEmptyMessage(theme tui.Theme) string {
