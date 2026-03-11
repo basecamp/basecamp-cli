@@ -54,6 +54,7 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 // mirroring cli.Execute. Shared by TestCatalog and TestSurfaceSnapshot.
 func buildRootWithAllCommands() *cobra.Command {
 	root := cli.NewRootCmd()
+	root.AddCommand(commands.NewAccountsCmd())
 	root.AddCommand(commands.NewAuthCmd())
 	root.AddCommand(commands.NewProjectsCmd())
 	root.AddCommand(commands.NewTodosCmd())

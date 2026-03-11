@@ -202,6 +202,7 @@ func Execute() {
 	cmd := NewRootCmd()
 
 	// Add subcommands
+	cmd.AddCommand(commands.NewAccountsCmd())
 	cmd.AddCommand(commands.NewAuthCmd())
 	cmd.AddCommand(commands.NewProjectsCmd())
 	cmd.AddCommand(commands.NewTodosCmd())
