@@ -4987,6 +4987,7 @@ FLAG basecamp todos list --agent type=bool
 FLAG basecamp todos list --all type=bool
 FLAG basecamp todos list --assignee type=string
 FLAG basecamp todos list --cache-dir type=string
+FLAG basecamp todos list --completed type=bool
 FLAG basecamp todos list --count type=bool
 FLAG basecamp todos list --hints type=bool
 FLAG basecamp todos list --ids-only type=bool
