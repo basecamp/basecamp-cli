@@ -1,5 +1,8 @@
 ARG basecamp assign 00 <todo_id>
 ARG basecamp unassign 00 <todo_id>
+CMD basecamp mcp
+FLAG basecamp mcp --help type=bool
+SUB basecamp mcp
 FLAG basecamp checkin answer create --question type=string
 FLAG basecamp checkins answer create --question type=string
 FLAG basecamp webhook create --url type=string
