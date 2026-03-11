@@ -1,9 +1,23 @@
 package commands
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/names"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 func TestRecordingTypeEndpoint(t *testing.T) {
@@ -52,4 +66,155 @@ func TestRecordingTypeEndpoint_EmptyType(t *testing.T) {
 	data := map[string]any{"type": ""}
 	result := recordingTypeEndpoint(data, "999")
 	assert.Equal(t, "", result, "empty type should return empty string")
+}
+
+// showTestTokenProvider is a mock token provider for show tests.
+type showTestTokenProvider struct{}
+
+func (showTestTokenProvider) AccessToken(_ context.Context) (string, error) {
+	return "test-token", nil
+}
+
+// showRefetchTransport tracks which endpoints are hit and returns appropriate responses.
+type showRefetchTransport struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (t *showRefetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.requests = append(t.requests, req.URL.Path)
+	t.mu.Unlock()
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	var body string
+	if strings.Contains(req.URL.Path, "/recordings/") {
+		// Sparse recording response with type field
+		body = `{"id": 42, "type": "Todo", "title": "sparse title"}`
+	} else if strings.Contains(req.URL.Path, "/todos/") {
+		// Rich type-specific response
+		body = `{"id": 42, "type": "Todo", "title": "Buy milk", "content": "Full todo content", "completed": false}`
+	} else {
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func (t *showRefetchTransport) getRequests() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, len(t.requests))
+	copy(out, t.requests)
+	return out
+}
+
+func TestShowGenericRecordingRefetchesTypeEndpoint(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showRefetchTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"42"}) // No type → generic recording lookup
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /todos/")
+	assert.Contains(t, reqs[0], "/recordings/42.json")
+	assert.Contains(t, reqs[1], "/todos/42.json")
+
+	// Output should contain the richer response content
+	assert.Contains(t, buf.String(), "Full todo content")
+}
+
+func TestShowGenericRecordingFallsBackOnRefetchError(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	// Transport that returns sparse data for /recordings/ and 500 for the refetch
+	transport := &showRefetchFailTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"42"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err, "should succeed with sparse data when refetch fails")
+
+	// Output should contain the sparse recording data
+	assert.Contains(t, buf.String(), "sparse title")
+}
+
+// showRefetchFailTransport returns sparse recording data, then fails on refetch.
+type showRefetchFailTransport struct{}
+
+func (showRefetchFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if strings.Contains(req.URL.Path, "/recordings/") {
+		body := `{"id": 42, "type": "Todo", "title": "sparse title"}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	// Refetch fails with 500
+	return &http.Response{
+		StatusCode: 500,
+		Body:       io.NopCloser(strings.NewReader(`{"error":"internal"}`)),
+		Header:     header,
+	}, nil
 }
