@@ -190,6 +190,16 @@ load test_helper
   assert_output_contains "basecamp message"
 }
 
+@test "comment with whitespace-only content shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comment 123 " "
+  assert_failure
+  assert_json_value '.error' '<content> required'
+  assert_json_value '.code' 'usage'
+}
+
 
 # Missing context errors
 

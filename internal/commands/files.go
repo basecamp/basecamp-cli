@@ -1179,8 +1179,6 @@ You can pass either an item ID or a Basecamp URL:
 			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && itemType == "" {
 				return noChanges(cmd)
 			}
-			title = strings.TrimSpace(title)
-			content = strings.TrimSpace(content)
 
 			app := appctx.FromContext(cmd.Context())
 

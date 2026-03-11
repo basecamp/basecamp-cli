@@ -383,8 +383,6 @@ You can pass either a message ID or a Basecamp URL:
 			if strings.TrimSpace(title) == "" && strings.TrimSpace(body) == "" {
 				return noChanges(cmd)
 			}
-			title = strings.TrimSpace(title)
-			body = strings.TrimSpace(body)
 
 			app := appctx.FromContext(cmd.Context())
 
@@ -562,8 +560,8 @@ use --message-board <id> to specify which one.`,
 			if len(args) == 0 {
 				return missingArg(cmd, "<title>")
 			}
-			title := strings.TrimSpace(args[0])
-			if subject == "" {
+			title := args[0]
+			if strings.TrimSpace(title) == "" {
 				return cmd.Help()
 			}
 

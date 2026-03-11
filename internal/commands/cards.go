@@ -450,8 +450,6 @@ You can pass either a card ID or a Basecamp URL:
 			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && due == "" && assignee == "" {
 				return noChanges(cmd)
 			}
-			title = strings.TrimSpace(title)
-			content = strings.TrimSpace(content)
 
 			app := appctx.FromContext(cmd.Context())
 
@@ -741,8 +739,8 @@ func NewCardCmd() *cobra.Command {
 				return missingArg(cmd, "<title>")
 			}
 
-			title := strings.TrimSpace(args[0])
-			if title == "" {
+			title := args[0]
+			if strings.TrimSpace(title) == "" {
 				return cmd.Help()
 			}
 			var content string
