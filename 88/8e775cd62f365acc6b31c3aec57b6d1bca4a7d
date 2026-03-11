@@ -1,0 +1,39 @@
+scripts/check-bare-groups.sh
+  07a0cc4240396a94 43
+e2e/templates.bats
+  07a0cc4240396a94 7-15
+e2e/files.bats
+  07a0cc4240396a94 7-15
+e2e/auth.bats
+  07a0cc4240396a94 7-15
+e2e/subscriptions.bats
+  07a0cc4240396a94 7-15
+e2e/boost.bats
+  07a0cc4240396a94 7-15
+e2e/messagetypes.bats
+  07a0cc4240396a94 7-15
+e2e/campfire.bats
+  07a0cc4240396a94 7-15
+e2e/webhooks.bats
+  07a0cc4240396a94 7-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "888e775cd62f365acc6b31c3aec57b6d1bca4a7d",
+  "prompts": {
+    "07a0cc4240396a94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "144ea335-9ae2-48f3-a749-bdd01c1d8e1e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 134,
+      "overriden_lines": 0
+    }
+  }
+}
