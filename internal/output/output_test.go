@@ -2187,6 +2187,33 @@ func TestWithEntityCampfireLineMarkdownOutput(t *testing.T) {
 	assert.Contains(t, output, "Alice")
 }
 
+func TestWithEntityMessageStyledOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":         float64(100),
+		"subject":    "Weekly update",
+		"content":    "<p>Status report</p>",
+		"creator":    map[string]any{"name": "Bob"},
+		"created_at": "2026-03-01T09:00:00Z",
+	}
+	err := w.OK(data,
+		WithEntity("message"),
+		WithSummary("Message: Weekly update"),
+	)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Weekly update",
+		"message detail should show subject")
+	assert.Contains(t, output, "Status report",
+		"message detail should show HTML-stripped content")
+}
+
 func TestRenderDataStripsOSCFromTopLevelString(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatMarkdown, Writer: &buf})

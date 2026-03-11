@@ -162,6 +162,8 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 
+	respOpts = append(respOpts, output.WithEntity("message"))
+
 	return app.OK(messages, respOpts...)
 }
 
@@ -197,6 +199,7 @@ You can pass either a message ID or a Basecamp URL:
 
 			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
+				output.WithEntity("message"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "comment",
@@ -314,6 +317,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 
 			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
+				output.WithEntity("message"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",
@@ -384,6 +388,7 @@ You can pass either a message ID or a Basecamp URL:
 
 			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Updated message #%s", messageIDStr)),
+				output.WithEntity("message"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -615,6 +620,7 @@ use --message-board <id> to specify which one.`,
 
 			return app.OK(message,
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
+				output.WithEntity("message"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "view",

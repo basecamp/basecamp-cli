@@ -2003,3 +2003,71 @@ func TestCampfireLineRenderListCollapsesMultiline(t *testing.T) {
 		"multiline content must be collapsed, not truncated to first line")
 	assert.Contains(t, out, "Alice")
 }
+
+func TestMessageSchemaLoads(t *testing.T) {
+	schema := LookupByName("message")
+	require.NotNil(t, schema, "message schema must be registered")
+	assert.Equal(t, "message", schema.Entity)
+	assert.Equal(t, "Message", schema.TypeKey)
+
+	// List columns
+	assert.Equal(t, []string{"id", "subject", "creator", "created_at"}, schema.Views.List.Columns)
+
+	// No affordances — commands supply breadcrumbs
+	assert.Empty(t, schema.Actions, "affordances must be empty to avoid duplicate hints")
+}
+
+func TestMessageRenderListShowsSubject(t *testing.T) {
+	schema := LookupByName("message")
+	require.NotNil(t, schema)
+
+	data := []map[string]any{
+		{
+			"id":         float64(100),
+			"subject":    "Weekly update",
+			"creator":    map[string]any{"name": "Bob"},
+			"created_at": "2026-03-01T09:00:00Z",
+		},
+		{
+			"id":         float64(101),
+			"subject":    "Launch plan",
+			"creator":    map[string]any{"name": "Carol"},
+			"created_at": "2026-03-02T14:00:00Z",
+		},
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var buf strings.Builder
+	err := RenderList(&buf, schema, data, styles, enUS)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "Weekly update")
+	assert.Contains(t, out, "Launch plan")
+	assert.Contains(t, out, "Bob")
+	assert.Contains(t, out, "Carol")
+}
+
+func TestMessageRenderDetailHeadline(t *testing.T) {
+	schema := LookupByName("message")
+	require.NotNil(t, schema)
+
+	data := map[string]any{
+		"id":         float64(100),
+		"subject":    "Weekly update",
+		"content":    "<p>Here is the update.</p>",
+		"creator":    map[string]any{"name": "Bob"},
+		"created_at": "2026-03-01T09:00:00Z",
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var buf strings.Builder
+	err := RenderDetail(&buf, schema, data, styles, enUS)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "Weekly update", "detail should show subject as headline")
+	assert.Contains(t, out, "Here is the update", "detail should show HTML-stripped content")
+}
