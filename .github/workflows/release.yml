@@ -301,6 +301,7 @@ jobs:
     environment: release
     permissions:
       contents: read
+      issues: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -313,8 +314,6 @@ jobs:
           owner: basecamp
           repositories: skills
           permission-contents: write
-          permission-pull-requests: write
-          permission-issues: write
 
       - name: Sync skills to distribution repo
         id: sync
@@ -327,20 +326,20 @@ jobs:
       - name: Notify on sync failure
         if: failure()
         env:
-          GH_TOKEN: ${{ steps.skills-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           REF_NAME: ${{ github.ref_name }}
           RUN_ID: ${{ github.run_id }}
         run: |
           TITLE="Skills sync failure"
-          BODY="The automatic skills sync from [basecamp-cli ${REF_NAME}](https://github.com/basecamp/basecamp-cli/actions/runs/${RUN_ID}) failed. Check the workflow run for details."
+          BODY="The automatic skills sync for [${REF_NAME}](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) failed. Check the workflow run for details."
 
           # Check for existing open issue before creating a new one
-          existing=$(gh issue list --repo basecamp/skills --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
+          existing=$(gh issue list --repo ${{ github.repository }} --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
           if [ -n "$existing" ]; then
-            gh issue comment --repo basecamp/skills "$existing" --body "$BODY" || true
+            gh issue comment --repo ${{ github.repository }} "$existing" --body "$BODY" || true
           else
-            gh issue create --repo basecamp/skills --title "$TITLE" --body "$BODY" || true
+            gh issue create --repo ${{ github.repository }} --title "$TITLE" --body "$BODY" || true
           fi
 
           # Always emit annotation so the failure is visible in the workflow summary
-          echo "::error::Skills sync to basecamp/skills failed for ${REF_NAME}. See https://github.com/basecamp/basecamp-cli/actions/runs/${RUN_ID}"
+          echo "::error::Skills sync to basecamp/skills failed for ${REF_NAME}. See https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
