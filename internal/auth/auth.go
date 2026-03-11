@@ -828,6 +828,50 @@ func openBrowser(url string) error {
 	return hostutil.OpenBrowser(url)
 }
 
+// bc3TokenPrefix is the prefix for tokens issued by Basecamp 3's OAuth server.
+const bc3TokenPrefix = "bc_at_"
+
+// AuthorizationEndpoint returns the authorization info endpoint URL for the
+// current authentication context. BASECAMP_TOKEN takes precedence over stored
+// credentials (mirroring AccessToken), with the token prefix used to determine
+// the issuer. When no env token is set, stored OAuth type drives selection.
+func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
+	// BASECAMP_TOKEN wins — match AccessToken() precedence (auth.go line 75).
+	if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
+		if strings.HasPrefix(envToken, bc3TokenPrefix) {
+			return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
+		}
+		lpURL, err := m.launchpadURL()
+		if err != nil {
+			return "", err
+		}
+		return lpURL + "/authorization.json", nil
+	}
+
+	oauthType := m.GetOAuthType()
+	switch oauthType {
+	case "bc3":
+		return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
+	case "launchpad":
+		lpURL, err := m.launchpadURL()
+		if err != nil {
+			return "", err
+		}
+		return lpURL + "/authorization.json", nil
+	case "":
+		// No stored credentials and no env token — shouldn't normally
+		// reach here (IsAuthenticated would have caught it), but handle
+		// gracefully by falling back to Launchpad.
+		lpURL, err := m.launchpadURL()
+		if err != nil {
+			return "", err
+		}
+		return lpURL + "/authorization.json", nil
+	default:
+		return "", output.ErrAuth("Unknown OAuth type: " + oauthType)
+	}
+}
+
 // GetOAuthType returns the OAuth type for the current credential key ("bc3" or "launchpad").
 func (m *Manager) GetOAuthType() string {
 	credKey := m.credentialKey()

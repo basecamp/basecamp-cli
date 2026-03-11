@@ -215,8 +215,13 @@ func (w *Workspace) discoverAccounts() tea.Cmd {
 	// Use the Hub's global realm context: survives account switches,
 	// canceled only on shutdown. Discovery is identity-wide, not account-scoped.
 	ctx := w.session.Hub().Global().Context()
+	authMgr := w.session.App().Auth
 	return func() tea.Msg {
-		accounts, err := ms.DiscoverAccounts(ctx)
+		endpoint, epErr := authMgr.AuthorizationEndpoint(ctx)
+		if epErr != nil {
+			return AccountsDiscoveredMsg{Err: epErr}
+		}
+		accounts, err := ms.DiscoverAccounts(ctx, endpoint)
 		if err != nil {
 			return AccountsDiscoveredMsg{Err: err}
 		}
@@ -234,7 +239,14 @@ func (w *Workspace) fetchAccountName() tea.Cmd {
 	accountID := w.session.Scope().AccountID
 	return func() tea.Msg {
 		ctx := w.session.Context()
-		accounts, err := w.session.App().Resolve().SDK().Authorization().GetInfo(ctx, nil)
+		endpoint, epErr := w.session.App().Auth.AuthorizationEndpoint(ctx)
+		if epErr != nil {
+			return AccountNameMsg{AccountID: accountID, Err: epErr}
+		}
+		accounts, err := w.session.App().Resolve().SDK().Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{
+			Endpoint:      endpoint,
+			FilterProduct: "bc3",
+		})
 		if err != nil {
 			return AccountNameMsg{AccountID: accountID, Err: err}
 		}

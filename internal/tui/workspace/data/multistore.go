@@ -45,11 +45,17 @@ func NewMultiStore(sdk *basecamp.Client) *MultiStore {
 }
 
 // DiscoverAccounts fetches all accessible accounts and initializes the store.
-// Safe to call multiple times; subsequent calls refresh the account list.
-func (ms *MultiStore) DiscoverAccounts(ctx context.Context) ([]AccountInfo, error) {
-	info, err := ms.sdk.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{
+// The endpoint parameter specifies the authorization info URL; pass "" to use
+// the SDK default. Safe to call multiple times; subsequent calls refresh the
+// account list.
+func (ms *MultiStore) DiscoverAccounts(ctx context.Context, endpoint string) ([]AccountInfo, error) {
+	opts := &basecamp.GetInfoOptions{
 		FilterProduct: "bc3",
-	})
+	}
+	if endpoint != "" {
+		opts.Endpoint = endpoint
+	}
+	info, err := ms.sdk.Authorization().GetInfo(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("discovering accounts: %w", err)
 	}
