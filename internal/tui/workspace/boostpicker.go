@@ -30,7 +30,7 @@ type BoostPicker struct {
 
 func NewBoostPicker(styles *tui.Styles) *BoostPicker {
 	ti := textinput.New()
-	ti.Placeholder = "Type an emoji or 16 chars..."
+	ti.Placeholder = "A short note or emoji…"
 	ti.CharLimit = 16
 	ti.SetWidth(30)
 
@@ -117,7 +117,7 @@ func (p *BoostPicker) View() string {
 		Padding(1, 2)
 
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("Boost this!"))
+	b.WriteString(lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("Give a Boost!"))
 	b.WriteString("\n\n")
 
 	// Render a grid of emojis
@@ -132,7 +132,7 @@ func (p *BoostPicker) View() string {
 		}
 	}
 
-	b.WriteString("\n\nOr type your own:\n")
+	b.WriteString("\n\nOr write a short note (16 chars max):\n")
 	b.WriteString(p.textInput.View())
 	b.WriteString("\n\n(Enter to send, Esc to cancel)")
 
