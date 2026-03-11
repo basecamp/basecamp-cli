@@ -10,7 +10,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// NewBoostsCmd creates the boost command for managing emoji reactions.
+// NewBoostsCmd creates the boost command for managing boosts.
 func NewBoostsCmd() *cobra.Command {
 	var project string
 
@@ -126,7 +126,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
-					Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --event %s --project %s", recordingID, eventID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp boost create %s \"content\" --event %s --project %s", recordingID, eventID, resolvedProjectID),
 					Description: "Boost this event",
 				},
 			),
@@ -145,7 +145,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --project %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp boost create %s \"content\" --project %s", recordingID, resolvedProjectID),
 				Description: "Boost this item",
 			},
 		),
@@ -232,7 +232,7 @@ func newBoostCreateCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <id|url> <content>",
 		Short: "Boost an item",
-		Long: `Boost an item with an emoji reaction.
+		Long: `Boost an item with a short note or emoji.
 
 You can pass either an ID or a Basecamp URL:
   basecamp boost create 789 "🎉" --project my-project
@@ -389,8 +389,8 @@ func NewBoostShortcutCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "react <content>",
-		Short: "React with an emoji",
-		Long: `React to an item with an emoji (shortcut for boost create).
+		Short: "Boost with a short note or emoji",
+		Long: `Boost an item with a short note or emoji (shortcut for boost create).
 
 Content as positional argument, --on for the item:
   basecamp react "🎉" --on 789 --project my-project

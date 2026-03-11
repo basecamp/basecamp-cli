@@ -1577,11 +1577,3 @@ func titleCase(s string) string {
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
 }
-
-// boostLabel returns "1 boost" or "N boosts".
-func boostLabel(n int) string {
-	if n == 1 {
-		return "1 boost"
-	}
-	return fmt.Sprintf("%d boosts", n)
-}
