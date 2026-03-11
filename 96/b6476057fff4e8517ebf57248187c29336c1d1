@@ -1,0 +1,37 @@
+internal/commands/people.go
+  4c59eec5ddecf962 50-52
+internal/commands/wizard.go
+  4c59eec5ddecf962 12-13,144-153,363-370
+internal/tui/workspace/data/multistore.go
+  4c59eec5ddecf962 48-52,55-58
+internal/commands/doctor.go
+  4c59eec5ddecf962 21-22,669-676,678-680
+internal/appctx/context.go
+  4c59eec5ddecf962 362-363
+internal/tui/resolve/account.go
+  4c59eec5ddecf962 115-117
+internal/tui/workspace/workspace.go
+  4c59eec5ddecf962 218,220-224,242-249
+internal/auth/auth.go
+  4c59eec5ddecf962 831-874
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "96b6476057fff4e8517ebf57248187c29336c1d1",
+  "prompts": {
+    "4c59eec5ddecf962": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "359d7a1b-5bf1-4638-9c77-5ea0637717dd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 587,
+      "total_deletions": 82,
+      "accepted_lines": 569,
+      "overriden_lines": 0
+    }
+  }
+}
