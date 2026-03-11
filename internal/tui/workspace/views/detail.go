@@ -1322,7 +1322,7 @@ func (v *Detail) syncPreview() {
 					parts = append(parts, b.content)
 				}
 			}
-			if extra := len(v.data.boostDetails) - limit; extra > 0 {
+			if extra := v.data.boosts - limit; extra > 0 {
 				parts = append(parts, fmt.Sprintf("+%d more", extra))
 			}
 			boostValue = strings.Join(parts, ", ")
