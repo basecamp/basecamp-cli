@@ -36,8 +36,9 @@ type pickerModel struct {
 	quitting     bool
 	styles       *Styles
 	title        string
-	maxVisible   int
-	scrollOffset int
+	maxVisible    int
+	maxVisibleCap int // configured upper bound, restored on terminal grow
+	scrollOffset  int
 
 	// Loading state
 	loading    bool
@@ -67,6 +68,7 @@ func WithPickerTitle(title string) PickerOption {
 func WithMaxVisible(n int) PickerOption {
 	return func(m *pickerModel) {
 		m.maxVisible = n
+		m.maxVisibleCap = n
 	}
 }
 
@@ -124,6 +126,7 @@ func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 		styles:        styles,
 		title:         "Select an item",
 		maxVisible:    20,
+		maxVisibleCap: 20,
 		spinner:       s,
 		loadingMsg:    "Loading…",
 		emptyMessage:  "No items found",
@@ -237,8 +240,8 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clamp maxVisible to fit the terminal: reserve lines for
 		// title, blank, input, blank, scroll indicator, help.
 		const chromeLines = 6
-		if avail := msg.Height - chromeLines; avail > 0 && avail < m.maxVisible {
-			m.maxVisible = avail
+		if avail := msg.Height - chromeLines; avail > 0 {
+			m.maxVisible = min(avail, m.maxVisibleCap)
 		}
 
 	case spinner.TickMsg:
