@@ -1,0 +1,25 @@
+internal/auth/auth.go
+  b14defc1fa7673f6 179-195,197-223,231-232,247-251
+internal/auth/auth_test.go
+  b14defc1fa7673f6 1345-1523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "5e788e46f19bd999db996687fe5602fb8d175675",
+  "prompts": {
+    "b14defc1fa7673f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13184e33-0454-4203-ac6c-b3806fac6e4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 333,
+      "overriden_lines": 0
+    }
+  }
+}
