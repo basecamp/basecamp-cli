@@ -323,3 +323,189 @@ func TestMeWithAccountConfigured(t *testing.T) {
 	assert.False(t, foundSetup, "expected no setup breadcrumb when account is configured")
 	assert.True(t, foundProjects, "expected projects breadcrumb when account is configured")
 }
+
+// setupBC3TokenTestApp creates a test app that uses BASECAMP_TOKEN with
+// a bc_at_ prefix. The mock server is used as BaseURL (BC3 path) rather
+// than Launchpad. No stored credentials are written.
+func setupBC3TokenTestApp(t *testing.T, accountID string, bc3Response *basecamp.AuthorizationInfo) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+
+	// Start mock BC3 server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/authorization.json", r.URL.Path, "unexpected path")
+		if r.URL.Path != "/authorization.json" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(bc3Response)
+	}))
+	t.Cleanup(server.Close)
+
+	// BASECAMP_TOKEN with bc_at_ prefix → should route to BC3 URL
+	t.Setenv("BASECAMP_TOKEN", "bc_at_test_token_123")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	// Temp config dir with no stored credentials
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "basecamp"), 0700))
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: accountID,
+		BaseURL:   server.URL, // BC3-direct URL
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+
+	sdkCfg := &basecamp.Config{BaseURL: server.URL}
+	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
+		basecamp.WithMaxRetries(0),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+		Flags: appctx.GlobalFlags{Hints: true},
+	}
+	return app, buf
+}
+
+// TestMeWithBC3Token tests that basecamp me routes to the BC3 authorization
+// endpoint when BASECAMP_TOKEN has a bc_at_ prefix and no stored credentials exist.
+func TestMeWithBC3Token(t *testing.T) {
+	bc3Response := &basecamp.AuthorizationInfo{
+		Identity: basecamp.Identity{
+			ID:           42,
+			FirstName:    "Token",
+			LastName:     "User",
+			EmailAddress: "token@example.com",
+		},
+		Accounts: []basecamp.AuthorizedAccount{
+			{Product: "bc3", ID: 555, Name: "Token Corp", HREF: "https://3.basecampapi.com/555", AppHREF: "https://3.basecamp.com/555"},
+		},
+	}
+
+	app, buf := setupBC3TokenTestApp(t, "555", bc3Response)
+
+	cmd := NewMeCmd()
+	err := executePeopleCommand(cmd, app)
+	require.NoError(t, err)
+
+	var result struct {
+		Data struct {
+			Identity struct {
+				EmailAddress string `json:"email_address"`
+			} `json:"identity"`
+			Accounts []struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			} `json:"accounts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "failed to parse output: %s", buf.String())
+
+	assert.Equal(t, "token@example.com", result.Data.Identity.EmailAddress)
+	require.Len(t, result.Data.Accounts, 1)
+	assert.Equal(t, int64(555), result.Data.Accounts[0].ID)
+}
+
+// TestMeWithBC3TokenOverridingStaleLaunchpadCreds is the exact scenario from
+// issue #268: BASECAMP_TOKEN=bc_at_... is set, but stale stored credentials
+// with oauth_type=launchpad still exist on disk. The endpoint must follow
+// the token, not the stored type.
+func TestMeWithBC3TokenOverridingStaleLaunchpadCreds(t *testing.T) {
+	bc3Response := &basecamp.AuthorizationInfo{
+		Identity: basecamp.Identity{
+			ID:           99,
+			FirstName:    "Mixed",
+			LastName:     "State",
+			EmailAddress: "mixed@example.com",
+		},
+		Accounts: []basecamp.AuthorizedAccount{
+			{Product: "bc3", ID: 777, Name: "Mixed Corp"},
+		},
+	}
+
+	// Start mock BC3 server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/authorization.json", r.URL.Path, "unexpected path")
+		if r.URL.Path != "/authorization.json" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(bc3Response)
+	}))
+	t.Cleanup(server.Close)
+
+	// bc_at_ token → should route to BC3, not Launchpad
+	t.Setenv("BASECAMP_TOKEN", "bc_at_mixed_state_token")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	// Write stale launchpad credentials that would cause the old bug
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	credsDir := filepath.Join(tmpDir, "basecamp")
+	require.NoError(t, os.MkdirAll(credsDir, 0700))
+
+	staleCreds := map[string]any{
+		server.URL: map[string]any{
+			"access_token":   "stale-lp-token",
+			"refresh_token":  "stale-refresh",
+			"expires_at":     9999999999,
+			"oauth_type":     "launchpad",
+			"token_endpoint": "https://launchpad.37signals.com/authorization/token",
+		},
+	}
+	credsData, _ := json.Marshal(staleCreds)
+	require.NoError(t, os.WriteFile(filepath.Join(credsDir, "credentials.json"), credsData, 0600))
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "777",
+		BaseURL:   server.URL,
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+
+	sdkCfg := &basecamp.Config{BaseURL: server.URL}
+	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
+		basecamp.WithMaxRetries(0),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+		Flags: appctx.GlobalFlags{Hints: true},
+	}
+
+	cmd := NewMeCmd()
+	err := executePeopleCommand(cmd, app)
+	require.NoError(t, err, "basecamp me should succeed despite stale launchpad creds")
+
+	var result struct {
+		Data struct {
+			Identity struct {
+				EmailAddress string `json:"email_address"`
+			} `json:"identity"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "failed to parse output: %s", buf.String())
+	assert.Equal(t, "mixed@example.com", result.Data.Identity.EmailAddress)
+}
