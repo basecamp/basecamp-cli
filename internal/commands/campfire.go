@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -267,7 +268,7 @@ for rich text (HTML) messages.`,
 			}
 
 			// Show help when invoked with no message content
-			if messageContent == "" {
+			if strings.TrimSpace(messageContent) == "" {
 				return missingArg(cmd, "<message>")
 			}
 
