@@ -694,7 +694,12 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		BaseName:       strings.TrimSuffix(filename, filepath.Ext(filename)),
 	}
 	if description != "" {
-		req.Description = richtext.MarkdownToHTML(description)
+		descHTML := richtext.MarkdownToHTML(description)
+		descHTML, resolveErr := resolveLocalImages(cmd, app, descHTML)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		req.Description = descHTML
 	}
 
 	upload, err := app.Account().Uploads().Create(cmd.Context(), vaultIDNum, req)
