@@ -176,10 +176,51 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 		return output.ErrAuth("No refresh token available")
 	}
 
-	// Use stored token endpoint (survives discovery failures)
+	// Migrate old credentials missing OAuthType
+	if creds.OAuthType == "" {
+		creds.OAuthType = "launchpad"
+	}
+
+	// Migrate old credentials missing TokenEndpoint
+	if creds.TokenEndpoint == "" {
+		if creds.OAuthType == "bc3" {
+			return output.ErrAuth("Stored credentials missing token endpoint — please re-authenticate: basecamp auth login")
+		}
+		lpURL, lpErr := m.launchpadURL()
+		if lpErr != nil {
+			return lpErr
+		}
+		creds.TokenEndpoint = lpURL + "/authorization/token"
+	}
+
 	tokenEndpoint := creds.TokenEndpoint
-	if tokenEndpoint == "" {
-		return output.ErrAuth("No token endpoint stored")
+
+	// Resolve client credentials for the refresh request
+	var clientID, clientSecret string
+	switch creds.OAuthType {
+	case "bc3":
+		cc, err := m.loadBC3Client()
+		if err != nil {
+			// DCR credentials from custom-redirect logins are intentionally
+			// not persisted (see registerBC3Client). After a process restart
+			// the client.json won't exist and refresh is impossible.
+			return output.ErrAuth("Cannot load BC3 client credentials for token refresh. " +
+				"This can happen after a custom-redirect login (credentials are session-only). " +
+				"Please re-authenticate: basecamp auth login")
+		}
+		clientID = cc.ClientID
+		clientSecret = cc.ClientSecret
+	default:
+		// Launchpad (or old credentials defaulted to launchpad)
+		if envCreds, err := resolveClientCredentials(func(string) {}); err != nil {
+			return err
+		} else if envCreds != nil {
+			clientID = envCreds.ClientID
+			clientSecret = envCreds.ClientSecret
+		} else {
+			clientID = launchpadClientID
+			clientSecret = launchpadClientSecret
+		}
 	}
 
 	exchanger := oauth.NewExchanger(m.httpClient)
@@ -187,6 +228,8 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	req := oauth.RefreshRequest{
 		TokenEndpoint:   tokenEndpoint,
 		RefreshToken:    creds.RefreshToken,
+		ClientID:        clientID,
+		ClientSecret:    clientSecret,
 		UseLegacyFormat: creds.OAuthType == "launchpad",
 	}
 
@@ -201,6 +244,11 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
+	} else {
+		// Server didn't return expiry — clear to zero. The existing
+		// contract (auth.go:93) treats ExpiresAt==0 as non-expiring,
+		// so this won't re-trigger refresh on the next call.
+		creds.ExpiresAt = 0
 	}
 
 	return m.store.Save(origin, creds)

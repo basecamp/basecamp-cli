@@ -1342,6 +1342,185 @@ func TestLoginBC3DefaultsToRead(t *testing.T) {
 	assert.Equal(t, "read", creds.Scope, "stored scope should be 'read' for BC3 default")
 }
 
+func TestRefreshLocked_LaunchpadSendsClientID(t *testing.T) {
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL
+
+	m := &Manager{
+		cfg:        cfg,
+		httpClient: srv.Client(),
+		store:      newTestStore(t, tmpDir),
+	}
+
+	creds := &Credentials{
+		AccessToken:   "old-token",
+		RefreshToken:  "old-refresh",
+		OAuthType:     "launchpad",
+		TokenEndpoint: srv.URL + "/authorization/token",
+		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
+	}
+	require.NoError(t, m.store.Save(srv.URL, creds))
+
+	err := m.refreshLocked(context.Background(), srv.URL, creds)
+	require.NoError(t, err)
+
+	assert.Contains(t, capturedBody, "client_id="+launchpadClientID)
+	assert.Contains(t, capturedBody, "client_secret="+launchpadClientSecret)
+}
+
+func TestRefreshLocked_BC3SendsClientID(t *testing.T) {
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh","expires_in":3600}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL
+
+	m := &Manager{
+		cfg:        cfg,
+		httpClient: srv.Client(),
+		store:      newTestStore(t, tmpDir),
+	}
+
+	// Pre-populate client.json
+	require.NoError(t, m.saveBC3Client(&ClientCredentials{
+		ClientID:     "bc3-client-id",
+		ClientSecret: "bc3-client-secret",
+	}))
+
+	creds := &Credentials{
+		AccessToken:   "old-token",
+		RefreshToken:  "old-refresh",
+		OAuthType:     "bc3",
+		TokenEndpoint: srv.URL + "/token",
+		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
+	}
+	require.NoError(t, m.store.Save(srv.URL, creds))
+
+	err := m.refreshLocked(context.Background(), srv.URL, creds)
+	require.NoError(t, err)
+
+	assert.Contains(t, capturedBody, "client_id=bc3-client-id")
+	assert.Contains(t, capturedBody, "client_secret=bc3-client-secret")
+}
+
+func TestRefreshLocked_BC3WithoutClientJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := config.Default()
+	m := &Manager{
+		cfg:        cfg,
+		httpClient: http.DefaultClient,
+		store:      newTestStore(t, tmpDir),
+	}
+
+	creds := &Credentials{
+		AccessToken:   "old-token",
+		RefreshToken:  "old-refresh",
+		OAuthType:     "bc3",
+		TokenEndpoint: "https://example.com/token",
+		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
+	}
+
+	err := m.refreshLocked(context.Background(), "test", creds)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Cannot load BC3 client credentials")
+	assert.Contains(t, err.Error(), "custom-redirect")
+}
+
+func TestRefreshLocked_ClearsExpiresAtWhenServerOmits(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// No expires_in in response
+		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL
+
+	m := &Manager{
+		cfg:        cfg,
+		httpClient: srv.Client(),
+		store:      newTestStore(t, tmpDir),
+	}
+
+	creds := &Credentials{
+		AccessToken:   "old-token",
+		RefreshToken:  "old-refresh",
+		OAuthType:     "launchpad",
+		TokenEndpoint: srv.URL + "/authorization/token",
+		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
+	}
+	require.NoError(t, m.store.Save(srv.URL, creds))
+
+	err := m.refreshLocked(context.Background(), srv.URL, creds)
+	require.NoError(t, err)
+
+	// Reload and verify ExpiresAt is 0 (non-expiring)
+	reloaded, err := m.store.Load(srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), reloaded.ExpiresAt,
+		"ExpiresAt should be 0 when server omits expires_in")
+}
+
+func TestRefreshLocked_EmptyOAuthTypeDefaultsToLaunchpad(t *testing.T) {
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh"}`)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL
+
+	m := &Manager{
+		cfg:        cfg,
+		httpClient: srv.Client(),
+		store:      newTestStore(t, tmpDir),
+	}
+
+	creds := &Credentials{
+		AccessToken:   "old-token",
+		RefreshToken:  "old-refresh",
+		OAuthType:     "", // Old credentials with no OAuthType
+		TokenEndpoint: srv.URL + "/authorization/token",
+		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
+	}
+	require.NoError(t, m.store.Save(srv.URL, creds))
+
+	err := m.refreshLocked(context.Background(), srv.URL, creds)
+	require.NoError(t, err)
+
+	// Should have used launchpad legacy format (type=refresh, not grant_type=refresh_token)
+	assert.Contains(t, capturedBody, "type=refresh")
+	assert.Contains(t, capturedBody, "client_id="+launchpadClientID)
+}
+
 func TestLoginRejectsInvalidScope(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
