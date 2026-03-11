@@ -239,6 +239,182 @@ func TestCampfirePostDefaultOmitsContentType(t *testing.T) {
 		"content_type should not be sent when --content-type is not specified")
 }
 
+// mockMultiCampfireTransport returns a project with multiple chat dock entries
+// and serves individual campfire GET requests.
+type mockMultiCampfireTransport struct{}
+
+func (t *mockMultiCampfireTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method != "GET" {
+		return &http.Response{
+			StatusCode: 405,
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Header:     header,
+		}, nil
+	}
+
+	var body string
+	switch {
+	case strings.Contains(req.URL.Path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test Project"}]`
+	case strings.Contains(req.URL.Path, "/projects/123"):
+		body = `{"id": 123, "dock": [` +
+			`{"name": "chat", "id": 1001, "title": "General", "enabled": true},` +
+			`{"name": "chat", "id": 1002, "title": "Engineering", "enabled": true}` +
+			`]}`
+	case strings.HasSuffix(req.URL.Path, "/chats/1001"):
+		body = `{"id": 1001, "title": "General", "type": "Chat::Transcript", "status": "active",` +
+			`"visible_to_clients": false, "inherits_status": true,` +
+			`"url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",` +
+			`"bucket": {"id": 123, "name": "Test"}, "creator": {"id": 1, "name": "Test"}}`
+	case strings.HasSuffix(req.URL.Path, "/chats/1002"):
+		body = `{"id": 1002, "title": "Engineering", "type": "Chat::Transcript", "status": "active",` +
+			`"visible_to_clients": false, "inherits_status": true,` +
+			`"url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",` +
+			`"bucket": {"id": 123, "name": "Test"}, "creator": {"id": 1, "name": "Test"}}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func newTestAppWithTransport(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &campfireTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+	return app, buf
+}
+
+// TestCampfireListMultipleCampfires verifies that `campfire list` succeeds on
+// projects with multiple campfires (no ambiguous error).
+func TestCampfireListMultipleCampfires(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockMultiCampfireTransport{})
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "list")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Len(t, envelope.Data, 2)
+
+	titles := []string{envelope.Data[0]["title"].(string), envelope.Data[1]["title"].(string)}
+	assert.Contains(t, titles, "General")
+	assert.Contains(t, titles, "Engineering")
+}
+
+// TestCampfireListWithCampfireFlag verifies that `campfire list -c <id>` returns
+// only the specified campfire.
+func TestCampfireListWithCampfireFlag(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockMultiCampfireTransport{})
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "list", "--campfire", "1002")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Len(t, envelope.Data, 1)
+	assert.Equal(t, "Engineering", envelope.Data[0]["title"])
+}
+
+// mockCampfireDockTransport returns a project whose dock payload is configurable.
+type mockCampfireDockTransport struct {
+	dockJSON string // JSON array for the dock field
+}
+
+func (t *mockCampfireDockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	var body string
+	switch {
+	case strings.Contains(req.URL.Path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test Project"}]`
+	case strings.Contains(req.URL.Path, "/projects/123"):
+		body = `{"id": 123, "dock": ` + t.dockJSON + `}`
+	default:
+		body = `{}`
+	}
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestCampfireListNoCampfires verifies the not-found error when a project has
+// no chat dock entries at all.
+func TestCampfireListNoCampfires(t *testing.T) {
+	transport := &mockCampfireDockTransport{
+		dockJSON: `[{"name": "todoset", "id": 500, "enabled": true}]`,
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "list")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Hint, "no campfire")
+}
+
+// TestCampfireListDisabledCampfire verifies the not-found error hints that
+// campfire is disabled when only disabled chat entries exist.
+func TestCampfireListDisabledCampfire(t *testing.T) {
+	transport := &mockCampfireDockTransport{
+		dockJSON: `[{"name": "chat", "id": 900, "title": "Campfire", "enabled": false}]`,
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "list")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Hint, "disabled")
+}
+
 // TestCampfirePostViaSubcommandWithCampfireFlag verifies the proper way to post
 // to a specific campfire: `basecamp campfire post <msg> --campfire <id>`.
 func TestCampfirePostViaSubcommandWithCampfireFlag(t *testing.T) {
