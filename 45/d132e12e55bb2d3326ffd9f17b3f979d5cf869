@@ -1,0 +1,29 @@
+internal/commands/campfire.go
+  5539cc013863ffb0 140,231,364,444
+internal/output/output_test.go
+  5539cc013863ffb0 2130-2158
+internal/presenter/presenter_test.go
+  5539cc013863ffb0 1649,1651-1652,1663-1681,1693-1694,1957-1993
+internal/presenter/schemas/campfire_line.yaml
+  5539cc013863ffb0 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "45d132e12e55bb2d3326ffd9f17b3f979d5cf869",
+  "prompts": {
+    "5539cc013863ffb0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e719e90-e8ae-43e2-bebc-8221234b28e5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 2,
+      "accepted_lines": 130,
+      "overriden_lines": 0
+    }
+  }
+}
