@@ -210,10 +210,8 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 
 	// Fallback: try pingable people (/people/pingable.json) which includes
 	// people not in /people.json (e.g., clients, external collaborators).
-	pingable, pingErr := r.getPingable(ctx)
-	if pingErr != nil {
-		return "", "", pingErr
-	}
+	// Degrade gracefully on error — the people list already provides suggestions.
+	pingable, _ := r.getPingable(ctx)
 
 	if len(pingable) > 0 {
 		// Try email exact match
