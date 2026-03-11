@@ -136,6 +136,8 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
 | Overdue todos (cross-project) | `basecamp reports overdue --json` |
 | Assign todo | `basecamp assign <id> --to <person> --in <project> --json` |
+| Assign card | `basecamp assign <id> --card --to <person> --in <project> --json` |
+| Assign card step | `basecamp assign <id> --step --to <person> --in <project> --json` |
 | Create todo | `basecamp todo "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
 | Complete todo | `basecamp done <id> --json` |
@@ -280,8 +282,12 @@ basecamp todos list --list <todolist_id> --in <project> # In specific list
 basecamp todo "Task" --in <project> --list <list> --assignee me --due tomorrow
 basecamp done <id> [id...]                              # Complete (multiple OK)
 basecamp reopen <id>                                    # Uncomplete
-basecamp assign <id> --to <person> --in <project>       # Assign (person: ID, email, or "me")
-basecamp unassign <id> --from <person> --in <project>   # Remove assignee
+basecamp assign <id> --to <person> --in <project>       # Assign to-do (person: ID, email, or "me")
+basecamp unassign <id> --from <person> --in <project>   # Remove to-do assignee
+basecamp assign <id> --card --to <person> --in <project>   # Assign card
+basecamp unassign <id> --card --from <person> --in <project> # Remove card assignee
+basecamp assign <id> --step --to <person> --in <project>   # Assign card step
+basecamp unassign <id> --step --from <person> --in <project> # Remove step assignee
 basecamp todos position <id> --to 1                     # Move to top
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 ```
