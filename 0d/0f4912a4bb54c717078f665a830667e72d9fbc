@@ -1,0 +1,25 @@
+internal/commands/tui_test.go
+  fd65441df4e5c4f8 27,34,37,42,49,55-56,60-61
+internal/commands/tui.go
+  fd65441df4e5c4f8 37,191,193-194,199,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "0d0f4912a4bb54c717078f665a830667e72d9fbc",
+  "prompts": {
+    "fd65441df4e5c4f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e705e676-2145-4dd0-8bcf-8ae8490be614",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 15,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
