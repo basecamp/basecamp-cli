@@ -35,6 +35,7 @@ type Resolver struct {
 	mu        sync.RWMutex
 	projects  []Project
 	people    []Person
+	pingable  []Person              // cached /people/pingable.json
 	todolists map[string][]Todolist // keyed by project ID
 	me        *Person               // cached /my/profile.json result
 }
@@ -80,6 +81,7 @@ func (r *Resolver) SetAccountID(accountID string) {
 		// Clear cache since data is account-specific
 		r.projects = nil
 		r.people = nil
+		r.pingable = nil
 		r.me = nil
 		r.todolists = make(map[string][]Todolist)
 	}
@@ -206,8 +208,50 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 		return "", "", output.ErrAmbiguous("person", names)
 	}
 
-	// Not found - provide suggestions
-	suggestions := suggest(input, people, func(p Person) string { return p.Name })
+	// Fallback: try pingable people (/people/pingable.json) which includes
+	// people not in /people.json (e.g., clients, external collaborators).
+	pingable, pingErr := r.getPingable(ctx)
+	if pingErr != nil {
+		return "", "", pingErr
+	}
+
+	if len(pingable) > 0 {
+		// Try email exact match
+		for _, p := range pingable {
+			if strings.EqualFold(p.Email, input) {
+				return strconv.FormatInt(p.ID, 10), p.Name, nil
+			}
+		}
+
+		// Try name resolution
+		pingMatch, pingMatches := resolve(input, pingable, func(p Person) (int64, string) {
+			return p.ID, p.Name
+		})
+		if pingMatch != nil {
+			return strconv.FormatInt(pingMatch.ID, 10), pingMatch.Name, nil
+		}
+		if len(pingMatches) > 1 {
+			pingNames := make([]string, len(pingMatches))
+			for i, m := range pingMatches {
+				pingNames[i] = m.Name
+			}
+			return "", "", output.ErrAmbiguous("person", pingNames)
+		}
+	}
+
+	// Not found - provide suggestions from both lists (deduplicated by ID)
+	seen := make(map[int64]struct{}, len(people))
+	allPeople := make([]Person, 0, len(people)+len(pingable))
+	for _, p := range people {
+		seen[p.ID] = struct{}{}
+		allPeople = append(allPeople, p)
+	}
+	for _, p := range pingable {
+		if _, ok := seen[p.ID]; !ok {
+			allPeople = append(allPeople, p)
+		}
+	}
+	suggestions := suggest(input, allPeople, func(p Person) string { return p.Name })
 	if len(suggestions) > 0 {
 		return "", "", output.ErrNotFoundHint("Person", input, "Did you mean: "+strings.Join(suggestions, ", "))
 	}
@@ -268,6 +312,7 @@ func (r *Resolver) ClearCache() {
 	defer r.mu.Unlock()
 	r.projects = nil
 	r.people = nil
+	r.pingable = nil
 	r.me = nil
 	r.todolists = make(map[string][]Todolist)
 }
@@ -370,6 +415,40 @@ func (r *Resolver) getPeople(ctx context.Context) ([]Person, error) {
 
 	r.people = people
 	return people, nil
+}
+
+func (r *Resolver) getPingable(ctx context.Context) ([]Person, error) {
+	r.mu.RLock()
+	if r.pingable != nil {
+		defer r.mu.RUnlock()
+		return r.pingable, nil
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if r.pingable != nil {
+		return r.pingable, nil
+	}
+
+	sdkPeople, err := r.forAccount().People().Pingable(ctx)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+
+	pingable := make([]Person, 0, len(sdkPeople))
+	for _, p := range sdkPeople {
+		pingable = append(pingable, Person{
+			ID:    p.ID,
+			Name:  p.Name,
+			Email: p.EmailAddress,
+		})
+	}
+
+	r.pingable = pingable
+	return pingable, nil
 }
 
 func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todolist, error) {
