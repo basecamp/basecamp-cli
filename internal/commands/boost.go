@@ -18,13 +18,19 @@ func NewBoostsCmd() *cobra.Command {
 		Use:     "boost [action]",
 		Aliases: []string{"boosts"},
 		Short:   "Manage boosts (reactions)",
-		Long: `Manage boosts (emoji reactions) on items.
+		Long: `Manage boosts on items.
+
+Boosts are tiny messages to show your support — a short note (16
+characters max) or emoji.
 
 Use 'basecamp boost list <id>' to see boosts on an item.
 Use 'basecamp boost show <boost-id>' to view a specific boost.
 Use 'basecamp boost create <id> "emoji"' to boost an item.
-Use 'basecamp boost delete <boost-id>' to remove a boost.`,
-		Annotations: map[string]string{"agent_notes": "Boost content is typically an emoji but can be text\nbasecamp react is a shortcut for boost create"},
+Use 'basecamp boost delete <boost-id>' to remove a boost.
+
+Tip: In the TUI, press 'b' on any item to boost interactively.
+'basecamp react' is a shortcut for 'boost create'.`,
+		Annotations: map[string]string{"agent_notes": "Boosts are tiny messages of support (16 chars max), not just emoji\nbasecamp react is a shortcut for boost create\nIn TUI mode, press 'b' on any item to boost interactively"},
 		Args:        cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -388,7 +394,9 @@ func NewBoostShortcutCmd() *cobra.Command {
 
 Content as positional argument, --on for the item:
   basecamp react "🎉" --on 789 --project my-project
-  basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789
+
+Tip: In the TUI, press 'b' on any item to open the boost picker.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			content := args[0]
