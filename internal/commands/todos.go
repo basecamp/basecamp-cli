@@ -18,15 +18,16 @@ import (
 
 // todosListFlags holds the flags for the todos list command.
 type todosListFlags struct {
-	project  string
-	todolist string
-	todoset  string
-	assignee string
-	status   string
-	overdue  bool
-	limit    int
-	page     int
-	all      bool
+	project   string
+	todolist  string
+	todoset   string
+	assignee  string
+	status    string
+	completed bool
+	overdue   bool
+	limit     int
+	page      int
+	all       bool
 }
 
 // NewTodosCmd creates the todos command group.
@@ -226,6 +227,7 @@ func newTodosListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
+	cmd.Flags().BoolVar(&flags.completed, "completed", false, "Show completed todos (shorthand for --status completed)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
@@ -246,6 +248,12 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	}
 
 	// Validate flag combinations
+	if flags.completed && flags.status != "" {
+		return output.ErrUsage("--completed and --status are mutually exclusive")
+	}
+	if flags.completed {
+		flags.status = "completed"
+	}
 	if flags.all && flags.limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
 	}
