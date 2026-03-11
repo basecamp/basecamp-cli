@@ -364,6 +364,25 @@ func TestList_HeightPadding_NoMatchesFilter(t *testing.T) {
 	assert.Contains(t, view, "No matches")
 }
 
+func TestList_BoostWithExtra_Alignment(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(60, 10)
+	l.SetFocused(true)
+	l.SetItems([]ListItem{
+		{ID: "1", Title: "Short", Boosts: 5, Extra: "3 items"},
+		{ID: "2", Title: "Another short title", Boosts: 12, Extra: "today"},
+	})
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		assert.LessOrEqual(t, w, 60, "list line %d overflows: width %d > 60", i, w)
+	}
+	assert.Contains(t, view, "3 items", "Extra should be visible")
+	assert.Contains(t, view, "boosts", "Boost count should be visible")
+}
+
 func TestList_LongFilter_NoOverflow(t *testing.T) {
 	l := NewList(tui.NewStyles())
 	l.SetSize(40, 20)
