@@ -1,0 +1,31 @@
+internal/commands/attach_helpers_test.go
+  4cd0fb4759d95f05 54-57,153
+internal/richtext/richtext.go
+  4cd0fb4759d95f05 615-617
+internal/commands/attach_helpers.go
+  4cd0fb4759d95f05 31-32,34-36
+internal/commands/attach.go
+  4cd0fb4759d95f05 162-164
+internal/commands/campfire.go
+  4cd0fb4759d95f05 400,427-429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "c02b4568ff2058b3148edd55f5cc913505e9eb7a",
+  "prompts": {
+    "4cd0fb4759d95f05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc2b5746-c5a6-4aa5-97aa-334a8dcec7a3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 20,
+      "total_deletions": 3,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    }
+  }
+}
