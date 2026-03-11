@@ -1,0 +1,25 @@
+internal/commands/boost.go
+  c240da323b127dfd 13,129,148,235,392-393
+internal/tui/workspace/views/boosts.go
+  c240da323b127dfd 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "40df987a021a107dd539346c8dcf68356f0c79cb",
+  "prompts": {
+    "c240da323b127dfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dd75f51c-cff6-4f21-ab03-4c7f04af8823",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 18,
+      "total_deletions": 15,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    }
+  }
+}
