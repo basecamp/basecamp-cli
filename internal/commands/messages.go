@@ -39,6 +39,9 @@ func NewMessagesCmd() *cobra.Command {
 		newMessagesUpdateCmd(),
 		newMessagesPinCmd(),
 		newMessagesUnpinCmd(),
+		newRecordableTrashCmd("message"),
+		newRecordableArchiveCmd("message"),
+		newRecordableRestoreCmd("message"),
 	)
 
 	return cmd

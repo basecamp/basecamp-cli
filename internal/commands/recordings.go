@@ -448,6 +448,57 @@ You can pass either an ID or a Basecamp URL:
 	return cmd
 }
 
+// newRecordableTrashCmd creates a trash subcommand for a recordable entity.
+func newRecordableTrashCmd(noun string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "trash <id|url>",
+		Short: fmt.Sprintf("Move a %s to trash", noun),
+		Long: fmt.Sprintf(`Move a %s to the trash.
+
+You can pass either an ID or a Basecamp URL:
+  basecamp %ss trash 789`, noun, noun),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			return runRecordingsStatus(cmd, app, args[0], "trashed")
+		},
+	}
+}
+
+// newRecordableArchiveCmd creates an archive subcommand for a recordable entity.
+func newRecordableArchiveCmd(noun string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "archive <id|url>",
+		Short: fmt.Sprintf("Archive a %s", noun),
+		Long: fmt.Sprintf(`Archive a %s to remove it from active view.
+
+You can pass either an ID or a Basecamp URL:
+  basecamp %ss archive 789`, noun, noun),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			return runRecordingsStatus(cmd, app, args[0], "archived")
+		},
+	}
+}
+
+// newRecordableRestoreCmd creates a restore subcommand for a recordable entity.
+func newRecordableRestoreCmd(noun string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "restore <id|url>",
+		Short: fmt.Sprintf("Restore a %s", noun),
+		Long: fmt.Sprintf(`Restore a %s from trash or archive to active status.
+
+You can pass either an ID or a Basecamp URL:
+  basecamp %ss restore 789`, noun, noun),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			return runRecordingsStatus(cmd, app, args[0], "active")
+		},
+	}
+}
+
 // recordingDisplayName maps SDK recording type names to human-friendly display names.
 func recordingDisplayName(sdkType string) string {
 	switch sdkType {

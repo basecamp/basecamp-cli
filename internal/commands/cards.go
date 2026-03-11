@@ -42,6 +42,9 @@ func NewCardsCmd() *cobra.Command {
 		newCardsColumnCmd(&project, &cardTable),
 		newCardsStepsCmd(&project),
 		newCardsStepCmd(&project),
+		newRecordableTrashCmd("card"),
+		newRecordableArchiveCmd("card"),
+		newRecordableRestoreCmd("card"),
 	)
 
 	return cmd
