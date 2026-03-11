@@ -36,7 +36,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "projects", Category: "core", Description: "Manage projects", Actions: []string{"list", "show", "create", "update", "delete"}},
 				{Name: "todos", Category: "core", Description: "Manage to-dos", Actions: []string{"list", "show", "create", "complete", "uncomplete", "position", "trash", "archive", "restore"}},
 				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
-				{Name: "todosets", Category: "core", Description: "View to-do set containers", Actions: []string{"show"}},
+				{Name: "todosets", Category: "core", Description: "Manage to-do set containers", Actions: []string{"list", "show"}},
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position"}},
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "pin", "unpin", "trash", "archive", "restore"}},
 				{Name: "campfire", Category: "core", Description: "Chat in Campfire rooms", Actions: []string{"list", "messages", "post", "upload", "line", "delete"}},

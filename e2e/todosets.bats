@@ -36,11 +36,11 @@ load test_helper
   assert_output_contains "--project requires a value"
 }
 
-@test "todosets --todoset without value shows error" {
+@test "todosets show --todoset without value shows error" {
   create_credentials
   create_global_config '{}'
 
-  run basecamp todosets --todoset
+  run basecamp todosets show --todoset
   assert_failure
   assert_output_contains "--todoset requires a value"
 }

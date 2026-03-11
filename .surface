@@ -263,6 +263,7 @@ CMD basecamp todos sweep
 CMD basecamp todos trash
 CMD basecamp todos uncomplete
 CMD basecamp todosets
+CMD basecamp todosets list
 CMD basecamp todosets show
 CMD basecamp tools
 CMD basecamp tools create
@@ -5172,6 +5173,7 @@ FLAG basecamp todo --stats type=bool
 FLAG basecamp todo --styled type=bool
 FLAG basecamp todo --to type=string
 FLAG basecamp todo --todolist type=string
+FLAG basecamp todo --todoset type=string
 FLAG basecamp todo --verbose type=count
 FLAG basecamp todolistgroups --account type=string
 FLAG basecamp todolistgroups --agent type=bool
@@ -5534,6 +5536,7 @@ FLAG basecamp todos create --stats type=bool
 FLAG basecamp todos create --styled type=bool
 FLAG basecamp todos create --to type=string
 FLAG basecamp todos create --todolist type=string
+FLAG basecamp todos create --todoset type=string
 FLAG basecamp todos create --verbose type=count
 FLAG basecamp todos list --account type=string
 FLAG basecamp todos list --agent type=bool
@@ -5699,8 +5702,26 @@ FLAG basecamp todosets --quiet type=bool
 FLAG basecamp todosets --stats type=bool
 FLAG basecamp todosets --styled type=bool
 FLAG basecamp todosets --todolist type=string
-FLAG basecamp todosets --todoset type=string
 FLAG basecamp todosets --verbose type=count
+FLAG basecamp todosets list --account type=string
+FLAG basecamp todosets list --agent type=bool
+FLAG basecamp todosets list --cache-dir type=string
+FLAG basecamp todosets list --count type=bool
+FLAG basecamp todosets list --hints type=bool
+FLAG basecamp todosets list --ids-only type=bool
+FLAG basecamp todosets list --in type=string
+FLAG basecamp todosets list --json type=bool
+FLAG basecamp todosets list --markdown type=bool
+FLAG basecamp todosets list --md type=bool
+FLAG basecamp todosets list --no-hints type=bool
+FLAG basecamp todosets list --no-stats type=bool
+FLAG basecamp todosets list --profile type=string
+FLAG basecamp todosets list --project type=string
+FLAG basecamp todosets list --quiet type=bool
+FLAG basecamp todosets list --stats type=bool
+FLAG basecamp todosets list --styled type=bool
+FLAG basecamp todosets list --todolist type=string
+FLAG basecamp todosets list --verbose type=count
 FLAG basecamp todosets show --account type=string
 FLAG basecamp todosets show --agent type=bool
 FLAG basecamp todosets show --cache-dir type=string
@@ -6869,6 +6890,7 @@ SUB basecamp todos sweep
 SUB basecamp todos trash
 SUB basecamp todos uncomplete
 SUB basecamp todosets
+SUB basecamp todosets list
 SUB basecamp todosets show
 SUB basecamp tools
 SUB basecamp tools create

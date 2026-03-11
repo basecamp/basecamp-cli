@@ -2,6 +2,7 @@ ARG basecamp assign 00 <todo_id>
 ARG basecamp unassign 00 <todo_id>
 FLAG basecamp checkin answer create --question type=string
 FLAG basecamp checkins answer create --question type=string
+FLAG basecamp todosets --todoset type=string
 FLAG basecamp webhook create --url type=string
 FLAG basecamp webhooks create --url type=string
 ARG basecamp upload doc create 00 <title>
