@@ -481,35 +481,40 @@ func (r *Resolver) getTodolists(ctx context.Context, projectID string) ([]Todoli
 		return nil, err
 	}
 
-	// Find todoset in dock
-	var todosetID int64
+	// Find all todosets in dock
+	var todosetIDs []int64
 	for _, dock := range projectData.Dock {
 		if dock.Name == "todoset" {
-			todosetID = dock.ID
-			break
+			todosetIDs = append(todosetIDs, dock.ID)
 		}
 	}
 
-	if todosetID == 0 {
+	if len(todosetIDs) == 0 {
 		// Project has no todoset - return empty list
 		r.todolists[projectID] = nil
 		return nil, nil
 	}
 
-	// Fetch all pages of todolists from todoset
-	todolistsPath := fmt.Sprintf("/todosets/%d/todolists.json", todosetID)
-	pages, err := r.forAccount().GetAll(ctx, todolistsPath)
-	if err != nil {
-		return nil, convertSDKError(err)
-	}
-
-	todolists := make([]Todolist, 0, len(pages))
-	for _, page := range pages {
-		var tl Todolist
-		if err := json.Unmarshal(page, &tl); err != nil {
-			return nil, err
+	// Fetch todolists from all todosets and merge results
+	var todolists []Todolist
+	for _, tsID := range todosetIDs {
+		todolistsPath := fmt.Sprintf("/todosets/%d/todolists.json", tsID)
+		pages, err := r.forAccount().GetAll(ctx, todolistsPath)
+		if err != nil {
+			sdkErr := convertSDKError(err)
+			if oe := output.AsError(sdkErr); oe != nil {
+				oe.Message = fmt.Sprintf("todoset %d: %s", tsID, oe.Message)
+				return nil, oe
+			}
+			return nil, fmt.Errorf("failed to fetch todolists from todoset %d: %w", tsID, sdkErr)
 		}
-		todolists = append(todolists, tl)
+		for _, page := range pages {
+			var tl Todolist
+			if err := json.Unmarshal(page, &tl); err != nil {
+				return nil, fmt.Errorf("failed to parse todolist from todoset %d: %w", tsID, err)
+			}
+			todolists = append(todolists, tl)
+		}
 	}
 
 	r.todolists[projectID] = todolists

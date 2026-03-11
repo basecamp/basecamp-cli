@@ -909,3 +909,98 @@ func TestResolverResolvePerson_PingableFallback_NotFound(t *testing.T) {
 	require.True(t, errors.As(err, &outErr))
 	assert.Equal(t, output.CodeNotFound, outErr.Code)
 }
+
+func TestGetTodolistsMultiTodosetMergesAll(t *testing.T) {
+	accountID := "99999"
+	projectID := "123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/" + accountID + "/projects/" + projectID + ".json":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": 123,
+				"dock": []map[string]any{
+					{"name": "todoset", "id": 100},
+					{"name": "todoset", "id": 200},
+				},
+			})
+		case fmt.Sprintf("/%s/todosets/100/todolists.json", accountID):
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 10, "name": "Sprint 1"},
+			})
+		case fmt.Sprintf("/%s/todosets/200/todolists.json", accountID):
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 20, "name": "UI Tasks"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		testTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+	r := NewResolver(sdkClient, nil, accountID)
+
+	ctx := context.Background()
+
+	// Should find "Sprint 1" from todoset 100
+	id, name, err := r.ResolveTodolist(ctx, "Sprint 1", projectID)
+	require.NoError(t, err)
+	assert.Equal(t, "10", id)
+	assert.Equal(t, "Sprint 1", name)
+
+	// Should find "UI Tasks" from todoset 200
+	id, name, err = r.ResolveTodolist(ctx, "UI Tasks", projectID)
+	require.NoError(t, err)
+	assert.Equal(t, "20", id)
+	assert.Equal(t, "UI Tasks", name)
+}
+
+func TestGetTodolistsPartialFetchFailsHard(t *testing.T) {
+	accountID := "99999"
+	projectID := "123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/" + accountID + "/projects/" + projectID + ".json":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": 123,
+				"dock": []map[string]any{
+					{"name": "todoset", "id": 100},
+					{"name": "todoset", "id": 200},
+				},
+			})
+		case fmt.Sprintf("/%s/todosets/100/todolists.json", accountID):
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 10, "name": "Sprint 1"},
+			})
+		case fmt.Sprintf("/%s/todosets/200/todolists.json", accountID):
+			// Simulate a server error for the second todoset
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"internal server error"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		testTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+	r := NewResolver(sdkClient, nil, accountID)
+
+	ctx := context.Background()
+
+	// Should fail — partial data from only one of two todosets is unreliable
+	_, _, err := r.ResolveTodolist(ctx, "Sprint 1", projectID)
+	require.Error(t, err, "partial todoset fetch should fail hard, not return partial results")
+	assert.Contains(t, err.Error(), "todoset 200")
+}
