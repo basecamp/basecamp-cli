@@ -123,6 +123,23 @@ You can also pass a Basecamp URL directly:
 				return err
 			}
 
+			// For generic recording lookups, re-fetch using the type-specific
+			// endpoint to get full content (the /recordings/ endpoint returns
+			// sparse data). The endpoint is derived from the response's type
+			// field — never from the url field, which could point off-origin.
+			if recordType == "" || recordType == "recording" || recordType == "recordings" {
+				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
+					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
+					if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {
+						var richer map[string]any
+						if json.Unmarshal(refetchResp.Data, &richer) == nil {
+							data = richer
+							resp = refetchResp
+						}
+					}
+				}
+			}
+
 			// Extract title from various fields
 			title := ""
 			for _, key := range []string{"title", "name", "content", "subject"} {
@@ -159,6 +176,39 @@ You can also pass a Basecamp URL directly:
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (todo, todolist, message, comment, card, card-table, document)")
 
 	return cmd
+}
+
+// recordingTypeEndpoint maps a recording's canonical API "type" field to the
+// type-specific endpoint path. Type names are the namespaced forms returned by
+// the Basecamp API (e.g. "Kanban::Card", "Schedule::Entry"), matching the SDK
+// constants in basecamp.RecordingType*. Returns "" for unrecognized types,
+// causing the caller to fall through to sparse recording data (no regression).
+func recordingTypeEndpoint(data map[string]any, id string) string {
+	t, _ := data["type"].(string)
+	switch t {
+	case "Todo":
+		return fmt.Sprintf("/todos/%s.json", id)
+	case "Todolist":
+		return fmt.Sprintf("/todolists/%s.json", id)
+	case "Message":
+		return fmt.Sprintf("/messages/%s.json", id)
+	case "Comment":
+		return fmt.Sprintf("/comments/%s.json", id)
+	case "Kanban::Card":
+		return fmt.Sprintf("/card_tables/cards/%s.json", id)
+	case "Document", "Vault::Document":
+		return fmt.Sprintf("/documents/%s.json", id)
+	case "Schedule::Entry":
+		return fmt.Sprintf("/schedule_entries/%s.json", id)
+	case "Question::Answer":
+		return fmt.Sprintf("/question_answers/%s.json", id)
+	case "Inbox::Forward":
+		return fmt.Sprintf("/forwards/%s.json", id)
+	case "Upload":
+		return fmt.Sprintf("/uploads/%s.json", id)
+	default:
+		return ""
+	}
 }
 
 // isValidRecordType checks if the given type is a valid recording type.
