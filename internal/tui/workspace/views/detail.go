@@ -1514,7 +1514,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 
 		// Fetch boosts for the recording
 		if data.boosts > 0 {
-			boostsResult, err := client.Boosts().ListRecording(ctx, recordingID)
+			boostsResult, err := client.Boosts().ListRecording(ctx, recordingID, nil)
 			if err == nil {
 				for _, b := range boostsResult.Boosts {
 					booster := ""

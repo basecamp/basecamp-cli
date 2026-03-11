@@ -52,7 +52,7 @@ func runMessagetypesList(cmd *cobra.Command) error {
 		return err
 	}
 
-	typesResult, err := app.Account().MessageTypes().List(cmd.Context())
+	typesResult, err := app.Account().MessageTypes().List(cmd.Context(), nil)
 	if err != nil {
 		return convertSDKError(err)
 	}

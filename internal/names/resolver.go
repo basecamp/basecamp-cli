@@ -431,13 +431,13 @@ func (r *Resolver) getPingable(ctx context.Context) ([]Person, error) {
 		return r.pingable, nil
 	}
 
-	sdkPeople, err := r.forAccount().People().Pingable(ctx)
+	sdkResult, err := r.forAccount().People().Pingable(ctx, nil)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
 
-	pingable := make([]Person, 0, len(sdkPeople))
-	for _, p := range sdkPeople {
+	pingable := make([]Person, 0, len(sdkResult.People))
+	for _, p := range sdkResult.People {
 		pingable = append(pingable, Person{
 			ID:    p.ID,
 			Name:  p.Name,

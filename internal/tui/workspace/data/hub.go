@@ -726,7 +726,7 @@ func (h *Hub) CampfireLines(projectID, campfireID int64) *Pool[CampfireLinesResu
 			PollMax:  2 * time.Minute,
 		}, func(ctx context.Context) (CampfireLinesResult, error) {
 			client := h.accountClient()
-			result, err := client.Campfires().ListLines(ctx, campfireID)
+			result, err := client.Campfires().ListLines(ctx, campfireID, nil)
 			if err != nil {
 				return CampfireLinesResult{}, err
 			}
@@ -821,12 +821,12 @@ func (h *Hub) ProjectTimeline(projectID int64) *Pool[[]TimelineEventInfo] {
 		}, func(ctx context.Context) ([]TimelineEventInfo, error) {
 			client := h.accountClient()
 			acct := h.currentAccountInfo()
-			events, err := client.Timeline().ProjectTimeline(ctx, projectID)
+			result, err := client.Timeline().ProjectTimeline(ctx, projectID, nil)
 			if err != nil {
 				return nil, err
 			}
-			infos := make([]TimelineEventInfo, 0, len(events))
-			for _, e := range events {
+			infos := make([]TimelineEventInfo, 0, len(result.Events))
+			for _, e := range result.Events {
 				project := ""
 				var pID int64
 				if e.Bucket != nil {
@@ -870,7 +870,7 @@ func (h *Hub) Boosts(projectID, recordingID int64) *Pool[BoostSummary] {
 	p := RealmPool(realm, key, func() *Pool[BoostSummary] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) (BoostSummary, error) {
 			client := h.accountClient()
-			result, err := client.Boosts().ListRecording(ctx, recordingID)
+			result, err := client.Boosts().ListRecording(ctx, recordingID, nil)
 			if err != nil {
 				return BoostSummary{}, err
 			}

@@ -14,6 +14,8 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
+**SDK version:** v0.4.0 — uniform pagination (Limit/Page) on all List methods; `types.FlexibleTime` and `types.FlexInt` for wire format handling.
+
 ## Coverage by Section
 
 | Section | Endpoints | CLI Command | Status | Priority | Notes |

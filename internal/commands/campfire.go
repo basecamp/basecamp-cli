@@ -72,7 +72,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bool) error {
 	// Account-wide campfire listing
 	if all {
-		result, err := app.Account().Campfires().List(cmd.Context())
+		result, err := app.Account().Campfires().List(cmd.Context(), nil)
 		if err != nil {
 			return err
 		}
@@ -216,13 +216,13 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 	}
 
 	// Get recent messages (lines) using SDK
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt)
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt, nil)
 	if err != nil {
 		return err
 	}
 	lines := result.Lines
 
-	// Take last N messages
+	// Take last N messages (newest)
 	if limit > 0 && len(lines) > limit {
 		lines = lines[len(lines)-limit:]
 	}

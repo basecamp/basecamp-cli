@@ -114,7 +114,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 			return output.ErrUsage("Invalid event ID")
 		}
 
-		result, err := app.Account().Boosts().ListEvent(cmd.Context(), recordingIDInt, eventIDInt)
+		result, err := app.Account().Boosts().ListEvent(cmd.Context(), recordingIDInt, eventIDInt, nil)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -133,7 +133,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 		)
 	}
 
-	result, err := app.Account().Boosts().ListRecording(cmd.Context(), recordingIDInt)
+	result, err := app.Account().Boosts().ListRecording(cmd.Context(), recordingIDInt, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
