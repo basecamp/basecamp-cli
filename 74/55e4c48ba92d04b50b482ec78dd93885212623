@@ -1,0 +1,43 @@
+internal/commands/commands.go
+  07a0cc4240396a94 39
+e2e/todosets.bats
+  07a0cc4240396a94 9,13-15,39,43
+internal/commands/todosets.go
+  07a0cc4240396a94 4,14,20-21,25-28,35-36,42,44-144,147-150,156,163-166
+.surface-breaking
+  07a0cc4240396a94 5
+internal/names/resolver.go
+  07a0cc4240396a94 484-485,488,492,498-501,504-509,514-516
+internal/names/resolver_test.go
+  07a0cc4240396a94 912-1006
+internal/tui/resolve/todolist.go
+  07a0cc4240396a94 23,46-47,62,134-135
+internal/commands/helpers.go
+  07a0cc4240396a94 240,250,257-350
+internal/tui/resolve/dock_test.go
+  07a0cc4240396a94 182,199
+internal/commands/todos.go
+  07a0cc4240396a94 74,131,133,144-145,232,610,667,669,680-681,768
+internal/commands/todos_test.go
+  07a0cc4240396a94 648-871
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "7455e4c48ba92d04b50b482ec78dd93885212623",
+  "prompts": {
+    "07a0cc4240396a94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "144ea335-9ae2-48f3-a749-bdd01c1d8e1e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 1,
+      "accepted_lines": 581,
+      "overriden_lines": 0
+    }
+  }
+}
