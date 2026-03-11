@@ -1,0 +1,23 @@
+internal/auth/auth.go
+  4c59eec5ddecf962 848,855-858,863
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "d45aefc7d85c2c2638cb3101ade3f3b1977d176c",
+  "prompts": {
+    "4c59eec5ddecf962": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "359d7a1b-5bf1-4638-9c77-5ea0637717dd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 12,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    }
+  }
+}
