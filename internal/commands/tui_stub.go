@@ -15,7 +15,10 @@ func NewTUICmd() *cobra.Command {
 		Short: "Launch the Basecamp workspace [dev]",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return output.ErrUsage("the tui workspace is only available in development builds")
+			return output.ErrUsageHint(
+				"the tui workspace is only available in development builds",
+				"build with: make build (or go build -tags dev ./cmd/basecamp)",
+			)
 		},
 	}
 

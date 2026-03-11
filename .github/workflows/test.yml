@@ -44,6 +44,11 @@ jobs:
           ./bin/basecamp --version
           ./bin/basecamp --help | head -5
 
+      - name: Validate release build (no dev tag)
+        run: |
+          go build -o bin/basecamp-release ./cmd/basecamp
+          go test -v ./internal/commands/ -run TestStub
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

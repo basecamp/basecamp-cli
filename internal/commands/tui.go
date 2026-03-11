@@ -27,7 +27,7 @@ func NewTUICmd() *cobra.Command {
 		Long: "Launch a persistent, full-screen terminal workspace for Basecamp.\n" +
 			"Optionally pass a Basecamp URL to jump directly to a project or recording.\n\n" +
 			"This feature is under active development and may change between releases.",
-		Annotations: map[string]string{"experimental": "true"},
+		Annotations: map[string]string{"dev_only": "true"},
 		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
