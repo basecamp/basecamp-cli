@@ -1,0 +1,25 @@
+internal/commands/todos_test.go
+  b14defc1fa7673f6 575-638
+internal/commands/todos.go
+  b14defc1fa7673f6 4,768,779-781,794-813,1167,1178-1180,1192-1211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "7e942050c9fb64081b3c1c04e75764e357b02c92",
+  "prompts": {
+    "b14defc1fa7673f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13184e33-0454-4203-ac6c-b3806fac6e4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 69,
+      "total_deletions": 5,
+      "accepted_lines": 113,
+      "overriden_lines": 0
+    }
+  }
+}
