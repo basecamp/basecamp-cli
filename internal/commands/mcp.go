@@ -14,9 +14,6 @@ func NewMCPCmd() *cobra.Command {
 		Long: `MCP server for AI integration.
 
 The MCP server allows AI assistants like Claude to interact with Basecamp.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
 	}
 
 	cmd.AddCommand(newMCPServeCmd())

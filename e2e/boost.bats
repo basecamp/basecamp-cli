@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "boost without subcommand shows help" {
+  run basecamp boost
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # react shortcut errors
 
 @test "react without --on or --recording shows usage error" {

@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "files without subcommand shows help" {
+  run basecamp files
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Flag parsing errors
 
 @test "files --project without value shows error" {

@@ -31,10 +31,6 @@ Use 'basecamp boost delete <boost-id>' to remove a boost.
 Tip: In the TUI, press 'b' on any item to boost interactively.
 'basecamp react' is a shortcut for 'boost create'.`,
 		Annotations: map[string]string{"agent_notes": "Boosts are tiny messages of support (16 chars max), not just emoji\nbasecamp react is a shortcut for boost create\nIn TUI mode, press 'b' on any item to boost interactively"},
-		Args:        cobra.MinimumNArgs(0),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")

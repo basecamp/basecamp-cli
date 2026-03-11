@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "templates without subcommand shows help" {
+  run basecamp templates
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Show errors
 
 @test "templates show without id shows error" {

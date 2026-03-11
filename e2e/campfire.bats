@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "campfire without subcommand shows help" {
+  run basecamp campfire
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Flag parsing errors
 
 @test "campfire --project without value shows error" {

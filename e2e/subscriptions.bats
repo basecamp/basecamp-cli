@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "subscriptions without subcommand shows help" {
+  run basecamp subscriptions
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Flag parsing errors
 
 @test "subscriptions --project without value shows error" {

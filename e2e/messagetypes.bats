@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "messagetypes without subcommand shows help" {
+  run basecamp messagetypes
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Missing context errors
 
 @test "messagetypes show without id shows error" {

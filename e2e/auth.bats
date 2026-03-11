@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "auth without subcommand shows help" {
+  run basecamp auth
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Auth token
 
 @test "basecamp auth token --help shows help" {

@@ -40,7 +40,7 @@ for file in "$COMMANDS_DIR"/*.go; do
     # Get the function body
     body=$(sed -n "/^func ${func_name}(/,/^func /p" "$file" | sed '$d')
 
-    has_addcommand=$(echo "$body" | grep -c 'AddCommand\|cmd\.AddCommand' || true)
+    has_addcommand=$(echo "$body" | grep -Ec 'AddCommand|cmd\.AddCommand' || true)
     has_rune=$(echo "$body" | grep -c 'RunE:' || true)
 
     if [[ "$has_addcommand" -gt 0 && "$has_rune" -gt 0 ]]; then

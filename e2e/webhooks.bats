@@ -4,6 +4,15 @@
 load test_helper
 
 
+# Help
+
+@test "webhooks without subcommand shows help" {
+  run basecamp webhooks
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
+
 # Flag parsing errors
 
 @test "webhooks create --url is not a valid flag" {
