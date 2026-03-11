@@ -1,0 +1,33 @@
+internal/tui/workspace/boostpicker_test.go
+  c240da323b127dfd 1-28
+internal/tui/workspace/widget/kanban.go
+  c240da323b127dfd 524,559
+internal/tui/workspace/widget/list.go
+  c240da323b127dfd 394,437-443,504,519,556-564
+internal/tui/workspace/views/detail.go
+  c240da323b127dfd 1310,1312,1314-1318,1325-1327,1579-1587
+internal/commands/boost.go
+  c240da323b127dfd 28
+internal/tui/workspace/views/campfire.go
+  c240da323b127dfd 633,643
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "453deabd0fe59dbc5436816e2ecfa2496db34210",
+  "prompts": {
+    "c240da323b127dfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dd75f51c-cff6-4f21-ab03-4c7f04af8823",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 71,
+      "overriden_lines": 0
+    }
+  }
+}
