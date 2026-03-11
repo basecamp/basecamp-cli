@@ -201,12 +201,15 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	case "bc3":
 		cc, err := m.loadBC3Client()
 		if err != nil {
-			// DCR credentials from custom-redirect logins are intentionally
-			// not persisted (see registerBC3Client). After a process restart
-			// the client.json won't exist and refresh is impossible.
-			return output.ErrAuth("Cannot load BC3 client credentials for token refresh. " +
-				"This can happen after a custom-redirect login (credentials are session-only). " +
-				"Please re-authenticate: basecamp auth login")
+			if os.IsNotExist(err) {
+				// DCR credentials from custom-redirect logins are intentionally
+				// not persisted (see registerBC3Client). After a process restart
+				// the client.json won't exist and refresh is impossible.
+				return output.ErrAuth("Cannot load BC3 client credentials for token refresh. " +
+					"This can happen after a custom-redirect login (credentials are session-only). " +
+					"Please re-authenticate: basecamp auth login")
+			}
+			return output.ErrAuth(fmt.Sprintf("Cannot load BC3 client credentials for token refresh: %v", err))
 		}
 		clientID = cc.ClientID
 		clientSecret = cc.ClientSecret

@@ -1343,10 +1343,16 @@ func TestLoginBC3DefaultsToRead(t *testing.T) {
 }
 
 func TestRefreshLocked_LaunchpadSendsClientID(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+
+	var mu sync.Mutex
 	var capturedBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
 		capturedBody = string(body)
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh"}`)
 	}))
@@ -1374,15 +1380,21 @@ func TestRefreshLocked_LaunchpadSendsClientID(t *testing.T) {
 	err := m.refreshLocked(context.Background(), srv.URL, creds)
 	require.NoError(t, err)
 
-	assert.Contains(t, capturedBody, "client_id="+launchpadClientID)
-	assert.Contains(t, capturedBody, "client_secret="+launchpadClientSecret)
+	mu.Lock()
+	body := capturedBody
+	mu.Unlock()
+	assert.Contains(t, body, "client_id="+launchpadClientID)
+	assert.Contains(t, body, "client_secret="+launchpadClientSecret)
 }
 
 func TestRefreshLocked_BC3SendsClientID(t *testing.T) {
+	var mu sync.Mutex
 	var capturedBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
 		capturedBody = string(body)
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh","expires_in":3600}`)
 	}))
@@ -1418,8 +1430,11 @@ func TestRefreshLocked_BC3SendsClientID(t *testing.T) {
 	err := m.refreshLocked(context.Background(), srv.URL, creds)
 	require.NoError(t, err)
 
-	assert.Contains(t, capturedBody, "client_id=bc3-client-id")
-	assert.Contains(t, capturedBody, "client_secret=bc3-client-secret")
+	mu.Lock()
+	body := capturedBody
+	mu.Unlock()
+	assert.Contains(t, body, "client_id=bc3-client-id")
+	assert.Contains(t, body, "client_secret=bc3-client-secret")
 }
 
 func TestRefreshLocked_BC3WithoutClientJSON(t *testing.T) {
@@ -1485,10 +1500,16 @@ func TestRefreshLocked_ClearsExpiresAtWhenServerOmits(t *testing.T) {
 }
 
 func TestRefreshLocked_EmptyOAuthTypeDefaultsToLaunchpad(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+
+	var mu sync.Mutex
 	var capturedBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
 		capturedBody = string(body)
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh"}`)
 	}))
@@ -1516,9 +1537,12 @@ func TestRefreshLocked_EmptyOAuthTypeDefaultsToLaunchpad(t *testing.T) {
 	err := m.refreshLocked(context.Background(), srv.URL, creds)
 	require.NoError(t, err)
 
+	mu.Lock()
+	body := capturedBody
+	mu.Unlock()
 	// Should have used launchpad legacy format (type=refresh, not grant_type=refresh_token)
-	assert.Contains(t, capturedBody, "type=refresh")
-	assert.Contains(t, capturedBody, "client_id="+launchpadClientID)
+	assert.Contains(t, body, "type=refresh")
+	assert.Contains(t, body, "client_id="+launchpadClientID)
 }
 
 func TestLoginRejectsInvalidScope(t *testing.T) {
