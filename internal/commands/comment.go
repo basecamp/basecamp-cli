@@ -19,12 +19,17 @@ import (
 
 // NewCommentsCmd creates the comments command group (list/show/update).
 func NewCommentsCmd() *cobra.Command {
+	var project string
+
 	cmd := &cobra.Command{
 		Use:         "comments",
 		Short:       "List and manage comments",
 		Long:        "List, show, and update comments on items.",
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 	}
+
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	cmd.AddCommand(
 		newCommentsListCmd(),
@@ -244,9 +249,15 @@ You can pass either a comment ID or a Basecamp URL:
 
 // NewCommentCmd creates the 'comment' shortcut (alias for 'comments create').
 func NewCommentCmd() *cobra.Command {
+	var project string
+
 	cmd := newCommentsCreateCmd()
 	cmd.Use = "comment <id|url> <content>"
 	cmd.Short = "Add a comment (shortcut for 'comments create')"
+
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+
 	return cmd
 }
 
