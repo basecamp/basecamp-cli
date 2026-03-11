@@ -23,7 +23,7 @@ import (
 func NewTUICmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tui [url]",
-		Short: "Launch the Basecamp workspace [experimental]",
+		Short: "Launch the Basecamp workspace [dev]",
 		Long: "Launch a persistent, full-screen terminal workspace for Basecamp.\n" +
 			"Optionally pass a Basecamp URL to jump directly to a project or recording.\n\n" +
 			"This feature is under active development and may change between releases.",
