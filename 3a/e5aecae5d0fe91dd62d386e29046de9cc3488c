@@ -1,0 +1,23 @@
+internal/names/resolver.go
+  c240da323b127dfd 213-214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "3ae5aecae5d0fe91dd62d386e29046de9cc3488c",
+  "prompts": {
+    "c240da323b127dfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dd75f51c-cff6-4f21-ab03-4c7f04af8823",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 4,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
