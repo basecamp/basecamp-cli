@@ -215,16 +215,17 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		return output.ErrUsage("Invalid campfire ID")
 	}
 
-	// Get recent messages (lines) using SDK with server-side limit
-	var lineOpts *basecamp.CampfireLineListOptions
-	if limit > 0 {
-		lineOpts = &basecamp.CampfireLineListOptions{Limit: limit}
-	}
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt, lineOpts)
+	// Get recent messages (lines) using SDK
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt, nil)
 	if err != nil {
 		return err
 	}
 	lines := result.Lines
+
+	// Take last N messages (newest)
+	if limit > 0 && len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
 
 	summary := fmt.Sprintf("%d messages", len(lines))
 

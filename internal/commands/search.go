@@ -54,7 +54,7 @@ Use 'basecamp search metadata' to see available search scopes.`,
 			if sortBy != "" {
 				opts.Sort = sortBy
 			}
-			if limit != 0 {
+			if limit > 0 {
 				opts.Limit = limit
 			}
 
