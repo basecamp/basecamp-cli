@@ -18,6 +18,10 @@ fields:
     role: detail
     format: person
 
+  app_url:
+    role: meta
+    format: text
+
   created_at:
     role: meta
     emphasis: muted
@@ -34,7 +38,7 @@ views:
     sections:
       - fields: [content]
       - heading: Metadata
-        fields: [id, created_at, creator]
+        fields: [id, app_url, created_at, creator]
 
 affordances:
   - action: update
