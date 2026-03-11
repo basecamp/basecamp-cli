@@ -28,14 +28,14 @@ func (i PickerItem) FilterValue() string {
 
 // pickerModel is the bubbletea model for a fuzzy picker.
 type pickerModel struct {
-	items        []PickerItem
-	filtered     []PickerItem
-	textInput    textinput.Model
-	cursor       int
-	selected     *PickerItem
-	quitting     bool
-	styles       *Styles
-	title        string
+	items         []PickerItem
+	filtered      []PickerItem
+	textInput     textinput.Model
+	cursor        int
+	selected      *PickerItem
+	quitting      bool
+	styles        *Styles
+	title         string
 	maxVisible    int
 	maxVisibleCap int // configured upper bound, restored on terminal grow
 	scrollOffset  int
@@ -67,6 +67,9 @@ func WithPickerTitle(title string) PickerOption {
 // WithMaxVisible sets the maximum number of visible items.
 func WithMaxVisible(n int) PickerOption {
 	return func(m *pickerModel) {
+		if n < 1 {
+			n = 1
+		}
 		m.maxVisible = n
 		m.maxVisibleCap = n
 	}
@@ -240,8 +243,15 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clamp maxVisible to fit the terminal: reserve lines for
 		// title, blank, input, blank, scroll indicator, help.
 		const chromeLines = 6
-		if avail := msg.Height - chromeLines; avail > 0 {
+		if avail := msg.Height - chromeLines; avail >= 1 {
 			m.maxVisible = min(avail, m.maxVisibleCap)
+		}
+		// Re-clamp cursor and scroll offset to the new visible window
+		if m.cursor >= len(m.filtered) && len(m.filtered) > 0 {
+			m.cursor = len(m.filtered) - 1
+		}
+		if m.cursor >= m.scrollOffset+m.maxVisible {
+			m.scrollOffset = m.cursor - m.maxVisible + 1
 		}
 
 	case spinner.TickMsg:
