@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -213,4 +220,71 @@ func TestMissingArg_MultiLineExample(t *testing.T) {
 	// Should only include the first example line
 	assert.Contains(t, e.Hint, "Example: basecamp test \"first\"")
 	assert.NotContains(t, e.Hint, "second")
+}
+
+// dockTestTokenProvider is a mock token provider for getDockToolID tests.
+type dockTestTokenProvider struct{}
+
+func (dockTestTokenProvider) AccessToken(_ context.Context) (string, error) {
+	return "test-token", nil
+}
+
+// dockTestTransport returns canned project JSON for dock resolution tests.
+type dockTestTransport struct {
+	projectJSON string
+}
+
+func (t *dockTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Path, "/projects/") {
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(t.projectJSON)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	}
+	return nil, errors.New("unexpected request: " + req.URL.Path)
+}
+
+func newDockTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	sdk := basecamp.NewClient(&basecamp.Config{}, dockTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	return &appctx.App{
+		Config: &config.Config{AccountID: "99999"},
+		SDK:    sdk,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: &bytes.Buffer{}}),
+	}
+}
+
+func TestGetDockToolID_DisabledToolShowsDisabledError(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": [{"name": "chat", "id": 789, "enabled": false}]}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "campfire")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Hint, "disabled for this project")
+}
+
+func TestGetDockToolID_AbsentToolShowsNotFoundError(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": []}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "campfire")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Hint, "has no campfire")
 }

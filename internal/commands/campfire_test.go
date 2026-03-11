@@ -47,7 +47,7 @@ func (t *mockCampfireCreateTransport) RoundTrip(req *http.Request) (*http.Respon
 			body = `[{"id": 123, "name": "Test Project"}]`
 		} else if strings.Contains(req.URL.Path, "/projects/") {
 			// Single project lookup - return project with chat (campfire) in dock
-			body = `{"id": 123, "dock": [{"name": "chat", "id": 789}]}`
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
 		} else if strings.Contains(req.URL.Path, "/chats/") && strings.Contains(req.URL.Path, "/lines.json") {
 			// List lines
 			body = `[]`

@@ -126,6 +126,21 @@ func TestDockToolDisabledNotReturned(t *testing.T) {
 	assert.Equal(t, SourceDefault, result.Source)
 }
 
+func TestDockToolDisabledOnlyShowsDisabledError(t *testing.T) {
+	transport := &mockDockTransport{
+		projectJSON: `{"id": 1, "dock": [{"name": "todoset", "id": 100, "enabled": false}]}`,
+	}
+	r := newTestResolver(transport, nil)
+
+	_, err := r.Todoset(context.Background(), "1", "")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Hint, "disabled for this project")
+}
+
 // todolistResolverTransport handles both project dock and todolist list calls.
 type todolistResolverTransport struct {
 	projectJSON   string

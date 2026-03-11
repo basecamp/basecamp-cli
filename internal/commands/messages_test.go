@@ -350,7 +350,7 @@ func (t *mockMessageCreateTransport) RoundTrip(req *http.Request) (*http.Respons
 			body = `[{"id": 123, "name": "Test Project"}]`
 		} else if strings.Contains(req.URL.Path, "/projects/") {
 			// Return project with message_board in dock
-			body = `{"id": 123, "dock": [{"name": "message_board", "id": 777}]}`
+			body = `{"id": 123, "dock": [{"name": "message_board", "id": 777, "enabled": true}]}`
 		} else {
 			body = `{}`
 		}

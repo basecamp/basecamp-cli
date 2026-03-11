@@ -42,7 +42,7 @@ func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID
 	}
 
 	// Fetch project to get dock tools
-	tools, err := r.fetchDockTools(ctx, projectID, dockName)
+	tools, allDock, err := r.fetchDockTools(ctx, projectID, dockName)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +50,13 @@ func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID
 	// Handle cases based on number of matching tools
 	switch len(tools) {
 	case 0:
+		// Check if tool exists but is disabled
+		for _, tool := range allDock {
+			if tool.Name == dockName && !tool.Enabled {
+				return nil, output.ErrNotFoundHint(friendlyName, projectID,
+					fmt.Sprintf("%s is disabled for this project", strings.ToUpper(friendlyName[:1])+friendlyName[1:]))
+			}
+		}
 		return nil, output.ErrNotFoundHint(friendlyName, projectID, fmt.Sprintf("Project has no %s", friendlyName))
 
 	case 1:
@@ -71,24 +78,26 @@ func (r *Resolver) DockTool(ctx context.Context, projectID, dockName, explicitID
 }
 
 // fetchDockTools retrieves enabled dock tools of a specific type from a project.
-func (r *Resolver) fetchDockTools(ctx context.Context, projectID, dockName string) ([]DockTool, error) {
+// Returns (enabled matches, all dock tools, error) so callers can distinguish
+// disabled tools from absent ones.
+func (r *Resolver) fetchDockTools(ctx context.Context, projectID, dockName string) ([]DockTool, []DockTool, error) {
 	// Ensure account is configured before making API calls
 	if r.config.AccountID == "" {
-		return nil, output.ErrUsage("Account must be resolved before fetching dock tools")
+		return nil, nil, output.ErrUsage("Account must be resolved before fetching dock tools")
 	}
 
 	// Fetch project data
 	path := fmt.Sprintf("/projects/%s.json", projectID)
 	resp, err := r.sdk.ForAccount(r.config.AccountID).Get(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch project: %w", err)
+		return nil, nil, fmt.Errorf("failed to fetch project: %w", err)
 	}
 
 	var project struct {
 		Dock []DockTool `json:"dock"`
 	}
 	if err := json.Unmarshal(resp.Data, &project); err != nil {
-		return nil, fmt.Errorf("failed to parse project: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse project: %w", err)
 	}
 
 	// Filter to matching enabled tools only
@@ -99,7 +108,7 @@ func (r *Resolver) fetchDockTools(ctx context.Context, projectID, dockName strin
 		}
 	}
 
-	return matches, nil
+	return matches, project.Dock, nil
 }
 
 // promptForDockTool shows an interactive picker for dock tool selection.

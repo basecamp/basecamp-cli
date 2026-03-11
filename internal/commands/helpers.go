@@ -118,10 +118,10 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 		return "", fmt.Errorf("failed to parse project: %w", err)
 	}
 
-	// Find all matching tools
+	// Find all matching enabled tools
 	var matches []DockTool
 	for _, tool := range project.Dock {
-		if tool.Name == dockName {
+		if tool.Name == dockName && tool.Enabled {
 			matches = append(matches, tool)
 		}
 	}
@@ -129,6 +129,13 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 	// Handle cases
 	switch len(matches) {
 	case 0:
+		// Check if tool exists but is disabled
+		for _, tool := range project.Dock {
+			if tool.Name == dockName && !tool.Enabled {
+				return "", output.ErrNotFoundHint(friendlyName, projectID,
+					fmt.Sprintf("%s is disabled for this project", strings.ToUpper(friendlyName[:1])+friendlyName[1:]))
+			}
+		}
 		return "", output.ErrNotFoundHint(friendlyName, projectID, fmt.Sprintf("Project has no %s", friendlyName))
 
 	case 1:
