@@ -83,6 +83,7 @@ func waitForCallback(ctx context.Context, expectedState string, listener net.Lis
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
 
 		state := r.URL.Query().Get("state")
 		code := r.URL.Query().Get("code")

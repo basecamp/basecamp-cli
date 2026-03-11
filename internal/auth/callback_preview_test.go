@@ -44,7 +44,7 @@ func TestPreviewCallbackPages(t *testing.T) {
 	t.Log("  http://localhost:9999/error")
 	t.Log("Ctrl-C to stop")
 
-	server := &http.Server{Addr: ":9999", Handler: mux}
+	server := &http.Server{Addr: "127.0.0.1:9999", Handler: mux}
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		t.Fatal(err)
 	}
