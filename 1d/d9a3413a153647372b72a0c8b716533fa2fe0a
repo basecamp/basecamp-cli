@@ -1,0 +1,23 @@
+internal/output/render.go
+  88ca25da0c5cd647 673-675,737-740
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "1dd9a3413a153647372b72a0c8b716533fa2fe0a",
+  "prompts": {
+    "88ca25da0c5cd647": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a55922-3228-4cde-97a9-a8012b6858dc",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 90,
+      "total_deletions": 4,
+      "accepted_lines": 88,
+      "overriden_lines": 0
+    }
+  }
+}
