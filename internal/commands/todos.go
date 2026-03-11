@@ -46,6 +46,9 @@ func NewTodosCmd() *cobra.Command {
 		newTodosUncompleteCmd(),
 		newTodosSweepCmd(),
 		newTodosPositionCmd(),
+		newRecordableTrashCmd("todo"),
+		newRecordableArchiveCmd("todo"),
+		newRecordableRestoreCmd("todo"),
 	)
 
 	return cmd
