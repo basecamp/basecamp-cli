@@ -28,6 +28,17 @@ Static `commandCategories()` in `commands.go`. Every registered command must app
 Invocation order: constructor, RunE, then helpers called by RunE.
 Export order: public before private.
 
+## Bare Command Groups
+
+Command groups (resource nouns like `todos`, `projects`, `todosets`) must not set
+`RunE` on the parent command. Bare invocation shows help — Cobra does this
+automatically when a command has subcommands and no `RunE`.
+
+Shortcut commands (`card`, `search`, `url`) are different: they perform an action
+directly and may also have subcommands. These are allowed to set `RunE`.
+
+`scripts/check-bare-groups.sh` enforces this in CI.
+
 ## File Organization
 
 One file per top-level command group in `internal/commands/`.

@@ -271,7 +271,7 @@ replace-check:
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e check-naming check-surface check-skill-drift provenance-check tidy-check
+check: fmt-check vet lint test test-e2e check-naming check-surface check-skill-drift check-bare-groups provenance-check tidy-check
 
 # Full pre-flight for release: check + replace-check + vuln + race + surface compat
 .PHONY: release-check
@@ -328,6 +328,11 @@ check-surface-compat: build
 .PHONY: check-skill-drift
 check-skill-drift:
 	@scripts/check-skill-drift.sh
+
+# Verify group commands show help bare (no RunE on parents with subcommands)
+.PHONY: check-bare-groups
+check-bare-groups:
+	@scripts/check-bare-groups.sh
 
 # Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
 .PHONY: check-naming
