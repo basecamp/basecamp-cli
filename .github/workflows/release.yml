@@ -64,12 +64,12 @@ jobs:
       - name: Run release quality gate
         run: |
           make fmt-check vet lint test test-e2e provenance-check check-naming check-surface
-          go test -race -count=1 ./...
+          go test -tags dev -race -count=1 ./...
 
       - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          GOFLAGS=-tags=dev govulncheck ./...
 
       - name: Check CLI surface compatibility
         run: |

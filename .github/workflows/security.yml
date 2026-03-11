@@ -73,7 +73,7 @@ jobs:
       - name: Run gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
-          gosec -no-fail -fmt sarif -out gosec-results.sarif ./...
+          gosec -tags dev -no-fail -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98 # v4
@@ -114,7 +114,7 @@ jobs:
       - name: Build
         env:
           CODEQL_EXTRACTOR_GO_BUILD_TRACING: 'on'
-        run: go build ./...
+        run: go build -tags dev ./...
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@0d579ffd059c29b07949a3cce3983f0780820c98 # v4

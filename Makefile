@@ -26,7 +26,8 @@ VERSION_PKG := github.com/basecamp/basecamp-cli/internal/version
 
 # Build flags
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)
-BUILD_FLAGS := -trimpath -ldflags "$(LDFLAGS)"
+BUILD_TAGS := -tags dev
+BUILD_FLAGS := -trimpath $(BUILD_TAGS) -ldflags "$(LDFLAGS)"
 
 # Default target
 .PHONY: all
@@ -70,7 +71,7 @@ build-bsd:
 # Run tests
 .PHONY: test
 test: check-toolchain
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -v ./...
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -v ./...
 
 # Run end-to-end tests against Go binary
 .PHONY: test-e2e
@@ -80,12 +81,12 @@ test-e2e: build
 # Run tests with race detector
 .PHONY: race-test
 race-test: check-toolchain
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -race -count=1 ./...
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -race -count=1 ./...
 
 # Run tests with coverage
 .PHONY: test-coverage
 test-coverage: check-toolchain
-	$(GOTEST) -v -coverprofile=coverage.out ./...
+	$(GOTEST) $(BUILD_TAGS) -v -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
 # Coverage with browser open
@@ -100,14 +101,14 @@ coverage: test-coverage
 # Run all benchmarks
 .PHONY: bench
 bench:
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem ./internal/...
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -bench=. -benchmem ./internal/...
 
 # Run benchmarks with CPU profiling (profiles first package only due to Go limitation)
 .PHONY: bench-cpu
 bench-cpu:
 	@mkdir -p profiles
 	@echo "Profiling internal/names (primary hot path)..."
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -bench=. -benchtime=1s -cpuprofile=profiles/cpu.pprof ./internal/names
 	@echo "CPU profile saved to profiles/cpu.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/cpu.pprof"
 
@@ -116,14 +117,14 @@ bench-cpu:
 bench-mem:
 	@mkdir -p profiles
 	@echo "Profiling internal/names (primary hot path)..."
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -bench=. -benchtime=1s -benchmem -memprofile=profiles/mem.pprof ./internal/names
 	@echo "Memory profile saved to profiles/mem.pprof"
 	@echo "View with: go tool pprof -http=:8080 profiles/mem.pprof"
 
 # Save current benchmarks as baseline for comparison
 .PHONY: bench-save
 bench-save:
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-baseline.txt
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -bench=. -benchmem -count=5 ./internal/... > benchmarks-baseline.txt
 	@echo "Baseline saved to benchmarks-baseline.txt"
 
 # Compare current benchmarks against baseline
@@ -133,7 +134,7 @@ bench-compare:
 		echo "No baseline found. Run 'make bench-save' first."; \
 		exit 1; \
 	fi
-	BASECAMP_NO_KEYRING=1 $(GOTEST) -bench=. -benchmem -count=5 ./internal/... > benchmarks-current.txt
+	BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) -bench=. -benchmem -count=5 ./internal/... > benchmarks-current.txt
 	@command -v benchstat >/dev/null 2>&1 || go install golang.org/x/perf/cmd/benchstat@latest
 	benchstat benchmarks-baseline.txt benchmarks-current.txt
 
@@ -186,7 +187,7 @@ provenance-check:
 # Run go vet
 .PHONY: vet
 vet: check-toolchain
-	$(GOVET) ./...
+	$(GOVET) $(BUILD_TAGS) ./...
 
 # Format code
 .PHONY: fmt
@@ -210,7 +211,7 @@ endif
 
 .PHONY: lint
 lint:
-	$(GOLANGCI_LINT) run ./...
+	$(GOLANGCI_LINT) run --build-tags dev ./...
 
 # Tidy dependencies
 .PHONY: tidy
@@ -255,7 +256,7 @@ clean-all: clean
 # Install to GOPATH/bin
 .PHONY: install
 install:
-	$(GOCMD) install ./cmd/basecamp
+	$(GOCMD) install $(BUILD_TAGS) ./cmd/basecamp
 
 # Guard against local replace directives in go.mod
 .PHONY: replace-check
@@ -365,7 +366,7 @@ security: lint vuln secrets
 .PHONY: vuln
 vuln:
 	@echo "Running govulncheck..."
-	govulncheck ./...
+	govulncheck $(BUILD_TAGS) ./...
 
 # Run secret scanner
 .PHONY: secrets
@@ -377,15 +378,15 @@ secrets:
 .PHONY: fuzz
 fuzz:
 	@echo "Running dateparse fuzz test..."
-	go test -fuzz=FuzzParseFrom -fuzztime=30s ./internal/dateparse/
+	go test $(BUILD_TAGS) -fuzz=FuzzParseFrom -fuzztime=30s ./internal/dateparse/
 	@echo "Running URL parsing fuzz test..."
-	go test -fuzz=FuzzURLPathParsing -fuzztime=30s ./internal/commands/
+	go test $(BUILD_TAGS) -fuzz=FuzzURLPathParsing -fuzztime=30s ./internal/commands/
 
 # Run quick fuzz tests (10s each, for CI)
 .PHONY: fuzz-quick
 fuzz-quick:
-	go test -fuzz=FuzzParseFrom -fuzztime=10s ./internal/dateparse/
-	go test -fuzz=FuzzURLPathParsing -fuzztime=10s ./internal/commands/
+	go test $(BUILD_TAGS) -fuzz=FuzzParseFrom -fuzztime=10s ./internal/dateparse/
+	go test $(BUILD_TAGS) -fuzz=FuzzURLPathParsing -fuzztime=10s ./internal/commands/
 
 # Install development tools
 .PHONY: tools
