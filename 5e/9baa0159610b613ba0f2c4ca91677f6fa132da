@@ -1,0 +1,33 @@
+internal/commands/cards.go
+  ace56a3dc2169407 45-47
+internal/commands/comment.go
+  ace56a3dc2169407 34-36
+internal/commands/files.go
+  ace56a3dc2169407 46-48
+internal/commands/recordings.go
+  ace56a3dc2169407 451-501
+internal/commands/todolists.go
+  ace56a3dc2169407 39-41
+internal/commands/commands.go
+  ace56a3dc2169407 63-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "5e9baa0159610b613ba0f2c4ca91677f6fa132da",
+  "prompts": {
+    "ace56a3dc2169407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e19d22cb-48c9-41df-8e2a-00ef8512a962",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 4,
+      "accepted_lines": 67,
+      "overriden_lines": 0
+    }
+  }
+}
