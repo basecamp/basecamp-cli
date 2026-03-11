@@ -1,0 +1,27 @@
+internal/commands/campfire.go
+  d12ca53f099800ba 218-219,225-228
+internal/commands/search.go
+  d12ca53f099800ba 57
+internal/tui/workspace/views/detail.go
+  d12ca53f099800ba 1517
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "05501208c22a8ba862a399099d6d21c2abc52171",
+  "prompts": {
+    "d12ca53f099800ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eff3a009-7621-4998-8b23-d156b8d84fd5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 19,
+      "total_deletions": 10,
+      "accepted_lines": 19,
+      "overriden_lines": 0
+    }
+  }
+}
