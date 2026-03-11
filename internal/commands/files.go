@@ -43,6 +43,9 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newFilesShowCmd(&project),
 		newFilesUpdateCmd(&project),
 		newFilesDownloadCmd(&project),
+		newRecordableTrashCmd("file"),
+		newRecordableArchiveCmd("file"),
+		newRecordableRestoreCmd("file"),
 	)
 
 	return cmd

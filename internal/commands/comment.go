@@ -31,6 +31,9 @@ func NewCommentsCmd() *cobra.Command {
 		newCommentsShowCmd(),
 		newCommentsCreateCmd(),
 		newCommentsUpdateCmd(),
+		newRecordableTrashCmd("comment"),
+		newRecordableArchiveCmd("comment"),
+		newRecordableRestoreCmd("comment"),
 	)
 
 	return cmd

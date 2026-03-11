@@ -36,6 +36,9 @@ to disambiguate when needed.`,
 		newTodolistsShowCmd(&project),
 		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
+		newRecordableTrashCmd("todolist"),
+		newRecordableArchiveCmd("todolist"),
+		newRecordableRestoreCmd("todolist"),
 	)
 
 	return cmd
