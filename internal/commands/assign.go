@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -50,7 +49,7 @@ Examples:
 
 			itemID := args[0]
 
-			assigneeID, assigneeIDInt, resolvedProjectID, err := resolveAssignmentInputs(cmd, app, &assignee, &project)
+			assigneeID, assigneeIDInt, resolvedProjectID, err := resolveAssigneeInputs(cmd, app, &assignee, &project, "Person to assign is required", "Use --to <person>")
 			if err != nil {
 				return err
 			}
@@ -116,7 +115,7 @@ Examples:
 
 			itemID := args[0]
 
-			_, assigneeIDInt, resolvedProjectID, err := resolveUnassignmentInputs(cmd, app, &assignee, &project)
+			_, assigneeIDInt, resolvedProjectID, err := resolveAssigneeInputs(cmd, app, &assignee, &project, "Person to unassign is required", "Use --from <person>")
 			if err != nil {
 				return err
 			}
@@ -146,8 +145,8 @@ Examples:
 	return cmd
 }
 
-// resolveAssignmentInputs resolves project and assignee for assign commands.
-func resolveAssignmentInputs(cmd *cobra.Command, app *appctx.App, assignee, project *string) (string, int64, string, error) {
+// resolveAssigneeInputs resolves project and assignee for assign/unassign commands.
+func resolveAssigneeInputs(cmd *cobra.Command, app *appctx.App, assignee, project *string, missingMsg, missingHint string) (string, int64, string, error) {
 	resolvedProjectID, err := resolveProjectID(cmd, app, *project)
 	if err != nil {
 		return "", 0, "", err
@@ -155,7 +154,7 @@ func resolveAssignmentInputs(cmd *cobra.Command, app *appctx.App, assignee, proj
 
 	if *assignee == "" {
 		if !app.IsInteractive() {
-			return "", 0, "", output.ErrUsageHint("Person to assign is required", "Use --to <person>")
+			return "", 0, "", output.ErrUsageHint(missingMsg, missingHint)
 		}
 		selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
 		if err != nil {
@@ -169,37 +168,10 @@ func resolveAssignmentInputs(cmd *cobra.Command, app *appctx.App, assignee, proj
 		return "", 0, "", err
 	}
 
-	var assigneeIDInt int64
-	_, _ = fmt.Sscanf(assigneeID, "%d", &assigneeIDInt) //nolint:gosec // G104: ID validated by ResolvePerson
-
-	return assigneeID, assigneeIDInt, resolvedProjectID, nil
-}
-
-// resolveUnassignmentInputs resolves project and assignee for unassign commands.
-func resolveUnassignmentInputs(cmd *cobra.Command, app *appctx.App, assignee, project *string) (string, int64, string, error) {
-	resolvedProjectID, err := resolveProjectID(cmd, app, *project)
+	assigneeIDInt, err := strconv.ParseInt(assigneeID, 10, 64)
 	if err != nil {
-		return "", 0, "", err
+		return "", 0, "", output.ErrUsage("Invalid assignee ID: " + assigneeID)
 	}
-
-	if *assignee == "" {
-		if !app.IsInteractive() {
-			return "", 0, "", output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
-		}
-		selectedPerson, err := ensurePersonInProject(cmd, app, resolvedProjectID)
-		if err != nil {
-			return "", 0, "", err
-		}
-		*assignee = selectedPerson
-	}
-
-	assigneeID, _, err := app.Names.ResolvePerson(cmd.Context(), *assignee)
-	if err != nil {
-		return "", 0, "", err
-	}
-
-	var assigneeIDInt int64
-	_, _ = fmt.Sscanf(assigneeID, "%d", &assigneeIDInt) //nolint:gosec // G104: ID validated by ResolvePerson
 
 	return assigneeID, assigneeIDInt, resolvedProjectID, nil
 }
@@ -482,7 +454,7 @@ func getStep(cmd *cobra.Command, app *appctx.App, stepID int64, resolvedProjectI
 	}
 
 	var step basecamp.CardStep
-	if err := json.Unmarshal(resp.Data, &step); err != nil {
+	if err := resp.UnmarshalData(&step); err != nil {
 		return nil, fmt.Errorf("failed to parse step: %w", err)
 	}
 	return &step, nil
