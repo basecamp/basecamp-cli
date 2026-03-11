@@ -71,7 +71,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bool) error {
 	// Account-wide campfire listing
 	if all {
-		result, err := app.Account().Campfires().List(cmd.Context())
+		result, err := app.Account().Campfires().List(cmd.Context(), nil)
 		if err != nil {
 			return err
 		}
@@ -214,17 +214,16 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 		return output.ErrUsage("Invalid campfire ID")
 	}
 
-	// Get recent messages (lines) using SDK
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt)
+	// Get recent messages (lines) using SDK with server-side limit
+	var lineOpts *basecamp.CampfireLineListOptions
+	if limit > 0 {
+		lineOpts = &basecamp.CampfireLineListOptions{Limit: limit}
+	}
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), campfireIDInt, lineOpts)
 	if err != nil {
 		return err
 	}
 	lines := result.Lines
-
-	// Take last N messages
-	if limit > 0 && len(lines) > limit {
-		lines = lines[len(lines)-limit:]
-	}
 
 	summary := fmt.Sprintf("%d messages", len(lines))
 

@@ -378,14 +378,14 @@ func runPeoplePingable(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	people, err := app.Account().People().Pingable(cmd.Context())
+	result, err := app.Account().People().Pingable(cmd.Context(), nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
-	summary := fmt.Sprintf("%d pingable people", len(people))
+	summary := fmt.Sprintf("%d pingable people", len(result.People))
 
-	return app.OK(people, output.WithSummary(summary))
+	return app.OK(result.People, output.WithSummary(summary))
 }
 
 func newPeopleAddCmd() *cobra.Command {

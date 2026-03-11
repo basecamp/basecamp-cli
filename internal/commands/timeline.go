@@ -95,13 +95,13 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 	}
 
 	// Default: account-wide activity feed
-	events, err := app.Account().Timeline().Progress(cmd.Context())
+	result, err := app.Account().Timeline().Progress(cmd.Context(), nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
-	return app.OK(events,
-		output.WithSummary(fmt.Sprintf("%d recent events", len(events))),
+	return app.OK(result.Events,
+		output.WithSummary(fmt.Sprintf("%d recent events", len(result.Events))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "project",
@@ -131,17 +131,17 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	events, err := app.Account().Timeline().ProjectTimeline(cmd.Context(), projectIDInt)
+	timelineResult, err := app.Account().Timeline().ProjectTimeline(cmd.Context(), projectIDInt, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
-	summary := fmt.Sprintf("%d events in %s", len(events), projectName)
+	summary := fmt.Sprintf("%d events in %s", len(timelineResult.Events), projectName)
 	if projectName == "" {
-		summary = fmt.Sprintf("%d events in project #%s", len(events), resolvedProjectID)
+		summary = fmt.Sprintf("%d events in project #%s", len(timelineResult.Events), resolvedProjectID)
 	}
 
-	return app.OK(events,
+	return app.OK(timelineResult.Events,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -172,7 +172,7 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 		return output.ErrUsage("Invalid person ID")
 	}
 
-	result, err := app.Account().Timeline().PersonProgress(cmd.Context(), personID)
+	result, err := app.Account().Timeline().PersonProgress(cmd.Context(), personID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -423,7 +423,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 		description = "your activity"
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			result, err := app.Account().Timeline().PersonProgress(ctx, personID)
+			result, err := app.Account().Timeline().PersonProgress(ctx, personID, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -441,7 +441,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 		description = fmt.Sprintf("activity for %s", personName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			result, err := app.Account().Timeline().PersonProgress(ctx, personID)
+			result, err := app.Account().Timeline().PersonProgress(ctx, personID, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -459,13 +459,21 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 		description = fmt.Sprintf("activity in %s", projectName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			return app.Account().Timeline().ProjectTimeline(ctx, projectIDInt)
+			r, err := app.Account().Timeline().ProjectTimeline(ctx, projectIDInt, nil)
+			if err != nil {
+				return nil, err
+			}
+			return r.Events, nil
 		}
 	} else {
 		// Account-wide timeline
 		description = "account activity"
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			return app.Account().Timeline().Progress(ctx)
+			r, err := app.Account().Timeline().Progress(ctx, nil)
+			if err != nil {
+				return nil, err
+			}
+			return r.Events, nil
 		}
 	}
 

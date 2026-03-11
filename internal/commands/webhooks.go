@@ -85,7 +85,7 @@ func runWebhooksList(cmd *cobra.Command, project *string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	webhooksResult, err := app.Account().Webhooks().List(cmd.Context(), bucketID)
+	webhooksResult, err := app.Account().Webhooks().List(cmd.Context(), bucketID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}

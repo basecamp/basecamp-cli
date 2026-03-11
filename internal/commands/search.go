@@ -50,23 +50,20 @@ Use 'basecamp search metadata' to see available search scopes.`,
 			}
 
 			// Build search options
-			var opts *basecamp.SearchOptions
+			opts := &basecamp.SearchOptions{}
 			if sortBy != "" {
-				opts = &basecamp.SearchOptions{
-					Sort: sortBy,
-				}
+				opts.Sort = sortBy
+			}
+			if limit != 0 {
+				opts.Limit = limit
 			}
 
-			results, err := app.Account().Search().Search(cmd.Context(), query, opts)
+			searchResult, err := app.Account().Search().Search(cmd.Context(), query, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			// Apply client-side limit if specified
-			if limit > 0 && len(results) > limit {
-				results = results[:limit]
-			}
-
+			results := searchResult.Results
 			summary := fmt.Sprintf("%d results for \"%s\"", len(results), query)
 
 			// Humanize for styled terminal output; preserve raw SDK structs
@@ -90,7 +87,7 @@ Use 'basecamp search metadata' to see available search scopes.`,
 	}
 
 	cmd.Flags().StringVarP(&sortBy, "sort", "s", "", "Sort by: created_at or updated_at (default: relevance)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Limit number of results")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of results to fetch (0 = all)")
 
 	cmd.AddCommand(newSearchMetadataCmd())
 

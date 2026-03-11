@@ -65,7 +65,7 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 	// SDK List() defaults to active status (API default)
 	// For archived/trashed, use raw API with status parameter
 	if status == "active" || status == "" {
-		templatesResult, err := app.Account().Templates().List(cmd.Context())
+		templatesResult, err := app.Account().Templates().List(cmd.Context(), nil)
 		if err != nil {
 			return convertSDKError(err)
 		}

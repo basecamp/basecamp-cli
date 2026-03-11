@@ -123,7 +123,7 @@ func sumTimesheetHours(entries []basecamp.TimesheetEntry) float64 {
 }
 
 func newTimesheetProjectCmd(project *string) *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "project",
 		Short: "View project timesheet",
 		Long:  "View timesheet entries for a project.",
@@ -159,15 +159,15 @@ func newTimesheetProjectCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			entries, err := app.Account().Timesheet().ProjectReport(cmd.Context(), projectIDInt, nil)
+			result, err := app.Account().Timesheet().ProjectReport(cmd.Context(), projectIDInt, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			totalHours := sumTimesheetHours(entries)
+			totalHours := sumTimesheetHours(result.Entries)
 
-			return app.OK(entries,
-				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(entries), totalHours)),
+			return app.OK(result.Entries,
+				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(result.Entries), totalHours)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "report",
@@ -183,12 +183,10 @@ func newTimesheetProjectCmd(project *string) *cobra.Command {
 			)
 		},
 	}
-
-	return cmd
 }
 
 func newTimesheetRecordingCmd(project *string) *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:     "item <id>",
 		Aliases: []string{"recording"},
 		Short:   "View item timesheet",
@@ -222,15 +220,15 @@ func newTimesheetRecordingCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid ID")
 			}
 
-			entries, err := app.Account().Timesheet().RecordingReport(cmd.Context(), recordingID, nil)
+			result, err := app.Account().Timesheet().RecordingReport(cmd.Context(), recordingID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			totalHours := sumTimesheetHours(entries)
+			totalHours := sumTimesheetHours(result.Entries)
 
-			return app.OK(entries,
-				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(entries), totalHours)),
+			return app.OK(result.Entries,
+				output.WithSummary(fmt.Sprintf("%d entries (%.1fh total)", len(result.Entries), totalHours)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "project",
@@ -246,6 +244,4 @@ func newTimesheetRecordingCmd(project *string) *cobra.Command {
 			)
 		},
 	}
-
-	return cmd
 }

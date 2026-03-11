@@ -206,7 +206,7 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 
 			results := FanOut[[]PingRoomInfo](ctx, h.multi,
 				func(acct AccountInfo, client *basecamp.AccountClient) ([]PingRoomInfo, error) {
-					campfires, err := client.Campfires().List(ctx)
+					campfires, err := client.Campfires().List(ctx, nil)
 					if err != nil {
 						return nil, err
 					}
@@ -217,7 +217,7 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 						}
 						var lastMsg, lastAt string
 						var lastAtTS int64
-						lines, err := client.Campfires().ListLines(ctx, cf.ID)
+						lines, err := client.Campfires().ListLines(ctx, cf.ID, nil)
 						if err == nil && len(lines.Lines) > 0 {
 							last := lines.Lines[len(lines.Lines)-1]
 							if last.Creator != nil {
@@ -296,7 +296,7 @@ func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
 					}
 				}
 
-				campfires, err := client.Campfires().List(ctx)
+				campfires, err := client.Campfires().List(ctx, nil)
 				if err != nil {
 					return accountRooms{}, err
 				}
@@ -441,7 +441,7 @@ func (h *Hub) BonfireLines(room RoomID) *Pool[CampfireLinesResult] {
 			if client == nil {
 				return CampfireLinesResult{}, fmt.Errorf("no client for account %s", room.AccountID)
 			}
-			result, err := client.Campfires().ListLines(ctx, room.CampfireID)
+			result, err := client.Campfires().ListLines(ctx, room.CampfireID, nil)
 			if err != nil {
 				return CampfireLinesResult{}, err
 			}
@@ -506,7 +506,7 @@ func (h *Hub) BonfireDigest() *Pool[[]BonfireDigestEntry] {
 						ch <- entry
 						return
 					}
-					lines, err := client.Campfires().ListLines(ctx, rc.CampfireID)
+					lines, err := client.Campfires().ListLines(ctx, rc.CampfireID, nil)
 					if err != nil || len(lines.Lines) == 0 {
 						ch <- entry
 						return
@@ -593,12 +593,12 @@ func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
 
 // fetchTimelineEvents fetches timeline events from a single account.
 func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, acct AccountInfo) ([]TimelineEventInfo, error) {
-	events, err := client.Timeline().Progress(ctx)
+	result, err := client.Timeline().Progress(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	infos := make([]TimelineEventInfo, 0, len(events))
-	for _, e := range events {
+	infos := make([]TimelineEventInfo, 0, len(result.Events))
+	for _, e := range result.Events {
 		project := ""
 		var projectID int64
 		if e.Bucket != nil {

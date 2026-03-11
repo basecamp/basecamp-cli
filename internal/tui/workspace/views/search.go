@@ -445,12 +445,12 @@ func (v *Search) fetchResults(query string) tea.Cmd {
 
 func (v *Search) fetchMultiAccountResults(ctx context.Context, ms *data.MultiStore, query string) workspace.SearchResultsMsg {
 	results := ms.FanOut(ctx, func(acct data.AccountInfo, client *basecamp.AccountClient) (any, error) {
-		recs, err := client.Search().Search(ctx, query, &basecamp.SearchOptions{})
+		recResult, err := client.Search().Search(ctx, query, &basecamp.SearchOptions{})
 		if err != nil {
 			return nil, err
 		}
 		var infos []workspace.SearchResultInfo
-		for _, r := range recs {
+		for _, r := range recResult.Results {
 			infos = append(infos, searchResultToInfo(r, acct.ID, acct.Name))
 		}
 		return infos, nil
@@ -490,13 +490,13 @@ func (v *Search) fetchMultiAccountResults(ctx context.Context, ms *data.MultiSto
 }
 
 func (v *Search) fetchSingleAccountResults(ctx context.Context, client *basecamp.AccountClient, accountID, query string) workspace.SearchResultsMsg {
-	results, err := client.Search().Search(ctx, query, &basecamp.SearchOptions{})
+	searchResult, err := client.Search().Search(ctx, query, &basecamp.SearchOptions{})
 	if err != nil {
 		return workspace.SearchResultsMsg{Query: query, Err: err}
 	}
 
-	infos := make([]workspace.SearchResultInfo, 0, len(results))
-	for _, r := range results {
+	infos := make([]workspace.SearchResultInfo, 0, len(searchResult.Results))
+	for _, r := range searchResult.Results {
 		infos = append(infos, searchResultToInfo(r, accountID, ""))
 	}
 	return workspace.SearchResultsMsg{Results: infos, Query: query}
