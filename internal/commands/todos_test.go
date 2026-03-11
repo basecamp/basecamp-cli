@@ -294,7 +294,7 @@ func (t *mockTodoCreateTransport) RoundTrip(req *http.Request) (*http.Response, 
 			body = `[{"id": 123, "name": "Test Project"}]`
 		} else if strings.Contains(req.URL.Path, "/projects/") {
 			// Single project lookup - return project with todoset in dock
-			body = `{"id": 123, "dock": [{"name": "todoset", "id": 789}]}`
+			body = `{"id": 123, "dock": [{"name": "todoset", "id": 789, "enabled": true}]}`
 		} else if strings.Contains(req.URL.Path, "/todolists.json") {
 			// Todolists lookup - return list containing our todolist
 			body = `[{"id": 456, "name": "Test List"}]`

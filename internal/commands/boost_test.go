@@ -47,7 +47,7 @@ func (t *mockBoostTransport) RoundTrip(req *http.Request) (*http.Response, error
 		case strings.Contains(req.URL.Path, "/projects.json"):
 			body = `[{"id": 123, "name": "Test Project"}]`
 		case strings.Contains(req.URL.Path, "/projects/"):
-			body = `{"id": 123, "dock": [{"name": "chat", "id": 789}]}`
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
 		case strings.Contains(req.URL.Path, "/boosts") && !strings.Contains(req.URL.Path, "/boosts/"):
 			body = `[{"id": 1, "content": "🎉", "created_at": "2024-01-01T00:00:00Z", "booster": {"id": 10, "name": "Alice"}}]`
 		case strings.Contains(req.URL.Path, "/boosts/"):
@@ -198,7 +198,7 @@ func (t *mockBoostNilBoosterTransport) RoundTrip(req *http.Request) (*http.Respo
 	case strings.Contains(req.URL.Path, "/projects.json"):
 		body = `[{"id": 123, "name": "Test Project"}]`
 	case strings.Contains(req.URL.Path, "/projects/"):
-		body = `{"id": 123, "dock": [{"name": "chat", "id": 789}]}`
+		body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
 	case strings.Contains(req.URL.Path, "/boosts/"):
 		body = `{"id": 1, "content": "👍", "created_at": "2024-01-01T00:00:00Z"}`
 	default:
