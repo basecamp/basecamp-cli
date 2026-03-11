@@ -359,7 +359,8 @@ func FromContext(ctx context.Context) *App {
 // ForAccount() will panic if accountID is empty or non-numeric.
 //
 // For account-agnostic operations (like Authorization().GetInfo()),
-// use app.SDK directly.
+// use app.SDK directly. Resolve the authorization endpoint via
+// app.Auth.AuthorizationEndpoint() rather than passing nil options.
 func (a *App) Account() *basecamp.AccountClient {
 	return a.SDK.ForAccount(a.Config.AccountID)
 }

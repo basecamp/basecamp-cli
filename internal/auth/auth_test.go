@@ -1557,3 +1557,165 @@ func TestLoginRejectsInvalidScope(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Invalid scope")
 }
+
+// --- AuthorizationEndpoint tests ---
+
+func TestAuthorizationEndpoint_StoredBC3(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	// Store bc3-type credentials
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "tok",
+		OAuthType:   "bc3",
+	}))
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://3.basecampapi.com/authorization.json", ep)
+}
+
+func TestAuthorizationEndpoint_StoredLaunchpad(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "tok",
+		OAuthType:   "launchpad",
+	}))
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://launchpad.37signals.com/authorization.json", ep)
+}
+
+func TestAuthorizationEndpoint_StoredLaunchpadOverrideURL(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "https://custom-lp.example.com")
+
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "tok",
+		OAuthType:   "launchpad",
+	}))
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://custom-lp.example.com/authorization.json", ep)
+}
+
+func TestAuthorizationEndpoint_TokenWithBC3Prefix(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_abc123")
+
+	// Isolate from real credential store
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://3.basecampapi.com/authorization.json", ep)
+}
+
+func TestAuthorizationEndpoint_TokenWithoutBC3Prefix(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "some-launchpad-token")
+
+	// Isolate from real credential store
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://launchpad.37signals.com/authorization.json", ep)
+}
+
+func TestAuthorizationEndpoint_UnknownStoredType(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "tok",
+		OAuthType:   "unknown",
+	}))
+
+	_, err := m.AuthorizationEndpoint(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Unknown OAuth type")
+}
+
+// Regression: BASECAMP_TOKEN must override conflicting stored credentials.
+// A user may export BASECAMP_TOKEN=bc_at_... while stale launchpad creds
+// remain on disk. The endpoint must follow the token, not the stored type.
+
+func TestAuthorizationEndpoint_BC3TokenOverridesStoredLaunchpad(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_override_test")
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	// Stale stored credentials say "launchpad"
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "stale-lp-token",
+		OAuthType:   "launchpad",
+	}))
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://3.basecampapi.com/authorization.json", ep,
+		"bc_at_ env token must route to BC3, not stored launchpad")
+}
+
+func TestAuthorizationEndpoint_LaunchpadTokenOverridesStoredBC3(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "plain-launchpad-token")
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	// Stale stored credentials say "bc3"
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "stale-bc3-token",
+		OAuthType:   "bc3",
+	}))
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://launchpad.37signals.com/authorization.json", ep,
+		"non-bc_at_ env token must route to launchpad, not stored bc3")
+}

@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/harness"
@@ -664,8 +666,18 @@ func checkAPIConnectivity(ctx context.Context, app *appctx.App, verbose bool) Ch
 		Name: "API Connectivity",
 	}
 
+	endpoint, epErr := app.Auth.AuthorizationEndpoint(ctx)
+	if epErr != nil {
+		check.Status = "fail"
+		check.Message = "Cannot determine authorization endpoint"
+		check.Hint = fmt.Sprintf("Error: %v", epErr)
+		return check
+	}
+
 	start := time.Now()
-	_, err := app.SDK.Authorization().GetInfo(ctx, nil)
+	_, err := app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{
+		Endpoint: endpoint,
+	})
 	latency := time.Since(start)
 
 	if err != nil {

@@ -3,25 +3,12 @@ package resolve
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
-
-// defaultLaunchpadBaseURL is the default Launchpad base URL.
-const defaultLaunchpadBaseURL = "https://launchpad.37signals.com"
-
-// getLaunchpadBaseURL returns the Launchpad base URL.
-// Can be overridden via BASECAMP_LAUNCHPAD_URL for testing.
-func getLaunchpadBaseURL() string {
-	if url := os.Getenv("BASECAMP_LAUNCHPAD_URL"); url != "" {
-		return url
-	}
-	return defaultLaunchpadBaseURL
-}
 
 // Account resolves the account ID using the following precedence:
 // 1. CLI flag (--account)
@@ -125,20 +112,9 @@ func (r *Resolver) fetchAccounts(ctx context.Context) ([]basecamp.AuthorizedAcco
 		return nil, output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
-	// Determine authorization endpoint based on OAuth type
-	var endpoint string
-	oauthType := r.auth.GetOAuthType()
-	switch oauthType {
-	case "bc3":
-		endpoint = r.config.BaseURL + "/authorization.json"
-	case "launchpad":
-		endpoint = getLaunchpadBaseURL() + "/authorization.json"
-	case "":
-		// Handle authentication via BASECAMP_TOKEN where no OAuth type is stored.
-		// Treat as bc3 since BASECAMP_TOKEN implies direct API access.
-		endpoint = r.config.BaseURL + "/authorization.json"
-	default:
-		return nil, output.ErrAuth("Unknown OAuth type: " + oauthType)
+	endpoint, err := r.auth.AuthorizationEndpoint(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Fetch authorization info using SDK

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,18 +40,6 @@ func NewMeCmd() *cobra.Command {
 	return cmd
 }
 
-// defaultLaunchpadBaseURL is the default Launchpad base URL.
-const defaultLaunchpadBaseURL = "https://launchpad.37signals.com"
-
-// getLaunchpadBaseURL returns the Launchpad base URL.
-// Can be overridden via BASECAMP_LAUNCHPAD_URL for testing.
-func getLaunchpadBaseURL() string {
-	if url := os.Getenv("BASECAMP_LAUNCHPAD_URL"); url != "" {
-		return url
-	}
-	return defaultLaunchpadBaseURL
-}
-
 func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
@@ -60,20 +47,9 @@ func runMe(cmd *cobra.Command, args []string) error {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
-	// Determine authorization endpoint based on OAuth type
-	var endpoint string
-	oauthType := app.Auth.GetOAuthType()
-	switch oauthType {
-	case "bc3":
-		endpoint = app.Config.BaseURL + "/authorization.json"
-	case "launchpad":
-		endpoint = getLaunchpadBaseURL() + "/authorization.json"
-	case "":
-		// Handle authentication via BASECAMP_TOKEN where no OAuth type is stored.
-		// Treat as bc3 since BASECAMP_TOKEN implies direct API access.
-		endpoint = app.Config.BaseURL + "/authorization.json"
-	default:
-		return output.ErrAuth("Unknown OAuth type: " + oauthType)
+	endpoint, err := app.Auth.AuthorizationEndpoint(cmd.Context())
+	if err != nil {
+		return err
 	}
 
 	// Fetch identity and accounts using SDK

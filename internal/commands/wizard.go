@@ -9,6 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/harness"
@@ -139,8 +141,16 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 	w := cmd.OutOrStdout()
 
 	if app.Auth.IsAuthenticated() {
-		info, err := app.SDK.Authorization().GetInfo(cmd.Context(), nil)
-		if err == nil {
+		endpoint, epErr := app.Auth.AuthorizationEndpoint(cmd.Context())
+		var info *basecamp.AuthorizationInfo
+		var err error
+		if epErr == nil {
+			info, err = app.SDK.Authorization().GetInfo(cmd.Context(), &basecamp.GetInfoOptions{
+				Endpoint:      endpoint,
+				FilterProduct: "bc3",
+			})
+		}
+		if epErr == nil && err == nil {
 			name := fmt.Sprintf("%s %s", info.Identity.FirstName, info.Identity.LastName)
 			fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s (%s)", name, info.Identity.EmailAddress)))
 			if len(info.Accounts) > 0 {
@@ -350,7 +360,14 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult) {
 
 // fetchAccountName attempts to get the account name from the authorization endpoint.
 func fetchAccountName(cmd *cobra.Command, app *appctx.App, accountID string) string {
-	info, err := app.SDK.Authorization().GetInfo(cmd.Context(), nil)
+	endpoint, epErr := app.Auth.AuthorizationEndpoint(cmd.Context())
+	if epErr != nil {
+		return ""
+	}
+	info, err := app.SDK.Authorization().GetInfo(cmd.Context(), &basecamp.GetInfoOptions{
+		Endpoint:      endpoint,
+		FilterProduct: "bc3",
+	})
 	if err != nil {
 		return ""
 	}
