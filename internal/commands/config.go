@@ -755,7 +755,7 @@ Without --project, an interactive picker is shown.`,
 			}
 
 			// Mode 1: explicit --project flag — non-interactive setter
-			if cmd.Flags().Lookup("project").Changed {
+			if f := cmd.Flags().Lookup("project"); f != nil && f.Changed {
 				projectArg := app.Flags.Project
 				resolvedID, projectName, err := app.Names.ResolveProject(cmd.Context(), projectArg)
 				if err != nil {

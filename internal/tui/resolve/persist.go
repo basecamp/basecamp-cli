@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
@@ -87,16 +88,51 @@ func PersistValue(key, value, scope string) error {
 		configData[key] = value
 	}
 
-	// Write back
+	// Write back (atomic: temp + rename)
 	data, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, append(data, '\n'), 0600); err != nil {
+	if err := atomicWriteFile(configPath, append(data, '\n')); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
+	return nil
+}
+
+// atomicWriteFile writes data to a file atomically using temp+rename.
+func atomicWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmpFile.Chmod(0600); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		if runtime.GOOS == "windows" {
+			_ = os.Remove(path)
+			return os.Rename(tmpPath, path)
+		}
+		os.Remove(tmpPath)
+		return err
+	}
 	return nil
 }
 
