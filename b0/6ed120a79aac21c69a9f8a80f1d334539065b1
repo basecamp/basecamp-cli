@@ -1,0 +1,62 @@
+internal/commands/boost.go
+  95674d49ccc611a4 111,130
+internal/commands/search.go
+  95674d49ccc611a4 53,55,57-58,61,66,90
+internal/commands/webhooks.go
+  95674d49ccc611a4 88
+internal/tui/workspace/data/hub.go
+  95674d49ccc611a4 729,824,828-829,873
+internal/commands/templates.go
+  95674d49ccc611a4 68
+internal/commands/people.go
+  95674d49ccc611a4 381,386,388
+internal/tui/workspace/data/hub_global.go
+  95674d49ccc611a4 209,220,299,444,509,596,600-601
+internal/commands/timesheet.go
+  95674d49ccc611a4 126,162,167,169-170,189,223,228,230-231
+internal/tui/workspace/views/search.go
+  95674d49ccc611a4 448,453,493,498-499
+internal/commands/messagetypes.go
+  95674d49ccc611a4 55
+internal/commands/todolistgroups.go
+  95674d49ccc611a4 108
+internal/names/resolver.go
+  95674d49ccc611a4 434,439-440
+internal/commands/campfire.go
+  95674d49ccc611a4 74,217-222
+internal/commands/timeline.go
+  95674d49ccc611a4 98,103-104,134,139,141,144,175,426,444,462-466,472-476
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "b06ed120a79aac21c69a9f8a80f1d334539065b1",
+  "prompts": {
+    "95674d49ccc611a4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "728d1da8-120c-43a1-a250-66a581faa815",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 74,
+      "overriden_lines": 0
+    },
+    "d12ca53f099800ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eff3a009-7621-4998-8b23-d156b8d84fd5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
