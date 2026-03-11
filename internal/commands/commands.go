@@ -34,13 +34,13 @@ func CommandCategories() []CommandCategory {
 			Name: "Core Commands",
 			Commands: []CommandInfo{
 				{Name: "projects", Category: "core", Description: "Manage projects", Actions: []string{"list", "show", "create", "update", "delete"}},
-				{Name: "todos", Category: "core", Description: "Manage to-dos", Actions: []string{"list", "show", "create", "complete", "uncomplete", "position"}},
-				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update"}},
+				{Name: "todos", Category: "core", Description: "Manage to-dos", Actions: []string{"list", "show", "create", "complete", "uncomplete", "position", "trash", "archive", "restore"}},
+				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
 				{Name: "todosets", Category: "core", Description: "View to-do set containers", Actions: []string{"show"}},
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position"}},
-				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "pin", "unpin"}},
+				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "pin", "unpin", "trash", "archive", "restore"}},
 				{Name: "campfire", Category: "core", Description: "Chat in Campfire rooms", Actions: []string{"list", "messages", "post", "line", "delete"}},
-				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "columns", "steps"}},
+				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "columns", "steps", "trash", "archive", "restore"}},
 			},
 		},
 		{
@@ -60,10 +60,10 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Files & Docs",
 			Commands: []CommandInfo{
-				{Name: "files", Category: "files", Description: "Manage files, documents, and folders", Actions: []string{"list", "show", "create", "update"}},
-				{Name: "uploads", Category: "files", Description: "List and manage uploads", Actions: []string{"list", "show"}},
-				{Name: "vaults", Category: "files", Description: "Manage folders (vaults)", Actions: []string{"list", "show", "create"}},
-				{Name: "docs", Category: "files", Description: "Manage documents", Actions: []string{"list", "show", "create", "update"}},
+				{Name: "files", Category: "files", Description: "Manage files, documents, and folders", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
+				{Name: "uploads", Category: "files", Description: "List and manage uploads", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
+				{Name: "vaults", Category: "files", Description: "Manage folders (vaults)", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
+				{Name: "docs", Category: "files", Description: "Manage documents", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
 			},
 		},
 		{
@@ -92,7 +92,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "messagetypes", Category: "communication", Description: "Manage message categories", Actions: []string{"list", "show", "create", "update", "delete"}},
 				{Name: "forwards", Category: "communication", Description: "Manage email forwards (inbox)", Actions: []string{"list", "show", "inbox", "replies", "reply"}},
 				{Name: "subscriptions", Category: "communication", Description: "Manage notification subscriptions", Actions: []string{"show", "subscribe", "unsubscribe", "add", "remove"}},
-				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "update"}},
+				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "update", "trash", "archive", "restore"}},
 				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
 			},
 		},
@@ -109,6 +109,7 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Auth & Config",
 			Commands: []CommandInfo{
+				{Name: "accounts", Category: "auth", Description: "Manage accounts", Actions: []string{"list", "use"}},
 				{Name: "auth", Category: "auth", Description: "Authenticate with Basecamp", Actions: []string{"login", "logout", "status", "refresh"}},
 				{Name: "login", Category: "auth", Description: "Authenticate with Basecamp"},
 				{Name: "logout", Category: "auth", Description: "Remove stored credentials"},

@@ -67,6 +67,7 @@ func (r *Resolver) Account(ctx context.Context) (*ResolvedValue, error) {
 		accountID := fmt.Sprintf("%d", accounts[0].ID)
 		return &ResolvedValue{
 			Value:  accountID,
+			Label:  accounts[0].Name,
 			Source: SourceDefault,
 		}, nil
 	}
@@ -109,6 +110,11 @@ func (r *Resolver) AccountWithPersist(ctx context.Context) (*ResolvedValue, erro
 	}
 
 	return resolved, nil
+}
+
+// ListAccounts returns the list of available Basecamp accounts.
+func (r *Resolver) ListAccounts(ctx context.Context) ([]basecamp.AuthorizedAccount, error) {
+	return r.fetchAccounts(ctx)
 }
 
 // fetchAccounts retrieves the list of available Basecamp accounts.

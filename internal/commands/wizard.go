@@ -207,6 +207,11 @@ func wizardAccount(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) (str
 		return "", err
 	}
 
+	// Show confirmation for auto-selected single account
+	if resolved.Source == resolve.SourceDefault && resolved.Label != "" {
+		fmt.Fprintf(w, "  Using account: %s\n\n", resolved.Label)
+	}
+
 	// Update app config for subsequent steps
 	app.Config.AccountID = resolved.Value
 	if err := app.RequireAccount(); err != nil {
