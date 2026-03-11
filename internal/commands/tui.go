@@ -34,7 +34,7 @@ func NewTUICmd() *cobra.Command {
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			printExperimentalNotice(app.Config.CacheDir)
+			printDevNotice(app.Config.CacheDir)
 			return ensureAccount(cmd, app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -188,22 +188,22 @@ func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope 
 	}
 }
 
-// printExperimentalNotice prints a one-time-per-version advisory to stderr.
+// printDevNotice prints a one-time-per-version advisory to stderr.
 // The sentinel file resets on version upgrade so the notice resurfaces when
-// experimental features are most likely to have changed.
-func printExperimentalNotice(cacheDir string) {
+// the TUI is most likely to have changed.
+func printDevNotice(cacheDir string) {
 	if cacheDir == "" {
 		return
 	}
 	v := version.Version
-	sentinel := filepath.Join(cacheDir, "experimental-tui-"+v)
+	sentinel := filepath.Join(cacheDir, "dev-tui-"+v)
 
 	if _, err := os.Stat(sentinel); err == nil {
 		return // already shown for this version
 	}
 
 	_, _ = fmt.Fprintf(os.Stderr,
-		"Note: The TUI workspace is experimental in %s.\n"+
+		"Note: The TUI workspace is a development preview in %s.\n"+
 			"Behavior may change between releases. Report issues at https://github.com/basecamp/basecamp-cli/issues\n\n",
 		v)
 
