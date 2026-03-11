@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -1665,6 +1664,18 @@ func TestSingleLineCollapsesAllLines(t *testing.T) {
 	got := singleLine("line one\nline two\nline three")
 	if got != "line one line two line three" {
 		t.Errorf("singleLine = %q, want %q", got, "line one line two line three")
+	}
+}
+
+func TestSingleLineCollapsesBareCarriageReturn(t *testing.T) {
+	got := singleLine("a\rb")
+	if got != "a b" {
+		t.Errorf("singleLine = %q, want %q", got, "a b")
+	}
+
+	got = singleLine("x\r\ny\rz")
+	if got != "x y z" {
+		t.Errorf("singleLine(mixed) = %q, want %q", got, "x y z")
 	}
 }
 
