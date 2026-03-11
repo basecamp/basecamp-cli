@@ -159,6 +159,9 @@ func resolveLocalImages(cmd *cobra.Command, app *appctx.App, htmlStr string) (st
 			continue
 		}
 
+		// Normalize file:// URLs to filesystem paths
+		src = richtext.NormalizeDragPath(src)
+
 		// Local path — must exist
 		if err := richtext.ValidateFile(src); err != nil {
 			return "", fmt.Errorf("%s: %w", src, err)

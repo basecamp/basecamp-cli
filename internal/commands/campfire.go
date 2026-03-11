@@ -397,7 +397,7 @@ func runCampfireUpload(cmd *cobra.Command, app *appctx.App, campfireID, project,
 		return fmt.Errorf("%s: %w", filePath, err)
 	}
 
-	// Resolve project only when needed (campfire ID not provided, or for breadcrumbs)
+	// Resolve project — required when campfire ID not provided, optional for breadcrumbs
 	var resolvedProjectID string
 	if campfireID == "" {
 		projectID := project
@@ -424,6 +424,9 @@ func runCampfireUpload(cmd *cobra.Command, app *appctx.App, campfireID, project,
 		if err != nil {
 			return err
 		}
+	} else if project != "" {
+		// Campfire ID provided directly — still resolve project for breadcrumbs
+		resolvedProjectID, _, _ = app.Names.ResolveProject(cmd.Context(), project)
 	}
 
 	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)

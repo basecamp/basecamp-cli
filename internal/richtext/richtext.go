@@ -612,7 +612,9 @@ func EmbedAttachments(html string, attachments []AttachmentRef) string {
 	var b strings.Builder
 	b.WriteString(html)
 	for _, a := range attachments {
-		b.WriteString("\n")
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(AttachmentToHTML(a.SGID, a.Filename, a.ContentType))
 	}
 	return b.String()

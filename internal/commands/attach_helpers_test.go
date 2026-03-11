@@ -51,6 +51,10 @@ func TestIsNonFileURI(t *testing.T) {
 	// Windows drive-letter paths → false (not URI schemes)
 	assert.False(t, isNonFileURI(`C:\images\pic.png`))
 	assert.False(t, isNonFileURI(`D:/photos/img.jpg`))
+
+	// file:// URIs are local paths, not non-file URIs
+	assert.False(t, isNonFileURI("file:///tmp/img.png"))
+	assert.False(t, isNonFileURI("file:///Users/me/photo.png"))
 }
 
 func TestImgTagPattern(t *testing.T) {
@@ -146,6 +150,7 @@ func TestClassifyImageSrc(t *testing.T) {
 		{"nested relative", "assets/images/photo.png", "photo", imgUpload, false},
 		{"windows backslash", `C:\images\pic.png`, "win", imgUpload, false},
 		{"windows forward slash", "D:/photos/img.jpg", "win", imgUpload, false},
+		{"file url", "file:///tmp/photo.png", "photo", imgUpload, false},
 
 		// Placeholder: error
 		{"question mark", "?", "chart", imgPlaceholder, true},

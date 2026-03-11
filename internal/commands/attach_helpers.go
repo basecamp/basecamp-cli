@@ -28,8 +28,12 @@ var uriSchemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+\-.]+:`)
 
 // isNonFileURI returns true for URI schemes that are clearly not local file
 // paths (data:, cid:, blob:, ftp:, etc.). These should be left untouched.
-// http/https are handled separately by isRemoteURL.
+// http/https are handled separately by isRemoteURL. file:// URIs are treated
+// as local paths (handled by NormalizeDragPath).
 func isNonFileURI(src string) bool {
+	if strings.HasPrefix(src, "file:") {
+		return false
+	}
 	return uriSchemePattern.MatchString(src) && !isRemoteURL(src)
 }
 
