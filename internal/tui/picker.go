@@ -233,6 +233,14 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, textinput.Blink
 
+	case tea.WindowSizeMsg:
+		// Clamp maxVisible to fit the terminal: reserve lines for
+		// title, blank, input, blank, scroll indicator, help.
+		const chromeLines = 6
+		if avail := msg.Height - chromeLines; avail > 0 && avail < m.maxVisible {
+			m.maxVisible = avail
+		}
+
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
