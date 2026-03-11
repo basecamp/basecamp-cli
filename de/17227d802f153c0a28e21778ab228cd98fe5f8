@@ -1,0 +1,31 @@
+internal/commands/tui_stub.go
+  fd65441df4e5c4f8 18-20
+internal/commands/bonfire.go
+  fd65441df4e5c4f8 237-239
+internal/commands/tui.go
+  fd65441df4e5c4f8 30
+internal/commands/tui_stub_test.go
+  fd65441df4e5c4f8 1-30
+.github/workflows/test.yml
+  fd65441df4e5c4f8 47-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "de17227d802f153c0a28e21778ab228cd98fe5f8",
+  "prompts": {
+    "fd65441df4e5c4f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e705e676-2145-4dd0-8bcf-8ae8490be614",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 44,
+      "total_deletions": 3,
+      "accepted_lines": 42,
+      "overriden_lines": 0
+    }
+  }
+}
