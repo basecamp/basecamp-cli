@@ -86,8 +86,16 @@ elif [[ "${RESOLVED}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
       COMMIT="${VCS_REV:0:12}"
       echo "    Commit (from module metadata): ${COMMIT}"
     fi
-    # Derive timestamp from module Time field (RFC3339 format)
+    # Derive timestamp from module Time field (RFC3339 format).
+    # go mod download -json omits .Time for semver tags; fall back to the
+    # cached .info file which always includes it.
     MOD_TIME=$(echo "${MOD_JSON}" | jq -r '.Time // ""' 2>/dev/null || echo "")
+    if [[ -z "${MOD_TIME}" ]]; then
+      INFO_FILE=$(echo "${MOD_JSON}" | jq -r '.Info // ""' 2>/dev/null || echo "")
+      if [[ -n "${INFO_FILE}" && -f "${INFO_FILE}" ]]; then
+        MOD_TIME=$(jq -r '.Time // ""' "${INFO_FILE}" 2>/dev/null || echo "")
+      fi
+    fi
     if [[ -n "${MOD_TIME}" ]]; then
       TIMESTAMP="${MOD_TIME}"
       echo "    Timestamp (from module metadata): ${TIMESTAMP}"
