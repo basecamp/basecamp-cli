@@ -1,0 +1,25 @@
+scripts/bump-sdk.sh
+  d12ca53f099800ba 89-91,93-98
+internal/version/sdk-provenance.json
+  d12ca53f099800ba 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "42dbd0c5addb7e47d16113eebcf9f08057164fcd",
+  "prompts": {
+    "d12ca53f099800ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eff3a009-7621-4998-8b23-d156b8d84fd5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
