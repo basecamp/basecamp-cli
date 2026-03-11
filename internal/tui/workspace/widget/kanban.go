@@ -19,7 +19,7 @@ type KanbanCard struct {
 	StepsProgress string // e.g. "3/5"
 	CommentsCount int
 	Completed     bool
-	Boosts        int // number of boosts (will render as [♥ N])
+	Boosts        int // number of boosts
 }
 
 // KanbanColumn represents a column in the kanban board.
@@ -521,7 +521,7 @@ func (k *Kanban) renderFocusedCard(card KanbanCard, width int, theme tui.Theme) 
 func (k *Kanban) renderUnfocusedCard(card KanbanCard, width int, theme tui.Theme) string {
 	boostStr := ""
 	if card.Boosts > 0 {
-		boostStr = fmt.Sprintf(" [♥ %d]", card.Boosts)
+		boostStr = " " + boostLabel(card.Boosts)
 	}
 	availWidth := width - 2 - lipgloss.Width(boostStr) // 2 for "  " prefix
 	title := Truncate(card.Title, availWidth)
@@ -556,7 +556,7 @@ func buildDetailLine(card KanbanCard) string {
 		parts = append(parts, fmt.Sprintf("%d comments", card.CommentsCount))
 	}
 	if card.Boosts > 0 {
-		parts = append(parts, fmt.Sprintf("♥ %d", card.Boosts))
+		parts = append(parts, boostLabel(card.Boosts))
 	}
 	return strings.Join(parts, " \u00b7 ") // middle dot separator
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// NewBoostsCmd creates the boost command for managing emoji reactions.
+// NewBoostsCmd creates the boost command for managing boosts.
 func NewBoostsCmd() *cobra.Command {
 	var project string
 
@@ -18,13 +18,19 @@ func NewBoostsCmd() *cobra.Command {
 		Use:     "boost [action]",
 		Aliases: []string{"boosts"},
 		Short:   "Manage boosts (reactions)",
-		Long: `Manage boosts (emoji reactions) on items.
+		Long: `Manage boosts on items.
+
+Boosts are tiny messages to show your support — a short note (16
+characters max) or emoji.
 
 Use 'basecamp boost list <id>' to see boosts on an item.
 Use 'basecamp boost show <boost-id>' to view a specific boost.
-Use 'basecamp boost create <id> "emoji"' to boost an item.
-Use 'basecamp boost delete <boost-id>' to remove a boost.`,
-		Annotations: map[string]string{"agent_notes": "Boost content is typically an emoji but can be text\nbasecamp react is a shortcut for boost create"},
+Use 'basecamp boost create <id> "content"' to boost an item.
+Use 'basecamp boost delete <boost-id>' to remove a boost.
+
+Tip: In the TUI, press 'b' on any item to boost interactively.
+'basecamp react' is a shortcut for 'boost create'.`,
+		Annotations: map[string]string{"agent_notes": "Boosts are tiny messages of support (16 chars max), not just emoji\nbasecamp react is a shortcut for boost create\nIn TUI mode, press 'b' on any item to boost interactively"},
 		Args:        cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -120,7 +126,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "create",
-					Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --event %s --project %s", recordingID, eventID, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp boost create %s \"content\" --event %s --project %s", recordingID, eventID, resolvedProjectID),
 					Description: "Boost this event",
 				},
 			),
@@ -139,7 +145,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp boost create %s \"emoji\" --project %s", recordingID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp boost create %s \"content\" --project %s", recordingID, resolvedProjectID),
 				Description: "Boost this item",
 			},
 		),
@@ -226,7 +232,7 @@ func newBoostCreateCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <id|url> <content>",
 		Short: "Boost an item",
-		Long: `Boost an item with an emoji reaction.
+		Long: `Boost an item with a short note or emoji.
 
 You can pass either an ID or a Basecamp URL:
   basecamp boost create 789 "🎉" --project my-project
@@ -383,12 +389,14 @@ func NewBoostShortcutCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "react <content>",
-		Short: "React with an emoji",
-		Long: `React to an item with an emoji (shortcut for boost create).
+		Short: "Boost with a short note or emoji",
+		Long: `Boost an item with a short note or emoji (shortcut for boost create).
 
 Content as positional argument, --on for the item:
   basecamp react "🎉" --on 789 --project my-project
-  basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789`,
+  basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789
+
+Tip: In the TUI, press 'b' on any item to open the boost picker.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			content := args[0]

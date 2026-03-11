@@ -315,6 +315,39 @@ func TestBuildDetailLine(t *testing.T) {
 	}
 }
 
+func TestKanban_BoostDisplay(t *testing.T) {
+	k := testKanban()
+	k.SetColumns([]KanbanColumn{
+		{
+			ID: "1", Title: "Col", Count: 2,
+			Items: []KanbanCard{
+				{ID: "1", Title: "One boost", Boosts: 1},
+				{ID: "2", Title: "Many boosts", Boosts: 5},
+			},
+		},
+	})
+
+	view := k.View()
+	// Unfocused card with 1 boost should say "1 boost" not "1 boosts"
+	assert.Contains(t, view, "1 boost")
+	assert.NotContains(t, view, "1 boosts")
+	assert.Contains(t, view, "5 boosts")
+
+	// Detail line for focused card with boosts
+	k.SetColumns([]KanbanColumn{
+		{
+			ID: "1", Title: "Col", Count: 1,
+			Items: []KanbanCard{
+				{ID: "1", Title: "Item", Boosts: 1, Assignees: "Alice"},
+			},
+		},
+	})
+	view = k.View()
+	// Detail line should show singular boost
+	assert.Contains(t, view, "1 boost")
+	assert.NotContains(t, view, "1 boosts")
+}
+
 func TestKanban_TinyWidth_NoPanic(t *testing.T) {
 	k := testKanban()
 	k.SetColumns(sampleColumns())

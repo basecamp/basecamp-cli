@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -237,6 +238,10 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				body = args[1]
 			}
 
+			if strings.TrimSpace(title) == "" {
+				return cmd.Help()
+			}
+
 			// Validate user input first, before checking account
 			if edit && body != "" {
 				return output.ErrUsage("cannot combine --edit and body argument")
@@ -375,7 +380,7 @@ You can pass either a message ID or a Basecamp URL:
   basecamp messages update 789 --body "new body"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if title == "" && body == "" {
+			if strings.TrimSpace(title) == "" && strings.TrimSpace(body) == "" {
 				return noChanges(cmd)
 			}
 
@@ -556,6 +561,9 @@ use --message-board <id> to specify which one.`,
 				return missingArg(cmd, "<title>")
 			}
 			title := args[0]
+			if strings.TrimSpace(title) == "" {
+				return cmd.Help()
+			}
 
 			// Body from second positional arg or --editor
 			var body string

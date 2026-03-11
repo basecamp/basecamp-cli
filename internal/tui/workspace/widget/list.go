@@ -20,7 +20,7 @@ type ListItem struct {
 	Title       string
 	Description string
 	Extra       string // right-aligned detail (count, date, etc.)
-	Boosts      int    // number of boosts (will render as [♥ N])
+	Boosts      int    // number of boosts
 	Marked      bool   // visual mark (star, check, etc.)
 	Header      bool   // section header (non-selectable, rendered differently)
 }
@@ -501,7 +501,7 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 		maxTitleWidth -= 2 // "* " prefix
 	}
 	if item.Boosts > 0 {
-		maxTitleWidth -= lipgloss.Width(fmt.Sprintf(" [♥ %d]", item.Boosts))
+		maxTitleWidth -= lipgloss.Width(" " + boostLabel(item.Boosts))
 	}
 	if item.Extra != "" {
 		maxTitleWidth -= lipgloss.Width(item.Extra) + 2 // extra + gap
@@ -516,8 +516,7 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 
 	line := cursor + titleStyle.Render(title)
 	if item.Boosts > 0 {
-		boostStr := fmt.Sprintf(" [♥ %d]", item.Boosts)
-		line += lipgloss.NewStyle().Foreground(theme.Success).Render(boostStr)
+		line += descStyle.Render(" " + boostLabel(item.Boosts))
 	}
 
 	// Add extra (right-aligned) if space permits
@@ -554,4 +553,12 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 	}
 
 	return line
+}
+
+// boostLabel returns "1 boost" or "N boosts".
+func boostLabel(n int) string {
+	if n == 1 {
+		return "1 boost"
+	}
+	return fmt.Sprintf("%d boosts", n)
 }

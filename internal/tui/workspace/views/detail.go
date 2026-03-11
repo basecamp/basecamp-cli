@@ -33,21 +33,28 @@ type detailComment struct {
 	content   string // HTML body
 }
 
+// detailBoost holds a single boost's display data.
+type detailBoost struct {
+	content string // emoji or text
+	booster string // person name
+}
+
 // detailData holds the fetched recording data.
 type detailData struct {
-	title      string
-	recordType string
-	content    string // HTML body
-	creator    string
-	createdAt  time.Time
-	assignees  []string
-	completed  bool
-	dueOn      string
-	category   string // message category (distinct from dueOn)
-	comments   []detailComment
-	boosts     int
-	subscribed bool
-	appURL     string
+	title        string
+	recordType   string
+	content      string // HTML body
+	creator      string
+	createdAt    time.Time
+	assignees    []string
+	completed    bool
+	dueOn        string
+	category     string // message category (distinct from dueOn)
+	comments     []detailComment
+	boosts       int
+	boostDetails []detailBoost
+	subscribed   bool
+	appURL       string
 }
 
 // detailLoadedMsg is sent when the recording detail is fetched.
@@ -1300,9 +1307,29 @@ func (v *Detail) syncPreview() {
 		})
 	}
 	if v.data.boosts > 0 {
+		boostValue := boostLabel(v.data.boosts)
+		if len(v.data.boostDetails) > 0 {
+			const maxShown = 3
+			var parts []string
+			limit := len(v.data.boostDetails)
+			if limit > maxShown {
+				limit = maxShown
+			}
+			for _, b := range v.data.boostDetails[:limit] {
+				if b.booster != "" {
+					parts = append(parts, fmt.Sprintf("%s %s", b.content, b.booster))
+				} else {
+					parts = append(parts, b.content)
+				}
+			}
+			if extra := v.data.boosts - limit; extra > 0 {
+				parts = append(parts, fmt.Sprintf("+%d more", extra))
+			}
+			boostValue = strings.Join(parts, ", ")
+		}
 		fields = append(fields, widget.PreviewField{
 			Key:   "Boosts",
-			Value: fmt.Sprintf("♥ %d", v.data.boosts),
+			Value: boostValue,
 		})
 	}
 	v.preview.SetFields(fields)
@@ -1482,6 +1509,23 @@ func (v *Detail) fetchDetail() tea.Cmd {
 					createdAt: c.CreatedAt,
 					content:   c.Content,
 				})
+			}
+		}
+
+		// Fetch boosts for the recording
+		if data.boosts > 0 {
+			boostsResult, err := client.Boosts().ListRecording(ctx, recordingID)
+			if err == nil {
+				for _, b := range boostsResult.Boosts {
+					booster := ""
+					if b.Booster != nil {
+						booster = b.Booster.Name
+					}
+					data.boostDetails = append(data.boostDetails, detailBoost{
+						content: b.Content,
+						booster: booster,
+					})
+				}
 			}
 		}
 

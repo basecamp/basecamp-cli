@@ -46,6 +46,15 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
+@test "card with whitespace-only title shows help" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp card " "
+  assert_success
+  assert_output_contains "basecamp card"
+}
+
 
 # Column show errors
 

@@ -55,6 +55,16 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
+@test "campfire post with whitespace-only content shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp campfire post " "
+  assert_failure
+  assert_json_value '.error' '<message> required'
+  assert_json_value '.code' 'usage'
+}
+
 
 # Line show/delete errors
 

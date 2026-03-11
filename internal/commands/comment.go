@@ -310,7 +310,7 @@ Comma-separated IDs add the same comment to multiple items:
 			}
 
 			// Show help when invoked with no content; keep error if editor was opened
-			if content == "" {
+			if strings.TrimSpace(content) == "" {
 				if edit {
 					return output.ErrUsage("Comment content required")
 				}

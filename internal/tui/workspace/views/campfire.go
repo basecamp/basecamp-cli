@@ -630,7 +630,7 @@ func (v *Campfire) renderMessages() {
 			b.WriteString("  ")
 			b.WriteString(timeStyle.Render(line.CreatedAt))
 			if line.GetBoosts().Count > 0 {
-				b.WriteString(lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf("  [♥ %d]", line.GetBoosts().Count)))
+				b.WriteString(lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + boostLabel(line.GetBoosts().Count)))
 			}
 			b.WriteString("\n")
 		}
@@ -640,7 +640,7 @@ func (v *Campfire) renderMessages() {
 		b.WriteString(rendered)
 		// Show boosts inline for grouped (non-header) messages
 		if !showHeader && line.GetBoosts().Count > 0 {
-			b.WriteString(lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf("  [♥ %d]", line.GetBoosts().Count)))
+			b.WriteString(lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + boostLabel(line.GetBoosts().Count)))
 		}
 		b.WriteString("\n")
 	}
