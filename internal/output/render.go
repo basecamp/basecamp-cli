@@ -735,7 +735,8 @@ func formatCell(val any) string {
 }
 
 func isURL(s string) bool {
-	return strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")
+	return (strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")) &&
+		!strings.ContainsRune(s, ' ')
 }
 
 // formatDateValue formats date fields in a human-readable way.

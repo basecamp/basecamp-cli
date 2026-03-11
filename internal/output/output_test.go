@@ -2139,6 +2139,15 @@ func TestFormatCellDoesNotTruncateURLs(t *testing.T) {
 		result := formatCell(httpURL)
 		assert.Equal(t, httpURL, result)
 	})
+
+	t.Run("URL-like string with spaces is truncated", func(t *testing.T) {
+		// After newline collapsing, a value like "https://example.com\n(extra...)"
+		// becomes "https://example.com (extra...)" — not a real URL.
+		notURL := "https://example.com (extra text that makes this quite long)"
+		result := formatCell(notURL)
+		assert.Len(t, []rune(result), 40)
+		assert.True(t, strings.HasSuffix(result, "..."))
+	})
 }
 
 func TestStyledRenderObjectPreservesURLs(t *testing.T) {
