@@ -1,0 +1,31 @@
+internal/cli/root.go
+  46f8a61b362a2ca8 140,144,146
+internal/commands/doctor_test.go
+  46f8a61b362a2ca8 568-649
+internal/commands/skill_test.go
+  46f8a61b362a2ca8 11-14,330-474
+internal/commands/skill.go
+  46f8a61b362a2ca8 334-335,341-343,346
+internal/commands/doctor.go
+  46f8a61b362a2ca8 935
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "6fdec8a47cbd799282208032765fae2799e8a2f9",
+  "prompts": {
+    "46f8a61b362a2ca8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "380e8405-1e90-4839-873e-41dbd0a2c9b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 249,
+      "total_deletions": 11,
+      "accepted_lines": 241,
+      "overriden_lines": 0
+    }
+  }
+}
