@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
 )
 
 // NewConfigCmd creates the config command for managing configuration.
@@ -740,81 +741,76 @@ func newConfigProjectCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "project",
 		Short: "Select default project",
-		Long:  "Interactively select a project and set it as the default in local config.",
+		Long: `Select a project and set it as the default in local config.
+
+Use --project to set non-interactively:
+  basecamp config project --project 12345
+  basecamp config project --project "Project Name"
+
+Without --project, an interactive picker is shown.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Fetch projects
-			resp, err := app.Account().Get(cmd.Context(), "/projects.json")
+			// Mode 1: explicit --project flag — non-interactive setter
+			if f := cmd.Flags().Lookup("project"); f != nil && f.Changed {
+				projectArg := app.Flags.Project
+				resolvedID, projectName, err := app.Names.ResolveProject(cmd.Context(), projectArg)
+				if err != nil {
+					return err
+				}
+				if projectName == "" {
+					return output.ErrNotFound("project", projectArg)
+				}
+
+				if err := resolve.PersistProjectID(resolvedID, "local"); err != nil {
+					return err
+				}
+
+				return app.OK(map[string]any{
+					"project_id":   resolvedID,
+					"project_name": projectName,
+					"status":       "set",
+				},
+					output.WithSummary(fmt.Sprintf("Set project_id = %s (%s)", resolvedID, projectName)),
+					output.WithBreadcrumbs(
+						output.Breadcrumb{
+							Action:      "show",
+							Cmd:         "basecamp config show",
+							Description: "View config",
+						},
+						output.Breadcrumb{
+							Action:      "project",
+							Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedID),
+							Description: "View project",
+						},
+					),
+				)
+			}
+
+			// Mode 2: no flag — always show picker
+			app.Config.ProjectID = ""
+			savedProject := app.Flags.Project
+			app.Flags.Project = ""
+			defer func() { app.Flags.Project = savedProject }()
+
+			resolved, err := app.Resolve().Project(cmd.Context())
 			if err != nil {
-				return convertSDKError(err)
+				return err
 			}
 
-			var projects []struct {
-				ID   int64  `json:"id"`
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(resp.Data, &projects); err != nil {
-				return fmt.Errorf("failed to parse projects: %w", err)
-			}
-
-			if len(projects) == 0 {
-				return output.ErrNotFound("project", "any")
-			}
-
-			// Display projects
-			fmt.Println("Available projects:")
-			fmt.Println()
-			for i, p := range projects {
-				fmt.Printf("%d. %s (#%d)\n", i+1, p.Name, p.ID)
-			}
-			fmt.Println()
-
-			// Read selection
-			fmt.Printf("Select project (1-%d): ", len(projects))
-			var selection int
-			if _, err := fmt.Scanf("%d", &selection); err != nil || selection < 1 || selection > len(projects) {
-				return output.ErrUsage("Invalid selection")
-			}
-
-			selected := projects[selection-1]
-
-			// Save to local config
-			configPath := filepath.Join(".basecamp", "config.json")
-
-			// Ensure directory exists
-			if err := os.MkdirAll(".basecamp", 0700); err != nil {
-				return fmt.Errorf("failed to create config directory: %w", err)
-			}
-
-			// Load or create config
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
-			}
-
-			// Set project_id
-			configData["project_id"] = fmt.Sprintf("%d", selected.ID)
-
-			// Write back (atomic: temp + rename)
-			data, err := json.MarshalIndent(configData, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal config: %w", err)
-			}
-
-			if err := atomicWriteFile(configPath, append(data, '\n')); err != nil {
-				return fmt.Errorf("failed to write config: %w", err)
+			if err := resolve.PersistProjectID(resolved.Value, "local"); err != nil {
+				return err
 			}
 
 			return app.OK(map[string]any{
-				"project_id":   selected.ID,
-				"project_name": selected.Name,
+				"project_id":   resolved.Value,
+				"project_name": resolved.Label,
 				"status":       "set",
 			},
-				output.WithSummary(fmt.Sprintf("Set project_id = %d (%s)", selected.ID, selected.Name)),
+				output.WithSummary(fmt.Sprintf("Set project_id = %s (%s)", resolved.Value, resolved.Label)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -823,7 +819,7 @@ func newConfigProjectCmd() *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "project",
-						Cmd:         fmt.Sprintf("basecamp projects show %d", selected.ID),
+						Cmd:         fmt.Sprintf("basecamp projects show %s", resolved.Value),
 						Description: "View project",
 					},
 				),

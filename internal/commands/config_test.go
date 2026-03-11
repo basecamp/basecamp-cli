@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -337,4 +341,105 @@ func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 	assert.Contains(t, stderr, "requires trust")
 	assert.Contains(t, stderr, absPath, "warning must include the exact config path")
 	assert.Contains(t, stderr, "'"+absPath+"'", "path must be single-quoted for shell safety")
+}
+
+// --- Config project tests ---
+
+// setupConfigProjectTestApp creates a test app wired to an httptest server
+// that serves project data for the names resolver.
+func setupConfigProjectTestApp(t *testing.T) (*appctx.App, *bytes.Buffer, *httptest.Server) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": 12345, "name": "Project Alpha"},
+			{"id": 67890, "name": "Project Beta"},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{
+		BaseURL:   server.URL,
+		AccountID: "99999",
+		CacheDir:  t.TempDir(),
+		Sources:   make(map[string]string),
+	}
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		&testTokenProvider{},
+	)
+
+	buf := &bytes.Buffer{}
+	app := &appctx.App{
+		Config: cfg,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, nil, "99999"),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+		Flags: appctx.GlobalFlags{JSON: true},
+	}
+	return app, buf, server
+}
+
+// executeConfigProjectCmd runs `config project` with optional extra args,
+// registering the persistent --project flag that normally lives on the root command.
+func executeConfigProjectCmd(app *appctx.App, extraArgs ...string) error {
+	cmd := NewConfigCmd()
+	cmd.PersistentFlags().StringVarP(&app.Flags.Project, "project", "p", "", "Project ID or name")
+	args := append([]string{"project"}, extraArgs...)
+	cmd.SetArgs(args)
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	return cmd.Execute()
+}
+
+func TestConfigProject_ExplicitFlag(t *testing.T) {
+	app, buf, _ := setupConfigProjectTestApp(t)
+
+	// Work in a temp dir so PersistProjectID writes .basecamp/config.json there
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+
+	err := executeConfigProjectCmd(app, "--project", "12345")
+	require.NoError(t, err)
+
+	var result map[string]any
+	parseEnvelopeData(t, buf, &result)
+	assert.Equal(t, "12345", result["project_id"])
+	assert.Equal(t, "Project Alpha", result["project_name"])
+	assert.Equal(t, "set", result["status"])
+
+	// Verify config file was written
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".basecamp", "config.json"))
+	require.NoError(t, err)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal(data, &saved))
+	assert.Equal(t, "12345", saved["project_id"])
+}
+
+func TestConfigProject_ExplicitFlag_InvalidID(t *testing.T) {
+	app, _, _ := setupConfigProjectTestApp(t)
+
+	err := executeConfigProjectCmd(app, "--project", "99999")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestConfigProject_NoFlag_NonInteractive(t *testing.T) {
+	app, _, _ := setupConfigProjectTestApp(t)
+
+	// No --project flag, JSON mode (non-interactive) — resolver returns usage error
+	err := executeConfigProjectCmd(app)
+	assert.Error(t, err)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -743,6 +744,58 @@ func TestSuggestEmptyList(t *testing.T) {
 
 	suggestions := suggest("test", projects, getName)
 	assert.Empty(t, suggestions, "empty list should have no suggestions, got %d", len(suggestions))
+}
+
+// TestResolverGetTodolists_FollowsPagination verifies that getTodolists uses
+// GetAll to follow Link pagination headers, so todolists beyond the first page
+// are resolved correctly.
+func TestResolverGetTodolists_FollowsPagination(t *testing.T) {
+	const accountID = "99999"
+	const projectID = "100"
+	const todosetID = 200
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case fmt.Sprintf("/%s/projects/%s.json", accountID, projectID):
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":   100,
+				"name": "Test Project",
+				"dock": []map[string]any{
+					{"name": "todoset", "id": todosetID},
+				},
+			})
+		case fmt.Sprintf("/%s/todosets/%d/todolists.json", accountID, todosetID):
+			if r.URL.Query().Get("page") == "2" {
+				json.NewEncoder(w).Encode([]map[string]any{
+					{"id": 333, "name": "Page Two List"},
+				})
+			} else {
+				page2URL := fmt.Sprintf("http://%s/%s/todosets/%d/todolists.json?page=2",
+					r.Host, accountID, todosetID)
+				w.Header().Set("Link", fmt.Sprintf("<%s>; rel=\"next\"", page2URL))
+				json.NewEncoder(w).Encode([]map[string]any{
+					{"id": 111, "name": "Page One List"},
+				})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		testTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+	r := NewResolver(sdkClient, nil, accountID)
+
+	ctx := context.Background()
+	id, name, err := r.ResolveTodolist(ctx, "Page Two List", projectID)
+	require.NoError(t, err)
+	assert.Equal(t, "333", id)
+	assert.Equal(t, "Page Two List", name)
 }
 
 func TestResolveSpecialCharacters(t *testing.T) {
