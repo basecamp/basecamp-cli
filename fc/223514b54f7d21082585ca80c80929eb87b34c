@@ -1,0 +1,23 @@
+.surface-breaking
+  b94f570d7584acb6 3-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "fc223514b54f7d21082585ca80c80929eb87b34c",
+  "prompts": {
+    "b94f570d7584acb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "808b834b-2b32-4c14-b97a-591bbb4a319d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 0,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
