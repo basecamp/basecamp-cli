@@ -932,7 +932,7 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 	var breadcrumbs []output.Breadcrumb
 
 	for _, c := range checks {
-		if c.Status != "fail" {
+		if c.Status != "fail" && c.Status != "warn" {
 			continue
 		}
 

@@ -8,6 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/version"
 	"github.com/basecamp/basecamp-cli/skills"
 )
 
@@ -322,4 +326,149 @@ func TestSkillInstallNoClaude(t *testing.T) {
 	if _, err := os.Stat(claudeDir); err == nil {
 		t.Error("~/.claude should not be created when Claude is not detected")
 	}
+}
+
+func TestInstallSkillFilesStampsVersion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	versionFile := filepath.Join(home, ".agents", "skills", "basecamp", installedVersionFile)
+	got, err := os.ReadFile(versionFile)
+	require.NoError(t, err)
+	assert.Equal(t, version.Version, string(got))
+}
+
+func TestInstalledSkillVersion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// No file → empty string
+	assert.Equal(t, "", installedSkillVersion())
+
+	// Create version file
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, installedVersionFile), []byte("1.2.3\n"), 0o644))
+
+	assert.Equal(t, "1.2.3", installedSkillVersion())
+}
+
+func TestRefreshSkillsIfVersionChanged_SentinelMissing(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	// Install baseline skill so refresh has something to update
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	// Save original version and set a non-dev version for testing
+	origVersion := version.Version
+	version.Version = "1.0.0"
+	defer func() { version.Version = origVersion }()
+
+	refreshed := RefreshSkillsIfVersionChanged()
+	assert.True(t, refreshed, "should refresh when sentinel is missing")
+
+	// Sentinel should now exist
+	sentinel, err := os.ReadFile(filepath.Join(configDir, "basecamp", ".last-run-version"))
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", string(sentinel))
+}
+
+func TestRefreshSkillsIfVersionChanged_SentinelMatches(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	origVersion := version.Version
+	version.Version = "1.0.0"
+	defer func() { version.Version = origVersion }()
+
+	// Install skill and write matching sentinel
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+	sentinelDir := filepath.Join(configDir, "basecamp")
+	require.NoError(t, os.MkdirAll(sentinelDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sentinelDir, ".last-run-version"), []byte("1.0.0"), 0o644))
+
+	refreshed := RefreshSkillsIfVersionChanged()
+	assert.False(t, refreshed, "should not refresh when sentinel matches")
+}
+
+func TestRefreshSkillsIfVersionChanged_SentinelMismatched(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	origVersion := version.Version
+	version.Version = "2.0.0"
+	defer func() { version.Version = origVersion }()
+
+	// Install baseline skill and write old sentinel
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+	sentinelDir := filepath.Join(configDir, "basecamp")
+	require.NoError(t, os.MkdirAll(sentinelDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sentinelDir, ".last-run-version"), []byte("1.0.0"), 0o644))
+
+	refreshed := RefreshSkillsIfVersionChanged()
+	assert.True(t, refreshed, "should refresh when sentinel mismatches")
+
+	// Sentinel should be updated
+	sentinel, err := os.ReadFile(filepath.Join(sentinelDir, ".last-run-version"))
+	require.NoError(t, err)
+	assert.Equal(t, "2.0.0", string(sentinel))
+
+	// Installed version should be updated
+	assert.Equal(t, "2.0.0", installedSkillVersion())
+}
+
+func TestRefreshSkillsIfVersionChanged_SkipsDev(t *testing.T) {
+	origVersion := version.Version
+	version.Version = "dev"
+	defer func() { version.Version = origVersion }()
+
+	refreshed := RefreshSkillsIfVersionChanged()
+	assert.False(t, refreshed, "should skip for dev builds")
+}
+
+func TestRefreshSkillsIfVersionChanged_NoSentinelUpdateOnFailure(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	origVersion := version.Version
+	version.Version = "3.0.0"
+	defer func() { version.Version = origVersion }()
+
+	// Install baseline skill, then make the skill file read-only
+	// so installSkillFiles() will fail on write
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	skillFile := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
+	require.NoError(t, os.Chmod(skillFile, 0o444))
+	defer os.Chmod(skillFile, 0o644) //nolint:errcheck // cleanup
+
+	// Write old sentinel
+	sentinelDir := filepath.Join(configDir, "basecamp")
+	require.NoError(t, os.MkdirAll(sentinelDir, 0o755))
+	sentinelPath := filepath.Join(sentinelDir, ".last-run-version")
+	require.NoError(t, os.WriteFile(sentinelPath, []byte("2.0.0"), 0o644))
+
+	refreshed := RefreshSkillsIfVersionChanged()
+	assert.False(t, refreshed, "should not report refresh on failure")
+
+	// Sentinel should NOT be updated (so next run retries)
+	sentinel, err := os.ReadFile(sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, "2.0.0", string(sentinel), "sentinel should remain unchanged on failure")
 }

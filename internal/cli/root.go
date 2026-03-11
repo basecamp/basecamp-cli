@@ -136,11 +136,14 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	cmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
-		if app := appctx.FromContext(cmd.Context()); app != nil {
+		app := appctx.FromContext(cmd.Context())
+		if app != nil {
 			app.Close()
 		}
 		if commands.RefreshSkillsIfVersionChanged() {
-			fmt.Fprintf(os.Stderr, "Agent skill updated to match CLI %s\n", version.Version)
+			if app == nil || !app.IsMachineOutput() {
+				fmt.Fprintf(os.Stderr, "Agent skill updated to match CLI %s\n", version.Version)
+			}
 		}
 		return nil
 	}

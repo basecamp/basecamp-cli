@@ -565,6 +565,88 @@ func TestCheckClaudeIntegrationIncludesSkillLink(t *testing.T) {
 	}
 }
 
+func TestCheckSkillVersion_UpToDate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("skill"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".installed-version"), []byte(version.Version), 0o644))
+
+	check := checkSkillVersion()
+	assert.Equal(t, "pass", check.Status)
+	if version.IsDev() {
+		assert.Contains(t, check.Message, "dev build")
+	} else {
+		assert.Contains(t, check.Message, "Up to date")
+	}
+}
+
+func TestCheckSkillVersion_Stale(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origVersion := version.Version
+	version.Version = "2.0.0"
+	defer func() { version.Version = origVersion }()
+
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("skill"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".installed-version"), []byte("1.0.0"), 0o644))
+
+	check := checkSkillVersion()
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "Stale")
+	assert.Contains(t, check.Message, "1.0.0")
+	assert.Contains(t, check.Message, "2.0.0")
+	assert.Contains(t, check.Hint, "basecamp skill install")
+}
+
+func TestCheckSkillVersion_Untracked(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("skill"), 0o644))
+	// No .installed-version file
+
+	check := checkSkillVersion()
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "version not tracked")
+}
+
+func TestCheckSkillVersion_DevBuild(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origVersion := version.Version
+	version.Version = "dev"
+	defer func() { version.Version = origVersion }()
+
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("skill"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".installed-version"), []byte("1.0.0"), 0o644))
+
+	check := checkSkillVersion()
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "dev build")
+	assert.Contains(t, check.Message, "1.0.0")
+}
+
+func TestBuildDoctorBreadcrumbs_SkillVersionWarn(t *testing.T) {
+	checks := []Check{
+		{Name: "Skill Version", Status: "warn"},
+	}
+
+	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	require.Len(t, breadcrumbs, 1)
+	assert.Equal(t, "basecamp skill install", breadcrumbs[0].Cmd)
+}
+
 func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

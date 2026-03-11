@@ -331,15 +331,19 @@ func RefreshSkillsIfVersionChanged() bool {
 	}
 
 	refreshed := false
-	if baselineSkillInstalled() {
+	needsRefresh := baselineSkillInstalled()
+	if needsRefresh {
 		if _, err := installSkillFiles(); err == nil {
 			refreshed = true
 		}
 	}
 
-	// Update sentinel (best-effort, directory may not exist yet)
-	_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o755)             //nolint:gosec // G301: config dir
-	_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+	// Update sentinel only when no refresh was needed or it succeeded.
+	// On transient failure, leave the sentinel stale so the next run retries.
+	if !needsRefresh || refreshed {
+		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o755)             //nolint:gosec // G301: config dir
+		_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+	}
 
 	return refreshed
 }
