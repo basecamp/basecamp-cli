@@ -1,0 +1,23 @@
+internal/commands/messages_test.go
+  9a23262e770934af 114-115,187-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "845b1d43047b61be944493d009902b7b46067755",
+  "prompts": {
+    "9a23262e770934af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fad5974f-56dd-4dd0-9329-d3f471feb8c8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 4,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
