@@ -136,7 +136,7 @@ func TestWaitForCallback_ExchangeFailure(t *testing.T) {
 
 	select {
 	case body := <-bodyCh:
-		assert.Contains(t, body, "could not be completed")
+		assert.Contains(t, body, "be completed")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for HTTP response")
 	}
@@ -159,7 +159,7 @@ func TestWaitForCallback_StateMismatch(t *testing.T) {
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?state=wrong-state&code=abc", addr))
 	body := readBody(t, resp)
-	assert.Contains(t, body, "invalid or expired")
+	assert.Contains(t, body, "authorization link is invalid")
 
 	select {
 	case err := <-errCh:
@@ -186,7 +186,7 @@ func TestWaitForCallback_OAuthError(t *testing.T) {
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&state=state", addr))
 	body := readBody(t, resp)
-	assert.Contains(t, body, "chose not to authorize")
+	assert.Contains(t, body, "denied access to Basecamp CLI")
 
 	select {
 	case err := <-errCh:
@@ -213,7 +213,7 @@ func TestWaitForCallback_OAuthErrorWithDescription(t *testing.T) {
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&error_description=User+denied+access&state=state", addr))
 	body := readBody(t, resp)
-	assert.Contains(t, body, "chose not to authorize")
+	assert.Contains(t, body, "denied access to Basecamp CLI")
 
 	select {
 	case err := <-errCh:
@@ -242,7 +242,7 @@ func TestWaitForCallback_OAuthErrorServerError(t *testing.T) {
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=server_error&error_description=Internal+error&state=state", addr))
 	body := readBody(t, resp)
 	assert.Contains(t, body, "Authorization failed")
-	assert.NotContains(t, body, "chose not to authorize")
+	assert.NotContains(t, body, "denied access to Basecamp CLI")
 
 	select {
 	case err := <-errCh:
@@ -270,7 +270,7 @@ func TestWaitForCallback_OAuthErrorWithBadState(t *testing.T) {
 
 	resp := httpGet(ctx, t, fmt.Sprintf("http://%s/callback?error=access_denied&state=wrong", addr))
 	body := readBody(t, resp)
-	assert.Contains(t, body, "invalid or expired")
+	assert.Contains(t, body, "authorization link is invalid")
 
 	select {
 	case err := <-errCh:
