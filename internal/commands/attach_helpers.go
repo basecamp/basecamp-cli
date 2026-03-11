@@ -21,8 +21,9 @@ func isRemoteURL(src string) bool {
 	return strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://")
 }
 
-// uriSchemePattern matches a URI scheme per RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-// followed by ":". Only matches at the start of the string.
+// uriSchemePattern matches URI schemes with 2+ characters before the colon.
+// RFC 3986 allows single-letter schemes (ALPHA *(...)), but we require 2+
+// to avoid misclassifying Windows drive letters (C:, D:) as URI schemes.
 var uriSchemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+\-.]+:`)
 
 // isNonFileURI returns true for URI schemes that are clearly not local file
