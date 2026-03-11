@@ -572,3 +572,67 @@ func TestTodolistsCreateMultiTodosetAmbiguousError(t *testing.T) {
 	assert.Equal(t, output.CodeAmbiguous, e.Code)
 	assert.Contains(t, e.Hint, "--todoset <id>")
 }
+
+// todos404Transport returns HTTP 404 for all requests (no network delay).
+type todos404Transport struct{}
+
+func (todos404Transport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}, nil
+}
+
+func setupTodos404App(t *testing.T) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(todos404Transport{}),
+	)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+}
+
+func TestDoneAllFailReturnsError(t *testing.T) {
+	app := setupTodos404App(t)
+
+	cmd := NewDoneCmd()
+	err := executeTodosCommand(cmd, app, "123", "456")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "123")
+	assert.Contains(t, err.Error(), "456")
+}
+
+func TestReopenAllFailReturnsError(t *testing.T) {
+	app := setupTodos404App(t)
+
+	cmd := NewReopenCmd()
+	err := executeTodosCommand(cmd, app, "123", "456")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "123")
+	assert.Contains(t, err.Error(), "456")
+}
+
+func TestDoneParseFailReturnsUsageError(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewDoneCmd()
+	// Non-numeric IDs trigger parse failures, not API errors
+	err := executeTodosCommand(cmd, app, "abc", "def")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "abc")
+	assert.Contains(t, err.Error(), "def")
+}
