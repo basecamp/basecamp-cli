@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -1646,10 +1647,10 @@ func TestFormatTextBcAttachmentOnly(t *testing.T) {
 	}
 }
 
-func TestSingleLineSkipsLeadingBlanks(t *testing.T) {
+func TestSingleLineCollapsesMultiline(t *testing.T) {
 	got := singleLine("\n\nfirst\nsecond")
-	if got != "first" {
-		t.Errorf("singleLine = %q, want %q", got, "first")
+	if got != "first second" {
+		t.Errorf("singleLine = %q, want %q", got, "first second")
 	}
 }
 
@@ -1657,6 +1658,13 @@ func TestSingleLinePlainText(t *testing.T) {
 	got := singleLine("no newlines")
 	if got != "no newlines" {
 		t.Errorf("singleLine = %q, want %q", got, "no newlines")
+	}
+}
+
+func TestSingleLineCollapsesAllLines(t *testing.T) {
+	got := singleLine("line one\nline two\nline three")
+	if got != "line one line two line three" {
+		t.Errorf("singleLine = %q, want %q", got, "line one line two line three")
 	}
 }
 
@@ -1671,8 +1679,8 @@ func TestRenderHeadlineHTMLContent(t *testing.T) {
 	if strings.Contains(got, "<") {
 		t.Errorf("RenderHeadline should strip HTML tags, got: %q", got)
 	}
-	if got != "Title" {
-		t.Errorf("RenderHeadline = %q, want %q", got, "Title")
+	if got != "Title subtitle" {
+		t.Errorf("RenderHeadline = %q, want %q", got, "Title subtitle")
 	}
 }
 

@@ -667,6 +667,9 @@ func formatCell(val any) string {
 		return ""
 	case string:
 		v = ansi.Strip(v)
+		if strings.ContainsAny(v, "\n\r") {
+			v = strings.Join(strings.Fields(v), " ")
+		}
 		// Truncate long strings (rune-safe for multi-byte UTF-8)
 		if utf8.RuneCountInString(v) > 40 {
 			runes := []rune(v)
