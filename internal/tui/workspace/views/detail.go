@@ -1307,7 +1307,7 @@ func (v *Detail) syncPreview() {
 		})
 	}
 	if v.data.boosts > 0 {
-		boostValue := boostLabel(v.data.boosts)
+		boostValue := widget.BoostLabel(v.data.boosts)
 		if len(v.data.boostDetails) > 0 {
 			const maxShown = 3
 			var parts []string

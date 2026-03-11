@@ -501,7 +501,7 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 		maxTitleWidth -= 2 // "* " prefix
 	}
 	if item.Boosts > 0 {
-		maxTitleWidth -= lipgloss.Width(" " + boostLabel(item.Boosts))
+		maxTitleWidth -= lipgloss.Width(" " + BoostLabel(item.Boosts))
 	}
 	if item.Extra != "" {
 		maxTitleWidth -= lipgloss.Width(item.Extra) + 2 // extra + gap
@@ -516,7 +516,7 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 
 	line := cursor + titleStyle.Render(title)
 	if item.Boosts > 0 {
-		line += descStyle.Render(" " + boostLabel(item.Boosts))
+		line += descStyle.Render(" " + BoostLabel(item.Boosts))
 	}
 
 	// Add extra (right-aligned) if space permits
@@ -555,8 +555,8 @@ func (l *List) renderItem(item ListItem, selected bool, theme tui.Theme) string 
 	return line
 }
 
-// boostLabel returns "1 boost" or "N boosts".
-func boostLabel(n int) string {
+// BoostLabel returns "1 boost" or "N boosts".
+func BoostLabel(n int) string {
 	if n == 1 {
 		return "1 boost"
 	}

@@ -400,9 +400,9 @@ func TestList_BoostSingularPlural(t *testing.T) {
 }
 
 func TestList_BoostLabel(t *testing.T) {
-	assert.Equal(t, "1 boost", boostLabel(1))
-	assert.Equal(t, "2 boosts", boostLabel(2))
-	assert.Equal(t, "99 boosts", boostLabel(99))
+	assert.Equal(t, "1 boost", BoostLabel(1))
+	assert.Equal(t, "2 boosts", BoostLabel(2))
+	assert.Equal(t, "99 boosts", BoostLabel(99))
 }
 
 func TestList_LongFilter_NoOverflow(t *testing.T) {
