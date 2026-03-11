@@ -200,6 +200,9 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	}
 
 	// 12. AI Agent integration (for each detected agent)
+	if baselineSkillInstalled() {
+		checks = append(checks, checkSkillVersion())
+	}
 	for _, agent := range harness.DetectedAgents() {
 		if agent.Checks != nil {
 			for _, c := range agent.Checks() {
@@ -952,6 +955,12 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 				Cmd:         "basecamp config show",
 				Description: "Review configuration",
 			})
+		case "Skill Version":
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "install",
+				Cmd:         "basecamp skill install",
+				Description: "Update installed skill",
+			})
 		}
 	}
 
@@ -1040,6 +1049,38 @@ func renderDoctorStyled(w io.Writer, result *DoctorResult) {
 
 	fmt.Fprintf(w, "  %s\n", strings.Join(summaryParts, "  "))
 	fmt.Fprintln(w)
+}
+
+// checkSkillVersion reports whether the installed skill matches the current CLI version.
+func checkSkillVersion() Check {
+	check := Check{
+		Name: "Skill Version",
+	}
+
+	installed := installedSkillVersion()
+
+	if installed == "" {
+		check.Status = "pass"
+		check.Message = "Installed (version not tracked)"
+		return check
+	}
+
+	if version.IsDev() {
+		check.Status = "pass"
+		check.Message = fmt.Sprintf("Installed (%s, dev build)", installed)
+		return check
+	}
+
+	if installed == version.Version {
+		check.Status = "pass"
+		check.Message = fmt.Sprintf("Up to date (%s)", installed)
+		return check
+	}
+
+	check.Status = "warn"
+	check.Message = fmt.Sprintf("Stale (installed: %s, current: %s)", installed, version.Version)
+	check.Hint = "Run: basecamp skill install"
+	return check
 }
 
 // checkLegacyInstall detects stale bcq artifacts and suggests migration.

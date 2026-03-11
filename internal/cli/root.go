@@ -139,6 +139,9 @@ func NewRootCmd() *cobra.Command {
 		if app := appctx.FromContext(cmd.Context()); app != nil {
 			app.Close()
 		}
+		if commands.RefreshSkillsIfVersionChanged() {
+			fmt.Fprintf(os.Stderr, "Agent skill updated to match CLI %s\n", version.Version)
+		}
 		return nil
 	}
 

@@ -9,13 +9,16 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/version"
 	"github.com/basecamp/basecamp-cli/skills"
 )
 
 const skillFilename = "SKILL.md"
+const installedVersionFile = ".installed-version"
 
 // skillLocation represents a predefined skill installation target.
 type skillLocation struct {
@@ -125,6 +128,9 @@ func installSkillFiles() (string, error) {
 		return "", fmt.Errorf("writing skill file: %w", err)
 	}
 
+	// Best-effort: stamp installed version
+	_ = os.WriteFile(filepath.Join(skillDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+
 	return skillFile, nil
 }
 
@@ -208,6 +214,8 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 				result["notice"] = fmt.Sprintf("could not write to %s: %v", canonicalFile, wErr)
 			}
 		}
+		// Best-effort: stamp installed version in canonical location
+		_ = os.WriteFile(filepath.Join(canonicalDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
 	}
 
 	return app.OK(result,
@@ -291,6 +299,49 @@ func linkSkillToClaude() (string, string, error) {
 	}
 
 	return symlinkPath, notice, nil
+}
+
+// installedSkillVersion reads the .installed-version file from the baseline
+// skill directory. Returns "" if absent or unreadable.
+func installedSkillVersion() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".agents", "skills", "basecamp", installedVersionFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// RefreshSkillsIfVersionChanged checks the CLI version sentinel and silently
+// refreshes installed skills when the version has changed. Returns true if
+// skills were refreshed.
+func RefreshSkillsIfVersionChanged() bool {
+	if version.Version == "dev" {
+		return false
+	}
+
+	sentinelPath := filepath.Join(config.GlobalConfigDir(), ".last-run-version")
+
+	data, err := os.ReadFile(sentinelPath)
+	if err == nil && strings.TrimSpace(string(data)) == version.Version {
+		return false
+	}
+
+	refreshed := false
+	if baselineSkillInstalled() {
+		if _, err := installSkillFiles(); err == nil {
+			refreshed = true
+		}
+	}
+
+	// Update sentinel (best-effort, directory may not exist yet)
+	_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o755)             //nolint:gosec // G301: config dir
+	_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+
+	return refreshed
 }
 
 func copySkillFiles(src, dst string) error {
