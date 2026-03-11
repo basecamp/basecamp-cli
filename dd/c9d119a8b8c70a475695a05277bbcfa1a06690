@@ -1,0 +1,31 @@
+internal/presenter/schemas/todo.yaml
+  ace56a3dc2169407 45-48,70
+internal/presenter/schemas/comment.yaml
+  ace56a3dc2169407 21-24,41
+internal/presenter/schemas/project.yaml
+  ace56a3dc2169407 32-39,56-57,59
+internal/presenter/format.go
+  ace56a3dc2169407 26-27,136-169
+internal/presenter/schemas/todolist.yaml
+  ace56a3dc2169407 40-43,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "ddc9d119a8b8c70a475695a05277bbcfa1a06690",
+  "prompts": {
+    "ace56a3dc2169407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e19d22cb-48c9-41df-8e2a-00ef8512a962",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 319,
+      "overriden_lines": 0
+    }
+  }
+}
