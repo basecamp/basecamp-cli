@@ -1,0 +1,44 @@
+internal/commands/accounts.go
+  ace56a3dc2169407 1-59,62-163
+internal/cli/root.go
+  ace56a3dc2169407 205
+internal/tui/resolve/account.go
+  ace56a3dc2169407 70,95,116-120
+internal/commands/commands.go
+  ace56a3dc2169407 112
+internal/commands/commands_test.go
+  ace56a3dc2169407 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "27bdd8c0522ff41b4fe6661b128d3530d2cc6d6b",
+  "prompts": {
+    "ace56a3dc2169407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e19d22cb-48c9-41df-8e2a-00ef8512a962",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 71,
+      "total_deletions": 20,
+      "accepted_lines": 171,
+      "overriden_lines": 0
+    },
+    "b3273e58ec86cba3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9b5de7d-a150-4c9b-8fff-b97ac067d642",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 1,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    }
+  }
+}
