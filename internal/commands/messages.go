@@ -21,10 +21,13 @@ func NewMessagesCmd() *cobra.Command {
 	var messageBoard string
 
 	cmd := &cobra.Command{
-		Use:         "messages",
-		Aliases:     []string{"msgs"},
-		Short:       "Manage message board messages",
-		Long:        "List, show, create, and manage messages in a project's message board.",
+		Use:     "messages",
+		Aliases: []string{"msgs"},
+		Short:   "Manage message board messages",
+		Long: `List, show, create, and manage messages in a project's message board.
+
+Most projects have a single message board. If a project has multiple,
+use --message-board <id> to specify which one.`,
 		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board"},
 	}
 
@@ -39,6 +42,9 @@ func NewMessagesCmd() *cobra.Command {
 		newMessagesUpdateCmd(),
 		newMessagesPinCmd(),
 		newMessagesUnpinCmd(),
+		newRecordableTrashCmd("message"),
+		newRecordableArchiveCmd("message"),
+		newRecordableRestoreCmd("message"),
 	)
 
 	return cmd
@@ -513,7 +519,10 @@ func NewMessageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "message <title> [body]",
 		Short: "Post a new message",
-		Long:  "Post a message to a project's message board. Shortcut for 'basecamp messages create'.",
+		Long: `Post a message to a project's message board. Shortcut for 'basecamp messages create'.
+
+Most projects have a single message board. If a project has multiple,
+use --message-board <id> to specify which one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
