@@ -670,8 +670,9 @@ func formatCell(val any) string {
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
-		// Truncate long strings (rune-safe for multi-byte UTF-8)
-		if utf8.RuneCountInString(v) > 40 {
+		// Truncate long strings (rune-safe for multi-byte UTF-8).
+		// HTTP(S) URLs are never truncated — a truncated URL is useless.
+		if utf8.RuneCountInString(v) > 40 && !isURL(v) {
 			runes := []rune(v)
 			return string(runes[:37]) + "..."
 		}
@@ -731,6 +732,11 @@ func formatCell(val any) string {
 	default:
 		return ansi.Strip(fmt.Sprintf("%v", v))
 	}
+}
+
+func isURL(s string) bool {
+	return (strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")) &&
+		!strings.ContainsRune(s, ' ')
 }
 
 // formatDateValue formats date fields in a human-readable way.

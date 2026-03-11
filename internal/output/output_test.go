@@ -2114,6 +2114,96 @@ func TestFormatCellCollapsesNewlines(t *testing.T) {
 	})
 }
 
+func TestFormatCellDoesNotTruncateURLs(t *testing.T) {
+	longURL := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+
+	t.Run("long URL preserved", func(t *testing.T) {
+		result := formatCell(longURL)
+		assert.Equal(t, longURL, result)
+	})
+
+	t.Run("non-URL still truncated", func(t *testing.T) {
+		long := "This is a very long string that exceeds forty runes"
+		result := formatCell(long)
+		assert.Equal(t, "This is a very long string that excee...", result)
+	})
+
+	t.Run("short URL unchanged", func(t *testing.T) {
+		short := "https://example.com"
+		result := formatCell(short)
+		assert.Equal(t, short, result)
+	})
+
+	t.Run("http URL preserved", func(t *testing.T) {
+		httpURL := "http://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+		result := formatCell(httpURL)
+		assert.Equal(t, httpURL, result)
+	})
+
+	t.Run("URL-like string with spaces is truncated", func(t *testing.T) {
+		// After newline collapsing, a value like "https://example.com\n(extra...)"
+		// becomes "https://example.com (extra...)" — not a real URL.
+		notURL := "https://example.com (extra text that makes this quite long)"
+		result := formatCell(notURL)
+		assert.Len(t, []rune(result), 40)
+		assert.True(t, strings.HasSuffix(result, "..."))
+	})
+}
+
+func TestStyledRenderObjectPreservesURLs(t *testing.T) {
+	url := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+	data := map[string]any{
+		"name":              "Todoset",
+		"app_todolists_url": url,
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), url)
+}
+
+func TestMarkdownRenderObjectPreservesURLs(t *testing.T) {
+	url := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+	data := map[string]any{
+		"name":          "Todoset",
+		"todolists_url": url,
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), url)
+}
+
+func TestStyledRenderTablePreservesURLs(t *testing.T) {
+	url := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+	data := []any{
+		map[string]any{"name": "Tasks", "todolists_url": url},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), url)
+}
+
+func TestMarkdownRenderTablePreservesURLs(t *testing.T) {
+	url := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+	data := []any{
+		map[string]any{"name": "Tasks", "todolists_url": url},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), url)
+}
+
 func TestRenderDataStripsEscapesFromTopLevelStrings(t *testing.T) {
 	tests := []struct {
 		name   string
