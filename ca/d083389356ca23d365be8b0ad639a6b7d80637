@@ -1,0 +1,33 @@
+internal/presenter/format.go
+  ace56a3dc2169407 26-27,136-168
+internal/presenter/schemas/comment.yaml
+  ace56a3dc2169407 21-24,41
+internal/presenter/schemas/project.yaml
+  ace56a3dc2169407 32-39,56-57,59
+internal/presenter/schemas/todo.yaml
+  ace56a3dc2169407 45-48,70
+internal/presenter/format_test.go
+  ace56a3dc2169407 1-53
+internal/presenter/schemas/todolist.yaml
+  ace56a3dc2169407 40-43,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "cad083389356ca23d365be8b0ad639a6b7d80637",
+  "prompts": {
+    "ace56a3dc2169407": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e19d22cb-48c9-41df-8e2a-00ef8512a962",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 59,
+      "total_deletions": 7,
+      "accepted_lines": 114,
+      "overriden_lines": 0
+    }
+  }
+}
