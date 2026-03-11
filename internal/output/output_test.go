@@ -2235,7 +2235,7 @@ func TestWithEntityMessageMarkdownOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	output := buf.String()
-	assert.NotContains(t, output, "\x1b[",
+	assert.NotContains(t, output, "\x1b",
 		"markdown output must not contain ANSI codes")
 	assert.Contains(t, output, "Weekly update",
 		"message markdown should show subject")
