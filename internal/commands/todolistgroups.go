@@ -347,6 +347,10 @@ func newTodolistgroupsPositionCmd() *cobra.Command {
 		Short:   "Change group position",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if position == 0 {
+				return output.ErrUsage("--position is required (1-based)")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
@@ -357,10 +361,6 @@ func newTodolistgroupsPositionCmd() *cobra.Command {
 			}
 
 			groupIDStr := args[0]
-
-			if position == 0 {
-				return output.ErrUsage("--position is required (1-based)")
-			}
 
 			groupID, err := strconv.ParseInt(groupIDStr, 10, 64)
 			if err != nil {
@@ -381,7 +381,6 @@ func newTodolistgroupsPositionCmd() *cobra.Command {
 
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
-	_ = cmd.MarkFlagRequired("position")
 
 	return cmd
 }

@@ -130,14 +130,14 @@ func newToolsCreateCmd(project *string) *cobra.Command {
 
 For example, clone a Campfire to create a second chat room in the same project.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if sourceID == "" {
+				return output.ErrUsage("--source or --clone is required (ID of tool to clone)")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			if sourceID == "" {
-				return output.ErrUsage("--source is required (ID of tool to clone)")
 			}
 
 			sourceToolID, err := strconv.ParseInt(sourceID, 10, 64)
@@ -203,7 +203,6 @@ For example, clone a Campfire to create a second chat room in the same project.`
 
 	cmd.Flags().StringVarP(&sourceID, "source", "s", "", "Source tool ID to clone (required)")
 	cmd.Flags().StringVar(&sourceID, "clone", "", "Source tool ID (alias for --source)")
-	_ = cmd.MarkFlagRequired("source")
 
 	return cmd
 }
@@ -470,6 +469,10 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 		Long:    "Move a tool to a different position in the project dock.",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if position == 0 {
+				return output.ErrUsage("--position is required (1-based)")
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -479,10 +482,6 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 			toolID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid tool ID")
-			}
-
-			if position == 0 {
-				return output.ErrUsage("--position is required (1-based)")
 			}
 
 			// Resolve project, with interactive fallback
@@ -525,7 +524,6 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
-	_ = cmd.MarkFlagRequired("position")
 
 	return cmd
 }
