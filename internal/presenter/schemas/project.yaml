@@ -29,6 +29,14 @@ fields:
     role: detail
     format: text
 
+  dock:
+    role: detail
+    format: dock
+
+  app_url:
+    role: meta
+    format: text
+
   created_at:
     role: meta
     emphasis: muted
@@ -36,7 +44,6 @@ fields:
 
   id:
     role: meta
-    emphasis: muted
 
 views:
   list:
@@ -46,8 +53,10 @@ views:
       - fields: [name, description]
       - heading: Info
         fields: [status, bookmarked]
+      - heading: Dock
+        fields: [dock]
       - heading: Metadata
-        fields: [id, created_at]
+        fields: [id, app_url, created_at]
   compact:
     show: [name, status]
     inline: true

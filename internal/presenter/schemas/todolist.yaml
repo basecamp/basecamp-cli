@@ -37,6 +37,10 @@ fields:
     role: detail
     format: number
 
+  app_url:
+    role: meta
+    format: text
+
   created_at:
     role: meta
     emphasis: muted
@@ -55,4 +59,4 @@ views:
       - heading: Status
         fields: [completed, completed_ratio, comments_count]
       - heading: Metadata
-        fields: [id, created_at]
+        fields: [id, app_url, created_at]
