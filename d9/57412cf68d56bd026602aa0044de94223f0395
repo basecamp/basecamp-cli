@@ -1,0 +1,25 @@
+internal/tui/resolve/persist.go
+  4dbd3a535844eae6 8,91,97,104-135
+internal/commands/config.go
+  4dbd3a535844eae6 758
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "d957412cf68d56bd026602aa0044de94223f0395",
+  "prompts": {
+    "4dbd3a535844eae6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ce3a9c9-1e44-449b-8bdd-516e75370161",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 39,
+      "total_deletions": 3,
+      "accepted_lines": 39,
+      "overriden_lines": 0
+    }
+  }
+}
