@@ -1,0 +1,29 @@
+internal/commands/tools.go
+  22ca9de2b426f852 133-136,472-475
+internal/commands/todolistgroups_test.go
+  22ca9de2b426f852 1-45
+internal/commands/todolistgroups.go
+  22ca9de2b426f852 353
+internal/commands/tools_test.go
+  22ca9de2b426f852 1-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "f08648aa46a11aa26092a20da1ad848c93d4b575",
+  "prompts": {
+    "22ca9de2b426f852": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00edec92-1eb0-48a1-b422-03a16640073a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 24,
+      "total_deletions": 16,
+      "accepted_lines": 139,
+      "overriden_lines": 0
+    }
+  }
+}
