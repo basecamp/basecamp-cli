@@ -179,7 +179,7 @@ func TestTodolistResolutionUsesTodosetResolver(t *testing.T) {
 	}
 	r := newTestResolver(transport, &Flags{JSON: true})
 
-	_, err := r.Todolist(context.Background(), "1")
+	_, err := r.Todolist(context.Background(), "1", "")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -196,7 +196,7 @@ func TestTodolistResolutionSingleTodosetWorks(t *testing.T) {
 	}
 	r := newTestResolver(transport, &Flags{JSON: true})
 
-	result, err := r.Todolist(context.Background(), "1")
+	result, err := r.Todolist(context.Background(), "1", "")
 	require.NoError(t, err)
 	assert.Equal(t, "10", result.Value)
 	assert.Equal(t, SourceDefault, result.Source)

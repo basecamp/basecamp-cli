@@ -237,7 +237,7 @@ func ensureTodoset(cmd *cobra.Command, app *appctx.App, projectID, explicitTodos
 // ensureTodolist resolves the todolist ID if not already configured.
 // This enables interactive prompts when --list flag and config are both missing.
 // The project must be resolved first (call ensureProject before this).
-func ensureTodolist(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
+func ensureTodolist(cmd *cobra.Command, app *appctx.App, projectID, explicitTodosetID string) (string, error) {
 	// Check if todolist is already set via flag or config
 	if app.Flags.Todolist != "" {
 		return app.Flags.Todolist, nil
@@ -247,11 +247,105 @@ func ensureTodolist(cmd *cobra.Command, app *appctx.App, projectID string) (stri
 	}
 
 	// Try interactive resolution
-	resolved, err := app.Resolve().Todolist(cmd.Context(), projectID)
+	resolved, err := app.Resolve().Todolist(cmd.Context(), projectID, explicitTodosetID)
 	if err != nil {
 		return "", err
 	}
 	return resolved.Value, nil
+}
+
+// resolveTodolistInTodoset resolves a todolist name or ID, scoped to a specific todoset
+// when explicitTodosetID is non-empty. This ensures that --todoset actually constrains
+// which todolists are visible for name resolution.
+//
+// When explicitTodosetID is empty, falls back to the project-wide name resolver.
+func resolveTodolistInTodoset(cmd *cobra.Command, app *appctx.App, todolist, projectID, explicitTodosetID string) (string, error) {
+	// No todoset constraint — use the standard project-wide resolver
+	if explicitTodosetID == "" {
+		resolved, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, projectID)
+		return resolved, err
+	}
+
+	// Numeric ID passthrough — trust it regardless of todoset
+	if isNumeric(todolist) {
+		return todolist, nil
+	}
+
+	// Todoset-scoped name resolution: fetch todolists from only the specified
+	// todoset and resolve the name within that set.
+	todosetID, err := strconv.ParseInt(explicitTodosetID, 10, 64)
+	if err != nil {
+		return "", output.ErrUsage("Invalid todoset ID")
+	}
+
+	todolistsPath := fmt.Sprintf("/todosets/%d/todolists.json", todosetID)
+	pages, err := app.Account().GetAll(cmd.Context(), todolistsPath)
+	if err != nil {
+		return "", convertSDKError(err)
+	}
+
+	// Build a name-resolution list from the scoped todolists
+	type entry struct {
+		id   int64
+		name string
+	}
+	var entries []entry
+	for _, raw := range pages {
+		var tl struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &tl); err != nil {
+			return "", fmt.Errorf("failed to parse todolist from todoset %s: %w", explicitTodosetID, err)
+		}
+		entries = append(entries, entry{id: tl.ID, name: tl.Name})
+	}
+
+	// Exact match
+	inputLower := strings.ToLower(todolist)
+	for _, e := range entries {
+		if e.name == todolist {
+			return strconv.FormatInt(e.id, 10), nil
+		}
+	}
+	// Case-insensitive match
+	var caseMatches []entry
+	for _, e := range entries {
+		if strings.ToLower(e.name) == inputLower {
+			caseMatches = append(caseMatches, e)
+		}
+	}
+	if len(caseMatches) == 1 {
+		return strconv.FormatInt(caseMatches[0].id, 10), nil
+	}
+	if len(caseMatches) > 1 {
+		matchNames := make([]string, len(caseMatches))
+		for i, m := range caseMatches {
+			matchNames[i] = m.name
+		}
+		return "", output.ErrAmbiguous("todolist", matchNames)
+	}
+	// Partial match
+	var partials []entry
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.name), inputLower) {
+			partials = append(partials, e)
+		}
+	}
+	if len(partials) == 1 {
+		return strconv.FormatInt(partials[0].id, 10), nil
+	}
+	if len(partials) > 1 {
+		matchNames := make([]string, len(partials))
+		for i, m := range partials {
+			matchNames[i] = m.name
+		}
+		return "", output.ErrAmbiguous("todolist", matchNames)
+	}
+
+	return "", output.ErrNotFoundHint("Todolist", todolist,
+		fmt.Sprintf("Not found in todoset %s. Use 'basecamp todolists --in %s --todoset %s' to see available lists",
+			explicitTodosetID, projectID, explicitTodosetID))
 }
 
 // ensurePersonInProject resolves a person ID interactively from project members.

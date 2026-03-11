@@ -20,7 +20,7 @@ import (
 //
 // The project must be resolved before calling this method.
 // Returns the resolved todolist ID and the source it came from.
-func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedValue, error) {
+func (r *Resolver) Todolist(ctx context.Context, projectID, explicitTodosetID string) (*ResolvedValue, error) {
 	// 1. Check CLI flag
 	if r.flags.Todolist != "" {
 		return &ResolvedValue{
@@ -43,8 +43,8 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 	}
 
 	// Fetch todolists to check count (needed for both interactive and non-interactive paths)
-	// No explicit todoset ID in this path — will prompt/error on multi-todoset projects
-	todolists, err := r.fetchTodolists(ctx, projectID, "")
+	// Pass through explicit todoset ID if provided (e.g. from --todoset flag)
+	todolists, err := r.fetchTodolists(ctx, projectID, explicitTodosetID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (r *Resolver) Todolist(ctx context.Context, projectID string) (*ResolvedVal
 
 	// No todolists found — create a default "Tasks" list
 	if len(todolists) == 0 {
-		created, err := r.createDefaultTodolist(ctx, projectID, "")
+		created, err := r.createDefaultTodolist(ctx, projectID, explicitTodosetID)
 		if err != nil {
 			return nil, err
 		}
@@ -131,8 +131,8 @@ func (r *Resolver) fetchTodolists(ctx context.Context, projectID, explicitTodose
 }
 
 // TodolistWithPersist resolves the todolist ID and optionally prompts to save it.
-func (r *Resolver) TodolistWithPersist(ctx context.Context, projectID string) (*ResolvedValue, error) {
-	resolved, err := r.Todolist(ctx, projectID)
+func (r *Resolver) TodolistWithPersist(ctx context.Context, projectID, explicitTodosetID string) (*ResolvedValue, error) {
+	resolved, err := r.Todolist(ctx, projectID, explicitTodosetID)
 	if err != nil {
 		return nil, err
 	}
