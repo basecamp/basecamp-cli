@@ -186,7 +186,7 @@ You can also pass a Basecamp URL directly:
 func recordingTypeEndpoint(data map[string]any, id string) string {
 	t, _ := data["type"].(string)
 	switch t {
-	case "Todo":
+	case "Todo", "Todolist::Todo":
 		return fmt.Sprintf("/todos/%s.json", id)
 	case "Todolist":
 		return fmt.Sprintf("/todolists/%s.json", id)
@@ -200,6 +200,8 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return fmt.Sprintf("/documents/%s.json", id)
 	case "Schedule::Entry":
 		return fmt.Sprintf("/schedule_entries/%s.json", id)
+	case "Question":
+		return fmt.Sprintf("/questions/%s.json", id)
 	case "Question::Answer":
 		return fmt.Sprintf("/question_answers/%s.json", id)
 	case "Inbox::Forward":

@@ -20,7 +20,9 @@ func TestRecordingTypeEndpoint(t *testing.T) {
 		{"Document", "300", "/documents/300.json"},
 		{"Vault::Document", "301", "/documents/301.json"},
 		{"Schedule::Entry", "400", "/schedule_entries/400.json"},
+		{"Question", "499", "/questions/499.json"},
 		{"Question::Answer", "500", "/question_answers/500.json"},
+		{"Todolist::Todo", "124", "/todos/124.json"},
 		{"Inbox::Forward", "600", "/forwards/600.json"},
 		{"Upload", "700", "/uploads/700.json"},
 	}
