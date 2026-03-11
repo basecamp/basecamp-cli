@@ -144,12 +144,7 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project, campfireID st
 	}
 
 	var projectData struct {
-		Dock []struct {
-			Name    string `json:"name"`
-			Title   string `json:"title"`
-			ID      int64  `json:"id"`
-			Enabled bool   `json:"enabled"`
-		} `json:"dock"`
+		Dock []DockTool `json:"dock"`
 	}
 	if err := json.Unmarshal(resp.Data, &projectData); err != nil {
 		return fmt.Errorf("failed to parse project: %w", err)

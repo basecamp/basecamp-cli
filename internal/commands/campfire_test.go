@@ -330,7 +330,7 @@ func TestCampfireListMultipleCampfires(t *testing.T) {
 		Data []map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
-	assert.Len(t, envelope.Data, 2)
+	require.Len(t, envelope.Data, 2)
 
 	titles := []string{envelope.Data[0]["title"].(string), envelope.Data[1]["title"].(string)}
 	assert.Contains(t, titles, "General")
@@ -350,7 +350,7 @@ func TestCampfireListWithCampfireFlag(t *testing.T) {
 		Data []map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
-	assert.Len(t, envelope.Data, 1)
+	require.Len(t, envelope.Data, 1)
 	assert.Equal(t, "Engineering", envelope.Data[0]["title"])
 }
 
