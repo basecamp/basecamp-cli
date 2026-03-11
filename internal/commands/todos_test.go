@@ -614,6 +614,10 @@ func TestDoneAllFailReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "123")
 	assert.Contains(t, err.Error(), "456")
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "expected *output.Error")
+	assert.Equal(t, 404, outErr.HTTPStatus)
 }
 
 func TestReopenAllFailReturnsError(t *testing.T) {
@@ -624,6 +628,10 @@ func TestReopenAllFailReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "123")
 	assert.Contains(t, err.Error(), "456")
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "expected *output.Error")
+	assert.Equal(t, 404, outErr.HTTPStatus)
 }
 
 func TestDoneParseFailReturnsUsageError(t *testing.T) {
