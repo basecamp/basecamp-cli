@@ -709,7 +709,12 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 
 	// Derive breadcrumb prefix from the command path so it matches the
 	// invocation (e.g. "basecamp files uploads" vs "basecamp uploads").
-	uploadsPath := cmd.Parent().CommandPath() // e.g. "basecamp files uploads" or "basecamp uploads"
+	uploadsPath := cmd.Parent().CommandPath()
+	if cmd.Parent().Parent() == nil {
+		// Shortcut command (e.g. "basecamp upload") sits directly under root;
+		// point breadcrumbs at the canonical uploads command group.
+		uploadsPath = "basecamp uploads"
+	}
 
 	return app.OK(upload,
 		output.WithSummary(fmt.Sprintf("Uploaded %s (#%d)", filename, upload.ID)),
