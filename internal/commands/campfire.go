@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,14 +31,14 @@ func NewCampfireCmd() *cobra.Command {
 Use 'basecamp campfire list' to see campfires in a project.
 Use 'basecamp campfire messages' to view recent messages.
 Use 'basecamp campfire post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Each project has one campfire (the chat room)\nContent supports Markdown — converted to HTML automatically\nCampfire is project-scoped, no cross-project campfire queries"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple campfires; use `campfire list` to see them\nContent supports Markdown — converted to HTML automatically\nCampfire is project-scoped, no cross-project campfire queries"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVarP(&campfireID, "campfire", "c", "", "Campfire ID")
 	cmd.AddCommand(
-		newCampfireListCmd(&project),
+		newCampfireListCmd(&project, &campfireID),
 		newCampfireMessagesCmd(&project, &campfireID),
 		newCampfirePostCmd(&project, &campfireID, &contentType),
 		newCampfireUploadCmd(&project, &campfireID),
@@ -48,7 +49,7 @@ Use 'basecamp campfire post "message"' to post a message.`,
 	return cmd
 }
 
-func newCampfireListCmd(project *string) *cobra.Command {
+func newCampfireListCmd(project, campfireID *string) *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
@@ -60,7 +61,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			return runCampfireList(cmd, app, *project, all)
+			return runCampfireList(cmd, app, *project, *campfireID, all)
 		},
 	}
 
@@ -69,7 +70,7 @@ func newCampfireListCmd(project *string) *cobra.Command {
 	return cmd
 }
 
-func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bool) error {
+func runCampfireList(cmd *cobra.Command, app *appctx.App, project, campfireID string, all bool) error {
 	// Account-wide campfire listing
 	if all {
 		result, err := app.Account().Campfires().List(cmd.Context(), nil)
@@ -117,47 +118,108 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 		return err
 	}
 
-	// Get campfire from project dock
-	campfireIDStr, err := getCampfireID(cmd, app, resolvedProjectID)
+	// If a specific campfire ID was given via -c, fetch just that one
+	if campfireID != "" {
+		campfireIDInt, parseErr := strconv.ParseInt(campfireID, 10, 64)
+		if parseErr != nil {
+			return output.ErrUsage("Invalid campfire ID")
+		}
+
+		campfire, getErr := app.Account().Campfires().Get(cmd.Context(), campfireIDInt)
+		if getErr != nil {
+			return getErr
+		}
+
+		return app.OK([]*basecamp.Campfire{campfire},
+			output.WithSummary(fmt.Sprintf("Campfire: %s", campfireTitle(campfire))),
+			output.WithBreadcrumbs(campfireListBreadcrumbs(campfireID, resolvedProjectID)...),
+		)
+	}
+
+	// Fetch project dock and find all chat entries (supports multi-campfire projects)
+	path := fmt.Sprintf("/projects/%s.json", resolvedProjectID)
+	resp, err := app.Account().Get(cmd.Context(), path)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
-	campfireIDInt, err := strconv.ParseInt(campfireIDStr, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid campfire ID")
+	var projectData struct {
+		Dock []struct {
+			Name    string `json:"name"`
+			Title   string `json:"title"`
+			ID      int64  `json:"id"`
+			Enabled bool   `json:"enabled"`
+		} `json:"dock"`
+	}
+	if err := json.Unmarshal(resp.Data, &projectData); err != nil {
+		return fmt.Errorf("failed to parse project: %w", err)
 	}
 
-	// Get campfire details using SDK
-	campfire, err := app.Account().Campfires().Get(cmd.Context(), campfireIDInt)
-	if err != nil {
-		return err
+	// Collect enabled chat dock entries and fetch full campfire details
+	var campfires []*basecamp.Campfire
+	var hasDisabled bool
+	for _, tool := range projectData.Dock {
+		if tool.Name != "chat" {
+			continue
+		}
+		if !tool.Enabled {
+			hasDisabled = true
+			continue
+		}
+		campfire, getErr := app.Account().Campfires().Get(cmd.Context(), tool.ID)
+		if getErr != nil {
+			return getErr
+		}
+		campfires = append(campfires, campfire)
 	}
 
-	title := "Campfire"
-	if campfire.Title != "" {
-		title = campfire.Title
+	if len(campfires) == 0 {
+		hint := "Project has no campfire"
+		if hasDisabled {
+			hint = "Campfire is disabled for this project"
+		}
+		return output.ErrNotFoundHint("campfire", resolvedProjectID, hint)
 	}
 
-	// Return as array for consistency
-	result := []*basecamp.Campfire{campfire}
-	summary := fmt.Sprintf("Campfire: %s", title)
+	summary := fmt.Sprintf("%d campfire(s)", len(campfires))
 
-	return app.OK(result,
+	return app.OK(campfires,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp campfire %s messages --in %s", campfireIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire messages -c <id> --in %s", resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp campfire %s post \"message\" --in %s", campfireIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp campfire post \"message\" -c <id> --in %s", resolvedProjectID),
 				Description: "Post message",
 			},
 		),
 	)
+}
+
+func campfireTitle(c *basecamp.Campfire) string {
+	if c.Title != "" {
+		return c.Title
+	}
+	return "Campfire"
+}
+
+func campfireListBreadcrumbs(campfireID, projectID string) []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{
+			Action:      "messages",
+			Cmd:         fmt.Sprintf("basecamp campfire messages -c %s --in %s", campfireID, projectID),
+			Description: "View messages",
+		},
+		{
+			Action:      "post",
+			Cmd:         fmt.Sprintf("basecamp campfire post \"message\" -c %s --in %s", campfireID, projectID),
+			Description: "Post message",
+		},
+	}
 }
 
 func newCampfireMessagesCmd(project, campfireID *string) *cobra.Command {
