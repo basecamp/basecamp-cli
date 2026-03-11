@@ -42,6 +42,10 @@ fields:
     format: people
     collapse: true
 
+  app_url:
+    role: meta
+    format: text
+
   created_at:
     role: meta
     emphasis: muted
@@ -63,7 +67,7 @@ views:
       - heading: Status
         fields: [completed, due_on, assignees]
       - heading: Metadata
-        fields: [id, created_at]
+        fields: [id, app_url, created_at]
   compact:
     show: [content, completed]
     inline: true

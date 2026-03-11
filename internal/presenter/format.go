@@ -23,6 +23,8 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 		return formatPeople(val)
 	case "number":
 		return formatNumber(val, locale)
+	case "dock":
+		return formatDock(val)
 	default:
 		return formatText(val)
 	}
@@ -129,6 +131,39 @@ func formatPeople(val any) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// formatDock formats a project dock (array of tool maps) as a multi-line listing.
+func formatDock(val any) string {
+	arr, ok := val.([]any)
+	if !ok || len(arr) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if enabled, ok := m["enabled"].(bool); ok && !enabled {
+			continue
+		}
+		title, _ := m["title"].(string)
+		name, _ := m["name"].(string)
+		id := formatText(m["id"])
+		if title == "" {
+			title = name
+		}
+		if name != "" && id != "" {
+			lines = append(lines, fmt.Sprintf("%s (%s, ID: %s)", title, name, id))
+		} else if name != "" {
+			lines = append(lines, fmt.Sprintf("%s (%s)", title, name))
+		} else {
+			lines = append(lines, title)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatPerson formats a single person object (map with "name" field).
