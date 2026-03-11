@@ -2101,6 +2101,19 @@ func TestFormatCellStripsANSIFromArrayElements(t *testing.T) {
 	})
 }
 
+func TestFormatCellCollapsesNewlines(t *testing.T) {
+	t.Run("top-level string with mixed newlines", func(t *testing.T) {
+		result := formatCell("line one\nline two\r\nline three\rfour")
+		assert.Equal(t, "line one line two line three four", result)
+	})
+
+	t.Run("string elements in array with newlines", func(t *testing.T) {
+		input := []any{"hello\nworld", "foo\r\nbar"}
+		result := formatCell(input)
+		assert.Equal(t, "hello world, foo bar", result)
+	})
+}
+
 func TestRenderDataStripsEscapesFromTopLevelStrings(t *testing.T) {
 	tests := []struct {
 		name   string

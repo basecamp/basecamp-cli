@@ -699,7 +699,11 @@ func formatCell(val any) string {
 		for _, item := range v {
 			switch elem := item.(type) {
 			case string:
-				items = append(items, ansi.Strip(elem))
+				s := ansi.Strip(elem)
+				if strings.ContainsAny(s, "\n\r") {
+					s = strings.Join(strings.Fields(s), " ")
+				}
+				items = append(items, s)
 			case json.Number:
 				items = append(items, elem.String())
 			case float64:
