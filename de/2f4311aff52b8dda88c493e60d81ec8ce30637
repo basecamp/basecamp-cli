@@ -1,0 +1,33 @@
+internal/commands/messages_test.go
+  9a23262e770934af 353
+internal/tui/resolve/dock.go
+  9a23262e770934af 45,53-59,81-83,86,93,100,111
+internal/commands/campfire_test.go
+  9a23262e770934af 50
+internal/commands/helpers_test.go
+  9a23262e770934af 7-9,16-19,224-290
+internal/tui/resolve/dock_test.go
+  9a23262e770934af 129-143
+internal/commands/helpers.go
+  9a23262e770934af 121,124,132-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "de2f4311aff52b8dda88c493e60d81ec8ce30637",
+  "prompts": {
+    "9a23262e770934af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fad5974f-56dd-4dd0-9329-d3f471feb8c8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 115,
+      "overriden_lines": 0
+    }
+  }
+}
