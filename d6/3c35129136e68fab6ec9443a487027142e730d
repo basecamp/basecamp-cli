@@ -1,0 +1,29 @@
+e2e/todosets.bats
+  07a0cc4240396a94 39,43
+internal/commands/todosets.go
+  07a0cc4240396a94 4,14,20-21,31-32,38,40-140,143-146,152,159-162
+internal/commands/commands.go
+  07a0cc4240396a94 39
+.surface-breaking
+  07a0cc4240396a94 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "d63c35129136e68fab6ec9443a487027142e730d",
+  "prompts": {
+    "07a0cc4240396a94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "144ea335-9ae2-48f3-a749-bdd01c1d8e1e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 9,
+      "accepted_lines": 125,
+      "overriden_lines": 0
+    }
+  }
+}
