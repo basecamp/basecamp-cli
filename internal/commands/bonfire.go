@@ -233,6 +233,12 @@ func newBonfireLayoutListCmd() *cobra.Command {
 }
 
 func requireBonfireExperimental(app *appctx.App) error {
+	if !devBuild {
+		return output.ErrUsageHint(
+			"bonfire is only available in development builds",
+			"build with: make build (or go build -tags dev ./cmd/basecamp)",
+		)
+	}
 	if !app.Config.IsExperimental("bonfire") {
 		return output.ErrUsage(
 			"experimental feature \"bonfire\" is not enabled; run: basecamp config set experimental.bonfire true --global")

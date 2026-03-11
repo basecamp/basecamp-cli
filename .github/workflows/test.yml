@@ -34,15 +34,20 @@ jobs:
         run: make check-naming
 
       - name: Run unit tests
-        run: go test -v ./...
+        run: go test -tags dev -v ./...
 
       - name: Build binary
-        run: go build -o bin/basecamp ./cmd/basecamp
+        run: go build -tags dev -o bin/basecamp ./cmd/basecamp
 
       - name: Smoke test
         run: |
           ./bin/basecamp --version
           ./bin/basecamp --help | head -5
+
+      - name: Validate release build (no dev tag)
+        run: |
+          go build -o bin/basecamp-release ./cmd/basecamp
+          go test -v ./internal/commands/ -run TestStub
 
   lint:
     name: Lint
@@ -59,6 +64,7 @@ jobs:
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
         with:
           version: v2.11.1
+          args: --build-tags dev
 
   security:
     name: Security
@@ -76,7 +82,7 @@ jobs:
         # new Go version support for no meaningful reproducibility gain.
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          govulncheck -tags dev ./...
 
   race-check:
     name: Race Detection
@@ -92,7 +98,7 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Run tests with race detector
-        run: go test -race -v ./...
+        run: go test -tags dev -race -v ./...
 
   integration:
     name: Integration Tests
@@ -224,7 +230,7 @@ jobs:
 
       - name: Run benchmarks
         if: steps.filter.outputs.bench == 'true'
-        run: go test -bench=. -benchmem -count=3 -run='^$' ./internal/... | tee benchmarks.txt
+        run: go test -tags dev -bench=. -benchmem -count=3 -run='^$' ./internal/... | tee benchmarks.txt
 
       - name: Download previous benchmark baseline
         if: steps.filter.outputs.bench == 'true'

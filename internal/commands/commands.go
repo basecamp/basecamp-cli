@@ -19,6 +19,7 @@ type CommandInfo struct {
 	Description  string   `json:"description"`
 	Actions      []string `json:"actions,omitempty"`
 	Experimental bool     `json:"experimental,omitempty"`
+	DevOnly      bool     `json:"dev_only,omitempty"`
 }
 
 // CommandCategory groups commands by category.
@@ -133,8 +134,8 @@ func CommandCategories() []CommandCategory {
 				{Name: "mcp", Category: "additional", Description: "MCP server integration", Actions: []string{"server"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},
 				{Name: "skill", Category: "additional", Description: "Manage the embedded agent skill file", Actions: []string{"install"}},
-				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true},
-				{Name: "bonfire", Category: "additional", Description: "Multi-campfire orchestration", Actions: []string{"split", "layout"}, Experimental: true},
+				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", DevOnly: true},
+				{Name: "bonfire", Category: "additional", Description: "Multi-campfire orchestration", Actions: []string{"split", "layout"}, Experimental: true, DevOnly: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
 				{Name: "help", Category: "additional", Description: "Show help"},
 				{Name: "version", Category: "additional", Description: "Show version"},
@@ -190,10 +191,11 @@ func renderCommandsStyled(w io.Writer, categories []CommandCategory) {
 	bold := lipgloss.NewStyle().Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
 
+	devPrefix := "[dev] "
 	experimentalPrefix := "[experimental] "
 
 	// Find max widths across all categories for alignment,
-	// accounting for the experimental prefix in the description column.
+	// accounting for badge prefixes in the description column.
 	maxName := 0
 	maxDesc := 0
 	for _, cat := range categories {
@@ -202,7 +204,9 @@ func renderCommandsStyled(w io.Writer, categories []CommandCategory) {
 				maxName = len(cmd.Name)
 			}
 			descWidth := len(cmd.Description)
-			if cmd.Experimental {
+			if cmd.DevOnly {
+				descWidth += len(devPrefix)
+			} else if cmd.Experimental {
 				descWidth += len(experimentalPrefix)
 			}
 			if descWidth > maxDesc {
@@ -222,7 +226,9 @@ func renderCommandsStyled(w io.Writer, categories []CommandCategory) {
 				actions = strings.Join(cmd.Actions, ", ")
 			}
 			desc := cmd.Description
-			if cmd.Experimental {
+			if cmd.DevOnly {
+				desc = devPrefix + desc
+			} else if cmd.Experimental {
 				desc = experimentalPrefix + desc
 			}
 			line := fmt.Sprintf("  %-*s  %-*s", maxName, cmd.Name, maxDesc, desc)
