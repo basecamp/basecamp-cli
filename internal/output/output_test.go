@@ -2127,6 +2127,66 @@ func TestRenderDataStripsEscapesFromTopLevelStrings(t *testing.T) {
 	}
 }
 
+func TestWithEntityCampfireLineStyledOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := []map[string]any{
+		{
+			"id":         float64(42),
+			"content":    "Hello\nworld",
+			"creator":    map[string]any{"name": "Alice"},
+			"created_at": "2026-01-15T10:00:00Z",
+		},
+	}
+	err := w.OK(data,
+		WithEntity("campfire_line"),
+		WithSummary("1 messages"),
+	)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Hello world",
+		"campfire_line list should collapse multiline content")
+	assert.Contains(t, output, "Alice")
+	assert.NotContains(t, output, "title",
+		"campfire_line must not show a title column")
+	assert.NotContains(t, output, "Title",
+		"campfire_line must not show a Title column")
+}
+
+func TestWithEntityCampfireLineMarkdownOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := []map[string]any{
+		{
+			"id":         float64(42),
+			"content":    "Hello\nworld",
+			"creator":    map[string]any{"name": "Alice"},
+			"created_at": "2026-01-15T10:00:00Z",
+		},
+	}
+	err := w.OK(data,
+		WithEntity("campfire_line"),
+		WithSummary("1 messages"),
+	)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "\x1b",
+		"markdown output must not contain ANSI codes")
+	assert.Contains(t, output, "Hello world",
+		"campfire_line markdown should collapse multiline content")
+	assert.Contains(t, output, "Alice")
+}
+
 func TestRenderDataStripsOSCFromTopLevelString(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatMarkdown, Writer: &buf})

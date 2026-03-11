@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -1953,4 +1954,41 @@ func TestRenderDetailHeadlineHyperlink(t *testing.T) {
 	if !strings.Contains(out, "\x1b]8;;https://3.basecamp.com/123/todos/456\x07") {
 		t.Errorf("Styled detail headline should contain OSC 8 hyperlink, got:\n%q", out)
 	}
+}
+
+func TestCampfireLineSchemaLoads(t *testing.T) {
+	schema := LookupByName("campfire_line")
+	require.NotNil(t, schema, "campfire_line schema must be registered")
+	assert.Equal(t, "campfire_line", schema.Entity)
+	assert.Equal(t, "recording", schema.Kind)
+	assert.Empty(t, schema.TypeKey, "type_key must be empty — lines have multiple API types")
+
+	// List columns must exclude title (avoids duplication with content)
+	assert.Equal(t, []string{"id", "content", "creator", "created_at"}, schema.Views.List.Columns)
+	assert.NotContains(t, schema.Views.List.Columns, "title")
+}
+
+func TestCampfireLineRenderListCollapsesMultiline(t *testing.T) {
+	schema := LookupByName("campfire_line")
+	require.NotNil(t, schema)
+
+	data := []map[string]any{
+		{
+			"id":         float64(42),
+			"content":    "first line\nsecond line\nthird line",
+			"creator":    map[string]any{"name": "Alice"},
+			"created_at": "2026-01-15T10:00:00Z",
+		},
+	}
+
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var buf strings.Builder
+	err := RenderList(&buf, schema, data, styles, enUS)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "first line second line third line",
+		"multiline content must be collapsed, not truncated to first line")
+	assert.Contains(t, out, "Alice")
 }

@@ -137,7 +137,7 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 	}
 
 	// Return as array for consistency
-	result := []any{campfire}
+	result := []*basecamp.Campfire{campfire}
 	summary := fmt.Sprintf("Campfire: %s", title)
 
 	return app.OK(result,
@@ -228,6 +228,7 @@ func runCampfireMessages(cmd *cobra.Command, app *appctx.App, campfireID, projec
 
 	return app.OK(lines,
 		output.WithSummary(summary),
+		output.WithEntity("campfire_line"),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
@@ -360,6 +361,7 @@ func runCampfirePost(cmd *cobra.Command, app *appctx.App, campfireID, project, c
 
 	return app.OK(line,
 		output.WithSummary(summary),
+		output.WithEntity("campfire_line"),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }
@@ -439,6 +441,7 @@ You can pass either a line ID or a Basecamp line URL:
 
 			return app.OK(line,
 				output.WithSummary(summary),
+				output.WithEntity("campfire_line"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
