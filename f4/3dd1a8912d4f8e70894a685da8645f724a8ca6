@@ -1,0 +1,25 @@
+internal/commands/campfire.go
+  5082bcee2c1fa2b8 147
+internal/commands/campfire_test.go
+  5082bcee2c1fa2b8 333,353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "f43dd1a8912d4f8e70894a685da8645f724a8ca6",
+  "prompts": {
+    "5082bcee2c1fa2b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76cfdcb7-4dd5-4c53-b87b-b581e23ee26a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 8,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
