@@ -1,0 +1,41 @@
+internal/commands/campfire.go
+  4cd0fb4759d95f05 5-6,14,44,373-472
+internal/cli/root.go
+  4cd0fb4759d95f05 265-266
+internal/commands/checkins.go
+  4cd0fb4759d95f05 890
+internal/commands/files.go
+  4cd0fb4759d95f05 16,73,75-94,468,576-613,616,619-647,650,654-662,664-665,667-670,672,674,678,681,683-684,689,694,696,698,703,718-720,858,922-939,942,977,1220,1252
+internal/commands/commands.go
+  4cd0fb4759d95f05 42,58-59,66
+internal/commands/commands_test.go
+  4cd0fb4759d95f05 115-116
+e2e/files.bats
+  4cd0fb4759d95f05 199,205
+internal/commands/attach_helpers.go
+  4cd0fb4759d95f05 24-26
+internal/cli/help.go
+  4cd0fb4759d95f05 47
+internal/commands/attach.go
+  4cd0fb4759d95f05 88,92-93,95,125,127-128,132,134,138,145,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "7f29a70c571ae2aa4f64e6ecd1f84d3efae0fa5c",
+  "prompts": {
+    "4cd0fb4759d95f05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc2b5746-c5a6-4aa5-97aa-334a8dcec7a3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 1,
+      "accepted_lines": 275,
+      "overriden_lines": 0
+    }
+  }
+}
