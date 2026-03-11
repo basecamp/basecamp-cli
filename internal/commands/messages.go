@@ -521,7 +521,7 @@ func NewMessageCmd() *cobra.Command {
 			if len(args) == 0 {
 				return missingArg(cmd, "<title>")
 			}
-			subject := args[0]
+			title := args[0]
 
 			// Body from second positional arg or --editor
 			var body string
@@ -589,7 +589,7 @@ func NewMessageCmd() *cobra.Command {
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			req := &basecamp.CreateMessageRequest{
-				Subject:       subject,
+				Subject:       title,
 				Content:       richtext.MarkdownToHTML(body),
 				Subscriptions: subs,
 			}
