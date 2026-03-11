@@ -1,0 +1,25 @@
+Makefile
+  51d8749209d2920f 80-85,88-91,93-96,499
+e2e/qa_happypath.bats
+  51d8749209d2920f 5-9,19-23,63-65,75,82-83,90-91,98-99,106-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "18ce06248486ac74ab217729d3d1a0f5dbd0ac39",
+  "prompts": {
+    "51d8749209d2920f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba428b21-ae69-497f-be08-8b6f854bcd13",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 39,
+      "total_deletions": 8,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
