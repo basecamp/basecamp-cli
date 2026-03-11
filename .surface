@@ -1,4 +1,7 @@
 CMD basecamp
+CMD basecamp accounts
+CMD basecamp accounts list
+CMD basecamp accounts use
 CMD basecamp api
 CMD basecamp api delete
 CMD basecamp api get
@@ -300,6 +303,61 @@ FLAG basecamp --stats type=bool
 FLAG basecamp --styled type=bool
 FLAG basecamp --todolist type=string
 FLAG basecamp --verbose type=count
+FLAG basecamp accounts --account type=string
+FLAG basecamp accounts --agent type=bool
+FLAG basecamp accounts --cache-dir type=string
+FLAG basecamp accounts --count type=bool
+FLAG basecamp accounts --hints type=bool
+FLAG basecamp accounts --ids-only type=bool
+FLAG basecamp accounts --json type=bool
+FLAG basecamp accounts --markdown type=bool
+FLAG basecamp accounts --md type=bool
+FLAG basecamp accounts --no-hints type=bool
+FLAG basecamp accounts --no-stats type=bool
+FLAG basecamp accounts --profile type=string
+FLAG basecamp accounts --project type=string
+FLAG basecamp accounts --quiet type=bool
+FLAG basecamp accounts --stats type=bool
+FLAG basecamp accounts --styled type=bool
+FLAG basecamp accounts --todolist type=string
+FLAG basecamp accounts --verbose type=count
+FLAG basecamp accounts list --account type=string
+FLAG basecamp accounts list --agent type=bool
+FLAG basecamp accounts list --cache-dir type=string
+FLAG basecamp accounts list --count type=bool
+FLAG basecamp accounts list --hints type=bool
+FLAG basecamp accounts list --ids-only type=bool
+FLAG basecamp accounts list --json type=bool
+FLAG basecamp accounts list --markdown type=bool
+FLAG basecamp accounts list --md type=bool
+FLAG basecamp accounts list --no-hints type=bool
+FLAG basecamp accounts list --no-stats type=bool
+FLAG basecamp accounts list --profile type=string
+FLAG basecamp accounts list --project type=string
+FLAG basecamp accounts list --quiet type=bool
+FLAG basecamp accounts list --stats type=bool
+FLAG basecamp accounts list --styled type=bool
+FLAG basecamp accounts list --todolist type=string
+FLAG basecamp accounts list --verbose type=count
+FLAG basecamp accounts use --account type=string
+FLAG basecamp accounts use --agent type=bool
+FLAG basecamp accounts use --cache-dir type=string
+FLAG basecamp accounts use --count type=bool
+FLAG basecamp accounts use --hints type=bool
+FLAG basecamp accounts use --ids-only type=bool
+FLAG basecamp accounts use --json type=bool
+FLAG basecamp accounts use --markdown type=bool
+FLAG basecamp accounts use --md type=bool
+FLAG basecamp accounts use --no-hints type=bool
+FLAG basecamp accounts use --no-stats type=bool
+FLAG basecamp accounts use --profile type=string
+FLAG basecamp accounts use --project type=string
+FLAG basecamp accounts use --quiet type=bool
+FLAG basecamp accounts use --scope type=string
+FLAG basecamp accounts use --stats type=bool
+FLAG basecamp accounts use --styled type=bool
+FLAG basecamp accounts use --todolist type=string
+FLAG basecamp accounts use --verbose type=count
 FLAG basecamp api --account type=string
 FLAG basecamp api --agent type=bool
 FLAG basecamp api --cache-dir type=string
@@ -6115,6 +6173,9 @@ FLAG basecamp webhooks update --todolist type=string
 FLAG basecamp webhooks update --types type=string
 FLAG basecamp webhooks update --url type=string
 FLAG basecamp webhooks update --verbose type=count
+SUB basecamp accounts
+SUB basecamp accounts list
+SUB basecamp accounts use
 SUB basecamp api
 SUB basecamp api delete
 SUB basecamp api get
