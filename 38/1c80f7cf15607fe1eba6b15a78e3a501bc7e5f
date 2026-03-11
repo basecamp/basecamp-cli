@@ -1,0 +1,25 @@
+internal/auth/callback_preview_test.go
+  319f82eb5e5c25c5 47
+internal/auth/callback.go
+  319f82eb5e5c25c5 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "381c80f7cf15607fe1eba6b15a78e3a501bc7e5f",
+  "prompts": {
+    "319f82eb5e5c25c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35333dfe-a2f6-4789-b5d6-423dbe712fe7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 1,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
