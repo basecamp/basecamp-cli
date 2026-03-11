@@ -808,7 +808,7 @@ func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 			}
 			return fmt.Errorf("failed to complete todos %s: %w", strings.Join(failed, ", "), converted)
 		}
-		return output.ErrUsage(fmt.Sprintf("Failed to complete all todos: %s", strings.Join(failed, ", ")))
+		return output.ErrUsage(fmt.Sprintf("Invalid todo ID(s): %s", strings.Join(failed, ", ")))
 	}
 
 	summary := fmt.Sprintf("Completed %d todo(s)", len(completedTodos))
@@ -1206,7 +1206,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 			}
 			return fmt.Errorf("failed to reopen todos %s: %w", strings.Join(failed, ", "), converted)
 		}
-		return output.ErrUsage(fmt.Sprintf("Failed to reopen all todos: %s", strings.Join(failed, ", ")))
+		return output.ErrUsage(fmt.Sprintf("Invalid todo ID(s): %s", strings.Join(failed, ", ")))
 	}
 
 	summary := fmt.Sprintf("Reopened %d todo(s)", len(reopenedTodos))

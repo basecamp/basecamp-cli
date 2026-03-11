@@ -633,6 +633,7 @@ func TestDoneParseFailReturnsUsageError(t *testing.T) {
 	// Non-numeric IDs trigger parse failures, not API errors
 	err := executeTodosCommand(cmd, app, "abc", "def")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid todo ID(s)")
 	assert.Contains(t, err.Error(), "abc")
 	assert.Contains(t, err.Error(), "def")
 }
