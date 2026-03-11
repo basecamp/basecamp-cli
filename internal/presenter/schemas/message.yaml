@@ -33,6 +33,10 @@ fields:
     role: meta
     emphasis: muted
 
+  app_url:
+    role: meta
+    format: text
+
 views:
   list:
     columns: [id, subject, creator, created_at]
@@ -40,5 +44,5 @@ views:
     sections:
       - fields: [subject, content]
       - heading: Metadata
-        fields: [id, created_at, creator]
+        fields: [id, app_url, created_at, creator]
 
