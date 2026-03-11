@@ -1,0 +1,73 @@
+e2e/recorder/main.go
+  51d8749209d2920f 1-91
+e2e/smoke/run_smoke.sh
+  51d8749209d2920f 1-113
+e2e/smoke/smoke_todos_write.bats
+  51d8749209d2920f 1-38
+e2e/smoke/smoke_cards_read.bats
+  51d8749209d2920f 1-16
+e2e/smoke/smoke_lifecycle.bats
+  51d8749209d2920f 1-21
+e2e/smoke/RUBRIC.md
+  51d8749209d2920f 1-27
+e2e/smoke/smoke_messages_write.bats
+  51d8749209d2920f 1-18
+e2e/smoke/smoke_core.bats
+  51d8749209d2920f 1-39
+e2e/smoke/smoke_files_write.bats
+  51d8749209d2920f 1-16
+e2e/smoke/smoke_helper.bash
+  51d8749209d2920f 1-194
+e2e/smoke/.qa-allowlist
+  51d8749209d2920f 1-5
+e2e/smoke/smoke_files_read.bats
+  51d8749209d2920f 1-34
+e2e/recorder/cassette.go
+  51d8749209d2920f 1-95
+e2e/smoke/smoke_misc_read.bats
+  51d8749209d2920f 1-40
+Makefile
+  51d8749209d2920f 80-127,482-489
+e2e/smoke/smoke_projects.bats
+  51d8749209d2920f 1-35
+e2e/smoke/smoke_todos_read.bats
+  51d8749209d2920f 1-28
+e2e/recorder/record.go
+  51d8749209d2920f 1-133
+e2e/smoke/smoke_messages_read.bats
+  51d8749209d2920f 1-22
+e2e/recorder/replay.go
+  51d8749209d2920f 1-90
+e2e/smoke/smoke_account.bats
+  51d8749209d2920f 1-22
+e2e/qa_happypath.bats
+  51d8749209d2920f 1-89
+e2e/smoke/smoke_comments.bats
+  51d8749209d2920f 1-26
+e2e/smoke/smoke_cards_write.bats
+  51d8749209d2920f 1-19
+e2e/run.sh
+  51d8749209d2920f 12-20
+e2e/test_helper.bash
+  51d8749209d2920f 38-41,225-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "f3635e4666e5fbc8855e15ec693c8331e5e27bf6",
+  "prompts": {
+    "51d8749209d2920f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba428b21-ae69-497f-be08-8b6f854bcd13",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1443,
+      "total_deletions": 79,
+      "accepted_lines": 1369,
+      "overriden_lines": 0
+    }
+  }
+}
