@@ -1,0 +1,23 @@
+internal/tui/picker.go
+  9a23262e770934af 40,71,129,243-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "6b3e98f7466fbab6e60e297076cdf9a4a206adc6",
+  "prompts": {
+    "9a23262e770934af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fad5974f-56dd-4dd0-9329-d3f471feb8c8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 4,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
