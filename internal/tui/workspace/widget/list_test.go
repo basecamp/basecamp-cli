@@ -311,6 +311,59 @@ func TestList_DescriptionWithExtra_NarrowWidth(t *testing.T) {
 	assert.Contains(t, view, "Badge", "Extra should render even at narrow width")
 }
 
+func TestList_HeightPadding_FewItems(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(60, 10)
+	l.SetFocused(true)
+	l.SetItems(sampleItems(2)) // only 2 items in a 10-line viewport
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 10, len(lines), "output should fill allocated height even with few items")
+}
+
+func TestList_HeightPadding_Empty(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(60, 10)
+	l.SetFocused(true)
+	l.SetEmptyText("Nothing here")
+	l.SetItems(nil)
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 10, len(lines), "empty list should fill allocated height")
+	assert.Contains(t, view, "Nothing here")
+}
+
+func TestList_HeightPadding_Loading(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(60, 10)
+	l.SetFocused(true)
+	l.SetLoading(true)
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 10, len(lines), "loading state should fill allocated height")
+	assert.Contains(t, view, "Loading")
+}
+
+func TestList_HeightPadding_NoMatchesFilter(t *testing.T) {
+	l := NewList(tui.NewStyles())
+	l.SetSize(60, 10)
+	l.SetFocused(true)
+	l.SetItems(sampleItems(5))
+	l.StartFilter()
+	// Type something that matches nothing
+	for _, r := range "zzzzz" {
+		l.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	view := l.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 10, len(lines), "no-matches filter should fill allocated height")
+	assert.Contains(t, view, "No matches")
+}
+
 func TestList_LongFilter_NoOverflow(t *testing.T) {
 	l := NewList(tui.NewStyles())
 	l.SetSize(40, 20)
