@@ -1,0 +1,27 @@
+STYLE.md
+  07a0cc4240396a94 31-41
+Makefile
+  07a0cc4240396a94 274,332-336
+scripts/check-bare-groups.sh
+  07a0cc4240396a94 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "42e4881f9f89ab41fa1a2e3657e7548fe0257d80",
+  "prompts": {
+    "07a0cc4240396a94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "144ea335-9ae2-48f3-a749-bdd01c1d8e1e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 153,
+      "total_deletions": 13,
+      "accepted_lines": 151,
+      "overriden_lines": 0
+    }
+  }
+}
