@@ -358,6 +358,7 @@ func TestResolverClearCache(t *testing.T) {
 	r := &Resolver{
 		projects:  []Project{{ID: 1, Name: "Test"}},
 		people:    []Person{{ID: 2, Name: "Alice"}},
+		pingable:  []Person{{ID: 4, Name: "Client"}},
 		todolists: map[string][]Todolist{"123": {{ID: 3, Name: "Tasks"}}},
 	}
 
@@ -365,6 +366,7 @@ func TestResolverClearCache(t *testing.T) {
 
 	assert.Nil(t, r.projects, "projects should be nil after ClearCache")
 	assert.Nil(t, r.people, "people should be nil after ClearCache")
+	assert.Nil(t, r.pingable, "pingable should be nil after ClearCache")
 	assert.Empty(t, r.todolists, "todolists should be empty after ClearCache")
 }
 
@@ -392,6 +394,12 @@ func (m *mockResolver) setPeople(people []Person) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.people = people
+}
+
+func (m *mockResolver) setPingable(pingable []Person) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pingable = pingable
 }
 
 func (m *mockResolver) setTodolists(projectID string, todolists []Todolist) {
@@ -686,6 +694,7 @@ func TestResolverSetAccountID(t *testing.T) {
 	r := newMockResolver()
 	r.setProjects([]Project{{ID: 1, Name: "Test"}})
 	r.setPeople([]Person{{ID: 2, Name: "Alice"}})
+	r.setPingable([]Person{{ID: 4, Name: "Client"}})
 	r.setTodolists("123", []Todolist{{ID: 3, Name: "Tasks"}})
 
 	// Set same account ID - should not clear cache
@@ -702,6 +711,7 @@ func TestResolverSetAccountID(t *testing.T) {
 	r.mu.RLock()
 	assert.Nil(t, r.projects, "projects should be nil after changing account ID")
 	assert.Nil(t, r.people, "people should be nil after changing account ID")
+	assert.Nil(t, r.pingable, "pingable should be nil after changing account ID")
 	assert.Empty(t, r.todolists, "todolists should be empty after changing account ID")
 	assert.Equal(t, "67890", r.accountID)
 	r.mu.RUnlock()
@@ -775,4 +785,74 @@ func TestResolveSpecialCharacters(t *testing.T) {
 			assert.Equal(t, tt.wantID, match.ID)
 		})
 	}
+}
+
+// =============================================================================
+// Pingable Fallback Tests
+// =============================================================================
+
+func TestResolverResolvePerson_PingableFallback_ByName(t *testing.T) {
+	r := newMockResolver()
+	r.setPeople([]Person{
+		{ID: 111, Name: "Alice Smith", Email: "alice@example.com"},
+	})
+	r.setPingable([]Person{
+		{ID: 999, Name: "External Client", Email: "client@external.com"},
+	})
+
+	ctx := context.Background()
+	id, name, err := r.ResolvePerson(ctx, "External Client")
+	require.NoError(t, err)
+	assert.Equal(t, "999", id)
+	assert.Equal(t, "External Client", name)
+}
+
+func TestResolverResolvePerson_PingableFallback_ByEmail(t *testing.T) {
+	r := newMockResolver()
+	r.setPeople([]Person{
+		{ID: 111, Name: "Alice Smith", Email: "alice@example.com"},
+	})
+	r.setPingable([]Person{
+		{ID: 999, Name: "External Client", Email: "client@external.com"},
+	})
+
+	ctx := context.Background()
+	id, name, err := r.ResolvePerson(ctx, "client@external.com")
+	require.NoError(t, err)
+	assert.Equal(t, "999", id)
+	assert.Equal(t, "External Client", name)
+}
+
+func TestResolverResolvePerson_PeoplePreferredOverPingable(t *testing.T) {
+	r := newMockResolver()
+	r.setPeople([]Person{
+		{ID: 111, Name: "Alice Smith", Email: "alice@example.com"},
+	})
+	r.setPingable([]Person{
+		{ID: 222, Name: "Alice Smith", Email: "alice2@example.com"},
+	})
+
+	ctx := context.Background()
+	id, _, err := r.ResolvePerson(ctx, "Alice Smith")
+	require.NoError(t, err)
+	// People list is checked first, so ID 111 wins
+	assert.Equal(t, "111", id)
+}
+
+func TestResolverResolvePerson_PingableFallback_NotFound(t *testing.T) {
+	r := newMockResolver()
+	r.setPeople([]Person{
+		{ID: 111, Name: "Alice Smith", Email: "alice@example.com"},
+	})
+	r.setPingable([]Person{
+		{ID: 222, Name: "Bob Jones", Email: "bob@example.com"},
+	})
+
+	ctx := context.Background()
+	_, _, err := r.ResolvePerson(ctx, "Charlie Nobody")
+	require.Error(t, err)
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeNotFound, outErr.Code)
 }
