@@ -322,7 +322,7 @@ func (l *List) handleFilterKey(km tea.KeyPressMsg) tea.Cmd {
 func (l *List) visibleHeight() int {
 	h := l.height
 	if h <= 0 {
-		h = 10
+		h = 20
 	}
 	if l.filtering || l.filter != "" {
 		h--

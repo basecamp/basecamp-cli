@@ -123,7 +123,7 @@ func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
 		textInput:     ti,
 		styles:        styles,
 		title:         "Select an item",
-		maxVisible:    10,
+		maxVisible:    20,
 		spinner:       s,
 		loadingMsg:    "Loading…",
 		emptyMessage:  "No items found",
