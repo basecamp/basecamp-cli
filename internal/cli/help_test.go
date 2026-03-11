@@ -148,7 +148,6 @@ func TestGroupCommandShowsPersistentLocalFlags(t *testing.T) {
 		{"messages --message-board", "messages", commands.NewMessagesCmd, "--message-board"},
 		{"campfire --project", "campfire", commands.NewCampfireCmd, "--project"},
 		{"campfire --campfire", "campfire", commands.NewCampfireCmd, "--campfire"},
-		{"campfire --content-type", "campfire", commands.NewCampfireCmd, "--content-type"},
 	}
 
 	for _, tt := range tests {

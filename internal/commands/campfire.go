@@ -35,8 +35,6 @@ Use 'basecamp campfire post "message"' to post a message.`,
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.PersistentFlags().StringVarP(&campfireID, "campfire", "c", "", "Campfire ID")
-	cmd.PersistentFlags().StringVar(&contentType, "content-type", "", "Content type (text/html for rich text)")
-
 	cmd.AddCommand(
 		newCampfireListCmd(&project),
 		newCampfireMessagesCmd(&project, &campfireID),
@@ -282,6 +280,7 @@ for rich text (HTML) messages.`,
 	}
 
 	cmd.Flags().StringVar(&content, "content", "", "Message content")
+	cmd.Flags().StringVar(contentType, "content-type", "", "Content type (text/html for rich text)")
 
 	return cmd
 }
@@ -426,7 +425,11 @@ func runCampfireUpload(cmd *cobra.Command, app *appctx.App, campfireID, project,
 		}
 	} else if project != "" {
 		// Campfire ID provided directly — still resolve project for breadcrumbs
-		resolvedProjectID, _, _ = app.Names.ResolveProject(cmd.Context(), project)
+		var err error
+		resolvedProjectID, _, err = app.Names.ResolveProject(cmd.Context(), project)
+		if err != nil {
+			return err
+		}
 	}
 
 	campfireIDInt, err := strconv.ParseInt(campfireID, 10, 64)

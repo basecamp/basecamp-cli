@@ -354,3 +354,9 @@ SUB basecamp upload trash
 SUB basecamp uploads archive
 SUB basecamp uploads restore
 SUB basecamp uploads trash
+FLAG basecamp campfire --content-type type=string
+FLAG basecamp campfire delete --content-type type=string
+FLAG basecamp campfire line --content-type type=string
+FLAG basecamp campfire list --content-type type=string
+FLAG basecamp campfire messages --content-type type=string
+FLAG basecamp campfire upload --content-type type=string
