@@ -845,28 +845,22 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return lpURL + "/authorization.json", nil
+		return strings.TrimSuffix(lpURL, "/") + "/authorization.json", nil
 	}
 
 	oauthType := m.GetOAuthType()
 	switch oauthType {
 	case "bc3":
 		return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
-	case "launchpad":
+	case "launchpad", "":
+		// "launchpad" = stored credentials; "" = no stored credentials and
+		// no env token (shouldn't normally reach here since IsAuthenticated
+		// would have caught it, but handle gracefully).
 		lpURL, err := m.launchpadURL()
 		if err != nil {
 			return "", err
 		}
-		return lpURL + "/authorization.json", nil
-	case "":
-		// No stored credentials and no env token — shouldn't normally
-		// reach here (IsAuthenticated would have caught it), but handle
-		// gracefully by falling back to Launchpad.
-		lpURL, err := m.launchpadURL()
-		if err != nil {
-			return "", err
-		}
-		return lpURL + "/authorization.json", nil
+		return strings.TrimSuffix(lpURL, "/") + "/authorization.json", nil
 	default:
 		return "", output.ErrAuth("Unknown OAuth type: " + oauthType)
 	}
