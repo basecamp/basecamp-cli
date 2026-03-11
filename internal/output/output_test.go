@@ -2154,6 +2154,8 @@ func TestWithEntityCampfireLineStyledOutput(t *testing.T) {
 	assert.Contains(t, output, "Alice")
 	assert.NotContains(t, output, "title",
 		"campfire_line must not show a title column")
+	assert.NotContains(t, output, "Title",
+		"campfire_line must not show a Title column")
 }
 
 func TestWithEntityCampfireLineMarkdownOutput(t *testing.T) {
@@ -2178,7 +2180,7 @@ func TestWithEntityCampfireLineMarkdownOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	output := buf.String()
-	assert.NotContains(t, output, "\x1b[",
+	assert.NotContains(t, output, "\x1b",
 		"markdown output must not contain ANSI codes")
 	assert.Contains(t, output, "Hello world",
 		"campfire_line markdown should collapse multiline content")

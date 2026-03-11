@@ -137,7 +137,7 @@ func runCampfireList(cmd *cobra.Command, app *appctx.App, project string, all bo
 	}
 
 	// Return as array for consistency
-	result := []basecamp.Campfire{*campfire}
+	result := []*basecamp.Campfire{campfire}
 	summary := fmt.Sprintf("Campfire: %s", title)
 
 	return app.OK(result,
