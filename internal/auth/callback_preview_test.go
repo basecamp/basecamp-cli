@@ -11,7 +11,7 @@ import (
 //
 //	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1
 //
-// Then open http://localhost:9999 in your browser. Ctrl-C to stop.
+// Then open http://127.0.0.1:9999 in your browser. Ctrl-C to stop.
 func TestPreviewCallbackPages(t *testing.T) {
 	if os.Getenv("PREVIEW") == "" {
 		t.Skip("set PREVIEW=1 to run this preview server")
@@ -49,9 +49,9 @@ func TestPreviewCallbackPages(t *testing.T) {
 		})
 	}
 
-	t.Log("Preview server running at http://localhost:9999")
+	t.Log("Preview server running at http://127.0.0.1:9999")
 	for _, p := range pages {
-		t.Logf("  http://localhost:9999%s", p.path)
+		t.Logf("  http://127.0.0.1:9999%s", p.path)
 	}
 	t.Log("Ctrl-C to stop")
 
