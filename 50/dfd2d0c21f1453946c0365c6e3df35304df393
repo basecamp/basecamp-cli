@@ -1,0 +1,29 @@
+Makefile
+  fd65441df4e5c4f8 29-30,74,84,89,104,111,120,127,137,190,214,259,369,381,383,388-389
+.github/workflows/security.yml
+  fd65441df4e5c4f8 76,117
+.github/workflows/test.yml
+  fd65441df4e5c4f8 37,40,62,80,96,228
+.github/workflows/release.yml
+  fd65441df4e5c4f8 67,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "50dfd2d0c21f1453946c0365c6e3df35304df393",
+  "prompts": {
+    "fd65441df4e5c4f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e705e676-2145-4dd0-8bcf-8ae8490be614",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 28,
+      "overriden_lines": 0
+    }
+  }
+}
