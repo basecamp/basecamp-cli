@@ -143,6 +143,54 @@ load test_helper
 }
 
 
+# Whitespace-only content errors
+
+@test "todo with whitespace-only content shows help" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp todo " "
+  assert_success
+  assert_output_contains "basecamp todo"
+}
+
+@test "todos create with whitespace-only content shows help" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp todos create " "
+  assert_success
+  assert_output_contains "basecamp todos create"
+}
+
+@test "cards create with whitespace-only title shows help" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp cards create " "
+  assert_success
+  assert_output_contains "basecamp cards create"
+}
+
+@test "messages create with whitespace-only title shows help" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp messages create " "
+  assert_success
+  assert_output_contains "basecamp messages create"
+}
+
+@test "message with whitespace-only title shows help" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp message " "
+  assert_success
+  assert_output_contains "basecamp message"
+}
+
+
 # Missing context errors
 
 @test "todos without project shows help" {
