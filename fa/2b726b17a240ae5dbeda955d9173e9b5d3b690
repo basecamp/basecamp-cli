@@ -1,0 +1,23 @@
+internal/tui/workspace/widget/list.go
+  c240da323b127dfd 378,382-390,392-406,413,419-421,425-444,451-452,455-456
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "fa2b726b17a240ae5dbeda955d9173e9b5d3b690",
+  "prompts": {
+    "c240da323b127dfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dd75f51c-cff6-4f21-ab03-4c7f04af8823",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 71,
+      "total_deletions": 74,
+      "accepted_lines": 53,
+      "overriden_lines": 0
+    }
+  }
+}
