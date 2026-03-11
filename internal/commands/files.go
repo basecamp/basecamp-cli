@@ -707,17 +707,21 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		return convertSDKError(err)
 	}
 
+	// Derive breadcrumb prefix from the command path so it matches the
+	// invocation (e.g. "basecamp files uploads" vs "basecamp uploads").
+	uploadsPath := cmd.Parent().CommandPath() // e.g. "basecamp files uploads" or "basecamp uploads"
+
 	return app.OK(upload,
 		output.WithSummary(fmt.Sprintf("Uploaded %s (#%d)", filename, upload.ID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp files show %d --in %s", upload.ID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("%s show %d --in %s", uploadsPath, upload.ID, resolvedProjectID),
 				Description: "View upload",
 			},
 			output.Breadcrumb{
 				Action:      "list",
-				Cmd:         fmt.Sprintf("basecamp files uploads --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("%s --in %s", uploadsPath, resolvedProjectID),
 				Description: "List uploads",
 			},
 		),
