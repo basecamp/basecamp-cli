@@ -1,0 +1,36 @@
+entity: campfire_line
+kind: recording
+
+identity:
+  id: id
+
+headline:
+  default:
+    template: ""
+
+fields:
+  content:
+    role: body
+    format: text
+
+  creator:
+    role: detail
+    format: person
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  id:
+    role: meta
+    emphasis: muted
+
+views:
+  list:
+    columns: [id, content, creator, created_at]
+  detail:
+    sections:
+      - fields: [content]
+      - heading: Metadata
+        fields: [id, created_at, creator]

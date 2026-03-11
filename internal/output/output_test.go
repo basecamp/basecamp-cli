@@ -2127,6 +2127,35 @@ func TestRenderDataStripsEscapesFromTopLevelStrings(t *testing.T) {
 	}
 }
 
+func TestWithEntityCampfireLineStyledOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := []map[string]any{
+		{
+			"id":         float64(42),
+			"content":    "Hello\nworld",
+			"creator":    map[string]any{"name": "Alice"},
+			"created_at": "2026-01-15T10:00:00Z",
+		},
+	}
+	err := w.OK(data,
+		WithEntity("campfire_line"),
+		WithSummary("1 messages"),
+	)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Hello world",
+		"campfire_line list should collapse multiline content")
+	assert.Contains(t, output, "Alice")
+	assert.NotContains(t, output, "title",
+		"campfire_line must not show a title column")
+}
+
 func TestRenderDataStripsOSCFromTopLevelString(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatMarkdown, Writer: &buf})
