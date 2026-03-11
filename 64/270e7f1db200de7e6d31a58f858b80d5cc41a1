@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  46f8a61b362a2ca8 304,329,334,337,339,341,345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "64270e7f1db200de7e6d31a58f858b80d5cc41a1",
+  "prompts": {
+    "46f8a61b362a2ca8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "380e8405-1e90-4839-873e-41dbd0a2c9b3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 102,
+      "total_deletions": 8,
+      "accepted_lines": 102,
+      "overriden_lines": 0
+    }
+  }
+}
