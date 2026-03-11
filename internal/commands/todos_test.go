@@ -645,3 +645,227 @@ func TestDoneParseFailReturnsUsageError(t *testing.T) {
 	assert.Contains(t, err.Error(), "abc")
 	assert.Contains(t, err.Error(), "def")
 }
+
+// scopedTodosetTransport serves a multi-todoset project where each todoset has
+// different todolists, and can create todos on a specific todolist.
+type scopedTodosetTransport struct {
+	createdOnTodolist int64 // records which todolist got the create call
+}
+
+func (s *scopedTodosetTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	status := 200
+
+	var body string
+	switch {
+	case req.Method == "POST" && strings.Contains(path, "/todolists/"):
+		// Create todo — extract todolist ID from path
+		parts := strings.Split(path, "/")
+		for i, p := range parts {
+			if p == "todolists" && i+1 < len(parts) {
+				if id, err := json.Number(parts[i+1]).Int64(); err == nil {
+					s.createdOnTodolist = id
+				}
+			}
+		}
+		status = 201
+		body = `{"id": 999, "content": "test", "status": "active", "completed": false}`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/projects/"):
+		body = `{"id": 123, "dock": [
+			{"name": "todoset", "id": 100, "title": "Engineering", "enabled": true},
+			{"name": "todoset", "id": 200, "title": "Design", "enabled": true}
+		]}`
+	case strings.Contains(path, "/todosets/100/todolists"):
+		body = `[{"id": 10, "name": "Sprint 1"}, {"id": 11, "name": "Backlog"}]`
+	case strings.Contains(path, "/todosets/200/todolists"):
+		body = `[{"id": 20, "name": "UI Tasks"}, {"id": 21, "name": "Backlog"}]`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func setupScopedTodosetApp(t *testing.T, transport *scopedTodosetTransport) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+}
+
+func TestTodoCreateWithTodosetScopesListResolution(t *testing.T) {
+	// "Sprint 1" only exists in todoset 100. With --todoset 100, it should resolve.
+	transport := &scopedTodosetTransport{}
+	app := setupScopedTodosetApp(t, transport)
+
+	cmd := NewTodoCmd()
+	err := executeTodosCommand(cmd, app, "test todo", "--list", "Sprint 1", "--todoset", "100")
+	require.NoError(t, err)
+	assert.Equal(t, int64(10), transport.createdOnTodolist)
+}
+
+func TestTodoCreateWithTodosetRejectsWrongList(t *testing.T) {
+	// "Sprint 1" is in todoset 100, not 200. With --todoset 200, it should fail.
+	transport := &scopedTodosetTransport{}
+	app := setupScopedTodosetApp(t, transport)
+
+	cmd := NewTodoCmd()
+	err := executeTodosCommand(cmd, app, "test todo", "--list", "Sprint 1", "--todoset", "200")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Sprint 1")
+}
+
+func TestTodoCreateWithTodosetDisambiguatesDuplicateNames(t *testing.T) {
+	// "Backlog" exists in both todosets (id 11 in 100, id 21 in 200).
+	// --todoset 200 should resolve to id 21.
+	transport := &scopedTodosetTransport{}
+	app := setupScopedTodosetApp(t, transport)
+
+	cmd := NewTodoCmd()
+	err := executeTodosCommand(cmd, app, "test todo", "--list", "Backlog", "--todoset", "200")
+	require.NoError(t, err)
+	assert.Equal(t, int64(21), transport.createdOnTodolist)
+}
+
+func TestTodosCreateWithTodosetScopesListResolution(t *testing.T) {
+	// Same as TestTodoCreateWithTodosetScopesListResolution but via "todos create"
+	transport := &scopedTodosetTransport{}
+	app := setupScopedTodosetApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "create", "test todo", "--list", "UI Tasks", "--todoset", "200")
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), transport.createdOnTodolist)
+}
+
+func TestTodoCreateWithConfigTodolistAndTodosetScopes(t *testing.T) {
+	// Config has todolist_id set to a name. --todoset should still scope resolution.
+	transport := &scopedTodosetTransport{}
+	app := setupScopedTodosetApp(t, transport)
+	app.Config.TodolistID = "Backlog" // name, not numeric
+
+	cmd := NewTodoCmd()
+	err := executeTodosCommand(cmd, app, "test todo", "--todoset", "100")
+	require.NoError(t, err)
+	assert.Equal(t, int64(11), transport.createdOnTodolist,
+		"config todolist_id 'Backlog' + --todoset 100 should resolve to todolist 11")
+}
+
+// paginatedTodosetTransport serves todolists across two pages to verify
+// that todoset-scoped resolution follows pagination Link headers.
+type paginatedTodosetTransport struct {
+	createdOnTodolist int64
+}
+
+func (p *paginatedTodosetTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	query := req.URL.Query()
+	status := 200
+
+	var body string
+	switch {
+	case req.Method == "POST" && strings.Contains(path, "/todolists/"):
+		parts := strings.Split(path, "/")
+		for i, part := range parts {
+			if part == "todolists" && i+1 < len(parts) {
+				if id, err := json.Number(parts[i+1]).Int64(); err == nil {
+					p.createdOnTodolist = id
+				}
+			}
+		}
+		status = 201
+		body = `{"id": 999, "content": "test", "status": "active", "completed": false}`
+	case strings.Contains(path, "/projects/"):
+		body = `{"id": 123, "dock": [
+			{"name": "todoset", "id": 300, "title": "Big Team", "enabled": true}
+		]}`
+	case strings.Contains(path, "/todosets/300/todolists"):
+		if query.Get("page") == "2" {
+			body = `[{"id": 32, "name": "Deep Backlog"}]`
+		} else {
+			// Page 1: Link header points to page 2 (same origin)
+			page2URL := req.URL.Scheme + "://" + req.URL.Host + path + "?page=2"
+			header.Set("Link", `<`+page2URL+`>; rel="next"`)
+			body = `[{"id": 30, "name": "Sprint 1"}, {"id": 31, "name": "Sprint 2"}]`
+		}
+	default:
+		body = `[]`
+	}
+
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+		Request:    req,
+	}, nil
+}
+
+func TestTodoScopedResolutionPaginates(t *testing.T) {
+	// "Deep Backlog" is on page 2; verifies GetAll follows Link headers.
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &paginatedTodosetTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{
+		BaseURL: "https://3.basecampapi.com",
+	}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewTodoCmd()
+	err := executeTodosCommand(cmd, app, "test todo", "--in", "123", "--todoset", "300", "--list", "Deep Backlog")
+	require.NoError(t, err)
+	assert.Equal(t, int64(32), transport.createdOnTodolist,
+		"should resolve 'Deep Backlog' from page 2 of todoset 300")
+}

@@ -71,6 +71,7 @@ func NewReopenCmd() *cobra.Command {
 func NewTodoCmd() *cobra.Command {
 	var project string
 	var todolist string
+	var todoset string
 	var assignee string
 	var due string
 	var description string
@@ -127,9 +128,9 @@ func NewTodoCmd() *cobra.Command {
 			if todolist == "" {
 				todolist = app.Config.TodolistID
 			}
-			// If still no todolist, try interactive selection
+			// If still no todolist, try interactive selection (todoset-scoped)
 			if todolist == "" {
-				selectedTodolist, err := ensureTodolist(cmd, app, project)
+				selectedTodolist, err := ensureTodolist(cmd, app, project, todoset)
 				if err != nil {
 					return err
 				}
@@ -140,8 +141,8 @@ func NewTodoCmd() *cobra.Command {
 				return output.ErrUsage("--list is required (no default todolist found)")
 			}
 
-			// Resolve todolist name to ID
-			resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
+			// Resolve todolist name to ID, scoped to --todoset when provided
+			resolvedTodolist, err := resolveTodolistInTodoset(cmd, app, todolist, project, todoset)
 			if err != nil {
 				return err
 			}
@@ -228,6 +229,7 @@ func NewTodoCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&todolist, "list", "l", "", "Todolist ID")
+	cmd.Flags().StringVarP(&todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date")
@@ -605,6 +607,7 @@ You can pass either a todo ID or a Basecamp URL:
 func newTodosCreateCmd() *cobra.Command {
 	var project string
 	var todolist string
+	var todoset string
 	var assignee string
 	var due string
 	var description string
@@ -661,9 +664,9 @@ func newTodosCreateCmd() *cobra.Command {
 			if todolist == "" {
 				todolist = app.Config.TodolistID
 			}
-			// If still no todolist, try interactive selection
+			// If still no todolist, try interactive selection (todoset-scoped)
 			if todolist == "" {
-				selectedTodolist, err := ensureTodolist(cmd, app, project)
+				selectedTodolist, err := ensureTodolist(cmd, app, project, todoset)
 				if err != nil {
 					return err
 				}
@@ -674,8 +677,8 @@ func newTodosCreateCmd() *cobra.Command {
 				return output.ErrUsage("--list is required (no default todolist found)")
 			}
 
-			// Resolve todolist name to ID
-			resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
+			// Resolve todolist name to ID, scoped to --todoset when provided
+			resolvedTodolist, err := resolveTodolistInTodoset(cmd, app, todolist, project, todoset)
 			if err != nil {
 				return err
 			}
@@ -762,6 +765,7 @@ func newTodosCreateCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&todolist, "list", "l", "", "Todolist ID")
+	cmd.Flags().StringVarP(&todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee ID (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (YYYY-MM-DD)")
