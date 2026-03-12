@@ -1640,7 +1640,7 @@ func downloadStorageURL(ctx context.Context, app *appctx.App, rawURL string) (*b
 		if err != nil {
 			return nil, fmt.Errorf("invalid redirect URL: %w", err)
 		}
-		resp, err = (&http.Client{Timeout: 5 * time.Minute}).Do(req2)
+		resp, err = (&http.Client{}).Do(req2)
 		if err != nil {
 			return nil, fmt.Errorf("storage download failed: %w", err)
 		}
