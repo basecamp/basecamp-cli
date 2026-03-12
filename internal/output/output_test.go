@@ -2356,3 +2356,159 @@ func TestRenderDataStripsOSCFromTopLevelString(t *testing.T) {
 	assert.NotContains(t, output, "\x1b]52", "OSC 52 clipboard injection must be stripped")
 	assert.Contains(t, output, "safetext")
 }
+
+// =============================================================================
+// Generic Table Date Formatting Tests
+// =============================================================================
+
+func TestStyledTableFormatsDateColumns(t *testing.T) {
+	data := []any{
+		map[string]any{
+			"id":         float64(1),
+			"name":       "Project A",
+			"created_at": "2024-01-15T10:00:00Z",
+		},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "2024-01-15T10:00:00Z",
+		"generic table should not show raw ISO8601 timestamps")
+	assert.Contains(t, output, "Jan 15, 2024",
+		"generic table should show human-readable date")
+}
+
+func TestMarkdownTableFormatsDateColumns(t *testing.T) {
+	data := []any{
+		map[string]any{
+			"id":         float64(1),
+			"name":       "Project A",
+			"created_at": "2024-01-15T10:00:00Z",
+		},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "2024-01-15T10:00:00Z",
+		"markdown table should not show raw ISO8601 timestamps")
+	assert.Contains(t, output, "Jan 15, 2024",
+		"markdown table should show human-readable date")
+}
+
+func TestSelectColumnsUsesFormattedDateWidth(t *testing.T) {
+	// Verify that selectColumns measures the formatted date width (short)
+	// rather than raw ISO8601 width (30 chars)
+	r := &Renderer{width: 60}
+	cols := []column{
+		{key: "name", header: "Name", priority: 2},
+		{key: "created_at", header: "Created", priority: 8},
+	}
+	data := []map[string]any{
+		{"name": "Test", "created_at": "2024-01-15T10:00:00Z"},
+	}
+	selected := r.selectColumns(cols, data)
+
+	// With 60-char width, both columns should fit when dates are formatted
+	// (formatted date is ~12 chars vs raw ISO8601 at 20+ chars)
+	require.Len(t, selected, 2, "both columns should fit with formatted date widths")
+
+	// Verify the width is based on the formatted value, not the raw timestamp
+	for _, col := range selected {
+		if col.key == "created_at" {
+			assert.Less(t, col.width, 20,
+				"date column width should reflect formatted date, not raw ISO8601")
+		}
+	}
+}
+
+// =============================================================================
+// updated_at Omission in Generic Tables
+// =============================================================================
+
+func TestGenericTableOmitsUpdatedAt(t *testing.T) {
+	data := []any{
+		map[string]any{
+			"id":         float64(1),
+			"name":       "Test Item",
+			"created_at": "2024-01-15T10:00:00Z",
+			"updated_at": "2024-02-20T15:00:00Z",
+		},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Created",
+		"generic table should show Created column")
+	assert.NotContains(t, output, "Updated",
+		"generic table should not show Updated column")
+}
+
+// =============================================================================
+// HTML Stripping in formatCell
+// =============================================================================
+
+func TestFormatCellStripsHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains string
+		excludes string
+	}{
+		{
+			name:     "bold HTML",
+			input:    "<div><strong>Hello</strong> world</div>",
+			contains: "Hello",
+			excludes: "<strong>",
+		},
+		{
+			name:     "paragraph tags",
+			input:    "<p>First paragraph</p><p>Second paragraph</p>",
+			contains: "First paragraph",
+			excludes: "<p>",
+		},
+		{
+			name:     "link HTML",
+			input:    `<a href="https://example.com">Click here</a>`,
+			contains: "Click here",
+			excludes: "<a ",
+		},
+		{
+			name:     "plain text passthrough",
+			input:    "just plain text",
+			contains: "just plain text",
+			excludes: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatCell(tt.input)
+			assert.Contains(t, result, tt.contains)
+			if tt.excludes != "" {
+				assert.NotContains(t, result, tt.excludes,
+					"formatCell should not contain raw HTML tags")
+			}
+		})
+	}
+}
+
+func TestFormatTableCellDelegatesToFormatDateValue(t *testing.T) {
+	timestamp := "2024-01-15T10:00:00Z"
+	assert.Equal(t,
+		formatDateValue("created_at", timestamp),
+		formatTableCell("created_at", timestamp),
+		"formatTableCell should produce the same result as formatDateValue for date columns")
+	assert.Equal(t,
+		formatDateValue("name", "Test"),
+		formatTableCell("name", "Test"),
+		"formatTableCell should produce the same result as formatDateValue for non-date columns")
+}

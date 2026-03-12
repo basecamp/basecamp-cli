@@ -374,6 +374,7 @@ var skipColumns = map[string]bool{
 	"bucket":          true,
 	"creator":         true,
 	"parent":          true,
+	"updated_at":      true,
 	"dock":            true,
 	"inherits_status": true,
 	"url":             true,
@@ -426,7 +427,7 @@ func (r *Renderer) renderTable(b *strings.Builder, data []map[string]any) {
 	for _, item := range data {
 		row := make([]string, len(columns))
 		for i, col := range columns {
-			cell := formatCell(item[col.key])
+			cell := formatTableCell(col.key, item[col.key])
 			if r.styled && (col.key == "title" || col.key == "name") {
 				if url, ok := item["app_url"].(string); ok && url != "" {
 					cell = richtext.Hyperlink(cell, url)
@@ -497,7 +498,7 @@ func (r *Renderer) selectColumns(cols []column, data []map[string]any) []column 
 	for i := range cols {
 		cols[i].width = lipgloss.Width(cols[i].header)
 		for _, row := range data {
-			cellWidth := lipgloss.Width(formatCell(row[cols[i].key]))
+			cellWidth := lipgloss.Width(formatTableCell(cols[i].key, row[cols[i].key]))
 			if cellWidth > cols[i].width {
 				cols[i].width = cellWidth
 			}
@@ -667,6 +668,9 @@ func formatCell(val any) string {
 		return ""
 	case string:
 		v = ansi.Strip(v)
+		if richtext.IsHTML(v) {
+			v = richtext.HTMLToMarkdown(v)
+		}
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
@@ -737,6 +741,12 @@ func formatCell(val any) string {
 func isURL(s string) bool {
 	return (strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")) &&
 		!strings.ContainsRune(s, ' ')
+}
+
+// formatTableCell formats a value for table cell display. Date columns get
+// human-readable formatting via formatDateValue; everything else uses formatCell.
+func formatTableCell(key string, val any) string {
+	return formatDateValue(key, val)
 }
 
 // formatDateValue formats date fields in a human-readable way.
@@ -933,7 +943,7 @@ func (r *MarkdownRenderer) renderTable(b *strings.Builder, data []map[string]any
 	for _, item := range data {
 		var cells []string
 		for _, col := range cols {
-			cell := formatCell(item[col.key])
+			cell := formatTableCell(col.key, item[col.key])
 			// Escape pipe characters in cell content
 			cell = strings.ReplaceAll(cell, "|", "\\|")
 			cells = append(cells, cell)
