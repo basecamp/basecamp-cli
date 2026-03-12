@@ -1,0 +1,47 @@
+e2e/smoke/smoke_assign.bats
+  6e7c4b6ba7b509de 1-39
+e2e/smoke/smoke_communication_write.bats
+  672063deaab6df6a 1-66
+e2e/smoke/smoke_misc_write.bats
+  672063deaab6df6a 1-48
+e2e/smoke/smoke_lineup.bats
+  672063deaab6df6a 1-39
+e2e/smoke/smoke_webhooks.bats
+  6e7c4b6ba7b509de 1-61
+e2e/smoke/smoke_campfire.bats
+  672063deaab6df6a 19,25-26,40-41
+  6e7c4b6ba7b509de 1-18,20-24,27-39,42-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "cf38c4a3ddb21bb556e00854bea9cf32cbb0f184",
+  "prompts": {
+    "672063deaab6df6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a42d4d2-6e53-4f19-9dca-d514f327c8fc",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 207,
+      "overriden_lines": 0
+    },
+    "6e7c4b6ba7b509de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "daf46874-88e8-4758-b85d-e42680a4dd12",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 204,
+      "overriden_lines": 0
+    }
+  }
+}
