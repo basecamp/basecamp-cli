@@ -27,3 +27,19 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "todos show returns todo detail" {
+  ensure_todo || mark_unverifiable "No todo in project"
+  run_smoke basecamp todos show "$QA_TODO" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
+
+@test "todolists show returns todolist detail" {
+  ensure_todolist || mark_unverifiable "No todolist in project"
+  run_smoke basecamp todolists show "$QA_TODOLIST" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}

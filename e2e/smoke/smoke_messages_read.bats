@@ -21,3 +21,11 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "messages show returns message detail" {
+  ensure_message || mark_unverifiable "No message in project"
+  run_smoke basecamp messages show "$QA_MESSAGE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
