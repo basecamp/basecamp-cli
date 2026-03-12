@@ -6,19 +6,27 @@
 #
 # Requires: BASECAMP_TOKEN set in the environment.
 
-# Stash the token before loading test_helper, whose setup() unsets it.
-# setup_extra (called at the end of each setup()) restores it per-test.
+# Stash env vars before loading test_helper, whose setup() unsets them.
+# setup_extra (called at the end of each setup()) restores them per-test.
 _SMOKE_TOKEN="${BASECAMP_TOKEN:-}"
+_SMOKE_ACCOUNT_ID="${BASECAMP_ACCOUNT_ID:-}"
+_SMOKE_PROJECT_ID="${BASECAMP_PROJECT_ID:-}"
 
 # Load the base test helper for assertions
 SMOKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 load "$SMOKE_DIR/../test_helper"
 
-# Restore BASECAMP_TOKEN after test_helper's setup() clears it.
+# Restore BASECAMP_* after test_helper's setup() clears them.
 # This runs at the end of every per-test setup() via the setup_extra hook.
 setup_extra() {
   if [[ -n "$_SMOKE_TOKEN" ]]; then
     export BASECAMP_TOKEN="$_SMOKE_TOKEN"
+  fi
+  if [[ -n "$_SMOKE_ACCOUNT_ID" ]]; then
+    export BASECAMP_ACCOUNT_ID="$_SMOKE_ACCOUNT_ID"
+  fi
+  if [[ -n "$_SMOKE_PROJECT_ID" ]]; then
+    export BASECAMP_PROJECT_ID="$_SMOKE_PROJECT_ID"
   fi
 }
 
@@ -210,4 +218,194 @@ ensure_cardtable() {
     return 1
   fi
   export QA_CARDTABLE
+}
+
+ensure_campfire() {
+  [[ -n "${QA_CAMPFIRE:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot show project $QA_PROJECT"
+    return 1
+  }
+  QA_CAMPFIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "chat") | .id][0] // empty')
+  if [[ -z "$QA_CAMPFIRE" ]]; then
+    mark_unverifiable "No campfire in project $QA_PROJECT dock"
+    return 1
+  fi
+  export QA_CAMPFIRE
+}
+
+ensure_todo() {
+  [[ -n "${QA_TODO:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_todolist || return 1
+
+  local out
+  out=$(basecamp todos list -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list todos in project $QA_PROJECT"
+    return 1
+  }
+  QA_TODO=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_TODO" ]]; then
+    mark_unverifiable "No todos in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_TODO
+}
+
+ensure_message() {
+  [[ -n "${QA_MESSAGE:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp messages list -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list messages in project $QA_PROJECT"
+    return 1
+  }
+  QA_MESSAGE=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_MESSAGE" ]]; then
+    mark_unverifiable "No messages in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_MESSAGE
+}
+
+ensure_person() {
+  [[ -n "${QA_PERSON:-}" ]] && return 0
+
+  local out
+  out=$(basecamp people list --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list people"
+    return 1
+  }
+  QA_PERSON=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_PERSON" ]]; then
+    mark_unverifiable "No people found"
+    return 1
+  fi
+  export QA_PERSON
+}
+
+ensure_schedule() {
+  [[ -n "${QA_SCHEDULE:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp schedule info -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot show schedule in project $QA_PROJECT"
+    return 1
+  }
+  QA_SCHEDULE=$(echo "$out" | jq -r '.data.id // empty')
+  if [[ -z "$QA_SCHEDULE" ]]; then
+    mark_unverifiable "No schedule in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_SCHEDULE
+}
+
+ensure_questionnaire() {
+  [[ -n "${QA_QUESTIONNAIRE:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot show project $QA_PROJECT"
+    return 1
+  }
+  QA_QUESTIONNAIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "questionnaire") | .id][0] // empty')
+  if [[ -z "$QA_QUESTIONNAIRE" ]]; then
+    mark_unverifiable "No questionnaire in project $QA_PROJECT dock"
+    return 1
+  fi
+  export QA_QUESTIONNAIRE
+}
+
+ensure_inbox() {
+  [[ -n "${QA_INBOX:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot show project $QA_PROJECT"
+    return 1
+  }
+  QA_INBOX=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "inbox") | .id][0] // empty')
+  if [[ -z "$QA_INBOX" ]]; then
+    mark_unverifiable "No inbox in project $QA_PROJECT dock"
+    return 1
+  fi
+  export QA_INBOX
+}
+
+ensure_card() {
+  [[ -n "${QA_CARD:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_cardtable || return 1
+
+  local out
+  out=$(basecamp cards list --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list cards in project $QA_PROJECT"
+    return 1
+  }
+  QA_CARD=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_CARD" ]]; then
+    mark_unverifiable "No cards in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_CARD
+}
+
+ensure_column() {
+  [[ -n "${QA_COLUMN:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_cardtable || return 1
+
+  local out
+  out=$(basecamp cards columns --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list columns in project $QA_PROJECT"
+    return 1
+  }
+  QA_COLUMN=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_COLUMN" ]]; then
+    mark_unverifiable "No columns in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_COLUMN
+}
+
+ensure_comment() {
+  [[ -n "${QA_COMMENT:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_todo || return 1
+
+  local out
+  out=$(basecamp comments list "$QA_TODO" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list comments on todo $QA_TODO"
+    return 1
+  }
+  QA_COMMENT=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_COMMENT" ]]; then
+    mark_unverifiable "No comments on todo $QA_TODO"
+    return 1
+  fi
+  export QA_COMMENT
+}
+
+ensure_upload() {
+  [[ -n "${QA_UPLOAD:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp uploads list -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list uploads in project $QA_PROJECT"
+    return 1
+  }
+  QA_UPLOAD=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_UPLOAD" ]]; then
+    mark_unverifiable "No uploads in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_UPLOAD
 }
