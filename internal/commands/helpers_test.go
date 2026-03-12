@@ -288,3 +288,68 @@ func TestGetDockToolID_AbsentToolShowsNotFoundError(t *testing.T) {
 	assert.Equal(t, output.CodeNotFound, e.Code)
 	assert.Contains(t, e.Hint, "has no chat")
 }
+
+func TestGetDockTools_ReturnsMultipleEnabled(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": [
+			{"name": "chat", "id": 789, "enabled": true, "title": "General"},
+			{"name": "chat", "id": 790, "enabled": true, "title": "Random"}
+		]}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	enabled, all, err := getDockTools(context.Background(), app, "1", "chat")
+	require.NoError(t, err)
+	assert.Len(t, enabled, 2)
+	assert.Len(t, all, 2)
+	ids := []int64{enabled[0].ID, enabled[1].ID}
+	assert.Contains(t, ids, int64(789))
+	assert.Contains(t, ids, int64(790))
+}
+
+func TestGetDockTools_FiltersDisabledFromEnabled(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": [
+			{"name": "chat", "id": 789, "enabled": true, "title": "Active"},
+			{"name": "chat", "id": 790, "enabled": false, "title": "Disabled"}
+		]}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	enabled, all, err := getDockTools(context.Background(), app, "1", "chat")
+	require.NoError(t, err)
+	assert.Len(t, enabled, 1)
+	assert.Equal(t, int64(789), enabled[0].ID)
+	assert.Len(t, all, 2)
+}
+
+func TestGetDockTools_NoMatchingTools(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": [{"name": "todoset", "id": 100, "enabled": true}]}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	enabled, all, err := getDockTools(context.Background(), app, "1", "chat")
+	require.NoError(t, err)
+	assert.Empty(t, enabled)
+	assert.Empty(t, all)
+}
+
+func TestGetDockToolID_AmbiguousMultipleReturnsError(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": [
+			{"name": "chat", "id": 789, "enabled": true, "title": "General"},
+			{"name": "chat", "id": 790, "enabled": true, "title": "Random"}
+		]}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "campfire")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "789")
+	assert.Contains(t, e.Hint, "790")
+}

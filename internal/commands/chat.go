@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,7 +31,7 @@ func NewChatCmd() *cobra.Command {
 Use 'basecamp chat list' to see chats in a project.
 Use 'basecamp chat messages' to view recent messages.
 Use 'basecamp chat post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats; use `chat list` to see them\nContent supports Markdown — converted to HTML automatically\nChat is project-scoped, no cross-project chat queries"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent supports Markdown — converted to HTML automatically\nChat is project-scoped, no cross-project chat queries"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -87,12 +86,12 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "messages",
-					Cmd:         "basecamp chat <id> messages --in <project>",
+					Cmd:         "basecamp chat messages --chat <id> --in <project>",
 					Description: "View messages",
 				},
 				output.Breadcrumb{
 					Action:      "post",
-					Cmd:         "basecamp chat <id> post \"message\" --in <project>",
+					Cmd:         "basecamp chat post \"message\" --chat <id> --in <project>",
 					Description: "Post message",
 				},
 			),
@@ -119,7 +118,7 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 		return err
 	}
 
-	// If a specific chat ID was given via -c, fetch just that one
+	// If a specific chat ID was given via --chat, fetch just that one
 	if chatID != "" {
 		chatIDInt, parseErr := strconv.ParseInt(chatID, 10, 64)
 		if parseErr != nil {
@@ -137,62 +136,42 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 		)
 	}
 
-	// Fetch project dock and find all chat entries (supports multi-chat projects)
-	path := fmt.Sprintf("/projects/%s.json", resolvedProjectID)
-	resp, err := app.Account().Get(cmd.Context(), path)
+	// Get all enabled chats from project dock
+	enabled, allTools, err := getDockTools(cmd.Context(), app, resolvedProjectID, "chat")
 	if err != nil {
-		return convertSDKError(err)
+		return err
+	}
+	if len(enabled) == 0 {
+		return dockToolNotFoundError(allTools, "chat", resolvedProjectID, "chat")
 	}
 
-	var projectData struct {
-		Dock []DockTool `json:"dock"`
-	}
-	if err := json.Unmarshal(resp.Data, &projectData); err != nil {
-		return fmt.Errorf("failed to parse project: %w", err)
-	}
-
-	// Collect enabled chat dock entries and fetch full chat details
+	// Fetch full details for each enabled chat
 	var chats []*basecamp.Campfire
-	var hasDisabled bool
-	for _, tool := range projectData.Dock {
-		if tool.Name != "chat" {
-			continue
-		}
-		if !tool.Enabled {
-			hasDisabled = true
-			continue
-		}
-		chat, getErr := app.Account().Campfires().Get(cmd.Context(), tool.ID)
+	for _, match := range enabled {
+		chat, getErr := app.Account().Campfires().Get(cmd.Context(), match.ID)
 		if getErr != nil {
 			return getErr
 		}
 		chats = append(chats, chat)
 	}
 
-	if len(chats) == 0 {
-		hint := "Project has no chat"
-		if hasDisabled {
-			hint = "Chat is disabled for this project"
-		}
-		return output.ErrNotFoundHint("chat", resolvedProjectID, hint)
+	// Summary: title-based for single, count-based for multiple
+	var summary string
+	if len(chats) == 1 {
+		summary = fmt.Sprintf("Chat: %s", chatTitle(chats[0]))
+	} else {
+		summary = fmt.Sprintf("%d chats in project", len(chats))
 	}
 
-	summary := fmt.Sprintf("%d chat(s)", len(chats))
+	// Breadcrumbs: concrete ID for single, placeholder for multiple
+	chatRef := "<id>"
+	if len(chats) == 1 {
+		chatRef = strconv.FormatInt(chats[0].ID, 10)
+	}
 
 	return app.OK(chats,
 		output.WithSummary(summary),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages -c <id> --in %s", resolvedProjectID),
-				Description: "View messages",
-			},
-			output.Breadcrumb{
-				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"message\" -c <id> --in %s", resolvedProjectID),
-				Description: "Post message",
-			},
-		),
+		output.WithBreadcrumbs(chatListBreadcrumbs(chatRef, resolvedProjectID)...),
 	)
 }
 
@@ -207,12 +186,12 @@ func chatListBreadcrumbs(chatID, projectID string) []output.Breadcrumb {
 	return []output.Breadcrumb{
 		{
 			Action:      "messages",
-			Cmd:         fmt.Sprintf("basecamp chat messages -c %s --in %s", chatID, projectID),
+			Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, projectID),
 			Description: "View messages",
 		},
 		{
 			Action:      "post",
-			Cmd:         fmt.Sprintf("basecamp chat post \"message\" -c %s --in %s", chatID, projectID),
+			Cmd:         fmt.Sprintf("basecamp chat post \"message\" --chat %s --in %s", chatID, projectID),
 			Description: "Post message",
 		},
 	}
@@ -293,12 +272,12 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat %s post \"message\" --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"message\" --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "Post message",
 			},
 			output.Breadcrumb{
 				Action:      "more",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages --limit 50 --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --limit 50 --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "Load more",
 			},
 		),
@@ -397,12 +376,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat %s post \"reply\" --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "Post another",
 			},
 		)
@@ -410,12 +389,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s", chatID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat %s post \"reply\"", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --chat %s", chatID),
 				Description: "Post another",
 			},
 		)
@@ -516,7 +495,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "View messages",
 			},
 		)
@@ -524,7 +503,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s", chatID),
 				Description: "View messages",
 			},
 		)
@@ -620,7 +599,7 @@ You can pass either a line ID or a Basecamp line URL:
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", effectiveChatID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
@@ -718,7 +697,7 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", effectiveChatID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
