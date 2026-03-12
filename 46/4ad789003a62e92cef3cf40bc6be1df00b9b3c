@@ -1,0 +1,23 @@
+internal/commands/surface_test.go
+  0bc6298a5a9f840e 46-49,52,54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "464ad789003a62e92cef3cf40bc6be1df00b9b3c",
+  "prompts": {
+    "0bc6298a5a9f840e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76a85fb2-a600-477c-a17f-73ed0410e576",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 3,
+      "accepted_lines": 24,
+      "overriden_lines": 0
+    }
+  }
+}
