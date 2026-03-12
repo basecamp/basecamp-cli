@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -1512,8 +1513,14 @@ func writeDownloadToFile(result *basecamp.DownloadResult, outDir, fallbackName s
 	outputPath = filepath.Join(dir, filename)
 
 	// Verify the resolved path is within dir to prevent traversal attacks
-	absDir, _ := filepath.Abs(dir)
-	absPath, _ := filepath.Abs(outputPath)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to resolve output directory: %w", err)
+	}
+	absPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to resolve output path: %w", err)
+	}
 	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
 		return "", "", 0, output.ErrUsage("Invalid filename: path traversal detected")
 	}
@@ -1537,7 +1544,8 @@ func isStorageURL(arg string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.HasSuffix(u.Hostname(), ".basecamp.com") &&
+	return u.Scheme == "https" &&
+		strings.HasSuffix(u.Hostname(), ".basecamp.com") &&
 		strings.HasPrefix(u.Hostname(), "storage.") &&
 		strings.Contains(u.Path, "/blobs/") &&
 		strings.Contains(u.Path, "/download/")
@@ -1596,6 +1604,7 @@ func downloadStorageURL(ctx context.Context, app *appctx.App, rawURL string) (*b
 	// Use a client that does NOT follow redirects automatically, so we can
 	// strip the Authorization header before following the redirect to S3.
 	client := &http.Client{
+		Timeout: 5 * time.Minute,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -1613,18 +1622,25 @@ func downloadStorageURL(ctx context.Context, app *appctx.App, rawURL string) (*b
 		return nil, fmt.Errorf("storage download failed: %w", err)
 	}
 
-	// Follow redirect to signed S3 URL (without auth header)
-	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
+	// Follow any redirect to signed S3 URL (without auth header)
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		resp.Body.Close()
 		location := resp.Header.Get("Location")
 		if location == "" {
 			return nil, fmt.Errorf("storage download: redirect with no Location header")
 		}
-		req2, err := http.NewRequestWithContext(ctx, http.MethodGet, location, nil)
+		locURL, err := url.Parse(location)
 		if err != nil {
 			return nil, fmt.Errorf("invalid redirect URL: %w", err)
 		}
-		resp, err = http.DefaultClient.Do(req2)
+		if !locURL.IsAbs() {
+			locURL = req.URL.ResolveReference(locURL)
+		}
+		req2, err := http.NewRequestWithContext(ctx, http.MethodGet, locURL.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("invalid redirect URL: %w", err)
+		}
+		resp, err = (&http.Client{Timeout: 5 * time.Minute}).Do(req2)
 		if err != nil {
 			return nil, fmt.Errorf("storage download failed: %w", err)
 		}
