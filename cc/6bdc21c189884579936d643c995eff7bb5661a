@@ -1,0 +1,31 @@
+internal/commands/helpers_test.go
+  0bc6298a5a9f840e 301,307
+internal/commands/chat.go
+  0bc6298a5a9f840e 715
+internal/cli/help_test.go
+  0bc6298a5a9f840e 243
+internal/commands/surface_test.go
+  0bc6298a5a9f840e 46-49,52,54
+skills/basecamp/SKILL.md
+  0bc6298a5a9f840e 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "cc6bdc21c189884579936d643c995eff7bb5661a",
+  "prompts": {
+    "0bc6298a5a9f840e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76a85fb2-a600-477c-a17f-73ed0410e576",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 8,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    }
+  }
+}
