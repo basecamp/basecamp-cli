@@ -1,0 +1,27 @@
+internal/commands/campfire.go
+  0bc6298a5a9f840e 34,39,134,172,174,176,179,202
+internal/commands/surface_test.go
+  0bc6298a5a9f840e 46-49,54
+internal/commands/campfire_test.go
+  0bc6298a5a9f840e 344-346,364-366,409,413,431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "7256ceb5174c20bce45554e1e4584ab8a449a7be",
+  "prompts": {
+    "0bc6298a5a9f840e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76a85fb2-a600-477c-a17f-73ed0410e576",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 22,
+      "total_deletions": 12,
+      "accepted_lines": 22,
+      "overriden_lines": 0
+    }
+  }
+}
