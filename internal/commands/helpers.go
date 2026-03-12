@@ -85,6 +85,51 @@ type DockTool struct {
 	Enabled bool   `json:"enabled"`
 }
 
+// getDockTools fetches a project's dock and partitions tools matching dockName
+// into enabled and all (including disabled) slices. Error is only returned on
+// network or parse failure — an empty enabled slice is not an error.
+func getDockTools(ctx context.Context, app *appctx.App, projectID, dockName string) (enabled []DockTool, all []DockTool, err error) {
+	// Account must already be resolved by calling command
+	if app.Config.AccountID == "" {
+		return nil, nil, output.ErrUsage("Account must be resolved before accessing dock tools")
+	}
+
+	path := fmt.Sprintf("/projects/%s.json", projectID)
+	resp, err := app.Account().Get(ctx, path)
+	if err != nil {
+		return nil, nil, convertSDKError(err)
+	}
+
+	var project struct {
+		Dock []DockTool `json:"dock"`
+	}
+	if err := json.Unmarshal(resp.Data, &project); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse project: %w", err)
+	}
+
+	for _, tool := range project.Dock {
+		if tool.Name == dockName {
+			all = append(all, tool)
+			if tool.Enabled {
+				enabled = append(enabled, tool)
+			}
+		}
+	}
+	return enabled, all, nil
+}
+
+// dockToolNotFoundError builds a structured not-found error for a dock tool,
+// distinguishing "disabled" from "absent".
+func dockToolNotFoundError(all []DockTool, dockName, projectID, friendlyName string) error {
+	for _, tool := range all {
+		if tool.Name == dockName && !tool.Enabled {
+			return output.ErrNotFoundHint(friendlyName, projectID,
+				fmt.Sprintf("%s is disabled for this project", strings.ToUpper(friendlyName[:1])+friendlyName[1:]))
+		}
+	}
+	return output.ErrNotFoundHint(friendlyName, projectID, fmt.Sprintf("Project has no %s", friendlyName))
+}
+
 // getDockToolID retrieves a dock tool ID from a project, handling the multi-dock case.
 //
 // When multiple tools of the same type exist in the project:
@@ -99,52 +144,22 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 		return explicitID, nil
 	}
 
-	// Account must already be resolved by calling command
-	if app.Config.AccountID == "" {
-		return "", output.ErrUsage("Account must be resolved before accessing dock tools")
-	}
-
-	// Fetch project to get dock
-	path := fmt.Sprintf("/projects/%s.json", projectID)
-	resp, err := app.Account().Get(ctx, path)
+	enabled, all, err := getDockTools(ctx, app, projectID, dockName)
 	if err != nil {
-		return "", convertSDKError(err)
+		return "", err
 	}
 
-	var project struct {
-		Dock []DockTool `json:"dock"`
-	}
-	if err := json.Unmarshal(resp.Data, &project); err != nil {
-		return "", fmt.Errorf("failed to parse project: %w", err)
-	}
-
-	// Find all matching enabled tools
-	var matches []DockTool
-	for _, tool := range project.Dock {
-		if tool.Name == dockName && tool.Enabled {
-			matches = append(matches, tool)
-		}
-	}
-
-	// Handle cases
-	switch len(matches) {
+	switch len(enabled) {
 	case 0:
-		// Check if tool exists but is disabled
-		for _, tool := range project.Dock {
-			if tool.Name == dockName && !tool.Enabled {
-				return "", output.ErrNotFoundHint(friendlyName, projectID,
-					fmt.Sprintf("%s is disabled for this project", strings.ToUpper(friendlyName[:1])+friendlyName[1:]))
-			}
-		}
-		return "", output.ErrNotFoundHint(friendlyName, projectID, fmt.Sprintf("Project has no %s", friendlyName))
+		return "", dockToolNotFoundError(all, dockName, projectID, friendlyName)
 
 	case 1:
-		return fmt.Sprintf("%d", matches[0].ID), nil
+		return fmt.Sprintf("%d", enabled[0].ID), nil
 
 	default:
 		// Multiple tools found - require explicit selection
 		var toolList []string
-		for _, tool := range matches {
+		for _, tool := range enabled {
 			title := tool.Title
 			if title == "" {
 				title = friendlyName
@@ -154,7 +169,7 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 		hint := fmt.Sprintf("Specify the ID directly. Available:\n  - %s", strings.Join(toolList, "\n  - "))
 		return "", &output.Error{
 			Code:    output.CodeAmbiguous,
-			Message: fmt.Sprintf("Project has %d %ss", len(matches), friendlyName),
+			Message: fmt.Sprintf("Project has %d %ss", len(enabled), friendlyName),
 			Hint:    hint,
 		}
 	}
