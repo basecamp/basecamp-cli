@@ -1,0 +1,5 @@
+# QA Allowlist — unverifiable tests that do not block release.
+# Each line: test name followed by # reason and owner.
+# Entries expire each release cycle — review and close gaps.
+#
+# Format: <test name> # <reason> — <owner>

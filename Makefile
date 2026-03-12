@@ -97,6 +97,38 @@ record-cassettes: build
 	bats e2e/qa_happypath.bats
 	@echo "Cassettes recorded to e2e/cassettes/happypath/"
 
+# Run pre-release smoke suite against a live test account (requires BASECAMP_TOKEN)
+.PHONY: smoke
+smoke: build
+	./e2e/smoke/run_smoke.sh
+
+# Show coverage gaps from smoke traces (unverifiable + out-of-scope).
+# Pass/fail comes from bats exit codes via make smoke, not traces.
+.PHONY: qa-report
+qa-report:
+	@QA_TRACE_DIR=$${QA_TRACE_DIR:-tmp/qa-traces}; \
+	if [ ! -f "$$QA_TRACE_DIR/traces.jsonl" ]; then \
+		echo "No traces found. Run 'make smoke' first."; \
+		exit 1; \
+	fi; \
+	echo "=== QA Coverage Gaps ==="; \
+	echo ""; \
+	unverified=$$(jq -r 'select(.status == "unverifiable") | .test' "$$QA_TRACE_DIR/traces.jsonl" | wc -l | tr -d ' '); \
+	outofscope=$$(jq -r 'select(.status == "out-of-scope") | .test' "$$QA_TRACE_DIR/traces.jsonl" | wc -l | tr -d ' '); \
+	echo "  Unverifiable:  $$unverified"; \
+	echo "  Out-of-scope:  $$outofscope"; \
+	echo ""; \
+	if [ "$$unverified" -gt 0 ]; then \
+		echo "UNVERIFIABLE:"; \
+		jq -r 'select(.status == "unverifiable") | "  - \(.test): \(.reason)"' "$$QA_TRACE_DIR/traces.jsonl"; \
+		echo ""; \
+	fi; \
+	if [ "$$outofscope" -gt 0 ]; then \
+		echo "OUT-OF-SCOPE:"; \
+		jq -r 'select(.status == "out-of-scope") | "  - \(.test): \(.reason)"' "$$QA_TRACE_DIR/traces.jsonl"; \
+		echo ""; \
+	fi
+
 # Run tests with race detector
 .PHONY: race-test
 race-test: check-toolchain
@@ -457,6 +489,8 @@ help:
 	@echo "  test-coverage    Run tests with coverage report"
 	@echo "  coverage         Run tests with coverage and open in browser"
 	@echo "  record-cassettes Record happy-path cassettes (TOKEN+TARGET+ACCOUNT+PROJECT)"
+	@echo "  smoke            Run pre-release smoke suite (BASECAMP_TOKEN=...)"
+	@echo "  qa-report        Show QA coverage report from smoke traces"
 	@echo ""
 	@echo "Performance:"
 	@echo "  bench          Run all benchmarks"
