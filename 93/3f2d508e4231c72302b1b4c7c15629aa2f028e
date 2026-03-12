@@ -1,0 +1,29 @@
+internal/commands/campfire_test.go
+  0bc6298a5a9f840e 344-346,364-366,409,413,431
+internal/commands/campfire.go
+  0bc6298a5a9f840e 34,39,134,172,174,176,179,202
+internal/commands/helpers.go
+  0bc6298a5a9f840e 92
+internal/commands/surface_test.go
+  0bc6298a5a9f840e 46-49,52,54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "933f2d508e4231c72302b1b4c7c15629aa2f028e",
+  "prompts": {
+    "0bc6298a5a9f840e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76a85fb2-a600-477c-a17f-73ed0410e576",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 3,
+      "accepted_lines": 24,
+      "overriden_lines": 0
+    }
+  }
+}
