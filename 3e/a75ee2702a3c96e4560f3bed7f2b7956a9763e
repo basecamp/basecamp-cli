@@ -1,0 +1,61 @@
+e2e/smoke/smoke_core.bats
+  672063deaab6df6a 16-21,41-42
+  6e7c4b6ba7b509de 52-79
+e2e/smoke/smoke_misc_read.bats
+  6e7c4b6ba7b509de 36-43
+  672063deaab6df6a 2,17,19-20,44-49
+e2e/smoke/smoke_messages_read.bats
+  6e7c4b6ba7b509de 24-25,27-31
+  672063deaab6df6a 26
+e2e/smoke/smoke_files_read.bats
+  6e7c4b6ba7b509de 36-37,39-43
+  672063deaab6df6a 38,44-56
+e2e/smoke/smoke_todos_read.bats
+  6e7c4b6ba7b509de 30-31,33-39,41-45
+  672063deaab6df6a 32,40
+e2e/smoke/smoke_account.bats
+  672063deaab6df6a 33,36,43-54
+  6e7c4b6ba7b509de 23-32,34-35,37-42
+e2e/smoke/smoke_cards_read.bats
+  672063deaab6df6a 13,19,27,30
+  6e7c4b6ba7b509de 17-18,20-26,28-29,31-36
+e2e/smoke/smoke_projects.bats
+  672063deaab6df6a 2,36,49,52,55-57
+  6e7c4b6ba7b509de 46-48,50-51,53-54
+e2e/smoke/smoke_lifecycle.bats
+  672063deaab6df6a 19-26,29-32
+  6e7c4b6ba7b509de 2-3,18,27-28,33-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "3ea75ee2702a3c96e4560f3bed7f2b7956a9763e",
+  "prompts": {
+    "672063deaab6df6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a42d4d2-6e53-4f19-9dca-d514f327c8fc",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 661,
+      "overriden_lines": 0
+    },
+    "6e7c4b6ba7b509de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "daf46874-88e8-4758-b85d-e42680a4dd12",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 623,
+      "overriden_lines": 0
+    }
+  }
+}
