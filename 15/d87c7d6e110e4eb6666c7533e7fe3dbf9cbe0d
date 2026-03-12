@@ -1,0 +1,41 @@
+e2e/auth.bats
+  bd129d3702e025a2 61,66,69,74-81
+internal/commands/profile.go
+  bd129d3702e025a2 190,247-250,345,347
+internal/commands/tui_test.go
+  bd129d3702e025a2 6-7,15-16,69-119
+internal/auth/auth_test.go
+  bd129d3702e025a2 931-1006
+internal/auth/auth.go
+  bd129d3702e025a2 436-449,455
+internal/commands/auth.go
+  bd129d3702e025a2 232,244-245,299,301
+skills/basecamp/SKILL.md
+  bd129d3702e025a2 613
+internal/commands/tui.go
+  bd129d3702e025a2 17,38-41
+internal/commands/commands.go
+  bd129d3702e025a2 137
+internal/commands/profile_test.go
+  bd129d3702e025a2 211,218-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "15d87c7d6e110e4eb6666c7533e7fe3dbf9cbe0d",
+  "prompts": {
+    "bd129d3702e025a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48ce1700-43a0-403f-91c1-427882339bdf",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 1,
+      "accepted_lines": 191,
+      "overriden_lines": 0
+    }
+  }
+}
