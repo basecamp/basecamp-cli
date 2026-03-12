@@ -94,6 +94,16 @@ var reMentionAnchor = regexp.MustCompile(`<a href="(mention|person):([^"]+)">([^
 // Group 3: the SGID value (base64-safe characters).
 var reSGIDMention = regexp.MustCompile(`(^|[\s>(\["'])(@sgid:([\w+=/-]+))`)
 
+// Pre-compiled regexes for ExtractAttachments (inline file attachments in rich text)
+var (
+	reFileAttachment = regexp.MustCompile(`(?i)<bc-attachment\b[^>]*>`)
+	reAttrHref       = regexp.MustCompile(`(?i)\bhref="([^"]*)"`)
+	reAttrFilename   = regexp.MustCompile(`(?i)\bfilename="([^"]*)"`)
+	reAttrFilesize   = regexp.MustCompile(`(?i)\bfilesize="([^"]*)"`)
+	reAttrCT         = regexp.MustCompile(`(?i)\bcontent-type="([^"]*)"`)
+	reAttrSGID       = regexp.MustCompile(`(?i)\bsgid="([^"]*)"`)
+)
+
 // Pre-compiled regexes for IsHTML detection
 var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
 
@@ -918,6 +928,57 @@ func isInsideBcAttachment(s string, pos int) bool {
 		return false
 	}
 	return true
+}
+
+// InlineAttachment holds metadata for a file attachment found in rich text content.
+// These appear as <bc-attachment> elements with href pointing to storage URLs.
+type InlineAttachment struct {
+	Href        string
+	Filename    string
+	Filesize    string
+	ContentType string
+	SGID        string
+}
+
+// ExtractAttachments parses <bc-attachment> elements from HTML and returns
+// file attachments. Mentions (content-type="application/vnd.basecamp.mention")
+// are excluded.
+func ExtractAttachments(html string) []InlineAttachment {
+	if html == "" {
+		return nil
+	}
+
+	tags := reFileAttachment.FindAllString(html, -1)
+	var result []InlineAttachment
+	for _, tag := range tags {
+		// Skip mentions
+		ctMatch := reAttrCT.FindStringSubmatch(tag)
+		if len(ctMatch) >= 2 && ctMatch[1] == "application/vnd.basecamp.mention" {
+			continue
+		}
+
+		// Must have an href to be a downloadable attachment
+		hrefMatch := reAttrHref.FindStringSubmatch(tag)
+		if len(hrefMatch) < 2 || hrefMatch[1] == "" {
+			continue
+		}
+
+		a := InlineAttachment{Href: hrefMatch[1]}
+		if len(ctMatch) >= 2 {
+			a.ContentType = ctMatch[1]
+		}
+		if m := reAttrFilename.FindStringSubmatch(tag); len(m) >= 2 {
+			a.Filename = m[1]
+		}
+		if m := reAttrFilesize.FindStringSubmatch(tag); len(m) >= 2 {
+			a.Filesize = m[1]
+		}
+		if m := reAttrSGID.FindStringSubmatch(tag); len(m) >= 2 {
+			a.SGID = m[1]
+		}
+		result = append(result, a)
+	}
+	return result
 }
 
 // IsHTML attempts to detect if the input string contains HTML.
