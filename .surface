@@ -26,13 +26,6 @@ CMD basecamp boost create
 CMD basecamp boost delete
 CMD basecamp boost list
 CMD basecamp boost show
-CMD basecamp campfire
-CMD basecamp campfire delete
-CMD basecamp campfire line
-CMD basecamp campfire list
-CMD basecamp campfire messages
-CMD basecamp campfire post
-CMD basecamp campfire upload
 CMD basecamp card
 CMD basecamp card move
 CMD basecamp card update
@@ -64,6 +57,13 @@ CMD basecamp cards step update
 CMD basecamp cards steps
 CMD basecamp cards trash
 CMD basecamp cards update
+CMD basecamp chat
+CMD basecamp chat delete
+CMD basecamp chat line
+CMD basecamp chat list
+CMD basecamp chat messages
+CMD basecamp chat post
+CMD basecamp chat upload
 CMD basecamp checkins
 CMD basecamp checkins answer
 CMD basecamp checkins answer create
@@ -831,150 +831,6 @@ FLAG basecamp boost show --stats type=bool
 FLAG basecamp boost show --styled type=bool
 FLAG basecamp boost show --todolist type=string
 FLAG basecamp boost show --verbose type=count
-FLAG basecamp campfire --account type=string
-FLAG basecamp campfire --agent type=bool
-FLAG basecamp campfire --cache-dir type=string
-FLAG basecamp campfire --campfire type=string
-FLAG basecamp campfire --count type=bool
-FLAG basecamp campfire --hints type=bool
-FLAG basecamp campfire --ids-only type=bool
-FLAG basecamp campfire --in type=string
-FLAG basecamp campfire --json type=bool
-FLAG basecamp campfire --markdown type=bool
-FLAG basecamp campfire --md type=bool
-FLAG basecamp campfire --no-hints type=bool
-FLAG basecamp campfire --no-stats type=bool
-FLAG basecamp campfire --profile type=string
-FLAG basecamp campfire --project type=string
-FLAG basecamp campfire --quiet type=bool
-FLAG basecamp campfire --stats type=bool
-FLAG basecamp campfire --styled type=bool
-FLAG basecamp campfire --todolist type=string
-FLAG basecamp campfire --verbose type=count
-FLAG basecamp campfire delete --account type=string
-FLAG basecamp campfire delete --agent type=bool
-FLAG basecamp campfire delete --cache-dir type=string
-FLAG basecamp campfire delete --campfire type=string
-FLAG basecamp campfire delete --count type=bool
-FLAG basecamp campfire delete --hints type=bool
-FLAG basecamp campfire delete --ids-only type=bool
-FLAG basecamp campfire delete --in type=string
-FLAG basecamp campfire delete --json type=bool
-FLAG basecamp campfire delete --markdown type=bool
-FLAG basecamp campfire delete --md type=bool
-FLAG basecamp campfire delete --no-hints type=bool
-FLAG basecamp campfire delete --no-stats type=bool
-FLAG basecamp campfire delete --profile type=string
-FLAG basecamp campfire delete --project type=string
-FLAG basecamp campfire delete --quiet type=bool
-FLAG basecamp campfire delete --stats type=bool
-FLAG basecamp campfire delete --styled type=bool
-FLAG basecamp campfire delete --todolist type=string
-FLAG basecamp campfire delete --verbose type=count
-FLAG basecamp campfire line --account type=string
-FLAG basecamp campfire line --agent type=bool
-FLAG basecamp campfire line --cache-dir type=string
-FLAG basecamp campfire line --campfire type=string
-FLAG basecamp campfire line --count type=bool
-FLAG basecamp campfire line --hints type=bool
-FLAG basecamp campfire line --ids-only type=bool
-FLAG basecamp campfire line --in type=string
-FLAG basecamp campfire line --json type=bool
-FLAG basecamp campfire line --markdown type=bool
-FLAG basecamp campfire line --md type=bool
-FLAG basecamp campfire line --no-hints type=bool
-FLAG basecamp campfire line --no-stats type=bool
-FLAG basecamp campfire line --profile type=string
-FLAG basecamp campfire line --project type=string
-FLAG basecamp campfire line --quiet type=bool
-FLAG basecamp campfire line --stats type=bool
-FLAG basecamp campfire line --styled type=bool
-FLAG basecamp campfire line --todolist type=string
-FLAG basecamp campfire line --verbose type=count
-FLAG basecamp campfire list --account type=string
-FLAG basecamp campfire list --agent type=bool
-FLAG basecamp campfire list --all type=bool
-FLAG basecamp campfire list --cache-dir type=string
-FLAG basecamp campfire list --campfire type=string
-FLAG basecamp campfire list --count type=bool
-FLAG basecamp campfire list --hints type=bool
-FLAG basecamp campfire list --ids-only type=bool
-FLAG basecamp campfire list --in type=string
-FLAG basecamp campfire list --json type=bool
-FLAG basecamp campfire list --markdown type=bool
-FLAG basecamp campfire list --md type=bool
-FLAG basecamp campfire list --no-hints type=bool
-FLAG basecamp campfire list --no-stats type=bool
-FLAG basecamp campfire list --profile type=string
-FLAG basecamp campfire list --project type=string
-FLAG basecamp campfire list --quiet type=bool
-FLAG basecamp campfire list --stats type=bool
-FLAG basecamp campfire list --styled type=bool
-FLAG basecamp campfire list --todolist type=string
-FLAG basecamp campfire list --verbose type=count
-FLAG basecamp campfire messages --account type=string
-FLAG basecamp campfire messages --agent type=bool
-FLAG basecamp campfire messages --cache-dir type=string
-FLAG basecamp campfire messages --campfire type=string
-FLAG basecamp campfire messages --count type=bool
-FLAG basecamp campfire messages --hints type=bool
-FLAG basecamp campfire messages --ids-only type=bool
-FLAG basecamp campfire messages --in type=string
-FLAG basecamp campfire messages --json type=bool
-FLAG basecamp campfire messages --limit type=int
-FLAG basecamp campfire messages --markdown type=bool
-FLAG basecamp campfire messages --md type=bool
-FLAG basecamp campfire messages --no-hints type=bool
-FLAG basecamp campfire messages --no-stats type=bool
-FLAG basecamp campfire messages --profile type=string
-FLAG basecamp campfire messages --project type=string
-FLAG basecamp campfire messages --quiet type=bool
-FLAG basecamp campfire messages --stats type=bool
-FLAG basecamp campfire messages --styled type=bool
-FLAG basecamp campfire messages --todolist type=string
-FLAG basecamp campfire messages --verbose type=count
-FLAG basecamp campfire post --account type=string
-FLAG basecamp campfire post --agent type=bool
-FLAG basecamp campfire post --cache-dir type=string
-FLAG basecamp campfire post --campfire type=string
-FLAG basecamp campfire post --content type=string
-FLAG basecamp campfire post --content-type type=string
-FLAG basecamp campfire post --count type=bool
-FLAG basecamp campfire post --hints type=bool
-FLAG basecamp campfire post --ids-only type=bool
-FLAG basecamp campfire post --in type=string
-FLAG basecamp campfire post --json type=bool
-FLAG basecamp campfire post --markdown type=bool
-FLAG basecamp campfire post --md type=bool
-FLAG basecamp campfire post --no-hints type=bool
-FLAG basecamp campfire post --no-stats type=bool
-FLAG basecamp campfire post --profile type=string
-FLAG basecamp campfire post --project type=string
-FLAG basecamp campfire post --quiet type=bool
-FLAG basecamp campfire post --stats type=bool
-FLAG basecamp campfire post --styled type=bool
-FLAG basecamp campfire post --todolist type=string
-FLAG basecamp campfire post --verbose type=count
-FLAG basecamp campfire upload --account type=string
-FLAG basecamp campfire upload --agent type=bool
-FLAG basecamp campfire upload --cache-dir type=string
-FLAG basecamp campfire upload --campfire type=string
-FLAG basecamp campfire upload --count type=bool
-FLAG basecamp campfire upload --hints type=bool
-FLAG basecamp campfire upload --ids-only type=bool
-FLAG basecamp campfire upload --in type=string
-FLAG basecamp campfire upload --json type=bool
-FLAG basecamp campfire upload --markdown type=bool
-FLAG basecamp campfire upload --md type=bool
-FLAG basecamp campfire upload --no-hints type=bool
-FLAG basecamp campfire upload --no-stats type=bool
-FLAG basecamp campfire upload --profile type=string
-FLAG basecamp campfire upload --project type=string
-FLAG basecamp campfire upload --quiet type=bool
-FLAG basecamp campfire upload --stats type=bool
-FLAG basecamp campfire upload --styled type=bool
-FLAG basecamp campfire upload --todolist type=string
-FLAG basecamp campfire upload --verbose type=count
 FLAG basecamp card --account type=string
 FLAG basecamp card --agent type=bool
 FLAG basecamp card --cache-dir type=string
@@ -1626,6 +1482,151 @@ FLAG basecamp cards update --styled type=bool
 FLAG basecamp cards update --title type=string
 FLAG basecamp cards update --todolist type=string
 FLAG basecamp cards update --verbose type=count
+FLAG basecamp chat --account type=string
+FLAG basecamp chat --agent type=bool
+FLAG basecamp chat --cache-dir type=string
+FLAG basecamp chat --chat type=string
+FLAG basecamp chat --count type=bool
+FLAG basecamp chat --hints type=bool
+FLAG basecamp chat --ids-only type=bool
+FLAG basecamp chat --in type=string
+FLAG basecamp chat --json type=bool
+FLAG basecamp chat --markdown type=bool
+FLAG basecamp chat --md type=bool
+FLAG basecamp chat --no-hints type=bool
+FLAG basecamp chat --no-stats type=bool
+FLAG basecamp chat --profile type=string
+FLAG basecamp chat --project type=string
+FLAG basecamp chat --quiet type=bool
+FLAG basecamp chat --stats type=bool
+FLAG basecamp chat --styled type=bool
+FLAG basecamp chat --todolist type=string
+FLAG basecamp chat --verbose type=count
+FLAG basecamp chat delete --account type=string
+FLAG basecamp chat delete --agent type=bool
+FLAG basecamp chat delete --cache-dir type=string
+FLAG basecamp chat delete --chat type=string
+FLAG basecamp chat delete --count type=bool
+FLAG basecamp chat delete --force type=bool
+FLAG basecamp chat delete --hints type=bool
+FLAG basecamp chat delete --ids-only type=bool
+FLAG basecamp chat delete --in type=string
+FLAG basecamp chat delete --json type=bool
+FLAG basecamp chat delete --markdown type=bool
+FLAG basecamp chat delete --md type=bool
+FLAG basecamp chat delete --no-hints type=bool
+FLAG basecamp chat delete --no-stats type=bool
+FLAG basecamp chat delete --profile type=string
+FLAG basecamp chat delete --project type=string
+FLAG basecamp chat delete --quiet type=bool
+FLAG basecamp chat delete --stats type=bool
+FLAG basecamp chat delete --styled type=bool
+FLAG basecamp chat delete --todolist type=string
+FLAG basecamp chat delete --verbose type=count
+FLAG basecamp chat line --account type=string
+FLAG basecamp chat line --agent type=bool
+FLAG basecamp chat line --cache-dir type=string
+FLAG basecamp chat line --chat type=string
+FLAG basecamp chat line --count type=bool
+FLAG basecamp chat line --hints type=bool
+FLAG basecamp chat line --ids-only type=bool
+FLAG basecamp chat line --in type=string
+FLAG basecamp chat line --json type=bool
+FLAG basecamp chat line --markdown type=bool
+FLAG basecamp chat line --md type=bool
+FLAG basecamp chat line --no-hints type=bool
+FLAG basecamp chat line --no-stats type=bool
+FLAG basecamp chat line --profile type=string
+FLAG basecamp chat line --project type=string
+FLAG basecamp chat line --quiet type=bool
+FLAG basecamp chat line --stats type=bool
+FLAG basecamp chat line --styled type=bool
+FLAG basecamp chat line --todolist type=string
+FLAG basecamp chat line --verbose type=count
+FLAG basecamp chat list --account type=string
+FLAG basecamp chat list --agent type=bool
+FLAG basecamp chat list --all type=bool
+FLAG basecamp chat list --cache-dir type=string
+FLAG basecamp chat list --chat type=string
+FLAG basecamp chat list --count type=bool
+FLAG basecamp chat list --hints type=bool
+FLAG basecamp chat list --ids-only type=bool
+FLAG basecamp chat list --in type=string
+FLAG basecamp chat list --json type=bool
+FLAG basecamp chat list --markdown type=bool
+FLAG basecamp chat list --md type=bool
+FLAG basecamp chat list --no-hints type=bool
+FLAG basecamp chat list --no-stats type=bool
+FLAG basecamp chat list --profile type=string
+FLAG basecamp chat list --project type=string
+FLAG basecamp chat list --quiet type=bool
+FLAG basecamp chat list --stats type=bool
+FLAG basecamp chat list --styled type=bool
+FLAG basecamp chat list --todolist type=string
+FLAG basecamp chat list --verbose type=count
+FLAG basecamp chat messages --account type=string
+FLAG basecamp chat messages --agent type=bool
+FLAG basecamp chat messages --cache-dir type=string
+FLAG basecamp chat messages --chat type=string
+FLAG basecamp chat messages --count type=bool
+FLAG basecamp chat messages --hints type=bool
+FLAG basecamp chat messages --ids-only type=bool
+FLAG basecamp chat messages --in type=string
+FLAG basecamp chat messages --json type=bool
+FLAG basecamp chat messages --limit type=int
+FLAG basecamp chat messages --markdown type=bool
+FLAG basecamp chat messages --md type=bool
+FLAG basecamp chat messages --no-hints type=bool
+FLAG basecamp chat messages --no-stats type=bool
+FLAG basecamp chat messages --profile type=string
+FLAG basecamp chat messages --project type=string
+FLAG basecamp chat messages --quiet type=bool
+FLAG basecamp chat messages --stats type=bool
+FLAG basecamp chat messages --styled type=bool
+FLAG basecamp chat messages --todolist type=string
+FLAG basecamp chat messages --verbose type=count
+FLAG basecamp chat post --account type=string
+FLAG basecamp chat post --agent type=bool
+FLAG basecamp chat post --cache-dir type=string
+FLAG basecamp chat post --chat type=string
+FLAG basecamp chat post --content type=string
+FLAG basecamp chat post --content-type type=string
+FLAG basecamp chat post --count type=bool
+FLAG basecamp chat post --hints type=bool
+FLAG basecamp chat post --ids-only type=bool
+FLAG basecamp chat post --in type=string
+FLAG basecamp chat post --json type=bool
+FLAG basecamp chat post --markdown type=bool
+FLAG basecamp chat post --md type=bool
+FLAG basecamp chat post --no-hints type=bool
+FLAG basecamp chat post --no-stats type=bool
+FLAG basecamp chat post --profile type=string
+FLAG basecamp chat post --project type=string
+FLAG basecamp chat post --quiet type=bool
+FLAG basecamp chat post --stats type=bool
+FLAG basecamp chat post --styled type=bool
+FLAG basecamp chat post --todolist type=string
+FLAG basecamp chat post --verbose type=count
+FLAG basecamp chat upload --account type=string
+FLAG basecamp chat upload --agent type=bool
+FLAG basecamp chat upload --cache-dir type=string
+FLAG basecamp chat upload --chat type=string
+FLAG basecamp chat upload --count type=bool
+FLAG basecamp chat upload --hints type=bool
+FLAG basecamp chat upload --ids-only type=bool
+FLAG basecamp chat upload --in type=string
+FLAG basecamp chat upload --json type=bool
+FLAG basecamp chat upload --markdown type=bool
+FLAG basecamp chat upload --md type=bool
+FLAG basecamp chat upload --no-hints type=bool
+FLAG basecamp chat upload --no-stats type=bool
+FLAG basecamp chat upload --profile type=string
+FLAG basecamp chat upload --project type=string
+FLAG basecamp chat upload --quiet type=bool
+FLAG basecamp chat upload --stats type=bool
+FLAG basecamp chat upload --styled type=bool
+FLAG basecamp chat upload --todolist type=string
+FLAG basecamp chat upload --verbose type=count
 FLAG basecamp checkins --account type=string
 FLAG basecamp checkins --agent type=bool
 FLAG basecamp checkins --cache-dir type=string
@@ -6656,13 +6657,6 @@ SUB basecamp boost create
 SUB basecamp boost delete
 SUB basecamp boost list
 SUB basecamp boost show
-SUB basecamp campfire
-SUB basecamp campfire delete
-SUB basecamp campfire line
-SUB basecamp campfire list
-SUB basecamp campfire messages
-SUB basecamp campfire post
-SUB basecamp campfire upload
 SUB basecamp card
 SUB basecamp card move
 SUB basecamp card update
@@ -6694,6 +6688,13 @@ SUB basecamp cards step update
 SUB basecamp cards steps
 SUB basecamp cards trash
 SUB basecamp cards update
+SUB basecamp chat
+SUB basecamp chat delete
+SUB basecamp chat line
+SUB basecamp chat list
+SUB basecamp chat messages
+SUB basecamp chat post
+SUB basecamp chat upload
 SUB basecamp checkins
 SUB basecamp checkins answer
 SUB basecamp checkins answer create

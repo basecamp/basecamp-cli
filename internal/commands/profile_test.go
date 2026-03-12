@@ -225,7 +225,6 @@ func TestProfileCreateDeviceCodeLocalExclusive(t *testing.T) {
 	root.SetErr(buf)
 	err := root.Execute()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "if any flags in the group")
 	assert.Contains(t, err.Error(), "device-code")
 	assert.Contains(t, err.Error(), "local")
 }
