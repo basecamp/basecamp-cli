@@ -9,6 +9,7 @@ go.work.sum
 bin/basecamp
 bin/basecamp-*
 /basecamp
+e2e/recorder/recorder
 
 # GoReleaser output
 dist/

@@ -9,6 +9,16 @@ export BASECAMP_NO_KEYRING=1
 
 cd "$(dirname "$0")"
 
+# Happy-path replay tests require committed cassettes. If none exist,
+# skip them with a warning instead of failing the entire suite.
+# Once cassettes are recorded (make record-cassettes) and committed,
+# this block becomes a no-op and the tests gate CI for real.
+if ! ls cassettes/happypath/*.json &>/dev/null; then
+  echo "WARNING: No happy-path cassettes found — replay tests will skip." >&2
+  echo "  Record with: make record-cassettes" >&2
+  export QA_HAPPYPATH_OPTIONAL=1
+fi
+
 if ! command -v bats &>/dev/null; then
   echo "Error: bats not found. Install with your package manager (e.g., pacman -S bats, brew install bats-core)" >&2
   exit 1

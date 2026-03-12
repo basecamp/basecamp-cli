@@ -35,6 +35,10 @@ setup() {
   unset XDG_CONFIG_HOME  # Ensure tests use $HOME/.config
 
   cd "$TEST_PROJECT"
+
+  # Allow test files to define setup_extra for additional per-test setup
+  # (e.g., qa_happypath.bats uses this to configure the replay proxy)
+  if type -t setup_extra &>/dev/null; then setup_extra; fi
 }
 
 teardown() {
@@ -215,6 +219,99 @@ init_git_repo() {
 mock_api_response() {
   local response="$1"
   export BASECAMP_MOCK_RESPONSE="$response"
+}
+
+
+# Recording proxy
+
+# start_proxy MODE CASSETTE_DIR [TARGET_URL]
+#   MODE: "replay" (serve from cassettes) or "record" (forward + save)
+#   CASSETTE_DIR: directory containing/receiving cassette JSON files
+#   TARGET_URL: upstream server (required for record mode)
+#
+# Auth in record mode:
+#   preferred: BASECAMP_RECORD_TOKEN from the environment
+#   fallback:  create_credentials with a real token before calling start_proxy
+start_proxy() {
+  local mode="$1"
+  local cass_dir="$2"
+  local target="${3:-}"
+
+  local recorder="$BATS_TEST_DIRNAME/recorder/recorder"
+  local needs_build=0
+  if [[ ! -x "$recorder" ]]; then
+    needs_build=1
+  else
+    # Rebuild if any Go source file is newer than the binary
+    for src in "$BATS_TEST_DIRNAME"/recorder/*.go; do
+      if [[ "$src" -nt "$recorder" ]]; then
+        needs_build=1
+        break
+      fi
+    done
+  fi
+  if [[ "$needs_build" -eq 1 ]]; then
+    (cd "$BATS_TEST_DIRNAME/recorder" && go build -o recorder .) || {
+      echo "Failed to build recorder" >&2
+      return 1
+    }
+  fi
+
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  RECORDER_TMPDIR="$tmpdir"
+
+  local port_file="$tmpdir/port"
+  local log_file="$tmpdir/recorder.log"
+
+  local args=(-mode="$mode" -cassettes="$cass_dir" -port-file="$port_file")
+  if [[ -n "$target" ]]; then
+    args+=(-target="$target")
+  fi
+  if [[ -n "${BASECAMP_RECORD_ACCOUNT:-}" ]]; then
+    args+=(-account="$BASECAMP_RECORD_ACCOUNT")
+  fi
+
+  "$recorder" "${args[@]}" >"$log_file" 2>&1 &
+  RECORDER_PID=$!
+
+  # Wait for port file (up to 5 seconds)
+  local i=0
+  while [[ ! -s "$port_file" ]] && (( i < 50 )); do
+    sleep 0.1
+    i=$((i + 1))
+  done
+
+  if [[ ! -s "$port_file" ]]; then
+    echo "Recorder failed to start. Log:" >&2
+    cat "$log_file" >&2
+    return 1
+  fi
+
+  REPLAY_PORT=$(<"$port_file")
+  export REPLAY_PORT RECORDER_PID RECORDER_TMPDIR
+}
+
+stop_proxy() {
+  local rc=0
+  if [[ -n "${RECORDER_PID:-}" ]]; then
+    kill "$RECORDER_PID" 2>/dev/null || true
+    wait "$RECORDER_PID" 2>/dev/null; rc=$?
+    # 143 = 128+15 (SIGTERM) — expected when we kill the process ourselves
+    if [[ "$rc" -eq 143 ]]; then rc=0; fi
+    if [[ "$rc" -ne 0 ]]; then
+      echo "Recorder exited with status $rc" >&2
+      if [[ -n "${RECORDER_TMPDIR:-}" ]] && [[ -f "$RECORDER_TMPDIR/recorder.log" ]]; then
+        cat "$RECORDER_TMPDIR/recorder.log" >&2
+      fi
+    fi
+    unset RECORDER_PID
+  fi
+  if [[ -n "${RECORDER_TMPDIR:-}" ]]; then
+    rm -rf "$RECORDER_TMPDIR"
+    unset RECORDER_TMPDIR
+  fi
+  return "$rc"
 }
 
 
