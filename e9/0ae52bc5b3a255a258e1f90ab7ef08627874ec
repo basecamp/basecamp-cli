@@ -1,0 +1,25 @@
+internal/commands/boost.go
+  4c4f7a93b80c6a4c 255-256
+internal/commands/tools.go
+  4c4f7a93b80c6a4c 151-154,242-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "e90ae52bc5b3a255a258e1f90ab7ef08627874ec",
+  "prompts": {
+    "4c4f7a93b80c6a4c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5468b127-fc35-4972-862e-024c6c4c57c1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 6,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
