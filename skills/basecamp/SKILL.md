@@ -515,7 +515,7 @@ basecamp campfire --in <project> --json           # List campfires
 basecamp campfire messages --in <project> --json  # List messages
 basecamp campfire post "Hello!" --in <project>
 basecamp campfire line <line_id> --in <project>   # Show line
-basecamp campfire delete <line_id> --in <project> # Delete line
+basecamp campfire delete <line_id> --in <project> --force # Delete line (permanent, not trashable)
 ```
 
 ### People

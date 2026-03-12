@@ -13,6 +13,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // NewCampfireCmd creates the campfire command for real-time chat.
@@ -573,10 +574,14 @@ You can pass either a line ID or a Basecamp line URL:
 }
 
 func newCampfireLineDeleteCmd(project, campfireID *string) *cobra.Command {
+	var force bool
+
 	cmd := &cobra.Command{
 		Use:   "delete <id|url>",
 		Short: "Delete a message",
 		Long: `Delete a message line from a Campfire.
+
+This permanently deletes the message — it is not moved to trash.
 
 You can pass either a line ID or a Basecamp line URL:
   basecamp campfire delete 789 --in my-project
@@ -632,6 +637,17 @@ You can pass either a line ID or a Basecamp line URL:
 				return output.ErrUsage("Invalid line ID")
 			}
 
+			// Confirm destructive action in interactive mode
+			if !force && !isMachineOutput(cmd) {
+				confirmed, err := tui.ConfirmDangerous("Permanently delete this campfire line?")
+				if err != nil {
+					return nil //nolint:nilerr // user canceled prompt
+				}
+				if !confirmed {
+					return nil
+				}
+			}
+
 			// Delete line using SDK
 			err = app.Account().Campfires().DeleteLine(cmd.Context(), campfireIDInt, lineIDInt)
 			if err != nil {
@@ -640,7 +656,7 @@ You can pass either a line ID or a Basecamp line URL:
 
 			summary := fmt.Sprintf("Deleted line #%s", lineID)
 
-			return app.OK(map[string]any{},
+			return app.OK(map[string]any{"deleted": true, "id": lineID},
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -652,6 +668,9 @@ You can pass either a line ID or a Basecamp line URL:
 			)
 		},
 	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
+
 	return cmd
 }
 

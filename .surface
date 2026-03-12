@@ -855,6 +855,7 @@ FLAG basecamp campfire delete --agent type=bool
 FLAG basecamp campfire delete --cache-dir type=string
 FLAG basecamp campfire delete --campfire type=string
 FLAG basecamp campfire delete --count type=bool
+FLAG basecamp campfire delete --force type=bool
 FLAG basecamp campfire delete --hints type=bool
 FLAG basecamp campfire delete --ids-only type=bool
 FLAG basecamp campfire delete --in type=string

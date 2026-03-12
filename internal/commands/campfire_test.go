@@ -80,6 +80,73 @@ func (t *mockCampfireCreateTransport) RoundTrip(req *http.Request) (*http.Respon
 	return nil, errors.New("unexpected request")
 }
 
+// mockCampfireDeleteTransport handles resolver API calls and responds to DELETE requests.
+type mockCampfireDeleteTransport struct {
+	capturedMethod string
+	capturedPath   string
+}
+
+func (t *mockCampfireDeleteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		if strings.Contains(req.URL.Path, "/projects.json") {
+			body = `[{"id": 123, "name": "Test Project"}]`
+		} else if strings.Contains(req.URL.Path, "/projects/") {
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
+		} else {
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "DELETE" {
+		t.capturedMethod = req.Method
+		t.capturedPath = req.URL.Path
+		return &http.Response{
+			StatusCode: 204,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func newCampfireDeleteTestApp(transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &campfireTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+	return app, buf
+}
+
 // executeCampfireCommand executes a cobra command with the given args.
 func executeCampfireCommand(cmd *cobra.Command, app *appctx.App, args ...string) error {
 	cmd.SetArgs(args)
@@ -283,4 +350,64 @@ func TestCampfirePostViaSubcommandWithCampfireFlag(t *testing.T) {
 		"content_type should be sent via subcommand path")
 	assert.Equal(t, "<b>Hello</b>", requestBody["content"],
 		"content should be passed through subcommand path")
+}
+
+// TestCampfireDeleteReturnsDeletedPayload verifies that delete returns {"deleted": true, "id": "..."}.
+func TestCampfireDeleteReturnsDeletedPayload(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockCampfireDeleteTransport{}
+	app, buf := newCampfireDeleteTestApp(transport)
+	app.Flags.Agent = true // skip confirmation prompt
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "delete", "111", "--force")
+	require.NoError(t, err)
+
+	assert.Equal(t, "DELETE", transport.capturedMethod)
+
+	var envelope map[string]any
+	err = json.Unmarshal(buf.Bytes(), &envelope)
+	require.NoError(t, err)
+
+	data, ok := envelope["data"].(map[string]any)
+	require.True(t, ok, "expected data object in envelope")
+	assert.Equal(t, true, data["deleted"])
+	assert.Equal(t, "111", data["id"])
+}
+
+// TestCampfireDeleteSkipsPromptInAgentMode verifies that --agent mode skips the
+// confirmation prompt and issues the DELETE call.
+func TestCampfireDeleteSkipsPromptInAgentMode(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockCampfireDeleteTransport{}
+	app, _ := newCampfireDeleteTestApp(transport)
+	app.Flags.Agent = true // machine output — no prompt
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "delete", "111")
+	require.NoError(t, err)
+
+	assert.Equal(t, "DELETE", transport.capturedMethod)
+	assert.Contains(t, transport.capturedPath, "/lines/")
+}
+
+// TestCampfireDeleteForceSkipsPrompt verifies that --force bypasses the confirmation
+// prompt even when not in machine-output mode.
+func TestCampfireDeleteForceSkipsPrompt(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockCampfireDeleteTransport{}
+	app, _ := newCampfireDeleteTestApp(transport)
+	// Flags.Agent is false — not in machine mode.
+	// Test stdout is *bytes.Buffer (not *os.File), so isMachineOutput TTY check
+	// falls through to false. Without --force this would attempt tui.ConfirmDangerous.
+
+	cmd := NewCampfireCmd()
+	err := executeCampfireCommand(cmd, app, "delete", "111", "--force")
+	require.NoError(t, err)
+
+	assert.Equal(t, "DELETE", transport.capturedMethod)
+	assert.Contains(t, transport.capturedPath, "/lines/")
 }

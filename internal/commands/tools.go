@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -147,6 +148,10 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				title = args[0]
 			}
 
+			if title != "" && utf8.RuneCountInString(title) > 64 {
+				return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", utf8.RuneCountInString(title)))
+			}
+
 			// Resolve project, with interactive fallback
 			projectID := *project
 			if projectID == "" {
@@ -231,6 +236,10 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 			}
 
 			title := args[1]
+
+			if utf8.RuneCountInString(title) > 64 {
+				return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", utf8.RuneCountInString(title)))
+			}
 
 			// Resolve project, with interactive fallback
 			projectID := *project
