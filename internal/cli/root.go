@@ -161,7 +161,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.IDsOnly, "ids-only", false, "Output only IDs")
 	cmd.PersistentFlags().BoolVar(&flags.Count, "count", false, "Output only count")
 	cmd.PersistentFlags().BoolVar(&flags.Agent, "agent", false, "Agent mode (JSON + quiet)")
-	cmd.PersistentFlags().StringVar(&flags.JQFilter, "jq", "", "Apply jq filter to JSON output (built-in, no external jq required)")
+	cmd.PersistentFlags().StringVar(&flags.JQFilter, "jq", "", "Apply jq filter to JSON output (built-in, no external jq required; implies --json)")
 
 	// Context flags
 	cmd.PersistentFlags().StringVarP(&flags.Project, "project", "p", "", "Project ID or name")

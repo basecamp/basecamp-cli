@@ -412,7 +412,7 @@ func (a *App) Resolve() *resolve.Resolver {
 			Todolist: a.Flags.Todolist,
 			// Machine output flags - disable interactive prompts
 			Agent:   a.Flags.Agent,
-			JSON:    a.Flags.JSON,
+			JSON:    a.Flags.JSON || a.Flags.JQFilter != "",
 			Quiet:   a.Flags.Quiet,
 			IDsOnly: a.Flags.IDsOnly,
 			Count:   a.Flags.Count,

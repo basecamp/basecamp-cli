@@ -79,6 +79,9 @@ type Options struct {
 	JQFilter string // jq expression to apply to JSON output (built-in via gojq)
 }
 
+// jqCode is a compiled jq query, parsed once and reused across writes.
+type jqCode = *gojq.Query
+
 // DefaultOptions returns options for standard output.
 func DefaultOptions() Options {
 	return Options{
@@ -90,14 +93,25 @@ func DefaultOptions() Options {
 // Writer handles all output formatting.
 type Writer struct {
 	opts Options
+	jq   jqCode // compiled jq filter, nil when JQFilter is empty
 }
 
 // New creates a new output writer.
+// If JQFilter is set, the jq expression is compiled eagerly so parse errors
+// surface immediately rather than on the first write.
 func New(opts Options) *Writer {
 	if opts.Writer == nil {
 		opts.Writer = os.Stdout
 	}
-	return &Writer{opts: opts}
+	w := &Writer{opts: opts}
+	if opts.JQFilter != "" {
+		q, err := gojq.Parse(opts.JQFilter)
+		if err == nil {
+			w.jq = q
+		}
+		// If parse fails, writeJQ will re-parse and return the error on first use.
+	}
+	return w
 }
 
 // EffectiveFormat resolves FormatAuto based on TTY detection.
@@ -204,14 +218,35 @@ func (w *Writer) write(v any) error {
 }
 
 // writeJQ serializes to JSON, applies a jq filter via gojq, and writes results.
+// When the output format is FormatQuiet (--agent/--quiet), the filter runs on
+// the data-only payload; otherwise it runs on the full JSON envelope.
 func (w *Writer) writeJQ(v any) error {
-	query, err := gojq.Parse(w.opts.JQFilter)
-	if err != nil {
-		return fmt.Errorf("invalid jq expression: %w", err)
+	query := w.jq
+	if query == nil {
+		// Fallback: parse on demand (covers edge case where New failed silently)
+		var err error
+		query, err = gojq.Parse(w.opts.JQFilter)
+		if err != nil {
+			return fmt.Errorf("invalid jq expression: %w", err)
+		}
+	}
+
+	// Determine what to feed the jq filter based on output format.
+	// Quiet/agent modes strip the envelope; the jq input should match.
+	target := v
+	if resp, ok := v.(*Response); ok {
+		respCopy := *resp
+		respCopy.Data = NormalizeData(resp.Data)
+
+		if w.opts.Format == FormatQuiet {
+			target = respCopy.Data
+		} else {
+			target = &respCopy
+		}
 	}
 
 	// Serialize to JSON then back to interface{} so gojq gets plain types
-	raw, err := json.Marshal(v)
+	raw, err := json.Marshal(target)
 	if err != nil {
 		return fmt.Errorf("jq: marshal error: %w", err)
 	}

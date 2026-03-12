@@ -82,7 +82,8 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 
 | Goal | Flag | Format |
 |------|------|--------|
-| Filter/extract JSON data | `--jq '<expr>'` | Built-in jq filter (no external jq needed). Implies `--json`. |
+| Filter/extract JSON data | `--jq '<expr>'` | Built-in jq filter (no external jq needed). Implies `--json`; filter runs on the envelope. |
+| Filter in agent mode | `--agent --jq '<expr>'` | Filter runs on data-only payload (no envelope), matching `--agent` contract. |
 | Full JSON output | `--json` | JSON envelope: `{ok, data, summary, breadcrumbs, meta}` |
 | Show results to a user | `--md` / `-m` | GFM tables, task lists, structured Markdown |
 | Automation / scripting | `--agent` | Success: raw JSON data (no envelope); errors: `{ok:false,...}` object; no interactive prompts |

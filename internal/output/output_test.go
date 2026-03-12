@@ -2667,6 +2667,44 @@ func TestWriterJQFilterMap(t *testing.T) {
 	assert.False(t, hasStatus)
 }
 
+func TestWriterJQFilterQuietRunsOnData(t *testing.T) {
+	// With FormatQuiet (--agent/--quiet), jq filter should operate on data only, not envelope
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatQuiet,
+		Writer:   &buf,
+		JQFilter: ".[0].title",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "First"},
+		{"id": 2, "title": "Second"},
+	}
+	err := w.OK(data, WithSummary("2 items"))
+	require.NoError(t, err)
+
+	// Should filter data directly (no .data wrapper), so .[0].title works
+	assert.Equal(t, "First\n", buf.String())
+}
+
+func TestWriterJQFilterJSONRunsOnEnvelope(t *testing.T) {
+	// With FormatJSON (default for --jq), filter runs on the full envelope
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data[0].title",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "First"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "First\n", buf.String())
+}
+
 func TestWriterJQFilterEmpty(t *testing.T) {
 	// Empty filter string should not trigger jq path
 	var buf bytes.Buffer
