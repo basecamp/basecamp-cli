@@ -86,8 +86,8 @@ type DockTool struct {
 }
 
 // getDockTools fetches a project's dock and partitions tools matching dockName
-// into enabled and all (including disabled) slices. Error is only returned on
-// network or parse failure — an empty enabled slice is not an error.
+// into enabled and all (including disabled) slices. The account must be resolved
+// before calling. An empty enabled slice is not an error.
 func getDockTools(ctx context.Context, app *appctx.App, projectID, dockName string) (enabled []DockTool, all []DockTool, err error) {
 	// Account must already be resolved by calling command
 	if app.Config.AccountID == "" {

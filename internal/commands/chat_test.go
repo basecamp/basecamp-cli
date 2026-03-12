@@ -482,6 +482,137 @@ func TestChatListDisabledChat(t *testing.T) {
 	assert.Contains(t, e.Hint, "disabled")
 }
 
+// TestChatListMultipleChatsBreadcrumbs verifies breadcrumbs use
+// --chat flag syntax with placeholder for multi-chat projects.
+func TestChatListMultipleChatsBreadcrumbs(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockMultiChatTransport{})
+	app.Flags.Hints = true
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "list")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Summary     string `json:"summary"`
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	assert.Contains(t, envelope.Summary, "2 chats")
+
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	for _, bc := range envelope.Breadcrumbs {
+		assert.Contains(t, bc.Cmd, "--chat")
+	}
+}
+
+// TestChatListSingleChatSummary verifies title-based summary and
+// concrete chat ID in breadcrumbs for single-chat projects.
+func TestChatListSingleChatSummary(t *testing.T) {
+	transport := &mockSingleChatTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "list")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data        []map[string]any `json:"data"`
+		Summary     string           `json:"summary"`
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	require.Len(t, envelope.Data, 1)
+	assert.Contains(t, envelope.Summary, "Team Chat")
+
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	for _, bc := range envelope.Breadcrumbs {
+		assert.Contains(t, bc.Cmd, "--chat 501")
+	}
+}
+
+// mockSingleChatTransport returns a project with one chat dock entry.
+type mockSingleChatTransport struct{}
+
+func (t *mockSingleChatTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	var body string
+	switch {
+	case strings.Contains(req.URL.Path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test Project"}]`
+	case strings.Contains(req.URL.Path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "chat", "id": 501, "title": "Team Chat", "enabled": true}]}`
+	case strings.HasSuffix(req.URL.Path, "/chats/501"):
+		body = `{"id": 501, "title": "Team Chat", "type": "Chat::Transcript", "status": "active",` +
+			`"visible_to_clients": false, "inherits_status": true,` +
+			`"url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// mockChatListAllTransport handles the account-wide chat list endpoint.
+type mockChatListAllTransport struct{}
+
+func (t *mockChatListAllTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if strings.HasSuffix(req.URL.Path, "/chats.json") {
+		body := `[{"id": 789, "title": "General", "type": "Chat::Transcript"}]`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+		Header:     header,
+	}, nil
+}
+
+// TestChatListAllBreadcrumbSyntax verifies that --all breadcrumbs use
+// --chat flag syntax, not the old positional syntax.
+func TestChatListAllBreadcrumbSyntax(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockChatListAllTransport{})
+	app.Flags.Hints = true
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "list", "--all")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.NotEmpty(t, envelope.Breadcrumbs)
+
+	for _, bc := range envelope.Breadcrumbs {
+		assert.Contains(t, bc.Cmd, "--chat")
+		assert.NotContains(t, bc.Cmd, "chat <id> messages")
+	}
+}
+
 // TestChatPostViaSubcommandWithChatFlag verifies the proper way to post
 // to a specific chat: `basecamp chat post <msg> --chat <id>`.
 func TestChatPostViaSubcommandWithChatFlag(t *testing.T) {
