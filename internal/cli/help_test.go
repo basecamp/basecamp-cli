@@ -233,6 +233,24 @@ func TestLeafCommandInheritsParentPersistentFlags(t *testing.T) {
 	}
 }
 
+func TestChatAliasShowsChatHelp(t *testing.T) {
+	// Invoking via the old alias "campfire" should still render canonical
+	// "basecamp chat" in the help output.
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewCampfireCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"campfire", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "basecamp chat")
+	assert.Contains(t, out, "ALIASES")
+	assert.Contains(t, out, "campfire")
+}
+
 func TestAgentHelpProducesJSON(t *testing.T) {
 	isolateHelpTest(t)
 
