@@ -1,0 +1,40 @@
+.claude/skills/qa-critic.md
+  6e7c4b6ba7b509de 1-23,27,29-59
+  672063deaab6df6a 24-26,28
+e2e/smoke/run_smoke.sh
+  6e7c4b6ba7b509de 53,58-62,81-83
+  672063deaab6df6a 84-86,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "374e97fe9684f17f5f2e6b2d6be17297d04ca3fe",
+  "prompts": {
+    "672063deaab6df6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a42d4d2-6e53-4f19-9dca-d514f327c8fc",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    },
+    "6e7c4b6ba7b509de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "daf46874-88e8-4758-b85d-e42680a4dd12",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 64,
+      "overriden_lines": 0
+    }
+  }
+}
