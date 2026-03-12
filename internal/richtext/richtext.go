@@ -653,7 +653,7 @@ func ExtractAttachments(html string) []InlineAttachment {
 	for _, tag := range tags {
 		// Skip mentions
 		ctMatch := reAttrCT.FindStringSubmatch(tag)
-		if len(ctMatch) >= 2 && ctMatch[1] == "application/vnd.basecamp.mention" {
+		if len(ctMatch) >= 2 && strings.EqualFold(ctMatch[1], "application/vnd.basecamp.mention") {
 			continue
 		}
 
@@ -663,18 +663,18 @@ func ExtractAttachments(html string) []InlineAttachment {
 			continue
 		}
 
-		a := InlineAttachment{Href: hrefMatch[1]}
+		a := InlineAttachment{Href: unescapeHTML(hrefMatch[1])}
 		if len(ctMatch) >= 2 {
-			a.ContentType = ctMatch[1]
+			a.ContentType = unescapeHTML(ctMatch[1])
 		}
 		if m := reAttrFilename.FindStringSubmatch(tag); len(m) >= 2 {
-			a.Filename = m[1]
+			a.Filename = unescapeHTML(m[1])
 		}
 		if m := reAttrFilesize.FindStringSubmatch(tag); len(m) >= 2 {
-			a.Filesize = m[1]
+			a.Filesize = unescapeHTML(m[1])
 		}
 		if m := reAttrSGID.FindStringSubmatch(tag); len(m) >= 2 {
-			a.SGID = m[1]
+			a.SGID = unescapeHTML(m[1])
 		}
 		result = append(result, a)
 	}

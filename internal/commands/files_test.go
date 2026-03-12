@@ -24,6 +24,9 @@ func TestIsStorageURL(t *testing.T) {
 		{"https://evil.com/blobs/abc/download/file.eml", false},                  // wrong host
 		{"https://storage.3.basecamp.com/123/uploads/789", false},                // no /blobs/
 		{"https://storage.evil.basecamp.com.evil.com/blobs/x/download/y", false}, // wrong TLD
+		{"http://storage.3.basecamp.com/123/blobs/abc/download/file.eml", false}, // http not allowed
+		{"ftp://storage.3.basecamp.com/123/blobs/abc/download/file.eml", false},  // wrong scheme
+		{"storage.3.basecamp.com/123/blobs/abc/download/file.eml", false},        // no scheme
 	}
 
 	for _, tt := range tests {
