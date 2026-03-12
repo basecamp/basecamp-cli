@@ -186,6 +186,35 @@ func TestBoostShowNilBoosterSummary(t *testing.T) {
 	assert.NotContains(t, summary, "by ", "summary should not contain trailing 'by ' when booster is nil")
 }
 
+// TestBoostCreateRejectsLongContent verifies that boost create rejects content over 16 characters.
+func TestBoostCreateRejectsLongContent(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockBoostTransport{}
+	app, _ := newBoostTestApp(transport)
+
+	cmd := NewBoostsCmd()
+	err := executeBoostCommand(cmd, app, "create", "456", "this is way long!")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Boost content too long")
+}
+
+// TestBoostCreateAcceptsMaxContent verifies that 16-character content passes validation.
+func TestBoostCreateAcceptsMaxContent(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockBoostTransport{}
+	app, _ := newBoostTestApp(transport)
+
+	cmd := NewBoostsCmd()
+	err := executeBoostCommand(cmd, app, "create", "456", "exactly16chars!!")
+	require.NoError(t, err)
+	assert.Equal(t, "POST", transport.capturedMethod)
+}
+
 // mockBoostNilBoosterTransport returns a boost with no booster field.
 type mockBoostNilBoosterTransport struct{}
 

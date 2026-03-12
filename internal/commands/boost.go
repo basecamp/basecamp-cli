@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -251,6 +252,10 @@ Use --event to boost a specific event within the item.`,
 }
 
 func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, content, eventID string) error {
+	if n := utf8.RuneCountInString(content); n > 16 {
+		return output.ErrUsage(fmt.Sprintf("Boost content too long (%d characters, max 16)", n))
+	}
+
 	recordingID, urlProjectID := extractWithProject(recording)
 
 	projectID := project
