@@ -409,8 +409,8 @@ func TestChatListMultipleChats(t *testing.T) {
 	assert.Contains(t, titles, "General")
 	assert.Contains(t, titles, "Engineering")
 
-	// Summary should use "chat(s)" not "campfire(s)"
-	assert.Contains(t, buf.String(), "2 chat(s)")
+	// Summary should use "chats" not "campfires"
+	assert.Contains(t, buf.String(), "2 chats")
 }
 
 // TestChatListWithChatFlag verifies that `chat list -c <id>` returns

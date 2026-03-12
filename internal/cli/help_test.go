@@ -240,7 +240,7 @@ func TestChatAliasShowsChatHelp(t *testing.T) {
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
-	cmd.AddCommand(commands.NewCampfireCmd())
+	cmd.AddCommand(commands.NewChatCmd())
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"campfire", "--help"})
 	_ = cmd.Execute()

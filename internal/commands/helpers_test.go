@@ -298,13 +298,13 @@ func TestGetDockToolID_AmbiguousToolShowsFlagHint(t *testing.T) {
 	}
 	app := newDockTestApp(t, transport)
 
-	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "campfire")
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "chat")
 	require.Error(t, err)
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Equal(t, output.CodeAmbiguous, e.Code)
-	assert.Contains(t, e.Hint, "Use --campfire <id> to specify.")
+	assert.Contains(t, e.Hint, "Use --chat <id> to specify.")
 	assert.Contains(t, e.Hint, "General (ID: 100)")
 	assert.Contains(t, e.Hint, "Engineering (ID: 200)")
 }
@@ -364,7 +364,7 @@ func TestGetDockToolID_AmbiguousMultipleReturnsError(t *testing.T) {
 	}
 	app := newDockTestApp(t, transport)
 
-	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "campfire")
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "chat")
 	require.Error(t, err)
 
 	var e *output.Error

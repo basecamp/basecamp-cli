@@ -134,7 +134,8 @@ func dockToolNotFoundError(all []DockTool, dockName, projectID, friendlyName str
 //
 // When multiple tools of the same type exist in the project:
 //   - If explicitID is provided, it is returned as-is
-//   - Otherwise, an error is returned listing the available tools
+//   - Otherwise, an error is returned listing the available tools;
+//     if flagName is non-empty, the hint directs users to that flag
 //
 // When exactly one tool exists, its ID is returned.
 // When no tools of the type exist, a not found error is returned.

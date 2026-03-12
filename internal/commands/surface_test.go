@@ -49,7 +49,12 @@ func TestSurfaceSnapshot(t *testing.T) {
 	// are ignored so they remain protected against accidental future removal.
 	breakingPath := "../../.surface-breaking"
 	acknowledged := make(map[string]bool)
-	if data, err := os.ReadFile(breakingPath); err == nil {
+	data, readErr := os.ReadFile(breakingPath)
+	if readErr != nil {
+		if !errors.Is(readErr, os.ErrNotExist) {
+			t.Fatalf("reading .surface-breaking: %v", readErr)
+		}
+	} else {
 		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 			if line != "" && !currentSet[line] {
 				acknowledged[line] = true
