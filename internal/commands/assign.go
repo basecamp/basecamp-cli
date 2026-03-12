@@ -55,23 +55,37 @@ Examples:
 				return err
 			}
 
-			item, err := validateItem(cmd, app, itemID, isCard, isStep, resolvedProjectID)
-			if err != nil {
-				return err
-			}
-
-			assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
-			if err != nil {
-				return err
-			}
-
 			switch {
 			case isCard:
-				return assignCard(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, item.(*basecamp.Card)) //nolint:errcheck // type is guaranteed by validateItem
+				card, err := validateCard(cmd, app, itemID)
+				if err != nil {
+					return err
+				}
+				assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
+				if err != nil {
+					return err
+				}
+				return assignCard(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, card)
 			case isStep:
-				return assignStep(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, item.(*basecamp.CardStep)) //nolint:errcheck // type is guaranteed by validateItem
+				step, err := validateStep(cmd, app, itemID, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
+				if err != nil {
+					return err
+				}
+				return assignStep(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, step)
 			default:
-				return assignTodo(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, item.(*basecamp.Todo)) //nolint:errcheck // type is guaranteed by validateItem
+				todo, err := validateTodo(cmd, app, itemID)
+				if err != nil {
+					return err
+				}
+				assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
+				if err != nil {
+					return err
+				}
+				return assignTodo(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, todo)
 			}
 		},
 	}
@@ -131,23 +145,37 @@ Examples:
 				return err
 			}
 
-			item, err := validateItem(cmd, app, itemID, isCard, isStep, resolvedProjectID)
-			if err != nil {
-				return err
-			}
-
-			_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
-			if err != nil {
-				return err
-			}
-
 			switch {
 			case isCard:
-				return unassignCard(cmd, app, itemID, assigneeIDInt, resolvedProjectID, item.(*basecamp.Card)) //nolint:errcheck // type is guaranteed by validateItem
+				card, err := validateCard(cmd, app, itemID)
+				if err != nil {
+					return err
+				}
+				_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
+				if err != nil {
+					return err
+				}
+				return unassignCard(cmd, app, itemID, assigneeIDInt, resolvedProjectID, card)
 			case isStep:
-				return unassignStep(cmd, app, itemID, assigneeIDInt, resolvedProjectID, item.(*basecamp.CardStep)) //nolint:errcheck // type is guaranteed by validateItem
+				step, err := validateStep(cmd, app, itemID, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+				_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
+				if err != nil {
+					return err
+				}
+				return unassignStep(cmd, app, itemID, assigneeIDInt, resolvedProjectID, step)
 			default:
-				return unassignTodo(cmd, app, itemID, assigneeIDInt, resolvedProjectID, item.(*basecamp.Todo)) //nolint:errcheck // type is guaranteed by validateItem
+				todo, err := validateTodo(cmd, app, itemID)
+				if err != nil {
+					return err
+				}
+				_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
+				if err != nil {
+					return err
+				}
+				return unassignTodo(cmd, app, itemID, assigneeIDInt, resolvedProjectID, todo)
 			}
 		},
 	}
@@ -215,46 +243,53 @@ func resolveProjectID(cmd *cobra.Command, app *appctx.App, project string) (stri
 	return resolvedProjectID, nil
 }
 
-// validateItem fetches the item to verify it exists before showing the person picker.
-// Returns the fetched item as an interface{} to avoid duplicate API calls.
-func validateItem(cmd *cobra.Command, app *appctx.App, itemIDStr string, isCard, isStep bool, resolvedProjectID string) (any, error) {
-	typeName := "to-do"
-	if isCard {
-		typeName = "card"
-	} else if isStep {
-		typeName = "step"
-	}
-
-	itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+// validateTodo fetches a to-do to verify it exists before showing the person picker.
+func validateTodo(cmd *cobra.Command, app *appctx.App, todoIDStr string) (*basecamp.Todo, error) {
+	todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 	if err != nil {
-		return nil, output.ErrUsage(fmt.Sprintf("Invalid %s ID", typeName))
+		return nil, output.ErrUsage("Invalid to-do ID")
 	}
-
-	switch {
-	case isCard:
-		card, err := app.Account().Cards().Get(cmd.Context(), itemID)
-		if err != nil {
-			return nil, itemNotFoundOrError(err, typeName, itemIDStr)
-		}
-		return card, nil
-	case isStep:
-		step, err := getStep(cmd, app, itemID, resolvedProjectID)
-		if err != nil {
-			return nil, itemNotFoundOrError(err, typeName, itemIDStr)
-		}
-		return step, nil
-	default:
-		todo, err := app.Account().Todos().Get(cmd.Context(), itemID)
-		if err != nil {
-			return nil, itemNotFoundOrError(err, typeName, itemIDStr)
-		}
-		return todo, nil
+	todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+	if err != nil {
+		return nil, notFoundOrConvert(err, "to-do", todoIDStr)
 	}
+	return todo, nil
 }
 
-// itemNotFoundOrError returns a friendly not-found error for the item type,
+// validateCard fetches a card to verify it exists before showing the person picker.
+func validateCard(cmd *cobra.Command, app *appctx.App, cardIDStr string) (*basecamp.Card, error) {
+	cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+	if err != nil {
+		return nil, output.ErrUsage("Invalid card ID")
+	}
+	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+	if err != nil {
+		return nil, notFoundOrConvert(err, "card", cardIDStr)
+	}
+	return card, nil
+}
+
+// validateStep fetches a card step to verify it exists before showing the person picker.
+func validateStep(cmd *cobra.Command, app *appctx.App, stepIDStr, resolvedProjectID string) (*basecamp.CardStep, error) {
+	stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
+	if err != nil {
+		return nil, output.ErrUsage("Invalid step ID")
+	}
+	stepPath := fmt.Sprintf("/buckets/%s/card_steps/%d.json", resolvedProjectID, stepID)
+	resp, err := app.Account().Get(cmd.Context(), stepPath)
+	if err != nil {
+		return nil, notFoundOrConvert(err, "step", stepIDStr)
+	}
+	var step basecamp.CardStep
+	if err := resp.UnmarshalData(&step); err != nil {
+		return nil, fmt.Errorf("failed to parse step: %w", err)
+	}
+	return &step, nil
+}
+
+// notFoundOrConvert returns a friendly not-found error for the item type,
 // or converts the SDK error if it's not a 404.
-func itemNotFoundOrError(err error, typeName, itemIDStr string) error {
+func notFoundOrConvert(err error, typeName, itemIDStr string) error {
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeNotFound {
 		return output.ErrNotFound(typeName, itemIDStr)
@@ -475,21 +510,6 @@ func unassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assigne
 			},
 		),
 	)
-}
-
-// getStep fetches a card step via raw GET (the SDK has no CardSteps.Get method).
-func getStep(cmd *cobra.Command, app *appctx.App, stepID int64, resolvedProjectID string) (*basecamp.CardStep, error) {
-	stepPath := fmt.Sprintf("/buckets/%s/card_steps/%d.json", resolvedProjectID, stepID)
-	resp, err := app.Account().Get(cmd.Context(), stepPath)
-	if err != nil {
-		return nil, convertSDKError(err)
-	}
-
-	var step basecamp.CardStep
-	if err := resp.UnmarshalData(&step); err != nil {
-		return nil, fmt.Errorf("failed to parse step: %w", err)
-	}
-	return &step, nil
 }
 
 // existingAssigneeIDs extracts IDs from a list of Person values.

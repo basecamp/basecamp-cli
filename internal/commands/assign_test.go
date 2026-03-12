@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -206,4 +209,36 @@ func TestRemoveID(t *testing.T) {
 func TestFindAssigneeName(t *testing.T) {
 	// Uses basecamp.Person from SDK, tested indirectly through the helper
 	assert.Equal(t, "Unknown", findAssigneeName(nil, 1))
+}
+
+func TestNotFoundOrConvertReturnsTypedNotFound(t *testing.T) {
+	tests := []struct {
+		typeName string
+		itemID   string
+	}{
+		{"to-do", "99999"},
+		{"card", "88888"},
+		{"step", "77777"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typeName, func(t *testing.T) {
+			sdkErr := basecamp.ErrNotFound(tt.typeName, tt.itemID)
+			err := notFoundOrConvert(sdkErr, tt.typeName, tt.itemID)
+
+			var e *output.Error
+			require.True(t, errors.As(err, &e))
+			assert.Equal(t, basecamp.CodeNotFound, e.Code)
+			assert.Contains(t, e.Message, fmt.Sprintf("%s not found: %s", tt.typeName, tt.itemID))
+		})
+	}
+}
+
+func TestNotFoundOrConvertPassesThroughOtherErrors(t *testing.T) {
+	sdkErr := basecamp.ErrForbidden("access denied")
+	err := notFoundOrConvert(sdkErr, "to-do", "123")
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.NotEqual(t, basecamp.CodeNotFound, e.Code)
 }
