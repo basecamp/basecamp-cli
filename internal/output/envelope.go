@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/itchyny/gojq"
+
 	clioutput "github.com/basecamp/cli/output"
 
 	"github.com/basecamp/basecamp-cli/internal/observability"
@@ -71,9 +73,10 @@ const (
 
 // Options controls output behavior.
 type Options struct {
-	Format  Format
-	Writer  io.Writer
-	Verbose bool
+	Format   Format
+	Writer   io.Writer
+	Verbose  bool
+	JQFilter string // jq expression to apply to JSON output (built-in via gojq)
 }
 
 // DefaultOptions returns options for standard output.
@@ -164,6 +167,11 @@ func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
 }
 
 func (w *Writer) write(v any) error {
+	// --jq flag: serialize to JSON, apply the jq filter, print results
+	if w.opts.JQFilter != "" {
+		return w.writeJQ(v)
+	}
+
 	format := w.opts.Format
 
 	// Auto-detect format: TTY → Styled, non-TTY → JSON
@@ -193,6 +201,47 @@ func (w *Writer) write(v any) error {
 	default:
 		return w.writeJSON(v)
 	}
+}
+
+// writeJQ serializes to JSON, applies a jq filter via gojq, and writes results.
+func (w *Writer) writeJQ(v any) error {
+	query, err := gojq.Parse(w.opts.JQFilter)
+	if err != nil {
+		return fmt.Errorf("invalid jq expression: %w", err)
+	}
+
+	// Serialize to JSON then back to interface{} so gojq gets plain types
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("jq: marshal error: %w", err)
+	}
+	var input any
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return fmt.Errorf("jq: unmarshal error: %w", err)
+	}
+
+	iter := query.Run(input)
+	enc := json.NewEncoder(w.opts.Writer)
+	enc.SetIndent("", "  ")
+
+	for {
+		result, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if err, ok := result.(error); ok {
+			return fmt.Errorf("jq filter error: %w", err)
+		}
+		// Print strings without JSON encoding for cleaner output
+		if s, ok := result.(string); ok {
+			fmt.Fprintln(w.opts.Writer, s)
+		} else {
+			if err := enc.Encode(result); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // isTTY checks if the writer is a terminal.

@@ -2515,3 +2515,172 @@ func TestFormatTableCellDelegatesToFormatDateValue(t *testing.T) {
 		formatTableCell("name", "Test"),
 		"formatTableCell should produce the same result as formatDateValue for non-date columns")
 }
+
+// =============================================================================
+// JQ Filter Tests
+// =============================================================================
+
+func TestWriterJQFilterExtractsField(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "First"},
+		{"id": 2, "title": "Second"},
+	}
+	err := w.OK(data, WithSummary("2 todos"))
+	require.NoError(t, err)
+
+	// .data extracts the data array from the envelope
+	var result []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Len(t, result, 2)
+	assert.Equal(t, "First", result[0]["title"])
+}
+
+func TestWriterJQFilterStringOutput(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data[].title",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "Buy milk"},
+		{"id": 2, "title": "Ship feature"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	// String results are printed as plain text (not JSON-quoted)
+	lines := strings.TrimSpace(buf.String())
+	assert.Equal(t, "Buy milk\nShip feature", lines)
+}
+
+func TestWriterJQFilterSelect(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `[.data[] | select(.completed == true)]`,
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "Done task", "completed": true},
+		{"id": 2, "title": "Open task", "completed": false},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	var result []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Len(t, result, 1)
+	assert.Equal(t, "Done task", result[0]["title"])
+}
+
+func TestWriterJQFilterLength(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data | length",
+	})
+
+	data := []map[string]any{
+		{"id": 1}, {"id": 2}, {"id": 3},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "3\n", buf.String())
+}
+
+func TestWriterJQFilterInvalidExpression(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".[invalid",
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid jq expression")
+}
+
+func TestWriterJQFilterOverridesFormat(t *testing.T) {
+	// Even with FormatStyled, --jq should produce filtered JSON output
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatStyled,
+		Writer:   &buf,
+		JQFilter: ".ok",
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.NoError(t, err)
+
+	assert.Equal(t, "true\n", buf.String())
+}
+
+func TestWriterJQFilterWithErrorResponse(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".error",
+	})
+
+	err := w.Err(ErrNotFound("project", "123"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "project not found: 123\n", buf.String())
+}
+
+func TestWriterJQFilterMap(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `[.data[] | {id, title}]`,
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "Task A", "status": "active", "extra": "noise"},
+		{"id": 2, "title": "Task B", "status": "done", "extra": "noise"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	var result []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Len(t, result, 2)
+	// Should only have id and title, not status or extra
+	assert.Equal(t, float64(1), result[0]["id"])
+	assert.Equal(t, "Task A", result[0]["title"])
+	_, hasStatus := result[0]["status"]
+	assert.False(t, hasStatus)
+}
+
+func TestWriterJQFilterEmpty(t *testing.T) {
+	// Empty filter string should not trigger jq path
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: "",
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.NoError(t, err)
+
+	// Should produce normal JSON envelope
+	var resp Response
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.True(t, resp.OK)
+}

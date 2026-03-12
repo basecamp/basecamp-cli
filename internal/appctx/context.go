@@ -47,13 +47,14 @@ type App struct {
 // GlobalFlags holds values for global CLI flags.
 type GlobalFlags struct {
 	// Output format flags
-	JSON    bool
-	Quiet   bool
-	MD      bool // Literal Markdown syntax output
-	Styled  bool // Force ANSI styled output (even when piped)
-	IDsOnly bool
-	Count   bool
-	Agent   bool
+	JSON     bool
+	Quiet    bool
+	MD       bool // Literal Markdown syntax output
+	Styled   bool // Force ANSI styled output (even when piped)
+	IDsOnly  bool
+	Count    bool
+	Agent    bool
+	JQFilter string // Built-in jq filter expression (via gojq)
 
 	// Context flags
 	Project  string
@@ -149,8 +150,9 @@ func (a *App) ApplyFlags() {
 	if a.Flags.Agent {
 		// Agent mode = quiet JSON (data only, no envelope)
 		a.Output = output.New(output.Options{
-			Format: output.FormatQuiet,
-			Writer: os.Stdout,
+			Format:   output.FormatQuiet,
+			Writer:   os.Stdout,
+			JQFilter: a.Flags.JQFilter,
 		})
 	} else if a.Flags.IDsOnly {
 		a.Output = output.New(output.Options{
@@ -164,13 +166,15 @@ func (a *App) ApplyFlags() {
 		})
 	} else if a.Flags.Quiet {
 		a.Output = output.New(output.Options{
-			Format: output.FormatQuiet,
-			Writer: os.Stdout,
+			Format:   output.FormatQuiet,
+			Writer:   os.Stdout,
+			JQFilter: a.Flags.JQFilter,
 		})
-	} else if a.Flags.JSON {
+	} else if a.Flags.JSON || a.Flags.JQFilter != "" {
 		a.Output = output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: os.Stdout,
+			Format:   output.FormatJSON,
+			Writer:   os.Stdout,
+			JQFilter: a.Flags.JQFilter,
 		})
 	} else if a.Flags.Styled {
 		// Force ANSI styled output (even when piped)
@@ -299,7 +303,7 @@ func (a *App) shouldPrintStatsToStderr() bool {
 // Use this to suppress human-friendly notices (like truncation warnings) in machine output.
 func (a *App) IsMachineOutput() bool {
 	// Flag-driven machine output modes
-	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count || a.Flags.JSON {
+	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count || a.Flags.JSON || a.Flags.JQFilter != "" {
 		return true
 	}
 	// Config-driven machine output formats
@@ -327,7 +331,7 @@ func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
 // IsInteractive returns true if the terminal supports interactive TUI.
 func (a *App) IsInteractive() bool {
 	// Not interactive if any non-interactive output mode is set
-	if a.Flags.Agent || a.Flags.JSON || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count {
+	if a.Flags.Agent || a.Flags.JSON || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count || a.Flags.JQFilter != "" {
 		return false
 	}
 

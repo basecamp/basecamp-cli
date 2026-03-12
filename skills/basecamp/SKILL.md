@@ -69,7 +69,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 
 **MUST follow these rules:**
 
-1. **Choose the right output mode** — `--json` when you need to parse data; `--md` when presenting results to a human (see Output Modes below)
+1. **Choose the right output mode** — `--jq` when you need to filter/extract data; `--json` for full JSON; `--md` when presenting results to a human (see Output Modes below). **Never pipe to external `jq` — use `--jq` instead.**
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
@@ -82,13 +82,14 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 
 | Goal | Flag | Format |
 |------|------|--------|
-| Parse data, pipe to jq | `--json` | JSON envelope: `{ok, data, summary, breadcrumbs, meta}` |
+| Filter/extract JSON data | `--jq '<expr>'` | Built-in jq filter (no external jq needed). Implies `--json`. |
+| Full JSON output | `--json` | JSON envelope: `{ok, data, summary, breadcrumbs, meta}` |
 | Show results to a user | `--md` / `-m` | GFM tables, task lists, structured Markdown |
 | Automation / scripting | `--agent` | Success: raw JSON data (no envelope); errors: `{ok:false,...}` object; no interactive prompts |
 
 Always pass `--json` or `--md` explicitly — auto-detection depends on config and may not produce the format you expect. Use `--md` when composing reports, summarizing data, or displaying results inline. `--agent` is for headless integration scripts.
 
-**Other modes:** `--quiet` (success: raw JSON, no envelope; errors: `{ok:false,...}`), `--ids-only`, `--count`, `--stats` (session statistics), `--styled` (force ANSI), `-v` / `-vv` (verbose/trace).
+**Other modes:** `--quiet` (success: raw JSON, no envelope; errors: `{ok:false,...}`), `--ids-only`, `--count`, `--stats` (session statistics), `--styled` (force ANSI), `-v` / `-vv` (verbose/trace), `--jq '<expr>'` (built-in jq filter — see below).
 
 ### CLI Introspection
 
@@ -653,20 +654,26 @@ The `error` field names the missing `<arg>` — use it to prompt the user for th
 
 **URL malformed (curl exit 3):** Special characters in content. Use plain text or properly escaped HTML.
 
-## jq Patterns
+## Built-in jq Filtering
 
-Common data extraction patterns for the output envelope:
+The CLI has a built-in `--jq` flag powered by gojq — no external `jq` binary required. **Always prefer `--jq` over piping to external `jq`.**
 
 ```bash
 # Extract fields from data array
-basecamp todos list --in <project> --json | jq '.data[] | select(.completed == false) | .title'
-basecamp todos list --in <project> --json | jq '.data | length'
-basecamp todos list --in <project> --json | jq '.data[] | {id, title, status}'
+basecamp todos list --in <project> --jq '.data[] | select(.completed == false) | .title'
+basecamp todos list --in <project> --jq '.data | length'
+basecamp todos list --in <project> --jq '[.data[] | {id, title, status}]'
 
 # Access envelope metadata
-basecamp todos list --in <project> --json | jq '.breadcrumbs[0].cmd'
-basecamp todos list --in <project> --json | jq '.meta.stats.requests'
+basecamp todos list --in <project> --jq '.breadcrumbs[0].cmd'
+basecamp todos list --in <project> --jq '.meta.stats.requests'
+
+# Filter and transform
+basecamp cards list --in <project> --jq '[.data[] | select(.completed == true) | .title]'
+basecamp people list --jq '[.data[] | {name: .name, email: .email_address}]'
 ```
+
+`--jq` implies `--json` — no need to pass both. String results print as plain text; objects and arrays print as formatted JSON.
 
 ## Exit Codes
 
