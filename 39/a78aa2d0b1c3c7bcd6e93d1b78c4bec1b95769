@@ -1,0 +1,52 @@
+e2e/smoke/smoke_todolistgroups.bats
+  672063deaab6df6a 16-31
+  6e7c4b6ba7b509de 1-15,32
+e2e/smoke/smoke_communication.bats
+  672063deaab6df6a 2,17-32,38-39,45-62,65,68,71,73-78,80,89
+  6e7c4b6ba7b509de 1,3-16,33-37,40-44,63-64,66-67,69-70,72,79,81-88,90-93
+e2e/smoke/smoke_schedule.bats
+  6e7c4b6ba7b509de 1-11,14-19,21-23
+  672063deaab6df6a 12-13,20
+e2e/smoke/smoke_tools.bats
+  672063deaab6df6a 13
+  6e7c4b6ba7b509de 1-12,14-18
+e2e/smoke/smoke_reports.bats
+  6e7c4b6ba7b509de 1-38,40-53,55-62,65-72,75-95
+  672063deaab6df6a 39,54,63-64,73-74,96-101
+e2e/smoke/smoke_checkins.bats
+  6e7c4b6ba7b509de 1-12,14-20,22-28,30-42,44-46
+  672063deaab6df6a 13,21,29,43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "39a78aa2d0b1c3c7bcd6e93d1b78c4bec1b95769",
+  "prompts": {
+    "672063deaab6df6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a42d4d2-6e53-4f19-9dca-d514f327c8fc",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 291,
+      "overriden_lines": 0
+    },
+    "6e7c4b6ba7b509de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "daf46874-88e8-4758-b85d-e42680a4dd12",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 433,
+      "overriden_lines": 0
+    }
+  }
+}
