@@ -1,0 +1,23 @@
+Makefile
+  51d8749209d2920f 100-139,500-501
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "d466ceb1eb393750c011f933683a28b1df3966f5",
+  "prompts": {
+    "51d8749209d2920f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba428b21-ae69-497f-be08-8b6f854bcd13",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 42,
+      "total_deletions": 0,
+      "accepted_lines": 42,
+      "overriden_lines": 0
+    }
+  }
+}
