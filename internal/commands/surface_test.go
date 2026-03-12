@@ -43,10 +43,29 @@ func TestSurfaceSnapshot(t *testing.T) {
 		currentSet[line] = true
 	}
 
+	// Load acknowledged breaking changes from .surface-breaking.
+	// Only entries that are actually absent from the current surface count
+	// as acknowledged removals — entries still present in the current surface
+	// are ignored so they remain protected against accidental future removal.
+	breakingPath := "../../.surface-breaking"
+	acknowledged := make(map[string]bool)
+	data, readErr := os.ReadFile(breakingPath)
+	if readErr != nil {
+		if !errors.Is(readErr, os.ErrNotExist) {
+			t.Fatalf("reading .surface-breaking: %v", readErr)
+		}
+	} else {
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line != "" && !currentSet[line] {
+				acknowledged[line] = true
+			}
+		}
+	}
+
 	// Removals: in baseline but not in current (breaking change)
 	var removals []string
 	for _, line := range baselineLines {
-		if !currentSet[line] {
+		if !currentSet[line] && !acknowledged[line] {
 			removals = append(removals, line)
 		}
 	}

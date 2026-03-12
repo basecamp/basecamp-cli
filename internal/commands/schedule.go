@@ -712,5 +712,5 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 
 // getScheduleID retrieves the schedule ID from a project's dock, handling multi-dock projects.
 func getScheduleID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "schedule", "", "schedule")
+	return getDockToolID(cmd.Context(), app, projectID, "schedule", "", "schedule", "schedule")
 }

@@ -1502,5 +1502,5 @@ func humanSize(bytes int64) string {
 
 // getVaultID retrieves the root vault ID from a project's dock, handling multi-dock projects.
 func getVaultID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "vault", "", "vault")
+	return getDockToolID(cmd.Context(), app, projectID, "vault", "", "vault", "vault")
 }

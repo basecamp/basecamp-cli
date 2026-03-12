@@ -13,6 +13,7 @@ triggers:
   - basecamp project
   - basecamp card
   - basecamp chat
+  - basecamp campfire
   - basecamp message
   - basecamp file
   - basecamp document

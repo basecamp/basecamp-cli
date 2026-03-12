@@ -402,6 +402,51 @@ func executeConfigProjectCmd(app *appctx.App, extraArgs ...string) error {
 	return cmd.Execute()
 }
 
+func TestConfigSet_ProjectAlias(t *testing.T) {
+	app, _ := setupConfigTestApp(t)
+
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+
+	require.NoError(t, os.MkdirAll(".basecamp", 0755))
+
+	err := executeConfigCommand(app, "set", "project", "12345")
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".basecamp", "config.json"))
+	require.NoError(t, err)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal(data, &saved))
+	assert.Equal(t, "12345", saved["project_id"])
+}
+
+func TestConfigUnset_ProjectAlias(t *testing.T) {
+	app, _ := setupConfigTestApp(t)
+
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+
+	// Seed a config with project_id
+	require.NoError(t, os.MkdirAll(".basecamp", 0755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, ".basecamp", "config.json"),
+		[]byte(`{"project_id":"12345"}`), 0644))
+
+	err := executeConfigCommand(app, "unset", "project")
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".basecamp", "config.json"))
+	require.NoError(t, err)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal(data, &saved))
+	_, exists := saved["project_id"]
+	assert.False(t, exists)
+}
+
 func TestConfigProject_ExplicitFlag(t *testing.T) {
 	app, buf, _ := setupConfigProjectTestApp(t)
 

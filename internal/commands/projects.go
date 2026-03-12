@@ -176,7 +176,7 @@ func newProjectsShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show project details",
-		Long:  "Display detailed information about a project including dock items.",
+		Long:  "Display detailed information about a project including its dock (the set of enabled tools: message board, to-dos, schedule, etc.).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

@@ -162,3 +162,9 @@ load test_helper
   assert_json_value '.code' 'usage'
   assert_output_contains '"error"'
 }
+
+@test "campfire alias --help shows canonical chat help" {
+  run basecamp campfire --help
+  assert_success
+  assert_output_contains "basecamp chat"
+}

@@ -31,12 +31,12 @@ func NewChatCmd() *cobra.Command {
 Use 'basecamp chat list' to see chats in a project.
 Use 'basecamp chat messages' to view recent messages.
 Use 'basecamp chat post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent supports Markdown — converted to HTML automatically\nChat is project-scoped, no cross-project chat queries"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.PersistentFlags().StringVarP(&chatID, "chat", "c", "", "Chat ID")
+	cmd.PersistentFlags().StringVarP(&chatID, "chat", "c", "", "Chat room ID (for projects with multiple chat rooms)")
 	cmd.AddCommand(
 		newChatListCmd(&project, &chatID),
 		newChatMessagesCmd(&project, &chatID),
@@ -712,5 +712,5 @@ You can pass either a line ID or a Basecamp line URL:
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
 func getChatID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat")
+	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat", "chat")
 }

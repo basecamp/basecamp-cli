@@ -35,7 +35,7 @@ Each project has exactly one message board in its dock.`,
 
 // getMessageboardID gets the message board ID from the project dock, handling multi-dock projects.
 func getMessageboardID(cmd *cobra.Command, app *appctx.App, projectID, boardID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "message_board", boardID, "message board")
+	return getDockToolID(cmd.Context(), app, projectID, "message_board", boardID, "message board", "board")
 }
 
 func newMessageboardShowCmd(project, boardID *string) *cobra.Command {

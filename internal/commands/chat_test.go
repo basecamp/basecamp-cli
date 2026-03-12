@@ -160,6 +160,12 @@ func executeChatCommand(cmd *cobra.Command, app *appctx.App, args ...string) err
 	return cmd.Execute()
 }
 
+func TestChatAliases(t *testing.T) {
+	cmd := NewChatCmd()
+	assert.Equal(t, "chat", cmd.Name())
+	assert.Contains(t, cmd.Aliases, "campfire")
+}
+
 // TestChatPostContentIsPlainText verifies that chat line content is sent as plain text,
 // not wrapped in HTML tags. The Basecamp API forces chat lines to text-only and
 // HTML-escapes the content, so sending HTML would display literal tags.
@@ -402,6 +408,9 @@ func TestChatListMultipleChats(t *testing.T) {
 	titles := []string{envelope.Data[0]["title"].(string), envelope.Data[1]["title"].(string)}
 	assert.Contains(t, titles, "General")
 	assert.Contains(t, titles, "Engineering")
+
+	// Summary should use "chats" not "campfires"
+	assert.Contains(t, buf.String(), "2 chats")
 }
 
 // TestChatListWithChatFlag verifies that `chat list -c <id>` returns
@@ -419,6 +428,9 @@ func TestChatListWithChatFlag(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
 	require.Len(t, envelope.Data, 1)
 	assert.Equal(t, "Engineering", envelope.Data[0]["title"])
+
+	// Summary should use "Chat:" not "Campfire:"
+	assert.Contains(t, buf.String(), "Chat: Engineering")
 }
 
 // mockChatDockTransport returns a project whose dock payload is configurable.

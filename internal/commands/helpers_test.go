@@ -265,7 +265,7 @@ func TestGetDockToolID_DisabledToolShowsDisabledError(t *testing.T) {
 	}
 	app := newDockTestApp(t, transport)
 
-	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat")
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "")
 	require.Error(t, err)
 
 	var e *output.Error
@@ -280,13 +280,33 @@ func TestGetDockToolID_AbsentToolShowsNotFoundError(t *testing.T) {
 	}
 	app := newDockTestApp(t, transport)
 
-	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat")
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "")
 	require.Error(t, err)
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Equal(t, output.CodeNotFound, e.Code)
 	assert.Contains(t, e.Hint, "has no chat")
+}
+
+func TestGetDockToolID_AmbiguousToolShowsFlagHint(t *testing.T) {
+	transport := &dockTestTransport{
+		projectJSON: `{"id": 1, "dock": [
+			{"name": "chat", "id": 100, "title": "General", "enabled": true},
+			{"name": "chat", "id": 200, "title": "Engineering", "enabled": true}
+		]}`,
+	}
+	app := newDockTestApp(t, transport)
+
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "chat")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "Use --chat <id> to specify.")
+	assert.Contains(t, e.Hint, "General (ID: 100)")
+	assert.Contains(t, e.Hint, "Engineering (ID: 200)")
 }
 
 func TestGetDockTools_ReturnsMultipleEnabled(t *testing.T) {
@@ -344,7 +364,7 @@ func TestGetDockToolID_AmbiguousMultipleReturnsError(t *testing.T) {
 	}
 	app := newDockTestApp(t, transport)
 
-	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "campfire")
+	_, err := getDockToolID(context.Background(), app, "1", "chat", "", "chat", "chat")
 	require.Error(t, err)
 
 	var e *output.Error

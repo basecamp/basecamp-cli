@@ -935,7 +935,7 @@ You can pass either an answer ID or a Basecamp URL:
 
 // getQuestionnaireID retrieves the questionnaire ID from a project's dock, handling multi-dock projects.
 func getQuestionnaireID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "questionnaire", "", "questionnaire")
+	return getDockToolID(cmd.Context(), app, projectID, "questionnaire", "", "questionnaire", "questionnaire")
 }
 
 // parseTimeOfDay parses a time string like "5:00pm" or "17:00" and returns hour and minute.
