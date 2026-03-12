@@ -2362,11 +2362,13 @@ func TestRenderDataStripsOSCFromTopLevelString(t *testing.T) {
 // =============================================================================
 
 func TestStyledTableFormatsDateColumns(t *testing.T) {
+	// Use date-only format to guarantee the absolute-date branch
+	// (RFC3339 timestamps would hit relative formatting if within 7 days of now).
 	data := []any{
 		map[string]any{
 			"id":         float64(1),
 			"name":       "Project A",
-			"created_at": "2024-01-15T10:00:00Z",
+			"created_at": "2024-01-15",
 		},
 	}
 	var buf bytes.Buffer
@@ -2375,18 +2377,19 @@ func TestStyledTableFormatsDateColumns(t *testing.T) {
 	require.NoError(t, err)
 
 	output := buf.String()
-	assert.NotContains(t, output, "2024-01-15T10:00:00Z",
-		"generic table should not show raw ISO8601 timestamps")
+	assert.NotContains(t, output, "2024-01-15",
+		"generic table should not show raw date string")
 	assert.Contains(t, output, "Jan 15, 2024",
 		"generic table should show human-readable date")
 }
 
 func TestMarkdownTableFormatsDateColumns(t *testing.T) {
+	// Use date-only format to guarantee the absolute-date branch.
 	data := []any{
 		map[string]any{
 			"id":         float64(1),
 			"name":       "Project A",
-			"created_at": "2024-01-15T10:00:00Z",
+			"created_at": "2024-01-15",
 		},
 	}
 	var buf bytes.Buffer
@@ -2395,8 +2398,8 @@ func TestMarkdownTableFormatsDateColumns(t *testing.T) {
 	require.NoError(t, err)
 
 	output := buf.String()
-	assert.NotContains(t, output, "2024-01-15T10:00:00Z",
-		"markdown table should not show raw ISO8601 timestamps")
+	assert.NotContains(t, output, "2024-01-15",
+		"markdown table should not show raw date string")
 	assert.Contains(t, output, "Jan 15, 2024",
 		"markdown table should show human-readable date")
 }
@@ -2410,7 +2413,7 @@ func TestSelectColumnsUsesFormattedDateWidth(t *testing.T) {
 		{key: "created_at", header: "Created", priority: 8},
 	}
 	data := []map[string]any{
-		{"name": "Test", "created_at": "2024-01-15T10:00:00Z"},
+		{"name": "Test", "created_at": "2024-01-15"},
 	}
 	selected := r.selectColumns(cols, data)
 
