@@ -50,10 +50,16 @@ level0=(
   "$SMOKE_DIR"/smoke_core.bats
   "$SMOKE_DIR"/smoke_projects.bats
   "$SMOKE_DIR"/smoke_todos_read.bats
+  "$SMOKE_DIR"/smoke_todolistgroups.bats
   "$SMOKE_DIR"/smoke_files_read.bats
   "$SMOKE_DIR"/smoke_messages_read.bats
   "$SMOKE_DIR"/smoke_cards_read.bats
   "$SMOKE_DIR"/smoke_misc_read.bats
+  "$SMOKE_DIR"/smoke_reports.bats
+  "$SMOKE_DIR"/smoke_communication.bats
+  "$SMOKE_DIR"/smoke_checkins.bats
+  "$SMOKE_DIR"/smoke_schedule.bats
+  "$SMOKE_DIR"/smoke_tools.bats
 )
 level0_exist=()
 for f in "${level0[@]}"; do
@@ -72,6 +78,12 @@ level1=(
   "$SMOKE_DIR"/smoke_files_write.bats
   "$SMOKE_DIR"/smoke_cards_write.bats
   "$SMOKE_DIR"/smoke_comments.bats
+  "$SMOKE_DIR"/smoke_campfire.bats
+  "$SMOKE_DIR"/smoke_webhooks.bats
+  "$SMOKE_DIR"/smoke_assign.bats
+  "$SMOKE_DIR"/smoke_lineup.bats
+  "$SMOKE_DIR"/smoke_communication_write.bats
+  "$SMOKE_DIR"/smoke_misc_write.bats
 )
 level1_exist=()
 for f in "${level1[@]}"; do
@@ -85,6 +97,7 @@ fi
 echo ""
 echo "--- Level 2+: Account-scoped tests (serial) ---"
 level2=(
+  "$SMOKE_DIR"/smoke_projects_write.bats
   "$SMOKE_DIR"/smoke_account.bats
   "$SMOKE_DIR"/smoke_lifecycle.bats
 )
