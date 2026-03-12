@@ -168,7 +168,7 @@ func newConfigInitCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "set",
-						Cmd:         "basecamp config set project_id <id>",
+						Cmd:         "basecamp config set project <id>",
 						Description: "Set project",
 					},
 				),
@@ -185,9 +185,9 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Set a configuration value",
 		Long: `Set a configuration value in the local or global config file.
 
-Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enabled,
-            format, scope, default_profile, hints, stats, verbose, onboarded,
-            llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
+Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_dir,
+            cache_enabled, format, scope, default_profile, hints, stats, verbose,
+            onboarded, llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
             llm_max_concurrent, llm_token_budget, experimental.<feature>`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -385,7 +385,8 @@ Valid keys: account_id, project_id, todolist_id, base_url, cache_dir, cache_enab
 
 // configKeyAliases maps short names to canonical config keys.
 var configKeyAliases = map[string]string{
-	"llm": "llm_provider",
+	"llm":     "llm_provider",
+	"project": "project_id",
 }
 
 // resolveKeyAlias returns the canonical key name, expanding aliases.
