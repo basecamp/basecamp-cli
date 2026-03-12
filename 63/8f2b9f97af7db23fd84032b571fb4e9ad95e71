@@ -1,0 +1,35 @@
+internal/commands/tools_test.go
+  dc9f937d87006880 5,87-156
+internal/commands/boost_test.go
+  dc9f937d87006880 189-217
+internal/commands/campfire.go
+  dc9f937d87006880 16,577-578,584,640-648,659,671-673
+internal/commands/tools.go
+  dc9f937d87006880 6,151-154,240-243
+skills/basecamp/SKILL.md
+  dc9f937d87006880 518
+internal/commands/campfire_test.go
+  dc9f937d87006880 83-149,354-413
+internal/commands/boost.go
+  dc9f937d87006880 6,255-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "638f2b9f97af7db23fd84032b571fb4e9ad95e71",
+  "prompts": {
+    "dc9f937d87006880": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7909ca0b-d371-4391-9aee-7c9dfab40b8d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 262,
+      "total_deletions": 2,
+      "accepted_lines": 262,
+      "overriden_lines": 0
+    }
+  }
+}
