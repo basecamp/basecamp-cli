@@ -1,0 +1,35 @@
+e2e/test_helper.bash
+  51d8749209d2920f 38-41,225-317
+e2e/recorder/record.go
+  51d8749209d2920f 1-163
+e2e/recorder/main.go
+  51d8749209d2920f 1-91
+e2e/run.sh
+  51d8749209d2920f 12-20
+e2e/qa_happypath.bats
+  51d8749209d2920f 1-109
+e2e/recorder/replay.go
+  51d8749209d2920f 1-90
+e2e/recorder/cassette.go
+  51d8749209d2920f 1-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "5b0b99c622f5a3a799063d99c0fd6eba7456be41",
+  "prompts": {
+    "51d8749209d2920f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba428b21-ae69-497f-be08-8b6f854bcd13",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 34,
+      "accepted_lines": 654,
+      "overriden_lines": 0
+    }
+  }
+}
