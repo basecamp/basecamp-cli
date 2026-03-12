@@ -138,7 +138,7 @@ func dockToolNotFoundError(all []DockTool, dockName, projectID, friendlyName str
 //
 // When exactly one tool exists, its ID is returned.
 // When no tools of the type exist, a not found error is returned.
-func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, explicitID, friendlyName string) (string, error) {
+func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, explicitID, friendlyName, flagName string) (string, error) {
 	// If explicit ID provided, use it directly
 	if explicitID != "" {
 		return explicitID, nil
@@ -166,7 +166,13 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 			}
 			toolList = append(toolList, fmt.Sprintf("%s (ID: %d)", title, tool.ID))
 		}
-		hint := fmt.Sprintf("Specify the ID directly. Available:\n  - %s", strings.Join(toolList, "\n  - "))
+		var instruction string
+		if flagName != "" {
+			instruction = fmt.Sprintf("Use --%s <id> to specify.", flagName)
+		} else {
+			instruction = "Specify the ID directly."
+		}
+		hint := fmt.Sprintf("%s Available:\n  - %s", instruction, strings.Join(toolList, "\n  - "))
 		return "", &output.Error{
 			Code:    output.CodeAmbiguous,
 			Message: fmt.Sprintf("Project has %d %ss", len(enabled), friendlyName),

@@ -44,7 +44,7 @@ that can receive forwarded emails.`,
 
 // getInboxID gets the inbox ID from the project dock, handling multi-dock projects.
 func getInboxID(cmd *cobra.Command, app *appctx.App, projectID, inboxID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "inbox", inboxID, "inbox")
+	return getDockToolID(cmd.Context(), app, projectID, "inbox", inboxID, "inbox", "inbox")
 }
 
 func newForwardsListCmd(project, inboxID *string) *cobra.Command {

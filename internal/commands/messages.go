@@ -696,5 +696,5 @@ use --message-board <id> to specify which one.`,
 
 // getMessageBoardID retrieves the message board ID from a project's dock, handling multi-dock projects.
 func getMessageBoardID(cmd *cobra.Command, app *appctx.App, projectID string, explicitID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "message_board", explicitID, "message board")
+	return getDockToolID(cmd.Context(), app, projectID, "message_board", explicitID, "message board", "message-board")
 }

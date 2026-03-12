@@ -712,5 +712,5 @@ You can pass either a line ID or a Basecamp line URL:
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
 func getChatID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat")
+	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat", "campfire")
 }
