@@ -1,0 +1,23 @@
+internal/commands/chat.go
+  9d89fb72a139f1be 275,280,379,384,392,397,498,506,602,700
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "e65dad98b00b61db41de4b03a7d4ebaa5a312b82",
+  "prompts": {
+    "9d89fb72a139f1be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1b410c79-5d23-476b-bbaf-d549e0476784",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 10,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
