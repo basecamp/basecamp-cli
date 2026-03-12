@@ -272,12 +272,12 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat %s post \"message\" --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"message\" --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "Post message",
 			},
 			output.Breadcrumb{
 				Action:      "more",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages --limit 50 --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --limit 50 --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "Load more",
 			},
 		),
@@ -376,12 +376,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat %s post \"reply\" --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "Post another",
 			},
 		)
@@ -389,12 +389,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s", chatID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat %s post \"reply\"", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --chat %s", chatID),
 				Description: "Post another",
 			},
 		)
@@ -495,7 +495,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, resolvedProjectID),
 				Description: "View messages",
 			},
 		)
@@ -503,7 +503,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat %s messages", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s", chatID),
 				Description: "View messages",
 			},
 		)
@@ -599,7 +599,7 @@ You can pass either a line ID or a Basecamp line URL:
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", effectiveChatID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
@@ -697,7 +697,7 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("basecamp chat %s messages --in %s", effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", effectiveChatID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
