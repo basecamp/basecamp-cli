@@ -208,11 +208,26 @@ func TestProfileCreateRejectsInvalidNames(t *testing.T) {
 func TestProfileCreateHasExpectedFlags(t *testing.T) {
 	cmd := newProfileCreateCmd()
 
-	flags := []string{"base-url", "scope", "account", "no-browser", "remote", "local"}
+	flags := []string{"base-url", "scope", "account", "no-browser", "remote", "local", "device-code"}
 	for _, flag := range flags {
 		f := cmd.Flags().Lookup(flag)
 		assert.NotNil(t, f, "expected flag %q to exist on create command", flag)
 	}
+}
+
+func TestProfileCreateDeviceCodeLocalExclusive(t *testing.T) {
+	root := &cobra.Command{Use: "basecamp"}
+	profileCmd := NewProfileCmd()
+	root.AddCommand(profileCmd)
+	root.SetArgs([]string{"profile", "create", "test-profile", "--base-url", "https://example.com", "--device-code", "--local"})
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(buf)
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "if any flags in the group")
+	assert.Contains(t, err.Error(), "device-code")
+	assert.Contains(t, err.Error(), "local")
 }
 
 func TestProfileCreateRejectsDuplicateName(t *testing.T) {

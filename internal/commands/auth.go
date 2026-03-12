@@ -229,6 +229,7 @@ func buildLoginCmd(use string) *cobra.Command {
 	var noBrowser bool
 	var remote bool
 	var local bool
+	var deviceCode bool
 
 	cmd := &cobra.Command{
 		Use:   use,
@@ -238,6 +239,10 @@ func buildLoginCmd(use string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if deviceCode {
+				remote = true
 			}
 
 			w := cmd.OutOrStdout()
@@ -291,7 +296,9 @@ func buildLoginCmd(use string) *cobra.Command {
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
+	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless mode: display auth URL and paste callback (alias for --remote)")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
+	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 
 	return cmd
 }

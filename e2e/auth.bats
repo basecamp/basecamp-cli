@@ -58,18 +58,27 @@ load test_helper
 
 # Auth login
 
-@test "basecamp auth login --help shows --remote and --local" {
+@test "basecamp auth login --help shows --remote, --local, and --device-code" {
   run basecamp auth login --help
   assert_success
   assert_output_contains "--remote"
   assert_output_contains "--local"
+  assert_output_contains "--device-code"
 }
 
-@test "basecamp login --help shows --remote and --local" {
+@test "basecamp login --help shows --remote, --local, and --device-code" {
   run basecamp login --help
   assert_success
   assert_output_contains "--remote"
   assert_output_contains "--local"
+  assert_output_contains "--device-code"
+}
+
+@test "basecamp auth login rejects --device-code --local" {
+  run basecamp auth login --device-code --local
+  assert_failure
+  assert_output_contains "device-code"
+  assert_output_contains "local"
 }
 
 

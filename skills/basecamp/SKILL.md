@@ -610,6 +610,7 @@ basecamp doctor --json                            # Check CLI health, auth, conn
 basecamp auth status                              # Check auth
 basecamp auth login                               # Re-authenticate
 basecamp auth login --scope full                  # Full access (BC3 OAuth only)
+basecamp auth login --device-code                 # Headless: display URL, paste callback
 ```
 
 **Network errors / localhost URLs:**

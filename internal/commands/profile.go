@@ -187,6 +187,7 @@ func newProfileCreateCmd() *cobra.Command {
 	var noBrowser bool
 	var remote bool
 	var local bool
+	var deviceCode bool
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -242,6 +243,10 @@ Examples:
 			app.Config.Profiles[name] = profileCfg
 			app.Config.ActiveProfile = name
 			app.Config.BaseURL = profileCfg.BaseURL
+
+			if deviceCode {
+				remote = true
+			}
 
 			// Start OAuth login flow — must succeed before we persist anything
 			loginResult, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
@@ -337,7 +342,9 @@ Examples:
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
+	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless mode: display auth URL and paste callback (alias for --remote)")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
+	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 
 	return cmd
 }

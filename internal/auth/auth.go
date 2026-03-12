@@ -433,18 +433,26 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 
 	if opts.Remote {
 		// Remote/headless mode: prompt user to paste callback URL
-		opts.log("\nOpen this URL in a browser on any device:")
-		opts.log("  " + authURL)
-		opts.log("\nAfter signing in, your browser will redirect to a URL starting with:")
-		opts.log("  " + redirectURI + "?code=...")
-		opts.log("\nThe page will show a connection error — this is expected.")
-		opts.log("Copy the full URL from your browser's address bar and paste it below.\n")
+		opts.log("\nRemote Authentication")
+		opts.log("")
+		opts.log("  1. Open this URL in a browser on any device:")
+		opts.log("     " + authURL)
+		opts.log("")
+		opts.log("  2. Sign in to Basecamp when prompted.")
+		opts.log("")
+		opts.log("  3. Your browser will redirect to a URL starting with:")
+		opts.log("     " + redirectURI + "?code=...&state=...")
+		opts.log("     The page will show a connection error — that's expected.")
+		opts.log("")
+		opts.log("  4. Copy the full URL from your browser's address bar and")
+		opts.log("     paste it below.")
+		opts.log("")
 
 		reader := opts.InputReader
 		if reader == nil {
 			reader = os.Stdin
 		}
-		opts.log("Callback URL: ")
+		opts.log("Paste the callback URL: ")
 
 		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()

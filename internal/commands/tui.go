@@ -14,6 +14,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/observability"
+	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/views"
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -33,6 +34,10 @@ func NewTUICmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+			if !app.Config.IsExperimental("tui") {
+				return output.ErrUsage(
+					`experimental feature "tui" is not enabled; run: basecamp config set experimental.tui true --global`)
 			}
 			printDevNotice(app.Config.CacheDir)
 			return ensureAccount(cmd, app)

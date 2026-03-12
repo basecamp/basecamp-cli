@@ -928,6 +928,82 @@ func TestLoginRemoteMode(t *testing.T) {
 	assert.Equal(t, "remote-tok", creds.AccessToken)
 }
 
+func TestLoginRemoteMode_PromptWording(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"authorization_endpoint": "%s/authorize",
+				"token_endpoint": "%s/token",
+				"registration_endpoint": "%s/register"
+			}`, base, base, base)
+		case "/register":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"client_id":"test-client","client_secret":"test-secret"}`)
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"tok","token_type":"bearer","refresh_token":"ref"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+		errCh <- err
+	}()
+
+	var authURL string
+	select {
+	case authURL = <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL")
+	}
+
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	state := u.Query().Get("state")
+	require.NotEmpty(t, state)
+
+	callbackURL := fmt.Sprintf("http://127.0.0.1:8976/callback?code=c&state=%s\n", state)
+	_, _ = pw.Write([]byte(callbackURL))
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+
+	logs := sl.snapshot()
+	joined := strings.Join(logs, "\n")
+
+	assert.Contains(t, joined, "Remote Authentication", "should show heading")
+	assert.Contains(t, joined, "1. Open this URL", "should show step 1")
+	assert.Contains(t, joined, "4. Copy the full URL", "should show step 4")
+	assert.Contains(t, joined, "Paste the callback URL", "should show updated prompt")
+}
+
 func TestLoginRemoteMode_StateMismatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

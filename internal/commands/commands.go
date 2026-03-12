@@ -134,7 +134,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "mcp", Category: "additional", Description: "MCP server integration", Actions: []string{"server"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},
 				{Name: "skill", Category: "additional", Description: "Manage the embedded agent skill file", Actions: []string{"install"}},
-				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", DevOnly: true},
+				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true, DevOnly: true},
 				{Name: "bonfire", Category: "additional", Description: "Multi-chat orchestration", Actions: []string{"split", "layout"}, Experimental: true, DevOnly: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
 				{Name: "help", Category: "additional", Description: "Show help"},

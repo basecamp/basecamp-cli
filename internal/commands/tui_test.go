@@ -3,6 +3,8 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -60,5 +64,58 @@ func TestPrintDevNotice(t *testing.T) {
 		printDevNotice(dir)
 		_, err = os.Stat(filepath.Join(dir, "dev-tui-0.2.0-test"))
 		assert.NoError(t, err, "new version should create a new sentinel")
+	})
+}
+
+func TestTUIExperimentalGate(t *testing.T) {
+	orig := version.Version
+	t.Cleanup(func() { version.Version = orig })
+	version.Version = "0.1.0-test"
+
+	t.Run("blocked before side effects when experimental.tui is off", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		cfg := config.Default()
+		cfg.CacheDir = cacheDir
+		// No experimental.tui set
+		app := appctx.NewApp(cfg)
+
+		cmd := NewTUICmd()
+		ctx := appctx.WithApp(context.Background(), app)
+		cmd.SetContext(ctx)
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `experimental feature "tui" is not enabled`)
+
+		// No dev-tui sentinel should exist — gate must run before printDevNotice
+		matches, _ := filepath.Glob(filepath.Join(cacheDir, "dev-tui-*"))
+		assert.Empty(t, matches, "sentinel file must not be created when experimental gate blocks")
+	})
+
+	t.Run("passes gate when experimental.tui is true", func(t *testing.T) {
+		cacheDir := t.TempDir()
+		cfg := config.Default()
+		cfg.CacheDir = cacheDir
+		cfg.AccountID = "12345"
+		cfg.Experimental = map[string]bool{"tui": true}
+		app := appctx.NewApp(cfg)
+
+		cmd := NewTUICmd()
+		ctx := appctx.WithApp(context.Background(), app)
+		cmd.SetContext(ctx)
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		// PreRunE should succeed (experimental gate passes, ensureAccount succeeds
+		// with numeric AccountID). RunE will fail because there's no real workspace,
+		// but PreRunE is what we're testing.
+		err := cmd.PreRunE(cmd, nil)
+		require.NoError(t, err)
+
+		// dev-tui sentinel should exist — printDevNotice ran after gate passed
+		matches, _ := filepath.Glob(filepath.Join(cacheDir, "dev-tui-*"))
+		assert.NotEmpty(t, matches, "sentinel file must be created when experimental gate passes")
 	})
 }
