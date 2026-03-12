@@ -148,8 +148,10 @@ For example, clone a Campfire to create a second chat room in the same project.`
 				title = args[0]
 			}
 
-			if title != "" && utf8.RuneCountInString(title) > 64 {
-				return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", utf8.RuneCountInString(title)))
+			if title != "" {
+				if n := utf8.RuneCountInString(title); n > 64 {
+					return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", n))
+				}
 			}
 
 			// Resolve project, with interactive fallback
@@ -237,8 +239,8 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 
 			title := args[1]
 
-			if utf8.RuneCountInString(title) > 64 {
-				return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", utf8.RuneCountInString(title)))
+			if n := utf8.RuneCountInString(title); n > 64 {
+				return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", n))
 			}
 
 			// Resolve project, with interactive fallback
