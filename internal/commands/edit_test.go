@@ -11,7 +11,7 @@ import (
 )
 
 // runCmdWithFlagsAndArgs creates a command, sets flags, sets args, and runs it.
-func runCmdWithFlagsAndArgs(newCmd func() *cobra.Command, flags map[string]string, args []string) error {
+func runCmdWithFlagsAndArgs(newCmd func() *cobra.Command, flags map[string]string, args []string) error { //nolint:unused // false positive on Linux CI
 	cmd := newCmd()
 	cmd.SetContext(context.Background())
 	for k, v := range flags {

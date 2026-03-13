@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
-	"github.com/basecamp/cli/oauthcallback"
 	"github.com/basecamp/cli/pkce"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
@@ -430,6 +429,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 	}
 
 	var code string
+	resolve := func(bool) {} // no-op default for remote mode
 
 	if opts.Remote {
 		// Remote/headless mode: prompt user to paste callback URL
@@ -486,11 +486,12 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
-		code, err = oauthcallback.WaitForCallback(waitCtx, state, listener, "")
+		code, resolve, err = waitForCallback(waitCtx, state, listener)
 		if err != nil {
 			return nil, err
 		}
 	}
+	defer resolve(false) // safety net: signal failure if we return without explicit resolve
 
 	// Exchange code for tokens
 	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds, &opts)
@@ -506,6 +507,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		return nil, err
 	}
 
+	resolve(true)
 	return &LoginResult{OAuthType: oauthType, Scope: effectiveScope}, nil
 }
 

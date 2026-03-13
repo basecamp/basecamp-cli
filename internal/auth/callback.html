@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Basecamp CLI</title>
+  <style>
+    * {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}
+
+    body {
+      align-items: center;
+      background: #f6f2ef;
+      color: #333;
+      display: flex;
+			font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      font-size: 17px;
+      justify-content: center;
+			line-height: 1.4;
+      min-height: 100vh;
+    }
+
+    .card {
+			background: #fff;
+			border-radius: 6px;
+			box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.25);
+      inline-size: 100%;
+      max-inline-size: 420px;
+			padding: 25px;
+      text-align: center;
+    }
+
+    .logo {
+      display: inline-block;
+      margin-block-end: 4px;
+      position: relative;
+    }
+
+    .logo svg { display: block; }
+
+    .badge {
+      align-items: center;
+      block-size: 25px;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      bottom: -2px;
+      display: flex;
+      inline-size: 25px;
+      place-items: center;
+      position: absolute;
+      right: -2px;
+    }
+
+    .badge svg {
+      block-size: 14px;
+      inline-size: 14px;
+      margin: auto;
+    }
+
+    .badge-success { background: #34a853; }
+    .badge-error   { background: #d93025; }
+    
+    .badge-warning { 
+      background: #f9a825;
+
+      svg {
+        block-size: 18px;
+        inline-size: 18px;
+      }
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+			line-height: 1.2;
+			margin: 0 0 4px;
+    }
+
+    p {
+      color: #7f7f7f;
+      font-size: 15px;
+			margin: 0;
+    }
+
+    code {
+      background: #eee;
+      border-radius: 0.5em;
+      color: #6f6f6f;
+      font-family: monospace;
+      font-weight: 500;
+      padding-inline: 0.5ch;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {{.Content}}
+  </div>
+</body>
+</html>
