@@ -4,6 +4,11 @@
 # Provides resource discovery (ensure_*), trace capture, and test state
 # management (mark_unverifiable, mark_out_of_scope).
 #
+# ensure_* helpers are read-only: they discover existing resources via dock
+# inspection or list commands, never create or mutate. Factory-mode
+# provisioning (enabling dock tools, creating resources) happens in
+# smoke_provision.sh before any test phase.
+#
 # Requires: BASECAMP_PROFILE or BASECAMP_TOKEN set in the environment.
 
 # Stash env vars before loading test_helper, whose setup() unsets them.
@@ -14,6 +19,18 @@ _SMOKE_PROJECT_ID="${BASECAMP_PROJECT_ID:-}"
 _SMOKE_PROFILE="${BASECAMP_PROFILE:-}"
 _SMOKE_LAUNCHPAD_URL="${BASECAMP_LAUNCHPAD_URL:-}"
 _SMOKE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/basecamp"
+
+# Source pre-provisioned environment (dock tools enabled, data resources created).
+# smoke_provision.sh writes this before any test phase runs.
+_QA_ENV_FILE="${QA_TRACE_DIR:-}/qa-env.sh"
+if [[ -n "${QA_TRACE_DIR:-}" && -f "$_QA_ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$_QA_ENV_FILE"
+  # Update stash with provisioned values so setup_extra restores them
+  # after test_helper's setup() clears BASECAMP_* vars.
+  [[ -n "${BASECAMP_ACCOUNT_ID:-}" ]] && _SMOKE_ACCOUNT_ID="$BASECAMP_ACCOUNT_ID"
+  [[ -n "${BASECAMP_PROJECT_ID:-}" ]] && _SMOKE_PROJECT_ID="$BASECAMP_PROJECT_ID"
+fi
 
 # Load the base test helper for assertions
 SMOKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,12 +118,14 @@ run_smoke() {
 }
 
 
-# --- Resource discovery ---
+# --- Resource discovery (read-only) ---
 #
 # Each ensure_* is idempotent. Exports a QA_* variable.
-# Discovery uses direct API calls to avoid running the exact CLI commands
-# that the smoke tests are verifying (prevents regressions from being
-# masked as "unverifiable").
+# Discovery uses dock inspection (projects show) or list commands —
+# never the specific CLI command under test (anti-masking contract).
+#
+# No mutations here. smoke_provision.sh handles all enables/creates
+# before any test phase runs.
 
 ensure_token() {
   # Profile-based auth carries the token implicitly
@@ -174,6 +193,19 @@ ensure_project() {
   export QA_PROJECT
 }
 
+# _project_dock — cached project dock JSON for dock-based discovery.
+# Avoids repeated projects show calls within a single setup_file.
+_QA_DOCK_JSON=""
+_project_dock() {
+  if [[ -z "$_QA_DOCK_JSON" ]]; then
+    _QA_DOCK_JSON=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
+      mark_unverifiable "Cannot show project $QA_PROJECT"
+      return 1
+    }
+  fi
+  echo "$_QA_DOCK_JSON"
+}
+
 ensure_todolist() {
   [[ -n "${QA_TODOLIST:-}" ]] && return 0
   ensure_project || return 1
@@ -212,14 +244,12 @@ ensure_messageboard() {
   [[ -n "${QA_MESSAGEBOARD:-}" ]] && return 0
   ensure_project || return 1
 
-  local out
-  out=$(basecamp messageboards show -p "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot find message board in project $QA_PROJECT"
-    return 1
-  }
-  QA_MESSAGEBOARD=$(echo "$out" | jq -r '.data.id // empty')
+  # Discover via dock inspection (not messageboards show, which is under test).
+  local dock
+  dock=$(_project_dock) || return 1
+  QA_MESSAGEBOARD=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "message_board" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_MESSAGEBOARD" ]]; then
-    mark_unverifiable "No message board in project $QA_PROJECT"
+    mark_unverifiable "No message board in project $QA_PROJECT dock"
     return 1
   fi
   export QA_MESSAGEBOARD
@@ -231,12 +261,9 @@ ensure_cardtable() {
 
   # Detect card table from the project dock (kanban_board) rather than
   # requiring existing cards. This matches getCardTableID in cards.go.
-  local out
-  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot show project $QA_PROJECT"
-    return 1
-  }
-  QA_CARDTABLE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "kanban_board" and .enabled == true) | .id][0] // empty')
+  local dock
+  dock=$(_project_dock) || return 1
+  QA_CARDTABLE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "kanban_board" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_CARDTABLE" ]]; then
     mark_unverifiable "No card table in project $QA_PROJECT dock"
     return 1
@@ -248,12 +275,9 @@ ensure_campfire() {
   [[ -n "${QA_CAMPFIRE:-}" ]] && return 0
   ensure_project || return 1
 
-  local out
-  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot show project $QA_PROJECT"
-    return 1
-  }
-  QA_CAMPFIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "chat" and .enabled == true) | .id][0] // empty')
+  local dock
+  dock=$(_project_dock) || return 1
+  QA_CAMPFIRE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "chat" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_CAMPFIRE" ]]; then
     mark_unverifiable "No campfire in project $QA_PROJECT dock"
     return 1
@@ -317,14 +341,12 @@ ensure_schedule() {
   [[ -n "${QA_SCHEDULE:-}" ]] && return 0
   ensure_project || return 1
 
-  local out
-  out=$(basecamp schedule info -p "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot show schedule in project $QA_PROJECT"
-    return 1
-  }
-  QA_SCHEDULE=$(echo "$out" | jq -r '.data.id // empty')
+  # Discover via dock inspection (not schedule info, which is under test).
+  local dock
+  dock=$(_project_dock) || return 1
+  QA_SCHEDULE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "schedule" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_SCHEDULE" ]]; then
-    mark_unverifiable "No schedule in project $QA_PROJECT"
+    mark_unverifiable "No schedule in project $QA_PROJECT dock"
     return 1
   fi
   export QA_SCHEDULE
@@ -334,12 +356,9 @@ ensure_questionnaire() {
   [[ -n "${QA_QUESTIONNAIRE:-}" ]] && return 0
   ensure_project || return 1
 
-  local out
-  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot show project $QA_PROJECT"
-    return 1
-  }
-  QA_QUESTIONNAIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "questionnaire" and .enabled == true) | .id][0] // empty')
+  local dock
+  dock=$(_project_dock) || return 1
+  QA_QUESTIONNAIRE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "questionnaire" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_QUESTIONNAIRE" ]]; then
     mark_unverifiable "No questionnaire in project $QA_PROJECT dock"
     return 1
@@ -351,12 +370,9 @@ ensure_inbox() {
   [[ -n "${QA_INBOX:-}" ]] && return 0
   ensure_project || return 1
 
-  local out
-  out=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot show project $QA_PROJECT"
-    return 1
-  }
-  QA_INBOX=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "inbox" and .enabled == true) | .id][0] // empty')
+  local dock
+  dock=$(_project_dock) || return 1
+  QA_INBOX=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "inbox" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_INBOX" ]]; then
     mark_unverifiable "No inbox in project $QA_PROJECT dock"
     return 1

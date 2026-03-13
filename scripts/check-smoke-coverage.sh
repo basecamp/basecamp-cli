@@ -173,13 +173,22 @@ for leaf in "${leaves[@]}"; do
   fi
 done
 
-echo "Leaf commands: ${#leaves[@]}"
-echo "Tested: ${#tested[@]}"
-echo "OOS: ${#oos[@]}"
-echo "Unverifiable: ${#unverifiable[@]}"
-echo "Uncovered: ${#uncovered[@]}"
+# Compute counts (set +u guards against Bash 4.x empty associative array bug)
+set +u
+num_leaves=${#leaves[@]}
+num_tested=${#tested[@]}
+num_oos=${#oos[@]}
+num_unverifiable=${#unverifiable[@]}
+num_uncovered=${#uncovered[@]}
+set -u
 
-if [[ ${#uncovered[@]} -gt 0 ]]; then
+echo "Leaf commands: $num_leaves"
+echo "Tested: $num_tested"
+echo "OOS: $num_oos"
+echo "Unverifiable: $num_unverifiable"
+echo "Uncovered: $num_uncovered"
+
+if [[ $num_uncovered -gt 0 ]]; then
   echo ""
   echo "UNCOVERED COMMANDS:"
   printf '  %s\n' "${uncovered[@]}" | sort

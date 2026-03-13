@@ -322,9 +322,14 @@ replace-check:
 	fi
 	@echo "Replace check passed (no local replace directives)"
 
+# Verify every leaf command is accounted for in smoke tests
+.PHONY: check-smoke-coverage
+check-smoke-coverage: build
+	@scripts/check-smoke-coverage.sh
+
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e check-naming check-surface check-skill-drift check-bare-groups provenance-check tidy-check
+check: fmt-check vet lint test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-smoke-coverage provenance-check tidy-check
 
 # Full pre-flight for release: check + replace-check + vuln + race + surface compat
 .PHONY: release-check
