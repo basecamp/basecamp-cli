@@ -1,0 +1,37 @@
+e2e/smoke/smoke_lineup.bats
+  f745e4493b9b03b7 2,4-6
+Makefile
+  f745e4493b9b03b7 325-329,332
+e2e/smoke/smoke_provision.sh
+  f745e4493b9b03b7 1-156
+e2e/smoke/.qa-allowlist
+  f745e4493b9b03b7 7,9-11,13,17-20,27,29
+scripts/check-smoke-coverage.sh
+  f745e4493b9b03b7 176-191
+e2e/smoke/run_smoke.sh
+  f745e4493b9b03b7 55-62
+e2e/smoke/smoke_lifecycle.bats
+  f745e4493b9b03b7 131-140
+e2e/smoke/smoke_helper.bash
+  f745e4493b9b03b7 7-11,23-34,121,124-128,196-206,247-250,252,264-266,278-280,344-347,349,359-361,373-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "d27bb3e47246ee8ba5df133dedb8bdd28eff9089",
+  "prompts": {
+    "f745e4493b9b03b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e22aea6-ac83-4320-9d60-b1286b368756",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 452,
+      "total_deletions": 308,
+      "accepted_lines": 291,
+      "overriden_lines": 0
+    }
+  }
+}
