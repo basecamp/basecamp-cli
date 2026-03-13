@@ -1,0 +1,25 @@
+internal/output/envelope.go
+  3caf0739a556d0b8 112-115
+internal/commands/skill.go
+  3caf0739a556d0b8 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "5e4ee597f1ee835974a9c831b9d6a1061b17164d",
+  "prompts": {
+    "3caf0739a556d0b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "79b835b6-ff2e-4b81-ad81-8360daa79b38",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 2,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
