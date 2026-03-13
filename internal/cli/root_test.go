@@ -130,6 +130,87 @@ func TestResolvePreferences(t *testing.T) {
 	}
 }
 
+// isolateRootTest sets env vars for hermetic root tests.
+func isolateRootTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+}
+
+func TestJQInvalidExpressionRejectedBeforeRunE(t *testing.T) {
+	isolateRootTest(t)
+
+	root := NewRootCmd()
+	root.AddCommand(commands.NewConfigCmd())
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"config", "show", "--jq", ".[invalid"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --jq expression")
+}
+
+func TestJQCompileErrorRejectedBeforeRunE(t *testing.T) {
+	isolateRootTest(t)
+
+	root := NewRootCmd()
+	root.AddCommand(commands.NewConfigCmd())
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"config", "show", "--jq", "$__loc__"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --jq expression")
+}
+
+func TestJQWithIDsOnlyConflict(t *testing.T) {
+	isolateRootTest(t)
+
+	root := NewRootCmd()
+	root.AddCommand(commands.NewConfigCmd())
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"config", "show", "--jq", ".data", "--ids-only"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot use --jq with --ids-only")
+}
+
+func TestJQWithCountConflict(t *testing.T) {
+	isolateRootTest(t)
+
+	root := NewRootCmd()
+	root.AddCommand(commands.NewConfigCmd())
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"config", "show", "--jq", ".data", "--count"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot use --jq with --count")
+}
+
+func TestIsMachineConsumerWithJQ(t *testing.T) {
+	root := NewRootCmd()
+	_ = root.PersistentFlags().Set("jq", ".data")
+
+	assert.True(t, isMachineConsumer(root))
+}
+
+func TestIsMachineConsumerWithoutJQ(t *testing.T) {
+	// Without any flags and with stdout as a terminal (in tests it's not a terminal),
+	// the piped stdout should make this return true in test context.
+	root := NewRootCmd()
+
+	// isMachineConsumer checks stdout which in tests is not a TTY.
+	// This is fine — it returns true because stdout is piped.
+	assert.True(t, isMachineConsumer(root))
+}
+
 func TestVersionSubcommand(t *testing.T) {
 	orig := version.Version
 	version.Version = "1.2.3"
@@ -146,4 +227,16 @@ func TestVersionSubcommand(t *testing.T) {
 	err := root.Execute()
 	require.NoError(t, err)
 	assert.Equal(t, "basecamp version 1.2.3\n", buf.String())
+}
+
+func TestVersionWithJQReturnsUsageError(t *testing.T) {
+	root := NewRootCmd()
+	root.AddCommand(commands.NewVersionCmd())
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"version", "--jq", ".x"})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--jq is not supported by the version command")
 }

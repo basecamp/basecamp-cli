@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/itchyny/gojq"
+
 	clioutput "github.com/basecamp/cli/output"
 
 	"github.com/basecamp/basecamp-cli/internal/observability"
@@ -71,9 +73,10 @@ const (
 
 // Options controls output behavior.
 type Options struct {
-	Format  Format
-	Writer  io.Writer
-	Verbose bool
+	Format   Format
+	Writer   io.Writer
+	Verbose  bool
+	JQFilter string // jq expression to apply to JSON output (built-in via gojq)
 }
 
 // DefaultOptions returns options for standard output.
@@ -87,14 +90,31 @@ func DefaultOptions() Options {
 // Writer handles all output formatting.
 type Writer struct {
 	opts Options
+	jq   *gojq.Code // compiled jq filter, nil when JQFilter is empty
 }
 
 // New creates a new output writer.
+// If JQFilter is set, the jq expression is parsed and compiled eagerly so
+// errors surface immediately rather than on the first write.
 func New(opts Options) *Writer {
 	if opts.Writer == nil {
 		opts.Writer = os.Stdout
 	}
-	return &Writer{opts: opts}
+	w := &Writer{opts: opts}
+	if opts.JQFilter != "" {
+		q, err := gojq.Parse(opts.JQFilter)
+		if err == nil {
+			code, err := gojq.Compile(q, gojq.WithEnvironLoader(os.Environ))
+			if err == nil {
+				w.jq = code
+			}
+		}
+		// Best-effort: invalid expressions are caught earlier in PersistentPreRunE;
+		// this avoids re-parsing on every write. If compilation fails here (e.g.
+		// fallback writer built without early validation), writeJQ re-parses and
+		// returns the error on first use.
+	}
+	return w
 }
 
 // EffectiveFormat resolves FormatAuto based on TTY detection.
@@ -164,6 +184,11 @@ func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
 }
 
 func (w *Writer) write(v any) error {
+	// --jq flag: serialize to JSON, apply the jq filter, print results
+	if w.opts.JQFilter != "" {
+		return w.writeJQ(v)
+	}
+
 	format := w.opts.Format
 
 	// Auto-detect format: TTY → Styled, non-TTY → JSON
@@ -193,6 +218,70 @@ func (w *Writer) write(v any) error {
 	default:
 		return w.writeJSON(v)
 	}
+}
+
+// writeJQ serializes to JSON, applies a jq filter via gojq, and writes results.
+// When the output format is FormatQuiet (--agent/--quiet), the filter runs on
+// the data-only payload; otherwise it runs on the full JSON envelope.
+func (w *Writer) writeJQ(v any) error {
+	code := w.jq
+	if code == nil {
+		// Fallback: parse+compile on demand (covers edge case where New failed silently)
+		q, err := gojq.Parse(w.opts.JQFilter)
+		if err != nil {
+			return ErrJQValidation(err)
+		}
+		code, err = gojq.Compile(q, gojq.WithEnvironLoader(os.Environ))
+		if err != nil {
+			return ErrJQValidation(err)
+		}
+	}
+
+	// Determine what to feed the jq filter based on output format.
+	// Quiet/agent modes strip the envelope; the jq input should match.
+	target := v
+	if resp, ok := v.(*Response); ok {
+		respCopy := *resp
+		respCopy.Data = NormalizeData(resp.Data)
+
+		if w.opts.Format == FormatQuiet {
+			target = respCopy.Data
+		} else {
+			target = &respCopy
+		}
+	}
+
+	// Serialize to JSON then back to interface{} so gojq gets plain types
+	raw, err := json.Marshal(target)
+	if err != nil {
+		return ErrJQRuntime(fmt.Errorf("marshal: %w", err))
+	}
+	var input any
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return ErrJQRuntime(fmt.Errorf("unmarshal: %w", err))
+	}
+
+	iter := code.Run(input)
+	for {
+		result, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if err, ok := result.(error); ok {
+			return ErrJQRuntime(err)
+		}
+		// Print strings without JSON encoding for cleaner output
+		if s, ok := result.(string); ok {
+			fmt.Fprintln(w.opts.Writer, s)
+		} else {
+			raw, err := json.Marshal(result)
+			if err != nil {
+				return ErrJQRuntime(fmt.Errorf("result not serializable: %w", err))
+			}
+			fmt.Fprintln(w.opts.Writer, string(raw))
+		}
+	}
+	return nil
 }
 
 // isTTY checks if the writer is a terminal.

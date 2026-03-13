@@ -196,8 +196,8 @@ Output modes:
 			}
 
 			// Output raw token by default for backwards compatibility with shell scripts.
-			// Only use JSON envelope when --json is explicitly requested.
-			if app.Flags.JSON || app.Flags.Agent {
+			// Only use JSON envelope when --json/--agent/--jq is explicitly requested.
+			if app.Flags.JSON || app.Flags.Agent || app.Flags.JQFilter != "" {
 				return app.OK(map[string]string{"token": token})
 			}
 
@@ -239,6 +239,10 @@ func buildLoginCmd(use string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if app.Flags.JQFilter != "" {
+				return output.ErrJQNotSupported("the login command")
 			}
 
 			if deviceCode {

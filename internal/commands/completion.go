@@ -68,6 +68,9 @@ PowerShell:
 		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 		Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app := appctx.FromContext(cmd.Context()); app != nil && app.Flags.JQFilter != "" {
+				return output.ErrJQNotSupported("completion script generation")
+			}
 			return runCompletion(cmd.Root(), args[0])
 		},
 	}
@@ -125,6 +128,9 @@ macOS:
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app := appctx.FromContext(cmd.Context()); app != nil && app.Flags.JQFilter != "" {
+				return output.ErrJQNotSupported("completion script generation")
+			}
 			return cmd.Root().GenBashCompletionV2(os.Stdout, true)
 		},
 	}
@@ -155,6 +161,9 @@ Or install to a directory in your fpath (add BEFORE compinit in ~/.zshrc):
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app := appctx.FromContext(cmd.Context()); app != nil && app.Flags.JQFilter != "" {
+				return output.ErrJQNotSupported("completion script generation")
+			}
 			return cmd.Root().GenZshCompletion(os.Stdout)
 		},
 	}
@@ -176,6 +185,9 @@ You will need to start a new shell for this setup to take effect.
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app := appctx.FromContext(cmd.Context()); app != nil && app.Flags.JQFilter != "" {
+				return output.ErrJQNotSupported("completion script generation")
+			}
 			return cmd.Root().GenFishCompletion(os.Stdout, true)
 		},
 	}
@@ -195,6 +207,9 @@ to your powershell profile.
 `,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app := appctx.FromContext(cmd.Context()); app != nil && app.Flags.JQFilter != "" {
+				return output.ErrJQNotSupported("completion script generation")
+			}
 			return cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
 		},
 	}
