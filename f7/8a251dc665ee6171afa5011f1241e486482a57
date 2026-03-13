@@ -1,0 +1,23 @@
+scripts/check-smoke-coverage.sh
+  101fabf4a35d3782 1-153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "f78a251dc665ee6171afa5011f1241e486482a57",
+  "prompts": {
+    "101fabf4a35d3782": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "abdda2e8-81e3-4522-a070-9d1cf1e097a2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1247,
+      "total_deletions": 27,
+      "accepted_lines": 1226,
+      "overriden_lines": 0
+    }
+  }
+}
