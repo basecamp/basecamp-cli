@@ -673,6 +673,7 @@ func TestResolveMentions(t *testing.T) {
 			"John Doe":      {"sgid-john", "John Doe"},
 			"Igor":          {"sgid-igor", "Igor Logachev"},
 			"Igor Logachev": {"sgid-igor", "Igor Logachev"},
+			"José":          {"sgid-jose", "José García"},
 		}
 		if p, ok := people[name]; ok {
 			return p[0], p[1], nil
@@ -720,6 +721,21 @@ func TestResolveMentions(t *testing.T) {
 			name:    "unresolved mention is error",
 			input:   `<p>Hey @Unknown</p>`,
 			wantErr: true,
+		},
+		{
+			name:     "mention inside HTML tag is skipped",
+			input:    `<a href="@John">link</a>`,
+			expected: `<a href="@John">link</a>`,
+		},
+		{
+			name:     "mention inside existing bc-attachment is skipped",
+			input:    `<bc-attachment sgid="x" content-type="application/vnd.basecamp.mention">@John</bc-attachment>`,
+			expected: `<bc-attachment sgid="x" content-type="application/vnd.basecamp.mention">@John</bc-attachment>`,
+		},
+		{
+			name:     "unicode name mention",
+			input:    `<p>Hey @José, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("sgid-jose", "José García") + `, check this</p>`,
 		},
 	}
 

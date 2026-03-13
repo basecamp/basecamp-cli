@@ -77,8 +77,9 @@ var (
 // reMentionInput matches @Name or @First.Last in user input.
 // Group 1: prefix character (whitespace, >, or empty at start of string).
 // Group 2: the @mention itself.
+// Uses Unicode letter/digit classes to support non-ASCII names (e.g., @José, @Zoë).
 // Does not match mid-word (e.g., user@example.com).
-var reMentionInput = regexp.MustCompile(`(^|[\s>])(@[\w]+(?:\.[\w]+)*)`)
+var reMentionInput = regexp.MustCompile(`(^|[\s>])(@[\pL\pN_]+(?:\.[\pL\pN_]+)*)`)
 
 // Pre-compiled regexes for IsHTML detection
 var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
@@ -639,6 +640,7 @@ func MentionToHTML(sgid, name string) string {
 
 // ResolveMentions scans HTML for @Name and @First.Last patterns, resolves each
 // to a person via the lookup function, and replaces with <bc-attachment> mention tags.
+// Skips matches inside HTML tags, attributes, and existing <bc-attachment> elements.
 // Returns the HTML unchanged if no mentions are found.
 func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
 	matches := reMentionInput.FindAllStringSubmatchIndex(html, -1)
@@ -653,6 +655,12 @@ func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
 		// Group 1: prefix (whitespace/> or empty for start of string)
 		// Group 2: the @mention itself
 		mentionStart, mentionEnd := m[4], m[5]
+
+		// Skip mentions inside HTML tags or existing <bc-attachment> elements
+		if isInsideHTMLTag(html, mentionStart) || isInsideBcAttachment(html, mentionStart) {
+			continue
+		}
+
 		mention := html[mentionStart:mentionEnd]
 
 		// Strip @ and convert dots to spaces for name lookup
@@ -668,6 +676,33 @@ func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
 	}
 
 	return result, nil
+}
+
+// isInsideHTMLTag checks if position pos is inside an HTML tag (between < and >).
+func isInsideHTMLTag(s string, pos int) bool {
+	// Walk backwards from pos looking for < or >
+	for i := pos - 1; i >= 0; i-- {
+		if s[i] == '>' {
+			return false // closed tag before us
+		}
+		if s[i] == '<' {
+			return true // inside a tag
+		}
+	}
+	return false
+}
+
+// isInsideBcAttachment checks if position pos is inside a <bc-attachment>...</bc-attachment> element.
+func isInsideBcAttachment(s string, pos int) bool {
+	// Find the last <bc-attachment before pos
+	prefix := s[:pos]
+	openIdx := strings.LastIndex(prefix, "<bc-attachment")
+	if openIdx == -1 {
+		return false
+	}
+	// Check that there's no </bc-attachment> closing tag between the open and pos
+	between := s[openIdx:pos]
+	return !strings.Contains(between, "</bc-attachment>")
 }
 
 // IsHTML attempts to detect if the input string contains HTML.

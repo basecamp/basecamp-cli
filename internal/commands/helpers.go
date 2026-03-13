@@ -470,9 +470,9 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 	return nil, nil
 }
 
-// resolveMentions scans HTML for @Name mentions and replaces them with
-// Basecamp mention attachment tags. Silently returns unchanged HTML if
-// no mentions are found. Errors if a mentioned name cannot be resolved.
+// resolveMentions scans HTML for @Name and @First.Last mentions and replaces
+// them with Basecamp mention attachment tags. Silently returns unchanged HTML
+// if no mentions are found. Errors if a mentioned name cannot be resolved.
 func resolveMentions(ctx context.Context, resolver *names.Resolver, html string) (string, error) {
 	return richtext.ResolveMentions(html, func(name string) (string, string, error) {
 		person, err := resolver.ResolvePersonByName(ctx, name)

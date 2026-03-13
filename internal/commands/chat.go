@@ -361,12 +361,17 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		return output.ErrUsage("Invalid chat ID")
 	}
 
-	// Resolve @mentions — if any are found, content becomes HTML
-	resolved, resolveErr := resolveMentions(cmd.Context(), app.Names, content)
+	// Resolve @mentions — if any are found, content becomes HTML.
+	// HTML-escape plain text first so characters like < > & are safe.
+	mentionInput := content
+	if contentType == "" {
+		mentionInput = richtext.MarkdownToHTML(content)
+	}
+	resolved, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionInput)
 	if resolveErr != nil {
 		return resolveErr
 	}
-	if resolved != content {
+	if resolved != mentionInput {
 		content = resolved
 		if contentType == "" {
 			contentType = "text/html"
