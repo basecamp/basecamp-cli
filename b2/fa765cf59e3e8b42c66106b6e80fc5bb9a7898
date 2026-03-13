@@ -1,0 +1,49 @@
+e2e/smoke/smoke_misc_read.bats
+  672063deaab6df6a 14,31-32
+e2e/smoke/smoke_files_read.bats
+  672063deaab6df6a 9
+e2e/smoke/smoke_helper.bash
+  672063deaab6df6a 7,14-16,25-32,42-44,112-115,117,145-150,155,239,256,342,359
+e2e/smoke/smoke_lineup.bats
+  672063deaab6df6a 3-5,11,15-19,24,28
+e2e/smoke/smoke_projects_write.bats
+  672063deaab6df6a 8
+e2e/smoke/run_smoke.sh
+  672063deaab6df6a 5,17-21,37-39,42-43,45-47,125,129
+e2e/smoke/smoke_todos_read.bats
+  672063deaab6df6a 42-44
+e2e/smoke/smoke_messages_read.bats
+  672063deaab6df6a 9
+e2e/smoke/smoke_webhooks.bats
+  672063deaab6df6a 19
+e2e/smoke/.qa-allowlist
+  672063deaab6df6a 6-31
+e2e/smoke/smoke_communication.bats
+  672063deaab6df6a 15-16
+e2e/smoke/smoke_core.bats
+  672063deaab6df6a 42-43,79
+e2e/smoke/smoke_files_write.bats
+  672063deaab6df6a 9
+e2e/smoke/smoke_reports.bats
+  672063deaab6df6a 26-27,51-52,60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "b2fa765cf59e3e8b42c66106b6e80fc5bb9a7898",
+  "prompts": {
+    "672063deaab6df6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a42d4d2-6e53-4f19-9dca-d514f327c8fc",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 108,
+      "total_deletions": 49,
+      "accepted_lines": 105,
+      "overriden_lines": 0
+    }
+  }
+}
