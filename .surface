@@ -160,6 +160,7 @@ CMD basecamp messages archive
 CMD basecamp messages create
 CMD basecamp messages list
 CMD basecamp messages pin
+CMD basecamp messages publish
 CMD basecamp messages restore
 CMD basecamp messages show
 CMD basecamp messages trash
@@ -3785,6 +3786,27 @@ FLAG basecamp messages pin --stats type=bool
 FLAG basecamp messages pin --styled type=bool
 FLAG basecamp messages pin --todolist type=string
 FLAG basecamp messages pin --verbose type=count
+FLAG basecamp messages publish --account type=string
+FLAG basecamp messages publish --agent type=bool
+FLAG basecamp messages publish --cache-dir type=string
+FLAG basecamp messages publish --count type=bool
+FLAG basecamp messages publish --hints type=bool
+FLAG basecamp messages publish --ids-only type=bool
+FLAG basecamp messages publish --in type=string
+FLAG basecamp messages publish --jq type=string
+FLAG basecamp messages publish --json type=bool
+FLAG basecamp messages publish --markdown type=bool
+FLAG basecamp messages publish --md type=bool
+FLAG basecamp messages publish --message-board type=string
+FLAG basecamp messages publish --no-hints type=bool
+FLAG basecamp messages publish --no-stats type=bool
+FLAG basecamp messages publish --profile type=string
+FLAG basecamp messages publish --project type=string
+FLAG basecamp messages publish --quiet type=bool
+FLAG basecamp messages publish --stats type=bool
+FLAG basecamp messages publish --styled type=bool
+FLAG basecamp messages publish --todolist type=string
+FLAG basecamp messages publish --verbose type=count
 FLAG basecamp messages restore --account type=string
 FLAG basecamp messages restore --agent type=bool
 FLAG basecamp messages restore --cache-dir type=string
@@ -7100,6 +7122,7 @@ SUB basecamp messages archive
 SUB basecamp messages create
 SUB basecamp messages list
 SUB basecamp messages pin
+SUB basecamp messages publish
 SUB basecamp messages restore
 SUB basecamp messages show
 SUB basecamp messages trash

@@ -368,6 +368,8 @@ basecamp cards column watch <id>                  # Subscribe to column
 basecamp messages list --in <project> --json  # List messages
 basecamp messages show <id> --in <project>    # Show message
 basecamp message "Title" "Body" --in <project>
+basecamp message "Draft" "WIP" --draft --in <project>  # Create draft
+basecamp messages publish <id>               # Publish a draft
 basecamp messages update <id> --title "New" --body "Updated"
 basecamp messages pin <id> --in <project>     # Pin to top
 basecamp messages unpin <id>                  # Unpin
