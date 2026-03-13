@@ -67,7 +67,7 @@ level0=(
   "$SMOKE_DIR"/smoke_communication.bats
   "$SMOKE_DIR"/smoke_checkins.bats
   "$SMOKE_DIR"/smoke_schedule.bats
-  "$SMOKE_DIR"/smoke_tools.bats
+  "$SMOKE_DIR"/smoke_config_local.bats
 )
 level0_exist=()
 for f in "${level0[@]}"; do
@@ -92,6 +92,11 @@ level1=(
   "$SMOKE_DIR"/smoke_lineup.bats
   "$SMOKE_DIR"/smoke_communication_write.bats
   "$SMOKE_DIR"/smoke_misc_write.bats
+  "$SMOKE_DIR"/smoke_tools.bats
+  "$SMOKE_DIR"/smoke_cards_column_write.bats
+  "$SMOKE_DIR"/smoke_checkins_write.bats
+  "$SMOKE_DIR"/smoke_todolistgroups_write.bats
+  "$SMOKE_DIR"/smoke_schedule_write.bats
 )
 level1_exist=()
 for f in "${level1[@]}"; do
