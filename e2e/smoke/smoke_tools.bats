@@ -6,11 +6,10 @@ load smoke_helper
 setup_file() {
   ensure_token || return 1
   ensure_project || return 1
-  ensure_messageboard || return 1
 }
 
 @test "tools show returns a tool" {
-  [[ -n "${QA_MESSAGEBOARD:-}" ]] || mark_unverifiable "No messageboard in project"
+  ensure_messageboard || return 0
   run_smoke basecamp tools show "$QA_MESSAGEBOARD" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
@@ -18,8 +17,10 @@ setup_file() {
 }
 
 @test "tools create creates a tool" {
+  ensure_messageboard || return 0
+
   run_smoke basecamp tools create "Smoke tool $(date +%s)" \
-    --type "Todoset" -p "$QA_PROJECT" --json
+    --source "$QA_MESSAGEBOARD" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
@@ -34,7 +35,7 @@ setup_file() {
   tool_id=$(<"$id_file")
 
   run_smoke basecamp tools update "$tool_id" \
-    --name "Updated tool $(date +%s)" -p "$QA_PROJECT" --json
+    "Updated tool $(date +%s)" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -45,7 +46,7 @@ setup_file() {
   local tool_id
   tool_id=$(<"$id_file")
 
-  run_smoke basecamp tools reposition "$tool_id" --to 1 -p "$QA_PROJECT" --json
+  run_smoke basecamp tools reposition "$tool_id" --position 1 -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

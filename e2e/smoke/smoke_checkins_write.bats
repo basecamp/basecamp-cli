@@ -10,8 +10,6 @@ setup_file() {
 }
 
 @test "checkins question create creates a question" {
-  [[ -n "${QA_QUESTIONNAIRE:-}" ]] || mark_unverifiable "No questionnaire in project"
-
   run_smoke basecamp checkins question create "Smoke question $(date +%s)?" \
     --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json
   assert_success
@@ -28,8 +26,7 @@ setup_file() {
   qid=$(<"$id_file")
 
   run_smoke basecamp checkins question update "$qid" \
-    --title "Updated question $(date +%s)?" \
-    --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json
+    "Updated question $(date +%s)?" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -40,8 +37,8 @@ setup_file() {
   local qid
   qid=$(<"$id_file")
 
-  run_smoke basecamp checkins answer create "Smoke answer $(date +%s)" \
-    --question "$qid" --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json
+  run_smoke basecamp checkins answer create "$qid" \
+    "Smoke answer $(date +%s)" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
@@ -56,8 +53,7 @@ setup_file() {
   aid=$(<"$id_file")
 
   run_smoke basecamp checkins answer update "$aid" \
-    "Updated smoke answer $(date +%s)" \
-    --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json
+    "Updated smoke answer $(date +%s)" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

@@ -26,7 +26,7 @@ setup_file() {
   gid=$(<"$id_file")
 
   run_smoke basecamp todolistgroups update "$gid" \
-    --name "Updated group $(date +%s)" -p "$QA_PROJECT" --json
+    "Updated group $(date +%s)" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -37,7 +37,7 @@ setup_file() {
   local gid
   gid=$(<"$id_file")
 
-  run_smoke basecamp todolistgroups position "$gid" --to 1 -p "$QA_PROJECT" --json
+  run_smoke basecamp todolistgroups position "$gid" --position 1 -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

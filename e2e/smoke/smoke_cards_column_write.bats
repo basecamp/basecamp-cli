@@ -51,8 +51,8 @@ setup_file() {
   local col_id
   col_id=$(<"$id_file")
 
-  run_smoke basecamp cards column color "$col_id" "blue" \
-    --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
+  run_smoke basecamp cards column color "$col_id" \
+    --color "blue" --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -63,7 +63,7 @@ setup_file() {
   local col_id
   col_id=$(<"$id_file")
 
-  run_smoke basecamp cards column move "$col_id" --to 1 \
+  run_smoke basecamp cards column move "$col_id" --position 1 \
     --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'

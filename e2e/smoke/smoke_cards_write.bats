@@ -187,7 +187,7 @@ setup_file() {
   step_id=$(<"$id_file")
 
   run_smoke basecamp cards step update "$step_id" \
-    --title "Updated step $(date +%s)" -p "$QA_PROJECT" --json
+    "Updated step $(date +%s)" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -198,7 +198,7 @@ setup_file() {
   local step_id
   step_id=$(<"$id_file")
 
-  run_smoke basecamp cards step move "$step_id" --to 1 -p "$QA_PROJECT" --json
+  run_smoke basecamp cards step move "$step_id" --position 1 -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

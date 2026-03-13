@@ -68,6 +68,20 @@ load smoke_helper
   mark_out_of_scope "Modifies Claude Code config"
 }
 
+# --- Profile mutations (require interactive OAuth / confirmation prompts) ---
+
+@test "profile create is out of scope" {
+  mark_out_of_scope "Triggers OAuth flow — no non-interactive mode"
+}
+
+@test "profile delete is out of scope" {
+  mark_out_of_scope "Interactive confirmation prompt — no --force flag"
+}
+
+@test "profile set-default is out of scope" {
+  mark_out_of_scope "Depends on profile create (OOS)"
+}
+
 # --- Account-wide / dangerous mutations ---
 
 @test "templates construct is out of scope" {
