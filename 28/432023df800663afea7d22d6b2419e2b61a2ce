@@ -1,0 +1,25 @@
+internal/commands/assign.go
+  d2c15b18e819ff30 58-61,152-155
+internal/commands/assign_test.go
+  d2c15b18e819ff30 8-10,20-22,251-357
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "28432023df800663afea7d22d6b2419e2b61a2ce",
+  "prompts": {
+    "d2c15b18e819ff30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9cddf0b1-e3c4-45b2-b3ab-8101a906037f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 128,
+      "total_deletions": 7,
+      "accepted_lines": 121,
+      "overriden_lines": 0
+    }
+  }
+}
