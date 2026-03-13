@@ -292,7 +292,7 @@ func setupAssignGuardTestApp(t *testing.T) *appctx.App {
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
-	return &appctx.App{
+	app := &appctx.App{
 		Config: cfg,
 		Auth:   authMgr,
 		SDK:    sdkClient,
@@ -302,6 +302,8 @@ func setupAssignGuardTestApp(t *testing.T) *appctx.App {
 			Writer: &bytes.Buffer{},
 		}),
 	}
+	app.Flags.JSON = true
+	return app
 }
 
 func TestAssignRequiresAssigneeNonInteractive(t *testing.T) {
