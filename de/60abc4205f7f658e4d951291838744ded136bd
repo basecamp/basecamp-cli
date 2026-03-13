@@ -1,0 +1,23 @@
+e2e/smoke/smoke_comments.bats
+  101fabf4a35d3782 54-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "de60abc4205f7f658e4d951291838744ded136bd",
+  "prompts": {
+    "101fabf4a35d3782": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "abdda2e8-81e3-4522-a070-9d1cf1e097a2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 477,
+      "overriden_lines": 0
+    }
+  }
+}
