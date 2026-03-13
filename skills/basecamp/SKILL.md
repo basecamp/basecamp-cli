@@ -74,7 +74,8 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Content fields accept Markdown and @mentions** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. Use `@Name` or `@First.Last` to create clickable mentions (e.g., `@Igor.Logachev`). For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+5. **Content fields accept Markdown and @mentions** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. Use `@Name` or `@First.Last` to create clickable mentions (e.g., `@Jane.Smith`). For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+6. **Line breaks in rich text** — Markdown blank lines become `<p>` tags, which Basecamp renders without visible spacing. For visible empty lines between paragraphs, use `<br><br>` instead of blank lines.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
