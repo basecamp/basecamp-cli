@@ -650,6 +650,7 @@ func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
 
 	// Process in reverse to preserve indices
 	result := html
+	htmlLower := strings.ToLower(html)
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		// Group 1: prefix (whitespace/> or empty for start of string)
@@ -657,7 +658,7 @@ func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
 		mentionStart, mentionEnd := m[4], m[5]
 
 		// Skip mentions inside HTML tags, code blocks, or existing <bc-attachment> elements
-		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(html, mentionStart) || isInsideBcAttachment(html, mentionStart) {
+		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(html, mentionStart) {
 			continue
 		}
 
@@ -693,22 +694,30 @@ func isInsideHTMLTag(s string, pos int) bool {
 }
 
 // isInsideCodeBlock checks if position pos is inside a <code> or <pre> element.
+// s must be pre-lowercased by the caller.
 func isInsideCodeBlock(s string, pos int) bool {
-	prefix := strings.ToLower(s[:pos])
+	prefix := s[:pos]
 	for _, tag := range []string{"code", "pre"} {
-		openIdx := strings.LastIndex(prefix, "<"+tag)
-		if openIdx == -1 {
-			continue
-		}
-		// Verify tag boundary: next char must be '>', ' ', tab, or newline
-		// to avoid matching partial names like <preview> for <pre>
-		nextPos := openIdx + 1 + len(tag)
-		if nextPos < len(prefix) && prefix[nextPos] != '>' && prefix[nextPos] != ' ' && prefix[nextPos] != '\t' && prefix[nextPos] != '\n' {
-			continue
-		}
-		between := prefix[openIdx:]
-		if !strings.Contains(between, "</"+tag+">") {
-			return true
+		open := "<" + tag
+		searchIn := prefix
+		for {
+			openIdx := strings.LastIndex(searchIn, open)
+			if openIdx == -1 {
+				break
+			}
+			// Verify tag boundary: next char must be '>', ' ', tab, or newline
+			// to avoid matching partial names like <preview> for <pre>
+			nextPos := openIdx + len(open)
+			if nextPos < len(prefix) && prefix[nextPos] != '>' && prefix[nextPos] != ' ' && prefix[nextPos] != '\t' && prefix[nextPos] != '\n' {
+				// Not a real tag, keep searching earlier in the string
+				searchIn = prefix[:openIdx]
+				continue
+			}
+			between := prefix[openIdx:]
+			if !strings.Contains(between, "</"+tag+">") {
+				return true
+			}
+			break
 		}
 	}
 	return false

@@ -752,6 +752,11 @@ func TestResolveMentions(t *testing.T) {
 			input:    `<bc-attachment sgid="x" content-type="image/png"/> @John check this`,
 			expected: `<bc-attachment sgid="x" content-type="image/png"/> ` + MentionToHTML("sgid-john", "John Doe") + ` check this`,
 		},
+		{
+			name:     "mention inside pre after preview tag is skipped",
+			input:    `<preview>stuff</preview><pre>@John example</pre>`,
+			expected: `<preview>stuff</preview><pre>@John example</pre>`,
+		},
 	}
 
 	for _, tt := range tests {
