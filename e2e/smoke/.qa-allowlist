@@ -5,27 +5,27 @@
 # Format: <test name> # <reason> — <owner>
 
 # Dock tools may be disabled on the test project
-test_todolistgroups_show_returns_group_detail # no todolist groups in project
-test_tools_show_returns_a_tool # depends on messageboard dock tool
-test_schedule_settings_updates_schedule_settings # schedule dock tool disabled
+test_todolistgroups_show_returns_group_detail # no todolist groups — smoke
+test_tools_show_returns_a_tool # depends on messageboard dock tool — smoke
+test_schedule_settings_updates_schedule_settings # schedule dock tool disabled — smoke
 
 # Message types / inbox may not exist in all environments
-test_messagetypes_list_returns_message_types # API returns not_found on some servers
-test_messagetypes_show_returns_message_type_detail # depends on messagetypes list
-test_forwards_inbox_shows_project_inbox # inbox dock tool disabled
-test_forwards_list_returns_forwards # inbox dock tool disabled
-test_forwards_show_returns_forward_detail # inbox dock tool disabled
+test_messagetypes_list_returns_message_types # not_found on some servers — smoke
+test_messagetypes_show_returns_message_type_detail # depends on messagetypes list — smoke
+test_forwards_inbox_shows_project_inbox # inbox dock tool disabled — smoke
+test_forwards_list_returns_forwards # inbox dock tool disabled — smoke
+test_forwards_show_returns_forward_detail # inbox dock tool disabled — smoke
 
 # Features not available in all accounts
-test_search_metadata_returns_metadata # requires projects with search enabled
-test_reports_schedule_returns_schedule_entries # 400 on some environments
-test_timesheet_report_returns_timesheet_data # timesheets not enabled
-test_timesheet_project_returns_project_timesheet # timesheets not enabled
+test_search_metadata_returns_metadata # requires search projects — smoke
+test_reports_schedule_returns_schedule_entries # 400 on some environments — smoke
+test_timesheet_report_returns_timesheet_data # timesheets not enabled — smoke
+test_timesheet_project_returns_project_timesheet # timesheets not enabled — smoke
 
 # Lineup API may not exist on all environments / returns 204 No Content
-test_lineup_create_creates_a_lineup_marker # API not available on some servers
-test_lineup_update_updates_a_lineup_marker # create returns no ID
-test_lineup_delete_removes_a_lineup_marker # create returns no ID
+test_lineup_create_creates_a_lineup_marker # API not available on some servers — smoke
+test_lineup_update_updates_a_lineup_marker # create returns no ID — smoke
+test_lineup_delete_removes_a_lineup_marker # create returns no ID — smoke
 
 # SDK bug: TodolistOrGroup0 union type expects wrapped JSON, API returns flat
-test_todolists_show_returns_todolist_detail # SDK deserialization mismatch
+test_todolists_show_returns_todolist_detail # SDK deserialization mismatch — smoke

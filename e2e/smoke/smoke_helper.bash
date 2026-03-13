@@ -13,7 +13,7 @@ _SMOKE_ACCOUNT_ID="${BASECAMP_ACCOUNT_ID:-}"
 _SMOKE_PROJECT_ID="${BASECAMP_PROJECT_ID:-}"
 _SMOKE_PROFILE="${BASECAMP_PROFILE:-}"
 _SMOKE_LAUNCHPAD_URL="${BASECAMP_LAUNCHPAD_URL:-}"
-_SMOKE_CONFIG_DIR="${HOME}/.config/basecamp"
+_SMOKE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/basecamp"
 
 # Load the base test helper for assertions
 SMOKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

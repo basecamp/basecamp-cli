@@ -29,6 +29,9 @@ setup_file() {
 @test "search metadata returns metadata" {
   run_smoke basecamp search metadata --json
   # Search metadata requires projects with search enabled
-  [[ "$status" -ne 0 ]] && mark_unverifiable "Search metadata not available"
+  if [[ "$status" -ne 0 ]]; then
+    mark_unverifiable "Search metadata not available"
+    return 0
+  fi
   assert_json_value '.ok' 'true'
 }

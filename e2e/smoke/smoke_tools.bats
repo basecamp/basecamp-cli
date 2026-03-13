@@ -9,7 +9,9 @@ setup_file() {
 }
 
 @test "tools show returns a tool" {
-  # Use the message board dock item as a known tool
+  # Use the message board dock item as a known tool.
+  # ensure_messageboard calls mark_unverifiable (writes trace + sets
+  # BATS_TEST_SKIPPED) before returning 1, so this shows as "skipped".
   ensure_messageboard || return 0
   run_smoke basecamp tools show "$QA_MESSAGEBOARD" -p "$QA_PROJECT" --json
   assert_success

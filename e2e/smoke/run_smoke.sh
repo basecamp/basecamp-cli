@@ -126,7 +126,7 @@ if [[ -f "$QA_TRACE_DIR/traces.jsonl" ]]; then
     allowlist="$SMOKE_DIR/.qa-allowlist"
     blocking_unverified=0
     while IFS= read -r test_name; do
-      if ! sed 's/ *#.*//' "$allowlist" 2>/dev/null | grep -qxF "$test_name"; then
+      if ! sed 's/ *#.*//' "$allowlist" 2>/dev/null | grep -v '^$' | grep -qxF "$test_name"; then
         blocking_unverified=$((blocking_unverified + 1))
         echo "  - $test_name (not allowlisted)"
       fi

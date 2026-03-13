@@ -12,7 +12,8 @@ Analyze smoke test traces and grade CLI output quality against the rubric.
 Smoke traces must exist. Run `make smoke` first to generate them:
 
 ```bash
-BASECAMP_TOKEN=<token> make smoke
+BASECAMP_PROFILE=dev make smoke
+# or: BASECAMP_TOKEN=<token> make smoke
 ```
 
 Traces land in `tmp/qa-traces/traces.jsonl` (or `$QA_TRACE_DIR`).

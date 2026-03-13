@@ -45,7 +45,7 @@ setup_file() {
 }
 
 @test "accounts use sets default account" {
-  ensure_account || return 0
+  ensure_account || return 0  # ensure_account traces unverifiable internally
 
   run_smoke basecamp accounts use "$QA_ACCOUNT" --json
   assert_success

@@ -6,7 +6,6 @@ load smoke_helper
 setup_file() {
   ensure_token || return 1
   ensure_project || return 1
-  ensure_messageboard || return 1
 }
 
 @test "messages list returns messages" {
