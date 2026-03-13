@@ -252,6 +252,42 @@ func TestErrAmbiguous(t *testing.T) {
 }
 
 // =============================================================================
+// JQ Error Constructor Tests
+// =============================================================================
+
+func TestErrJQValidation(t *testing.T) {
+	cause := fmt.Errorf("unexpected token")
+	err := ErrJQValidation(cause)
+
+	assert.Equal(t, CodeUsage, err.Code)
+	assert.Contains(t, err.Message, "invalid --jq expression")
+	assert.Contains(t, err.Message, "unexpected token")
+	assert.True(t, IsJQError(err))
+}
+
+func TestErrJQNotSupported(t *testing.T) {
+	err := ErrJQNotSupported("the version command")
+
+	assert.Equal(t, CodeUsage, err.Code)
+	assert.Contains(t, err.Message, "--jq is not supported by the version command")
+	assert.True(t, IsJQError(err))
+}
+
+func TestErrJQConflict(t *testing.T) {
+	err := ErrJQConflict("--ids-only")
+
+	assert.Equal(t, CodeUsage, err.Code)
+	assert.Contains(t, err.Message, "cannot use --jq with --ids-only")
+	assert.True(t, IsJQError(err))
+}
+
+func TestIsJQErrorFalseForNonJQError(t *testing.T) {
+	assert.False(t, IsJQError(ErrUsage("plain error")))
+	assert.False(t, IsJQError(errors.New("random error")))
+	assert.False(t, IsJQError(ErrNotFound("project", "123")))
+}
+
+// =============================================================================
 // AsError Tests
 // =============================================================================
 
@@ -2610,7 +2646,9 @@ func TestWriterJQFilterInvalidExpression(t *testing.T) {
 
 	err := w.OK(map[string]any{"id": 1})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid jq expression")
+	assert.Contains(t, err.Error(), "invalid --jq expression")
+	assert.True(t, IsJQError(err), "invalid expression should be a jq error")
+	assert.Equal(t, CodeUsage, AsError(err).Code)
 }
 
 func TestWriterJQFilterOverridesFormat(t *testing.T) {
@@ -2721,4 +2759,133 @@ func TestWriterJQFilterEmpty(t *testing.T) {
 	var resp Response
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
 	assert.True(t, resp.OK)
+}
+
+func TestWriterJQFilterEnvAccess(t *testing.T) {
+	t.Setenv("BASECAMP_TEST_JQ_VAR", "hello_from_env")
+
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `env.BASECAMP_TEST_JQ_VAR`,
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.NoError(t, err)
+	assert.Equal(t, "hello_from_env\n", buf.String())
+}
+
+func TestWriterJQFilterEnvDollarAccess(t *testing.T) {
+	t.Setenv("BASECAMP_TEST_JQ_VAR2", "dollar_form")
+
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `$ENV.BASECAMP_TEST_JQ_VAR2`,
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.NoError(t, err)
+	assert.Equal(t, "dollar_form\n", buf.String())
+}
+
+func TestWriterJQFilterCompactOutput(t *testing.T) {
+	// Objects must render as compact single-line JSON, not indented
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `.data`,
+	})
+
+	err := w.OK(map[string]any{"name": "test", "value": 42})
+	require.NoError(t, err)
+
+	output := strings.TrimSpace(buf.String())
+	// Must be single-line compact JSON
+	assert.NotContains(t, output, "\n")
+	assert.Contains(t, output, `"name":"test"`)
+}
+
+func TestWriterJQFilterRuntimeErrorOnErrorResponse(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `.error / 0`,
+	})
+
+	err := w.Err(ErrNotFound("project", "123"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "jq filter error")
+	assert.True(t, IsJQError(err), "runtime error should be a jq error")
+	assert.Equal(t, CodeUsage, AsError(err).Code)
+}
+
+func TestWriterJQFilterEmptyResult(t *testing.T) {
+	// Empty result (no matches) should produce no output, no error
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `empty`,
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.NoError(t, err)
+	assert.Equal(t, "", buf.String())
+}
+
+func TestWriterJQFilterNullResult(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `null`,
+	})
+
+	err := w.OK(map[string]any{"id": 1})
+	require.NoError(t, err)
+	assert.Equal(t, "null\n", buf.String())
+}
+
+func TestWriterJQFilterMultiResult(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: `.data.a, .data.b, .data.c`,
+	})
+
+	err := w.OK(map[string]any{"a": 1, "b": "two", "c": true})
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	assert.Len(t, lines, 3)
+	assert.Equal(t, "1", lines[0])
+	assert.Equal(t, "two", lines[1])
+	assert.Equal(t, "true", lines[2])
+}
+
+func TestWriterJQFilterNonSerializableResultReturnsError(t *testing.T) {
+	// gojq's nan and infinite produce float values that json.Marshal
+	// rejects. The writer must surface an error, not silently drop output.
+	for _, expr := range []string{"nan", "infinite"} {
+		t.Run(expr, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := New(Options{
+				Format:   FormatJSON,
+				Writer:   &buf,
+				JQFilter: expr,
+			})
+
+			err := w.OK(map[string]any{"id": 1})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not serializable")
+			assert.True(t, IsJQError(err), "non-serializable result should be a jq error")
+			assert.Equal(t, CodeUsage, AsError(err).Code)
+		})
+	}
 }

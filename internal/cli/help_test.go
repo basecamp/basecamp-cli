@@ -415,6 +415,20 @@ func TestLeafCommandHelpShowsArguments(t *testing.T) {
 	assert.Contains(t, out, "<id|url>")
 }
 
+func TestRootHelpContainsJQFlag(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "--jq")
+	assert.Contains(t, out, "Filter JSON with jq expression")
+}
+
 func TestGroupCommandHelpOmitsArguments(t *testing.T) {
 	isolateHelpTest(t)
 
