@@ -11,6 +11,12 @@
 
 set -euo pipefail
 
+if ((BASH_VERSINFO[0] < 4)); then
+  echo "ERROR: check-smoke-coverage.sh requires Bash 4+ (found ${BASH_VERSION})" >&2
+  echo "  On macOS: brew install bash" >&2
+  exit 1
+fi
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SURFACE="$ROOT_DIR/.surface"
 SMOKE_DIR="$ROOT_DIR/e2e/smoke"
