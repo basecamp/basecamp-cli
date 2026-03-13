@@ -656,8 +656,8 @@ func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
 		// Group 2: the @mention itself
 		mentionStart, mentionEnd := m[4], m[5]
 
-		// Skip mentions inside HTML tags or existing <bc-attachment> elements
-		if isInsideHTMLTag(html, mentionStart) || isInsideBcAttachment(html, mentionStart) {
+		// Skip mentions inside HTML tags, code blocks, or existing <bc-attachment> elements
+		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(html, mentionStart) || isInsideBcAttachment(html, mentionStart) {
 			continue
 		}
 
@@ -692,6 +692,22 @@ func isInsideHTMLTag(s string, pos int) bool {
 	return false
 }
 
+// isInsideCodeBlock checks if position pos is inside a <code> or <pre> element.
+func isInsideCodeBlock(s string, pos int) bool {
+	prefix := strings.ToLower(s[:pos])
+	for _, tag := range []string{"code", "pre"} {
+		openIdx := strings.LastIndex(prefix, "<"+tag)
+		if openIdx == -1 {
+			continue
+		}
+		between := prefix[openIdx:]
+		if !strings.Contains(between, "</"+tag+">") {
+			return true
+		}
+	}
+	return false
+}
+
 // isInsideBcAttachment checks if position pos is inside a <bc-attachment>...</bc-attachment> element.
 func isInsideBcAttachment(s string, pos int) bool {
 	// Find the last <bc-attachment before pos
@@ -700,9 +716,16 @@ func isInsideBcAttachment(s string, pos int) bool {
 	if openIdx == -1 {
 		return false
 	}
-	// Check that there's no </bc-attachment> closing tag between the open and pos
 	between := s[openIdx:pos]
-	return !strings.Contains(between, "</bc-attachment>")
+	// Self-closing tag (e.g., <bc-attachment ... />) — mention is after it, not inside
+	if strings.Contains(between, "/>") {
+		return false
+	}
+	// Check for closing tag between the open and pos
+	if strings.Contains(between, "</bc-attachment>") {
+		return false
+	}
+	return true
 }
 
 // IsHTML attempts to detect if the input string contains HTML.

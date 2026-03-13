@@ -737,6 +737,21 @@ func TestResolveMentions(t *testing.T) {
 			input:    `<p>Hey @José, check this</p>`,
 			expected: `<p>Hey ` + MentionToHTML("sgid-jose", "José García") + `, check this</p>`,
 		},
+		{
+			name:     "mention inside code block is skipped",
+			input:    `<p>Use <code>@John</code> syntax</p>`,
+			expected: `<p>Use <code>@John</code> syntax</p>`,
+		},
+		{
+			name:     "mention inside pre block is skipped",
+			input:    `<pre>@John example</pre>`,
+			expected: `<pre>@John example</pre>`,
+		},
+		{
+			name:     "mention after self-closing bc-attachment is resolved",
+			input:    `<bc-attachment sgid="x" content-type="image/png"/> @John check this`,
+			expected: `<bc-attachment sgid="x" content-type="image/png"/> ` + MentionToHTML("sgid-john", "John Doe") + ` check this`,
+		},
 	}
 
 	for _, tt := range tests {
