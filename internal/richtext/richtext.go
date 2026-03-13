@@ -700,6 +700,12 @@ func isInsideCodeBlock(s string, pos int) bool {
 		if openIdx == -1 {
 			continue
 		}
+		// Verify tag boundary: next char must be '>', ' ', tab, or newline
+		// to avoid matching partial names like <preview> for <pre>
+		nextPos := openIdx + 1 + len(tag)
+		if nextPos < len(prefix) && prefix[nextPos] != '>' && prefix[nextPos] != ' ' && prefix[nextPos] != '\t' && prefix[nextPos] != '\n' {
+			continue
+		}
 		between := prefix[openIdx:]
 		if !strings.Contains(between, "</"+tag+">") {
 			return true
