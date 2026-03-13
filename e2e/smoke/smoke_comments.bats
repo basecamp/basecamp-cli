@@ -51,3 +51,51 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "comments create creates a comment (direct verb)" {
+  local todo_file="$BATS_FILE_TMPDIR/comment_todo_id"
+  [[ -f "$todo_file" ]] || mark_unverifiable "No todo created for comment test"
+  local todo_id
+  todo_id=$(<"$todo_file")
+
+  run_smoke basecamp comments create "$todo_id" \
+    "Direct comment $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+
+  echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/direct_comment_id"
+}
+
+@test "comments archive archives a comment" {
+  local id_file="$BATS_FILE_TMPDIR/direct_comment_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No comment created in prior test"
+  local comment_id
+  comment_id=$(<"$id_file")
+
+  run_smoke basecamp comments archive "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "comments restore restores an archived comment" {
+  local id_file="$BATS_FILE_TMPDIR/direct_comment_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No comment created in prior test"
+  local comment_id
+  comment_id=$(<"$id_file")
+
+  run_smoke basecamp comments restore "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "comments trash trashes a comment" {
+  local id_file="$BATS_FILE_TMPDIR/direct_comment_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No comment created in prior test"
+  local comment_id
+  comment_id=$(<"$id_file")
+
+  run_smoke basecamp comments trash "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
