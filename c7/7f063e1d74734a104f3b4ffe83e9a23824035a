@@ -1,0 +1,23 @@
+e2e/smoke/smoke_cards_write.bats
+  101fabf4a35d3782 142-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "c77f063e1d74734a104f3b4ffe83e9a23824035a",
+  "prompts": {
+    "101fabf4a35d3782": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "abdda2e8-81e3-4522-a070-9d1cf1e097a2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 747,
+      "overriden_lines": 0
+    }
+  }
+}
