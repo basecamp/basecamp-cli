@@ -109,7 +109,10 @@ func New(opts Options) *Writer {
 				w.jq = code
 			}
 		}
-		// If parse/compile fails, writeJQ will re-parse and return the error on first use.
+		// Best-effort: invalid expressions are caught earlier in PersistentPreRunE;
+		// this avoids re-parsing on every write. If compilation fails here (e.g.
+		// fallback writer built without early validation), writeJQ re-parses and
+		// returns the error on first use.
 	}
 	return w
 }
