@@ -1,0 +1,14 @@
+internal/cli/root.go
+  3caf0739a556d0b8 134-151,315-328,331,341-342,344-348,360,367,533-535
+  089a1783c063570b 12
+internal/output/errors.go
+  3caf0739a556d0b8 3-6,8,51-88
+internal/output/envelope.go
+  3caf0739a556d0b8 93,97-98,107-110,112,224-227,231,261,274-276,278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "22922417f33dbda1fa613d0ed1b6931f1c0e69e2",
+  "prompts": {}
+}
