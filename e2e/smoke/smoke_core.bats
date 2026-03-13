@@ -39,7 +39,8 @@ setup_file() {
 }
 
 @test "config project shows project config" {
-  run_smoke basecamp config project --json
+  ensure_project || mark_unverifiable "Cannot discover project for config project"
+  run_smoke basecamp config project -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -75,5 +76,5 @@ setup_file() {
 @test "help shows usage" {
   run_smoke basecamp help
   assert_success
-  assert_output_contains "Usage"
+  assert_output_contains "USAGE"
 }

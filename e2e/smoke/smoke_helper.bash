@@ -4,13 +4,16 @@
 # Provides resource discovery (ensure_*), trace capture, and test state
 # management (mark_unverifiable, mark_out_of_scope).
 #
-# Requires: BASECAMP_TOKEN set in the environment.
+# Requires: BASECAMP_PROFILE or BASECAMP_TOKEN set in the environment.
 
 # Stash env vars before loading test_helper, whose setup() unsets them.
 # setup_extra (called at the end of each setup()) restores them per-test.
 _SMOKE_TOKEN="${BASECAMP_TOKEN:-}"
 _SMOKE_ACCOUNT_ID="${BASECAMP_ACCOUNT_ID:-}"
 _SMOKE_PROJECT_ID="${BASECAMP_PROJECT_ID:-}"
+_SMOKE_PROFILE="${BASECAMP_PROFILE:-}"
+_SMOKE_LAUNCHPAD_URL="${BASECAMP_LAUNCHPAD_URL:-}"
+_SMOKE_CONFIG_DIR="${HOME}/.config/basecamp"
 
 # Load the base test helper for assertions
 SMOKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +22,14 @@ load "$SMOKE_DIR/../test_helper"
 # Restore BASECAMP_* after test_helper's setup() clears them.
 # This runs at the end of every per-test setup() via the setup_extra hook.
 setup_extra() {
+  if [[ -n "$_SMOKE_PROFILE" ]]; then
+    export BASECAMP_PROFILE="$_SMOKE_PROFILE"
+    # test_helper.bash sets HOME to a temp dir, so the profile's config
+    # and credentials are invisible. Copy them into the temp HOME.
+    if [[ -d "$_SMOKE_CONFIG_DIR" ]]; then
+      cp -a "$_SMOKE_CONFIG_DIR/." "$HOME/.config/basecamp/"
+    fi
+  fi
   if [[ -n "$_SMOKE_TOKEN" ]]; then
     export BASECAMP_TOKEN="$_SMOKE_TOKEN"
   fi
@@ -27,6 +38,9 @@ setup_extra() {
   fi
   if [[ -n "$_SMOKE_PROJECT_ID" ]]; then
     export BASECAMP_PROJECT_ID="$_SMOKE_PROJECT_ID"
+  fi
+  if [[ -n "$_SMOKE_LAUNCHPAD_URL" ]]; then
+    export BASECAMP_LAUNCHPAD_URL="$_SMOKE_LAUNCHPAD_URL"
   fi
 }
 
@@ -95,8 +109,12 @@ run_smoke() {
 # masked as "unverifiable").
 
 ensure_token() {
+  # Profile-based auth carries the token implicitly
+  if [[ -n "${BASECAMP_PROFILE:-}" ]]; then
+    return 0
+  fi
   if [[ -z "${BASECAMP_TOKEN:-}" ]]; then
-    echo "BASECAMP_TOKEN required for smoke tests" >&2
+    echo "BASECAMP_PROFILE or BASECAMP_TOKEN required for smoke tests" >&2
     return 1
   fi
   export BASECAMP_TOKEN
@@ -124,11 +142,17 @@ ensure_account() {
     return 1
   fi
   export QA_ACCOUNT
+
+  # Propagate to BASECAMP_ACCOUNT_ID so CLI commands pick it up
+  # without --account flags, and update the stash so setup_extra
+  # restores it after test_helper's setup() clears the env.
+  export BASECAMP_ACCOUNT_ID="$QA_ACCOUNT"
+  _SMOKE_ACCOUNT_ID="$QA_ACCOUNT"
 }
 
 ensure_project() {
   [[ -n "${QA_PROJECT:-}" ]] && return 0
-  ensure_token || return 1
+  ensure_account || return 1
 
   # Use BASECAMP_PROJECT_ID if already set (avoids running `projects list`)
   if [[ -n "${BASECAMP_PROJECT_ID:-}" ]]; then
@@ -212,7 +236,7 @@ ensure_cardtable() {
     mark_unverifiable "Cannot show project $QA_PROJECT"
     return 1
   }
-  QA_CARDTABLE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "kanban_board") | .id][0] // empty')
+  QA_CARDTABLE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "kanban_board" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_CARDTABLE" ]]; then
     mark_unverifiable "No card table in project $QA_PROJECT dock"
     return 1
@@ -229,7 +253,7 @@ ensure_campfire() {
     mark_unverifiable "Cannot show project $QA_PROJECT"
     return 1
   }
-  QA_CAMPFIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "chat") | .id][0] // empty')
+  QA_CAMPFIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "chat" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_CAMPFIRE" ]]; then
     mark_unverifiable "No campfire in project $QA_PROJECT dock"
     return 1
@@ -315,7 +339,7 @@ ensure_questionnaire() {
     mark_unverifiable "Cannot show project $QA_PROJECT"
     return 1
   }
-  QA_QUESTIONNAIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "questionnaire") | .id][0] // empty')
+  QA_QUESTIONNAIRE=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "questionnaire" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_QUESTIONNAIRE" ]]; then
     mark_unverifiable "No questionnaire in project $QA_PROJECT dock"
     return 1
@@ -332,7 +356,7 @@ ensure_inbox() {
     mark_unverifiable "Cannot show project $QA_PROJECT"
     return 1
   }
-  QA_INBOX=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "inbox") | .id][0] // empty')
+  QA_INBOX=$(echo "$out" | jq -r '[.data.dock[]? | select(.name == "inbox" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_INBOX" ]]; then
     mark_unverifiable "No inbox in project $QA_PROJECT dock"
     return 1

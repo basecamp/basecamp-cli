@@ -23,6 +23,8 @@ setup_file() {
 
 @test "reports schedule returns schedule entries" {
   run_smoke basecamp reports schedule --json
+  # 400 on some dev environments where schedule reports aren't configured
+  [[ "$status" -eq 7 ]] && mark_unverifiable "Schedule reports not available in this environment"
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -46,6 +48,8 @@ setup_file() {
 
 @test "timesheet report returns timesheet data" {
   run_smoke basecamp timesheet report --json
+  # Timesheets may not be enabled on all accounts (403 forbidden)
+  [[ "$status" -eq 4 ]] && mark_unverifiable "Timesheets not enabled in this account"
   assert_success
   assert_json_value '.ok' 'true'
 }
@@ -53,6 +57,7 @@ setup_file() {
 @test "timesheet project returns project timesheet" {
   ensure_project || mark_unverifiable "Cannot discover project"
   run_smoke basecamp timesheet project -p "$QA_PROJECT" --json
+  [[ "$status" -eq 4 ]] && mark_unverifiable "Timesheets not enabled in this account"
   assert_success
   assert_json_value '.ok' 'true'
 }

@@ -16,7 +16,7 @@ setup_file() {
 
 @test "webhooks create creates a webhook" {
   run_smoke basecamp webhooks create "https://smoke-test.invalid/hook-$(date +%s)" \
-    -p "$QA_PROJECT" --json
+    --types Todo -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'

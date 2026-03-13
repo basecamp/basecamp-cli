@@ -1,13 +1,12 @@
 #!/usr/bin/env bats
 # smoke_files_read.bats - Level 0: Files, vaults, docs, uploads (read-only)
-#
-# No ensure_vault — vaults list IS the test.
 
 load smoke_helper
 
 setup_file() {
   ensure_token || return 1
   ensure_project || return 1
+  ensure_vault || return 1
 }
 
 @test "files list returns files" {

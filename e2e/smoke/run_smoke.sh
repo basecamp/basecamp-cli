@@ -2,6 +2,7 @@
 # run_smoke.sh - Orchestrator for the pre-release smoke suite.
 #
 # Usage:
+#   BASECAMP_PROFILE=dev ./e2e/smoke/run_smoke.sh
 #   BASECAMP_TOKEN=<token> ./e2e/smoke/run_smoke.sh
 #
 # Runs Level 0 (read-only) tests in parallel, then Level 1+ serially.
@@ -13,10 +14,11 @@ set -euo pipefail
 SMOKE_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SMOKE_DIR/../.." && pwd)"
 
-# Require token
-if [[ -z "${BASECAMP_TOKEN:-}" ]]; then
-  echo "Error: BASECAMP_TOKEN must be set" >&2
-  echo "Usage: BASECAMP_TOKEN=<token> $0" >&2
+# Require auth: either a profile (carries token + base_url + account) or a bare token
+if [[ -z "${BASECAMP_PROFILE:-}" && -z "${BASECAMP_TOKEN:-}" ]]; then
+  echo "Error: BASECAMP_PROFILE or BASECAMP_TOKEN must be set" >&2
+  echo "Usage: BASECAMP_PROFILE=dev $0" >&2
+  echo "       BASECAMP_TOKEN=<token> $0" >&2
   exit 1
 fi
 
@@ -32,11 +34,17 @@ rm -rf "$QA_TRACE_DIR"
 mkdir -p "$QA_TRACE_DIR"
 
 export BASECAMP_NO_KEYRING=1
-export BASECAMP_TOKEN
+[[ -n "${BASECAMP_PROFILE:-}" ]] && export BASECAMP_PROFILE
+[[ -n "${BASECAMP_TOKEN:-}" ]] && export BASECAMP_TOKEN
+[[ -n "${BASECAMP_LAUNCHPAD_URL:-}" ]] && export BASECAMP_LAUNCHPAD_URL
 export PATH="$ROOT_DIR/bin:$PATH"
 
-# Detect parallelism
+# Detect parallelism — bats -j requires GNU parallel, not moreutils parallel.
+# Fall back to serial if GNU parallel isn't available.
 jobs=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+if ! parallel --will-cite true ::: true 2>/dev/null; then
+  jobs=1
+fi
 
 echo "=== Smoke Suite ==="
 echo "Traces: $QA_TRACE_DIR"
@@ -114,11 +122,11 @@ if [[ -f "$QA_TRACE_DIR/traces.jsonl" ]]; then
   if [[ "$unverified" -gt 0 ]]; then
     echo "Coverage gaps: $unverified unverifiable"
 
-    # Check allowlist
+    # Check allowlist (strip inline comments and blank lines before matching)
     allowlist="$SMOKE_DIR/.qa-allowlist"
     blocking_unverified=0
     while IFS= read -r test_name; do
-      if ! grep -qxF "$test_name" "$allowlist" 2>/dev/null; then
+      if ! sed 's/ *#.*//' "$allowlist" 2>/dev/null | grep -qxF "$test_name"; then
         blocking_unverified=$((blocking_unverified + 1))
         echo "  - $test_name (not allowlisted)"
       fi

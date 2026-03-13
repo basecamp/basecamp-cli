@@ -5,6 +5,7 @@ load smoke_helper
 
 setup_file() {
   ensure_token || return 1
+  ensure_account || return 1
 }
 
 @test "projects create creates a project" {

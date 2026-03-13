@@ -1,13 +1,12 @@
 #!/usr/bin/env bats
 # smoke_messages_read.bats - Level 0: Messages and message boards (read-only)
-#
-# No ensure_messageboard — messageboards show IS the test.
 
 load smoke_helper
 
 setup_file() {
   ensure_token || return 1
   ensure_project || return 1
+  ensure_messageboard || return 1
 }
 
 @test "messages list returns messages" {
