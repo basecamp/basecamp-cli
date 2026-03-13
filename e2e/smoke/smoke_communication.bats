@@ -92,3 +92,39 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+# --- Forwards (reply operations) ---
+
+@test "forwards replies lists replies to a forward" {
+  ensure_inbox || mark_unverifiable "No inbox in project"
+
+  local fwd_out
+  fwd_out=$(basecamp forwards list --inbox "$QA_INBOX" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list forwards"
+    return
+  }
+  local fwd_id
+  fwd_id=$(echo "$fwd_out" | jq -r '.data[0].id // empty')
+  [[ -n "$fwd_id" ]] || mark_unverifiable "No forwards in project inbox"
+
+  run_smoke basecamp forwards replies "$fwd_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  echo "$fwd_id" > "$BATS_FILE_TMPDIR/forward_id_for_reply"
+}
+
+@test "forwards reply creates a reply to a forward" {
+  ensure_inbox || mark_unverifiable "No inbox in project"
+
+  local id_file="$BATS_FILE_TMPDIR/forward_id_for_reply"
+  [[ -f "$id_file" ]] || mark_unverifiable "No forward discovered in prior test"
+  local fwd_id
+  fwd_id=$(<"$id_file")
+  [[ -n "$fwd_id" ]] || mark_unverifiable "Forward ID is empty"
+
+  run_smoke basecamp forwards reply "$fwd_id" \
+    "Smoke reply $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}

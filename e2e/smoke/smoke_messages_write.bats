@@ -61,6 +61,28 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "messages archive archives a message" {
+  local id_file="$BATS_FILE_TMPDIR/message_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
+  local msg_id
+  msg_id=$(<"$id_file")
+
+  run_smoke basecamp messages archive "$msg_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "messages restore restores an archived message" {
+  local id_file="$BATS_FILE_TMPDIR/message_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
+  local msg_id
+  msg_id=$(<"$id_file")
+
+  run_smoke basecamp messages restore "$msg_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "messages trash trashes a message" {
   local id_file="$BATS_FILE_TMPDIR/message_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
