@@ -73,6 +73,7 @@ basecamp search "authentication"      # Search across projects
 basecamp files list --in 12345        # List docs & files
 basecamp cards list --in 12345        # List cards (Kanban)
 basecamp chat post "Hello" --in 12345      # Post to chat
+basecamp comment 67890 "@Jane.Smith, done!"    # Comment with @mention
 ```
 
 ### Output Formats

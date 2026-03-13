@@ -1,6 +1,7 @@
 package richtext
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -654,5 +655,125 @@ func TestHTMLToMarkdownPreservesContent(t *testing.T) {
 		if !strings.Contains(result, check) {
 			t.Errorf("HTMLToMarkdown result missing %q\nFull result: %q", check, result)
 		}
+	}
+}
+
+func TestMentionToHTML(t *testing.T) {
+	got := MentionToHTML("sgid-abc123", "John Doe")
+	expected := `<bc-attachment sgid="sgid-abc123" content-type="application/vnd.basecamp.mention">@John Doe</bc-attachment>`
+	if got != expected {
+		t.Errorf("MentionToHTML() = %q, want %q", got, expected)
+	}
+}
+
+func TestResolveMentions(t *testing.T) {
+	lookup := func(name string) (sgid, displayName string, err error) {
+		people := map[string][2]string{
+			"John":          {"sgid-john", "John Doe"},
+			"John Doe":      {"sgid-john", "John Doe"},
+			"Igor":          {"sgid-igor", "Igor Logachev"},
+			"Igor Logachev": {"sgid-igor", "Igor Logachev"},
+			"José":          {"sgid-jose", "José García"},
+		}
+		if p, ok := people[name]; ok {
+			return p[0], p[1], nil
+		}
+		return "", "", fmt.Errorf("not found: %s", name)
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "single mention",
+			input:    `<p>Hey @John, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("sgid-john", "John Doe") + `, check this</p>`,
+		},
+		{
+			name:     "first.last mention",
+			input:    `<p>Hey @Igor.Logachev, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("sgid-igor", "Igor Logachev") + `, check this</p>`,
+		},
+		{
+			name:     "multiple mentions",
+			input:    `<p>@John and @Igor please review</p>`,
+			expected: `<p>` + MentionToHTML("sgid-john", "John Doe") + ` and ` + MentionToHTML("sgid-igor", "Igor Logachev") + ` please review</p>`,
+		},
+		{
+			name:     "no mentions",
+			input:    `<p>Hello world</p>`,
+			expected: `<p>Hello world</p>`,
+		},
+		{
+			name:     "mention at start of line",
+			input:    `@John hello`,
+			expected: MentionToHTML("sgid-john", "John Doe") + ` hello`,
+		},
+		{
+			name:     "email not treated as mention",
+			input:    `<p>Send to user@John.com</p>`,
+			expected: `<p>Send to user@John.com</p>`,
+		},
+		{
+			name:    "unresolved mention is error",
+			input:   `<p>Hey @Unknown</p>`,
+			wantErr: true,
+		},
+		{
+			name:     "mention inside HTML tag is skipped",
+			input:    `<a href="@John">link</a>`,
+			expected: `<a href="@John">link</a>`,
+		},
+		{
+			name:     "mention inside existing bc-attachment is skipped",
+			input:    `<bc-attachment sgid="x" content-type="application/vnd.basecamp.mention">@John</bc-attachment>`,
+			expected: `<bc-attachment sgid="x" content-type="application/vnd.basecamp.mention">@John</bc-attachment>`,
+		},
+		{
+			name:     "unicode name mention",
+			input:    `<p>Hey @José, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("sgid-jose", "José García") + `, check this</p>`,
+		},
+		{
+			name:     "mention inside code block is skipped",
+			input:    `<p>Use <code>@John</code> syntax</p>`,
+			expected: `<p>Use <code>@John</code> syntax</p>`,
+		},
+		{
+			name:     "mention inside pre block is skipped",
+			input:    `<pre>@John example</pre>`,
+			expected: `<pre>@John example</pre>`,
+		},
+		{
+			name:     "mention after self-closing bc-attachment is resolved",
+			input:    `<bc-attachment sgid="x" content-type="image/png"/> @John check this`,
+			expected: `<bc-attachment sgid="x" content-type="image/png"/> ` + MentionToHTML("sgid-john", "John Doe") + ` check this`,
+		},
+		{
+			name:     "mention inside pre after preview tag is skipped",
+			input:    `<preview>stuff</preview><pre>@John example</pre>`,
+			expected: `<preview>stuff</preview><pre>@John example</pre>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveMentions(tt.input, lookup)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			}
+		})
 	}
 }

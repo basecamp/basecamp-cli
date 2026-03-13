@@ -49,6 +49,7 @@ type Project struct {
 // Person represents a Basecamp person for name resolution.
 type Person struct {
 	ID             int64  `json:"id"`
+	AttachableSGID string `json:"attachable_sgid,omitempty"`
 	Name           string `json:"name"`
 	Email          string `json:"email_address"`
 	PersonableType string `json:"personable_type,omitempty"` // e.g., "User", "Client"
@@ -238,22 +239,81 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 	}
 
 	// Not found - provide suggestions from both lists (deduplicated by ID)
-	seen := make(map[int64]struct{}, len(people))
-	allPeople := make([]Person, 0, len(people)+len(pingable))
-	for _, p := range people {
-		seen[p.ID] = struct{}{}
-		allPeople = append(allPeople, p)
-	}
-	for _, p := range pingable {
-		if _, ok := seen[p.ID]; !ok {
-			allPeople = append(allPeople, p)
-		}
-	}
+	allPeople := deduplicatePeople(people, pingable)
 	suggestions := suggest(input, allPeople, func(p Person) string { return p.Name })
 	if len(suggestions) > 0 {
 		return "", "", output.ErrNotFoundHint("Person", input, "Did you mean: "+strings.Join(suggestions, ", "))
 	}
 	return "", "", output.ErrNotFound("Person", input)
+}
+
+// ResolvePersonByName resolves a person name to a full Person record including AttachableSGID.
+// Uses the same resolution logic as ResolvePerson (exact > case-insensitive > partial > pingable).
+func (r *Resolver) ResolvePersonByName(ctx context.Context, input string) (*Person, error) {
+	// Fetch people for name resolution
+	people, err := r.getPeople(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Try name resolution
+	match, matches := resolve(input, people, func(p Person) (int64, string) {
+		return p.ID, p.Name
+	})
+
+	if match != nil {
+		return match, nil
+	}
+
+	if len(matches) > 1 {
+		names := make([]string, len(matches))
+		for i, m := range matches {
+			names[i] = m.Name
+		}
+		return nil, output.ErrAmbiguous("person", names)
+	}
+
+	// Fallback: try pingable people
+	pingable, _ := r.getPingable(ctx)
+	if len(pingable) > 0 {
+		pingMatch, pingMatches := resolve(input, pingable, func(p Person) (int64, string) {
+			return p.ID, p.Name
+		})
+		if pingMatch != nil {
+			return pingMatch, nil
+		}
+		if len(pingMatches) > 1 {
+			pingNames := make([]string, len(pingMatches))
+			for i, m := range pingMatches {
+				pingNames[i] = m.Name
+			}
+			return nil, output.ErrAmbiguous("person", pingNames)
+		}
+	}
+
+	// Not found
+	allPeople := deduplicatePeople(people, pingable)
+	suggestions := suggest(input, allPeople, func(p Person) string { return p.Name })
+	if len(suggestions) > 0 {
+		return nil, output.ErrNotFoundHint("Person", input, "Did you mean: "+strings.Join(suggestions, ", "))
+	}
+	return nil, output.ErrNotFound("Person", input)
+}
+
+// deduplicatePeople merges two person lists, removing duplicates by ID.
+func deduplicatePeople(people, pingable []Person) []Person {
+	seen := make(map[int64]struct{}, len(people))
+	all := make([]Person, 0, len(people)+len(pingable))
+	for _, p := range people {
+		seen[p.ID] = struct{}{}
+		all = append(all, p)
+	}
+	for _, p := range pingable {
+		if _, ok := seen[p.ID]; !ok {
+			all = append(all, p)
+		}
+	}
+	return all
 }
 
 // ResolveTodolist resolves a todolist name or ID within a project.
@@ -338,9 +398,10 @@ func (r *Resolver) getMe(ctx context.Context) (*Person, error) {
 	}
 
 	r.me = &Person{
-		ID:    person.ID,
-		Name:  person.Name,
-		Email: person.EmailAddress,
+		ID:             person.ID,
+		AttachableSGID: person.AttachableSGID,
+		Name:           person.Name,
+		Email:          person.EmailAddress,
 	}
 	return r.me, nil
 }
@@ -439,9 +500,10 @@ func (r *Resolver) getPingable(ctx context.Context) ([]Person, error) {
 	pingable := make([]Person, 0, len(sdkResult.People))
 	for _, p := range sdkResult.People {
 		pingable = append(pingable, Person{
-			ID:    p.ID,
-			Name:  p.Name,
-			Email: p.EmailAddress,
+			ID:             p.ID,
+			AttachableSGID: p.AttachableSGID,
+			Name:           p.Name,
+			Email:          p.EmailAddress,
 		})
 	}
 
