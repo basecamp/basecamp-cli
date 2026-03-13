@@ -120,13 +120,44 @@ for parent_cmd in "${!oos[@]}"; do
   done
 done
 
-# --- Extract unverifiable commands from mark_unverifiable tests ---
-# These are already in the tested bucket since they have run_smoke calls,
-# but we track them separately for completeness.
+# --- Extract always-unverifiable commands from test metadata ---
+# An "always-unverifiable" test calls mark_unverifiable but never run_smoke.
+# These are tests where the command *should* work but cannot be exercised due
+# to environment limitations (e.g., lineup create returns no ID to chain).
+# Derived mechanically — no hardcoded list.
 declare -A unverifiable
-# lineup update/delete are the known unverifiable-only commands
-unverifiable["basecamp lineup update"]=1
-unverifiable["basecamp lineup delete"]=1
+while IFS= read -r bats_file; do
+  # Split file into test blocks; check each for mark_unverifiable without run_smoke
+  in_test=0
+  test_name=""
+  has_run_smoke=0
+  has_mark_unverifiable=0
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^@test\ \"(.*)\" ]]; then
+      # Emit previous test if it qualifies
+      if [[ $in_test -eq 1 && $has_mark_unverifiable -eq 1 && $has_run_smoke -eq 0 && -n "$test_name" ]]; then
+        # Extract command from test name using longest-prefix match
+        # shellcheck disable=SC2206
+        name_words=($test_name)
+        matched=$(find_longest_cmd "${name_words[@]}")
+        [[ -n "$matched" ]] && unverifiable["$matched"]=1
+      fi
+      test_name="${BASH_REMATCH[1]}"
+      in_test=1
+      has_run_smoke=0
+      has_mark_unverifiable=0
+    elif [[ $in_test -eq 1 ]]; then
+      [[ "$line" == *run_smoke* ]] && has_run_smoke=1
+      [[ "$line" == *mark_unverifiable* ]] && has_mark_unverifiable=1
+    fi
+  done < "$bats_file"
+  # Emit last test in file
+  if [[ $in_test -eq 1 && $has_mark_unverifiable -eq 1 && $has_run_smoke -eq 0 && -n "$test_name" ]]; then
+    name_words=($test_name)
+    matched=$(find_longest_cmd "${name_words[@]}")
+    [[ -n "$matched" ]] && unverifiable["$matched"]=1
+  fi
+done < <(find "$SMOKE_DIR" -name '*.bats' -type f)
 
 # --- Check coverage ---
 uncovered=()
