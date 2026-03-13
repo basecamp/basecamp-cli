@@ -55,6 +55,10 @@ Examples:
 				return err
 			}
 
+			if assignee == "" && !app.IsInteractive() {
+				return output.ErrUsageHint("Person to assign is required", "Use --to <person>")
+			}
+
 			switch {
 			case isCard:
 				card, err := validateCard(cmd, app, itemID)
@@ -143,6 +147,10 @@ Examples:
 			resolvedProjectID, err := resolveProjectID(cmd, app, project)
 			if err != nil {
 				return err
+			}
+
+			if assignee == "" && !app.IsInteractive() {
+				return output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
 			}
 
 			switch {
