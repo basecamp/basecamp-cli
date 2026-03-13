@@ -193,17 +193,16 @@ ensure_project() {
   export QA_PROJECT
 }
 
-# _project_dock — cached project dock JSON for dock-based discovery.
+# _load_dock — fetch and cache project dock JSON for dock-based discovery.
 # Avoids repeated projects show calls within a single setup_file.
+# Sets _QA_DOCK_JSON; returns 1 on failure (caller handles mark_unverifiable).
 _QA_DOCK_JSON=""
-_project_dock() {
-  if [[ -z "$_QA_DOCK_JSON" ]]; then
-    _QA_DOCK_JSON=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
-      mark_unverifiable "Cannot show project $QA_PROJECT"
-      return 1
-    }
-  fi
-  echo "$_QA_DOCK_JSON"
+_load_dock() {
+  [[ -n "$_QA_DOCK_JSON" ]] && return 0
+  _QA_DOCK_JSON=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || {
+    _QA_DOCK_JSON=""
+    return 1
+  }
 }
 
 ensure_todolist() {
@@ -245,9 +244,8 @@ ensure_messageboard() {
   ensure_project || return 1
 
   # Discover via dock inspection (not messageboards show, which is under test).
-  local dock
-  dock=$(_project_dock) || return 1
-  QA_MESSAGEBOARD=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "message_board" and .enabled == true) | .id][0] // empty')
+  _load_dock || { mark_unverifiable "Cannot show project $QA_PROJECT"; return 1; }
+  QA_MESSAGEBOARD=$(echo "$_QA_DOCK_JSON" | jq -r '[.data.dock[]? | select(.name == "message_board" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_MESSAGEBOARD" ]]; then
     mark_unverifiable "No message board in project $QA_PROJECT dock"
     return 1
@@ -261,9 +259,8 @@ ensure_cardtable() {
 
   # Detect card table from the project dock (kanban_board) rather than
   # requiring existing cards. This matches getCardTableID in cards.go.
-  local dock
-  dock=$(_project_dock) || return 1
-  QA_CARDTABLE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "kanban_board" and .enabled == true) | .id][0] // empty')
+  _load_dock || { mark_unverifiable "Cannot show project $QA_PROJECT"; return 1; }
+  QA_CARDTABLE=$(echo "$_QA_DOCK_JSON" | jq -r '[.data.dock[]? | select(.name == "kanban_board" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_CARDTABLE" ]]; then
     mark_unverifiable "No card table in project $QA_PROJECT dock"
     return 1
@@ -275,9 +272,8 @@ ensure_campfire() {
   [[ -n "${QA_CAMPFIRE:-}" ]] && return 0
   ensure_project || return 1
 
-  local dock
-  dock=$(_project_dock) || return 1
-  QA_CAMPFIRE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "chat" and .enabled == true) | .id][0] // empty')
+  _load_dock || { mark_unverifiable "Cannot show project $QA_PROJECT"; return 1; }
+  QA_CAMPFIRE=$(echo "$_QA_DOCK_JSON" | jq -r '[.data.dock[]? | select(.name == "chat" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_CAMPFIRE" ]]; then
     mark_unverifiable "No campfire in project $QA_PROJECT dock"
     return 1
@@ -342,9 +338,8 @@ ensure_schedule() {
   ensure_project || return 1
 
   # Discover via dock inspection (not schedule info, which is under test).
-  local dock
-  dock=$(_project_dock) || return 1
-  QA_SCHEDULE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "schedule" and .enabled == true) | .id][0] // empty')
+  _load_dock || { mark_unverifiable "Cannot show project $QA_PROJECT"; return 1; }
+  QA_SCHEDULE=$(echo "$_QA_DOCK_JSON" | jq -r '[.data.dock[]? | select(.name == "schedule" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_SCHEDULE" ]]; then
     mark_unverifiable "No schedule in project $QA_PROJECT dock"
     return 1
@@ -356,9 +351,8 @@ ensure_questionnaire() {
   [[ -n "${QA_QUESTIONNAIRE:-}" ]] && return 0
   ensure_project || return 1
 
-  local dock
-  dock=$(_project_dock) || return 1
-  QA_QUESTIONNAIRE=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "questionnaire" and .enabled == true) | .id][0] // empty')
+  _load_dock || { mark_unverifiable "Cannot show project $QA_PROJECT"; return 1; }
+  QA_QUESTIONNAIRE=$(echo "$_QA_DOCK_JSON" | jq -r '[.data.dock[]? | select(.name == "questionnaire" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_QUESTIONNAIRE" ]]; then
     mark_unverifiable "No questionnaire in project $QA_PROJECT dock"
     return 1
@@ -370,9 +364,8 @@ ensure_inbox() {
   [[ -n "${QA_INBOX:-}" ]] && return 0
   ensure_project || return 1
 
-  local dock
-  dock=$(_project_dock) || return 1
-  QA_INBOX=$(echo "$dock" | jq -r '[.data.dock[]? | select(.name == "inbox" and .enabled == true) | .id][0] // empty')
+  _load_dock || { mark_unverifiable "Cannot show project $QA_PROJECT"; return 1; }
+  QA_INBOX=$(echo "$_QA_DOCK_JSON" | jq -r '[.data.dock[]? | select(.name == "inbox" and .enabled == true) | .id][0] // empty')
   if [[ -z "$QA_INBOX" ]]; then
     mark_unverifiable "No inbox in project $QA_PROJECT dock"
     return 1

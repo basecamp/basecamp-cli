@@ -18,41 +18,35 @@ ENV_FILE="${1:?Usage: smoke_provision.sh <env-file>}"
 
 QA_ACCOUNT="${BASECAMP_ACCOUNT_ID:-}"
 if [[ -z "$QA_ACCOUNT" ]]; then
-  out=$(basecamp accounts list --json 2>/dev/null) || exit 0
+  out=$(basecamp accounts list --json 2>/dev/null) || { echo "Cannot list accounts" >&2; exit 1; }
   QA_ACCOUNT=$(echo "$out" | jq -r '.data[0].id // empty')
-  [[ -n "$QA_ACCOUNT" ]] || exit 0
+  [[ -n "$QA_ACCOUNT" ]] || { echo "No accounts found" >&2; exit 1; }
 fi
 export BASECAMP_ACCOUNT_ID="$QA_ACCOUNT"
 
 QA_PROJECT="${BASECAMP_PROJECT_ID:-}"
 if [[ -z "$QA_PROJECT" ]]; then
-  out=$(basecamp projects list --json 2>/dev/null) || exit 0
+  out=$(basecamp projects list --json 2>/dev/null) || { echo "Cannot list projects" >&2; exit 1; }
   QA_PROJECT=$(echo "$out" | jq -r '.data[0].id // empty')
-  [[ -n "$QA_PROJECT" ]] || exit 0
+  [[ -n "$QA_PROJECT" ]] || { echo "No projects found" >&2; exit 1; }
 fi
 
 # --- Read project dock once ---
 
-dock_json=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || exit 0
+dock_json=$(basecamp projects show "$QA_PROJECT" --json 2>/dev/null) || { echo "Cannot show project $QA_PROJECT" >&2; exit 1; }
 
 # enable_dock_tool NAME — ensure a dock tool is enabled, print its ID.
+# Finds by name (regardless of enabled state), enables idempotently.
 enable_dock_tool() {
   local name="$1"
   local tool_id
-  # Already enabled?
-  tool_id=$(echo "$dock_json" | jq -r "[.data.dock[]? | select(.name == \"$name\" and .enabled == true) | .id][0] // empty")
-  if [[ -n "$tool_id" ]]; then
-    echo "$tool_id"
-    return 0
-  fi
-  # Exists but disabled — enable it
   tool_id=$(echo "$dock_json" | jq -r "[.data.dock[]? | select(.name == \"$name\") | .id][0] // empty")
-  if [[ -n "$tool_id" ]]; then
-    basecamp tools enable "$tool_id" -p "$QA_PROJECT" --json >/dev/null 2>&1 || return 1
-    echo "$tool_id"
-    return 0
+  if [[ -z "$tool_id" ]]; then
+    return 1
   fi
-  return 1
+  # Enable idempotently — already-enabled tools return success.
+  basecamp tools enable "$tool_id" -p "$QA_PROJECT" --json >/dev/null 2>&1 || return 1
+  echo "$tool_id"
 }
 
 # --- Enable dock tools ---
