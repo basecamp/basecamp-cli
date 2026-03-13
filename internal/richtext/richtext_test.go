@@ -104,7 +104,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "mixed formatting",
 			input:    "# Title\n\nThis is **bold** and *italic* and `code`.",
-			expected: "<h1>Title</h1>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
+			expected: "<h1>Title</h1>\n<br>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
 		},
 		{
 			name:     "escapes HTML",
@@ -115,6 +115,36 @@ func TestMarkdownToHTML(t *testing.T) {
 			name:     "escapes ampersand",
 			input:    "Tom & Jerry",
 			expected: "<p>Tom &amp; Jerry</p>",
+		},
+		{
+			name:     "paragraph spacing with blank line",
+			input:    "First paragraph\n\nSecond paragraph",
+			expected: "<p>First paragraph</p>\n<br>\n<p>Second paragraph</p>",
+		},
+		{
+			name:     "multiple blank lines collapse to one break",
+			input:    "First\n\n\n\nSecond",
+			expected: "<p>First</p>\n<br>\n<p>Second</p>",
+		},
+		{
+			name:     "no spacing without blank line",
+			input:    "Line one\nLine two",
+			expected: "<p>Line one</p>\n<p>Line two</p>",
+		},
+		{
+			name:     "blank line before list",
+			input:    "Intro\n\n- Item 1\n- Item 2",
+			expected: "<p>Intro</p>\n<br>\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>",
+		},
+		{
+			name:     "blank line before code block",
+			input:    "Intro\n\n```\ncode\n```",
+			expected: "<p>Intro</p>\n<br>\n<pre><code>code</code></pre>",
+		},
+		{
+			name:     "leading blank lines ignored",
+			input:    "\n\nHello",
+			expected: "<p>Hello</p>",
 		},
 	}
 

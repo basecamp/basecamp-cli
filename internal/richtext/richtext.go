@@ -114,6 +114,7 @@ func MarkdownToHTML(md string) string {
 	var inList bool
 	var listItems []string
 	var listType string // "ul" or "ol"
+	var pendingBreak bool
 
 	flushList := func() {
 		if len(listItems) > 0 {
@@ -149,6 +150,10 @@ func MarkdownToHTML(md string) string {
 			} else {
 				// Start code block
 				flushList()
+				if pendingBreak {
+					result.WriteString("<br>\n")
+					pendingBreak = false
+				}
 				inCodeBlock = true
 				codeBlockLang = after
 			}
@@ -167,6 +172,10 @@ func MarkdownToHTML(md string) string {
 		if ulMatch != nil {
 			if !inList || listType != "ul" {
 				flushList()
+				if pendingBreak {
+					result.WriteString("<br>\n")
+					pendingBreak = false
+				}
 				inList = true
 				listType = "ul"
 			}
@@ -177,6 +186,10 @@ func MarkdownToHTML(md string) string {
 		if olMatch != nil {
 			if !inList || listType != "ol" {
 				flushList()
+				if pendingBreak {
+					result.WriteString("<br>\n")
+					pendingBreak = false
+				}
 				inList = true
 				listType = "ol"
 			}
@@ -187,9 +200,19 @@ func MarkdownToHTML(md string) string {
 		// Not a list item, flush any pending list
 		flushList()
 
-		// Empty line
+		// Empty line — record that we need paragraph spacing before the next block.
+		// Basecamp's Trix editor does not render margins on <p> tags, so an
+		// explicit <br> is required to produce visible separation between blocks.
 		if strings.TrimSpace(line) == "" {
+			if result.Len() > 0 {
+				pendingBreak = true
+			}
 			continue
+		}
+
+		if pendingBreak {
+			result.WriteString("<br>\n")
+			pendingBreak = false
 		}
 
 		// Headings
