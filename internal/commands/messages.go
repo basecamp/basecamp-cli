@@ -311,6 +311,12 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return err
 			}
 
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			if err != nil {
+				return err
+			}
+
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
 				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
@@ -400,9 +406,17 @@ You can pass either a message ID or a Basecamp URL:
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(body)
+
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			if err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateMessageRequest{
 				Subject: title,
-				Content: richtext.MarkdownToHTML(body),
+				Content: html,
 			}
 
 			message, err := app.Account().Messages().Update(cmd.Context(), messageID, req)
@@ -634,6 +648,12 @@ use --message-board <id> to specify which one.`,
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}

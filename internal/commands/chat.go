@@ -358,6 +358,18 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		return output.ErrUsage("Invalid chat ID")
 	}
 
+	// Resolve @mentions — if any are found, content becomes HTML
+	resolved, resolveErr := resolveMentions(cmd.Context(), app.Names, content)
+	if resolveErr != nil {
+		return resolveErr
+	}
+	if resolved != content {
+		content = resolved
+		if contentType == "" {
+			contentType = "text/html"
+		}
+	}
+
 	// Post message using SDK
 	var opts *basecamp.CreateLineOptions
 	if contentType != "" {

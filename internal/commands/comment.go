@@ -224,8 +224,16 @@ You can pass either a comment ID or a Basecamp URL:
 			}
 
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(content)
+
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			if err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateCommentRequest{
-				Content: richtext.MarkdownToHTML(content),
+				Content: html,
 			}
 
 			comment, err := app.Account().Comments().Update(cmd.Context(), commentID, req)
@@ -330,6 +338,12 @@ Comma-separated IDs add the same comment to multiple items:
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err := resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Resolve @mentions (e.g., @John, @John.Doe → clickable mention tags)
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}

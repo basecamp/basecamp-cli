@@ -3,6 +3,7 @@
 package richtext
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -72,6 +73,12 @@ var (
 	reStripTags    = regexp.MustCompile(`<[^>]+>`)
 	reMultiNewline = regexp.MustCompile(`\n{3,}`)
 )
+
+// reMentionInput matches @Name or @First.Last in user input.
+// Group 1: prefix character (whitespace, >, or empty at start of string).
+// Group 2: the @mention itself.
+// Does not match mid-word (e.g., user@example.com).
+var reMentionInput = regexp.MustCompile(`(^|[\s>])(@[\w]+(?:\.[\w]+)*)`)
 
 // Pre-compiled regexes for IsHTML detection
 var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
@@ -618,6 +625,49 @@ func EmbedAttachments(html string, attachments []AttachmentRef) string {
 		b.WriteString(AttachmentToHTML(a.SGID, a.Filename, a.ContentType))
 	}
 	return b.String()
+}
+
+// MentionLookupFunc resolves a name to an attachable SGID and display name.
+type MentionLookupFunc func(name string) (sgid, displayName string, err error)
+
+// MentionToHTML builds a <bc-attachment> mention tag.
+func MentionToHTML(sgid, name string) string {
+	return `<bc-attachment sgid="` + escapeAttr(sgid) +
+		`" content-type="application/vnd.basecamp.mention">@` +
+		escapeHTML(name) + `</bc-attachment>`
+}
+
+// ResolveMentions scans HTML for @Name and @First.Last patterns, resolves each
+// to a person via the lookup function, and replaces with <bc-attachment> mention tags.
+// Returns the HTML unchanged if no mentions are found.
+func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
+	matches := reMentionInput.FindAllStringSubmatchIndex(html, -1)
+	if len(matches) == 0 {
+		return html, nil
+	}
+
+	// Process in reverse to preserve indices
+	result := html
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		// Group 1: prefix (whitespace/> or empty for start of string)
+		// Group 2: the @mention itself
+		mentionStart, mentionEnd := m[4], m[5]
+		mention := html[mentionStart:mentionEnd]
+
+		// Strip @ and convert dots to spaces for name lookup
+		name := strings.ReplaceAll(mention[1:], ".", " ")
+
+		sgid, displayName, err := lookup(name)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve mention %s: %w", mention, err)
+		}
+
+		tag := MentionToHTML(sgid, displayName)
+		result = result[:mentionStart] + tag + result[mentionEnd:]
+	}
+
+	return result, nil
 }
 
 // IsHTML attempts to detect if the input string contains HTML.

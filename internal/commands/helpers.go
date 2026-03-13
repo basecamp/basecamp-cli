@@ -13,6 +13,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
@@ -467,4 +468,20 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 		return &ids, nil
 	}
 	return nil, nil
+}
+
+// resolveMentions scans HTML for @Name mentions and replaces them with
+// Basecamp mention attachment tags. Silently returns unchanged HTML if
+// no mentions are found. Errors if a mentioned name cannot be resolved.
+func resolveMentions(ctx context.Context, resolver *names.Resolver, html string) (string, error) {
+	return richtext.ResolveMentions(html, func(name string) (string, string, error) {
+		person, err := resolver.ResolvePersonByName(ctx, name)
+		if err != nil {
+			return "", "", err
+		}
+		if person.AttachableSGID == "" {
+			return "", "", fmt.Errorf("person %q has no attachable SGID", person.Name)
+		}
+		return person.AttachableSGID, person.Name, nil
+	})
 }
