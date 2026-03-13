@@ -249,13 +249,11 @@ func TestNotFoundOrConvertPassesThroughOtherErrors(t *testing.T) {
 	assert.NotEqual(t, basecamp.CodeNotFound, e.Code)
 }
 
-// assignGuardTransport serves project resolution but fatals on item-fetch endpoints.
+// assignGuardTransport serves project resolution but errors on item-fetch endpoints.
 // This proves the non-interactive guard short-circuits before any item lookup.
-type assignGuardTransport struct {
-	t *testing.T
-}
+type assignGuardTransport struct{}
 
-func (tr *assignGuardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (assignGuardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
@@ -274,7 +272,7 @@ func (tr *assignGuardTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return nil, fmt.Errorf("unexpected HTTP request: %s %s — guard should have short-circuited", req.Method, path)
 }
 
-// setupAssignGuardTestApp creates an app whose transport fatals on item-fetch calls.
+// setupAssignGuardTestApp creates an app whose transport errors on item-fetch calls.
 func setupAssignGuardTestApp(t *testing.T) *appctx.App {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
@@ -284,10 +282,9 @@ func setupAssignGuardTestApp(t *testing.T) *appctx.App {
 		ProjectID: "123",
 	}
 
-	transport := &assignGuardTransport{t: t}
 	authMgr := auth.NewManager(cfg, nil)
 	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
-		basecamp.WithTransport(transport),
+		basecamp.WithTransport(assignGuardTransport{}),
 		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
