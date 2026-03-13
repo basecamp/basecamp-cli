@@ -29,3 +29,58 @@ test_lineup_delete_removes_a_lineup_marker # create returns no ID — smoke
 
 # SDK bug: TodolistOrGroup0 union type expects wrapped JSON, API returns flat
 test_todolists_show_returns_todolist_detail # SDK deserialization mismatch — smoke
+
+# Forwards reply operations depend on existing forwards in inbox
+test_forwards_replies_lists_replies_to_a_forward # inbox dock tool / no forwards — smoke
+test_forwards_reply_creates_a_reply_to_a_forward # inbox dock tool / no forwards — smoke
+
+# Checkin answers may not exist on all environments
+test_checkins_answer_show_returns_an_answer # no answers for question — smoke
+
+# Schedule entry detail depends on existing entries
+test_schedule_show_returns_entry_detail # no schedule entries — smoke
+
+# Schedule write operations depend on schedule dock tool
+test_schedule_create_creates_a_schedule_entry # schedule dock tool disabled — smoke
+test_schedule_update_updates_a_schedule_entry # depends on schedule create — smoke
+
+# Checkin write operations depend on questionnaire dock tool
+test_checkins_question_create_creates_a_question # questionnaire dock disabled — smoke
+test_checkins_question_update_updates_a_question # depends on question create — smoke
+test_checkins_answer_create_creates_an_answer # depends on question create — smoke
+test_checkins_answer_update_updates_an_answer # depends on answer create — smoke
+
+# Card column operations depend on card table dock tool
+test_cards_column_create_creates_a_column # card table disabled — smoke
+test_cards_column_show_returns_column_detail # depends on column create — smoke
+test_cards_column_update_updates_a_column # depends on column create — smoke
+test_cards_column_color_sets_column_color # depends on column create — smoke
+test_cards_column_move_moves_a_column # depends on column create — smoke
+test_cards_column_watch_watches_a_column # depends on column create — smoke
+test_cards_column_unwatch_unwatches_a_column # depends on column create — smoke
+test_cards_column_on_hold_sets_column_on_hold # depends on column create — smoke
+test_cards_column_no_on_hold_clears_column_on_hold # depends on column create — smoke
+
+# Tools create depends on project dock configuration
+test_tools_create_creates_a_tool # depends on messageboard dock tool — smoke
+test_tools_update_updates_a_tool # depends on tools create — smoke
+test_tools_reposition_repositions_a_tool # depends on tools create — smoke
+test_tools_disable_disables_a_tool # depends on tools create — smoke
+test_tools_enable_enables_a_tool # depends on tools create — smoke
+test_tools_trash_trashes_a_tool # depends on tools create — smoke
+
+# Todolist group write operations depend on existing todolists
+test_todolistgroups_create_creates_a_group # no todolists — smoke
+test_todolistgroups_update_updates_a_group # depends on group create — smoke
+test_todolistgroups_position_moves_a_group # depends on group create — smoke
+
+# Timesheet item may not be enabled
+test_timesheet_item_returns_timesheet_item_detail # timesheets not enabled — smoke
+
+# File download depends on existing uploads
+test_files_download_downloads_a_file # no uploads in project — smoke
+test_docs_download_downloads_a_document # no documents in project — smoke
+
+# Recordings operations create throwaway resources
+test_recordings_archive_archives_a_recording # depends on todolist — smoke
+test_recordings_visibility_sets_recording_visibility # depends on todolist — smoke
