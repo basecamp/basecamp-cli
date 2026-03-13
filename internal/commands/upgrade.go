@@ -34,6 +34,9 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	w := cmd.OutOrStdout()
+	if app.IsMachineOutput() {
+		w = cmd.ErrOrStderr()
+	}
 
 	current := version.Version
 	if current == "dev" {

@@ -55,6 +55,10 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	if app.Flags.JQFilter != "" {
+		return output.ErrJQNotSupported("the setup command")
+	}
+
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
 
 	// Step 1: Welcome

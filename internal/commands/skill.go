@@ -49,6 +49,9 @@ func NewSkillCmd() *cobra.Command {
 
 			// Non-interactive: print skill content (piped, --json, --agent, config-driven machine output)
 			if app == nil || !app.IsInteractive() || app.IsMachineOutput() {
+				if app != nil && app.Flags.JQFilter != "" {
+					return output.ErrJQNotSupported("raw skill output (use: basecamp skill install --jq)")
+				}
 				data, err := skills.FS.ReadFile("basecamp/SKILL.md")
 				if err != nil {
 					return fmt.Errorf("reading embedded skill: %w", err)
