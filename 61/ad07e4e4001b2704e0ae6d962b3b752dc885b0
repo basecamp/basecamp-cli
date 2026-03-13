@@ -1,0 +1,29 @@
+internal/commands/commands.go
+  6fbcf3ff922875e6 42
+internal/commands/messages.go
+  6fbcf3ff922875e6 44,448-496
+skills/basecamp/SKILL.md
+  6fbcf3ff922875e6 371-372
+API-COVERAGE.md
+  6fbcf3ff922875e6 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "61ad07e4e4001b2704e0ae6d962b3b752dc885b0",
+  "prompts": {
+    "6fbcf3ff922875e6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c79a6c80-1040-4dfa-99c4-0a3b41dd6ba6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 54,
+      "total_deletions": 2,
+      "accepted_lines": 54,
+      "overriden_lines": 0
+    }
+  }
+}
