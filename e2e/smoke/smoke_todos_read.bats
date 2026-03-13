@@ -46,3 +46,9 @@ setup_file() {
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
 }
+
+@test "todosets list returns todosets" {
+  run_smoke basecamp todosets list -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}

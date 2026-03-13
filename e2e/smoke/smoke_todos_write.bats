@@ -113,3 +113,73 @@ setup_file() {
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
 }
+
+@test "todolists update updates a todolist" {
+  ensure_todolist || mark_unverifiable "No todolist in project"
+
+  # Create a todolist to update
+  local tl_out
+  tl_out=$(basecamp todolists create "Update target $(date +%s)" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot create todolist for update test"
+    return
+  }
+  local tl_id
+  tl_id=$(echo "$tl_out" | jq -r '.data.id // empty')
+  [[ -n "$tl_id" ]] || mark_unverifiable "No todolist ID returned"
+
+  run_smoke basecamp todolists update "$tl_id" \
+    --name "Updated todolist $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  echo "$tl_id" > "$BATS_FILE_TMPDIR/todolist_target_id"
+}
+
+@test "todolists archive archives a todolist" {
+  local id_file="$BATS_FILE_TMPDIR/todolist_target_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No todolist created in prior test"
+  local tl_id
+  tl_id=$(<"$id_file")
+
+  run_smoke basecamp todolists archive "$tl_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "todolists restore restores an archived todolist" {
+  local id_file="$BATS_FILE_TMPDIR/todolist_target_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No todolist created in prior test"
+  local tl_id
+  tl_id=$(<"$id_file")
+
+  run_smoke basecamp todolists restore "$tl_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "todolists trash trashes a todolist" {
+  local id_file="$BATS_FILE_TMPDIR/todolist_target_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No todolist created in prior test"
+  local tl_id
+  tl_id=$(<"$id_file")
+
+  run_smoke basecamp todolists trash "$tl_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "todos archive archives a todo" {
+  # Create a throwaway todo to archive
+  local todo_out
+  todo_out=$(basecamp todo "Archive target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot create todo for archive test"
+    return
+  }
+  local todo_id
+  todo_id=$(echo "$todo_out" | jq -r '.data.id // empty')
+  [[ -n "$todo_id" ]] || mark_unverifiable "No todo ID returned"
+
+  run_smoke basecamp todos archive "$todo_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
