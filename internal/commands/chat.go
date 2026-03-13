@@ -31,7 +31,7 @@ func NewChatCmd() *cobra.Command {
 Use 'basecamp chat list' to see chats in a project.
 Use 'basecamp chat messages' to view recent messages.
 Use 'basecamp chat post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries\n@mentions supported: use @Name or @First.Last in content to create clickable mentions (auto-promotes to text/html)"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -293,7 +293,10 @@ func newChatPostCmd(project, chatID, contentType *string) *cobra.Command {
 		Long: `Post a message to a chat.
 
 By default, messages are sent as plain text. Use --content-type text/html
-for rich text (HTML) messages.`,
+for rich text (HTML) messages.
+
+@mentions (@Name or @First.Last) are resolved automatically and the
+content type is promoted to text/html when mentions are present.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

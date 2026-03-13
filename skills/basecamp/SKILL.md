@@ -74,7 +74,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Content fields accept Markdown** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+5. **Content fields accept Markdown and @mentions** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. Use `@Name` or `@First.Last` to create clickable mentions (e.g., `@Igor.Logachev`). For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
@@ -146,6 +146,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Create card | `basecamp card "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> --in <project> --json` |
 | Post message | `basecamp message "Title" "Body" --in <project> --json` |
+| Post with @mention | `basecamp message "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp message "Title" "Body" --no-subscribe --in <project> --json` |
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
 | Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
@@ -243,6 +244,18 @@ basecamp todos sweep --overdue --dry-run --in <project>
 
 # Complete all with comment
 basecamp todos sweep --overdue --complete --comment "Cleaning up" --in <project>
+```
+
+### Mention Someone
+
+```bash
+# Use @Name or @First.Last in any content field (comments, messages, chat)
+basecamp comment <id> "@Jane.Smith, please review this" --in <project>
+basecamp message "Update" "cc @Jane, @Alex" --in <project>
+basecamp chat post "@Jane, done!" --in <project>
+
+# Ambiguous names return an error with suggestions
+# Use @First.Last for disambiguation
 ```
 
 ### Move Card Through Workflow
@@ -369,6 +382,7 @@ basecamp message "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
 ```bash
 basecamp comments list <recording_id> --in <project> --json
 basecamp comment <recording_id> "Text" --in <project>
+basecamp comment <recording_id> "@Jane.Smith, looks good!" --in <project>  # With @mention
 basecamp comments update <id> "Updated" --in <project>
 ```
 
@@ -515,6 +529,7 @@ basecamp lineup delete <id>
 basecamp chat --in <project> --json           # List chats
 basecamp chat messages --in <project> --json  # List messages
 basecamp chat post "Hello!" --in <project>
+basecamp chat post "@Jane.Smith, check this" --in <project>  # With @mention (auto text/html)
 basecamp chat line <line_id> --in <project>   # Show line
 basecamp chat delete <line_id> --in <project> --force # Delete line (permanent, not trashable)
 ```
