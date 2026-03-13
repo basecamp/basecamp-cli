@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/itchyny/gojq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -129,6 +130,24 @@ func NewRootCmd() *cobra.Command {
 			app := appctx.NewApp(cfg)
 			app.Flags = flags
 			app.ApplyFlags()
+
+			// Early jq validation: parse + compile before RunE so invalid
+			// expressions are rejected with no side effects.
+			if flags.JQFilter != "" {
+				q, err := gojq.Parse(flags.JQFilter)
+				if err != nil {
+					return output.ErrJQValidation(err)
+				}
+				if _, err := gojq.Compile(q, gojq.WithEnvironLoader(os.Environ)); err != nil {
+					return output.ErrJQValidation(err)
+				}
+				if flags.IDsOnly {
+					return output.ErrJQConflict("--ids-only")
+				}
+				if flags.Count {
+					return output.ErrJQConflict("--count")
+				}
+			}
 
 			cmd.SetContext(appctx.WithApp(cmd.Context(), app))
 			return nil
@@ -293,13 +312,23 @@ func Execute() {
 		// Convert error to structured output
 		apiErr := output.AsError(err)
 
-		// Try to use app.Err() if app is available (for --stats support)
-		if app := appctx.FromContext(executedCmd.Context()); app != nil {
-			_ = app.Err(err)
-			os.Exit(apiErr.ExitCode())
+		// jq-related errors (validation failures, unsupported commands, conflicts)
+		// must never be fed through the jq filter. Skip app.Err() entirely and
+		// render with a plain writer.
+		disableJQ := output.IsJQError(err)
+		if !disableJQ {
+			if app := appctx.FromContext(executedCmd.Context()); app != nil {
+				if writeErr := app.Err(err); writeErr == nil {
+					os.Exit(apiErr.ExitCode())
+				}
+				// app.Err() write failed (e.g. jq runtime error on the error
+				// envelope, or broken pipe). Disable jq in the fallback writer
+				// to avoid replaying the same failure.
+				disableJQ = true
+			}
 		}
 
-		// Fallback: output error directly (app not available, e.g., during setup)
+		// Fallback: output error directly (app not available, or jq bypass needed)
 		pf := cmd.PersistentFlags()
 		format := output.FormatAuto // Default to auto (TTY → styled, non-TTY → JSON)
 		agent, _ := pf.GetBool("agent")
@@ -309,6 +338,14 @@ func Execute() {
 		styled, _ := pf.GetBool("styled")
 		md, _ := pf.GetBool("md")
 		jsonFlag, _ := pf.GetBool("json")
+		jqFilter, _ := pf.GetString("jq")
+		hadJQ := jqFilter != ""
+
+		// Strip jq filter when disabled (jq-about-jq errors OR app.Err() write failure).
+		// hadJQ preserves the "--jq implies --json" format decision even after zeroing.
+		if disableJQ {
+			jqFilter = ""
+		}
 
 		if agent || quiet {
 			format = output.FormatQuiet
@@ -320,13 +357,14 @@ func Execute() {
 			format = output.FormatStyled
 		} else if md {
 			format = output.FormatMarkdown
-		} else if jsonFlag {
+		} else if jsonFlag || hadJQ {
 			format = output.FormatJSON
 		}
 
 		writer := output.New(output.Options{
-			Format: format,
-			Writer: os.Stdout,
+			Format:   format,
+			Writer:   os.Stdout,
+			JQFilter: jqFilter,
 		})
 		_ = writer.Err(err)
 
@@ -491,6 +529,9 @@ func isMachineConsumer(root *cobra.Command) bool {
 		if v, _ := pf.GetBool(flag); v {
 			return true
 		}
+	}
+	if jq, _ := pf.GetString("jq"); jq != "" {
+		return true
 	}
 	fi, err := os.Stdout.Stat()
 	if err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {

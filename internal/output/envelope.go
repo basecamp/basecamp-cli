@@ -79,9 +79,6 @@ type Options struct {
 	JQFilter string // jq expression to apply to JSON output (built-in via gojq)
 }
 
-// jqCode is a compiled jq query, parsed once and reused across writes.
-type jqCode = *gojq.Query
-
 // DefaultOptions returns options for standard output.
 func DefaultOptions() Options {
 	return Options{
@@ -93,12 +90,12 @@ func DefaultOptions() Options {
 // Writer handles all output formatting.
 type Writer struct {
 	opts Options
-	jq   jqCode // compiled jq filter, nil when JQFilter is empty
+	jq   *gojq.Code // compiled jq filter, nil when JQFilter is empty
 }
 
 // New creates a new output writer.
-// If JQFilter is set, the jq expression is compiled eagerly so parse errors
-// surface immediately rather than on the first write.
+// If JQFilter is set, the jq expression is parsed and compiled eagerly so
+// errors surface immediately rather than on the first write.
 func New(opts Options) *Writer {
 	if opts.Writer == nil {
 		opts.Writer = os.Stdout
@@ -107,9 +104,12 @@ func New(opts Options) *Writer {
 	if opts.JQFilter != "" {
 		q, err := gojq.Parse(opts.JQFilter)
 		if err == nil {
-			w.jq = q
+			code, err := gojq.Compile(q, gojq.WithEnvironLoader(os.Environ))
+			if err == nil {
+				w.jq = code
+			}
 		}
-		// If parse fails, writeJQ will re-parse and return the error on first use.
+		// If parse/compile fails, writeJQ will re-parse and return the error on first use.
 	}
 	return w
 }
@@ -221,13 +221,16 @@ func (w *Writer) write(v any) error {
 // When the output format is FormatQuiet (--agent/--quiet), the filter runs on
 // the data-only payload; otherwise it runs on the full JSON envelope.
 func (w *Writer) writeJQ(v any) error {
-	query := w.jq
-	if query == nil {
-		// Fallback: parse on demand (covers edge case where New failed silently)
-		var err error
-		query, err = gojq.Parse(w.opts.JQFilter)
+	code := w.jq
+	if code == nil {
+		// Fallback: parse+compile on demand (covers edge case where New failed silently)
+		q, err := gojq.Parse(w.opts.JQFilter)
 		if err != nil {
-			return fmt.Errorf("invalid jq expression: %w", err)
+			return ErrJQValidation(err)
+		}
+		code, err = gojq.Compile(q, gojq.WithEnvironLoader(os.Environ))
+		if err != nil {
+			return ErrJQValidation(err)
 		}
 	}
 
@@ -248,32 +251,31 @@ func (w *Writer) writeJQ(v any) error {
 	// Serialize to JSON then back to interface{} so gojq gets plain types
 	raw, err := json.Marshal(target)
 	if err != nil {
-		return fmt.Errorf("jq: marshal error: %w", err)
+		return ErrJQRuntime(fmt.Errorf("marshal: %w", err))
 	}
 	var input any
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return fmt.Errorf("jq: unmarshal error: %w", err)
+		return ErrJQRuntime(fmt.Errorf("unmarshal: %w", err))
 	}
 
-	iter := query.Run(input)
-	enc := json.NewEncoder(w.opts.Writer)
-	enc.SetIndent("", "  ")
-
+	iter := code.Run(input)
 	for {
 		result, ok := iter.Next()
 		if !ok {
 			break
 		}
 		if err, ok := result.(error); ok {
-			return fmt.Errorf("jq filter error: %w", err)
+			return ErrJQRuntime(err)
 		}
 		// Print strings without JSON encoding for cleaner output
 		if s, ok := result.(string); ok {
 			fmt.Fprintln(w.opts.Writer, s)
 		} else {
-			if err := enc.Encode(result); err != nil {
-				return err
+			raw, err := json.Marshal(result)
+			if err != nil {
+				return ErrJQRuntime(fmt.Errorf("result not serializable: %w", err))
 			}
+			fmt.Fprintln(w.opts.Writer, string(raw))
 		}
 	}
 	return nil

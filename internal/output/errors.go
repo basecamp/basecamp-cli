@@ -1,6 +1,11 @@
 package output
 
-import clioutput "github.com/basecamp/cli/output"
+import (
+	"errors"
+	"fmt"
+
+	clioutput "github.com/basecamp/cli/output"
+)
 
 // Error is a structured error with code, message, and optional hint.
 // Type alias — zero-cost, full compatibility with errors.As.
@@ -42,4 +47,52 @@ func ErrForbiddenScope() *Error {
 		Hint:       "Run: basecamp auth login --scope full",
 		HTTPStatus: 403,
 	}
+}
+
+// errJQUnsupported is a sentinel cause for all jq-related errors.
+// Root.go uses IsJQError() to detect these and bypass jq filtering
+// when rendering the error itself.
+var errJQUnsupported = errors.New("jq unsupported")
+
+// ErrJQValidation returns a usage error for invalid --jq expressions.
+func ErrJQValidation(cause error) *Error {
+	return &Error{
+		Code:    CodeUsage,
+		Message: fmt.Sprintf("invalid --jq expression: %s", cause),
+		Cause:   errJQUnsupported,
+	}
+}
+
+// ErrJQNotSupported returns a usage error for commands that don't support --jq.
+func ErrJQNotSupported(command string) *Error {
+	return &Error{
+		Code:    CodeUsage,
+		Message: fmt.Sprintf("--jq is not supported by %s", command),
+		Cause:   errJQUnsupported,
+	}
+}
+
+// ErrJQConflict returns a usage error for flags that conflict with --jq.
+func ErrJQConflict(flag string) *Error {
+	return &Error{
+		Code:    CodeUsage,
+		Message: fmt.Sprintf("cannot use --jq with %s", flag),
+		Cause:   errJQUnsupported,
+	}
+}
+
+// ErrJQRuntime returns a usage error for jq runtime failures
+// (e.g. type errors, non-serializable results).
+func ErrJQRuntime(cause error) *Error {
+	return &Error{
+		Code:    CodeUsage,
+		Message: fmt.Sprintf("jq filter error: %s", cause),
+		Cause:   errJQUnsupported,
+	}
+}
+
+// IsJQError returns true if the error is a jq-related error
+// (validation failure, unsupported command, or flag conflict).
+func IsJQError(err error) bool {
+	return errors.Is(err, errJQUnsupported)
 }
