@@ -1,0 +1,37 @@
+e2e/smoke/smoke_lifecycle.bats
+  101fabf4a35d3782 71-84
+e2e/smoke/smoke_config_local.bats
+  101fabf4a35d3782 2
+e2e/smoke/smoke_cards_column_write.bats
+  101fabf4a35d3782 55,66
+e2e/smoke/smoke_cards_write.bats
+  101fabf4a35d3782 201
+e2e/smoke/smoke_tools.bats
+  101fabf4a35d3782 12,20-21,23,49
+e2e/smoke/smoke_reports.bats
+  101fabf4a35d3782 67-68
+e2e/smoke/smoke_checkins_write.bats
+  101fabf4a35d3782 29,40-41,56
+e2e/smoke/smoke_todolistgroups_write.bats
+  101fabf4a35d3782 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "4a1c935fc32e0f0871904673008263a31c4cca1b",
+  "prompts": {
+    "101fabf4a35d3782": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "abdda2e8-81e3-4522-a070-9d1cf1e097a2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 34,
+      "total_deletions": 54,
+      "accepted_lines": 30,
+      "overriden_lines": 0
+    }
+  }
+}
