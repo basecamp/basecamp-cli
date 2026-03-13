@@ -16,14 +16,14 @@ setup_file() {
 }
 
 @test "campfire messages returns lines" {
-  run_smoke basecamp campfire messages --campfire "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  run_smoke basecamp campfire messages --chat "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }
 
 @test "campfire post creates a message" {
   run_smoke basecamp campfire post "Smoke test $(date +%s)" \
-    --campfire "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+    --chat "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
@@ -38,7 +38,7 @@ setup_file() {
   line_id=$(<"$id_file")
 
   run_smoke basecamp campfire line "$line_id" \
-    --campfire "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+    --chat "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'

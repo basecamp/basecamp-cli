@@ -52,7 +52,7 @@ setup_file() {
   local boost_id
   boost_id=$(<"$id_file")
 
-  run_smoke basecamp boost delete "$boost_id" --json
+  run_smoke basecamp boost delete "$boost_id" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

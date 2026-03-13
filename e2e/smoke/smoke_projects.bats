@@ -45,13 +45,9 @@ setup_file() {
 }
 
 @test "accounts use sets default account" {
-  local acct_out
-  acct_out=$(basecamp accounts list --json 2>/dev/null) || mark_unverifiable "Cannot list accounts"
-  local acct_id
-  acct_id=$(echo "$acct_out" | jq -r '.data[0].id // empty')
-  [[ -n "$acct_id" ]] || mark_unverifiable "No accounts found"
+  ensure_account || return 0
 
-  run_smoke basecamp accounts use "$acct_id" --json
+  run_smoke basecamp accounts use "$QA_ACCOUNT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

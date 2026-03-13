@@ -15,7 +15,7 @@ setup_file() {
 }
 
 @test "webhooks create creates a webhook" {
-  run_smoke basecamp webhooks create "https://example.com/smoke-$(date +%s)" \
+  run_smoke basecamp webhooks create "https://smoke-test.invalid/hook-$(date +%s)" \
     -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
@@ -43,7 +43,7 @@ setup_file() {
   webhook_id=$(<"$id_file")
 
   run_smoke basecamp webhooks update "$webhook_id" \
-    --url "https://example.com/smoke-updated-$(date +%s)" \
+    --url "https://smoke-test.invalid/hook-updated-$(date +%s)" \
     -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'

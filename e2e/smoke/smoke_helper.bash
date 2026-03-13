@@ -274,6 +274,7 @@ ensure_message() {
 
 ensure_person() {
   [[ -n "${QA_PERSON:-}" ]] && return 0
+  ensure_token || return 1
 
   local out
   out=$(basecamp people list --json 2>/dev/null) || {
