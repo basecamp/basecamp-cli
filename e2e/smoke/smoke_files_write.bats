@@ -80,3 +80,76 @@ setup_file() {
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
 }
+
+@test "files documents create creates a document" {
+  run_smoke basecamp files documents create "Smoke file doc $(date +%s)" \
+    "Automated smoke test document" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
+
+@test "files uploads create creates an upload" {
+  local tmpfile="$BATS_FILE_TMPDIR/smoke_files_upload.txt"
+  echo "files upload content $(date +%s)" > "$tmpfile"
+
+  run_smoke basecamp files uploads create "$tmpfile" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
+
+@test "files update updates a file" {
+  local id_file="$BATS_FILE_TMPDIR/upload_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"
+  local file_id
+  file_id=$(<"$id_file")
+
+  run_smoke basecamp files update "$file_id" \
+    --description "Updated smoke file $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "files archive archives a file" {
+  local id_file="$BATS_FILE_TMPDIR/upload_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"
+  local file_id
+  file_id=$(<"$id_file")
+
+  run_smoke basecamp files archive "$file_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "files restore restores an archived file" {
+  local id_file="$BATS_FILE_TMPDIR/upload_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"
+  local file_id
+  file_id=$(<"$id_file")
+
+  run_smoke basecamp files restore "$file_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "files trash trashes a file" {
+  local id_file="$BATS_FILE_TMPDIR/upload_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"
+  local file_id
+  file_id=$(<"$id_file")
+
+  run_smoke basecamp files trash "$file_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "vaults folders create creates a vault folder" {
+  ensure_vault || mark_unverifiable "No vault in project"
+
+  run_smoke basecamp vaults folders create "Smoke vault folder $(date +%s)" \
+    --vault "$QA_VAULT" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
