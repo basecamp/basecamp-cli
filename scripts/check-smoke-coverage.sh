@@ -168,9 +168,9 @@ for leaf in "${leaves[@]}"; do
 done
 
 echo "Leaf commands: ${#leaves[@]}"
-echo "Tested: $(printf '%s\n' "${!tested[@]}" | wc -l | tr -d ' ')"
-echo "OOS: $(printf '%s\n' "${!oos[@]}" | wc -l | tr -d ' ')"
-echo "Unverifiable: $(printf '%s\n' "${!unverifiable[@]}" | wc -l | tr -d ' ')"
+echo "Tested: ${#tested[@]}"
+echo "OOS: ${#oos[@]}"
+echo "Unverifiable: ${#unverifiable[@]}"
 echo "Uncovered: ${#uncovered[@]}"
 
 if [[ ${#uncovered[@]} -gt 0 ]]; then

@@ -180,17 +180,6 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
-@test "cards archive archives a card" {
-  local id_file="$BATS_FILE_TMPDIR/card_id"
-  [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
-  local card_id
-  card_id=$(<"$id_file")
-
-  run_smoke basecamp cards archive "$card_id" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-}
-
 @test "cards step update updates a step" {
   local id_file="$BATS_FILE_TMPDIR/step_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No step created in prior test"
@@ -221,6 +210,17 @@ setup_file() {
   step_id=$(<"$id_file")
 
   run_smoke basecamp cards step delete "$step_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "cards archive archives a card" {
+  local id_file="$BATS_FILE_TMPDIR/card_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
+  local card_id
+  card_id=$(<"$id_file")
+
+  run_smoke basecamp cards archive "$card_id" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 }

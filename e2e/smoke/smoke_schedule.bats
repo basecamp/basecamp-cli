@@ -31,7 +31,7 @@ setup_file() {
   }
   local entry_id
   entry_id=$(echo "$out" | jq -r '.data[0].id // empty')
-  [[ -n "$entry_id" ]] || mark_unverifiable "No schedule entries in project"
+  [[ -n "$entry_id" ]] || { mark_unverifiable "No schedule entries in project"; return; }
 
   run_smoke basecamp schedule show "$entry_id" -p "$QA_PROJECT" --json
   assert_success

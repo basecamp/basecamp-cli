@@ -10,8 +10,6 @@ setup_file() {
 }
 
 @test "cards column create creates a column" {
-  [[ -n "${QA_CARDTABLE:-}" ]] || mark_unverifiable "No card table in project"
-
   run_smoke basecamp cards column create "Smoke col $(date +%s)" \
     --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
   assert_success
