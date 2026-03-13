@@ -46,3 +46,39 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "recordings archive archives a recording" {
+  ensure_todolist || mark_unverifiable "Cannot discover todolist for recordings archive"
+
+  # Create a throwaway todo to archive
+  local todo_out
+  todo_out=$(basecamp todo "Archive rec target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot create todo for recordings archive test"
+    return
+  }
+  local todo_id
+  todo_id=$(echo "$todo_out" | jq -r '.data.id // empty')
+  [[ -n "$todo_id" ]] || mark_unverifiable "No todo ID returned"
+
+  run_smoke basecamp recordings archive "$todo_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "recordings visibility sets recording visibility" {
+  ensure_todolist || mark_unverifiable "Cannot discover todolist for recordings visibility"
+
+  # Create a throwaway todo
+  local todo_out
+  todo_out=$(basecamp todo "Visibility target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot create todo for recordings visibility test"
+    return
+  }
+  local todo_id
+  todo_id=$(echo "$todo_out" | jq -r '.data.id // empty')
+  [[ -n "$todo_id" ]] || mark_unverifiable "No todo ID returned"
+
+  run_smoke basecamp recordings visibility "$todo_id" --visible -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}

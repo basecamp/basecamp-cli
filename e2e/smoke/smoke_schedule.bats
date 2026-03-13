@@ -21,3 +21,20 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "schedule show returns entry detail" {
+  # Discover an entry from the schedule
+  local out
+  out=$(basecamp schedule entries --schedule "$QA_SCHEDULE" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list schedule entries"
+    return
+  }
+  local entry_id
+  entry_id=$(echo "$out" | jq -r '.data[0].id // empty')
+  [[ -n "$entry_id" ]] || mark_unverifiable "No schedule entries in project"
+
+  run_smoke basecamp schedule show "$entry_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
