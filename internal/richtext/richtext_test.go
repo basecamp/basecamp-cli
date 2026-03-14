@@ -147,6 +147,16 @@ func TestMarkdownToHTML(t *testing.T) {
 			input:    "\n\nHello",
 			expected: "<p>Hello</p>",
 		},
+		{
+			name:     "blank line before blockquote",
+			input:    "Intro\n\n> A quote",
+			expected: "<p>Intro</p>\n<br>\n<blockquote>A quote</blockquote>",
+		},
+		{
+			name:     "blank line before horizontal rule",
+			input:    "Intro\n\n---",
+			expected: "<p>Intro</p>\n<br>\n<hr>",
+		},
 	}
 
 	for _, tt := range tests {

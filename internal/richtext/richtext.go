@@ -124,6 +124,13 @@ func MarkdownToHTML(md string) string {
 	var listType string // "ul" or "ol"
 	var pendingBreak bool
 
+	flushPendingBreak := func() {
+		if pendingBreak {
+			result.WriteString("<br>\n")
+			pendingBreak = false
+		}
+	}
+
 	flushList := func() {
 		if len(listItems) > 0 {
 			result.WriteString("<" + listType + ">\n")
@@ -158,10 +165,7 @@ func MarkdownToHTML(md string) string {
 			} else {
 				// Start code block
 				flushList()
-				if pendingBreak {
-					result.WriteString("<br>\n")
-					pendingBreak = false
-				}
+				flushPendingBreak()
 				inCodeBlock = true
 				codeBlockLang = after
 			}
@@ -180,10 +184,7 @@ func MarkdownToHTML(md string) string {
 		if ulMatch != nil {
 			if !inList || listType != "ul" {
 				flushList()
-				if pendingBreak {
-					result.WriteString("<br>\n")
-					pendingBreak = false
-				}
+				flushPendingBreak()
 				inList = true
 				listType = "ul"
 			}
@@ -194,10 +195,7 @@ func MarkdownToHTML(md string) string {
 		if olMatch != nil {
 			if !inList || listType != "ol" {
 				flushList()
-				if pendingBreak {
-					result.WriteString("<br>\n")
-					pendingBreak = false
-				}
+				flushPendingBreak()
 				inList = true
 				listType = "ol"
 			}
@@ -218,10 +216,7 @@ func MarkdownToHTML(md string) string {
 			continue
 		}
 
-		if pendingBreak {
-			result.WriteString("<br>\n")
-			pendingBreak = false
-		}
+		flushPendingBreak()
 
 		// Headings
 		if after, ok := strings.CutPrefix(line, "######"); ok {
