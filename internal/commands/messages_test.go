@@ -184,6 +184,50 @@ func TestMessagesUpdateShowsHelpWithoutContent(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestMessagesPublishRequiresID tests that messages publish requires an ID argument.
+func TestMessagesPublishRequiresID(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "publish")
+	require.Error(t, err)
+
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
+}
+
+// TestMessagesPublishInvalidID tests that messages publish rejects non-numeric IDs.
+func TestMessagesPublishInvalidID(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "publish", "not-a-number")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "Invalid message ID", e.Message)
+}
+
+// TestMessagesPublishSendsActiveStatus verifies publish sends an update with status "active".
+func TestMessagesPublishSendsActiveStatus(t *testing.T) {
+	transport := &mockMessageUpdateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "publish", "789")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "active", body["status"])
+}
+
 // TestMessageShortcutShowsHelpWithoutTitle tests that help is shown when title is missing.
 func TestMessageShortcutShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
@@ -235,7 +279,7 @@ func TestMessageShortcutHasMessageBoardFlag(t *testing.T) {
 func TestMessagesSubcommands(t *testing.T) {
 	cmd := NewMessagesCmd()
 
-	expected := []string{"list", "show", "create", "update", "pin", "unpin"}
+	expected := []string{"list", "show", "create", "update", "publish", "pin", "unpin"}
 	for _, name := range expected {
 		sub, _, err := cmd.Find([]string{name})
 		require.NoError(t, err, "expected subcommand %q to exist", name)
@@ -333,6 +377,36 @@ func TestMessageShortcutSubscribeEmptyIsError(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "at least one person")
+}
+
+// mockMessageUpdateTransport handles PUT requests and captures the body.
+type mockMessageUpdateTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockMessageUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "PUT" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 789, "subject": "Draft", "status": "active"}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+		Header:     header,
+	}, nil
 }
 
 // mockMessageCreateTransport handles resolver and dock API calls, and captures the POST body.
