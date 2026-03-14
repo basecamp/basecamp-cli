@@ -29,7 +29,7 @@ func NewMessagesCmd() *cobra.Command {
 
 Most projects have a single message board. If a project has multiple,
 use --message-board <id> to specify which one.`,
-		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board\n@mentions supported: use @Name or @First.Last in content to create clickable mentions\nFor visible empty lines use <br><br> — Markdown blank lines become <p> tags which Basecamp renders without spacing"},
+		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board\n@mentions supported: use @Name or @First.Last in content to create clickable mentions"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")

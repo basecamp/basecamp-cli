@@ -25,7 +25,7 @@ func NewCommentsCmd() *cobra.Command {
 		Use:         "comments",
 		Short:       "List and manage comments",
 		Long:        "List, show, and update comments on items.",
-		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments\n@mentions supported: use @Name or @First.Last in content to create clickable mentions\nFor visible empty lines use <br><br> — Markdown blank lines become <p> tags which Basecamp renders without spacing"},
+		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments\n@mentions supported: use @Name or @First.Last in content to create clickable mentions"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
