@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
-# smoke_lineup.bats - Level 1: Lineup CRUD lifecycle
+# smoke_lineup.bats - Level 1: Lineup create
 #
-# Note: lineup create/update return 204 No Content (no ID in response),
-# so update/delete cannot chain off a created marker without a list command.
+# Note: lineup update/delete are OOS — the API returns 204 No Content
+# (no ID in response), making them structurally untestable without a
+# fragile list-after-create workaround. See smoke_lifecycle.bats.
 
 load smoke_helper
 
@@ -18,12 +19,4 @@ setup_file() {
   # Lineup API may not exist on all environments (404 → validation error)
   [[ "$status" -ne 0 ]] && mark_unverifiable "Lineup API not available"
   assert_json_value '.ok' 'true'
-}
-
-@test "lineup update updates a lineup marker" {
-  mark_unverifiable "lineup create returns 204 No Content — no ID to chain"
-}
-
-@test "lineup delete removes a lineup marker" {
-  mark_unverifiable "lineup create returns 204 No Content — no ID to chain"
 }
