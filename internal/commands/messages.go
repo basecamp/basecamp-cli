@@ -41,6 +41,7 @@ use --message-board <id> to specify which one.`,
 		newMessagesShowCmd(),
 		newMessagesCreateCmd(&project, &messageBoard),
 		newMessagesUpdateCmd(),
+		newMessagesPublishCmd(),
 		newMessagesPinCmd(),
 		newMessagesUnpinCmd(),
 		newRecordableTrashCmd("message"),
@@ -441,6 +442,55 @@ You can pass either a message ID or a Basecamp URL:
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
 	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content")
 
+	return cmd
+}
+
+func newMessagesPublishCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "publish <id|url>",
+		Short: "Publish a draft message",
+		Long: `Publish a draft message, making it visible on the message board.
+
+You can pass either a message ID or a Basecamp URL:
+  basecamp messages publish 789
+  basecamp messages publish https://3.basecamp.com/123/buckets/456/messages/789`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			messageIDStr := extractID(args[0])
+
+			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message ID")
+			}
+
+			req := &basecamp.UpdateMessageRequest{
+				Status: "active",
+			}
+
+			message, err := app.Account().Messages().Update(cmd.Context(), messageID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(message,
+				output.WithSummary(fmt.Sprintf("Published message #%s", messageIDStr)),
+				output.WithEntity("message"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("basecamp messages show %s", messageIDStr),
+						Description: "View message",
+					},
+				),
+			)
+		},
+	}
 	return cmd
 }
 

@@ -27,7 +27,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
 | **Communication** |
-| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin. Create supports `--subscribe`/`--no-subscribe`. @mentions in content |
+| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
 | message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
 | campfires | 14 | `chat` | ✅ | - | list, messages, post, line show/delete. @mentions in content |
