@@ -1,0 +1,25 @@
+e2e/smoke/smoke_helper.bash
+  f745e4493b9b03b7 7-11,23-34,121,124-128,196-201,203,246-248,250,262-263,275-276,340-342,344,354-355,367-368
+e2e/smoke/smoke_provision.sh
+  f745e4493b9b03b7 1-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "e70479776c41b7726470f57219c800b72156621c",
+  "prompts": {
+    "f745e4493b9b03b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e22aea6-ac83-4320-9d60-b1286b368756",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 14,
+      "accepted_lines": 196,
+      "overriden_lines": 0
+    }
+  }
+}
