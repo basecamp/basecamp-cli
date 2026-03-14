@@ -27,11 +27,11 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
 | **Communication** |
-| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin. Create supports `--subscribe`/`--no-subscribe` |
+| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, pin, unpin. Create supports `--subscribe`/`--no-subscribe`. @mentions in content |
 | message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
-| campfires | 14 | `chat` | ✅ | - | list, messages, post, line show/delete |
-| comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update |
+| campfires | 14 | `chat` | ✅ | - | list, messages, post, line show/delete. @mentions in content |
+| comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update. @mentions in content |
 | boosts | 6 | `boost`, `react` | ✅ | - | list (recording + event), show, create (recording + event), delete |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | - | Accessed via project dock |

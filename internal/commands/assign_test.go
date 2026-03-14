@@ -4,13 +4,22 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -206,4 +215,142 @@ func TestRemoveID(t *testing.T) {
 func TestFindAssigneeName(t *testing.T) {
 	// Uses basecamp.Person from SDK, tested indirectly through the helper
 	assert.Equal(t, "Unknown", findAssigneeName(nil, 1))
+}
+
+func TestNotFoundOrConvertReturnsTypedNotFound(t *testing.T) {
+	tests := []struct {
+		typeName string
+		itemID   string
+	}{
+		{"to-do", "99999"},
+		{"card", "88888"},
+		{"step", "77777"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typeName, func(t *testing.T) {
+			sdkErr := basecamp.ErrNotFound(tt.typeName, tt.itemID)
+			err := notFoundOrConvert(sdkErr, tt.typeName, tt.itemID)
+
+			var e *output.Error
+			require.True(t, errors.As(err, &e))
+			assert.Equal(t, basecamp.CodeNotFound, e.Code)
+			assert.Contains(t, e.Message, fmt.Sprintf("%s not found: %s", tt.typeName, tt.itemID))
+		})
+	}
+}
+
+func TestNotFoundOrConvertPassesThroughOtherErrors(t *testing.T) {
+	sdkErr := basecamp.ErrForbidden("access denied")
+	err := notFoundOrConvert(sdkErr, "to-do", "123")
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.NotEqual(t, basecamp.CodeNotFound, e.Code)
+}
+
+// assignGuardTransport serves project resolution but errors on item-fetch endpoints.
+// This proves the non-interactive guard short-circuits before any item lookup.
+type assignGuardTransport struct{}
+
+func (assignGuardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	if req.Method == "GET" && strings.Contains(path, "/projects.json") {
+		body := `[{"id": 123, "name": "Test Project"}]`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	// Any other request means the guard didn't fire — the command tried to
+	// fetch a todo/card/step or resolve a person.
+	return nil, fmt.Errorf("unexpected HTTP request: %s %s — guard should have short-circuited", req.Method, path)
+}
+
+// setupAssignGuardTestApp creates an app whose transport errors on item-fetch calls.
+func setupAssignGuardTestApp(t *testing.T) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(assignGuardTransport{}),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+	app.Flags.JSON = true
+	return app
+}
+
+func TestAssignRequiresAssigneeNonInteractive(t *testing.T) {
+	app := setupAssignGuardTestApp(t)
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "456", "-p", "123")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Person to assign is required")
+	assert.Contains(t, e.Hint, "Use --to")
+}
+
+func TestUnassignRequiresAssigneeNonInteractive(t *testing.T) {
+	app := setupAssignGuardTestApp(t)
+
+	cmd := NewUnassignCmd()
+	err := executeAssignCommand(cmd, app, "456", "-p", "123")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Person to unassign is required")
+	assert.Contains(t, e.Hint, "Use --from")
+}
+
+func TestAssignCardRequiresAssigneeNonInteractive(t *testing.T) {
+	app := setupAssignGuardTestApp(t)
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "456", "--card", "-p", "123")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Person to assign is required")
+	assert.Contains(t, e.Hint, "Use --to")
+}
+
+func TestUnassignStepRequiresAssigneeNonInteractive(t *testing.T) {
+	app := setupAssignGuardTestApp(t)
+
+	cmd := NewUnassignCmd()
+	err := executeAssignCommand(cmd, app, "456", "--step", "-p", "123")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Person to unassign is required")
+	assert.Contains(t, e.Hint, "Use --from")
 }

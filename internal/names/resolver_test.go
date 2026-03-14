@@ -1004,3 +1004,64 @@ func TestGetTodolistsPartialFetchFailsHard(t *testing.T) {
 	require.Error(t, err, "partial todoset fetch should fail hard, not return partial results")
 	assert.Contains(t, err.Error(), "todoset 200")
 }
+
+// =============================================================================
+// ResolvePersonByName Tests
+// =============================================================================
+
+func TestResolvePersonByName(t *testing.T) {
+	r := newMockResolver()
+	r.setPeople([]Person{
+		{ID: 1, AttachableSGID: "sgid-john", Name: "John Doe", Email: "john@example.com"},
+		{ID: 2, AttachableSGID: "sgid-jane", Name: "Jane Smith", Email: "jane@example.com"},
+		{ID: 3, AttachableSGID: "sgid-igor", Name: "Igor Logachev", Email: "igor@example.com"},
+	})
+	r.setPingable([]Person{}) // empty pingable cache to avoid SDK call
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantSGID string
+		wantErr  bool
+	}{
+		{"exact match", "John Doe", "John Doe", "sgid-john", false},
+		{"partial match", "John", "John Doe", "sgid-john", false},
+		{"case insensitive", "jane", "Jane Smith", "sgid-jane", false},
+		{"full name", "Igor Logachev", "Igor Logachev", "sgid-igor", false},
+		{"not found", "Unknown", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			person, err := r.ResolvePersonByName(ctx, tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, person.Name)
+			assert.Equal(t, tt.wantSGID, person.AttachableSGID)
+		})
+	}
+}
+
+func TestResolvePersonByNamePingableFallback(t *testing.T) {
+	r := newMockResolver()
+	r.setPeople([]Person{
+		{ID: 1, AttachableSGID: "sgid-john", Name: "John Doe"},
+	})
+	r.setPingable([]Person{
+		{ID: 2, AttachableSGID: "sgid-client", Name: "External Client"},
+	})
+
+	ctx := context.Background()
+
+	// Should find in pingable
+	person, err := r.ResolvePersonByName(ctx, "External")
+	require.NoError(t, err)
+	assert.Equal(t, "External Client", person.Name)
+	assert.Equal(t, "sgid-client", person.AttachableSGID)
+}

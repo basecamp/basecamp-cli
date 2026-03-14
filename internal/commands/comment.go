@@ -25,7 +25,7 @@ func NewCommentsCmd() *cobra.Command {
 		Use:         "comments",
 		Short:       "List and manage comments",
 		Long:        "List, show, and update comments on items.",
-		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
+		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments\n@mentions supported: use @Name or @First.Last in content to create clickable mentions\nFor visible empty lines use <br><br> — Markdown blank lines become <p> tags which Basecamp renders without spacing"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -224,8 +224,16 @@ You can pass either a comment ID or a Basecamp URL:
 			}
 
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(content)
+
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			if err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateCommentRequest{
-				Content: richtext.MarkdownToHTML(content),
+				Content: html,
 			}
 
 			comment, err := app.Account().Comments().Update(cmd.Context(), commentID, req)
@@ -277,7 +285,10 @@ The first argument is the item ID or URL to comment on.
 Comma-separated IDs add the same comment to multiple items:
   basecamp comment 789 "Looks good!"
   basecamp comment 789,012,345 "Looks good!"
-  basecamp comment https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"`,
+  basecamp comment https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"
+
+Content supports Markdown and @mentions (@Name or @First.Last):
+  basecamp comment 789 "Hey @Jane.Smith, **please review**"`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -330,6 +341,12 @@ Comma-separated IDs add the same comment to multiple items:
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err := resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Resolve @mentions (e.g., @John, @John.Doe → clickable mention tags)
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}

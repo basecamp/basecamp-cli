@@ -29,7 +29,7 @@ func NewMessagesCmd() *cobra.Command {
 
 Most projects have a single message board. If a project has multiple,
 use --message-board <id> to specify which one.`,
-		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board"},
+		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board\n@mentions supported: use @Name or @First.Last in content to create clickable mentions\nFor visible empty lines use <br><br> — Markdown blank lines become <p> tags which Basecamp renders without spacing"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -311,6 +311,12 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return err
 			}
 
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			if err != nil {
+				return err
+			}
+
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
 				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
@@ -400,9 +406,17 @@ You can pass either a message ID or a Basecamp URL:
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
+			html := richtext.MarkdownToHTML(body)
+
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			if err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateMessageRequest{
 				Subject: title,
-				Content: richtext.MarkdownToHTML(body),
+				Content: html,
 			}
 
 			message, err := app.Account().Messages().Update(cmd.Context(), messageID, req)
@@ -552,7 +566,10 @@ func NewMessageCmd() *cobra.Command {
 		Long: `Post a message to a project's message board. Shortcut for 'basecamp messages create'.
 
 Most projects have a single message board. If a project has multiple,
-use --message-board <id> to specify which one.`,
+use --message-board <id> to specify which one.
+
+Content supports Markdown and @mentions (@Name or @First.Last):
+  basecamp message "Title" "Hey @Jane.Smith, **check this out**"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -634,6 +651,12 @@ use --message-board <id> to specify which one.`,
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
+			// Resolve @mentions
+			html, err = resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}

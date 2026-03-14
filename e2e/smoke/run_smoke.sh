@@ -52,6 +52,14 @@ echo ""
 
 bats_failures=0
 
+# Provisioning: enable dock tools and create missing data resources.
+# Writes QA_* env vars to qa-env.sh — test files source this on load.
+echo "--- Provisioning: enabling dock tools, creating data resources ---"
+"$SMOKE_DIR/smoke_provision.sh" "$QA_TRACE_DIR/qa-env.sh" || {
+  echo "Warning: provisioning failed (tests will mark gaps as unverifiable)"
+}
+echo ""
+
 # Level 0: Read-only (parallel)
 echo "--- Level 0: Read-only tests (parallel, $jobs jobs) ---"
 level0=(
