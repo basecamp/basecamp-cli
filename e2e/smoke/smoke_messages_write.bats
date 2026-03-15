@@ -27,6 +27,24 @@ setup_file() {
   assert_json_not_null '.data.id'
 }
 
+@test "messages publish publishes a draft message" {
+  run_smoke basecamp messages create "Smoke draft $(date +%s)" \
+    "Draft body" --draft -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+  local draft_id
+  draft_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp messages publish "$draft_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  # Clean up: trash the published message
+  run_smoke basecamp messages trash "$draft_id" -p "$QA_PROJECT" --json
+  assert_success
+}
+
 @test "messages update updates a message" {
   local id_file="$BATS_FILE_TMPDIR/message_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
