@@ -160,6 +160,28 @@ func TestSortCards_Due(t *testing.T) {
 	assert.Equal(t, "none", cards[1].Title)
 }
 
+func TestSortCards_TitleReversed(t *testing.T) {
+	cards := []basecamp.Card{
+		{Title: "Apple"},
+		{Title: "Zebra"},
+	}
+	sortCards(cards, "title", true)
+	assert.Equal(t, "Zebra", cards[0].Title)
+	assert.Equal(t, "Apple", cards[1].Title)
+}
+
+func TestSortCards_Created(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	cards := []basecamp.Card{
+		{Title: "old", CreatedAt: t1},
+		{Title: "new", CreatedAt: t2},
+	}
+	sortCards(cards, "created", false)
+	assert.Equal(t, "new", cards[0].Title)
+	assert.Equal(t, "old", cards[1].Title)
+}
+
 // --- sortMessages ---
 
 func TestSortMessages_Title(t *testing.T) {
@@ -184,6 +206,28 @@ func TestSortMessages_Created(t *testing.T) {
 	assert.Equal(t, "old", msgs[1].Subject)
 }
 
+func TestSortMessages_TitleReversed(t *testing.T) {
+	msgs := []basecamp.Message{
+		{Subject: "Apple"},
+		{Subject: "Zebra"},
+	}
+	sortMessages(msgs, "title", true)
+	assert.Equal(t, "Zebra", msgs[0].Subject)
+	assert.Equal(t, "Apple", msgs[1].Subject)
+}
+
+func TestSortMessages_Updated(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	msgs := []basecamp.Message{
+		{Subject: "stale", UpdatedAt: t1},
+		{Subject: "fresh", UpdatedAt: t2},
+	}
+	sortMessages(msgs, "updated", false)
+	assert.Equal(t, "fresh", msgs[0].Subject)
+	assert.Equal(t, "stale", msgs[1].Subject)
+}
+
 // --- sortTodolists ---
 
 func TestSortTodolists_Title(t *testing.T) {
@@ -204,6 +248,28 @@ func TestSortTodolists_Position(t *testing.T) {
 	sortTodolists(lists, "position", false)
 	assert.Equal(t, "a", lists[0].Name)
 	assert.Equal(t, "b", lists[1].Name)
+}
+
+func TestSortTodolists_TitleReversed(t *testing.T) {
+	lists := []basecamp.Todolist{
+		{Name: "Apple"},
+		{Name: "Zebra"},
+	}
+	sortTodolists(lists, "title", true)
+	assert.Equal(t, "Zebra", lists[0].Name)
+	assert.Equal(t, "Apple", lists[1].Name)
+}
+
+func TestSortTodolists_Updated(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	lists := []basecamp.Todolist{
+		{Name: "stale", UpdatedAt: t1},
+		{Name: "fresh", UpdatedAt: t2},
+	}
+	sortTodolists(lists, "updated", false)
+	assert.Equal(t, "fresh", lists[0].Name)
+	assert.Equal(t, "stale", lists[1].Name)
 }
 
 // --- sortProjects ---
@@ -238,6 +304,18 @@ func TestSortProjects_Reversed(t *testing.T) {
 	sortProjects(projects, "title", true)
 	assert.Equal(t, "Zebra", projects[0].Name)
 	assert.Equal(t, "Apple", projects[1].Name)
+}
+
+func TestSortProjects_Updated(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	projects := []basecamp.Project{
+		{Name: "stale", UpdatedAt: t1},
+		{Name: "fresh", UpdatedAt: t2},
+	}
+	sortProjects(projects, "updated", false)
+	assert.Equal(t, "fresh", projects[0].Name)
+	assert.Equal(t, "stale", projects[1].Name)
 }
 
 // --- sortPeople ---
@@ -305,6 +383,28 @@ func TestSortScheduleEntries_Created(t *testing.T) {
 	sortScheduleEntries(entries, "created", false)
 	assert.Equal(t, "new", entries[0].Title)
 	assert.Equal(t, "old", entries[1].Title)
+}
+
+func TestSortScheduleEntries_TitleReversed(t *testing.T) {
+	entries := []basecamp.ScheduleEntry{
+		{Title: "Apple"},
+		{Title: "Zebra"},
+	}
+	sortScheduleEntries(entries, "title", true)
+	assert.Equal(t, "Zebra", entries[0].Title)
+	assert.Equal(t, "Apple", entries[1].Title)
+}
+
+func TestSortScheduleEntries_Updated(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	entries := []basecamp.ScheduleEntry{
+		{Title: "stale", UpdatedAt: t1},
+		{Title: "fresh", UpdatedAt: t2},
+	}
+	sortScheduleEntries(entries, "updated", false)
+	assert.Equal(t, "fresh", entries[0].Title)
+	assert.Equal(t, "stale", entries[1].Title)
 }
 
 // --- compareDueOn edge cases ---
