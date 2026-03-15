@@ -869,3 +869,134 @@ func TestTodoScopedResolutionPaginates(t *testing.T) {
 	assert.Equal(t, int64(32), transport.createdOnTodolist,
 		"should resolve 'Deep Backlog' from page 2 of todoset 300")
 }
+
+// =============================================================================
+// Sweep Comment HTML Conversion Tests
+// =============================================================================
+
+// mockSweepTransport serves a todolist with one overdue todo, captures comment POST bodies,
+// and handles todo completion.
+type mockSweepTransport struct {
+	capturedCommentBody []byte
+}
+
+func (t *mockSweepTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/todos.json"):
+			// Return one overdue active todo
+			body = `[{"id": 555, "title": "Overdue Todo", "status": "active", "completed": false, "due_on": "2020-01-01"}]`
+		case strings.Contains(req.URL.Path, "/todolists.json"):
+			body = `[{"id": 456, "name": "Test List"}]`
+		case strings.Contains(req.URL.Path, "/projects/"):
+			body = `{"id": 123, "dock": [{"name": "todoset", "id": 789, "enabled": true}]}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			if strings.Contains(req.URL.Path, "/comments.json") {
+				t.capturedCommentBody = body
+			}
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "status": "active"}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func TestSweepCommentContentIsHTML(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockSweepTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "sweep", "--overdue", "--comment", "**done** here")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedCommentBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedCommentBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "<strong>done</strong>")
+}
+
+func TestSweepCommentLocalImageErrors(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockSweepTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "sweep", "--overdue", "--comment", "![alt](./missing.png)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing.png")
+}
