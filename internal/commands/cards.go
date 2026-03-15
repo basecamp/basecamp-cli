@@ -14,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewCardsCmd creates the cards command group.
@@ -398,6 +399,19 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				}
 			}
 
+			// Convert content through rich text pipeline
+			if content != "" {
+				content = richtext.MarkdownToHTML(content)
+				content, err = resolveLocalImages(cmd, app, content)
+				if err != nil {
+					return err
+				}
+				content, err = resolveMentions(cmd.Context(), app.Names, content)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Build request
 			req := &basecamp.CreateCardRequest{
 				Title:   title,
@@ -488,7 +502,16 @@ You can pass either a card ID or a Basecamp URL:
 				req.Title = title
 			}
 			if content != "" {
-				req.Content = content
+				html := richtext.MarkdownToHTML(content)
+				html, err = resolveLocalImages(cmd, app, html)
+				if err != nil {
+					return err
+				}
+				html, err = resolveMentions(cmd.Context(), app.Names, html)
+				if err != nil {
+					return err
+				}
+				req.Content = html
 			}
 			if due != "" {
 				req.DueOn = dateparse.Parse(due)
@@ -879,6 +902,19 @@ func NewCardCmd() *cobra.Command {
 						return output.ErrNotFound("columns", resolvedProjectID)
 					}
 					columnID = cardTableData.Lists[0].ID
+				}
+			}
+
+			// Convert content through rich text pipeline
+			if content != "" {
+				content = richtext.MarkdownToHTML(content)
+				content, err = resolveLocalImages(cmd, app, content)
+				if err != nil {
+					return err
+				}
+				content, err = resolveMentions(cmd.Context(), app.Names, content)
+				if err != nil {
+					return err
 				}
 			}
 
