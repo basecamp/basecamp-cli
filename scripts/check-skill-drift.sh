@@ -102,7 +102,7 @@ while IFS=: read -r lineno line; do
   matched=$(resolve_cmd "$cmd_candidate")
   [ -z "$matched" ] && continue
 
-  for flag in $(echo "$line" | grep -oE '\-\-[a-z][-a-z0-9]*' | sort -u); do
+  for flag in $(echo "$line" | grep -oE -- '--[a-z][-a-z0-9]*' | sort -u); do
     # Skip cobra built-ins
     case " $BUILTINS " in *" $flag "*) continue ;; esac
 

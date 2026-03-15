@@ -39,6 +39,17 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "messages publish publishes a message" {
+  local id_file="$BATS_FILE_TMPDIR/message_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
+  local msg_id
+  msg_id=$(<"$id_file")
+
+  run_smoke basecamp messages publish "$msg_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "messages pin pins a message" {
   local id_file="$BATS_FILE_TMPDIR/message_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
