@@ -222,6 +222,24 @@ ensure_todolist() {
   export QA_TODOLIST
 }
 
+ensure_todolist_group() {
+  [[ -n "${QA_TODOLIST_GROUP:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_todolist || return 1
+
+  local out
+  out=$(basecamp todolistgroups list --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list todolist groups in todolist $QA_TODOLIST"
+    return 1
+  }
+  QA_TODOLIST_GROUP=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_TODOLIST_GROUP" ]]; then
+    mark_unverifiable "No todolist groups in todolist $QA_TODOLIST"
+    return 1
+  fi
+  export QA_TODOLIST_GROUP
+}
+
 ensure_vault() {
   [[ -n "${QA_VAULT:-}" ]] && return 0
   ensure_project || return 1
@@ -425,6 +443,78 @@ ensure_comment() {
     return 1
   fi
   export QA_COMMENT
+}
+
+ensure_question() {
+  [[ -n "${QA_QUESTION:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_questionnaire || return 1
+
+  local out
+  out=$(basecamp checkins questions --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list checkin questions in project $QA_PROJECT"
+    return 1
+  }
+  QA_QUESTION=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_QUESTION" ]]; then
+    mark_unverifiable "No checkin questions in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_QUESTION
+}
+
+ensure_answer() {
+  [[ -n "${QA_ANSWER:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_questionnaire || return 1
+  ensure_question || return 1
+
+  local out
+  out=$(basecamp checkins answers "$QA_QUESTION" --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list checkin answers in project $QA_PROJECT"
+    return 1
+  }
+  QA_ANSWER=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_ANSWER" ]]; then
+    mark_unverifiable "No answers for question $QA_QUESTION"
+    return 1
+  fi
+  export QA_ANSWER
+}
+
+ensure_schedule_entry() {
+  [[ -n "${QA_SCHEDULE_ENTRY:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_schedule || return 1
+
+  local out
+  out=$(basecamp schedule entries --schedule "$QA_SCHEDULE" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list schedule entries in project $QA_PROJECT"
+    return 1
+  }
+  QA_SCHEDULE_ENTRY=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_SCHEDULE_ENTRY" ]]; then
+    mark_unverifiable "No schedule entries in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_SCHEDULE_ENTRY
+}
+
+ensure_doc() {
+  [[ -n "${QA_DOC:-}" ]] && return 0
+  ensure_project || return 1
+
+  local out
+  out=$(basecamp docs list -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot list docs in project $QA_PROJECT"
+    return 1
+  }
+  QA_DOC=$(echo "$out" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_DOC" ]]; then
+    mark_unverifiable "No documents in project $QA_PROJECT"
+    return 1
+  fi
+  export QA_DOC
 }
 
 ensure_upload() {

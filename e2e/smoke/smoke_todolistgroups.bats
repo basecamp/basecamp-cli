@@ -19,11 +19,13 @@ setup_file() {
 }
 
 @test "todolistgroups show returns group detail" {
-  local id_file="$BATS_FILE_TMPDIR/group_id"
-  [[ -f "$id_file" ]] || mark_unverifiable "No group discovered in prior test"
-  local group_id
-  group_id=$(<"$id_file")
-  [[ -n "$group_id" ]] || mark_unverifiable "No todolist groups in project"
+  # Use provisioned group, file-based discovery from prior test, or ensure helper
+  local group_id="${QA_TODOLIST_GROUP:-}"
+  if [[ -z "$group_id" ]]; then
+    local id_file="$BATS_FILE_TMPDIR/group_id"
+    [[ -f "$id_file" ]] && group_id=$(<"$id_file")
+  fi
+  [[ -n "$group_id" ]] || { ensure_todolist_group || return 0; group_id="$QA_TODOLIST_GROUP"; }
 
   run_smoke basecamp todolistgroups show "$group_id" -p "$QA_PROJECT" --json
   assert_success

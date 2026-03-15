@@ -4,12 +4,6 @@
 #
 # Format: <test name> # <reason> — <owner>
 
-# Data dependencies (no ordering guarantee between read and write test files)
-test_todolistgroups_show_returns_group_detail # no todolist groups — smoke
-test_checkins_answer_show_returns_an_answer # no answers for question — smoke
-test_schedule_show_returns_entry_detail # no schedule entries — smoke
-test_docs_download_downloads_a_document # no documents in project — smoke
-
 # Message types — account-wide feature, no create command in scope
 test_messagetypes_list_returns_message_types # not_found on some servers — smoke
 test_messagetypes_show_returns_message_type_detail # depends on messagetypes list — smoke

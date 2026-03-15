@@ -79,11 +79,9 @@ setup_file() {
 }
 
 @test "docs download downloads a document" {
-  local out
-  out=$(basecamp docs list -p "$QA_PROJECT" --json 2>/dev/null) || mark_unverifiable "Cannot list docs"
-  local doc_id
-  doc_id=$(echo "$out" | jq -r '.data[0].id // empty')
-  [[ -n "$doc_id" ]] || mark_unverifiable "No documents in project"
+  # Use provisioned doc or ensure helper
+  local doc_id="${QA_DOC:-}"
+  [[ -n "$doc_id" ]] || { ensure_doc || return 0; doc_id="$QA_DOC"; }
 
   run_smoke basecamp docs download "$doc_id" -p "$QA_PROJECT" -o "$BATS_FILE_TMPDIR/smoke_doc_download"
   assert_success

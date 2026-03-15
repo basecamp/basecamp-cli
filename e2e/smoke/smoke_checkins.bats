@@ -46,20 +46,9 @@ setup_file() {
 }
 
 @test "checkins answer show returns an answer" {
-  local qid_file="$BATS_FILE_TMPDIR/question_id"
-  [[ -f "$qid_file" ]] || mark_unverifiable "No question discovered in prior test"
-  local qid
-  qid=$(<"$qid_file")
-
-  # Discover an answer from the question
-  local out
-  out=$(basecamp checkins answers "$qid" --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot list checkin answers"
-    return
-  }
-  local aid
-  aid=$(echo "$out" | jq -r '.data[0].id // empty')
-  [[ -n "$aid" ]] || mark_unverifiable "No answers for question"
+  # Use provisioned answer or ensure helper
+  local aid="${QA_ANSWER:-}"
+  [[ -n "$aid" ]] || { ensure_answer || return 0; aid="$QA_ANSWER"; }
 
   run_smoke basecamp checkins answer show "$aid" \
     --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json
