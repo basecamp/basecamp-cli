@@ -147,7 +147,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Complete todo | `basecamp done <id> --json` |
 | List cards | `basecamp cards list --in <project> --json` |
 | Create card | `basecamp card "Title" --in <project> --json` |
-| Move card | `basecamp cards move <id> --to <column> --in <project> --json` |
+| Move card | `basecamp cards move <id> --to <column> [--position N] --in <project> --json` |
 | Post message | `basecamp message "Title" "Body" --in <project> --json` |
 | Post with @mention | `basecamp message "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp message "Title" "Body" --no-subscribe --in <project> --json` |
@@ -269,6 +269,9 @@ basecamp cards columns --in <project> --json
 
 # Move card to column
 basecamp cards move <card_id> --to <column_id> --in <project>
+
+# Move card to specific position in column (1-indexed)
+basecamp cards move <card_id> --to <column_id> --position 1 --in <project>
 ```
 
 ### Download File from Basecamp
@@ -337,6 +340,7 @@ basecamp card "Title" "<p>Body</p>" --in <project> --column <id>
 basecamp cards update <id> --title "New" --due tomorrow --assignee me
 basecamp cards move <id> --to <column_id>             # Move to column (numeric ID)
 basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
+basecamp cards move <id> --to "Done" --position 1 --card-table <table_id>  # Move to position
 ```
 
 **Identifying completed cards:** Cards in Done columns have `parent.type: "Kanban::DoneColumn"` and `completed: true`. Use this to identify completed cards that haven't been archived.
