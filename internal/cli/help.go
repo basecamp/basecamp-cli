@@ -266,21 +266,28 @@ func renderCommandHelp(cmd *cobra.Command) {
 		}
 	}
 
-	// FLAGS (all local flags: persistent + non-persistent)
-	localFlags := cmd.LocalFlags()
-	localUsage := strings.TrimRight(localFlags.FlagUsages(), "\n")
-	if localUsage != "" {
+	// FLAGS — local flags plus parent-scoped persistent flags (e.g. --chat,
+	// --project defined on a parent command). This promotes parent-scoped
+	// flags into the primary FLAGS section where they're immediately visible,
+	// rather than burying them in INHERITED FLAGS alongside root globals.
+	merged := pflag.NewFlagSet("flags", pflag.ContinueOnError)
+	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) { merged.AddFlag(f) })
+	parentScopedFlags(cmd).VisitAll(func(f *pflag.Flag) {
+		if merged.Lookup(f.Name) == nil {
+			merged.AddFlag(f)
+		}
+	})
+	flagsUsage := strings.TrimRight(merged.FlagUsages(), "\n")
+	if flagsUsage != "" {
 		b.WriteString("\n")
 		b.WriteString(r.Header.Render("FLAGS"))
 		b.WriteString("\n")
-		b.WriteString(localUsage)
+		b.WriteString(flagsUsage)
 		b.WriteString("\n")
 	}
 
-	// INHERITED FLAGS
-	// Parent-defined persistent flags (--project, --chat, etc.) always
-	// show — they carry required context. Root-level global flags are curated
-	// to the essentials so leaf help isn't 20+ lines of noise.
+	// INHERITED FLAGS — root-level globals only. Parent-scoped persistent
+	// flags (--project, --chat, etc.) are promoted into FLAGS above.
 	inherited := filterInheritedFlags(cmd)
 	if inherited != "" {
 		b.WriteString("\n")
@@ -314,8 +321,8 @@ func renderCommandHelp(cmd *cobra.Command) {
 }
 
 // salientRootFlags is the curated set of root-level global flags shown in
-// inherited flag sections. Parent-defined persistent flags always appear;
-// only root globals are filtered to this set.
+// INHERITED FLAGS. Non-root parent-scoped persistent flags are promoted
+// into the FLAGS section by parentScopedFlags and never appear here.
 var salientRootFlags = map[string]bool{
 	"account": true,
 	"json":    true,
@@ -324,13 +331,27 @@ var salientRootFlags = map[string]bool{
 	"quiet":   true,
 }
 
-// filterInheritedFlags returns formatted flag usages for inherited flags,
-// keeping all parent-defined persistent flags and curating root globals
-// to the salient set. Provenance is determined by pointer identity: if the
-// flag object is the same pointer as the one on root's PersistentFlags,
-// it truly originates from root. A parent that redefines the same name
-// (e.g. --project on messages) produces a different pointer and always
-// passes through.
+// parentScopedFlags returns inherited flags that originate from a non-root
+// parent command. These are promoted into the FLAGS section so they're
+// immediately visible on leaf commands, rather than buried in INHERITED FLAGS.
+// Provenance is determined by pointer identity against root's PersistentFlags.
+func parentScopedFlags(cmd *cobra.Command) *pflag.FlagSet {
+	root := cmd.Root()
+	ps := pflag.NewFlagSet("parent-scoped", pflag.ContinueOnError)
+	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
+		rootFlag := root.PersistentFlags().Lookup(f.Name)
+		if rootFlag != nil && rootFlag == f {
+			return // root-level — stays in INHERITED FLAGS
+		}
+		ps.AddFlag(f)
+	})
+	return ps
+}
+
+// filterInheritedFlags returns formatted flag usages for INHERITED FLAGS,
+// containing only the curated subset of root-level globals. Parent-scoped
+// persistent flags (--chat, --project on messages, etc.) are excluded here
+// because parentScopedFlags promotes them into FLAGS.
 func filterInheritedFlags(cmd *cobra.Command) string {
 	root := cmd.Root()
 	filtered := pflag.NewFlagSet("inherited", pflag.ContinueOnError)
@@ -341,10 +362,13 @@ func filterInheritedFlags(cmd *cobra.Command) string {
 
 	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
 		rootFlag := root.PersistentFlags().Lookup(f.Name)
-		if rootFlag != nil && rootFlag == f && !salientRootFlags[f.Name] {
+		if rootFlag == nil || rootFlag != f {
+			return // parent-scoped — already promoted to FLAGS
+		}
+		if !salientRootFlags[f.Name] {
 			return
 		}
-		if acceptsID && f.Name == "project" && rootFlag == f {
+		if acceptsID && f.Name == "project" {
 			return
 		}
 		filtered.AddFlag(f)
