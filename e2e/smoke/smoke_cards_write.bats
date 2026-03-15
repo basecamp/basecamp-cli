@@ -70,6 +70,22 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "cards move with position moves card to position" {
+  local card_file="$BATS_FILE_TMPDIR/direct_card_id"
+  local col_file="$BATS_FILE_TMPDIR/column_id"
+  [[ -f "$card_file" ]] || mark_unverifiable "No card created in prior test"
+  [[ -f "$col_file" ]] || mark_unverifiable "No column discovered in prior test"
+  local card_id col_id
+  card_id=$(<"$card_file")
+  col_id=$(<"$col_file")
+  [[ -n "$col_id" ]] || mark_unverifiable "Column ID is empty"
+
+  run_smoke basecamp cards move "$card_id" --to "$col_id" --position 1 \
+    --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "cards step create creates a step on a card" {
   local id_file="$BATS_FILE_TMPDIR/card_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
