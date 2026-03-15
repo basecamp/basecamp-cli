@@ -62,61 +62,61 @@ QA_INBOX=$(enable_dock_tool "inbox") || QA_INBOX=""
 
 # Todolist
 out=$(basecamp todolists list -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-QA_TODOLIST=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+QA_TODOLIST=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
 if [[ -z "$QA_TODOLIST" ]]; then
   out=$(basecamp todolists create "Smoke Test List" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-  QA_TODOLIST=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+  QA_TODOLIST=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
 fi
 
 # Todo (needs todolist)
 QA_TODO=""
 if [[ -n "$QA_TODOLIST" ]]; then
   out=$(basecamp todos list -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-  QA_TODO=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+  QA_TODO=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
   if [[ -z "$QA_TODO" ]]; then
     out=$(basecamp todos create "Smoke test todo" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-    QA_TODO=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+    QA_TODO=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
   fi
 fi
 
 # Message (needs messageboard enabled)
 out=$(basecamp messages list -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-QA_MESSAGE=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+QA_MESSAGE=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
 if [[ -z "$QA_MESSAGE" && -n "$QA_MESSAGEBOARD" ]]; then
   out=$(basecamp messages create "Smoke test message" "Automated smoke test" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-  QA_MESSAGE=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+  QA_MESSAGE=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
 fi
 
 # Comment (needs todo)
 QA_COMMENT=""
 if [[ -n "$QA_TODO" ]]; then
   out=$(basecamp comments list "$QA_TODO" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-  QA_COMMENT=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+  QA_COMMENT=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
   if [[ -z "$QA_COMMENT" ]]; then
     out=$(basecamp comments create "$QA_TODO" "Smoke test comment" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-    QA_COMMENT=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+    QA_COMMENT=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
   fi
 fi
 
 # Upload
 out=$(basecamp uploads list -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-QA_UPLOAD=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+QA_UPLOAD=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
 if [[ -z "$QA_UPLOAD" ]]; then
   tmpfile=$(mktemp)
   echo "smoke test upload $(date +%s)" > "$tmpfile"
   out=$(basecamp uploads create "$tmpfile" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
   rm -f "$tmpfile"
-  QA_UPLOAD=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+  QA_UPLOAD=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
 fi
 
 # Card (needs cardtable)
 QA_CARD=""
 if [[ -n "$QA_CARDTABLE" ]]; then
   out=$(basecamp cards list --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-  QA_CARD=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+  QA_CARD=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
   if [[ -z "$QA_CARD" ]]; then
     out=$(basecamp cards create "Smoke card" --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-    QA_CARD=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+    QA_CARD=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
   fi
 fi
 
@@ -124,10 +124,10 @@ fi
 QA_COLUMN=""
 if [[ -n "$QA_CARDTABLE" ]]; then
   out=$(basecamp cards columns --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-  QA_COLUMN=$(echo "${out:-{}}" | jq -r '.data[0].id // empty')
+  QA_COLUMN=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
   if [[ -z "$QA_COLUMN" ]]; then
     out=$(basecamp cards column create "Smoke column" --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
-    QA_COLUMN=$(echo "${out:-{}}" | jq -r '.data.id // empty')
+    QA_COLUMN=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
   fi
 fi
 
