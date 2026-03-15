@@ -23,15 +23,9 @@ setup_file() {
 }
 
 @test "schedule show returns entry detail" {
-  # Discover an entry from the schedule
-  local out
-  out=$(basecamp schedule entries --schedule "$QA_SCHEDULE" -p "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot list schedule entries"
-    return
-  }
-  local entry_id
-  entry_id=$(echo "$out" | jq -r '.data[0].id // empty')
-  [[ -n "$entry_id" ]] || { mark_unverifiable "No schedule entries in project"; return; }
+  # Use provisioned entry or ensure helper
+  local entry_id="${QA_SCHEDULE_ENTRY:-}"
+  [[ -n "$entry_id" ]] || { ensure_schedule_entry || return 0; entry_id="$QA_SCHEDULE_ENTRY"; }
 
   run_smoke basecamp schedule show "$entry_id" -p "$QA_PROJECT" --json
   assert_success
