@@ -79,6 +79,17 @@ if [[ -n "$QA_TODOLIST" ]]; then
   fi
 fi
 
+# Todolist group (needs todolist)
+QA_TODOLIST_GROUP=""
+if [[ -n "$QA_TODOLIST" ]]; then
+  out=$(basecamp todolistgroups list --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+  QA_TODOLIST_GROUP=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_TODOLIST_GROUP" ]]; then
+    out=$(basecamp todolistgroups create "Smoke group" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+    QA_TODOLIST_GROUP=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
+  fi
+fi
+
 # Message (needs messageboard enabled)
 out=$(basecamp messages list -p "$QA_PROJECT" --json 2>/dev/null) || out=""
 QA_MESSAGE=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
@@ -131,6 +142,49 @@ if [[ -n "$QA_CARDTABLE" ]]; then
   fi
 fi
 
+# Question (needs questionnaire)
+QA_QUESTION=""
+if [[ -n "$QA_QUESTIONNAIRE" ]]; then
+  out=$(basecamp checkins questions --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+  QA_QUESTION=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_QUESTION" ]]; then
+    out=$(basecamp checkins question create "Smoke question?" --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+    QA_QUESTION=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
+  fi
+fi
+
+# Answer (needs question)
+QA_ANSWER=""
+if [[ -n "$QA_QUESTION" ]]; then
+  out=$(basecamp checkins answers "$QA_QUESTION" --questionnaire "$QA_QUESTIONNAIRE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+  QA_ANSWER=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_ANSWER" ]]; then
+    out=$(basecamp checkins answer create "$QA_QUESTION" "Smoke answer" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+    QA_ANSWER=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
+  fi
+fi
+
+# Schedule entry (needs schedule)
+QA_SCHEDULE_ENTRY=""
+if [[ -n "$QA_SCHEDULE" ]]; then
+  out=$(basecamp schedule entries --schedule "$QA_SCHEDULE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+  QA_SCHEDULE_ENTRY=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
+  if [[ -z "$QA_SCHEDULE_ENTRY" ]]; then
+    out=$(basecamp schedule create "Smoke entry" \
+      --starts-at "2030-01-01" --ends-at "2030-01-02" \
+      --schedule "$QA_SCHEDULE" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+    QA_SCHEDULE_ENTRY=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
+  fi
+fi
+
+# Document
+out=$(basecamp docs list -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+QA_DOC=$(echo "${out:-"{}"}" | jq -r '.data[0].id // empty')
+if [[ -z "$QA_DOC" ]]; then
+  out=$(basecamp docs documents create "Smoke doc" "Smoke test" -p "$QA_PROJECT" --json 2>/dev/null) || out=""
+  QA_DOC=$(echo "${out:-"{}"}" | jq -r '.data.id // empty')
+fi
+
 # --- Write env file ---
 
 {
@@ -140,7 +194,8 @@ fi
   printf 'export BASECAMP_ACCOUNT_ID=%q\n' "$QA_ACCOUNT"
   printf 'export BASECAMP_PROJECT_ID=%q\n' "$QA_PROJECT"
   for var in QA_CARDTABLE QA_CAMPFIRE QA_MESSAGEBOARD QA_SCHEDULE QA_QUESTIONNAIRE QA_INBOX \
-             QA_TODOLIST QA_TODO QA_MESSAGE QA_COMMENT QA_UPLOAD QA_CARD QA_COLUMN; do
+             QA_TODOLIST QA_TODO QA_TODOLIST_GROUP QA_MESSAGE QA_COMMENT QA_UPLOAD QA_CARD QA_COLUMN \
+             QA_QUESTION QA_ANSWER QA_SCHEDULE_ENTRY QA_DOC; do
     val="${!var:-}"
     [[ -n "$val" ]] && printf 'export %s=%q\n' "$var" "$val"
   done
