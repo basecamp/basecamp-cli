@@ -300,6 +300,11 @@ You can pass either a card ID or a Basecamp URL:
 }
 
 func resolveAssigneeID(ctx context.Context, app *appctx.App, input string) (int64, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return 0, output.ErrUsage("Assignee cannot be empty")
+	}
+
 	if id, err := strconv.ParseInt(input, 10, 64); err == nil {
 		if id <= 0 {
 			return 0, output.ErrUsage("Assignee ID must be a positive number")
@@ -313,6 +318,9 @@ func resolveAssigneeID(ctx context.Context, app *appctx.App, input string) (int6
 	id, err := strconv.ParseInt(resolvedID, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid resolved ID '%s': %w", resolvedID, err)
+	}
+	if id <= 0 {
+		return 0, fmt.Errorf("resolved assignee ID for '%s' is not valid: %d", input, id)
 	}
 	return id, nil
 }
@@ -453,17 +461,18 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 			}
 
 			if assigneeID != 0 {
-				card, err = app.Account().Cards().Update(cmd.Context(), card.ID, &basecamp.UpdateCardRequest{
+				createdCardID := card.ID
+				card, err = app.Account().Cards().Update(cmd.Context(), createdCardID, &basecamp.UpdateCardRequest{
 					AssigneeIDs: []int64{assigneeID},
 				})
 				if err != nil {
 					sdkErr := convertSDKError(err)
 					var e *output.Error
 					if errors.As(sdkErr, &e) {
-						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", card.ID, e.Message)
+						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", createdCardID, e.Message)
 						return e
 					}
-					return fmt.Errorf("card %d created but assignment failed: %w", card.ID, err)
+					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, err)
 				}
 			}
 
@@ -989,17 +998,18 @@ func NewCardCmd() *cobra.Command {
 			}
 
 			if assigneeID != 0 {
-				card, err = app.Account().Cards().Update(cmd.Context(), card.ID, &basecamp.UpdateCardRequest{
+				createdCardID := card.ID
+				card, err = app.Account().Cards().Update(cmd.Context(), createdCardID, &basecamp.UpdateCardRequest{
 					AssigneeIDs: []int64{assigneeID},
 				})
 				if err != nil {
 					sdkErr := convertSDKError(err)
 					var e *output.Error
 					if errors.As(sdkErr, &e) {
-						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", card.ID, e.Message)
+						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", createdCardID, e.Message)
 						return e
 					}
-					return fmt.Errorf("card %d created but assignment failed: %w", card.ID, err)
+					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, err)
 				}
 			}
 
@@ -2155,18 +2165,9 @@ func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]i
 			continue
 		}
 
-		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
-			ids = append(ids, id)
-			continue
-		}
-
-		resolvedID, _, err := app.Names.ResolvePerson(ctx, part)
+		id, err := resolveAssigneeID(ctx, app, part)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve assignee '%s': %w", part, err)
-		}
-		id, err := strconv.ParseInt(resolvedID, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid resolved ID '%s': %w", resolvedID, err)
+			return nil, err
 		}
 		ids = append(ids, id)
 	}
