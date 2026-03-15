@@ -145,18 +145,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	// Build response options
 	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d messages", len(messages))),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp show message <id> --in %s", resolvedProjectID),
-				Description: "Show message details",
-			},
-			output.Breadcrumb{
-				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp message <title> --in %s", resolvedProjectID),
-				Description: "Post new message",
-			},
-		),
+		output.WithBreadcrumbs(messagesListBreadcrumbs(resolvedProjectID)...),
 	}
 
 	// Add truncation notice if results may be limited
@@ -167,6 +156,14 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	respOpts = append(respOpts, output.WithEntity("message"))
 
 	return app.OK(messages, respOpts...)
+}
+
+func messagesListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{Action: "show", Cmd: "basecamp messages show <id>", Description: "Show message details"},
+		{Action: "post", Cmd: fmt.Sprintf("basecamp message <title> --in %s", resolvedProjectID), Description: "Post new message"},
+		{Action: "archived", Cmd: fmt.Sprintf("basecamp recordings messages --status archived --in %s", resolvedProjectID), Description: "Browse archived messages"},
+	}
 }
 
 func newMessagesShowCmd() *cobra.Command {
