@@ -1,0 +1,29 @@
+e2e/smoke/smoke_schedule.bats
+  777fcd32aab6f010 26-28
+e2e/smoke/smoke_todolistgroups.bats
+  777fcd32aab6f010 22-24,26-28
+e2e/smoke/smoke_checkins.bats
+  777fcd32aab6f010 49-51
+e2e/smoke/smoke_files_read.bats
+  777fcd32aab6f010 82-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "f6d6f665803f9061845709293eeb93ce74e7732e",
+  "prompts": {
+    "777fcd32aab6f010": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "555ab090-b334-4162-b13a-64747a9bcacd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 39,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
