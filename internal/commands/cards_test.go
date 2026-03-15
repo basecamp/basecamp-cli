@@ -818,6 +818,52 @@ func TestCardsMovePositionPayload(t *testing.T) {
 	assert.Equal(t, float64(1), body["position"])
 }
 
+// TestCardsMovePositionPosAlias verifies that --pos triggers the same
+// positioned-move contract as --position.
+func TestCardsMovePositionPosAlias(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := "555"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "Done", "--pos", "2")
+	require.NoError(t, err)
+
+	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, float64(456), body["source_id"])
+	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(2), body["position"])
+}
+
+// TestCardsMovePositionNumericToSingleTableAutoResolves verifies that a
+// positioned move with numeric --to and no --card-table auto-resolves
+// the card table when the project has exactly one.
+func TestCardsMovePositionNumericToSingleTableAutoResolves(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := "" // no --card-table
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777", "--position", "1")
+	require.NoError(t, err)
+
+	// Should auto-resolve to card table 555 (single table in mock dock)
+	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, float64(456), body["source_id"])
+	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(1), body["position"])
+}
+
 // TestCardsMoveWithoutPositionUsesCardsMove verifies the old path
 // (POST /card_tables/cards/{id}/moves.json with {column_id}) is taken
 // when --position is absent.
