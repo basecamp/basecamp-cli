@@ -446,13 +446,15 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 }
 
 func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, status string, overdue bool, limit int, all bool, sortField string, reverse bool) error {
+	// Position is only meaningful within a single todolist — reject before
+	// the --all check so users get the right error message.
+	if sortField == "position" {
+		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
+	}
 	// Sorting the aggregate path without --all is misleading because results
 	// are silently sampled per-todolist using default SDK paging.
 	if sortField != "" && !all {
 		return output.ErrUsage("--sort requires --all when listing across todolists (results are sampled per list without it)")
-	}
-	if sortField == "position" {
-		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
