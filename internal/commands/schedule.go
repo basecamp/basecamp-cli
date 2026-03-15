@@ -11,6 +11,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewScheduleCmd creates the schedule command for managing schedules.
@@ -463,6 +464,19 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
+	// Convert description through rich text pipeline
+	if description != "" {
+		description = richtext.MarkdownToHTML(description)
+		description, err = resolveLocalImages(cmd, app, description)
+		if err != nil {
+			return err
+		}
+		description, err = resolveMentions(cmd.Context(), app.Names, description)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Build request
 	req := &basecamp.CreateScheduleEntryRequest{
 		Summary:       summary,
@@ -580,7 +594,16 @@ You can pass either an entry ID or a Basecamp URL:
 				hasChanges = true
 			}
 			if description != "" {
-				req.Description = description
+				html := richtext.MarkdownToHTML(description)
+				html, err = resolveLocalImages(cmd, app, html)
+				if err != nil {
+					return err
+				}
+				html, err = resolveMentions(cmd.Context(), app.Names, html)
+				if err != nil {
+					return err
+				}
+				req.Description = html
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
