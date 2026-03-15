@@ -1,0 +1,23 @@
+internal/commands/cards_test.go
+  d66ca96dad7e488f 821-866
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "33890d5918d10d8eebb66b6bfcaa9e4c097701de",
+  "prompts": {
+    "d66ca96dad7e488f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0044380f-bb05-4cab-abfa-ba092a258db7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 46,
+      "total_deletions": 0,
+      "accepted_lines": 46,
+      "overriden_lines": 0
+    }
+  }
+}
