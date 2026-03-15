@@ -1,0 +1,25 @@
+skills/basecamp/SKILL.md
+  d66ca96dad7e488f 150,272-274,343
+.surface
+  d66ca96dad7e488f 898-899,1273-1274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "ddb33510f2395471e240d52ae9c22eaf3c973bde",
+  "prompts": {
+    "d66ca96dad7e488f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0044380f-bb05-4cab-abfa-ba092a258db7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
