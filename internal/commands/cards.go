@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -298,8 +299,27 @@ You can pass either a card ID or a Basecamp URL:
 	return cmd
 }
 
+func resolveAssigneeID(ctx context.Context, app *appctx.App, input string) (int64, error) {
+	if id, err := strconv.ParseInt(input, 10, 64); err == nil {
+		if id <= 0 {
+			return 0, output.ErrUsage("Assignee ID must be a positive number")
+		}
+		return id, nil
+	}
+	resolvedID, _, err := app.Names.ResolvePerson(ctx, input)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve assignee '%s': %w", input, err)
+	}
+	id, err := strconv.ParseInt(resolvedID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid resolved ID '%s': %w", resolvedID, err)
+	}
+	return id, nil
+}
+
 func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	var column string
+	var assignee string
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
@@ -412,6 +432,15 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				}
 			}
 
+			// Pre-resolve assignee before creating card (fail early on bad input)
+			var assigneeID int64
+			if assignee != "" {
+				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Build request
 			req := &basecamp.CreateCardRequest{
 				Title:   title,
@@ -421,6 +450,21 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
 			if err != nil {
 				return convertSDKError(err)
+			}
+
+			if assigneeID != 0 {
+				card, err = app.Account().Cards().Update(cmd.Context(), card.ID, &basecamp.UpdateCardRequest{
+					AssigneeIDs: []int64{assigneeID},
+				})
+				if err != nil {
+					sdkErr := convertSDKError(err)
+					var e *output.Error
+					if errors.As(sdkErr, &e) {
+						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", card.ID, e.Message)
+						return e
+					}
+					return fmt.Errorf("card %d created but assignment failed: %w", card.ID, err)
+				}
 			}
 
 			// Build breadcrumbs - only include --card-table when known
@@ -459,6 +503,12 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
+	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
+
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 
 	return cmd
 }
@@ -517,12 +567,11 @@ You can pass either a card ID or a Basecamp URL:
 				req.DueOn = dateparse.Parse(due)
 			}
 			if assignee != "" {
-				assigneeID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
+				assigneeID, err := resolveAssigneeID(cmd.Context(), app, assignee)
 				if err != nil {
-					return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
+					return err
 				}
-				assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
-				req.AssigneeIDs = []int64{assigneeIDInt}
+				req.AssigneeIDs = []int64{assigneeID}
 			}
 
 			card, err := app.Account().Cards().Update(cmd.Context(), cardID, req)
@@ -805,6 +854,7 @@ func NewCardCmd() *cobra.Command {
 	var project string
 	var column string
 	var cardTable string
+	var assignee string
 
 	cmd := &cobra.Command{
 		Use:   "card <title> [body]",
@@ -918,6 +968,15 @@ func NewCardCmd() *cobra.Command {
 				}
 			}
 
+			// Pre-resolve assignee before creating card (fail early on bad input)
+			var assigneeID int64
+			if assignee != "" {
+				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Build request
 			req := &basecamp.CreateCardRequest{
 				Title:   title,
@@ -927,6 +986,21 @@ func NewCardCmd() *cobra.Command {
 			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
 			if err != nil {
 				return convertSDKError(err)
+			}
+
+			if assigneeID != 0 {
+				card, err = app.Account().Cards().Update(cmd.Context(), card.ID, &basecamp.UpdateCardRequest{
+					AssigneeIDs: []int64{assigneeID},
+				})
+				if err != nil {
+					sdkErr := convertSDKError(err)
+					var e *output.Error
+					if errors.As(sdkErr, &e) {
+						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", card.ID, e.Message)
+						return e
+					}
+					return fmt.Errorf("card %d created but assignment failed: %w", card.ID, err)
+				}
 			}
 
 			// Build breadcrumbs - only include --card-table when known
@@ -966,7 +1040,13 @@ func NewCardCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
+	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
 	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
+
+	cardCompleter := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("assignee", cardCompleter.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("to", cardCompleter.PeopleNameCompletion())
 
 	cmd.AddCommand(
 		newCardsUpdateCmd(),
