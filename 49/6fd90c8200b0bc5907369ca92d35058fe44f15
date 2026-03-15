@@ -1,0 +1,25 @@
+internal/commands/sort.go
+  02f560ebbdcb67e9 1-173
+internal/commands/sort_test.go
+  02f560ebbdcb67e9 1-325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "496fd90c8200b0bc5907369ca92d35058fe44f15",
+  "prompts": {
+    "02f560ebbdcb67e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c7e2c754-4374-4a7f-9caa-e382553a1075",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 672,
+      "total_deletions": 58,
+      "accepted_lines": 637,
+      "overriden_lines": 0
+    }
+  }
+}
