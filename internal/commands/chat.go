@@ -31,7 +31,7 @@ func NewChatCmd() *cobra.Command {
 Use 'basecamp chat list' to see chats in a project.
 Use 'basecamp chat messages' to view recent messages.
 Use 'basecamp chat post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries\n@mentions supported: use @Name or @First.Last in content to create clickable mentions (auto-promotes to text/html)"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching (auto-promotes to text/html)\nUse --content-type text/plain to bypass mention resolution"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")

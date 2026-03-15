@@ -248,16 +248,14 @@ func (r *Resolver) ResolvePerson(ctx context.Context, input string) (string, str
 }
 
 // ResolvePersonByName resolves a person name to a full Person record including AttachableSGID.
-// Uses the same resolution logic as ResolvePerson (exact > case-insensitive > partial > pingable).
+// Resolves against the pingable set only — mentions require the target to be pingable.
 func (r *Resolver) ResolvePersonByName(ctx context.Context, input string) (*Person, error) {
-	// Fetch people for name resolution
-	people, err := r.getPeople(ctx)
+	pingable, err := r.getPingable(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Try name resolution
-	match, matches := resolve(input, people, func(p Person) (int64, string) {
+	match, matches := resolve(input, pingable, func(p Person) (int64, string) {
 		return p.ID, p.Name
 	})
 
@@ -273,31 +271,29 @@ func (r *Resolver) ResolvePersonByName(ctx context.Context, input string) (*Pers
 		return nil, output.ErrAmbiguous("person", names)
 	}
 
-	// Fallback: try pingable people
-	pingable, _ := r.getPingable(ctx)
-	if len(pingable) > 0 {
-		pingMatch, pingMatches := resolve(input, pingable, func(p Person) (int64, string) {
-			return p.ID, p.Name
-		})
-		if pingMatch != nil {
-			return pingMatch, nil
-		}
-		if len(pingMatches) > 1 {
-			pingNames := make([]string, len(pingMatches))
-			for i, m := range pingMatches {
-				pingNames[i] = m.Name
-			}
-			return nil, output.ErrAmbiguous("person", pingNames)
-		}
-	}
-
-	// Not found
-	allPeople := deduplicatePeople(people, pingable)
-	suggestions := suggest(input, allPeople, func(p Person) string { return p.Name })
+	suggestions := suggest(input, pingable, func(p Person) string { return p.Name })
 	if len(suggestions) > 0 {
 		return nil, output.ErrNotFoundHint("Person", input, "Did you mean: "+strings.Join(suggestions, ", "))
 	}
 	return nil, output.ErrNotFound("Person", input)
+}
+
+// ResolvePersonByID looks up a person by numeric ID in the pingable set.
+// Returns the Person record including AttachableSGID.
+// Returns not-found if the person is not in the pingable set.
+func (r *Resolver) ResolvePersonByID(ctx context.Context, id int64) (*Person, error) {
+	pingable, err := r.getPingable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range pingable {
+		if pingable[i].ID == id {
+			return &pingable[i], nil
+		}
+	}
+
+	return nil, output.ErrNotFound("Person", strconv.FormatInt(id, 10))
 }
 
 // deduplicatePeople merges two person lists, removing duplicates by ID.

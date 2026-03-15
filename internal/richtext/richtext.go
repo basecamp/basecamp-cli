@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
 )
@@ -75,11 +76,23 @@ var (
 )
 
 // reMentionInput matches @Name or @First.Last in user input.
-// Group 1: prefix character (whitespace, >, or empty at start of string).
+// Group 1: prefix character (whitespace, >, (, [, ", ', or empty at start of string).
 // Group 2: the @mention itself.
 // Uses Unicode letter/digit classes to support non-ASCII names (e.g., @José, @Zoë).
 // Does not match mid-word (e.g., user@example.com).
-var reMentionInput = regexp.MustCompile(`(^|[\s>])(@[\pL\pN_]+(?:\.[\pL\pN_]+)*)`)
+var reMentionInput = regexp.MustCompile(`(^|[\s>(\["'])(@[\pL\pN_]+(?:\.[\pL\pN_]+)*)`)
+
+// reMentionAnchor matches Markdown-style mention anchors after HTML conversion.
+// Group 1: scheme (mention or person).
+// Group 2: value (SGID for mention:, person ID for person:).
+// Group 3: display text (may include leading @).
+var reMentionAnchor = regexp.MustCompile(`<a href="(mention|person):([^"]+)">([^<]*)</a>`)
+
+// reSGIDMention matches inline @sgid:VALUE syntax.
+// Group 1: prefix character.
+// Group 2: the full @sgid:VALUE token.
+// Group 3: the SGID value (base64-safe characters).
+var reSGIDMention = regexp.MustCompile(`(^|[\s>(\["'])(@sgid:([\w+=/-]+))`)
 
 // Pre-compiled regexes for IsHTML detection
 var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
@@ -631,6 +644,10 @@ func EmbedAttachments(html string, attachments []AttachmentRef) string {
 // MentionLookupFunc resolves a name to an attachable SGID and display name.
 type MentionLookupFunc func(name string) (sgid, displayName string, err error)
 
+// PersonByIDFunc resolves a person ID to an attachable SGID and canonical name.
+// Used by the person:ID mention syntax.
+type PersonByIDFunc func(id string) (sgid, canonicalName string, err error)
+
 // MentionToHTML builds a <bc-attachment> mention tag.
 func MentionToHTML(sgid, name string) string {
 	return `<bc-attachment sgid="` + escapeAttr(sgid) +
@@ -638,28 +655,145 @@ func MentionToHTML(sgid, name string) string {
 		escapeHTML(name) + `</bc-attachment>`
 }
 
-// ResolveMentions scans HTML for @Name and @First.Last patterns, resolves each
-// to a person via the lookup function, and replaces with <bc-attachment> mention tags.
-// Skips matches inside HTML tags, attributes, and existing <bc-attachment> elements.
-// Returns the HTML unchanged if no mentions are found.
-func ResolveMentions(html string, lookup MentionLookupFunc) (string, error) {
+// ResolveMentions processes mention syntax in HTML in three passes:
+//  1. Markdown mention anchors: <a href="mention:SGID">@Name</a> and <a href="person:ID">@Name</a>
+//  2. Inline @sgid:VALUE syntax
+//  3. Fuzzy @Name and @First.Last patterns
+//
+// Each pass replaces matches with <bc-attachment> tags. Subsequent passes skip regions
+// already converted by earlier passes via isInsideBcAttachment.
+//
+// lookupByID may be nil if person:ID syntax is not needed; encountering a person:ID
+// anchor with a nil lookupByID returns an error.
+func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByIDFunc) (string, error) {
+	// Pass 1: Markdown mention anchors
+	var err error
+	html, err = resolveMentionAnchors(html, lookupByID)
+	if err != nil {
+		return "", err
+	}
+
+	// Pass 2: @sgid:VALUE
+	html = resolveSGIDMentions(html)
+
+	// Pass 3: fuzzy @Name (skip when no lookup function provided)
+	if lookup != nil {
+		html, err = resolveNameMentions(html, lookup)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return html, nil
+}
+
+// resolveMentionAnchors processes <a href="mention:SGID">@Name</a> and
+// <a href="person:ID">@Name</a> anchors produced by MarkdownToHTML.
+func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, error) {
+	matches := reMentionAnchor.FindAllStringSubmatchIndex(html, -1)
+	if len(matches) == 0 {
+		return html, nil
+	}
+
+	htmlLower := strings.ToLower(html)
+	result := html
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		fullStart, fullEnd := m[0], m[1]
+
+		// Skip anchors inside code blocks, existing bc-attachments, or HTML tags
+		if isInsideHTMLTag(html, fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
+			continue
+		}
+
+		scheme := html[m[2]:m[3]]
+		value := html[m[4]:m[5]]
+		displayText := html[m[6]:m[7]]
+
+		var tag string
+		switch scheme {
+		case "mention":
+			// Zero API calls — use value as SGID, link text as display name (caller-trusted).
+			// Unescape HTML because convertInline already escaped the link text (e.g. & → &amp;)
+			// and MentionToHTML will re-escape — without this we'd double-encode.
+			name := unescapeHTML(strings.TrimPrefix(displayText, "@"))
+			tag = MentionToHTML(value, name)
+
+		case "person":
+			// One API lookup — ID → SGID via pingable set
+			if lookupByID == nil {
+				return "", fmt.Errorf("person:%s syntax requires a person lookup function", value)
+			}
+			sgid, canonicalName, err := lookupByID(value)
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve person:%s: %w", value, err)
+			}
+			tag = MentionToHTML(sgid, canonicalName)
+		}
+
+		result = result[:fullStart] + tag + result[fullEnd:]
+	}
+
+	return result, nil
+}
+
+// resolveSGIDMentions processes inline @sgid:VALUE syntax.
+func resolveSGIDMentions(html string) string {
+	matches := reSGIDMention.FindAllStringSubmatchIndex(html, -1)
+	if len(matches) == 0 {
+		return html
+	}
+
+	htmlLower := strings.ToLower(html)
+	result := html
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		// Group 2: full @sgid:VALUE token
+		tokenStart, tokenEnd := m[4], m[5]
+		// Group 3: SGID value
+		sgid := html[m[6]:m[7]]
+
+		if isInsideHTMLTag(html, tokenStart) || isInsideCodeBlock(htmlLower, tokenStart) || isInsideBcAttachment(htmlLower, tokenStart) {
+			continue
+		}
+
+		tag := MentionToHTML(sgid, sgid)
+		result = result[:tokenStart] + tag + result[tokenEnd:]
+	}
+
+	return result
+}
+
+// resolveNameMentions processes fuzzy @Name and @First.Last patterns.
+func resolveNameMentions(html string, lookup MentionLookupFunc) (string, error) {
 	matches := reMentionInput.FindAllStringSubmatchIndex(html, -1)
 	if len(matches) == 0 {
 		return html, nil
 	}
 
-	// Process in reverse to preserve indices
 	result := html
 	htmlLower := strings.ToLower(html)
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
-		// Group 1: prefix (whitespace/> or empty for start of string)
-		// Group 2: the @mention itself
 		mentionStart, mentionEnd := m[4], m[5]
 
 		// Skip mentions inside HTML tags, code blocks, or existing <bc-attachment> elements
-		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(html, mentionStart) {
+		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(htmlLower, mentionStart) {
 			continue
+		}
+
+		// Trailing-character bailout: skip if followed by hyphen or word-internal apostrophe
+		if mentionEnd < len(result) {
+			next := result[mentionEnd]
+			if next == '-' {
+				continue
+			}
+			if next == '\'' && mentionEnd+1 < len(result) {
+				r, _ := utf8.DecodeRuneInString(result[mentionEnd+1:])
+				if r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+					continue
+				}
+			}
 		}
 
 		mention := html[mentionStart:mentionEnd]
@@ -724,6 +858,7 @@ func isInsideCodeBlock(s string, pos int) bool {
 }
 
 // isInsideBcAttachment checks if position pos is inside a <bc-attachment>...</bc-attachment> element.
+// s must be pre-lowercased by the caller for case-insensitive matching.
 func isInsideBcAttachment(s string, pos int) bool {
 	// Find the last <bc-attachment before pos
 	prefix := s[:pos]

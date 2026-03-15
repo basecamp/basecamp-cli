@@ -757,11 +757,56 @@ func TestResolveMentions(t *testing.T) {
 			input:    `<preview>stuff</preview><pre>@John example</pre>`,
 			expected: `<preview>stuff</preview><pre>@John example</pre>`,
 		},
+		// Expanded prefix tests
+		{
+			name:     "mention after open paren",
+			input:    `<p>(@John) check this</p>`,
+			expected: `<p>(` + MentionToHTML("sgid-john", "John Doe") + `) check this</p>`,
+		},
+		{
+			name:     "mention after open bracket",
+			input:    `<p>[@John] check this</p>`,
+			expected: `<p>[` + MentionToHTML("sgid-john", "John Doe") + `] check this</p>`,
+		},
+		{
+			name:     "mention after double quote",
+			input:    `<p>"@John" check this</p>`,
+			expected: `<p>"` + MentionToHTML("sgid-john", "John Doe") + `" check this</p>`,
+		},
+		{
+			name:     "mention after single quote",
+			input:    `<p>'@John' check this</p>`,
+			expected: `<p>'` + MentionToHTML("sgid-john", "John Doe") + `' check this</p>`,
+		},
+		// Trailing-character bailout tests
+		{
+			name:     "hyphen bailout",
+			input:    `<p>Hey @John-Doe</p>`,
+			expected: `<p>Hey @John-Doe</p>`,
+			wantErr:  false,
+		},
+		{
+			name:     "apostrophe letter bailout",
+			input:    `<p>Hey @John's stuff</p>`,
+			expected: `<p>Hey @John's stuff</p>`,
+			wantErr:  false,
+		},
+		{
+			name:     "apostrophe then non-letter is not bailout",
+			input:    `<p>'@John' said hi</p>`,
+			expected: `<p>'` + MentionToHTML("sgid-john", "John Doe") + `' said hi</p>`,
+		},
+		// Case-insensitive bc-attachment guard
+		{
+			name:     "uppercase BC-ATTACHMENT skips inner mention",
+			input:    `<BC-ATTACHMENT sgid="x" content-type="application/vnd.basecamp.mention">@John</BC-ATTACHMENT>`,
+			expected: `<BC-ATTACHMENT sgid="x" content-type="application/vnd.basecamp.mention">@John</BC-ATTACHMENT>`,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ResolveMentions(tt.input, lookup)
+			result, err := ResolveMentions(tt.input, lookup, nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -775,5 +820,200 @@ func TestResolveMentions(t *testing.T) {
 				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestResolveMentions_MentionSGID(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "mention scheme — zero API calls",
+			input:    `<a href="mention:BAh7CEkiCG">@Jane Smith</a>`,
+			expected: MentionToHTML("BAh7CEkiCG", "Jane Smith"),
+		},
+		{
+			name:     "mention scheme without @ in link text",
+			input:    `<a href="mention:BAh7CEkiCG">Jane Smith</a>`,
+			expected: MentionToHTML("BAh7CEkiCG", "Jane Smith"),
+		},
+		{
+			name:     "mention in paragraph",
+			input:    `<p>Hey <a href="mention:BAh7CEkiCG">@Jane Smith</a>, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("BAh7CEkiCG", "Jane Smith") + `, check this</p>`,
+		},
+		{
+			name:     "mention inside code block is skipped",
+			input:    `<code><a href="mention:BAh7">@Jane</a></code>`,
+			expected: `<code><a href="mention:BAh7">@Jane</a></code>`,
+		},
+		{
+			name:     "mention inside pre block is skipped",
+			input:    `<pre><a href="mention:BAh7">@Jane</a></pre>`,
+			expected: `<pre><a href="mention:BAh7">@Jane</a></pre>`,
+		},
+		{
+			name:     "mention inside bc-attachment is skipped",
+			input:    `<bc-attachment sgid="x" content-type="text/plain"><a href="mention:BAh7">@Jane</a></bc-attachment>`,
+			expected: `<bc-attachment sgid="x" content-type="text/plain"><a href="mention:BAh7">@Jane</a></bc-attachment>`,
+		},
+		{
+			name:     "uppercase BC-ATTACHMENT around mention anchor is skipped",
+			input:    `<BC-ATTACHMENT sgid="x" content-type="text/plain"><a href="mention:BAh7">@Jane</a></BC-ATTACHMENT>`,
+			expected: `<BC-ATTACHMENT sgid="x" content-type="text/plain"><a href="mention:BAh7">@Jane</a></BC-ATTACHMENT>`,
+		},
+		{
+			name:     "normal link scheme is not intercepted by anchor regex",
+			input:    `<a href="http://example.com">link text</a>`,
+			expected: `<a href="http://example.com">link text</a>`,
+		},
+		{
+			name:     "mention scheme with HTML entities in link text does not double-escape",
+			input:    `<a href="mention:sgid-att">@AT&amp;T</a>`,
+			expected: MentionToHTML("sgid-att", "AT&T"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveMentions(tt.input, nil, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestResolveMentions_PersonID(t *testing.T) {
+	lookupByID := func(id string) (string, string, error) {
+		people := map[string][2]string{
+			"42000": {"sgid-jane", "Jane Smith"},
+			"42001": {"sgid-bob", "Bob Jones"},
+		}
+		if p, ok := people[id]; ok {
+			return p[0], p[1], nil
+		}
+		return "", "", fmt.Errorf("person not found: %s", id)
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "person scheme — uses canonical name",
+			input:    `<a href="person:42000">@Wrong Name</a>`,
+			expected: MentionToHTML("sgid-jane", "Jane Smith"),
+		},
+		{
+			name:     "person scheme in paragraph",
+			input:    `<p>Hey <a href="person:42000">@Jane</a>, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("sgid-jane", "Jane Smith") + `, check this</p>`,
+		},
+		{
+			name:    "person scheme — not pingable",
+			input:   `<a href="person:99999">@Nobody</a>`,
+			wantErr: true,
+		},
+		{
+			name:     "person inside code block is skipped",
+			input:    `<code><a href="person:42000">@Jane</a></code>`,
+			expected: `<code><a href="person:42000">@Jane</a></code>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveMentions(tt.input, nil, lookupByID)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestResolveMentions_SGIDInline(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "sgid inline — direct embed",
+			input:    `<p>Hey @sgid:BAh7CEkiCG, check this</p>`,
+			expected: `<p>Hey ` + MentionToHTML("BAh7CEkiCG", "BAh7CEkiCG") + `, check this</p>`,
+		},
+		{
+			name:     "sgid at start of line",
+			input:    `@sgid:BAh7CEkiCG check this`,
+			expected: MentionToHTML("BAh7CEkiCG", "BAh7CEkiCG") + ` check this`,
+		},
+		{
+			name:     "sgid with base64 chars",
+			input:    `<p>Hey @sgid:BAh7+CG/k=, check</p>`,
+			expected: `<p>Hey ` + MentionToHTML("BAh7+CG/k=", "BAh7+CG/k=") + `, check</p>`,
+		},
+		{
+			name:     "sgid inside code is skipped",
+			input:    `<code>@sgid:BAh7CEkiCG</code>`,
+			expected: `<code>@sgid:BAh7CEkiCG</code>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveMentions(tt.input, nil, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestResolveMentions_Mixed(t *testing.T) {
+	lookup := func(name string) (string, string, error) {
+		if name == "John" || name == "John Doe" {
+			return "sgid-john", "John Doe", nil
+		}
+		return "", "", fmt.Errorf("not found: %s", name)
+	}
+
+	t.Run("markdown mention resolved first then fuzzy", func(t *testing.T) {
+		input := `<p><a href="mention:BAh7">@Jane</a> and @John</p>`
+		expected := `<p>` + MentionToHTML("BAh7", "Jane") + ` and ` + MentionToHTML("sgid-john", "John Doe") + `</p>`
+		result, err := ResolveMentions(input, lookup, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != expected {
+			t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, expected)
+		}
+	})
+}
+
+func TestResolveMentions_PersonSchemeNilLookup(t *testing.T) {
+	input := `<a href="person:42000">@Jane</a>`
+	_, err := ResolveMentions(input, nil, nil)
+	if err == nil {
+		t.Error("expected error for person: scheme with nil lookupByID")
 	}
 }

@@ -1011,12 +1011,12 @@ func TestGetTodolistsPartialFetchFailsHard(t *testing.T) {
 
 func TestResolvePersonByName(t *testing.T) {
 	r := newMockResolver()
-	r.setPeople([]Person{
+	// ResolvePersonByName resolves against pingable set only
+	r.setPingable([]Person{
 		{ID: 1, AttachableSGID: "sgid-john", Name: "John Doe", Email: "john@example.com"},
 		{ID: 2, AttachableSGID: "sgid-jane", Name: "Jane Smith", Email: "jane@example.com"},
 		{ID: 3, AttachableSGID: "sgid-igor", Name: "Igor Logachev", Email: "igor@example.com"},
 	})
-	r.setPingable([]Person{}) // empty pingable cache to avoid SDK call
 
 	ctx := context.Background()
 
@@ -1048,8 +1048,9 @@ func TestResolvePersonByName(t *testing.T) {
 	}
 }
 
-func TestResolvePersonByNamePingableFallback(t *testing.T) {
+func TestResolvePersonByNamePingableOnly(t *testing.T) {
 	r := newMockResolver()
+	// Person exists in people list but NOT in pingable — should not be found
 	r.setPeople([]Person{
 		{ID: 1, AttachableSGID: "sgid-john", Name: "John Doe"},
 	})
@@ -1059,9 +1060,43 @@ func TestResolvePersonByNamePingableFallback(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Should find in pingable
-	person, err := r.ResolvePersonByName(ctx, "External")
+	// Person in people but not pingable → not found
+	_, err := r.ResolvePersonByName(ctx, "John Doe")
+	require.Error(t, err)
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeNotFound, outErr.Code)
+
+	// Person in pingable → found
+	person, err := r.ResolvePersonByName(ctx, "External Client")
 	require.NoError(t, err)
 	assert.Equal(t, "External Client", person.Name)
 	assert.Equal(t, "sgid-client", person.AttachableSGID)
+}
+
+func TestResolvePersonByID(t *testing.T) {
+	r := newMockResolver()
+	r.setPingable([]Person{
+		{ID: 42000, AttachableSGID: "sgid-jane", Name: "Jane Smith"},
+		{ID: 42001, AttachableSGID: "sgid-bob", Name: "Bob Jones"},
+	})
+
+	ctx := context.Background()
+
+	t.Run("found", func(t *testing.T) {
+		person, err := r.ResolvePersonByID(ctx, 42000)
+		require.NoError(t, err)
+		assert.Equal(t, "Jane Smith", person.Name)
+		assert.Equal(t, "sgid-jane", person.AttachableSGID)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := r.ResolvePersonByID(ctx, 99999)
+		require.Error(t, err)
+
+		var outErr *output.Error
+		require.True(t, errors.As(err, &outErr))
+		assert.Equal(t, output.CodeNotFound, outErr.Code)
+	})
 }

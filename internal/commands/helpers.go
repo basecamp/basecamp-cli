@@ -470,18 +470,39 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 	return nil, nil
 }
 
-// resolveMentions scans HTML for @Name and @First.Last mentions and replaces
-// them with Basecamp mention attachment tags. Silently returns unchanged HTML
-// if no mentions are found. Errors if a mentioned name cannot be resolved.
+// resolveMentions scans HTML for mention syntax and replaces matches with
+// Basecamp mention attachment tags. Supports three syntaxes:
+//   - [@Name](mention:SGID) — zero API calls (SGID embedded directly)
+//   - [@Name](person:ID) — one API call (ID→SGID via pingable set)
+//   - @Name / @First.Last — fuzzy name resolution via pingable set
+//
+// Also supports @sgid:VALUE inline syntax for pipeline composability.
+// Silently returns unchanged HTML if no mentions are found.
 func resolveMentions(ctx context.Context, resolver *names.Resolver, html string) (string, error) {
-	return richtext.ResolveMentions(html, func(name string) (string, string, error) {
-		person, err := resolver.ResolvePersonByName(ctx, name)
-		if err != nil {
-			return "", "", err
-		}
-		if person.AttachableSGID == "" {
-			return "", "", fmt.Errorf("person %q has no attachable SGID", person.Name)
-		}
-		return person.AttachableSGID, person.Name, nil
-	})
+	return richtext.ResolveMentions(html,
+		func(name string) (string, string, error) {
+			person, err := resolver.ResolvePersonByName(ctx, name)
+			if err != nil {
+				return "", "", err
+			}
+			if person.AttachableSGID == "" {
+				return "", "", fmt.Errorf("person %q has no attachable SGID", person.Name)
+			}
+			return person.AttachableSGID, person.Name, nil
+		},
+		func(id string) (string, string, error) {
+			personID, err := strconv.ParseInt(id, 10, 64)
+			if err != nil {
+				return "", "", output.ErrUsage(fmt.Sprintf("invalid person ID %q — must be numeric", id))
+			}
+			person, err := resolver.ResolvePersonByID(ctx, personID)
+			if err != nil {
+				return "", "", err
+			}
+			if person.AttachableSGID == "" {
+				return "", "", fmt.Errorf("person %q has no attachable SGID", person.Name)
+			}
+			return person.AttachableSGID, person.Name, nil
+		},
+	)
 }
