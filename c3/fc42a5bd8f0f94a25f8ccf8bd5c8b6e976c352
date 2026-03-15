@@ -1,0 +1,35 @@
+internal/commands/todolists.go
+  02f560ebbdcb67e9 50-51,58,67-68,73,147-154
+internal/commands/projects.go
+  02f560ebbdcb67e9 48-49,56,64-65,70,114-121,123
+internal/commands/schedule.go
+  02f560ebbdcb67e9 126-127,139,147-148,153,217-224
+internal/commands/todos.go
+  02f560ebbdcb67e9 33-34,274-275,366,376,379,412-420,447-452,539-547
+internal/commands/messages.go
+  02f560ebbdcb67e9 57-58,65,72-73,78,148-155
+internal/commands/people.go
+  02f560ebbdcb67e9 162-163,170,178-179,184,242-255
+internal/commands/cards.go
+  02f560ebbdcb67e9 58-59,66,74-75,80,160-167,218-225,235-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "c3fc42a5bd8f0f94a25f8ccf8bd5c8b6e976c352",
+  "prompts": {
+    "02f560ebbdcb67e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c7e2c754-4374-4a7f-9caa-e382553a1075",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 138,
+      "overriden_lines": 0
+    }
+  }
+}
