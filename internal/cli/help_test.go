@@ -265,6 +265,49 @@ func TestAgentHelpProducesJSON(t *testing.T) {
 	assert.Contains(t, out, `"command"`)
 }
 
+func TestJSONHelpProducesStructuredJSON(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--help", "--json"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.True(t, strings.HasPrefix(out, "{"), "json help should produce JSON, got: %s", out)
+	assert.Contains(t, out, `"command"`)
+}
+
+func TestBareGroupJSONHelpProducesJSON(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewTodosCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"todos", "--json"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.True(t, strings.HasPrefix(out, "{"), "bare group --json should produce JSON, got: %s", out)
+	assert.Contains(t, out, `"subcommands"`)
+}
+
+func TestBareGroupTextHelpUnchanged(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewTodosCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"todos"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	assert.Contains(t, out, "COMMANDS")
+}
+
 func TestBareRootToleratesBadProfile(t *testing.T) {
 	// Bare basecamp should not error when profile env is broken.
 	// In non-TTY test environments the bare root falls through to quickstart

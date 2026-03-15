@@ -386,6 +386,16 @@ load test_helper
   assert_output_contains "COMMANDS"
 }
 
+@test "messages --json shows structured JSON help" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp messages --json
+  assert_success
+  assert_json_value '.command' 'messages'
+  assert_output_contains '"subcommands"'
+}
+
 @test "message without subject shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
