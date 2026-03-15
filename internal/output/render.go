@@ -382,11 +382,12 @@ var skipColumns = map[string]bool{
 }
 
 type column struct {
-	key      string
-	header   string
-	priority int
-	muted    bool
-	width    int
+	key         string
+	header      string
+	priority    int
+	muted       bool
+	width       int
+	containsURL bool
 }
 
 func (r *Renderer) renderTable(b *strings.Builder, data []map[string]any) {
@@ -498,13 +499,19 @@ func (r *Renderer) selectColumns(cols []column, data []map[string]any) []column 
 	for i := range cols {
 		cols[i].width = lipgloss.Width(cols[i].header)
 		for _, row := range data {
-			cellWidth := lipgloss.Width(formatTableCell(cols[i].key, row[cols[i].key]))
+			formatted := formatTableCell(cols[i].key, row[cols[i].key])
+			cellWidth := lipgloss.Width(formatted)
 			if cellWidth > cols[i].width {
 				cols[i].width = cellWidth
 			}
+			if !cols[i].containsURL && isURL(formatted) {
+				cols[i].containsURL = true
+			}
 		}
-		// Cap width at 40 for long content
-		if cols[i].width > 40 {
+		// Cap width at 40 for long content. URL columns keep actual
+		// width so column-dropping math matches what formatCell (which
+		// never truncates URLs) actually renders.
+		if cols[i].width > 40 && !cols[i].containsURL {
 			cols[i].width = 40
 		}
 	}
