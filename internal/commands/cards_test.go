@@ -984,29 +984,39 @@ func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
 // title pass through without being parsed as a flag.
 func TestCardsCreateDashSeparatorTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
+	// ProjectID intentionally empty — --in must be parsed for the command to
+	// proceed past project resolution.
 
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "create", "--in", "123", "--", "--some-title")
 
-	// Will hit auth/API, but must NOT be "unknown flag"
-	if err != nil {
-		assert.NotContains(t, err.Error(), "unknown flag")
+	// No-network transport guarantees an error past arg parsing.
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "unknown flag")
+	assert.NotContains(t, err.Error(), "unknown shorthand")
+
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotEqual(t, "Project ID required", e.Message)
 	}
 }
 
 // TestCardShortcutDashSeparatorTitle verifies the same for the card shortcut.
 func TestCardShortcutDashSeparatorTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
 
 	cmd := NewCardCmd()
 
 	err := executeCommand(cmd, app, "--in", "123", "--", "--some-title")
 
-	if err != nil {
-		assert.NotContains(t, err.Error(), "unknown flag")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "unknown flag")
+	assert.NotContains(t, err.Error(), "unknown shorthand")
+
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotEqual(t, "Project ID required", e.Message)
 	}
 }
 
@@ -1014,27 +1024,37 @@ func TestCardShortcutDashSeparatorTitle(t *testing.T) {
 // flags placed after the positional title must still be parsed.
 func TestCardsCreateFlagsAfterTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
+	// ProjectID intentionally empty — if --in after the title is NOT parsed,
+	// the command would fail with "Project ID required".
 
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "create", "Normal title", "--in", "123")
 
-	if err != nil {
-		assert.NotContains(t, err.Error(), "unknown flag")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "unknown flag")
+	assert.NotContains(t, err.Error(), "unknown shorthand")
+
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotEqual(t, "Project ID required", e.Message)
 	}
 }
 
 // TestCardShortcutFlagsAfterTitle guards the same for the card shortcut.
 func TestCardShortcutFlagsAfterTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
 
 	cmd := NewCardCmd()
 
 	err := executeCommand(cmd, app, "Normal title", "--in", "123")
 
-	if err != nil {
-		assert.NotContains(t, err.Error(), "unknown flag")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "unknown flag")
+	assert.NotContains(t, err.Error(), "unknown shorthand")
+
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotEqual(t, "Project ID required", e.Message)
 	}
 }

@@ -289,7 +289,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 		Short: "Create a new card",
 		Long:  "Create a new card in a project's card table.",
 		Example: `  basecamp cards create "My card" --in myproject
-  basecamp cards create -- "--title with dashes" --in myproject`,
+  basecamp cards create --in myproject -- "--title with dashes"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {
@@ -772,7 +772,7 @@ func NewCardCmd() *cobra.Command {
 		Short: "Create a new card",
 		Long:  "Create a card in a project's card table. Shortcut for 'basecamp cards create'.",
 		Example: `  basecamp card "My card" --in myproject
-  basecamp card -- "--title with dashes" --in myproject`,
+  basecamp card --in myproject -- "--title with dashes"`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
