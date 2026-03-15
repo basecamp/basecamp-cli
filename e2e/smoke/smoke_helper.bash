@@ -224,16 +224,17 @@ ensure_todolist() {
 
 ensure_todolist_group() {
   [[ -n "${QA_TODOLIST_GROUP:-}" ]] && return 0
+  ensure_project || return 1
   ensure_todolist || return 1
 
   local out
   out=$(basecamp todolistgroups list --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
-    mark_unverifiable "Cannot list todolist groups in project $QA_PROJECT"
+    mark_unverifiable "Cannot list todolist groups in todolist $QA_TODOLIST"
     return 1
   }
   QA_TODOLIST_GROUP=$(echo "$out" | jq -r '.data[0].id // empty')
   if [[ -z "$QA_TODOLIST_GROUP" ]]; then
-    mark_unverifiable "No todolist groups in project $QA_PROJECT"
+    mark_unverifiable "No todolist groups in todolist $QA_TODOLIST"
     return 1
   fi
   export QA_TODOLIST_GROUP
@@ -446,6 +447,7 @@ ensure_comment() {
 
 ensure_question() {
   [[ -n "${QA_QUESTION:-}" ]] && return 0
+  ensure_project || return 1
   ensure_questionnaire || return 1
 
   local out
@@ -463,6 +465,8 @@ ensure_question() {
 
 ensure_answer() {
   [[ -n "${QA_ANSWER:-}" ]] && return 0
+  ensure_project || return 1
+  ensure_questionnaire || return 1
   ensure_question || return 1
 
   local out
@@ -480,6 +484,7 @@ ensure_answer() {
 
 ensure_schedule_entry() {
   [[ -n "${QA_SCHEDULE_ENTRY:-}" ]] && return 0
+  ensure_project || return 1
   ensure_schedule || return 1
 
   local out
