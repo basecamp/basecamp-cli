@@ -184,10 +184,11 @@ func TestRootLevelLeafCommandHelp(t *testing.T) {
 	assert.NotContains(t, out, "COMMANDS")
 }
 
-func TestLeafCommandInheritsParentPersistentFlags(t *testing.T) {
-	// Leaf commands must show parent-defined persistent flags in INHERITED
-	// FLAGS. These flags carry required context (--project, --chat, etc.)
-	// and hiding them breaks discoverability.
+func TestLeafCommandShowsParentScopedFlagsInFLAGS(t *testing.T) {
+	// Parent-scoped persistent flags (--project, --chat, etc.) are promoted
+	// into the FLAGS section on leaf commands, not buried in INHERITED FLAGS.
+	// This is a renderer-wide policy: any leaf whose parent defines persistent
+	// flags will show them in FLAGS.
 	isolateHelpTest(t)
 
 	tests := []struct {
@@ -197,19 +198,19 @@ func TestLeafCommandInheritsParentPersistentFlags(t *testing.T) {
 		wantFlags []string
 	}{
 		{
-			"messages create inherits --project",
+			"messages create shows --project in FLAGS",
 			[]string{"messages", "create", "--help"},
 			commands.NewMessagesCmd,
 			[]string{"--project", "--in", "--message-board"},
 		},
 		{
-			"chat post inherits --project and --chat",
+			"chat post shows --project and --chat in FLAGS",
 			[]string{"chat", "post", "--help"},
 			commands.NewChatCmd,
-			[]string{"--project", "--chat", "--content-type"},
+			[]string{"--project", "--chat"},
 		},
 		{
-			"timesheet report inherits date and person flags",
+			"timesheet report shows date and person flags in FLAGS",
 			[]string{"timesheet", "report", "--help"},
 			commands.NewTimesheetCmd,
 			[]string{"--project", "--start", "--end", "--person"},
@@ -226,11 +227,81 @@ func TestLeafCommandInheritsParentPersistentFlags(t *testing.T) {
 			_ = cmd.Execute()
 
 			out := buf.String()
+			flagsSection := extractSection(out, "FLAGS")
 			for _, flag := range tt.wantFlags {
-				assert.Contains(t, out, flag)
+				assert.Contains(t, flagsSection, flag,
+					"expected %s in FLAGS section", flag)
 			}
 		})
 	}
+}
+
+func TestCampfirePostHelpShowsChatFlag(t *testing.T) {
+	// The campfire alias path must also show --chat in FLAGS.
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewChatCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"campfire", "post", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	flagsSection := extractSection(out, "FLAGS")
+	assert.Contains(t, flagsSection, "--chat")
+	assert.Contains(t, flagsSection, "--project")
+}
+
+func TestLeafCommandKeepsRootGlobalsInInheritedFlags(t *testing.T) {
+	// Root-level globals (--json, --quiet, etc.) must stay in INHERITED FLAGS,
+	// not be promoted into FLAGS. This is the other half of the parent-scoped
+	// promotion contract.
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewProjectsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"projects", "list", "--help"})
+	_ = cmd.Execute()
+
+	out := buf.String()
+	inheritedSection := extractSection(out, "INHERITED FLAGS")
+	flagsSection := extractSection(out, "FLAGS")
+
+	assert.Contains(t, inheritedSection, "--json",
+		"--json should remain in INHERITED FLAGS")
+	assert.Contains(t, inheritedSection, "--quiet",
+		"--quiet should remain in INHERITED FLAGS")
+	assert.NotContains(t, flagsSection, "--json",
+		"--json should not be promoted to FLAGS")
+	assert.NotContains(t, flagsSection, "--quiet",
+		"--quiet should not be promoted to FLAGS")
+}
+
+// extractSection returns the text between a header (e.g. "FLAGS") and the
+// next header or end of string. Headers are identified as lines that are
+// all-caps words (the styled header text).
+func extractSection(help, header string) string {
+	lines := strings.Split(help, "\n")
+	var collecting bool
+	var section strings.Builder
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == header {
+			collecting = true
+			continue
+		}
+		if collecting && trimmed != "" && trimmed == strings.ToUpper(trimmed) && !strings.HasPrefix(trimmed, "-") {
+			break // next header
+		}
+		if collecting {
+			section.WriteString(line)
+			section.WriteString("\n")
+		}
+	}
+	return section.String()
 }
 
 func TestChatAliasShowsChatHelp(t *testing.T) {
