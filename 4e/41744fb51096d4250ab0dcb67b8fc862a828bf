@@ -1,0 +1,25 @@
+skills/basecamp/SKILL.md
+  6ea30bb4f75a1cd6 261
+e2e/smoke/smoke_messages_write.bats
+  6ea30bb4f75a1cd6 30-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "4e41744fb51096d4250ab0dcb67b8fc862a828bf",
+  "prompts": {
+    "6ea30bb4f75a1cd6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1933ee4d-d307-45bf-bfd7-a9229dee026e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 1,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    }
+  }
+}
