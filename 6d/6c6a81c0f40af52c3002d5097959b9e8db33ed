@@ -1,0 +1,27 @@
+internal/cli/help.go
+  f773428a5e4fd105 20-25
+internal/cli/help_test.go
+  f773428a5e4fd105 268-310
+e2e/errors.bats
+  f773428a5e4fd105 389-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "6d6c6a81c0f40af52c3002d5097959b9e8db33ed",
+  "prompts": {
+    "f773428a5e4fd105": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0534a60d-8a75-40c7-b265-026f0d019ab3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 59,
+      "total_deletions": 1,
+      "accepted_lines": 59,
+      "overriden_lines": 0
+    }
+  }
+}
