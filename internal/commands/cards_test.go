@@ -975,3 +975,66 @@ func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
 		assert.Contains(t, e.Message, "card table")
 	}
 }
+
+// =============================================================================
+// Dash-separator title tests
+// =============================================================================
+
+// TestCardsCreateDashSeparatorTitle verifies that `--` lets a dash-prefixed
+// title pass through without being parsed as a flag.
+func TestCardsCreateDashSeparatorTitle(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewCardsCmd()
+
+	err := executeCommand(cmd, app, "create", "--in", "123", "--", "--some-title")
+
+	// Will hit auth/API, but must NOT be "unknown flag"
+	if err != nil {
+		assert.NotContains(t, err.Error(), "unknown flag")
+	}
+}
+
+// TestCardShortcutDashSeparatorTitle verifies the same for the card shortcut.
+func TestCardShortcutDashSeparatorTitle(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewCardCmd()
+
+	err := executeCommand(cmd, app, "--in", "123", "--", "--some-title")
+
+	if err != nil {
+		assert.NotContains(t, err.Error(), "unknown flag")
+	}
+}
+
+// TestCardsCreateFlagsAfterTitle guards the flags-anywhere behavior:
+// flags placed after the positional title must still be parsed.
+func TestCardsCreateFlagsAfterTitle(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewCardsCmd()
+
+	err := executeCommand(cmd, app, "create", "Normal title", "--in", "123")
+
+	if err != nil {
+		assert.NotContains(t, err.Error(), "unknown flag")
+	}
+}
+
+// TestCardShortcutFlagsAfterTitle guards the same for the card shortcut.
+func TestCardShortcutFlagsAfterTitle(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewCardCmd()
+
+	err := executeCommand(cmd, app, "Normal title", "--in", "123")
+
+	if err != nil {
+		assert.NotContains(t, err.Error(), "unknown flag")
+	}
+}
