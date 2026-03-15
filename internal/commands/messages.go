@@ -419,6 +419,12 @@ You can pass either a message ID or a Basecamp URL:
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			html := richtext.MarkdownToHTML(body)
 
+			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
+			html, err = resolveLocalImages(cmd, app, html)
+			if err != nil {
+				return err
+			}
+
 			// Resolve @mentions
 			html, err = resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
