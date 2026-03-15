@@ -76,7 +76,7 @@ var (
 )
 
 // reMentionInput matches @Name or @First.Last in user input.
-// Group 1: prefix character (whitespace, >, punctuation, or empty at start of string).
+// Group 1: prefix character (whitespace, >, (, [, ", ', or empty at start of string).
 // Group 2: the @mention itself.
 // Uses Unicode letter/digit classes to support non-ASCII names (e.g., @José, @Zoë).
 // Does not match mid-word (e.g., user@example.com).
