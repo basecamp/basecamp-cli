@@ -123,6 +123,8 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var sortField string
+	var reverse bool
 
 	cmd := &cobra.Command{
 		Use:   "entries",
@@ -134,7 +136,7 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			return runScheduleEntries(cmd, app, *project, *scheduleID, status, limit, page, all)
+			return runScheduleEntries(cmd, app, *project, *scheduleID, status, limit, page, all, sortField, reverse)
 		},
 	}
 
@@ -142,11 +144,13 @@ func newScheduleEntriesCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of entries to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all entries (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&sortField, "sort", "", "Sort by field (title, created, updated)")
+	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 
 	return cmd
 }
 
-func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID, status string, limit, page int, all bool) error {
+func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID, status string, limit, page int, all bool, sortField string, reverse bool) error {
 	// Validate flag combinations
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
@@ -209,6 +213,14 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 		return convertSDKError(err)
 	}
 	entries := entriesResult.Entries
+
+	if sortField != "" {
+		allowed := []string{"title", "created", "updated"}
+		if err := validateSortField(sortField, allowed); err != nil {
+			return err
+		}
+		sortScheduleEntries(entries, sortField, reverse)
+	}
 
 	summary := fmt.Sprintf("%d schedule entries", len(entries))
 

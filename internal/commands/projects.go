@@ -45,13 +45,15 @@ func newProjectsListCmd() *cobra.Command {
 	var status string
 	var limit, page int
 	var all bool
+	var sortField string
+	var reverse bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List projects",
 		Long:  "List all accessible projects in the account.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProjectsList(cmd, status, limit, page, all)
+			return runProjectsList(cmd, status, limit, page, all, sortField, reverse)
 		},
 	}
 
@@ -59,11 +61,13 @@ func newProjectsListCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of projects to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all projects (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&sortField, "sort", "", "Sort by field (title, created, updated)")
+	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 
 	return cmd
 }
 
-func runProjectsList(cmd *cobra.Command, status string, limit, page int, all bool) error {
+func runProjectsList(cmd *cobra.Command, status string, limit, page int, all bool, sortField string, reverse bool) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
 		return fmt.Errorf("app not initialized")
@@ -107,10 +111,16 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 
 	projects := result.Projects
 
-	// Sort alphabetically by name (API returns reverse_chronologically).
-	// Only sort when we have the full result set — alphabetizing a partial
-	// page would create a misleading view.
-	if page == 0 && limit == 0 {
+	if sortField != "" {
+		allowed := []string{"title", "created", "updated"}
+		if err := validateSortField(sortField, allowed); err != nil {
+			return err
+		}
+		sortProjects(projects, sortField, reverse)
+	} else if page == 0 && limit == 0 {
+		// Default: sort alphabetically by name (API returns reverse_chronologically).
+		// Only sort when we have the full result set — alphabetizing a partial
+		// page would create a misleading view.
 		sort.Slice(projects, func(i, j int) bool {
 			return strings.ToLower(projects[i].Name) < strings.ToLower(projects[j].Name)
 		})

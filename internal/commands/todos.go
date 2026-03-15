@@ -30,6 +30,8 @@ type todosListFlags struct {
 	limit     int
 	page      int
 	all       bool
+	sortField string
+	reverse   bool
 }
 
 // NewTodosCmd creates the todos command group.
@@ -269,6 +271,8 @@ func newTodosListCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
 	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&flags.sortField, "sort", "", "Sort by field (title, created, updated, position, due)")
+	cmd.Flags().BoolVar(&flags.reverse, "reverse", false, "Reverse sort order")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -359,7 +363,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 
 	// If todolist is specified, list todos in that list
 	if todolist != "" {
-		return listTodosInList(cmd, app, project, todolist, flags.status, flags.limit, flags.page, flags.all)
+		return listTodosInList(cmd, app, project, todolist, flags.status, flags.limit, flags.page, flags.all, flags.sortField, flags.reverse)
 	}
 
 	// --page is not meaningful when aggregating across todolists
@@ -369,10 +373,10 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	}
 
 	// Otherwise, get all todos from project's todoset
-	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, flags.status, flags.overdue, flags.limit, flags.all)
+	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, flags.status, flags.overdue, flags.limit, flags.all, flags.sortField, flags.reverse)
 }
 
-func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit, page int, all bool) error {
+func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit, page int, all bool, sortField string, reverse bool) error {
 	// Resolve todolist name to ID
 	resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 	if err != nil {
@@ -405,6 +409,15 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	}
 	todos := todosResult.Todos
 
+	// Apply client-side sort when requested
+	if sortField != "" {
+		allowed := []string{"title", "created", "updated", "position", "due"}
+		if err := validateSortField(sortField, allowed); err != nil {
+			return err
+		}
+		sortTodos(todos, sortField, reverse)
+	}
+
 	// Build response options
 	respOpts := []output.ResponseOption{
 		output.WithEntity("todo"),
@@ -431,7 +444,12 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	return app.OK(todos, respOpts...)
 }
 
-func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, status string, overdue bool, limit int, all bool) error {
+func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, status string, overdue bool, limit int, all bool, sortField string, reverse bool) error {
+	// Sorting the aggregate path without --all is misleading because results
+	// are silently sampled per-todolist using default SDK paging.
+	if sortField != "" && !all {
+		return output.ErrUsage("--sort requires --all when listing across todolists (results are sampled per list without it)")
+	}
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
 	if assignee != "" {
@@ -516,6 +534,15 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		}
 
 		result = append(result, todo)
+	}
+
+	// Apply client-side sort when requested (--all already validated above)
+	if sortField != "" {
+		allowed := []string{"title", "created", "updated", "due"}
+		if err := validateSortField(sortField, allowed); err != nil {
+			return err
+		}
+		sortTodos(result, sortField, reverse)
 	}
 
 	// Build response options
