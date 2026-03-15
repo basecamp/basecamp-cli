@@ -1,0 +1,31 @@
+internal/commands/cards.go
+  57e89b89f6ca7abc 158,208,214,218-225,526-531,612-619,666-669
+internal/commands/messages_test.go
+  57e89b89f6ca7abc 187-230,380-409,412-420
+internal/commands/cards_test.go
+  57e89b89f6ca7abc 731-739,752-1068
+internal/commands/messages.go
+  57e89b89f6ca7abc 148,161-168,442-490
+skills/basecamp/SKILL.md
+  57e89b89f6ca7abc 260-274,365-366,403-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "bc4cb188fdeac505e58fa0e9760480325a01ba21",
+  "prompts": {
+    "57e89b89f6ca7abc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2427ba21-33b6-4ec8-a08c-5e254e6f0851",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 515,
+      "overriden_lines": 0
+    }
+  }
+}
