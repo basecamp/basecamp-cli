@@ -671,6 +671,108 @@ func TestChatPostViaSubcommandWithChatFlag(t *testing.T) {
 		"content should be passed through subcommand path")
 }
 
+// mockChatMentionTransport handles resolver API calls for mentions and captures POST body.
+type mockChatMentionTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockChatMentionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/"):
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
+		case strings.Contains(req.URL.Path, "/circles/people.json") || strings.Contains(req.URL.Path, "/people/pingable.json"):
+			body = `[{"id": 42000, "name": "Jane Smith", "email_address": "jane@example.com", "attachable_sgid": "sgid-jane"}]`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "content": "Test", "created_at": "2024-01-01T00:00:00Z"}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+// TestChatPostMentionPromotesToHTML verifies that a chat post with @Name
+// auto-promotes content type to text/html when mentions are resolved.
+func TestChatPostMentionPromotesToHTML(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "post", "Hey @Jane.Smith, check this")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var requestBody map[string]any
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err)
+
+	// Content type should be promoted to text/html when mentions are present
+	assert.Equal(t, "text/html", requestBody["content_type"],
+		"content_type should be promoted to text/html when mentions are resolved")
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "bc-attachment",
+		"content should contain bc-attachment mention tag")
+}
+
+// TestChatPostPlainTextOptOut verifies that --content-type text/plain
+// bypasses mention resolution and sends content as-is.
+func TestChatPostPlainTextOptOut(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "post", "Hey @Jane.Smith", "--content-type", "text/plain")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var requestBody map[string]any
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err)
+
+	// Content type should remain text/plain
+	assert.Equal(t, "text/plain", requestBody["content_type"],
+		"content_type should remain text/plain when explicitly set")
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+	// Mentions should NOT be resolved — raw text preserved
+	assert.NotContains(t, content, "bc-attachment",
+		"content should not contain bc-attachment when content-type is text/plain")
+	assert.Contains(t, content, "@Jane.Smith",
+		"@mention should be left as literal text")
+}
+
 // TestChatDeleteReturnsDeletedPayload verifies that delete returns {"deleted": true, "id": "..."}.
 func TestChatDeleteReturnsDeletedPayload(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
