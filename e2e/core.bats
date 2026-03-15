@@ -68,6 +68,22 @@ load test_helper
 }
 
 
+# JQ flag
+
+@test "--jq implies --json" {
+  run basecamp --jq '.'
+  assert_success
+  is_valid_json
+  assert_json_not_null '.data.version'
+}
+
+@test "--jq extracts scalar" {
+  run basecamp --jq '.data.auth.status'
+  assert_success
+  assert_output_contains "unauthenticated"
+}
+
+
 # Error handling
 
 @test "basecamp unknown command shows error" {

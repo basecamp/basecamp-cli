@@ -110,6 +110,25 @@ load test_helper
 }
 
 
+# JQ flag errors
+
+@test "--jq invalid expression shows error" {
+  run basecamp --jq '.[invalid'
+  assert_failure
+  assert_json_value '.ok' 'false'
+  assert_json_value '.code' 'usage'
+  assert_output_contains "invalid --jq expression"
+}
+
+@test "--jq conflicts with --ids-only" {
+  run basecamp --jq '.data' --ids-only
+  assert_failure
+  assert_json_value '.ok' 'false'
+  assert_json_value '.code' 'usage'
+  assert_output_contains "cannot use --jq with --ids-only"
+}
+
+
 # Missing content errors
 
 @test "todo create without content shows error" {
