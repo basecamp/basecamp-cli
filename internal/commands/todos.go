@@ -304,6 +304,11 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	if flags.page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if flags.sortField != "" {
+		if err := validateSortField(flags.sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
+			return err
+		}
+	}
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
@@ -409,12 +414,8 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	}
 	todos := todosResult.Todos
 
-	// Apply client-side sort when requested
+	// Apply client-side sort when requested (field already validated in runTodosList)
 	if sortField != "" {
-		allowed := []string{"title", "created", "updated", "position", "due"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortTodos(todos, sortField, reverse)
 	}
 
@@ -449,6 +450,9 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// are silently sampled per-todolist using default SDK paging.
 	if sortField != "" && !all {
 		return output.ErrUsage("--sort requires --all when listing across todolists (results are sampled per list without it)")
+	}
+	if sortField == "position" {
+		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
@@ -536,12 +540,9 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		result = append(result, todo)
 	}
 
-	// Apply client-side sort when requested (--all already validated above)
+	// Apply client-side sort when requested (field validated early in runTodosList,
+	// position rejected above)
 	if sortField != "" {
-		allowed := []string{"title", "created", "updated", "due"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortTodos(result, sortField, reverse)
 	}
 

@@ -90,6 +90,14 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if sortField != "" {
+		// Validate against the superset of all allowed fields early, before any
+		// API calls. Context-specific restrictions (e.g. no position in aggregate)
+		// are enforced at each branch below.
+		if err := validateSortField(sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
+			return err
+		}
+	}
 
 	// Pagination flags only make sense when listing a single column
 	// When aggregating across columns, pagination is per-column which is confusing
@@ -158,10 +166,6 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 		}
 
 		if sortField != "" {
-			allowed := []string{"title", "created", "updated", "position", "due"}
-			if err := validateSortField(sortField, allowed); err != nil {
-				return err
-			}
 			sortCards(cardsResult.Cards, sortField, reverse)
 		}
 
@@ -217,13 +221,14 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 		allCards = cardsResult.Cards
 
 		if sortField != "" {
-			allowed := []string{"title", "created", "updated", "position", "due"}
-			if err := validateSortField(sortField, allowed); err != nil {
-				return err
-			}
 			sortCards(allCards, sortField, reverse)
 		}
 	} else {
+		// No position in aggregate — it's only meaningful within a single column
+		if sortField == "position" {
+			return output.ErrUsage("--sort position requires --column (position is per-column)")
+		}
+
 		// Get cards from all columns (no pagination - already validated above)
 		for _, col := range cardTableData.Lists {
 			cardsResult, err := app.Account().Cards().List(cmd.Context(), col.ID, nil)
@@ -234,11 +239,6 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 		}
 
 		if sortField != "" {
-			// No position in aggregate — it's only meaningful within a single column
-			allowed := []string{"title", "created", "updated", "due"}
-			if err := validateSortField(sortField, allowed); err != nil {
-				return err
-			}
 			sortCards(allCards, sortField, reverse)
 		}
 	}

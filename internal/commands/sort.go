@@ -154,12 +154,22 @@ func sortPeople(people []basecamp.Person, field string, reverse bool) {
 	}
 }
 
+// scheduleEntryTitle returns the display title for a schedule entry,
+// preferring Summary (the user-facing name) with Title as fallback.
+func scheduleEntryTitle(e basecamp.ScheduleEntry) string {
+	if e.Summary != "" {
+		return e.Summary
+	}
+	return e.Title
+}
+
 // sortScheduleEntries sorts a slice of schedule entries by field with default direction, then reverses if requested.
+// "title" uses Summary (the user-visible name) with Title as fallback, matching display behavior.
 func sortScheduleEntries(entries []basecamp.ScheduleEntry, field string, reverse bool) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		switch field {
 		case "title":
-			return strings.ToLower(entries[i].Title) < strings.ToLower(entries[j].Title)
+			return strings.ToLower(scheduleEntryTitle(entries[i])) < strings.ToLower(scheduleEntryTitle(entries[j]))
 		case "created":
 			return entries[i].CreatedAt.After(entries[j].CreatedAt)
 		case "updated":

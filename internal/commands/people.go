@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -194,6 +195,11 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if sortField != "" {
+		if err := validateSortField(sortField, []string{"name"}); err != nil {
+			return err
+		}
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -241,15 +247,14 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 
 	// Sort raw people before slimming (sort functions need full SDK type)
 	if sortField != "" {
-		allowed := []string{"name"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortPeople(people, sortField, reverse)
 	} else {
 		sort.Slice(people, func(i, j int) bool {
-			return people[i].Name < people[j].Name
+			return strings.ToLower(people[i].Name) < strings.ToLower(people[j].Name)
 		})
+		if reverse {
+			slices.Reverse(people)
+		}
 	}
 
 	// Slim output

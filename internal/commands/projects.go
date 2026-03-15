@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,6 +84,11 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if sortField != "" {
+		if err := validateSortField(sortField, []string{"title", "created", "updated"}); err != nil {
+			return err
+		}
+	}
 
 	// Resolve account if not configured (enables interactive prompt)
 	if err := ensureAccount(cmd, app); err != nil {
@@ -112,10 +118,6 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 	projects := result.Projects
 
 	if sortField != "" {
-		allowed := []string{"title", "created", "updated"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortProjects(projects, sortField, reverse)
 	} else if page == 0 && limit == 0 {
 		// Default: sort alphabetically by name (API returns reverse_chronologically).
@@ -124,6 +126,9 @@ func runProjectsList(cmd *cobra.Command, status string, limit, page int, all boo
 		sort.Slice(projects, func(i, j int) bool {
 			return strings.ToLower(projects[i].Name) < strings.ToLower(projects[j].Name)
 		})
+		if reverse {
+			slices.Reverse(projects)
+		}
 	}
 
 	// Opportunistic cache refresh: update completion cache as a side-effect.

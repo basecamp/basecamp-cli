@@ -161,6 +161,11 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if sortField != "" {
+		if err := validateSortField(sortField, []string{"title", "created", "updated"}); err != nil {
+			return err
+		}
+	}
 
 	// Resolve project from CLI flags and config, with interactive fallback
 	projectID := project
@@ -215,10 +220,6 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	entries := entriesResult.Entries
 
 	if sortField != "" {
-		allowed := []string{"title", "created", "updated"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortScheduleEntries(entries, sortField, reverse)
 	}
 

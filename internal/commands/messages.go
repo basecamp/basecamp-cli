@@ -89,6 +89,11 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if sortField != "" {
+		if err := validateSortField(sortField, []string{"title", "created", "updated"}); err != nil {
+			return err
+		}
+	}
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
@@ -147,10 +152,6 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 	messages := messagesResult.Messages
 
 	if sortField != "" {
-		allowed := []string{"title", "created", "updated"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortMessages(messages, sortField, reverse)
 	}
 

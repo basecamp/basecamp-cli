@@ -86,6 +86,11 @@ func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, pa
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
+	if sortField != "" {
+		if err := validateSortField(sortField, []string{"title", "created", "updated", "position"}); err != nil {
+			return err
+		}
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -145,10 +150,6 @@ func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, pa
 	todolists := todolistsResult.Todolists
 
 	if sortField != "" {
-		allowed := []string{"title", "created", "updated", "position"}
-		if err := validateSortField(sortField, allowed); err != nil {
-			return err
-		}
 		sortTodolists(todolists, sortField, reverse)
 	}
 

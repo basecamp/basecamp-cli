@@ -274,6 +274,27 @@ func TestSortScheduleEntries_Title(t *testing.T) {
 	assert.Equal(t, "Zebra", entries[1].Title)
 }
 
+func TestSortScheduleEntries_TitlePrefersSummary(t *testing.T) {
+	entries := []basecamp.ScheduleEntry{
+		{Summary: "Zebra", Title: "aaa"},
+		{Summary: "Apple", Title: "zzz"},
+	}
+	sortScheduleEntries(entries, "title", false)
+	// Should sort by Summary, not Title
+	assert.Equal(t, "Apple", entries[0].Summary)
+	assert.Equal(t, "Zebra", entries[1].Summary)
+}
+
+func TestSortScheduleEntries_TitleFallsBackToTitle(t *testing.T) {
+	entries := []basecamp.ScheduleEntry{
+		{Summary: "", Title: "Zebra"},
+		{Summary: "Apple", Title: ""},
+	}
+	sortScheduleEntries(entries, "title", false)
+	assert.Equal(t, "Apple", entries[0].Summary)
+	assert.Equal(t, "", entries[1].Summary)
+}
+
 func TestSortScheduleEntries_Created(t *testing.T) {
 	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	t2 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
