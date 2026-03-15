@@ -3,8 +3,11 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -737,4 +740,238 @@ func TestCardsStepDeleteRequiresStepID(t *testing.T) {
 
 	// Cobra validates args count first
 	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
+}
+
+// =============================================================================
+// Cards Move --position Tests
+// =============================================================================
+
+// mockCardMoveTransport handles resolver and card table API calls, captures the move POST.
+type mockCardMoveTransport struct {
+	capturedPath string
+	capturedBody []byte
+}
+
+func (t *mockCardMoveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/123"):
+			body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"}]}`
+		case strings.Contains(req.URL.Path, "/card_tables/555"):
+			body = `{"id": 555, "lists": [{"id": 777, "title": "Done", "position": 1}]}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		t.capturedPath = req.URL.Path
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		return &http.Response{
+			StatusCode: 204,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+// TestCardsMovePositionPayload verifies the CLI sends the intended request contract
+// (source_id=card, target_id=column, position) to /card_tables/{id}/moves.json.
+// This proves the CLI wiring is correct; it does not prove the BC3 API accepts
+// card-as-source on this endpoint — that requires manual/integration validation.
+func TestCardsMovePositionPayload(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := "555"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "Done", "--position", "1")
+	require.NoError(t, err)
+
+	// Verify URL path hits the card_tables moves endpoint
+	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+
+	// Verify payload shape
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, float64(456), body["source_id"])
+	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(1), body["position"])
+}
+
+// TestCardsMovePositionPosAlias verifies that --pos triggers the same
+// positioned-move contract as --position.
+func TestCardsMovePositionPosAlias(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := "555"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "Done", "--pos", "2")
+	require.NoError(t, err)
+
+	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, float64(456), body["source_id"])
+	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(2), body["position"])
+}
+
+// TestCardsMovePositionNumericToSingleTableAutoResolves verifies that a
+// positioned move with numeric --to and no --card-table auto-resolves
+// the card table when the project has exactly one.
+func TestCardsMovePositionNumericToSingleTableAutoResolves(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := "" // no --card-table
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777", "--position", "1")
+	require.NoError(t, err)
+
+	// Should auto-resolve to card table 555 (single table in mock dock)
+	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, float64(456), body["source_id"])
+	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(1), body["position"])
+}
+
+// TestCardsMoveWithoutPositionUsesCardsMove verifies the old path
+// (POST /card_tables/cards/{id}/moves.json with {column_id}) is taken
+// when --position is absent.
+func TestCardsMoveWithoutPositionUsesCardsMove(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777")
+	require.NoError(t, err)
+
+	// Verify URL path hits the cards move endpoint, not card_tables moves
+	assert.Contains(t, transport.capturedPath, "/card_tables/cards/456/moves.json")
+
+	// Verify payload has column_id, not source_id/target_id
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, float64(777), body["column_id"])
+	_, hasSourceID := body["source_id"]
+	assert.False(t, hasSourceID, "non-positioned move should not send source_id")
+}
+
+// TestCardsMovePositionRejectsNonPositive tests that --position -1 is rejected.
+func TestCardsMovePositionRejectsNonPositive(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cardTable := "999"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777", "--position", "-1")
+	require.NotNil(t, err)
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e)) {
+		assert.Equal(t, "--position must be a positive integer (1-indexed)", e.Message)
+	}
+}
+
+// TestCardsMovePositionRejectsZero tests that --position 0 is rejected.
+func TestCardsMovePositionRejectsZero(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cardTable := "999"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777", "--position", "0")
+	require.NotNil(t, err)
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e)) {
+		assert.Equal(t, "--position must be a positive integer (1-indexed)", e.Message)
+	}
+}
+
+// mockMultiCardTableTransport returns a project with multiple card tables.
+type mockMultiCardTableTransport struct{}
+
+func (t *mockMultiCardTableTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/123"):
+			body = `{"id": 123, "dock": [` +
+				`{"name": "kanban_board", "id": 555, "title": "Board A"},` +
+				`{"name": "kanban_board", "id": 666, "title": "Board B"}` +
+				`]}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+// TestCardsMovePositionNumericToMultiTableAmbiguous verifies that a positioned move
+// with a numeric --to and no --card-table returns an ambiguous error when the project
+// has multiple card tables.
+func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
+	transport := &mockMultiCardTableTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := "" // no --card-table
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777", "--position", "1")
+	require.NotNil(t, err)
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e)) {
+		assert.Equal(t, output.CodeAmbiguous, e.Code)
+		assert.Contains(t, e.Message, "card table")
+	}
 }

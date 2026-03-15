@@ -31,3 +31,6 @@ test_lineup_create_creates_a_lineup_marker # API not available on some servers �
 
 # SDK bug: TodolistOrGroup0 union type expects wrapped JSON, API returns flat
 test_todolists_show_returns_todolist_detail # SDK deserialization mismatch — smoke
+
+# Positioned card move depends on card table dock tool
+test_cards_move_with_position_moves_card_to_position # depends on card table + column — smoke

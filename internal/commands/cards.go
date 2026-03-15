@@ -516,6 +516,7 @@ You can pass either a card ID or a Basecamp URL:
 
 func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	var targetColumn string
+	var position int
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
@@ -524,12 +525,19 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 
 You can pass either a card ID or a Basecamp URL:
   basecamp cards move 789 --to "Done" --in my-project
-  basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"`,
+  basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"
+  basecamp cards move 789 --to "Done" --position 1 --in my-project`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no target column
 			if targetColumn == "" {
 				return missingArg(cmd, "--to")
+			}
+
+			// Detect --position/--pos presence and validate
+			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
+			if positionSet && position <= 0 {
+				return output.ErrUsage("--position must be a positive integer (1-indexed)")
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -615,8 +623,28 @@ You can pass either a card ID or a Basecamp URL:
 				}
 			}
 
+			// Positioned moves need card table ID for the moves endpoint
+			if positionSet && position > 0 && cardTableIDVal == "" {
+				cardTableIDVal, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Move card to column
-			err = app.Account().Cards().Move(cmd.Context(), cardID, columnID)
+			if positionSet && position > 0 {
+				cardTableIDInt, parseErr := strconv.ParseInt(cardTableIDVal, 10, 64)
+				if parseErr != nil {
+					return output.ErrUsage("Invalid card table ID")
+				}
+				err = app.Account().CardColumns().Move(cmd.Context(), cardTableIDInt, &basecamp.MoveColumnRequest{
+					SourceID: cardID,
+					TargetID: columnID,
+					Position: position,
+				})
+			} else {
+				err = app.Account().Cards().Move(cmd.Context(), cardID, columnID)
+			}
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -637,18 +665,27 @@ You can pass either a card ID or a Basecamp URL:
 				})
 			}
 
-			return app.OK(map[string]string{
+			result := map[string]any{
 				"id":     cardIDStr,
 				"status": "moved",
 				"column": targetColumn,
-			},
-				output.WithSummary(fmt.Sprintf("Moved card #%s to '%s'", cardIDStr, targetColumn)),
+			}
+			summary := fmt.Sprintf("Moved card #%s to '%s'", cardIDStr, targetColumn)
+			if positionSet && position > 0 {
+				result["position"] = position
+				summary = fmt.Sprintf("Moved card #%s to '%s' at position %d", cardIDStr, targetColumn, position)
+			}
+
+			return app.OK(result,
+				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			)
 		},
 	}
 
 	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name (required)")
+	cmd.Flags().IntVar(&position, "position", 0, "Position in column (1-indexed)")
+	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
 
 	return cmd
 }
