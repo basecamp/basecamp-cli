@@ -1,0 +1,25 @@
+internal/commands/schedule_test.go
+  785547399ff6eaa0 4,6-8,66-154
+internal/commands/schedule.go
+  785547399ff6eaa0 14,454-466,584-589
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "9bf79629db91e131079b4e685949c8de7d8dacf1",
+  "prompts": {
+    "785547399ff6eaa0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f09d2953-d296-49f1-bc6f-e008dfab7e04",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 226,
+      "overriden_lines": 0
+    }
+  }
+}
