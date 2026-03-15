@@ -1,0 +1,25 @@
+internal/commands/cards.go
+  62558a5963314e13 5,285-298,300-302,305,403-411,423-435,474-479,529,533,584-589,672-679,684-694,696,726-729,816,915-923,935-947,987-988,991-993,2099-2103,2107,2109-2111,2113
+internal/commands/cards_test.go
+  62558a5963314e13 6,8,10,744-1138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "db5f05edd8bb63927152f9d9c9f6b9a3d76cb80e",
+  "prompts": {
+    "62558a5963314e13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "485800c8-832e-41c0-8ad7-01dda10761c8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 18,
+      "total_deletions": 17,
+      "accepted_lines": 515,
+      "overriden_lines": 0
+    }
+  }
+}
