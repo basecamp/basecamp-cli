@@ -17,7 +17,12 @@ import (
 // and a consistent styled layout for every subcommand.
 func rootHelpFunc() func(*cobra.Command, []string) {
 	return func(cmd *cobra.Command, args []string) {
-		if agent, _ := cmd.Root().PersistentFlags().GetBool("agent"); agent {
+		pf := cmd.Root().PersistentFlags()
+		if agent, _ := pf.GetBool("agent"); agent {
+			emitAgentHelp(cmd)
+			return
+		}
+		if jsonFlag, _ := pf.GetBool("json"); jsonFlag {
 			emitAgentHelp(cmd)
 			return
 		}
