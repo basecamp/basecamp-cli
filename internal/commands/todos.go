@@ -388,9 +388,6 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 // same position space; this function merges them by position so the output
 // order matches the Basecamp UI.
 //
-// hasGroups reports whether the todolist contains any groups, so callers
-// can adjust behavior (e.g. reject --page when groups are present).
-//
 // totalCount is the total number of matching todos before any limit cap:
 // for the no-groups path it is the server-reported Meta.TotalCount; for the
 // groups path it is the full flattened count (since we fetch everything for
@@ -399,23 +396,22 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 // limit controls pagination: -1 fetches all, 0 uses SDK default, positive
 // values cap results. In the no-groups path the limit is passed directly to
 // the SDK. In the groups path all todos are fetched for position-correct
-// merge, then capped to limit before returning.
+// merge, then capped to limit before returning (0 defaults to 100).
 //
 // When failOnGroupError is true, any error fetching groups or their todos is
 // fatal. When false, group errors are silently skipped (suitable for cross-list
 // aggregation where partial results are acceptable).
-func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID int64, status string, limit int, failOnGroupError bool) (todos []basecamp.Todo, totalCount int, hasGroups bool, err error) {
-	// Fetch groups first so callers can branch on hasGroups.
+func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID int64, status string, limit int, failOnGroupError bool) (todos []basecamp.Todo, totalCount int, err error) {
 	groupsResult, groupsErr := app.Account().TodolistGroups().List(ctx, todolistID, nil)
 	if groupsErr != nil {
 		if failOnGroupError {
-			return nil, 0, false, groupsErr
+			return nil, 0, groupsErr
 		}
 		// Fall through — treat as zero groups.
 		groupsResult = nil
 	}
 
-	hasGroups = groupsResult != nil && len(groupsResult.Groups) > 0
+	hasGroups := groupsResult != nil && len(groupsResult.Groups) > 0
 
 	if !hasGroups {
 		// No groups — straightforward fetch with caller's limit.
@@ -428,9 +424,9 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 		}
 		directResult, err := app.Account().Todos().List(ctx, todolistID, opts)
 		if err != nil {
-			return nil, 0, false, err
+			return nil, 0, err
 		}
-		return directResult.Todos, directResult.Meta.TotalCount, false, nil
+		return directResult.Todos, directResult.Meta.TotalCount, nil
 	}
 
 	// Groups present — fetch everything (Limit: -1) for correct
@@ -441,7 +437,7 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	}
 	directResult, err := app.Account().Todos().List(ctx, todolistID, directOpts)
 	if err != nil {
-		return nil, 0, true, err
+		return nil, 0, err
 	}
 
 	type positioned struct {
@@ -463,7 +459,7 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 		groupTodos, err := app.Account().Todos().List(ctx, g.ID, groupOpts)
 		if err != nil {
 			if failOnGroupError {
-				return nil, 0, true, err
+				return nil, 0, err
 			}
 			continue
 		}
@@ -480,11 +476,16 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	}
 
 	totalCount = len(result)
+	if limit == 0 {
+		// No explicit limit and not --all: apply the same default cap (100)
+		// that the SDK uses for the no-groups path.
+		limit = 100
+	}
 	if limit > 0 && len(result) > limit {
 		result = result[:limit]
 	}
 
-	return result, totalCount, true, nil
+	return result, totalCount, nil
 }
 
 func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit, page int, all bool, sortField string, reverse bool) error {
@@ -498,6 +499,18 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		return output.ErrUsage("Invalid todolist ID")
 	}
 
+	// Reject --page for grouped todolists before doing any expensive
+	// todo fetches. The groups-list call is lightweight (metadata only).
+	if page > 0 {
+		groupsResult, err := app.Account().TodolistGroups().List(cmd.Context(), todolistID, nil)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		if len(groupsResult.Groups) > 0 {
+			return output.ErrUsage("--page is not supported for todolists with groups; use --limit to cap results")
+		}
+	}
+
 	// Determine the SDK limit to pass through. fetchTodosIncludingGroups
 	// uses this for the no-groups fast path and for cross-list aggregation.
 	sdkLimit := 0 // SDK default
@@ -507,17 +520,9 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		sdkLimit = limit
 	}
 
-	todos, totalCount, hasGroups, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, status, sdkLimit, true)
+	todos, totalCount, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, status, sdkLimit, true)
 	if err != nil {
 		return convertSDKError(err)
-	}
-
-	// --page is incompatible with grouped lists: the flattened result set
-	// has no meaningful page boundary. Without groups, only --page 1 is
-	// valid (enforced in runTodosList) and the SDK default is page 1, so
-	// the no-groups fast path already returns correct results.
-	if hasGroups && page > 0 {
-		return output.ErrUsage("--page is not supported for todolists with groups; use --limit to cap results")
 	}
 
 	// Apply client-side sort when requested (field already validated in runTodosList)
@@ -597,7 +602,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// Aggregate todos from all todolists, including group-nested todos.
 	var allTodos []basecamp.Todo
 	for _, tl := range todolistsResult.Todolists {
-		todos, _, _, err := fetchTodosIncludingGroups(cmd.Context(), app, tl.ID, "", sdkLimit, false)
+		todos, _, err := fetchTodosIncludingGroups(cmd.Context(), app, tl.ID, "", sdkLimit, false)
 		if err != nil {
 			continue // Skip failed todolists
 		}
