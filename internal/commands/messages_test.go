@@ -409,6 +409,15 @@ func (t *mockMessageUpdateTransport) RoundTrip(req *http.Request) (*http.Respons
 	}, nil
 }
 
+// TestMessagesListBreadcrumbs tests the messagesListBreadcrumbs helper.
+func TestMessagesListBreadcrumbs(t *testing.T) {
+	breadcrumbs := messagesListBreadcrumbs("456")
+
+	require.Len(t, breadcrumbs, 3)
+	assert.Equal(t, "archived", breadcrumbs[2].Action)
+	assert.Contains(t, breadcrumbs[2].Cmd, "recordings messages --status archived --in 456")
+}
+
 // mockMessageCreateTransport handles resolver and dock API calls, and captures the POST body.
 type mockMessageCreateTransport struct {
 	capturedBody []byte

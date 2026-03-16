@@ -728,6 +728,15 @@ func TestCardShortcutRequiresProject(t *testing.T) {
 	}
 }
 
+// TestCardsListBreadcrumbs tests the cardsListBreadcrumbs helper.
+func TestCardsListBreadcrumbs(t *testing.T) {
+	breadcrumbs := cardsListBreadcrumbs("123")
+
+	require.Len(t, breadcrumbs, 3)
+	assert.Equal(t, "archived", breadcrumbs[2].Action)
+	assert.Contains(t, breadcrumbs[2].Cmd, "recordings cards --status archived --in 123")
+}
+
 // TestCardsStepDeleteRequiresStepID tests that step ID is required for step delete.
 func TestCardsStepDeleteRequiresStepID(t *testing.T) {
 	app, _ := setupTestApp(t)

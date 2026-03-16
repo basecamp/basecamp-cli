@@ -155,18 +155,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 		return app.OK(cardsResult.Cards,
 			output.WithSummary(fmt.Sprintf("%d cards", len(cardsResult.Cards))),
-			output.WithBreadcrumbs(
-				output.Breadcrumb{
-					Action:      "create",
-					Cmd:         fmt.Sprintf("basecamp card --title <title> --in %s", resolvedProjectID),
-					Description: "Create card",
-				},
-				output.Breadcrumb{
-					Action:      "show",
-					Cmd:         "basecamp cards show <id>",
-					Description: "Show card details",
-				},
-			),
+			output.WithBreadcrumbs(cardsListBreadcrumbs(resolvedProjectID)...),
 		)
 	}
 
@@ -216,24 +205,22 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 	return app.OK(allCards,
 		output.WithSummary(fmt.Sprintf("%d cards", len(allCards))),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp card --title <title> --in %s", resolvedProjectID),
-				Description: "Create card",
-			},
-			output.Breadcrumb{
-				Action:      "show",
-				Cmd:         "basecamp cards show <id>",
-				Description: "Show card details",
-			},
+		output.WithBreadcrumbs(append(cardsListBreadcrumbs(resolvedProjectID),
 			output.Breadcrumb{
 				Action:      "columns",
 				Cmd:         fmt.Sprintf("basecamp cards columns --in %s", resolvedProjectID),
 				Description: "List columns with IDs",
 			},
-		),
+		)...),
 	)
+}
+
+func cardsListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{Action: "create", Cmd: fmt.Sprintf("basecamp card --title <title> --in %s", resolvedProjectID), Description: "Create card"},
+		{Action: "show", Cmd: "basecamp cards show <id>", Description: "Show card details"},
+		{Action: "archived", Cmd: fmt.Sprintf("basecamp recordings cards --status archived --in %s", resolvedProjectID), Description: "Browse archived cards"},
+	}
 }
 
 func newCardsShowCmd() *cobra.Command {

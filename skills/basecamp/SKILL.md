@@ -362,6 +362,8 @@ basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (ne
 basecamp cards move <id> --to "Done" --position 1 --card-table <table_id>  # Move to position
 ```
 
+**Archived/trashed cards:** `cards list` only returns active cards. For archived or trashed cards, use `basecamp recordings cards --status archived --in <project>` or `--status trashed`.
+
 **Identifying completed cards:** Cards in Done columns have `parent.type: "Kanban::DoneColumn"` and `completed: true`. Use this to identify completed cards that haven't been archived.
 
 **Limitation:** Basecamp does not track when cards are moved between columns. The `updated_at` field updates on any modification and cannot reliably indicate when a card was completed.
@@ -397,6 +399,8 @@ basecamp messages update <id> --title "New" --body "Updated"
 basecamp messages pin <id> --in <project>     # Pin to top
 basecamp messages unpin <id>                  # Unpin
 ```
+
+**Archived/trashed messages:** `messages list` only returns active messages. For archived or trashed messages, use `basecamp recordings messages --status archived --in <project>` or `--status trashed`.
 
 **Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards)
 
