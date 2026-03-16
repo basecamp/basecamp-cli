@@ -854,12 +854,13 @@ func chatLinesDisplayData(lines []basecamp.CampfireLine) any {
 
 	// NormalizeData returns []map[string]any when all elements are objects.
 	if items, ok := normalized.([]map[string]any); ok {
-		for i, m := range items {
-			if i >= len(lines) {
-				break
-			}
+		n := len(lines)
+		if len(items) < n {
+			n = len(items)
+		}
+		for i := range n {
 			if display := chatLineDisplayContent(&lines[i]); display != "" {
-				m["content"] = display
+				items[i]["content"] = display
 			}
 		}
 		return items
