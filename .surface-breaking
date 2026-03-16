@@ -1,7 +1,9 @@
 ARG basecamp assign 00 <todo_id>
+ARG basecamp assign 00 <id>
+ARG basecamp unassign 00 <todo_id>
+ARG basecamp unassign 00 <id>
 ARG basecamp url 00 [parse]
 ARG basecamp url 01 <url>
-ARG basecamp unassign 00 <todo_id>
 ARG basecamp upload archive 00 <id|url>
 ARG basecamp upload doc create 00 <title>
 ARG basecamp upload doc create 01 [content]
