@@ -1,0 +1,23 @@
+e2e/tools.bats
+  aac288da50450d3d 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "6e07859318d5ca8d12693b96f49293bb69c357af",
+  "prompts": {
+    "aac288da50450d3d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd42348e-1740-4d5d-b7ea-4deb1125ed3b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 33,
+      "overriden_lines": 0
+    }
+  }
+}
