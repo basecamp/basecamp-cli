@@ -2949,3 +2949,77 @@ func TestWriterJQFilterNonSerializableResultReturnsError(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// DisplayData rendering tests for chat_line entity
+// =============================================================================
+
+func TestChatLineDisplayData_StyledRendering(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":         float64(555),
+		"content":    "<p>raw html</p>",
+		"created_at": "2024-01-01T00:00:00Z",
+	}
+	displayData := map[string]any{
+		"id":         float64(555),
+		"content":    "📎 photo.jpg (3.5mb)",
+		"created_at": "2024-01-01T00:00:00Z",
+	}
+
+	err := w.OK(data, WithEntity("chat_line"), WithDisplayData(displayData))
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "📎 photo.jpg (3.5mb)")
+}
+
+func TestChatLineDisplayData_MarkdownRendering(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":         float64(555),
+		"content":    "<p>raw html</p>",
+		"created_at": "2024-01-01T00:00:00Z",
+	}
+	displayData := map[string]any{
+		"id":         float64(555),
+		"content":    "📎 report.pdf (9.1mb)",
+		"created_at": "2024-01-01T00:00:00Z",
+	}
+
+	err := w.OK(data, WithEntity("chat_line"), WithDisplayData(displayData))
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "📎 report.pdf (9.1mb)")
+}
+
+func TestChatLineDisplayData_JSONPreservesOriginal(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":      float64(555),
+		"content": "<p>raw html</p>",
+	}
+	displayData := map[string]any{
+		"id":      float64(555),
+		"content": "📎 photo.jpg (3.5mb)",
+	}
+
+	err := w.OK(data, WithEntity("chat_line"), WithDisplayData(displayData))
+	require.NoError(t, err)
+
+	// JSON output should contain the original content, not display data
+	assert.Contains(t, buf.String(), "raw html")
+	assert.NotContains(t, buf.String(), "📎 photo.jpg")
+}
