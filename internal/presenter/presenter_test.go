@@ -191,14 +191,14 @@ func TestDetectNoMatch(t *testing.T) {
 func TestFormatFieldBoolean(t *testing.T) {
 	spec := FieldSpec{
 		Format: "boolean",
-		Labels: map[string]string{"true": "done", "false": "pending"},
+		Labels: map[string]string{"true": "done", "false": "incomplete"},
 	}
 
 	if got := FormatField(spec, "completed", true, enUS); got != "done" {
 		t.Errorf("FormatField(true) = %q, want %q", got, "done")
 	}
-	if got := FormatField(spec, "completed", false, enUS); got != "pending" {
-		t.Errorf("FormatField(false) = %q, want %q", got, "pending")
+	if got := FormatField(spec, "completed", false, enUS); got != "incomplete" {
+		t.Errorf("FormatField(false) = %q, want %q", got, "incomplete")
 	}
 }
 
@@ -400,8 +400,8 @@ func TestRenderDetailTodo(t *testing.T) {
 	}
 
 	// Should contain status fields
-	if !strings.Contains(out, "pending") {
-		t.Errorf("Output should contain 'pending', got:\n%s", out)
+	if !strings.Contains(out, "incomplete") {
+		t.Errorf("Output should contain 'incomplete', got:\n%s", out)
 	}
 	if !strings.Contains(out, "Jan 15, 2026") {
 		t.Errorf("Output should contain formatted due date, got:\n%s", out)
@@ -926,8 +926,8 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	}
 
 	// Fields should be Markdown list items with bold labels
-	if !strings.Contains(out, "- **Completed:** pending") {
-		t.Errorf("Markdown detail should have '- **Completed:** pending', got:\n%s", out)
+	if !strings.Contains(out, "- **Completed:** incomplete") {
+		t.Errorf("Markdown detail should have '- **Completed:** incomplete', got:\n%s", out)
 	}
 	if !strings.Contains(out, "- **Due:** Jan 15, 2026") {
 		t.Errorf("Markdown detail should have '- **Due:** Jan 15, 2026', got:\n%s", out)

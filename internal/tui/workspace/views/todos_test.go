@@ -781,7 +781,7 @@ func TestTodos_ShortHelp_LeftPane_ShowsPendingHintWhenCompleted(t *testing.T) {
 	for _, h := range hints {
 		keys[h.Help().Key] = h.Help().Desc
 	}
-	assert.Equal(t, "pending", keys["c"])
+	assert.Equal(t, "incomplete", keys["c"])
 }
 
 func TestTodos_ShortHelp_RightPaneCompleted_ShowsUncomplete(t *testing.T) {
