@@ -647,7 +647,7 @@ You can pass either a card ID or a Basecamp URL:
 		Annotations: map[string]string{
 			"agent_notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
 				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
-				"Cards do NOT support --assignee filtering.",
+				"--position cannot be combined with --on-hold.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if targetColumn == "" && !onHold {

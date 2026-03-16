@@ -345,7 +345,7 @@ func TestCardsMovePositionWithOnHoldRejected(t *testing.T) {
 }
 
 // mockOnHoldTransport handles the API calls for --on-hold card moves.
-// Flow: GET card -> GET column (with on_hold) -> POST move.
+// Flow: GET /projects.json -> GET card -> GET column (with on_hold) -> POST move.
 type mockOnHoldTransport struct {
 	capturedMovePath string
 	capturedMoveBody []byte
@@ -402,6 +402,69 @@ func TestCardsMoveOnHoldWithoutToDoesNotRequireCardTable(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
 	assert.Equal(t, float64(888), body["column_id"])
+}
+
+// TestCardsMoveOnHoldWithNumericTo tests --on-hold with a numeric --to column ID.
+// The card should move to the on-hold section of the specified column.
+func TestCardsMoveOnHoldWithNumericTo(t *testing.T) {
+	transport := &mockOnHoldTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "777", "--on-hold")
+	require.NoError(t, err)
+
+	assert.Contains(t, transport.capturedMovePath, "/card_tables/cards/456/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
+	assert.Equal(t, float64(888), body["column_id"])
+}
+
+// TestCardsMoveOnHoldDisabledError tests that moving to on-hold fails when the column
+// does not have an on-hold section.
+func TestCardsMoveOnHoldDisabledError(t *testing.T) {
+	transport := &mockOnHoldDisabledTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--on-hold")
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Contains(t, e.Message, "does not have an on-hold section")
+	}
+}
+
+// mockOnHoldDisabledTransport returns a column without an on-hold section.
+type mockOnHoldDisabledTransport struct{}
+
+func (t *mockOnHoldDisabledTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
+			body = `{"id": 456, "title": "Test Card", "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
+		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
+			body = `{"id": 777, "title": "Developing"}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	return nil, errors.New("unexpected request")
 }
 
 // TestCardShortcutShowsHelpWithoutTitle tests that help is shown when --title is missing.
