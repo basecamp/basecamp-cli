@@ -168,6 +168,9 @@ func newPeopleListCmd() *cobra.Command {
 		Short: "List people",
 		Long:  "List all people in your Basecamp account, or in a specific project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectID == "" {
+				projectID = appctx.FromContext(cmd.Context()).Flags.Project
+			}
 			return runPeopleList(cmd, projectID, limit, page, all, sortField, reverse)
 		},
 	}
@@ -400,6 +403,9 @@ func newPeopleAddCmd() *cobra.Command {
 				return missingArg(cmd, "<person-id>...")
 			}
 			if projectID == "" {
+				projectID = appctx.FromContext(cmd.Context()).Flags.Project
+			}
+			if projectID == "" {
 				return output.ErrUsage("--project (or --in) is required")
 			}
 			return runPeopleAdd(cmd, args, projectID)
@@ -479,6 +485,9 @@ func newPeopleRemoveCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<person-id>...")
+			}
+			if projectID == "" {
+				projectID = appctx.FromContext(cmd.Context()).Flags.Project
 			}
 			if projectID == "" {
 				return output.ErrUsage("--project (or --in) is required")

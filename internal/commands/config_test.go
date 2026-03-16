@@ -477,12 +477,14 @@ func TestConfigProject_ExplicitFlag(t *testing.T) {
 func TestConfigProject_InAlias(t *testing.T) {
 	app, buf, _ := setupConfigProjectTestApp(t)
 
-	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
-	origDir, _ := os.Getwd()
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tmpDir))
 	defer os.Chdir(origDir)
 
-	err := executeConfigProjectCmd(app, "--in", "12345")
+	err = executeConfigProjectCmd(app, "--in", "12345")
 	require.NoError(t, err)
 
 	var result map[string]any

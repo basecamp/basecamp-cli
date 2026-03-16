@@ -546,17 +546,20 @@ func setupPeopleMockServer(t *testing.T, accountID string, projectID int64) *htt
 		case r.URL.Path == accessPath && r.Method == http.MethodPut:
 			// UpdateProjectAccess — echo back granted/revoked
 			var req map[string]any
-			json.NewDecoder(r.Body).Decode(&req)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, fmt.Sprintf("bad request body: %v", err), http.StatusBadRequest)
+				return
+			}
 			resp := map[string]any{"granted": []any{}, "revoked": []any{}}
-			if ids, ok := req["grant"]; ok {
-				for _, id := range ids.([]any) {
+			if ids, ok := req["grant"].([]any); ok {
+				for _, id := range ids {
 					resp["granted"] = append(resp["granted"].([]any), map[string]any{
 						"id": id, "name": fmt.Sprintf("Person %v", id),
 					})
 				}
 			}
-			if ids, ok := req["revoke"]; ok {
-				for _, id := range ids.([]any) {
+			if ids, ok := req["revoke"].([]any); ok {
+				for _, id := range ids {
 					resp["revoked"] = append(resp["revoked"].([]any), map[string]any{
 						"id": id, "name": fmt.Sprintf("Person %v", id),
 					})
