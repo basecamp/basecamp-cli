@@ -1,0 +1,23 @@
+internal/output/output_test.go
+  2b51c729580de1c0 13,1849,2180-2188,2240-2279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "d07b79c0374c396f2e6441fc35b43a10a2635b2a",
+  "prompts": {
+    "2b51c729580de1c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e79ee758-8206-46d7-8a28-f92f3886ea5b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 51,
+      "overriden_lines": 0
+    }
+  }
+}
