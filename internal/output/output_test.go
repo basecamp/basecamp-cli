@@ -2227,10 +2227,28 @@ func TestStyledRenderTablePreservesURLs(t *testing.T) {
 	assert.Contains(t, buf.String(), url)
 }
 
-func TestMarkdownRenderTablePreservesURLs(t *testing.T) {
-	url := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+func TestMarkdownRenderTableSkipsURLColumns(t *testing.T) {
 	data := []any{
-		map[string]any{"name": "Tasks", "todolists_url": url},
+		map[string]any{
+			"name":          "Tasks",
+			"todolists_url": "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json",
+		},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Tasks")
+	assert.NotContains(t, output, "todolists_url")
+	assert.NotContains(t, output, "Todolists Url")
+}
+
+func TestMarkdownRenderTablePreservesURLValues(t *testing.T) {
+	url := "https://example.com/page"
+	data := []any{
+		map[string]any{"name": "Tasks", "homepage": url},
 	}
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatMarkdown, Writer: &buf})
@@ -2238,6 +2256,69 @@ func TestMarkdownRenderTablePreservesURLs(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, buf.String(), url)
+}
+
+func TestMarkdownTableSkipsLowValueColumns(t *testing.T) {
+	data := []any{
+		map[string]any{
+			"id":               1,
+			"name":             "Test",
+			"comments_count":   5,
+			"boosts_count":     3,
+			"position":         2,
+			"attachable_sgid":  "abc123",
+			"personable_type":  "User",
+			"recording_type":   "Todo",
+			"subscription_url": "https://api.example.com/sub",
+			"bookmark_url":     "https://api.example.com/bookmark",
+		},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Id")
+	assert.Contains(t, output, "Name")
+	assert.NotContains(t, output, "Comments Count")
+	assert.NotContains(t, output, "Boosts Count")
+	assert.NotContains(t, output, "Position")
+	assert.NotContains(t, output, "Attachable Sgid")
+	assert.NotContains(t, output, "Personable Type")
+	assert.NotContains(t, output, "Recording Type")
+	assert.NotContains(t, output, "Subscription Url")
+	assert.NotContains(t, output, "Bookmark Url")
+}
+
+func TestMarkdownTableKeepsTypeColumn(t *testing.T) {
+	data := []any{
+		map[string]any{"name": "Docs", "type": "Folder"},
+		map[string]any{"name": "photo.jpg", "type": "Upload"},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Type")
+	assert.Contains(t, output, "Folder")
+	assert.Contains(t, output, "Upload")
+}
+
+func TestMarkdownTableKeepsBaseURLColumn(t *testing.T) {
+	data := []any{
+		map[string]any{"name": "Work", "base_url": "https://3.basecamp.com/1234"},
+	}
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Base Url")
+	assert.Contains(t, output, "https://3.basecamp.com/1234")
 }
 
 func TestRenderDataStripsEscapesFromTopLevelStrings(t *testing.T) {
