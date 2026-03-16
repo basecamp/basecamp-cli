@@ -629,6 +629,7 @@ You can pass either a card ID or a Basecamp URL:
 func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	var targetColumn string
 	var position int
+	var onHold bool
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
@@ -638,15 +639,21 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 You can pass either a card ID or a Basecamp URL:
   basecamp cards move 789 --to "Done" --in my-project
   basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"
-  basecamp cards move 789 --to "Done" --position 1 --in my-project`,
-		Args: cobra.ExactArgs(1),
+  basecamp cards move 789 --to "Done" --position 1 --in my-project
+  basecamp cards move 789 --on-hold --in my-project
+  basecamp cards move 789 --to "Developing" --on-hold --in my-project`,
+		Args:    cobra.ExactArgs(1),
+		Aliases: []string{"mv"},
+		Annotations: map[string]string{
+			"notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
+				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
+				"Cards do NOT support --assignee filtering.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no target column
-			if targetColumn == "" {
+			if targetColumn == "" && !onHold {
 				return missingArg(cmd, "--to")
 			}
 
-			// Detect --position/--pos presence and validate
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
 			if positionSet && position <= 0 {
 				return output.ErrUsage("--position must be a positive integer (1-indexed)")
@@ -658,7 +665,6 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
 			cardIDStr, urlProjectID := extractWithProject(args[0])
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
@@ -666,14 +672,11 @@ You can pass either a card ID or a Basecamp URL:
 				return output.ErrUsage("Invalid card ID")
 			}
 
-			// Check if --to is a column name (not numeric) - requires --card-table
-			// Do this validation early, before any API calls
-			isNumericColumn := isNumericID(targetColumn)
-			if !isNumericColumn && *cardTable == "" {
+			isNumericColumn := targetColumn != "" && isNumericID(targetColumn)
+			if targetColumn != "" && !isNumericColumn && *cardTable == "" {
 				return output.ErrUsage("--card-table is required when --to is a column name")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
 			if projectID == "" && urlProjectID != "" {
 				projectID = urlProjectID
@@ -696,19 +699,19 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
-			// Determine column ID - numeric IDs bypass card table resolution
+			// --on-hold: move card to on-hold section of current or target column
+			if onHold {
+				return moveCardOnHold(cmd, app, cardID, cardIDStr, resolvedProjectID, targetColumn, *cardTable)
+			}
+
 			var columnID int64
-			var cardTableIDVal string // Will be empty if using numeric column ID directly
+			var cardTableIDVal string
 			if isNumericColumn {
-				// Numeric column ID - use directly without card table lookup
 				columnID, err = strconv.ParseInt(targetColumn, 10, 64)
 				if err != nil {
 					return output.ErrUsage("Invalid column ID")
 				}
 			} else {
-				// Column name - need card table to resolve (already validated above)
-
-				// Get card table ID from project dock
 				cardTableIDVal, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 				if err != nil {
 					return err
@@ -719,13 +722,11 @@ You can pass either a card ID or a Basecamp URL:
 					return output.ErrUsage("Invalid card table ID")
 				}
 
-				// Get card table with embedded columns (lists)
 				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
 				if err != nil {
 					return convertSDKError(err)
 				}
 
-				// Find target column by name
 				columnID = resolveColumn(cardTableData.Lists, targetColumn)
 				if columnID == 0 {
 					return output.ErrUsageHint(
@@ -735,7 +736,6 @@ You can pass either a card ID or a Basecamp URL:
 				}
 			}
 
-			// Positioned moves need card table ID for the moves endpoint
 			if positionSet && position > 0 && cardTableIDVal == "" {
 				cardTableIDVal, err = getCardTableID(cmd, app, resolvedProjectID, *cardTable)
 				if err != nil {
@@ -743,7 +743,6 @@ You can pass either a card ID or a Basecamp URL:
 				}
 			}
 
-			// Move card to column
 			if positionSet && position > 0 {
 				cardTableIDInt, parseErr := strconv.ParseInt(cardTableIDVal, 10, 64)
 				if parseErr != nil {
@@ -761,7 +760,6 @@ You can pass either a card ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			// Build breadcrumbs - only include --card-table when known
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "view",
@@ -795,11 +793,93 @@ You can pass either a card ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name (required)")
+	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name")
 	cmd.Flags().IntVar(&position, "position", 0, "Position in column (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
+	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
 
 	return cmd
+}
+
+func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr, projectID, targetColumn, cardTableFlag string) error {
+	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	cardTableIDVal, err := getCardTableID(cmd, app, projectID, cardTableFlag)
+	if err != nil {
+		return err
+	}
+
+	cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid card table ID")
+	}
+
+	cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	var column *basecamp.CardColumn
+	if targetColumn != "" {
+		colID := resolveColumn(cardTableData.Lists, targetColumn)
+		if colID == 0 {
+			return output.ErrUsageHint(
+				fmt.Sprintf("Column '%s' not found", targetColumn),
+				"Use column ID or exact name",
+			)
+		}
+		for i := range cardTableData.Lists {
+			if cardTableData.Lists[i].ID == colID {
+				column = &cardTableData.Lists[i]
+				break
+			}
+		}
+	} else {
+		if card.Parent == nil {
+			return output.ErrUsage("Card has no parent column")
+		}
+		for i := range cardTableData.Lists {
+			if cardTableData.Lists[i].ID == card.Parent.ID {
+				column = &cardTableData.Lists[i]
+				break
+			}
+		}
+		if column == nil {
+			return output.ErrUsage("Could not find card's current column")
+		}
+	}
+
+	if column.OnHold == nil || column.OnHold.ID == 0 {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Column '%s' does not have an on-hold section", column.Title),
+			"Enable on-hold with: basecamp cards column on-hold <column-id> --enable",
+		)
+	}
+
+	err = app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	result := map[string]any{
+		"id":      cardIDStr,
+		"status":  "moved",
+		"column":  column.Title,
+		"on_hold": true,
+	}
+	summary := fmt.Sprintf("Moved card #%s to on-hold in '%s'", cardIDStr, column.Title)
+
+	return app.OK(result,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "view",
+			Cmd:         fmt.Sprintf("basecamp cards show %s --in %s", cardIDStr, projectID),
+			Description: "View card",
+		}),
+	)
 }
 
 func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
