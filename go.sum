@@ -27,6 +27,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/basecamp-sdk/go v0.6.0 h1:LnyW0rFI5/1vmGpmFnogE+8ms/kueCwg5U/mSAuLJYw=
 github.com/basecamp/basecamp-sdk/go v0.6.0/go.mod h1:g05DM58QkUm4/mvBAvRiugPw+F4trliuGkRGg8y+Th4=
+github.com/basecamp/basecamp-sdk/go v0.4.0 h1:O/Sywalv97zHqaHboxuZo7JmMfwQvU3uuWEOMdZVChU=
+github.com/basecamp/basecamp-sdk/go v0.4.0/go.mod h1:g05DM58QkUm4/mvBAvRiugPw+F4trliuGkRGg8y+Th4=
 github.com/basecamp/cli v0.1.1 h1:FAF3M09xo1m7gJJXf38glCkT50ZUuvz+31f+c3R3zcc=
 github.com/basecamp/cli v0.1.1/go.mod h1:NTHe+keCTGI2qM5sMXdkUN0QgU3zGbwnBxcmg8vD5QU=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
@@ -133,8 +135,6 @@ github.com/muesli/reflow v0.3.0 h1:IFsN6K9NfGtjeggFP+68I4chLZV2yIKsXJFNZ+eWh6s=
 github.com/muesli/reflow v0.3.0/go.mod h1:pbwTDkVPibjO2kyvBQRBxTWEEGDGq0FlB1BIKtnHY/8=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/nnemirovsky/basecamp-sdk/go v0.5.1-0.20260316054246-f5ec05a8d942 h1:evt2fGYiRraUKZV0RdB3MxdavM4/D5qAlpICCh7waHg=
-github.com/nnemirovsky/basecamp-sdk/go v0.5.1-0.20260316054246-f5ec05a8d942/go.mod h1:g05DM58QkUm4/mvBAvRiugPw+F4trliuGkRGg8y+Th4=
 github.com/oapi-codegen/runtime v1.2.0 h1:RvKc1CVS1QeKSNzO97FBQbSMZyQ8s6rZd+LpmzwHMP4=
 github.com/oapi-codegen/runtime v1.2.0/go.mod h1:Y7ZhmmlE8ikZOmuHRRndiIm7nf3xcVv+YMweKgG1DT0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
