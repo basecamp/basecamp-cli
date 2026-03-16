@@ -1,0 +1,25 @@
+internal/presenter/schemas/todo.yaml
+  3466e0b0ecc578e5 33
+internal/presenter/presenter_test.go
+  3466e0b0ecc578e5 402,404,553-556,931-933
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "919104d796e6b30879b211a7b15a319ecb3357e1",
+  "prompts": {
+    "3466e0b0ecc578e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70fd410d-7521-496e-8d16-39f2dbcfe3ab",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 8,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
