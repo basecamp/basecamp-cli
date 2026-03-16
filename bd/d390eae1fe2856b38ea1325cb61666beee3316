@@ -1,0 +1,25 @@
+internal/commands/todos.go
+  3466e0b0ecc578e5 270,611
+internal/tui/empty/messages.go
+  3466e0b0ecc578e5 43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "bdd390eae1fe2856b38ea1325cb61666beee3316",
+  "prompts": {
+    "3466e0b0ecc578e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70fd410d-7521-496e-8d16-39f2dbcfe3ab",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
