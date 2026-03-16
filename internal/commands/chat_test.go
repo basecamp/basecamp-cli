@@ -928,6 +928,23 @@ func TestInjectAttachmentSizes_DuplicateFilenames(t *testing.T) {
 	assert.Equal(t, "📎 doc.pdf (2.0kb)", lines[2])
 }
 
+func TestChatLinesDisplayData_ReplacesContent(t *testing.T) {
+	lines := []basecamp.CampfireLine{
+		{
+			ID:      1,
+			Content: `<bc-attachment filename="file.pdf">file.pdf</bc-attachment>`,
+			Attachments: []basecamp.CampfireLineAttachment{
+				{Filename: "file.pdf", ByteSize: 5_000},
+			},
+		},
+	}
+	result := chatLinesDisplayData(lines)
+	items, ok := result.([]map[string]any)
+	require.True(t, ok, "expected []map[string]any, got %T", result)
+	require.Len(t, items, 1)
+	assert.Contains(t, items[0]["content"], "📎 file.pdf (5.0kb)")
+}
+
 // =============================================================================
 // Upload command-level test
 // =============================================================================
@@ -986,7 +1003,7 @@ func TestChatUploadSummaryIncludesFileSize(t *testing.T) {
 	// Create a temp file to upload
 	tmp := t.TempDir()
 	filePath := tmp + "/photo.jpg"
-	os.WriteFile(filePath, []byte("fake image data"), 0644)
+	require.NoError(t, os.WriteFile(filePath, []byte("fake image data"), 0644))
 
 	cmd := NewChatCmd()
 	err := executeChatCommand(cmd, app, "upload", filePath)
@@ -1030,7 +1047,7 @@ func TestChatUploadStyledOutputIncludesFileSize(t *testing.T) {
 
 	tmp := t.TempDir()
 	filePath := tmp + "/photo.jpg"
-	os.WriteFile(filePath, []byte("fake image data"), 0644)
+	require.NoError(t, os.WriteFile(filePath, []byte("fake image data"), 0644))
 
 	cmd := NewChatCmd()
 	err := executeChatCommand(cmd, app, "upload", filePath)

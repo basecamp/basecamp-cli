@@ -851,21 +851,20 @@ func formatChatAttachments(attachments []basecamp.CampfireLineAttachment) string
 // is replaced with the display-ready version for styled/markdown output.
 func chatLinesDisplayData(lines []basecamp.CampfireLine) any {
 	normalized := output.NormalizeData(lines)
-	items, ok := normalized.([]any)
-	if !ok {
-		return normalized
-	}
-	for i, item := range items {
-		m, ok := item.(map[string]any)
-		if !ok || i >= len(lines) {
-			continue
+
+	// NormalizeData returns []map[string]any when all elements are objects.
+	if items, ok := normalized.([]map[string]any); ok {
+		for i, m := range items {
+			if i >= len(lines) {
+				break
+			}
+			if display := chatLineDisplayContent(&lines[i]); display != "" {
+				m["content"] = display
+			}
 		}
-		display := chatLineDisplayContent(&lines[i])
-		if display != "" {
-			m["content"] = display
-		}
+		return items
 	}
-	return items
+	return normalized
 }
 
 // chatLineDisplayData builds display-data for a single campfire line.
