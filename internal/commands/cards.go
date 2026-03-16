@@ -442,7 +442,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 
 			// Pre-resolve assignee before creating card (fail early on bad input)
 			var assigneeID int64
-			if assignee != "" {
+			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
 				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
 				if err != nil {
 					return err
@@ -575,7 +575,7 @@ You can pass either a card ID or a Basecamp URL:
 			if due != "" {
 				req.DueOn = dateparse.Parse(due)
 			}
-			if assignee != "" {
+			if cmd.Flags().Changed("assignee") {
 				assigneeID, err := resolveAssigneeID(cmd.Context(), app, assignee)
 				if err != nil {
 					return err
@@ -979,7 +979,7 @@ func NewCardCmd() *cobra.Command {
 
 			// Pre-resolve assignee before creating card (fail early on bad input)
 			var assigneeID int64
-			if assignee != "" {
+			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
 				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
 				if err != nil {
 					return err

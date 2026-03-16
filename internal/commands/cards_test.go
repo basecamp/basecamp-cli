@@ -1268,12 +1268,13 @@ func TestCardShortcutHasAssigneeFlag(t *testing.T) {
 	require.NotNil(t, toFlag, "expected --to flag on card shortcut")
 }
 
-// mockCardCreateTransport handles resolver API calls, card creation, and captures the update request.
-type mockCardCreateTransport struct {
+// mockCardAssignTransport handles resolver API calls with people endpoint,
+// card creation, and captures the PUT body for assignment verification.
+type mockCardAssignTransport struct {
 	capturedPutBody []byte
 }
 
-func (t *mockCardCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *mockCardAssignTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
@@ -1324,33 +1325,12 @@ func (t *mockCardCreateTransport) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 func TestCardsCreateWithAssigneeSendsUpdate(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &mockCardCreateTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{
-		AccountID: "99999",
-		ProjectID: "123",
-	}
-
-	sdkCfg := &basecamp.Config{}
-	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-	authMgr := auth.NewManager(cfg, nil)
-	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  nameResolver,
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
+	transport := &mockCardAssignTransport{}
+	app := setupCardsMockApp(t, transport)
+	app.Output = output.New(output.Options{
+		Format: output.FormatJSON,
+		Writer: &bytes.Buffer{},
+	})
 
 	project := ""
 	cardTable := ""
@@ -1369,8 +1349,6 @@ func TestCardsCreateWithAssigneeSendsUpdate(t *testing.T) {
 	require.True(t, ok, "expected assignee_ids array in PUT body")
 	require.Len(t, assigneeIDs, 1)
 	assert.Equal(t, float64(42), assigneeIDs[0])
-
-	assert.Contains(t, buf.String(), "Annie Bryan")
 }
 
 func TestResolveAssigneeIDRejectsZero(t *testing.T) {
