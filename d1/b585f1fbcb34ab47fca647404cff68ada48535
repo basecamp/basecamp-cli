@@ -1,0 +1,27 @@
+.surface-breaking
+  46ab2d6cd7f4cf87 2,4
+internal/commands/assign.go
+  46ab2d6cd7f4cf87 198,287
+internal/commands/assign_test.go
+  46ab2d6cd7f4cf87 578
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "d1b585f1fbcb34ab47fca647404cff68ada48535",
+  "prompts": {
+    "46ab2d6cd7f4cf87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b6e14d31-2326-4d5c-b264-c3bafef9cd1c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 0,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
