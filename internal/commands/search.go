@@ -17,6 +17,7 @@ import (
 func NewSearchCmd() *cobra.Command {
 	var sortBy string
 	var limit int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -27,7 +28,8 @@ Uses the Basecamp search API to find content matching your query.
 Use 'basecamp search metadata' to see available search scopes.`,
 		Example: `  basecamp search "quarterly goals"
   basecamp search "bug report" --sort created_at
-  basecamp search "design review" --limit 5`,
+  basecamp search "design review" --limit 5
+  basecamp search "meeting notes" --all`,
 		Annotations: map[string]string{"agent_notes": "Use search for keyword queries, use recordings for browsing by type/status without a search term"},
 		Args:        cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,6 +47,10 @@ Use 'basecamp search metadata' to see available search scopes.`,
 
 			query := args[0]
 
+			if all && limit > 0 {
+				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -54,7 +60,7 @@ Use 'basecamp search metadata' to see available search scopes.`,
 			if sortBy != "" {
 				opts.Sort = sortBy
 			}
-			if limit > 0 {
+			if !all && limit > 0 {
 				opts.Limit = limit
 			}
 
@@ -73,7 +79,7 @@ Use 'basecamp search metadata' to see available search scopes.`,
 				data = humanizeSearchResults(results)
 			}
 
-			return app.OK(data,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -82,12 +88,19 @@ Use 'basecamp search metadata' to see available search scopes.`,
 						Description: "Show result details",
 					},
 				),
-			)
+			}
+
+			if notice := output.TruncationNoticeWithTotal(len(results), searchResult.Meta.TotalCount); notice != "" {
+				respOpts = append(respOpts, output.WithNotice(notice))
+			}
+
+			return app.OK(data, respOpts...)
 		},
 	}
 
 	cmd.Flags().StringVarP(&sortBy, "sort", "s", "", "Sort by: created_at or updated_at (default: relevance)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of results to fetch (0 = all)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of results to fetch")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all results (no limit)")
 
 	cmd.AddCommand(newSearchMetadataCmd())
 

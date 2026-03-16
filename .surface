@@ -4885,6 +4885,7 @@ FLAG basecamp schedule update --todolist type=string
 FLAG basecamp schedule update --verbose type=count
 FLAG basecamp search --account type=string
 FLAG basecamp search --agent type=bool
+FLAG basecamp search --all type=bool
 FLAG basecamp search --cache-dir type=string
 FLAG basecamp search --count type=bool
 FLAG basecamp search --hints type=bool
