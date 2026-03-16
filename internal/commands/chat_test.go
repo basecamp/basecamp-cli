@@ -928,6 +928,17 @@ func TestInjectAttachmentSizes_DuplicateFilenames(t *testing.T) {
 	assert.Equal(t, "📎 doc.pdf (2.0kb)", lines[2])
 }
 
+func TestInjectAttachmentSizes_InlineAttachment(t *testing.T) {
+	// HTMLToMarkdown for inline attachments produces "content\n📎 filename\n"
+	// where the marker follows non-empty content — must still be annotated.
+	text := "See \n📎 report.pdf\nreport.pdf"
+	attachments := []basecamp.CampfireLineAttachment{
+		{Filename: "report.pdf", ByteSize: 9_000},
+	}
+	got := injectAttachmentSizes(text, attachments)
+	assert.Contains(t, got, "📎 report.pdf (9.0kb)")
+}
+
 func TestChatLinesDisplayData_ReplacesContent(t *testing.T) {
 	lines := []basecamp.CampfireLine{
 		{
