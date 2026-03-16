@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -22,9 +23,9 @@ func NewAssignCmd() *cobra.Command {
 	var isStep bool
 
 	cmd := &cobra.Command{
-		Use:   "assign <id>",
+		Use:   "assign <id|url>...",
 		Short: "Assign someone to an item",
-		Long: `Assign a person to a to-do, card, or card step.
+		Long: `Assign a person to one or more to-dos, cards, or card steps.
 
 By default assigns to a to-do. Use --card or --step for other types.
 
@@ -34,63 +35,18 @@ Person can be:
   - An email address (will be resolved to ID)
 
 Examples:
-  basecamp assign 123 --to me                   # Assign to-do
-  basecamp assign 456 --card --to me             # Assign card
-  basecamp assign 789 --step --to me             # Assign card step`,
-		Args: cobra.ExactArgs(1),
+  basecamp assign 123 --to me                     # Assign to-do
+  basecamp assign 123 456 --to me                  # Assign multiple to-dos
+  basecamp assign 456 --card --to me               # Assign card
+  basecamp assign 789 --step --to me               # Assign card step`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
 			if isCard && isStep {
 				return output.ErrUsage("Cannot use --card and --step together")
 			}
-
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			itemID := args[0]
-
-			resolvedProjectID, err := resolveProjectID(cmd, app, project)
-			if err != nil {
-				return err
-			}
-
-			if assignee == "" && !app.IsInteractive() {
-				return output.ErrUsageHint("Person to assign is required", "Use --to <person>")
-			}
-
-			switch {
-			case isCard:
-				card, err := validateCard(cmd, app, itemID)
-				if err != nil {
-					return err
-				}
-				assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
-				if err != nil {
-					return err
-				}
-				return assignCard(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, card)
-			case isStep:
-				step, err := validateStep(cmd, app, itemID, resolvedProjectID)
-				if err != nil {
-					return err
-				}
-				assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
-				if err != nil {
-					return err
-				}
-				return assignStep(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, step)
-			default:
-				todo, err := validateTodo(cmd, app, itemID)
-				if err != nil {
-					return err
-				}
-				assigneeID, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to assign is required", "Use --to <person>")
-				if err != nil {
-					return err
-				}
-				return assignTodo(cmd, app, itemID, assigneeID, assigneeIDInt, resolvedProjectID, todo)
-			}
+			return assignItems(cmd, args, &assignee, project, isCard, isStep)
 		},
 	}
 
@@ -116,9 +72,9 @@ func NewUnassignCmd() *cobra.Command {
 	var isStep bool
 
 	cmd := &cobra.Command{
-		Use:   "unassign <id>",
+		Use:   "unassign <id|url>...",
 		Short: "Remove assignment",
-		Long: `Remove a person from a to-do, card, or card step.
+		Long: `Remove a person from one or more to-dos, cards, or card steps.
 
 By default unassigns from a to-do. Use --card or --step for other types.
 
@@ -128,63 +84,18 @@ Person can be:
   - An email address (will be resolved to ID)
 
 Examples:
-  basecamp unassign 123 --from me                   # Unassign from to-do
-  basecamp unassign 456 --card --from me             # Unassign from card
-  basecamp unassign 789 --step --from me             # Unassign from card step`,
-		Args: cobra.ExactArgs(1),
+  basecamp unassign 123 --from me                     # Unassign from to-do
+  basecamp unassign 123 456 --from me                  # Unassign multiple to-dos
+  basecamp unassign 456 --card --from me               # Unassign from card
+  basecamp unassign 789 --step --from me               # Unassign from card step`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
 			if isCard && isStep {
 				return output.ErrUsage("Cannot use --card and --step together")
 			}
-
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			itemID := args[0]
-
-			resolvedProjectID, err := resolveProjectID(cmd, app, project)
-			if err != nil {
-				return err
-			}
-
-			if assignee == "" && !app.IsInteractive() {
-				return output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
-			}
-
-			switch {
-			case isCard:
-				card, err := validateCard(cmd, app, itemID)
-				if err != nil {
-					return err
-				}
-				_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
-				if err != nil {
-					return err
-				}
-				return unassignCard(cmd, app, itemID, assigneeIDInt, resolvedProjectID, card)
-			case isStep:
-				step, err := validateStep(cmd, app, itemID, resolvedProjectID)
-				if err != nil {
-					return err
-				}
-				_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
-				if err != nil {
-					return err
-				}
-				return unassignStep(cmd, app, itemID, assigneeIDInt, resolvedProjectID, step)
-			default:
-				todo, err := validateTodo(cmd, app, itemID)
-				if err != nil {
-					return err
-				}
-				_, assigneeIDInt, err := resolveAssignee(cmd, app, &assignee, resolvedProjectID, "Person to unassign is required", "Use --from <person>")
-				if err != nil {
-					return err
-				}
-				return unassignTodo(cmd, app, itemID, assigneeIDInt, resolvedProjectID, todo)
-			}
+			return unassignItems(cmd, args, &assignee, project, isCard, isStep)
 		},
 	}
 
@@ -200,6 +111,329 @@ Examples:
 	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 
 	return cmd
+}
+
+// fatalAssignError wraps errors that should halt the batch loop (e.g. assignee
+// resolution failure), distinguishing them from per-item validation errors.
+type fatalAssignError struct{ err error }
+
+func (e *fatalAssignError) Error() string { return e.err.Error() }
+func (e *fatalAssignError) Unwrap() error { return e.err }
+
+// assignResult holds the outcome of a single assign/unassign operation.
+type assignResult struct {
+	id          string
+	item        any
+	summary     string
+	breadcrumbs []output.Breadcrumb
+}
+
+func assignItems(cmd *cobra.Command, args []string, assignee *string, project string, isCard, isStep bool) error {
+	app := appctx.FromContext(cmd.Context())
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	resolvedProjectID, err := resolveProjectID(cmd, app, project)
+	if err != nil {
+		return err
+	}
+
+	if *assignee == "" && !app.IsInteractive() {
+		return output.ErrUsageHint("Person to assign is required", "Use --to <person>")
+	}
+
+	extractedIDs := extractIDs(args)
+	if len(extractedIDs) == 0 {
+		return missingArg(cmd, "<id|url>...")
+	}
+
+	var results []*assignResult
+	var failed []string
+	var firstErr error
+	var assigneeResolved bool
+	var assigneeID string
+	var assigneeIDInt int64
+
+	for _, itemID := range extractedIDs {
+		res, err := assignOneItem(cmd, app, itemID, isCard, isStep, resolvedProjectID,
+			assignee, &assigneeResolved, &assigneeID, &assigneeIDInt)
+		if err != nil {
+			var fatal *fatalAssignError
+			if errors.As(err, &fatal) {
+				return fatal.err
+			}
+			failed = append(failed, itemID)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+
+		results = append(results, res)
+	}
+
+	if len(results) == 0 && len(failed) > 0 {
+		return batchFailError("assign", failed, firstErr)
+	}
+
+	// Single item, no failures — return directly with per-item breadcrumbs
+	if len(results) == 1 && len(failed) == 0 {
+		return app.OK(results[0].item,
+			output.WithSummary(results[0].summary),
+			output.WithBreadcrumbs(results[0].breadcrumbs...),
+		)
+	}
+
+	summary := fmt.Sprintf("Assigned %d item(s)", len(results))
+	if len(failed) > 0 {
+		summary = fmt.Sprintf("Assigned %d, failed %d", len(results), len(failed))
+	}
+
+	var typeFlag string
+	if isCard {
+		typeFlag = " --card"
+	} else if isStep {
+		typeFlag = " --step"
+	}
+
+	batchBreadcrumbs := []output.Breadcrumb{{
+		Action:      "unassign",
+		Cmd:         fmt.Sprintf("basecamp unassign %s%s --from %s --project %s", results[0].id, typeFlag, assigneeID, resolvedProjectID),
+		Description: "Remove assignee",
+	}}
+
+	if len(results) == 1 {
+		return app.OK(results[0].item,
+			output.WithSummary(summary),
+			output.WithBreadcrumbs(batchBreadcrumbs...),
+		)
+	}
+
+	items := make([]any, len(results))
+	for i, r := range results {
+		items[i] = r.item
+	}
+
+	return app.OK(items,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(batchBreadcrumbs...),
+	)
+}
+
+func unassignItems(cmd *cobra.Command, args []string, assignee *string, project string, isCard, isStep bool) error {
+	app := appctx.FromContext(cmd.Context())
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	resolvedProjectID, err := resolveProjectID(cmd, app, project)
+	if err != nil {
+		return err
+	}
+
+	if *assignee == "" && !app.IsInteractive() {
+		return output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
+	}
+
+	extractedIDs := extractIDs(args)
+	if len(extractedIDs) == 0 {
+		return missingArg(cmd, "<id|url>...")
+	}
+
+	var results []*assignResult
+	var failed []string
+	var firstErr error
+	var assigneeResolved bool
+	var assigneeIDInt int64
+
+	for _, itemID := range extractedIDs {
+		res, err := unassignOneItem(cmd, app, itemID, isCard, isStep, resolvedProjectID,
+			assignee, &assigneeResolved, &assigneeIDInt)
+		if err != nil {
+			var fatal *fatalAssignError
+			if errors.As(err, &fatal) {
+				return fatal.err
+			}
+			failed = append(failed, itemID)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+
+		results = append(results, res)
+	}
+
+	if len(results) == 0 && len(failed) > 0 {
+		return batchFailError("unassign", failed, firstErr)
+	}
+
+	// Single item, no failures — return directly with per-item breadcrumbs
+	if len(results) == 1 && len(failed) == 0 {
+		return app.OK(results[0].item,
+			output.WithSummary(results[0].summary),
+			output.WithBreadcrumbs(results[0].breadcrumbs...),
+		)
+	}
+
+	summary := fmt.Sprintf("Unassigned %d item(s)", len(results))
+	if len(failed) > 0 {
+		summary = fmt.Sprintf("Unassigned %d, failed %d", len(results), len(failed))
+	}
+
+	var typeFlag string
+	if isCard {
+		typeFlag = " --card"
+	} else if isStep {
+		typeFlag = " --step"
+	}
+
+	batchBreadcrumbs := []output.Breadcrumb{{
+		Action:      "assign",
+		Cmd:         fmt.Sprintf("basecamp assign %s%s --to <person> --project %s", results[0].id, typeFlag, resolvedProjectID),
+		Description: "Add assignee",
+	}}
+
+	if len(results) == 1 {
+		return app.OK(results[0].item,
+			output.WithSummary(summary),
+			output.WithBreadcrumbs(batchBreadcrumbs...),
+		)
+	}
+
+	items := make([]any, len(results))
+	for i, r := range results {
+		items[i] = r.item
+	}
+
+	return app.OK(items,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(batchBreadcrumbs...),
+	)
+}
+
+// batchFailError builds an error when all items in a batch operation failed.
+// Preserves typed errors (not-found, API errors) from validation and mutation.
+func batchFailError(action string, failed []string, firstErr error) error {
+	if firstErr != nil {
+		var outErr *output.Error
+		if errors.As(firstErr, &outErr) {
+			return &output.Error{
+				Code:       outErr.Code,
+				Message:    fmt.Sprintf("Failed to %s items %s: %s", action, strings.Join(failed, ", "), outErr.Message),
+				Hint:       outErr.Hint,
+				HTTPStatus: outErr.HTTPStatus,
+				Retryable:  outErr.Retryable,
+				Cause:      outErr,
+			}
+		}
+		return fmt.Errorf("failed to %s items %s: %w", action, strings.Join(failed, ", "), firstErr)
+	}
+	return output.ErrUsage(fmt.Sprintf("Invalid item ID(s): %s", strings.Join(failed, ", ")))
+}
+
+// assignOneItem validates one item and assigns it. The assignee is resolved
+// lazily on the first call where *assigneeResolved is false, preserving
+// PR #279 ordering (validate before person picker).
+func assignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, isStep bool, resolvedProjectID string,
+	assignee *string, assigneeResolved *bool, assigneeID *string, assigneeIDInt *int64) (*assignResult, error) {
+
+	switch {
+	case isCard:
+		card, err := validateCard(cmd, app, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if !*assigneeResolved {
+			aID, aIDInt, err := resolveAssignee(cmd, app, assignee, resolvedProjectID,
+				"Person to assign is required", "Use --to <person>")
+			if err != nil {
+				return nil, &fatalAssignError{err}
+			}
+			*assigneeID, *assigneeIDInt, *assigneeResolved = aID, aIDInt, true
+		}
+		return doAssignCard(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, card)
+	case isStep:
+		step, err := validateStep(cmd, app, itemID, resolvedProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if !*assigneeResolved {
+			aID, aIDInt, err := resolveAssignee(cmd, app, assignee, resolvedProjectID,
+				"Person to assign is required", "Use --to <person>")
+			if err != nil {
+				return nil, &fatalAssignError{err}
+			}
+			*assigneeID, *assigneeIDInt, *assigneeResolved = aID, aIDInt, true
+		}
+		return doAssignStep(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, step)
+	default:
+		todo, err := validateTodo(cmd, app, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if !*assigneeResolved {
+			aID, aIDInt, err := resolveAssignee(cmd, app, assignee, resolvedProjectID,
+				"Person to assign is required", "Use --to <person>")
+			if err != nil {
+				return nil, &fatalAssignError{err}
+			}
+			*assigneeID, *assigneeIDInt, *assigneeResolved = aID, aIDInt, true
+		}
+		return doAssignTodo(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, todo)
+	}
+}
+
+// unassignOneItem validates one item and unassigns from it. The assignee is
+// resolved lazily on the first call where *assigneeResolved is false.
+func unassignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, isStep bool, resolvedProjectID string,
+	assignee *string, assigneeResolved *bool, assigneeIDInt *int64) (*assignResult, error) {
+
+	switch {
+	case isCard:
+		card, err := validateCard(cmd, app, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if !*assigneeResolved {
+			_, aIDInt, err := resolveAssignee(cmd, app, assignee, resolvedProjectID,
+				"Person to unassign is required", "Use --from <person>")
+			if err != nil {
+				return nil, &fatalAssignError{err}
+			}
+			*assigneeIDInt, *assigneeResolved = aIDInt, true
+		}
+		return doUnassignCard(cmd, app, itemID, *assigneeIDInt, resolvedProjectID, card)
+	case isStep:
+		step, err := validateStep(cmd, app, itemID, resolvedProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if !*assigneeResolved {
+			_, aIDInt, err := resolveAssignee(cmd, app, assignee, resolvedProjectID,
+				"Person to unassign is required", "Use --from <person>")
+			if err != nil {
+				return nil, &fatalAssignError{err}
+			}
+			*assigneeIDInt, *assigneeResolved = aIDInt, true
+		}
+		return doUnassignStep(cmd, app, itemID, *assigneeIDInt, resolvedProjectID, step)
+	default:
+		todo, err := validateTodo(cmd, app, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if !*assigneeResolved {
+			_, aIDInt, err := resolveAssignee(cmd, app, assignee, resolvedProjectID,
+				"Person to unassign is required", "Use --from <person>")
+			if err != nil {
+				return nil, &fatalAssignError{err}
+			}
+			*assigneeIDInt, *assigneeResolved = aIDInt, true
+		}
+		return doUnassignTodo(cmd, app, itemID, *assigneeIDInt, resolvedProjectID, todo)
+	}
 }
 
 // resolveAssignee resolves the assignee for assign/unassign commands.
@@ -305,19 +539,21 @@ func notFoundOrConvert(err error, typeName, itemIDStr string) error {
 	return convertSDKError(err)
 }
 
-// assignTodo assigns a person to a to-do using the SDK.
-func assignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, todo *basecamp.Todo) error {
+// doAssignTodo assigns a person to a to-do.
+func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, todo *basecamp.Todo) (*assignResult, error) {
 	todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid to-do ID")
+		return nil, output.ErrUsage("Invalid to-do ID")
 	}
 
 	assigneeIDs := existingAssigneeIDs(todo.Assignees)
 	if containsID(assigneeIDs, assigneeIDInt) {
 		assigneeName := findAssigneeName(todo.Assignees, assigneeIDInt)
-		return app.OK(todo,
-			output.WithSummary(fmt.Sprintf("%s is already assigned to to-do #%s", assigneeName, todoIDStr)),
-		)
+		return &assignResult{
+			id:      todoIDStr,
+			item:    todo,
+			summary: fmt.Sprintf("%s is already assigned to to-do #%s", assigneeName, todoIDStr),
+		}, nil
 	}
 	assigneeIDs = append(assigneeIDs, assigneeIDInt)
 
@@ -325,41 +561,45 @@ func assignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID strin
 		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
-	return app.OK(updated,
-		output.WithSummary(fmt.Sprintf("Assigned to-do #%s to %s", todoIDStr, assigneeName)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
+	return &assignResult{
+		id:      todoIDStr,
+		item:    updated,
+		summary: fmt.Sprintf("Assigned to-do #%s to %s", todoIDStr, assigneeName),
+		breadcrumbs: []output.Breadcrumb{
+			{
 				Action:      "view",
 				Cmd:         fmt.Sprintf("basecamp show todo %s --project %s", todoIDStr, resolvedProjectID),
 				Description: "View to-do",
 			},
-			output.Breadcrumb{
+			{
 				Action:      "unassign",
 				Cmd:         fmt.Sprintf("basecamp unassign %s --from %s --project %s", todoIDStr, assigneeID, resolvedProjectID),
 				Description: "Remove assignee",
 			},
-		),
-	)
+		},
+	}, nil
 }
 
-// assignCard assigns a person to a card using the SDK.
-func assignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, card *basecamp.Card) error {
+// doAssignCard assigns a person to a card.
+func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, card *basecamp.Card) (*assignResult, error) {
 	cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid card ID")
+		return nil, output.ErrUsage("Invalid card ID")
 	}
 
 	assigneeIDs := existingAssigneeIDs(card.Assignees)
 	if containsID(assigneeIDs, assigneeIDInt) {
 		assigneeName := findAssigneeName(card.Assignees, assigneeIDInt)
-		return app.OK(card,
-			output.WithSummary(fmt.Sprintf("%s is already assigned to card #%s", assigneeName, cardIDStr)),
-		)
+		return &assignResult{
+			id:      cardIDStr,
+			item:    card,
+			summary: fmt.Sprintf("%s is already assigned to card #%s", assigneeName, cardIDStr),
+		}, nil
 	}
 	assigneeIDs = append(assigneeIDs, assigneeIDInt)
 
@@ -367,41 +607,45 @@ func assignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID strin
 		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
-	return app.OK(updated,
-		output.WithSummary(fmt.Sprintf("Assigned card #%s to %s", cardIDStr, assigneeName)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
+	return &assignResult{
+		id:      cardIDStr,
+		item:    updated,
+		summary: fmt.Sprintf("Assigned card #%s to %s", cardIDStr, assigneeName),
+		breadcrumbs: []output.Breadcrumb{
+			{
 				Action:      "view",
 				Cmd:         fmt.Sprintf("basecamp cards show %s", cardIDStr),
 				Description: "View card",
 			},
-			output.Breadcrumb{
+			{
 				Action:      "unassign",
 				Cmd:         fmt.Sprintf("basecamp unassign %s --card --from %s --project %s", cardIDStr, assigneeID, resolvedProjectID),
 				Description: "Remove assignee",
 			},
-		),
-	)
+		},
+	}, nil
 }
 
-// assignStep assigns a person to a card step.
-func assignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, step *basecamp.CardStep) error {
+// doAssignStep assigns a person to a card step.
+func doAssignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, step *basecamp.CardStep) (*assignResult, error) {
 	stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid step ID")
+		return nil, output.ErrUsage("Invalid step ID")
 	}
 
 	assigneeIDs := existingAssigneeIDs(step.Assignees)
 	if containsID(assigneeIDs, assigneeIDInt) {
 		assigneeName := findAssigneeName(step.Assignees, assigneeIDInt)
-		return app.OK(step,
-			output.WithSummary(fmt.Sprintf("%s is already assigned to step #%s", assigneeName, stepIDStr)),
-		)
+		return &assignResult{
+			id:      stepIDStr,
+			item:    step,
+			summary: fmt.Sprintf("%s is already assigned to step #%s", assigneeName, stepIDStr),
+		}, nil
 	}
 	assigneeIDs = append(assigneeIDs, assigneeIDInt)
 
@@ -409,28 +653,30 @@ func assignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID strin
 		Assignees: assigneeIDs,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
-	return app.OK(updated,
-		output.WithSummary(fmt.Sprintf("Assigned step #%s to %s", stepIDStr, assigneeName)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
+	return &assignResult{
+		id:      stepIDStr,
+		item:    updated,
+		summary: fmt.Sprintf("Assigned step #%s to %s", stepIDStr, assigneeName),
+		breadcrumbs: []output.Breadcrumb{
+			{
 				Action:      "unassign",
 				Cmd:         fmt.Sprintf("basecamp unassign %s --step --from %s --project %s", stepIDStr, assigneeID, resolvedProjectID),
 				Description: "Remove assignee",
 			},
-		),
-	)
+		},
+	}, nil
 }
 
-// unassignTodo removes a person from a to-do's assignees using the SDK.
-func unassignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr string, assigneeIDInt int64, resolvedProjectID string, todo *basecamp.Todo) error {
+// doUnassignTodo removes a person from a to-do's assignees.
+func doUnassignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr string, assigneeIDInt int64, resolvedProjectID string, todo *basecamp.Todo) (*assignResult, error) {
 	todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid to-do ID")
+		return nil, output.ErrUsage("Invalid to-do ID")
 	}
 
 	assigneeIDs := removeID(existingAssigneeIDs(todo.Assignees), assigneeIDInt)
@@ -439,31 +685,33 @@ func unassignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr string, assigne
 		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
-	return app.OK(updated,
-		output.WithSummary(fmt.Sprintf("Removed assignee from to-do #%s", todoIDStr)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
+	return &assignResult{
+		id:      todoIDStr,
+		item:    updated,
+		summary: fmt.Sprintf("Removed assignee from to-do #%s", todoIDStr),
+		breadcrumbs: []output.Breadcrumb{
+			{
 				Action:      "view",
 				Cmd:         fmt.Sprintf("basecamp show todo %s --project %s", todoIDStr, resolvedProjectID),
 				Description: "View to-do",
 			},
-			output.Breadcrumb{
+			{
 				Action:      "assign",
 				Cmd:         fmt.Sprintf("basecamp assign %s --to <person> --project %s", todoIDStr, resolvedProjectID),
 				Description: "Add assignee",
 			},
-		),
-	)
+		},
+	}, nil
 }
 
-// unassignCard removes a person from a card's assignees using the SDK.
-func unassignCard(cmd *cobra.Command, app *appctx.App, cardIDStr string, assigneeIDInt int64, resolvedProjectID string, card *basecamp.Card) error {
+// doUnassignCard removes a person from a card's assignees.
+func doUnassignCard(cmd *cobra.Command, app *appctx.App, cardIDStr string, assigneeIDInt int64, resolvedProjectID string, card *basecamp.Card) (*assignResult, error) {
 	cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid card ID")
+		return nil, output.ErrUsage("Invalid card ID")
 	}
 
 	assigneeIDs := removeID(existingAssigneeIDs(card.Assignees), assigneeIDInt)
@@ -472,31 +720,33 @@ func unassignCard(cmd *cobra.Command, app *appctx.App, cardIDStr string, assigne
 		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
-	return app.OK(updated,
-		output.WithSummary(fmt.Sprintf("Removed assignee from card #%s", cardIDStr)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
+	return &assignResult{
+		id:      cardIDStr,
+		item:    updated,
+		summary: fmt.Sprintf("Removed assignee from card #%s", cardIDStr),
+		breadcrumbs: []output.Breadcrumb{
+			{
 				Action:      "view",
 				Cmd:         fmt.Sprintf("basecamp cards show %s", cardIDStr),
 				Description: "View card",
 			},
-			output.Breadcrumb{
+			{
 				Action:      "assign",
 				Cmd:         fmt.Sprintf("basecamp assign %s --card --to <person> --project %s", cardIDStr, resolvedProjectID),
 				Description: "Add assignee",
 			},
-		),
-	)
+		},
+	}, nil
 }
 
-// unassignStep removes a person from a card step's assignees.
-func unassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assigneeIDInt int64, resolvedProjectID string, step *basecamp.CardStep) error {
+// doUnassignStep removes a person from a card step's assignees.
+func doUnassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assigneeIDInt int64, resolvedProjectID string, step *basecamp.CardStep) (*assignResult, error) {
 	stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid step ID")
+		return nil, output.ErrUsage("Invalid step ID")
 	}
 
 	assigneeIDs := removeID(existingAssigneeIDs(step.Assignees), assigneeIDInt)
@@ -505,19 +755,21 @@ func unassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assigne
 		Assignees: assigneeIDs,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
-	return app.OK(updated,
-		output.WithSummary(fmt.Sprintf("Removed assignee from step #%s", stepIDStr)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
+	return &assignResult{
+		id:      stepIDStr,
+		item:    updated,
+		summary: fmt.Sprintf("Removed assignee from step #%s", stepIDStr),
+		breadcrumbs: []output.Breadcrumb{
+			{
 				Action:      "assign",
 				Cmd:         fmt.Sprintf("basecamp assign %s --step --to <person> --project %s", stepIDStr, resolvedProjectID),
 				Description: "Add assignee",
 			},
-		),
-	)
+		},
+	}, nil
 }
 
 // existingAssigneeIDs extracts IDs from a list of Person values.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -38,21 +39,27 @@ func executeAssignCommand(cmd *cobra.Command, app *appctx.App, args ...string) e
 }
 
 func TestAssignRequiresID(t *testing.T) {
-	app, _ := setupAssignTestApp(t)
+	app := setupAssignGuardTestApp(t)
 
 	cmd := NewAssignCmd()
 	err := executeAssignCommand(cmd, app)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "accepts 1 arg")
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "required")
 }
 
 func TestUnassignRequiresID(t *testing.T) {
-	app, _ := setupAssignTestApp(t)
+	app := setupAssignGuardTestApp(t)
 
 	cmd := NewUnassignCmd()
 	err := executeAssignCommand(cmd, app)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "accepts 1 arg")
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "required")
 }
 
 func TestAssignCardAndStepMutuallyExclusive(t *testing.T) {
@@ -182,6 +189,31 @@ func TestAssignStepWithProjectConfig(t *testing.T) {
 	}
 }
 
+func TestAssignAcceptsMultipleIDs(t *testing.T) {
+	app, _ := setupAssignTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "111", "222", "--to", "me")
+	require.Error(t, err)
+
+	// Should not fail on arg count — should proceed into the batch loop
+	assert.NotContains(t, err.Error(), "accepts")
+	assert.NotContains(t, err.Error(), "required")
+}
+
+func TestUnassignAcceptsMultipleIDs(t *testing.T) {
+	app, _ := setupAssignTestApp(t)
+	app.Config.ProjectID = "123"
+
+	cmd := NewUnassignCmd()
+	err := executeAssignCommand(cmd, app, "111", "222", "--from", "me")
+	require.Error(t, err)
+
+	assert.NotContains(t, err.Error(), "accepts")
+	assert.NotContains(t, err.Error(), "required")
+}
+
 func TestAssignHelpMentionsCardAndStep(t *testing.T) {
 	cmd := NewAssignCmd()
 	assert.Contains(t, cmd.Long, "--card")
@@ -247,6 +279,34 @@ func TestNotFoundOrConvertPassesThroughOtherErrors(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
 	assert.NotEqual(t, basecamp.CodeNotFound, e.Code)
+}
+
+func TestBatchFailErrorPreservesTypedError(t *testing.T) {
+	firstErr := output.ErrNotFound("to-do", "111")
+	err := batchFailError("assign", []string{"111", "222"}, firstErr)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, basecamp.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, "111, 222")
+	assert.Contains(t, e.Message, "Failed to assign")
+}
+
+func TestBatchFailErrorWrapsPlainError(t *testing.T) {
+	firstErr := fmt.Errorf("network down")
+	err := batchFailError("unassign", []string{"111"}, firstErr)
+
+	assert.Contains(t, err.Error(), "failed to unassign")
+	assert.Contains(t, err.Error(), "111")
+	assert.ErrorIs(t, err, firstErr)
+}
+
+func TestBatchFailErrorFallsBackToUsage(t *testing.T) {
+	err := batchFailError("assign", []string{"abc", "def"}, nil)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "Invalid item ID(s): abc, def")
 }
 
 // assignGuardTransport serves project resolution but errors on item-fetch endpoints.
@@ -353,4 +413,201 @@ func TestUnassignStepRequiresAssigneeNonInteractive(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	assert.Contains(t, e.Message, "Person to unassign is required")
 	assert.Contains(t, e.Hint, "Use --from")
+}
+
+// assignBatchTransport serves controlled responses for batch assign tests.
+// It tracks request order to verify lazy assignee resolution.
+type assignBatchTransport struct {
+	mu           sync.Mutex
+	validTodoIDs map[string]bool // true = 200 with todo, false = 404
+	requestLog   []string        // ordered log of request paths
+}
+
+func (t *assignBatchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	t.mu.Lock()
+	t.requestLog = append(t.requestLog, req.Method+" "+path)
+	t.mu.Unlock()
+
+	// Project resolution
+	if req.Method == "GET" && strings.Contains(path, "/projects.json") {
+		body := `[{"id": 123, "name": "Test Project"}]`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	// Person "me" resolution
+	if req.Method == "GET" && strings.Contains(path, "/my/profile.json") {
+		body := `{"id": 42, "name": "Test User"}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	// Todo GET
+	if req.Method == "GET" && strings.Contains(path, "/todos/") {
+		for id, valid := range t.validTodoIDs {
+			if strings.Contains(path, "/todos/"+id) {
+				if valid {
+					body := fmt.Sprintf(`{"id": %s, "title": "Test Todo %s", "assignees": []}`, id, id)
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+				}
+				break
+			}
+		}
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"status": 404, "error": "The resource was not found."}`)),
+			Header:     header,
+		}, nil
+	}
+
+	// Todo UPDATE
+	if req.Method == "PUT" && strings.Contains(path, "/todos/") {
+		body := `{"id": 222, "title": "Updated Todo", "assignees": [{"id": 42, "name": "Test User"}]}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, path)
+}
+
+func setupAssignBatchTestApp(t *testing.T, transport *assignBatchTransport) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+	app.Flags.JSON = true
+	return app, buf
+}
+
+func TestAssignBatchPartialSuccess(t *testing.T) {
+	transport := &assignBatchTransport{
+		validTodoIDs: map[string]bool{
+			"111": false, // 404
+			"222": true,  // exists
+		},
+	}
+	app, buf := setupAssignBatchTestApp(t, transport)
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "111", "222", "--to", "me", "-p", "123")
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "Assigned 1, failed 1")
+}
+
+func TestUnassignBatchPartialSuccess(t *testing.T) {
+	transport := &assignBatchTransport{
+		validTodoIDs: map[string]bool{
+			"111": false,
+			"222": true,
+		},
+	}
+	app, buf := setupAssignBatchTestApp(t, transport)
+
+	cmd := NewUnassignCmd()
+	err := executeAssignCommand(cmd, app, "111", "222", "--from", "me", "-p", "123")
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "Unassigned 1, failed 1")
+}
+
+func TestAssignBatchAllFail(t *testing.T) {
+	transport := &assignBatchTransport{
+		validTodoIDs: map[string]bool{
+			"111": false,
+			"222": false,
+		},
+	}
+	app, _ := setupAssignBatchTestApp(t, transport)
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "111", "222", "--to", "me", "-p", "123")
+	require.Error(t, err)
+
+	// Should contain both failed IDs
+	assert.Contains(t, err.Error(), "111")
+	assert.Contains(t, err.Error(), "222")
+	assert.Contains(t, err.Error(), "Failed to assign")
+}
+
+func TestAssignBatchLazyResolution(t *testing.T) {
+	// First ID fails validation (404), second succeeds.
+	// Person resolution should only happen AFTER the first valid item.
+	transport := &assignBatchTransport{
+		validTodoIDs: map[string]bool{
+			"111": false, // 404
+			"222": true,  // exists
+		},
+	}
+	app, _ := setupAssignBatchTestApp(t, transport)
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "111", "222", "--to", "me", "-p", "123")
+	require.NoError(t, err)
+
+	// Verify request ordering: todo/111 (404), todo/222 (200), THEN profile (me resolution), THEN update
+	transport.mu.Lock()
+	log := transport.requestLog
+	transport.mu.Unlock()
+
+	todoGetIdx, profileIdx := -1, -1
+	for i, entry := range log {
+		if strings.Contains(entry, "/todos/222") && strings.HasPrefix(entry, "GET") {
+			todoGetIdx = i
+		}
+		if strings.Contains(entry, "/my/profile.json") {
+			profileIdx = i
+		}
+	}
+	require.NotEqual(t, -1, todoGetIdx, "expected GET /todos/222 in request log")
+	require.NotEqual(t, -1, profileIdx, "expected GET /my/profile.json in request log")
+	assert.Greater(t, profileIdx, todoGetIdx, "person resolution should happen after the valid todo is fetched")
+}
+
+func TestAssignBatchAllFailNeverResolvesAssignee(t *testing.T) {
+	// If all items fail validation, assignee resolution should never be attempted.
+	transport := &assignBatchTransport{
+		validTodoIDs: map[string]bool{
+			"111": false,
+			"222": false,
+		},
+	}
+	app, _ := setupAssignBatchTestApp(t, transport)
+
+	cmd := NewAssignCmd()
+	_ = executeAssignCommand(cmd, app, "111", "222", "--to", "me", "-p", "123")
+
+	transport.mu.Lock()
+	log := transport.requestLog
+	transport.mu.Unlock()
+
+	for _, entry := range log {
+		assert.NotContains(t, entry, "/my/profile.json",
+			"person resolution should not be attempted when all items fail validation")
+	}
 }
