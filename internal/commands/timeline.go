@@ -26,6 +26,9 @@ func NewTimelineCmd() *cobra.Command {
 	var person string
 	var watch bool
 	var interval int
+	var limit int
+	var page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "timeline [me]",
@@ -41,9 +44,9 @@ Use --watch to continuously poll for new activity.`,
 		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if watch {
-				return runTimelineWatch(cmd, args, project, person, time.Duration(interval)*time.Second)
+				return runTimelineWatch(cmd, args, project, person, time.Duration(interval)*time.Second, limit, page, all)
 			}
-			return runTimeline(cmd, args, project, person)
+			return runTimeline(cmd, args, project, person, limit, page, all)
 		},
 	}
 
@@ -52,11 +55,44 @@ Use --watch to continuously poll for new activity.`,
 	cmd.Flags().StringVar(&person, "person", "", "Person ID or name")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Watch for new activity (poll continuously)")
 	cmd.Flags().IntVar(&interval, "interval", 30, "Poll interval in seconds (default: 30)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of events to fetch (0 = default 100)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all events (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }
 
-func runTimeline(cmd *cobra.Command, args []string, project, person string) error {
+func validateTimelinePagination(limit, page int, all bool) error {
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
+	return nil
+}
+
+func timelineListOpts(limit, page int, all bool) *basecamp.TimelineListOptions {
+	opts := &basecamp.TimelineListOptions{}
+	if all {
+		opts.Limit = -1
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+	return opts
+}
+
+func runTimeline(cmd *cobra.Command, args []string, project, person string, limit, page int, all bool) error {
+	if err := validateTimelinePagination(limit, page, all); err != nil {
+		return err
+	}
+
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -79,28 +115,30 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 	// Determine which timeline to show based on args and flags
 	// Priority: positional "me" > --person flag > --project flag > default (account-wide)
 
+	opts := timelineListOpts(limit, page, all)
+
 	// Check for "me" positional argument
 	if len(args) > 0 && args[0] == "me" {
-		return runPersonTimeline(cmd, "me")
+		return runPersonTimeline(cmd, "me", opts)
 	}
 
 	// Check for --person flag
 	if person != "" {
-		return runPersonTimeline(cmd, person)
+		return runPersonTimeline(cmd, person, opts)
 	}
 
 	// Check for --project flag
 	if project != "" {
-		return runProjectTimeline(cmd, project)
+		return runProjectTimeline(cmd, project, opts)
 	}
 
 	// Default: account-wide activity feed
-	result, err := app.Account().Timeline().Progress(cmd.Context(), nil)
+	result, err := app.Account().Timeline().Progress(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
 
-	return app.OK(result.Events,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d recent events", len(result.Events))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -114,10 +152,16 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string) erro
 				Description: "View your activity",
 			},
 		),
-	)
+	}
+
+	if notice := output.TruncationNoticeWithTotal(len(result.Events), result.Meta.TotalCount); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(result.Events, respOpts...)
 }
 
-func runProjectTimeline(cmd *cobra.Command, project string) error {
+func runProjectTimeline(cmd *cobra.Command, project string, opts *basecamp.TimelineListOptions) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Resolve project name to ID
@@ -131,7 +175,7 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		return output.ErrUsage("Invalid project ID")
 	}
 
-	timelineResult, err := app.Account().Timeline().ProjectTimeline(cmd.Context(), projectIDInt, nil)
+	timelineResult, err := app.Account().Timeline().ProjectTimeline(cmd.Context(), projectIDInt, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -141,7 +185,7 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 		summary = fmt.Sprintf("%d events in project #%s", len(timelineResult.Events), resolvedProjectID)
 	}
 
-	return app.OK(timelineResult.Events,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -155,10 +199,16 @@ func runProjectTimeline(cmd *cobra.Command, project string) error {
 				Description: "View project details",
 			},
 		),
-	)
+	}
+
+	if notice := output.TruncationNoticeWithTotal(len(timelineResult.Events), timelineResult.Meta.TotalCount); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(timelineResult.Events, respOpts...)
 }
 
-func runPersonTimeline(cmd *cobra.Command, personArg string) error {
+func runPersonTimeline(cmd *cobra.Command, personArg string, opts *basecamp.TimelineListOptions) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Resolve person name/ID
@@ -172,7 +222,7 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 		return output.ErrUsage("Invalid person ID")
 	}
 
-	result, err := app.Account().Timeline().PersonProgress(cmd.Context(), personID, nil)
+	result, err := app.Account().Timeline().PersonProgress(cmd.Context(), personID, opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -188,7 +238,7 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 		summary = fmt.Sprintf("%d events for person #%s", len(result.Events), resolvedPersonID)
 	}
 
-	return app.OK(result.Events,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -202,7 +252,13 @@ func runPersonTimeline(cmd *cobra.Command, personArg string) error {
 				Description: "View person details",
 			},
 		),
-	)
+	}
+
+	if notice := output.TruncationNoticeWithTotal(len(result.Events), result.Meta.TotalCount); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+
+	return app.OK(result.Events, respOpts...)
 }
 
 // watchModel is the bubbletea model for the watch mode TUI.
@@ -366,7 +422,17 @@ func formatEvent(e basecamp.TimelineEvent) string {
 	)
 }
 
-func runTimelineWatch(cmd *cobra.Command, args []string, project, person string, interval time.Duration) error {
+func runTimelineWatch(cmd *cobra.Command, args []string, project, person string, interval time.Duration, limit, page int, all bool) error {
+	if err := validateTimelinePagination(limit, page, all); err != nil {
+		return err
+	}
+	if all {
+		return output.ErrUsage("--all cannot be used with --watch")
+	}
+	if page > 0 {
+		return output.ErrUsage("--page cannot be used with --watch")
+	}
+
 	app := appctx.FromContext(cmd.Context())
 
 	if interval < 1 {
@@ -407,6 +473,8 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 	}()
 
+	opts := timelineListOpts(limit, 0, false)
+
 	// Determine fetch function and description based on flags
 	var fetchFn func(context.Context) ([]basecamp.TimelineEvent, error)
 	var description string
@@ -423,7 +491,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 		description = "your activity"
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			result, err := app.Account().Timeline().PersonProgress(ctx, personID, nil)
+			result, err := app.Account().Timeline().PersonProgress(ctx, personID, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -441,7 +509,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 		description = fmt.Sprintf("activity for %s", personName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			result, err := app.Account().Timeline().PersonProgress(ctx, personID, nil)
+			result, err := app.Account().Timeline().PersonProgress(ctx, personID, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -459,7 +527,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		}
 		description = fmt.Sprintf("activity in %s", projectName)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			r, err := app.Account().Timeline().ProjectTimeline(ctx, projectIDInt, nil)
+			r, err := app.Account().Timeline().ProjectTimeline(ctx, projectIDInt, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -469,7 +537,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		// Account-wide timeline
 		description = "account activity"
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			r, err := app.Account().Timeline().Progress(ctx, nil)
+			r, err := app.Account().Timeline().Progress(ctx, opts)
 			if err != nil {
 				return nil, err
 			}
