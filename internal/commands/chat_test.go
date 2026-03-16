@@ -916,7 +916,8 @@ func TestFormatChatAttachments_TitleFallback(t *testing.T) {
 }
 
 func TestInjectAttachmentSizes_DuplicateFilenames(t *testing.T) {
-	text := "📎 doc.pdf\nsome text\n📎 doc.pdf"
+	// HTMLToMarkdown emits markers preceded by empty lines
+	text := "📎 doc.pdf\nsome text\n\n📎 doc.pdf"
 	attachments := []basecamp.CampfireLineAttachment{
 		{Filename: "doc.pdf", ByteSize: 1_000},
 		{Filename: "doc.pdf", ByteSize: 2_000},
@@ -925,7 +926,22 @@ func TestInjectAttachmentSizes_DuplicateFilenames(t *testing.T) {
 	lines := strings.Split(got, "\n")
 	assert.Equal(t, "📎 doc.pdf (1.0kb)", lines[0])
 	assert.Equal(t, "some text", lines[1])
-	assert.Equal(t, "📎 doc.pdf (2.0kb)", lines[2])
+	assert.Equal(t, "", lines[2])
+	assert.Equal(t, "📎 doc.pdf (2.0kb)", lines[3])
+}
+
+func TestInjectAttachmentSizes_UserAuthoredStandaloneLine(t *testing.T) {
+	// User wrote "📎 report.pdf" as prose followed by real attachment marker
+	text := "See attached:\n📎 report.pdf\n\n📎 report.pdf"
+	attachments := []basecamp.CampfireLineAttachment{
+		{Filename: "report.pdf", ByteSize: 9_000},
+	}
+	got := injectAttachmentSizes(text, attachments)
+	lines := strings.Split(got, "\n")
+	// User-authored line follows non-empty content — left alone
+	assert.Equal(t, "📎 report.pdf", lines[1])
+	// Real marker preceded by empty line — annotated
+	assert.Equal(t, "📎 report.pdf (9.0kb)", lines[3])
 }
 
 func TestChatLinesDisplayData_ReplacesContent(t *testing.T) {

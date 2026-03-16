@@ -809,6 +809,12 @@ func injectAttachmentSizes(text string, attachments []basecamp.CampfireLineAttac
 		if !strings.HasPrefix(trimmed, "📎 ") {
 			continue
 		}
+		// HTMLToMarkdown emits "\n📎 filename\n", so real markers are always
+		// preceded by an empty line (or appear at the start). Skip lines that
+		// follow non-empty content to avoid rewriting user-authored text.
+		if i > 0 && strings.TrimSpace(lines[i-1]) != "" {
+			continue
+		}
 		filename := strings.TrimPrefix(trimmed, "📎 ")
 		entry, ok := lookup[filename]
 		if !ok || entry.idx >= len(entry.sizes) {
