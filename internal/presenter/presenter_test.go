@@ -399,9 +399,9 @@ func TestRenderDetailTodo(t *testing.T) {
 		t.Errorf("Output should contain headline, got:\n%s", out)
 	}
 
-	// Should contain status fields
-	if !strings.Contains(out, "incomplete") {
-		t.Errorf("Output should contain 'incomplete', got:\n%s", out)
+	// Should contain status fields — incomplete todos omit the completed label
+	if strings.Contains(out, "incomplete") {
+		t.Errorf("Output should not contain 'incomplete' for default state, got:\n%s", out)
 	}
 	if !strings.Contains(out, "Jan 15, 2026") {
 		t.Errorf("Output should contain formatted due date, got:\n%s", out)
@@ -550,7 +550,10 @@ func TestRenderListTodosNoPaddingOnContent(t *testing.T) {
 	// Content (title role) should have a two-space column separator after the
 	// value, NOT be padded to the max content width (34 chars).
 	assert.Contains(t, lines[0], "Short  ", "expected two-space separator after Short, got: %q", lines[0])
-	assert.NotContains(t, lines[0], "Short   ", "content should not be padded beyond two-space separator, got: %q", lines[0])
+	// Content should NOT be padded to the max content width (34 chars).
+	// With "Short" (5) padded to 34, there would be 29+ extra spaces.
+	assert.NotContains(t, lines[0], "Short"+strings.Repeat(" ", 30),
+		"content should not be padded to max width, got: %q", lines[0])
 }
 
 // =============================================================================
@@ -925,9 +928,9 @@ func TestRenderDetailMarkdown(t *testing.T) {
 		t.Errorf("Markdown detail should have '#### Metadata' heading, got:\n%s", out)
 	}
 
-	// Fields should be Markdown list items with bold labels
-	if !strings.Contains(out, "- **Completed:** incomplete") {
-		t.Errorf("Markdown detail should have '- **Completed:** incomplete', got:\n%s", out)
+	// Incomplete todos omit the completed label (default state)
+	if strings.Contains(out, "- **Completed:**") {
+		t.Errorf("Markdown detail should omit Completed for default state, got:\n%s", out)
 	}
 	if !strings.Contains(out, "- **Due:** Jan 15, 2026") {
 		t.Errorf("Markdown detail should have '- **Due:** Jan 15, 2026', got:\n%s", out)

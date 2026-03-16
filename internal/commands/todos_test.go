@@ -1203,7 +1203,7 @@ func TestTodosListStatusIncomplete_CrossList_FiltersClientSide(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "list", "--status", "incomplete")
 	require.NoError(t, err)
 
-	// Cross-list path fetches all todos (no status sent to API) and filters client-side.
+	// Cross-list path fetches todos without a status filter and filters client-side.
 	assert.Empty(t, transport.capturedStatus,
 		"cross-list path should not send status to the API")
 
