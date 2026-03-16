@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -216,7 +215,7 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 }
 
 // wrapText wraps text to fit within maxWidth, preserving words and newlines.
-// Uses rune counting for proper Unicode support.
+// Uses display-cell width for proper Unicode support.
 func wrapText(text string, maxWidth int) string {
 	if maxWidth <= 0 {
 		maxWidth = 80
@@ -242,7 +241,7 @@ func wrapText(text string, maxWidth int) string {
 		currentWidth := 0
 
 		for _, word := range words {
-			wordWidth := runeWidth(word)
+			wordWidth := cellWidth(word)
 
 			// Handle words longer than maxWidth by adding them on their own line
 			if wordWidth > maxWidth {
@@ -280,9 +279,9 @@ func wrapText(text string, maxWidth int) string {
 	return strings.Join(result, "\n")
 }
 
-// runeWidth returns the display width of a string, counting runes.
-func runeWidth(s string) int {
-	return utf8.RuneCountInString(s)
+// cellWidth returns the display width of a string in terminal cells.
+func cellWidth(s string) int {
+	return ansi.StringWidth(s)
 }
 
 func (r *Renderer) renderData(b *strings.Builder, data any) {
@@ -719,11 +718,10 @@ func formatCell(val any) string {
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
-		// Truncate long strings (rune-safe for multi-byte UTF-8).
+		// Truncate long strings by display width.
 		// HTTP(S) URLs are never truncated — a truncated URL is useless.
-		if utf8.RuneCountInString(v) > 40 && !isURL(v) {
-			runes := []rune(v)
-			return string(runes[:37]) + "..."
+		if ansi.StringWidth(v) > 40 && !isURL(v) {
+			return ansi.Truncate(v, 40, "...")
 		}
 		return v
 	case bool:
