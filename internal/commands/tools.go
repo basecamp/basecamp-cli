@@ -16,7 +16,7 @@ func NewToolsCmd() *cobra.Command {
 	var project string
 
 	cmd := &cobra.Command{
-		Use:   "tools",
+		Use:   "tools [action]",
 		Short: "Manage project dock tools",
 		Long: `Manage project dock tools (Chat, Schedule, Docs & Files, etc.).
 
