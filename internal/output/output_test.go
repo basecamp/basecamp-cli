@@ -2529,7 +2529,7 @@ func TestSelectColumnsExemptsURLColumnsForSuffixFields(t *testing.T) {
 
 func TestSelectColumnsPreservesURLColumnsWhenOverflowing(t *testing.T) {
 	url := "https://3.basecampapi.com/1234567/buckets/12345678/people/9999999.json"
-	r := &Renderer{width: 80}
+	r := &Renderer{width: 60} // URL (70) + name (5) + padding (4) = 79 > 60
 	cols := []column{
 		{key: "name", header: "Name", priority: 2},
 		{key: "href", header: "Href", priority: 5},
@@ -2539,7 +2539,7 @@ func TestSelectColumnsPreservesURLColumnsWhenOverflowing(t *testing.T) {
 	}
 	selected := r.selectColumns(cols, data)
 
-	require.Len(t, selected, 2, "both columns should survive even though total exceeds terminal width")
+	require.Len(t, selected, 2, "both columns should survive even when total exceeds terminal width")
 	assert.Equal(t, "href", selected[1].key)
 	assert.Equal(t, len(url), selected[1].width, "URL column should retain its full measured width")
 }
