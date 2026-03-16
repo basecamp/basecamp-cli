@@ -35,13 +35,22 @@ load test_helper
   assert_output_contains "Unknown option"
 }
 
-@test "chat --chat without value shows error" {
+@test "chat --room without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp chat messages --chat
+  run basecamp chat messages --room
   assert_failure
-  assert_output_contains "--chat requires a value"
+  assert_output_contains "--room requires a value"
+}
+
+@test "chat --chat is rejected after rename to --room" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp chat messages --chat 123
+  assert_failure
+  assert_output_contains "Unknown option"
 }
 
 @test "comment without recording ID shows error" {

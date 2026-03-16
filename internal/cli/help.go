@@ -304,7 +304,7 @@ func renderCommandHelp(cmd *cobra.Command) {
 		}
 	}
 
-	// FLAGS — local flags plus parent-scoped persistent flags (e.g. --chat,
+	// FLAGS — local flags plus parent-scoped persistent flags (e.g. --room,
 	// --project defined on a parent command). This promotes parent-scoped
 	// flags into the primary FLAGS section where they're immediately visible,
 	// rather than burying them in INHERITED FLAGS alongside root globals.
@@ -325,7 +325,7 @@ func renderCommandHelp(cmd *cobra.Command) {
 	}
 
 	// INHERITED FLAGS — root-level globals only. Parent-scoped persistent
-	// flags (--project, --chat, etc.) are promoted into FLAGS above.
+	// flags (--project, --room, etc.) are promoted into FLAGS above.
 	inherited := filterInheritedFlags(cmd)
 	if inherited != "" {
 		b.WriteString("\n")
@@ -388,7 +388,7 @@ func parentScopedFlags(cmd *cobra.Command) *pflag.FlagSet {
 
 // filterInheritedFlags returns formatted flag usages for INHERITED FLAGS,
 // containing only the curated subset of root-level globals. Parent-scoped
-// persistent flags (--chat, --project on messages, etc.) are excluded here
+// persistent flags (--room, --project on messages, etc.) are excluded here
 // because parentScopedFlags promotes them into FLAGS.
 func filterInheritedFlags(cmd *cobra.Command) string {
 	root := cmd.Root()

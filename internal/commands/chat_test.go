@@ -414,13 +414,13 @@ func TestChatListMultipleChats(t *testing.T) {
 	assert.Contains(t, buf.String(), "2 chats")
 }
 
-// TestChatListWithChatFlag verifies that `chat list -c <id>` returns
+// TestChatListWithRoomFlag verifies that `chat list --room <id>` returns
 // only the specified chat.
-func TestChatListWithChatFlag(t *testing.T) {
+func TestChatListWithRoomFlag(t *testing.T) {
 	app, buf := newTestAppWithTransport(t, &mockMultiChatTransport{})
 
 	cmd := NewChatCmd()
-	err := executeChatCommand(cmd, app, "list", "--chat", "1002")
+	err := executeChatCommand(cmd, app, "list", "--room", "1002")
 	require.NoError(t, err)
 
 	var envelope struct {
@@ -496,7 +496,7 @@ func TestChatListDisabledChat(t *testing.T) {
 }
 
 // TestChatListMultipleChatsBreadcrumbs verifies breadcrumbs use
-// --chat flag syntax with placeholder for multi-chat projects.
+// --room flag syntax with placeholder for multi-chat projects.
 func TestChatListMultipleChatsBreadcrumbs(t *testing.T) {
 	app, buf := newTestAppWithTransport(t, &mockMultiChatTransport{})
 	app.Flags.Hints = true
@@ -517,7 +517,7 @@ func TestChatListMultipleChatsBreadcrumbs(t *testing.T) {
 
 	require.NotEmpty(t, envelope.Breadcrumbs)
 	for _, bc := range envelope.Breadcrumbs {
-		assert.Contains(t, bc.Cmd, "--chat")
+		assert.Contains(t, bc.Cmd, "--room")
 	}
 }
 
@@ -546,7 +546,7 @@ func TestChatListSingleChatSummary(t *testing.T) {
 
 	require.NotEmpty(t, envelope.Breadcrumbs)
 	for _, bc := range envelope.Breadcrumbs {
-		assert.Contains(t, bc.Cmd, "--chat 501")
+		assert.Contains(t, bc.Cmd, "--room 501")
 	}
 }
 
@@ -603,7 +603,7 @@ func (t *mockChatListAllTransport) RoundTrip(req *http.Request) (*http.Response,
 }
 
 // TestChatListAllBreadcrumbSyntax verifies that --all breadcrumbs use
-// --chat flag syntax, not the old positional syntax.
+// --room flag syntax, not the old positional syntax.
 func TestChatListAllBreadcrumbSyntax(t *testing.T) {
 	app, buf := newTestAppWithTransport(t, &mockChatListAllTransport{})
 	app.Flags.Hints = true
@@ -621,14 +621,14 @@ func TestChatListAllBreadcrumbSyntax(t *testing.T) {
 	require.NotEmpty(t, envelope.Breadcrumbs)
 
 	for _, bc := range envelope.Breadcrumbs {
-		assert.Contains(t, bc.Cmd, "--chat")
+		assert.Contains(t, bc.Cmd, "--room")
 		assert.NotContains(t, bc.Cmd, "chat <id> messages")
 	}
 }
 
-// TestChatPostViaSubcommandWithChatFlag verifies the proper way to post
-// to a specific chat: `basecamp chat post <msg> --chat <id>`.
-func TestChatPostViaSubcommandWithChatFlag(t *testing.T) {
+// TestChatPostViaSubcommandWithRoomFlag verifies the proper way to post
+// to a specific chat: `basecamp chat post <msg> --room <id>`.
+func TestChatPostViaSubcommandWithRoomFlag(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	transport := &mockChatCreateTransport{}
@@ -658,8 +658,8 @@ func TestChatPostViaSubcommandWithChatFlag(t *testing.T) {
 	}
 
 	cmd := NewChatCmd()
-	err := executeChatCommand(cmd, app, "post", "<b>Hello</b>", "--chat", "789", "--content-type", "text/html")
-	require.NoError(t, err, "post via subcommand with --chat flag should succeed")
+	err := executeChatCommand(cmd, app, "post", "<b>Hello</b>", "--room", "789", "--content-type", "text/html")
+	require.NoError(t, err, "post via subcommand with --room flag should succeed")
 	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
 
 	var requestBody map[string]any
@@ -1065,4 +1065,20 @@ func TestChatUploadStyledOutputIncludesFileSize(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, buf.String(), "📎 photo.jpg (3.5mb)")
+}
+
+// TestChatRoomShorthandFlag verifies that -r works as shorthand for --room.
+func TestChatRoomShorthandFlag(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockMultiChatTransport{})
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "list", "-r", "1002")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 1)
+	assert.Equal(t, "Engineering", envelope.Data[0]["title"])
 }

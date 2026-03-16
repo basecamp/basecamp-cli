@@ -147,7 +147,7 @@ func TestGroupCommandShowsPersistentLocalFlags(t *testing.T) {
 		{"messages --in", "messages", commands.NewMessagesCmd, "--in"},
 		{"messages --message-board", "messages", commands.NewMessagesCmd, "--message-board"},
 		{"chat --project", "chat", commands.NewChatCmd, "--project"},
-		{"chat --chat", "chat", commands.NewChatCmd, "--chat"},
+		{"chat --room", "chat", commands.NewChatCmd, "--room"},
 	}
 
 	for _, tt := range tests {
@@ -185,7 +185,7 @@ func TestRootLevelLeafCommandHelp(t *testing.T) {
 }
 
 func TestLeafCommandShowsParentScopedFlagsInFLAGS(t *testing.T) {
-	// Parent-scoped persistent flags (--project, --chat, etc.) are promoted
+	// Parent-scoped persistent flags (--project, --room, etc.) are promoted
 	// into the FLAGS section on leaf commands, not buried in INHERITED FLAGS.
 	// This is a renderer-wide policy: any leaf whose parent defines persistent
 	// flags will show them in FLAGS.
@@ -204,10 +204,10 @@ func TestLeafCommandShowsParentScopedFlagsInFLAGS(t *testing.T) {
 			[]string{"--project", "--in", "--message-board"},
 		},
 		{
-			"chat post shows --project and --chat in FLAGS",
+			"chat post shows --project and --room in FLAGS",
 			[]string{"chat", "post", "--help"},
 			commands.NewChatCmd,
-			[]string{"--project", "--chat"},
+			[]string{"--project", "--room"},
 		},
 		{
 			"timesheet report shows date and person flags in FLAGS",
@@ -236,8 +236,8 @@ func TestLeafCommandShowsParentScopedFlagsInFLAGS(t *testing.T) {
 	}
 }
 
-func TestCampfirePostHelpShowsChatFlag(t *testing.T) {
-	// The campfire alias path must also show --chat in FLAGS.
+func TestCampfirePostHelpShowsRoomFlag(t *testing.T) {
+	// The campfire alias path must also show --room in FLAGS.
 	isolateHelpTest(t)
 
 	var buf bytes.Buffer
@@ -249,7 +249,7 @@ func TestCampfirePostHelpShowsChatFlag(t *testing.T) {
 
 	out := buf.String()
 	flagsSection := extractSection(out, "FLAGS")
-	assert.Contains(t, flagsSection, "--chat")
+	assert.Contains(t, flagsSection, "--room")
 	assert.Contains(t, flagsSection, "--project")
 }
 
