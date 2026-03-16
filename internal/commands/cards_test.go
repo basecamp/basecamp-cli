@@ -581,62 +581,6 @@ func TestFormatCardTableIDs(t *testing.T) {
 	}
 }
 
-// TestFormatCardTableMatches tests the formatCardTableMatches helper.
-func TestFormatCardTableMatches(t *testing.T) {
-	tests := []struct {
-		name       string
-		cardTables []struct {
-			ID    int64
-			Title string
-		}
-		expected []string
-	}{
-		{
-			name: "with titles",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
-				{ID: 123, Title: "Sprint Board"},
-				{ID: 456, Title: "Backlog"},
-			},
-			expected: []string{"123: Sprint Board", "456: Backlog"},
-		},
-		{
-			name: "without titles",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
-				{ID: 123, Title: ""},
-				{ID: 456, Title: ""},
-			},
-			expected: []string{"123", "456"},
-		},
-		{
-			name: "mixed",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
-				{ID: 123, Title: "Board"},
-				{ID: 456, Title: ""},
-			},
-			expected: []string{"123: Board", "456"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := formatCardTableMatches(tt.cardTables)
-			assert.Equal(t, len(tt.expected), len(result))
-			for i, v := range result {
-				assert.Equal(t, tt.expected[i], v, "formatCardTableMatches()[%d]", i)
-			}
-		})
-	}
-}
-
 // =============================================================================
 // Cards Create Validation Tests
 // =============================================================================
@@ -981,7 +925,10 @@ func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e)) {
 		assert.Equal(t, output.CodeAmbiguous, e.Code)
-		assert.Contains(t, e.Message, "card table")
+		assert.Equal(t, "Multiple card tables found", e.Message)
+		assert.Contains(t, e.Hint, "Specify one with --card-table <id>:")
+		assert.Contains(t, e.Hint, "  555  Board A")
+		assert.Contains(t, e.Hint, "  666  Board B")
 	}
 }
 

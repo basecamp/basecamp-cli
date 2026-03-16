@@ -91,10 +91,31 @@ func TestDockToolMultiNonInteractiveError(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
 	assert.Equal(t, output.CodeAmbiguous, e.Code)
-	assert.Contains(t, e.Message, "2 todosets")
-	assert.Contains(t, e.Hint, "--todoset <id>")
-	assert.Contains(t, e.Hint, "Engineering (ID: 100)")
-	assert.Contains(t, e.Hint, "Design (ID: 200)")
+	assert.Equal(t, "Multiple todosets found", e.Message)
+	assert.Contains(t, e.Hint, "Specify one with --todoset <id>:")
+	assert.Contains(t, e.Hint, "  100  Engineering")
+	assert.Contains(t, e.Hint, "  200  Design")
+}
+
+func TestDockToolMultiInboxPluralizesCorrectly(t *testing.T) {
+	transport := &mockDockTransport{
+		projectJSON: `{"id": 1, "dock": [
+			{"name": "inbox", "id": 300, "title": "Support", "enabled": true},
+			{"name": "inbox", "id": 400, "title": "Billing", "enabled": true}
+		]}`,
+	}
+	// JSON mode → non-interactive
+	r := newTestResolver(transport, &Flags{JSON: true})
+
+	_, err := r.Inbox(context.Background(), "1", "")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "Multiple inboxes found", e.Message)
+	assert.Contains(t, e.Hint, "Specify one with --inbox <id>:")
+	assert.Contains(t, e.Hint, "  300  Support")
+	assert.Contains(t, e.Hint, "  400  Billing")
 }
 
 func TestDockToolNoneFound(t *testing.T) {

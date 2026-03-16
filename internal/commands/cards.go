@@ -2083,9 +2083,19 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 	}
 
 	// Multiple card tables - error with available IDs
-	matches := formatCardTableMatches(cardTables)
-	matches = append(matches, "Use --card-table <id> to specify")
-	return "", output.ErrAmbiguous("card table", matches)
+	lines := make([]string, 0, len(cardTables))
+	for _, ct := range cardTables {
+		title := ct.Title
+		if title == "" {
+			title = "card table"
+		}
+		lines = append(lines, fmt.Sprintf("  %d  %s", ct.ID, title))
+	}
+	return "", &output.Error{
+		Code:    output.CodeAmbiguous,
+		Message: "Multiple card tables found",
+		Hint:    fmt.Sprintf("Specify one with --card-table <id>:\n%s", strings.Join(lines, "\n")),
+	}
 }
 
 // formatCardTableIDs formats card table IDs for error messages.
@@ -2102,22 +2112,6 @@ func formatCardTableIDs(cardTables []struct {
 		}
 	}
 	return fmt.Sprintf("%v", ids)
-}
-
-// formatCardTableMatches formats card tables for ambiguous error.
-func formatCardTableMatches(cardTables []struct {
-	ID    int64
-	Title string
-}) []string {
-	matches := make([]string, len(cardTables))
-	for i, ct := range cardTables {
-		if ct.Title != "" {
-			matches[i] = fmt.Sprintf("%d: %s", ct.ID, ct.Title)
-		} else {
-			matches[i] = fmt.Sprintf("%d", ct.ID)
-		}
-	}
-	return matches
 }
 
 // isNumericID checks if a string consists only of digits (matches bash: [[ "$s" =~ ^[0-9]+$ ]]).

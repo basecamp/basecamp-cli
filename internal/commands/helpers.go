@@ -160,27 +160,37 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 
 	default:
 		// Multiple tools found - require explicit selection
-		var toolList []string
+		lines := make([]string, 0, len(enabled))
 		for _, tool := range enabled {
 			title := tool.Title
 			if title == "" {
 				title = friendlyName
 			}
-			toolList = append(toolList, fmt.Sprintf("%s (ID: %d)", title, tool.ID))
+			lines = append(lines, fmt.Sprintf("  %d  %s", tool.ID, title))
 		}
 		var instruction string
 		if flagName != "" {
-			instruction = fmt.Sprintf("Use --%s <id> to specify.", flagName)
+			instruction = fmt.Sprintf("Specify one with --%s <id>:", flagName)
 		} else {
-			instruction = "Specify the ID directly."
+			instruction = "Specify one by ID:"
 		}
-		hint := fmt.Sprintf("%s Available:\n  - %s", instruction, strings.Join(toolList, "\n  - "))
+		hint := fmt.Sprintf("%s\n%s", instruction, strings.Join(lines, "\n"))
 		return "", &output.Error{
 			Code:    output.CodeAmbiguous,
-			Message: fmt.Sprintf("Project has %d %ss", len(enabled), friendlyName),
+			Message: fmt.Sprintf("Multiple %s found", pluralNoun(friendlyName)),
 			Hint:    hint,
 		}
 	}
+}
+
+// pluralNoun returns a simple English plural for tool-related nouns.
+// Handles the irregular cases we actually encounter (inbox → inboxes)
+// and falls back to appending "s".
+func pluralNoun(s string) string {
+	if strings.HasSuffix(s, "x") || strings.HasSuffix(s, "sh") || strings.HasSuffix(s, "ch") || strings.HasSuffix(s, "ss") {
+		return s + "es"
+	}
+	return s + "s"
 }
 
 // isNumeric checks if a string contains only digits (for ID detection).

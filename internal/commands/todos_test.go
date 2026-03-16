@@ -525,9 +525,9 @@ func TestTodosListMultiTodosetAmbiguousError(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Equal(t, output.CodeAmbiguous, e.Code)
-	assert.Contains(t, e.Hint, "--todoset <id>")
-	assert.Contains(t, e.Hint, "Engineering (ID: 100)")
-	assert.Contains(t, e.Hint, "Design (ID: 200)")
+	assert.Contains(t, e.Hint, "Specify one with --todoset <id>:")
+	assert.Contains(t, e.Hint, "  100  Engineering")
+	assert.Contains(t, e.Hint, "  200  Design")
 }
 
 func TestTodosListMultiTodosetExplicitFlagWorks(t *testing.T) {
