@@ -1,0 +1,23 @@
+internal/commands/wizard_test.go
+  db7ae783e2580cd8 390
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "daf515984c22916182804d39a9d7e8d669585062",
+  "prompts": {
+    "db7ae783e2580cd8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c238db-e410-403e-b8ca-7a573b8fedd7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
