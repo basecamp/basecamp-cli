@@ -1,0 +1,35 @@
+internal/tui/resolve/dock.go
+  a410c8de51b1f5de 29,181
+internal/commands/chat_test.go
+  a410c8de51b1f5de 417,419,423,499,520,549,606,624,629-631,661-662,835-1067,1069-1084
+internal/cli/help.go
+  a410c8de51b1f5de 328
+e2e/smoke/smoke_campfire.bats
+  a410c8de51b1f5de 19,26,41,54,64
+internal/cli/help_test.go
+  a410c8de51b1f5de 150,188,207,210
+e2e/errors.bats
+  a410c8de51b1f5de 38,42,44-53
+internal/commands/chat.go
+  a410c8de51b1f5de 34,39,89,94,121,125,145,189,194,252,276,281,362,402,407,415,420,498,521,529,607,633,638,705,736,751
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "439e384ff0c70d970a61824190cdc9d7be7469ef",
+  "prompts": {
+    "a410c8de51b1f5de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84fda414-9269-4c51-a5c3-55fcf82c2dff",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 9,
+      "accepted_lines": 312,
+      "overriden_lines": 0
+    }
+  }
+}
