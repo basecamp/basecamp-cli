@@ -1,0 +1,35 @@
+internal/commands/helpers_test.go
+  5bcba2fe0c37c676 307-310,313-348
+internal/commands/helpers.go
+  5bcba2fe0c37c676 163,169,173,175,177,180,186-195
+internal/tui/resolve/dock.go
+  5bcba2fe0c37c676 161,167,172-173,177-182
+internal/tui/resolve/dock_test.go
+  5bcba2fe0c37c676 94-97,100-118
+internal/commands/todos_test.go
+  5bcba2fe0c37c676 528-530
+internal/commands/cards.go
+  5bcba2fe0c37c676 2086-2098
+internal/commands/cards_test.go
+  5bcba2fe0c37c676 928-931
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "f2c17548fd8ef279cd74db9b1d348647984cba81",
+  "prompts": {
+    "5bcba2fe0c37c676": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "620a66ec-4181-4faa-983f-07597d3b1670",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 124,
+      "total_deletions": 105,
+      "accepted_lines": 115,
+      "overriden_lines": 0
+    }
+  }
+}
