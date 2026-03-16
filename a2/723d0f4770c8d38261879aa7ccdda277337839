@@ -1,0 +1,27 @@
+internal/commands/assign_test.go
+  277ca0df5fc61fcc 345-439
+internal/commands/tools.go
+  277ca0df5fc61fcc 10-11,179-183
+internal/commands/assign.go
+  277ca0df5fc61fcc 74,168,286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "a2723d0f4770c8d38261879aa7ccdda277337839",
+  "prompts": {
+    "277ca0df5fc61fcc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a8db18e-1145-40c5-b301-c518542a0b12",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 2,
+      "accepted_lines": 105,
+      "overriden_lines": 0
+    }
+  }
+}
