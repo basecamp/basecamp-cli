@@ -1241,3 +1241,142 @@ func TestCardsCreateRemoteImagePassesThrough(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, content, `<img src="https://example.com/img.png"`)
 }
+
+// =============================================================================
+// Assignee Flag Tests
+// =============================================================================
+
+func TestCardsCreateHasAssigneeFlag(t *testing.T) {
+	project := ""
+	cardTable := ""
+	cmd := newCardsCreateCmd(&project, &cardTable)
+
+	flag := cmd.Flags().Lookup("assignee")
+	require.NotNil(t, flag, "expected --assignee flag on cards create")
+
+	toFlag := cmd.Flags().Lookup("to")
+	require.NotNil(t, toFlag, "expected --to flag on cards create")
+}
+
+func TestCardShortcutHasAssigneeFlag(t *testing.T) {
+	cmd := NewCardCmd()
+
+	flag := cmd.Flags().Lookup("assignee")
+	require.NotNil(t, flag, "expected --assignee flag on card shortcut")
+
+	toFlag := cmd.Flags().Lookup("to")
+	require.NotNil(t, toFlag, "expected --to flag on card shortcut")
+}
+
+// mockCardAssignTransport handles resolver API calls with people endpoint,
+// card creation, and captures the PUT body for assignment verification.
+type mockCardAssignTransport struct {
+	capturedPutBody []byte
+}
+
+func (t *mockCardAssignTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		if strings.Contains(req.URL.Path, "/projects.json") {
+			body = `[{"id": 123, "name": "Test Project"}]`
+		} else if strings.Contains(req.URL.Path, "/projects/") {
+			body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 789, "title": "Card Table"}]}`
+		} else if strings.Contains(req.URL.Path, "/card_tables/") {
+			body = `{"id": 789, "lists": [{"id": 111, "title": "Backlog"}]}`
+		} else if strings.Contains(req.URL.Path, "/people.json") {
+			body = `[{"id": 42, "name": "Annie Bryan"}]`
+		} else {
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		mockResp := `{"id": 999, "title": "Test Card", "assignees": []}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "PUT" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedPutBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "title": "Test Card", "assignees": [{"id": 42, "name": "Annie Bryan"}]}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func TestCardsCreateWithAssigneeSendsUpdate(t *testing.T) {
+	transport := &mockCardAssignTransport{}
+	app := setupCardsMockApp(t, transport)
+	app.Output = output.New(output.Options{
+		Format: output.FormatJSON,
+		Writer: &bytes.Buffer{},
+	})
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsCreateCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "Test Card", "--assignee", "Annie Bryan")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, transport.capturedPutBody, "expected PUT request for assignment")
+
+	var putBody map[string]any
+	err = json.Unmarshal(transport.capturedPutBody, &putBody)
+	require.NoError(t, err)
+
+	assigneeIDs, ok := putBody["assignee_ids"].([]any)
+	require.True(t, ok, "expected assignee_ids array in PUT body")
+	require.Len(t, assigneeIDs, 1)
+	assert.Equal(t, float64(42), assigneeIDs[0])
+}
+
+func TestResolveAssigneeIDRejectsZero(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	_, err := resolveAssigneeID(context.Background(), app, "0")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "Assignee ID must be a positive number", e.Message)
+}
+
+func TestResolveAssigneeIDRejectsNegative(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	_, err := resolveAssigneeID(context.Background(), app, "-5")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "Assignee ID must be a positive number", e.Message)
+}
+
+func TestResolveAssigneeIDAcceptsPositive(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	id, err := resolveAssigneeID(context.Background(), app, "42")
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), id)
+}
