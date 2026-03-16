@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -355,21 +356,6 @@ func (t *mockOnHoldTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	if req.Method == "GET" {
-		var body string
-		switch {
-		case strings.HasSuffix(req.URL.Path, "/projects.json"):
-			body = `[{"id": 123, "name": "Test Project"}]`
-		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
-			body = `{"id": 456, "title": "Test Card", "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
-		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
-			body = `{"id": 777, "title": "Developing", "on_hold": {"id": 888, "enabled": true, "cards_count": 0, "cards_url": "https://example.com/cards.json"}}`
-		default:
-			body = `{}`
-		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
-	}
-
 	if req.Method == "POST" && strings.Contains(req.URL.Path, "/moves.json") {
 		t.capturedMovePath = req.URL.Path
 		if req.Body != nil {
@@ -380,7 +366,22 @@ func (t *mockOnHoldTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
 	}
 
-	return nil, errors.New("unexpected request")
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
+			body = `{"id": 456, "title": "Test Card", "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
+		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
+			body = `{"id": 777, "title": "Developing", "on_hold": {"id": 888, "enabled": true, "cards_count": 0, "cards_url": "https://example.com/cards.json"}}`
+		default:
+			return nil, fmt.Errorf("unexpected GET request: %s", req.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 }
 
 // TestCardsMoveOnHoldWithoutToDoesNotRequireCardTable tests that --on-hold without --to
@@ -459,12 +460,12 @@ func (t *mockOnHoldDisabledTransport) RoundTrip(req *http.Request) (*http.Respon
 		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
 			body = `{"id": 777, "title": "Developing"}`
 		default:
-			body = `{}`
+			return nil, fmt.Errorf("unexpected GET request: %s", req.URL.Path)
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
 	}
 
-	return nil, errors.New("unexpected request")
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 }
 
 // TestCardShortcutShowsHelpWithoutTitle tests that help is shown when --title is missing.

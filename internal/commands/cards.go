@@ -861,7 +861,7 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 	if column.OnHold == nil || column.OnHold.ID == 0 {
 		return output.ErrUsageHint(
 			fmt.Sprintf("Column '%s' does not have an on-hold section", column.Title),
-			"Enable on-hold with: basecamp cards column on-hold <column-id>",
+			fmt.Sprintf("Enable on-hold with: basecamp cards column on-hold %d", column.ID),
 		)
 	}
 
