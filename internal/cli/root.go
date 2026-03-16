@@ -727,8 +727,8 @@ func emitAgentHelp(cmd *cobra.Command) {
 		})
 	})
 
-	// Inherited flags
-	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
+	// Inherited flags — shared logic with filterInheritedFlags (text help)
+	curatedInheritedFlags(cmd).VisitAll(func(f *pflag.Flag) {
 		info.InheritedFlags = append(info.InheritedFlags, agentFlag{
 			Name:      f.Name,
 			Shorthand: f.Shorthand,

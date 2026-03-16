@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -640,4 +641,48 @@ func TestGroupCommandHelpOmitsArguments(t *testing.T) {
 
 	out := buf.String()
 	assert.NotContains(t, out, "ARGUMENTS")
+}
+
+func TestAgentHelpFiltersTodolistFromInheritedFlags(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewAPICmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"api", "--agent", "--help"})
+	_ = cmd.Execute()
+
+	var info agentHelpInfo
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+
+	names := make([]string, len(info.InheritedFlags))
+	for i, f := range info.InheritedFlags {
+		names[i] = f.Name
+	}
+	assert.NotContains(t, names, "todolist")
+	assert.NotContains(t, names, "verbose")
+	assert.Contains(t, names, "json")
+	assert.Contains(t, names, "account")
+}
+
+func TestAgentHelpSuppressesProjectForIDURLCommands(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewSubscriptionsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"subscriptions", "show", "--agent", "--help"})
+	_ = cmd.Execute()
+
+	var info agentHelpInfo
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+
+	names := make([]string, len(info.InheritedFlags))
+	for i, f := range info.InheritedFlags {
+		names[i] = f.Name
+	}
+	assert.NotContains(t, names, "project", "agent help should suppress --project for <id|url> commands")
+	assert.Contains(t, names, "json")
 }
