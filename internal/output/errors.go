@@ -3,6 +3,7 @@ package output
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	clioutput "github.com/basecamp/cli/output"
 )
@@ -95,4 +96,14 @@ func ErrJQRuntime(cause error) *Error {
 // (validation failure, unsupported command, or flag conflict).
 func IsJQError(err error) bool {
 	return errors.Is(err, errJQUnsupported)
+}
+
+// PluralNoun returns a simple English plural for tool-related nouns.
+// Handles the sibilant cases we encounter (inbox → inboxes) and falls
+// back to appending "s".
+func PluralNoun(s string) string {
+	if strings.HasSuffix(s, "x") || strings.HasSuffix(s, "sh") || strings.HasSuffix(s, "ch") || strings.HasSuffix(s, "ss") {
+		return s + "es"
+	}
+	return s + "s"
 }

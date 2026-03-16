@@ -112,6 +112,7 @@ func TestDockToolMultiInboxPluralizesCorrectly(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
 	assert.Equal(t, "Multiple inboxes found", e.Message)
 	assert.Contains(t, e.Hint, "Specify one with --inbox <id>:")
 	assert.Contains(t, e.Hint, "  300  Support")

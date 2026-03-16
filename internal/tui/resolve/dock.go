@@ -169,17 +169,9 @@ func (r *Resolver) multiToolError(tools []DockTool, friendlyName, flagName strin
 
 	return &output.Error{
 		Code:    output.CodeAmbiguous,
-		Message: fmt.Sprintf("Multiple %s found", pluralizeName(friendlyName)),
+		Message: fmt.Sprintf("Multiple %s found", output.PluralNoun(friendlyName)),
 		Hint:    fmt.Sprintf("Specify one with --%s <id>:\n%s", flagName, strings.Join(lines, "\n")),
 	}
-}
-
-// pluralizeName returns a simple English plural for tool-related nouns.
-func pluralizeName(s string) string {
-	if strings.HasSuffix(s, "x") || strings.HasSuffix(s, "sh") || strings.HasSuffix(s, "ch") || strings.HasSuffix(s, "ss") {
-		return s + "es"
-	}
-	return s + "s"
 }
 
 // Convenience methods for specific dock tool types

@@ -330,24 +330,6 @@ func TestGetDockToolID_AmbiguousInboxPluralizesCorrectly(t *testing.T) {
 	assert.Contains(t, e.Hint, "  400  Billing")
 }
 
-func TestPluralize(t *testing.T) {
-	tests := []struct {
-		input, expected string
-	}{
-		{"chat", "chats"},
-		{"todoset", "todosets"},
-		{"message board", "message boards"},
-		{"inbox", "inboxes"},
-		{"schedule", "schedules"},
-		{"vault", "vaults"},
-		{"questionnaire", "questionnaires"},
-		{"chat room", "chat rooms"},
-	}
-	for _, tt := range tests {
-		assert.Equal(t, tt.expected, pluralNoun(tt.input), "pluralNoun(%q)", tt.input)
-	}
-}
-
 func TestGetDockTools_ReturnsMultipleEnabled(t *testing.T) {
 	transport := &dockTestTransport{
 		projectJSON: `{"id": 1, "dock": [

@@ -3122,3 +3122,25 @@ func TestChatLineDisplayData_JSONPreservesOriginal(t *testing.T) {
 	assert.Contains(t, buf.String(), "raw html")
 	assert.NotContains(t, buf.String(), "📎 photo.jpg")
 }
+
+// =============================================================================
+// PluralNoun Tests
+// =============================================================================
+
+func TestPluralNoun(t *testing.T) {
+	tests := []struct {
+		input, expected string
+	}{
+		{"chat", "chats"},
+		{"todoset", "todosets"},
+		{"message board", "message boards"},
+		{"inbox", "inboxes"},
+		{"schedule", "schedules"},
+		{"vault", "vaults"},
+		{"questionnaire", "questionnaires"},
+		{"chat room", "chat rooms"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.expected, PluralNoun(tt.input), "PluralNoun(%q)", tt.input)
+	}
+}

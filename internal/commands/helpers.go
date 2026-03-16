@@ -177,20 +177,10 @@ func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, ex
 		hint := fmt.Sprintf("%s\n%s", instruction, strings.Join(lines, "\n"))
 		return "", &output.Error{
 			Code:    output.CodeAmbiguous,
-			Message: fmt.Sprintf("Multiple %s found", pluralNoun(friendlyName)),
+			Message: fmt.Sprintf("Multiple %s found", output.PluralNoun(friendlyName)),
 			Hint:    hint,
 		}
 	}
-}
-
-// pluralNoun returns a simple English plural for tool-related nouns.
-// Handles the irregular cases we actually encounter (inbox → inboxes)
-// and falls back to appending "s".
-func pluralNoun(s string) string {
-	if strings.HasSuffix(s, "x") || strings.HasSuffix(s, "sh") || strings.HasSuffix(s, "ch") || strings.HasSuffix(s, "ss") {
-		return s + "es"
-	}
-	return s + "s"
 }
 
 // isNumeric checks if a string contains only digits (for ID detection).
