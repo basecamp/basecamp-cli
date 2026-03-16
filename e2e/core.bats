@@ -80,7 +80,7 @@ load test_helper
 @test "--jq extracts scalar" {
   run basecamp --jq '.data.auth.status'
   assert_success
-  assert_output_contains "unauthenticated"
+  [[ "$output" == "unauthenticated" ]]
 }
 
 
