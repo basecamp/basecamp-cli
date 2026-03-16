@@ -870,6 +870,236 @@ func TestTodoScopedResolutionPaginates(t *testing.T) {
 		"should resolve 'Deep Backlog' from page 2 of todoset 300")
 }
 
+// ---------------------------------------------------------------------------
+// Todolist group integration tests
+// ---------------------------------------------------------------------------
+
+// groupTodoTransport serves a todolist (ID 500) with interleaved direct
+// todos and a group:
+//
+//	Position 1: direct todo (ID 1)
+//	Position 2: group (ID 600) containing todo (ID 2)
+//	Position 3: direct todo (ID 3)
+//
+// It also supports a cross-list aggregation path via todoset 900 containing
+// todolist 500.
+type groupTodoTransport struct{}
+
+func (groupTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+
+	switch {
+	// Project resolution
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/projects/"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 900, "enabled": true}]}`
+
+	// Todolist resolution — todoset lists
+	case strings.Contains(path, "/todosets/900/todolists"):
+		body = `[{"id": 500, "name": "Sprint"}]`
+
+	// Groups for todolist 500
+	case strings.Contains(path, "/todolists/500/groups.json"):
+		body = `[{"id": 600, "position": 2, "name": "Group A"}]`
+
+	// Todos in group 600
+	case strings.Contains(path, "/todolists/600/todos.json"):
+		body = `[{"id": 2, "title": "Group todo", "position": 1, "status": "active"}]`
+
+	// Direct todos in todolist 500
+	case strings.Contains(path, "/todolists/500/todos.json"):
+		body = `[{"id": 1, "title": "First", "position": 1, "status": "active"},` +
+			`{"id": 3, "title": "Third", "position": 3, "status": "active"}]`
+
+	// No groups on group sublists
+	case strings.Contains(path, "/todolists/600/groups.json"):
+		body = `[]`
+
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// groupErrorTransport is like groupTodoTransport but returns HTTP 403 for
+// the /groups.json endpoint.
+type groupErrorTransport struct{}
+
+func (groupErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+
+	if strings.Contains(path, "/groups.json") {
+		return &http.Response{
+			StatusCode: 403,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"forbidden"}`)),
+			Header:     header,
+		}, nil
+	}
+
+	// Delegate everything else to the happy-path transport.
+	return (groupTodoTransport{}).RoundTrip(req)
+}
+
+func setupGroupTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+	return app, buf
+}
+
+func TestTodosListInListMergesGroupTodosByPosition(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 3, "expected 3 todos (2 direct + 1 from group)")
+
+	// Position-ordered: direct(pos1) → group(pos2, containing todo 2) → direct(pos3)
+	assert.Equal(t, int64(1), resp.Data[0].ID)
+	assert.Equal(t, int64(2), resp.Data[1].ID)
+	assert.Equal(t, int64(3), resp.Data[2].ID)
+}
+
+func TestTodosListAllIncludesGroupTodos(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
+
+	cmd := NewTodosCmd()
+	// No --list: cross-list aggregation path
+	err := executeTodosCommand(cmd, app, "list")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 3, "expected 3 todos including group todo")
+}
+
+func TestTodosListInListGroupErrorFails(t *testing.T) {
+	app, _ := setupGroupTodoApp(t, groupErrorTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500")
+	require.Error(t, err, "group fetch error should propagate in single-list mode")
+}
+
+func TestTodosListAllGroupErrorSkipped(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupErrorTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list")
+	require.NoError(t, err, "group error should be skipped in cross-list mode")
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Len(t, resp.Data, 2, "should contain only direct todos when groups fail")
+}
+
+func TestTodosListInListLimitCapsFlattened(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--limit", "2")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+		Notice string `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Len(t, resp.Data, 2, "should cap to --limit 2")
+	assert.NotEmpty(t, resp.Notice, "should include truncation notice")
+}
+
+func TestTodosListInListPageOneIsNoOp(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
+
+	cmd := NewTodosCmd()
+	// --page 1 is the only valid value (2+ rejected by runTodosList) and is
+	// the SDK default, so it succeeds even with grouped todolists.
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--page", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Len(t, resp.Data, 3, "should return all todos including group todos")
+}
+
+func TestTodosListInListLimitPreservedCrossList(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
+
+	cmd := NewTodosCmd()
+	// Cross-list with --limit 1 should cap per-list results. Todolist 500
+	// has groups, so the helper fetches all 3 todos for position merge then
+	// caps to 1 before returning.
+	err := executeTodosCommand(cmd, app, "list", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Equal(t, 1, len(resp.Data))
+}
+
 // =============================================================================
 // Sweep Comment HTML Conversion Tests
 // =============================================================================
