@@ -1,0 +1,23 @@
+internal/commands/timeline.go
+  c255452606611d12 29-31,47,49,58-60,65-95,118-119,122,127,132,136,141,155-161,164,178,188,202-208,211,225,241,255-261,425-435,476-477,494,512,530,540
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "8995251e3013ec8947f5e3a2107ec0b43b5350cb",
+  "prompts": {
+    "c255452606611d12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60f36a1a-fde2-408a-ba78-1c6aedee331e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 91,
+      "total_deletions": 24,
+      "accepted_lines": 91,
+      "overriden_lines": 0
+    }
+  }
+}
