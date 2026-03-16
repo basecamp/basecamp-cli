@@ -1,0 +1,25 @@
+internal/richtext/richtext_test.go
+  0cdf78f01e5106b6 131,133,160-184,546-549,573-585
+internal/richtext/richtext.go
+  0cdf78f01e5106b6 139,148-153,190,209,221,235-238,240,248-251,278-281,291-292,297-298,301-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "026baa179a8d92b105348ae8de5220194314a256",
+  "prompts": {
+    "0cdf78f01e5106b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "39107050-99fb-4c75-8bf6-e91eb70e0483",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 76,
+      "total_deletions": 10,
+      "accepted_lines": 76,
+      "overriden_lines": 0
+    }
+  }
+}
