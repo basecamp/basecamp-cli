@@ -393,6 +393,7 @@ func setupConfigProjectTestApp(t *testing.T) (*appctx.App, *bytes.Buffer, *httpt
 func executeConfigProjectCmd(app *appctx.App, extraArgs ...string) error {
 	cmd := NewConfigCmd()
 	cmd.PersistentFlags().StringVarP(&app.Flags.Project, "project", "p", "", "Project ID or name")
+	cmd.PersistentFlags().StringVar(&app.Flags.Project, "in", "", "Project ID or name (alias for --project)")
 	args := append([]string{"project"}, extraArgs...)
 	cmd.SetArgs(args)
 	ctx := appctx.WithApp(context.Background(), app)
@@ -457,6 +458,31 @@ func TestConfigProject_ExplicitFlag(t *testing.T) {
 	defer os.Chdir(origDir)
 
 	err := executeConfigProjectCmd(app, "--project", "12345")
+	require.NoError(t, err)
+
+	var result map[string]any
+	parseEnvelopeData(t, buf, &result)
+	assert.Equal(t, "12345", result["project_id"])
+	assert.Equal(t, "Project Alpha", result["project_name"])
+	assert.Equal(t, "set", result["status"])
+
+	// Verify config file was written
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".basecamp", "config.json"))
+	require.NoError(t, err)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal(data, &saved))
+	assert.Equal(t, "12345", saved["project_id"])
+}
+
+func TestConfigProject_InAlias(t *testing.T) {
+	app, buf, _ := setupConfigProjectTestApp(t)
+
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+
+	err := executeConfigProjectCmd(app, "--in", "12345")
 	require.NoError(t, err)
 
 	var result map[string]any
