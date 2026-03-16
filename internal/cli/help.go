@@ -386,16 +386,17 @@ func parentScopedFlags(cmd *cobra.Command) *pflag.FlagSet {
 	return ps
 }
 
-// filterInheritedFlags returns formatted flag usages for INHERITED FLAGS,
-// containing only the curated subset of root-level globals. Parent-scoped
-// persistent flags (--room, --project on messages, etc.) are excluded here
-// because parentScopedFlags promotes them into FLAGS.
-func filterInheritedFlags(cmd *cobra.Command) string {
+// curatedInheritedFlags returns the subset of inherited flags that should
+// appear in help output — both text (filterInheritedFlags) and agent JSON
+// (emitAgentHelp) call this so the two views stay in sync.
+//
+// Rules:
+//   - Only root-level persistent flags (pointer identity vs root.PersistentFlags)
+//   - Only flags in salientRootFlags
+//   - Suppress --project for commands whose Use contains <id|url>
+func curatedInheritedFlags(cmd *cobra.Command) *pflag.FlagSet {
 	root := cmd.Root()
 	filtered := pflag.NewFlagSet("inherited", pflag.ContinueOnError)
-
-	// Commands that accept <id|url> resolve the project from the ID
-	// automatically, so --project is noise in their help output.
 	acceptsID := strings.Contains(cmd.Use, "<id|url>")
 
 	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
@@ -412,5 +413,13 @@ func filterInheritedFlags(cmd *cobra.Command) string {
 		filtered.AddFlag(f)
 	})
 
-	return strings.TrimRight(filtered.FlagUsages(), "\n")
+	return filtered
+}
+
+// filterInheritedFlags returns formatted flag usages for INHERITED FLAGS,
+// containing only the curated subset of root-level globals. Parent-scoped
+// persistent flags (--room, --project on messages, etc.) are excluded here
+// because parentScopedFlags promotes them into FLAGS.
+func filterInheritedFlags(cmd *cobra.Command) string {
+	return strings.TrimRight(curatedInheritedFlags(cmd).FlagUsages(), "\n")
 }

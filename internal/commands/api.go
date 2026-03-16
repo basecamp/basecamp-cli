@@ -18,8 +18,8 @@ func NewAPICmd() *cobra.Command {
 		Use:   "api <verb> <path>",
 		Short: "Raw API access",
 		Long:  "Make raw API requests to any Basecamp endpoint. Useful for operations not covered by dedicated commands.",
-		Example: `  basecamp api get /projects.json
-  basecamp api post /buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'`,
+		Example: `  basecamp api get projects.json
+  basecamp api post buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'`,
 	}
 
 	cmd.AddCommand(
@@ -37,10 +37,10 @@ func newAPIGetCmd() *cobra.Command {
 		Use:   "get <path>",
 		Short: "GET request to API",
 		Long:  "Make a raw GET request to any Basecamp API endpoint.",
-		Example: `  basecamp api get /projects.json
-  basecamp api get /buckets/123/todos/456.json
+		Example: `  basecamp api get projects.json
+  basecamp api get buckets/123/todos/456.json
   basecamp api get https://3.basecampapi.com/999/projects.json`,
-		Args: cobra.ExactArgs(1),
+		Args: apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -71,9 +71,9 @@ func newAPIPostCmd() *cobra.Command {
 		Use:   "post <path>",
 		Short: "POST request to API",
 		Long:  "Make a raw POST request to any Basecamp API endpoint.",
-		Example: `  basecamp api post /buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'
-  basecamp api post /buckets/123/message_boards/789/messages.json -d '{"subject":"Hello","content":"<p>World</p>"}'`,
-		Args: cobra.ExactArgs(1),
+		Example: `  basecamp api post buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'
+  basecamp api post buckets/123/message_boards/789/messages.json -d '{"subject":"Hello","content":"<p>World</p>"}'`,
+		Args: apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
 			if data == "" {
@@ -121,8 +121,8 @@ func newAPIPutCmd() *cobra.Command {
 		Use:     "put <path>",
 		Short:   "PUT request to API",
 		Long:    "Make a raw PUT request to any Basecamp API endpoint.",
-		Example: `  basecamp api put /buckets/123/todos/456.json -d '{"content":"Updated todo"}'`,
-		Args:    cobra.ExactArgs(1),
+		Example: `  basecamp api put buckets/123/todos/456.json -d '{"content":"Updated todo"}'`,
+		Args:    apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
 			if data == "" {
@@ -168,8 +168,8 @@ func newAPIDeleteCmd() *cobra.Command {
 		Use:     "delete <path>",
 		Short:   "DELETE request to API",
 		Long:    "Make a raw DELETE request to any Basecamp API endpoint.",
-		Example: `  basecamp api delete /buckets/123/todos/456.json`,
-		Args:    cobra.ExactArgs(1),
+		Example: `  basecamp api delete buckets/123/todos/456.json`,
+		Args:    apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -191,20 +191,28 @@ func newAPIDeleteCmd() *cobra.Command {
 	}
 }
 
+// apiPathArgs validates that exactly one positional arg (the API path) is given.
+// Using a custom validator avoids the global transformArgError rewriting the
+// message to "ID required" — the api argument is <path>, not <id>.
+func apiPathArgs(cmd *cobra.Command, args []string) error {
+	if len(args) != 1 {
+		return output.ErrUsage("path required")
+	}
+	return nil
+}
+
 // parsePath extracts and normalizes the API path.
-// Handles full URLs, relative paths, and auto-adds leading slash.
+// Handles full URLs and relative paths. The leading slash is stripped because
+// the SDK's accountPath and buildURL both add one — keeping it here would
+// double-slash and, on Windows, MSYS/Git Bash converts /path to C:\...\path.
 func parsePath(input string) string {
-	// Extract path from full URL
-	// Matches: https://3.basecampapi.com/12345/projects.json
 	urlPattern := regexp.MustCompile(`^https?://[^/]+/[0-9]+(/.*)`)
 	if matches := urlPattern.FindStringSubmatch(input); len(matches) > 1 {
 		return matches[1]
 	}
 
-	// Ensure leading slash
-	if !strings.HasPrefix(input, "/") {
-		input = "/" + input
-	}
+	// Strip leading slash — the SDK prefixes the account path.
+	input = strings.TrimPrefix(input, "/")
 
 	return input
 }
@@ -251,14 +259,21 @@ func apiSummary(data []byte) string {
 
 // apiBreadcrumbs generates contextual breadcrumbs based on the path.
 func apiBreadcrumbs(path string) []output.Breadcrumb {
+	// Normalize for pattern matching — parsePath may return bare paths
+	// (e.g. "projects.json") or slash-prefixed paths from full URLs.
+	matchPath := path
+	if !strings.HasPrefix(matchPath, "/") {
+		matchPath = "/" + matchPath
+	}
+
 	var breadcrumbs []output.Breadcrumb
 
 	// Projects list
-	if strings.HasSuffix(path, "/projects.json") {
+	if strings.HasSuffix(matchPath, "/projects.json") {
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "details",
-				Cmd:         "basecamp api get /projects/<id>.json",
+				Cmd:         "basecamp api get projects/<id>.json",
 				Description: "Get project details",
 			},
 			output.Breadcrumb{
@@ -271,7 +286,7 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 
 	// Card table
 	cardTablePattern := regexp.MustCompile(`/buckets/(\d+)/card_tables/(\d+)\.json`)
-	if matches := cardTablePattern.FindStringSubmatch(path); len(matches) > 1 {
+	if matches := cardTablePattern.FindStringSubmatch(matchPath); len(matches) > 1 {
 		bucket := matches[1]
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
@@ -290,12 +305,12 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 
 	// Bucket path
 	bucketPattern := regexp.MustCompile(`/buckets/(\d+)`)
-	if matches := bucketPattern.FindStringSubmatch(path); len(matches) > 1 {
+	if matches := bucketPattern.FindStringSubmatch(matchPath); len(matches) > 1 {
 		bucket := matches[1]
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         fmt.Sprintf("basecamp api get /projects/%s.json", bucket),
+				Cmd:         fmt.Sprintf("basecamp api get projects/%s.json", bucket),
 				Description: "Get project details",
 			},
 			output.Breadcrumb{
