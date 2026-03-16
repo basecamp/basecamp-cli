@@ -529,7 +529,19 @@ func (r *Renderer) selectColumns(cols []column, data []map[string]any) []column 
 		if total <= r.width {
 			break
 		}
-		selected = selected[:len(selected)-1]
+		// Drop the rightmost non-URL column. A dropped URL is useless;
+		// an overflowing table at least keeps the link clickable.
+		dropped := false
+		for j := len(selected) - 1; j >= 1; j-- {
+			if !selected[j].containsURL {
+				selected = append(selected[:j], selected[j+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			break // only the lead column and URL columns remain
+		}
 	}
 
 	return selected
