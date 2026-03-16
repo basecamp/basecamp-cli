@@ -259,14 +259,21 @@ func apiSummary(data []byte) string {
 
 // apiBreadcrumbs generates contextual breadcrumbs based on the path.
 func apiBreadcrumbs(path string) []output.Breadcrumb {
+	// Normalize for pattern matching — parsePath may return bare paths
+	// (e.g. "projects.json") or slash-prefixed paths from full URLs.
+	matchPath := path
+	if !strings.HasPrefix(matchPath, "/") {
+		matchPath = "/" + matchPath
+	}
+
 	var breadcrumbs []output.Breadcrumb
 
 	// Projects list
-	if strings.HasSuffix(path, "/projects.json") {
+	if strings.HasSuffix(matchPath, "/projects.json") {
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "details",
-				Cmd:         "basecamp api get /projects/<id>.json",
+				Cmd:         "basecamp api get projects/<id>.json",
 				Description: "Get project details",
 			},
 			output.Breadcrumb{
@@ -279,7 +286,7 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 
 	// Card table
 	cardTablePattern := regexp.MustCompile(`/buckets/(\d+)/card_tables/(\d+)\.json`)
-	if matches := cardTablePattern.FindStringSubmatch(path); len(matches) > 1 {
+	if matches := cardTablePattern.FindStringSubmatch(matchPath); len(matches) > 1 {
 		bucket := matches[1]
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
@@ -298,12 +305,12 @@ func apiBreadcrumbs(path string) []output.Breadcrumb {
 
 	// Bucket path
 	bucketPattern := regexp.MustCompile(`/buckets/(\d+)`)
-	if matches := bucketPattern.FindStringSubmatch(path); len(matches) > 1 {
+	if matches := bucketPattern.FindStringSubmatch(matchPath); len(matches) > 1 {
 		bucket := matches[1]
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "project",
-				Cmd:         fmt.Sprintf("basecamp api get /projects/%s.json", bucket),
+				Cmd:         fmt.Sprintf("basecamp api get projects/%s.json", bucket),
 				Description: "Get project details",
 			},
 			output.Breadcrumb{
