@@ -31,8 +31,8 @@ func TestDocContractArgs(t *testing.T) {
 		{"basecamp message", []string{"title", "body"}},
 		{"basecamp show", []string{"type", "id|url"}},
 		{"basecamp search", []string{"query"}},
-		{"basecamp assign", []string{"id"}},
-		{"basecamp unassign", []string{"id"}},
+		{"basecamp assign", []string{"id|url"}},
+		{"basecamp unassign", []string{"id|url"}},
 		{"basecamp completion", []string{"shell"}},
 		{"basecamp timeline", []string{"me"}},
 		{"basecamp schedule", nil},                    // [action] stripped
