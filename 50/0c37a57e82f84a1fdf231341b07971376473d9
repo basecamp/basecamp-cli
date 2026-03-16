@@ -1,0 +1,41 @@
+internal/appctx/context.go
+  58710f6e056dada6 108-112,123-124
+internal/commands/tools.go
+  93ae288b2e6ef7fa 8,178-180,183
+internal/commands/files.go
+  93ae288b2e6ef7fa 1371,1373,1375
+  58710f6e056dada6 1379,1509-1511
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "500c37a57e82f84a1fdf231341b07971376473d9",
+  "prompts": {
+    "58710f6e056dada6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2c42f4f8-009d-41fe-aff5-bfa154842f45",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 181,
+      "total_deletions": 39,
+      "accepted_lines": 13,
+      "overriden_lines": 0
+    },
+    "93ae288b2e6ef7fa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d8f2e8c-4193-44e1-9e94-7a0afa823824",
+        "model": "<synthetic>"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 304,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
