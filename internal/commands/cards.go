@@ -427,6 +427,15 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				}
 			}
 
+			// Pre-resolve assignee before side-effectful work (fail early on bad input)
+			var assigneeID int64
+			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
+				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Convert content through rich text pipeline
 			if content != "" {
 				content = richtext.MarkdownToHTML(content)
@@ -435,15 +444,6 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 					return err
 				}
 				content, err = resolveMentions(cmd.Context(), app.Names, content)
-				if err != nil {
-					return err
-				}
-			}
-
-			// Pre-resolve assignee before creating card (fail early on bad input)
-			var assigneeID int64
-			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
-				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
 				if err != nil {
 					return err
 				}
@@ -964,6 +964,15 @@ func NewCardCmd() *cobra.Command {
 				}
 			}
 
+			// Pre-resolve assignee before side-effectful work (fail early on bad input)
+			var assigneeID int64
+			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
+				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Convert content through rich text pipeline
 			if content != "" {
 				content = richtext.MarkdownToHTML(content)
@@ -972,15 +981,6 @@ func NewCardCmd() *cobra.Command {
 					return err
 				}
 				content, err = resolveMentions(cmd.Context(), app.Names, content)
-				if err != nil {
-					return err
-				}
-			}
-
-			// Pre-resolve assignee before creating card (fail early on bad input)
-			var assigneeID int64
-			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
-				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
 				if err != nil {
 					return err
 				}
