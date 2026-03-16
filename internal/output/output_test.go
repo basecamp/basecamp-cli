@@ -2516,12 +2516,15 @@ func TestSelectColumnsExemptsURLColumnsForSuffixFields(t *testing.T) {
 	}
 	selected := r.selectColumns(cols, data)
 
+	var found bool
 	for _, col := range selected {
 		if col.key == "todolists_url" {
+			found = true
 			assert.Greater(t, col.width, 40, "URL column with _url suffix should retain actual width")
 			assert.True(t, col.containsURL, "URL column should be flagged")
 		}
 	}
+	require.True(t, found, "todolists_url column must be present in selected columns")
 }
 
 func TestSelectColumnsPreservesURLColumnsWhenOverflowing(t *testing.T) {
