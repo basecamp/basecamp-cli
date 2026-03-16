@@ -155,35 +155,38 @@ func formatDock(val any) string {
 		return ""
 	}
 
-	// Filter to enabled items only.
-	var enabled []map[string]any
-	for _, m := range items {
-		if e, ok := m["enabled"].(bool); ok && !e {
-			continue
-		}
-		enabled = append(enabled, m)
-	}
-
 	// Sort by position so the output matches the web UI order.
-	sort.SliceStable(enabled, func(i, j int) bool {
-		return dockPosition(enabled[i]) < dockPosition(enabled[j])
+	// Enabled items (with positions) come first; disabled items sort to the end.
+	sort.SliceStable(items, func(i, j int) bool {
+		return dockPosition(items[i]) < dockPosition(items[j])
 	})
 
 	var lines []string
-	for _, m := range enabled {
+	for _, m := range items {
+		disabled := false
+		if e, ok := m["enabled"].(bool); ok && !e {
+			disabled = true
+		}
+
 		title, _ := m["title"].(string)
 		name, _ := m["name"].(string)
 		id := formatText(m["id"])
 		if title == "" {
 			title = name
 		}
+
+		var line string
 		if name != "" && id != "" {
-			lines = append(lines, fmt.Sprintf("%s (%s, ID: %s)", title, name, id))
+			line = fmt.Sprintf("%s (%s, ID: %s)", title, name, id)
 		} else if name != "" {
-			lines = append(lines, fmt.Sprintf("%s (%s)", title, name))
+			line = fmt.Sprintf("%s (%s)", title, name)
 		} else {
-			lines = append(lines, title)
+			line = title
 		}
+		if disabled {
+			line += " [disabled]"
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }

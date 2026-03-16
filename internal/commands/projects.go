@@ -188,10 +188,12 @@ func updateProjectsCache(projects []basecamp.Project, cacheDir string) {
 }
 
 func newProjectsShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show project details",
-		Long:  "Display detailed information about a project including its dock (the set of enabled tools: message board, to-dos, schedule, etc.).",
+		Long:  "Display detailed information about a project including its dock (the set of enabled tools: message board, to-dos, schedule, etc.).\n\nBy default only enabled tools are shown. Use --all to include disabled tools.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -214,6 +216,10 @@ func newProjectsShowCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
+			if !all {
+				project.Dock = filterEnabledDock(project.Dock)
+			}
+
 			return app.OK(project,
 				output.WithEntity("project"),
 				output.WithBreadcrumbs(
@@ -231,6 +237,21 @@ func newProjectsShowCmd() *cobra.Command {
 			)
 		},
 	}
+
+	cmd.Flags().BoolVar(&all, "all", false, "Show all dock tools including disabled")
+
+	return cmd
+}
+
+// filterEnabledDock returns only the enabled dock items.
+func filterEnabledDock(dock []basecamp.DockItem) []basecamp.DockItem {
+	var enabled []basecamp.DockItem
+	for _, item := range dock {
+		if item.Enabled {
+			enabled = append(enabled, item)
+		}
+	}
+	return enabled
 }
 
 func newProjectsCreateCmd() *cobra.Command {

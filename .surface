@@ -4388,6 +4388,7 @@ FLAG basecamp projects list --todolist type=string
 FLAG basecamp projects list --verbose type=count
 FLAG basecamp projects show --account type=string
 FLAG basecamp projects show --agent type=bool
+FLAG basecamp projects show --all type=bool
 FLAG basecamp projects show --cache-dir type=string
 FLAG basecamp projects show --count type=bool
 FLAG basecamp projects show --hints type=bool
