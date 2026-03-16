@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -508,4 +509,210 @@ func TestMeWithBC3TokenOverridingStaleLaunchpadCreds(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "failed to parse output: %s", buf.String())
 	assert.Equal(t, "mixed@example.com", result.Data.Identity.EmailAddress)
+}
+
+// setupPeopleMockServer creates a mock server that routes people endpoints.
+// It serves distinct payloads for account-wide vs project-scoped list,
+// and handles the UpdateProjectAccess (grant/revoke) endpoint.
+func setupPeopleMockServer(t *testing.T, accountID string, projectID int64) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		projectsPath := fmt.Sprintf("/%s/projects.json", accountID)
+		projectPeoplePath := fmt.Sprintf("/%s/projects/%d/people.json", accountID, projectID)
+		accountPeoplePath := fmt.Sprintf("/%s/people.json", accountID)
+		accessPath := fmt.Sprintf("/%s/projects/%d/people/users.json", accountID, projectID)
+
+		switch {
+		case r.URL.Path == projectsPath && r.Method == http.MethodGet:
+			// Projects list — used by name resolver
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": projectID, "name": "Test Project"},
+			})
+		case r.URL.Path == accountPeoplePath && r.Method == http.MethodGet:
+			// Account-wide people list — also used by name resolver for person IDs
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 1001, "name": "Alice Test", "email_address": "alice@example.com"},
+				{"id": 2001, "name": "Account Bob", "title": "PM", "employee": true, "admin": true, "email_address": "bob@example.com"},
+				{"id": 2002, "name": "Account Carol", "title": "Design", "employee": true, "admin": false, "email_address": "carol@example.com"},
+			})
+		case r.URL.Path == projectPeoplePath && r.Method == http.MethodGet:
+			// Project-scoped people list — return a distinct set
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 1001, "name": "Project Alice", "title": "Dev", "employee": true, "admin": false, "email_address": "alice@example.com"},
+			})
+		case r.URL.Path == accessPath && r.Method == http.MethodPut:
+			// UpdateProjectAccess — echo back granted/revoked
+			var req map[string]any
+			json.NewDecoder(r.Body).Decode(&req)
+			resp := map[string]any{"granted": []any{}, "revoked": []any{}}
+			if ids, ok := req["grant"]; ok {
+				for _, id := range ids.([]any) {
+					resp["granted"] = append(resp["granted"].([]any), map[string]any{
+						"id": id, "name": fmt.Sprintf("Person %v", id),
+					})
+				}
+			}
+			if ids, ok := req["revoke"]; ok {
+				for _, id := range ids.([]any) {
+					resp["revoked"] = append(resp["revoked"].([]any), map[string]any{
+						"id": id, "name": fmt.Sprintf("Person %v", id),
+					})
+				}
+			}
+			json.NewEncoder(w).Encode(resp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// setupPeopleMockApp creates a test app wired to the mock people server.
+func setupPeopleMockApp(t *testing.T, server *httptest.Server) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		CacheDir:  t.TempDir(),
+	}
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		&peopleTestTokenProvider{},
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, nil, "99999"),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+		Flags: appctx.GlobalFlags{Hints: true},
+	}
+	return app, buf
+}
+
+// TestPeopleListIn verifies that --in takes the project-scoped path and
+// returns project-specific people, not the account-wide list.
+func TestPeopleListIn(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "list", "--in", "55555")
+	require.NoError(t, err)
+
+	var result struct {
+		Data []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+
+	// Should return the project-scoped person (Alice), not the account-wide set
+	require.Len(t, result.Data, 1)
+	assert.Equal(t, int64(1001), result.Data[0].ID)
+	assert.Equal(t, "Project Alice", result.Data[0].Name)
+}
+
+// TestPeopleListWithoutIn returns account-wide list as a control.
+func TestPeopleListWithoutIn(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "list")
+	require.NoError(t, err)
+
+	var result struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+
+	// Should return the account-wide people (Alice + Bob + Carol)
+	assert.Len(t, result.Data, 3)
+}
+
+// TestPeopleAddIn verifies that --in is accepted and routed to the
+// correct project access endpoint (grant succeeds).
+func TestPeopleAddIn(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "add", "--in", "55555", "1001")
+	require.NoError(t, err)
+
+	var result struct {
+		Data struct {
+			Granted []struct {
+				ID int64 `json:"id"`
+			} `json:"granted"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	require.Len(t, result.Data.Granted, 1)
+	assert.Equal(t, int64(1001), result.Data.Granted[0].ID)
+}
+
+// TestPeopleRemoveIn verifies that --in is accepted and routed to the
+// correct project access endpoint (revoke succeeds).
+func TestPeopleRemoveIn(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "remove", "--in", "55555", "1001")
+	require.NoError(t, err)
+
+	var result struct {
+		Data struct {
+			Revoked []struct {
+				ID int64 `json:"id"`
+			} `json:"revoked"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	require.Len(t, result.Data.Revoked, 1)
+	assert.Equal(t, int64(1001), result.Data.Revoked[0].ID)
+}
+
+// TestPeopleAddNoProject verifies that omitting --project/--in returns a usage error.
+func TestPeopleAddNoProject(t *testing.T) {
+	app, _ := setupPeopleTestApp(t)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "add", "1001")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "--project (or --in) is required")
+}
+
+// TestPeopleRemoveNoProject verifies that omitting --project/--in returns a usage error.
+func TestPeopleRemoveNoProject(t *testing.T) {
+	app, _ := setupPeopleTestApp(t)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "remove", "1001")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "--project (or --in) is required")
 }
