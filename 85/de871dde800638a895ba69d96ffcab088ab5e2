@@ -1,0 +1,27 @@
+internal/commands/people_test.go
+  518449c0db3c6b2c 549-552,554-555,561-562
+internal/commands/config_test.go
+  518449c0db3c6b2c 480-483,487
+internal/commands/people.go
+  518449c0db3c6b2c 171-173,406-407,490-491
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "85de871dde800638a895ba69d96ffcab088ab5e2",
+  "prompts": {
+    "518449c0db3c6b2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "356c5792-5d73-4079-9849-6d4bc630186a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 22,
+      "total_deletions": 8,
+      "accepted_lines": 22,
+      "overriden_lines": 0
+    }
+  }
+}
