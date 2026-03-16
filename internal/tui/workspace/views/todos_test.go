@@ -773,7 +773,7 @@ func TestTodos_ShortHelp_LeftPane_ShowsCompletedHint(t *testing.T) {
 	assert.Equal(t, "completed", keys["c"])
 }
 
-func TestTodos_ShortHelp_LeftPane_ShowsPendingHintWhenCompleted(t *testing.T) {
+func TestTodos_ShortHelp_LeftPane_ShowsIncompleteHintWhenCompleted(t *testing.T) {
 	v := testTodosView()
 	v.showCompleted = true
 	hints := v.ShortHelp()
@@ -781,7 +781,7 @@ func TestTodos_ShortHelp_LeftPane_ShowsPendingHintWhenCompleted(t *testing.T) {
 	for _, h := range hints {
 		keys[h.Help().Key] = h.Help().Desc
 	}
-	assert.Equal(t, "pending", keys["c"])
+	assert.Equal(t, "incomplete", keys["c"])
 }
 
 func TestTodos_ShortHelp_RightPaneCompleted_ShowsUncomplete(t *testing.T) {

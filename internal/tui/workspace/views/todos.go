@@ -312,7 +312,7 @@ func (v *Todos) ShortHelp() []key.Binding {
 	if v.focus == todosPaneLeft {
 		completedHint := key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "completed"))
 		if v.showCompleted {
-			completedHint = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "pending"))
+			completedHint = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "incomplete"))
 		}
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("j/k"), key.WithHelp("j/k", "navigate")),

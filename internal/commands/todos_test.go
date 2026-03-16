@@ -1101,6 +1101,125 @@ func TestTodosListInListLimitPreservedCrossList(t *testing.T) {
 }
 
 // =============================================================================
+// --status incomplete alias tests
+// =============================================================================
+
+// statusCapturingTransport serves a todolist with mixed-completion todos and
+// captures the status query parameter sent to the todos.json endpoint.
+type statusCapturingTransport struct {
+	capturedStatus string
+}
+
+func (s *statusCapturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+
+	switch {
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/projects/"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 900, "enabled": true}]}`
+	case strings.Contains(path, "/todosets/900/todolists"):
+		body = `[{"id": 500, "name": "Sprint"}]`
+	case strings.Contains(path, "/groups.json"):
+		body = `[]`
+	case strings.Contains(path, "/todos.json"):
+		s.capturedStatus = req.URL.Query().Get("status")
+		body = `[` +
+			`{"id": 1, "content": "Open task", "position": 1, "status": "active", "completed": false},` +
+			`{"id": 2, "content": "Done task", "position": 2, "status": "active", "completed": true}]`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func setupStatusTestApp(t *testing.T, transport *statusCapturingTransport) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}, buf
+}
+
+func TestTodosListStatusIncomplete_SingleList_NormalizesToPending(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "incomplete")
+	require.NoError(t, err)
+
+	assert.Equal(t, "pending", transport.capturedStatus,
+		"--status incomplete should be normalized to 'pending' before reaching the SDK")
+}
+
+func TestTodosListStatusPending_SingleList_PassedThrough(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "pending")
+	require.NoError(t, err)
+
+	assert.Equal(t, "pending", transport.capturedStatus,
+		"--status pending should pass through unchanged")
+}
+
+func TestTodosListStatusIncomplete_CrossList_FiltersClientSide(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, buf := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--status", "incomplete")
+	require.NoError(t, err)
+
+	// Cross-list path fetches todos without a status filter and filters client-side.
+	assert.Empty(t, transport.capturedStatus,
+		"cross-list path should not send status to the API")
+
+	var resp struct {
+		Data []struct {
+			ID        int64 `json:"id"`
+			Completed bool  `json:"completed"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1, "should filter out completed todos")
+	assert.Equal(t, int64(1), resp.Data[0].ID)
+	assert.False(t, resp.Data[0].Completed)
+}
+
+// =============================================================================
 // Sweep Comment HTML Conversion Tests
 // =============================================================================
 

@@ -30,7 +30,7 @@ fields:
     format: boolean
     labels:
       "true": done
-      "false": pending
+      "false": ""
 
   due_on:
     role: detail
