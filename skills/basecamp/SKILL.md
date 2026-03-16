@@ -80,8 +80,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
-6. **Line breaks in rich text** — Markdown blank lines become `<p>` tags, which Basecamp renders without visible spacing. For visible empty lines between paragraphs, use `<br><br>` instead of blank lines.
-7. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp recordings <type>` for browsing by type.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
 

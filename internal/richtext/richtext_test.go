@@ -105,7 +105,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "mixed formatting",
 			input:    "# Title\n\nThis is **bold** and *italic* and `code`.",
-			expected: "<h1>Title</h1>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
+			expected: "<h1>Title</h1>\n<br>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
 		},
 		{
 			name:     "escapes HTML",
@@ -116,6 +116,71 @@ func TestMarkdownToHTML(t *testing.T) {
 			name:     "escapes ampersand",
 			input:    "Tom & Jerry",
 			expected: "<p>Tom &amp; Jerry</p>",
+		},
+		{
+			name:     "paragraph spacing with blank line",
+			input:    "First paragraph\n\nSecond paragraph",
+			expected: "<p>First paragraph</p>\n<br>\n<p>Second paragraph</p>",
+		},
+		{
+			name:     "multiple blank lines collapse to one break",
+			input:    "First\n\n\n\nSecond",
+			expected: "<p>First</p>\n<br>\n<p>Second</p>",
+		},
+		{
+			name:     "consecutive lines join into one paragraph",
+			input:    "Line one\nLine two",
+			expected: "<p>Line one Line two</p>",
+		},
+		{
+			name:     "blank line before list",
+			input:    "Intro\n\n- Item 1\n- Item 2",
+			expected: "<p>Intro</p>\n<br>\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>",
+		},
+		{
+			name:     "blank line before code block",
+			input:    "Intro\n\n```\ncode\n```",
+			expected: "<p>Intro</p>\n<br>\n<pre><code>code</code></pre>",
+		},
+		{
+			name:     "leading blank lines ignored",
+			input:    "\n\nHello",
+			expected: "<p>Hello</p>",
+		},
+		{
+			name:     "blank line before blockquote",
+			input:    "Intro\n\n> A quote",
+			expected: "<p>Intro</p>\n<br>\n<blockquote>A quote</blockquote>",
+		},
+		{
+			name:     "blank line before horizontal rule",
+			input:    "Intro\n\n---",
+			expected: "<p>Intro</p>\n<br>\n<hr>",
+		},
+		{
+			name:     "heading flushes accumulated paragraph",
+			input:    "Text\n# Heading",
+			expected: "<p>Text</p>\n<h1>Heading</h1>",
+		},
+		{
+			name:     "list flushes accumulated paragraph",
+			input:    "Text\n- Item",
+			expected: "<p>Text</p>\n<ul>\n<li>Item</li>\n</ul>",
+		},
+		{
+			name:     "blockquote flushes accumulated paragraph",
+			input:    "Text\n> Quote",
+			expected: "<p>Text</p>\n<blockquote>Quote</blockquote>",
+		},
+		{
+			name:     "code fence flushes accumulated paragraph",
+			input:    "Text\n```go\nx\n```",
+			expected: "<p>Text</p>\n<pre><code class=\"language-go\">x</code></pre>",
+		},
+		{
+			name:     "horizontal rule flushes accumulated paragraph",
+			input:    "Text\n---",
+			expected: "<p>Text</p>\n<hr>",
 		},
 	}
 
@@ -478,6 +543,10 @@ func TestRoundTrip(t *testing.T) {
 			name:     "unordered list",
 			markdown: "- Item 1\n- Item 2",
 		},
+		{
+			name:     "consecutive lines merge into single paragraph",
+			markdown: "Line 1\nLine 2",
+		},
 	}
 
 	for _, tt := range tests {
@@ -501,6 +570,19 @@ func TestRoundTrip(t *testing.T) {
 			t.Logf("Back: %q", back)
 		})
 	}
+
+	// Consecutive lines should round-trip through a single paragraph
+	t.Run("consecutive lines round-trip as single paragraph", func(t *testing.T) {
+		input := "Line 1\nLine 2"
+		html := MarkdownToHTML(input)
+		back := HTMLToMarkdown(html)
+		if strings.Contains(back, "\n\n") {
+			t.Errorf("round-trip produced two paragraphs, want one\nhtml: %q\nback: %q", html, back)
+		}
+		if !strings.Contains(back, "Line 1") || !strings.Contains(back, "Line 2") {
+			t.Errorf("round-trip lost content\nhtml: %q\nback: %q", html, back)
+		}
+	})
 }
 
 func TestMarkdownToHTMLListVariants(t *testing.T) {
