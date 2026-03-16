@@ -31,12 +31,12 @@ func NewChatCmd() *cobra.Command {
 Use 'basecamp chat list' to see chats in a project.
 Use 'basecamp chat messages' to view recent messages.
 Use 'basecamp chat post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --chat to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching (auto-promotes to text/html)\nUse --content-type text/plain to bypass mention resolution"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --room to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching (auto-promotes to text/html)\nUse --content-type text/plain to bypass mention resolution"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.PersistentFlags().StringVarP(&chatID, "chat", "c", "", "Chat room ID (for projects with multiple chat rooms)")
+	cmd.PersistentFlags().StringVarP(&chatID, "room", "r", "", "Campfire room ID (for projects with multiple rooms)")
 	cmd.AddCommand(
 		newChatListCmd(&project, &chatID),
 		newChatMessagesCmd(&project, &chatID),
@@ -86,12 +86,12 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "messages",
-					Cmd:         "basecamp chat messages --chat <id> --in <project>",
+					Cmd:         "basecamp chat messages --room <id> --in <project>",
 					Description: "View messages",
 				},
 				output.Breadcrumb{
 					Action:      "post",
-					Cmd:         "basecamp chat post \"message\" --chat <id> --in <project>",
+					Cmd:         "basecamp chat post \"message\" --room <id> --in <project>",
 					Description: "Post message",
 				},
 			),
@@ -118,11 +118,11 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 		return err
 	}
 
-	// If a specific chat ID was given via --chat, fetch just that one
+	// If a specific room ID was given via --room, fetch just that one
 	if chatID != "" {
 		chatIDInt, parseErr := strconv.ParseInt(chatID, 10, 64)
 		if parseErr != nil {
-			return output.ErrUsage("Invalid chat ID")
+			return output.ErrUsage("Invalid chat room ID")
 		}
 
 		chat, getErr := app.Account().Campfires().Get(cmd.Context(), chatIDInt)
@@ -142,7 +142,7 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 		return err
 	}
 	if len(enabled) == 0 {
-		return dockToolNotFoundError(allTools, "chat", resolvedProjectID, "chat")
+		return dockToolNotFoundError(allTools, "chat", resolvedProjectID, "chat room")
 	}
 
 	// Fetch full details for each enabled chat
@@ -186,12 +186,12 @@ func chatListBreadcrumbs(chatID, projectID string) []output.Breadcrumb {
 	return []output.Breadcrumb{
 		{
 			Action:      "messages",
-			Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, projectID),
+			Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", chatID, projectID),
 			Description: "View messages",
 		},
 		{
 			Action:      "post",
-			Cmd:         fmt.Sprintf("basecamp chat post \"message\" --chat %s --in %s", chatID, projectID),
+			Cmd:         fmt.Sprintf("basecamp chat post \"message\" --room %s --in %s", chatID, projectID),
 			Description: "Post message",
 		},
 	}
@@ -249,7 +249,7 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 
 	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid chat ID")
+		return output.ErrUsage("Invalid chat room ID")
 	}
 
 	// Get recent messages (lines) using SDK
@@ -273,12 +273,12 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"message\" --chat %s --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"message\" --room %s --in %s", chatID, resolvedProjectID),
 				Description: "Post message",
 			},
 			output.Breadcrumb{
 				Action:      "more",
-				Cmd:         fmt.Sprintf("basecamp chat messages --limit 50 --chat %s --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --limit 50 --room %s --in %s", chatID, resolvedProjectID),
 				Description: "Load more",
 			},
 		),
@@ -359,7 +359,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 
 	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid chat ID")
+		return output.ErrUsage("Invalid chat room ID")
 	}
 
 	// Resolve @mentions — skip if user explicitly set a non-HTML content type.
@@ -399,12 +399,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", chatID, resolvedProjectID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --chat %s --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --room %s --in %s", chatID, resolvedProjectID),
 				Description: "Post another",
 			},
 		)
@@ -412,12 +412,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --room %s", chatID),
 				Description: "View messages",
 			},
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --chat %s", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --room %s", chatID),
 				Description: "Post another",
 			},
 		)
@@ -495,7 +495,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 
 	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
-		return output.ErrUsage("Invalid chat ID")
+		return output.ErrUsage("Invalid chat room ID")
 	}
 
 	contentType := richtext.DetectMIME(filePath)
@@ -518,7 +518,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", chatID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", chatID, resolvedProjectID),
 				Description: "View messages",
 			},
 		)
@@ -526,7 +526,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		breadcrumbs = append(breadcrumbs,
 			output.Breadcrumb{
 				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --chat %s", chatID),
+				Cmd:         fmt.Sprintf("basecamp chat messages --room %s", chatID),
 				Description: "View messages",
 			},
 		)
@@ -604,7 +604,7 @@ You can pass either a line ID or a Basecamp line URL:
 
 			chatIDInt, err := strconv.ParseInt(effectiveChatID, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid chat ID")
+				return output.ErrUsage("Invalid chat room ID")
 			}
 			lineIDInt, err := strconv.ParseInt(lineID, 10, 64)
 			if err != nil {
@@ -630,12 +630,12 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("basecamp chat delete %s --chat %s --in %s", lineID, effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat delete %s --room %s --in %s", lineID, effectiveChatID, resolvedProjectID),
 						Description: "Delete line",
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", effectiveChatID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
@@ -702,7 +702,7 @@ You can pass either a line ID or a Basecamp line URL:
 
 			chatIDInt, err := strconv.ParseInt(effectiveChatID, 10, 64)
 			if err != nil {
-				return output.ErrUsage("Invalid chat ID")
+				return output.ErrUsage("Invalid chat room ID")
 			}
 			lineIDInt, err := strconv.ParseInt(lineID, 10, 64)
 			if err != nil {
@@ -733,7 +733,7 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         fmt.Sprintf("basecamp chat messages --chat %s --in %s", effectiveChatID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", effectiveChatID, resolvedProjectID),
 						Description: "Back to messages",
 					},
 				),
@@ -748,7 +748,7 @@ You can pass either a line ID or a Basecamp line URL:
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
 func getChatID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat", "chat")
+	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat room", "room")
 }
 
 // chatLineDisplayContent produces human-readable content for a campfire line,

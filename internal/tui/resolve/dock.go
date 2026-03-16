@@ -26,7 +26,7 @@ type DockToolResult struct {
 }
 
 // DockTool resolves a dock tool ID from a project using the following precedence:
-// 1. Explicit ID provided (--chat, --board, etc.)
+// 1. Explicit ID provided (--room, --board, etc.)
 // 2. Single tool of type exists - use it automatically
 // 3. Interactive prompt (if terminal is interactive)
 // 4. Error listing available tools (if not interactive)
@@ -178,7 +178,7 @@ func (r *Resolver) multiToolError(tools []DockTool, friendlyName, flagName strin
 
 // Chat resolves a chat ID from a project.
 func (r *Resolver) Chat(ctx context.Context, projectID, explicitID string) (*DockToolResult, error) {
-	return r.DockTool(ctx, projectID, "chat", explicitID, "chat", "chat")
+	return r.DockTool(ctx, projectID, "chat", explicitID, "chat room", "room")
 }
 
 // MessageBoard resolves a message board ID from a project.
