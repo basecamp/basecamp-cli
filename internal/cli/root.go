@@ -184,6 +184,7 @@ func NewRootCmd() *cobra.Command {
 
 	// Context flags
 	cmd.PersistentFlags().StringVarP(&flags.Project, "project", "p", "", "Project ID or name")
+	cmd.PersistentFlags().StringVar(&flags.Project, "in", "", "Project ID or name (alias for --project)")
 	cmd.PersistentFlags().StringVarP(&flags.Account, "account", "a", "", "Account ID")
 	cmd.PersistentFlags().StringVar(&flags.Todolist, "todolist", "", "Todolist ID or name")
 	cmd.PersistentFlags().StringVarP(&flags.Profile, "profile", "P", "", "Named profile")
