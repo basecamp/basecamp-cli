@@ -40,7 +40,7 @@ func newAPIGetCmd() *cobra.Command {
 		Example: `  basecamp api get projects.json
   basecamp api get buckets/123/todos/456.json
   basecamp api get https://3.basecampapi.com/999/projects.json`,
-		Args: cobra.ExactArgs(1),
+		Args: apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -73,7 +73,7 @@ func newAPIPostCmd() *cobra.Command {
 		Long:  "Make a raw POST request to any Basecamp API endpoint.",
 		Example: `  basecamp api post buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'
   basecamp api post buckets/123/message_boards/789/messages.json -d '{"subject":"Hello","content":"<p>World</p>"}'`,
-		Args: cobra.ExactArgs(1),
+		Args: apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
 			if data == "" {
@@ -122,7 +122,7 @@ func newAPIPutCmd() *cobra.Command {
 		Short:   "PUT request to API",
 		Long:    "Make a raw PUT request to any Basecamp API endpoint.",
 		Example: `  basecamp api put buckets/123/todos/456.json -d '{"content":"Updated todo"}'`,
-		Args:    cobra.ExactArgs(1),
+		Args:    apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
 			if data == "" {
@@ -169,7 +169,7 @@ func newAPIDeleteCmd() *cobra.Command {
 		Short:   "DELETE request to API",
 		Long:    "Make a raw DELETE request to any Basecamp API endpoint.",
 		Example: `  basecamp api delete buckets/123/todos/456.json`,
-		Args:    cobra.ExactArgs(1),
+		Args:    apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -189,6 +189,16 @@ func newAPIDeleteCmd() *cobra.Command {
 			)
 		},
 	}
+}
+
+// apiPathArgs validates that exactly one positional arg (the API path) is given.
+// Using a custom validator avoids the global transformArgError rewriting the
+// message to "ID required" — the api argument is <path>, not <id>.
+func apiPathArgs(cmd *cobra.Command, args []string) error {
+	if len(args) != 1 {
+		return output.ErrUsage("path required")
+	}
+	return nil
 }
 
 // parsePath extracts and normalizes the API path.
