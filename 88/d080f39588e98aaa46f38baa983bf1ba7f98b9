@@ -1,0 +1,25 @@
+internal/commands/chat.go
+  f312841148b5ac42 812-817
+internal/commands/chat_test.go
+  f312841148b5ac42 919-920,929-944
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "88d080f39588e98aaa46f38baa983bf1ba7f98b9",
+  "prompts": {
+    "f312841148b5ac42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47500926-29a8-4ac9-b5b7-5e5b985fe162",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 24,
+      "total_deletions": 2,
+      "accepted_lines": 24,
+      "overriden_lines": 0
+    }
+  }
+}
