@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# tools.bats - Test tools command help and error handling
+# tools.bats - Test tools command help output
 
 load test_helper
 
