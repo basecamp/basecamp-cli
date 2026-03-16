@@ -40,8 +40,8 @@ func NoTodos(context string) Message {
 	switch context {
 	case "completed":
 		msg.Body = "No completed todos."
-	case "pending":
-		msg.Body = "No pending todos. Everything is done!"
+	case "incomplete", "pending":
+		msg.Body = "No incomplete todos. Everything is done!"
 	case "overdue":
 		msg.Body = "No overdue todos. You're on track!"
 	default:

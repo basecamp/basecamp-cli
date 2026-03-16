@@ -267,7 +267,7 @@ func newTodosListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
-	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, pending)")
+	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, incomplete)")
 	cmd.Flags().BoolVar(&flags.completed, "completed", false, "Show completed todos (shorthand for --status completed)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
@@ -608,7 +608,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 			if status == "completed" && !todo.Completed {
 				continue
 			}
-			if status == "pending" && todo.Completed {
+			if (status == "incomplete" || status == "pending") && todo.Completed {
 				continue
 			}
 		}
