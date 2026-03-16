@@ -715,3 +715,17 @@ SUB basecamp uploads vault list
 SUB basecamp uploads vaults
 SUB basecamp uploads vaults create
 SUB basecamp uploads vaults list
+FLAG basecamp campfire --chat type=string
+FLAG basecamp campfire delete --chat type=string
+FLAG basecamp campfire line --chat type=string
+FLAG basecamp campfire list --chat type=string
+FLAG basecamp campfire messages --chat type=string
+FLAG basecamp campfire post --chat type=string
+FLAG basecamp campfire upload --chat type=string
+FLAG basecamp chat --chat type=string
+FLAG basecamp chat delete --chat type=string
+FLAG basecamp chat line --chat type=string
+FLAG basecamp chat list --chat type=string
+FLAG basecamp chat messages --chat type=string
+FLAG basecamp chat post --chat type=string
+FLAG basecamp chat upload --chat type=string
