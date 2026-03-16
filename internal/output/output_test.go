@@ -2215,7 +2215,9 @@ func TestMarkdownRenderObjectPreservesURLs(t *testing.T) {
 }
 
 func TestStyledRenderTablePreservesURLs(t *testing.T) {
-	url := "https://3.basecampapi.com/1234567/buckets/12345678/todolists/9876543210.json"
+	// URL must be >40 chars (to exercise the cap exemption) but short enough
+	// to fit beside "name" in an 80-char default terminal.
+	url := "https://3.basecampapi.com/1234567/todolists/98765.json"
 	data := []any{
 		map[string]any{"name": "Tasks", "todolists_url": url},
 	}
@@ -2462,6 +2464,64 @@ func TestSelectColumnsUsesFormattedDateWidth(t *testing.T) {
 		if col.key == "created_at" {
 			assert.Less(t, col.width, 20,
 				"date column width should reflect formatted date, not raw ISO8601")
+		}
+	}
+}
+
+// =============================================================================
+// URL Column Width Exemption
+// =============================================================================
+
+func TestSelectColumnsExemptsURLColumnsFromWidthCap(t *testing.T) {
+	r := &Renderer{width: 120}
+	cols := []column{
+		{key: "name", header: "Name", priority: 2},
+		{key: "href", header: "Href", priority: 5},
+		{key: "description", header: "Description", priority: 8},
+	}
+	data := []map[string]any{
+		{
+			"name":        "Alice",
+			"href":        "https://3.basecampapi.com/1234567/people/9999999.json",
+			"description": "This is a long description that exceeds forty characters easily",
+		},
+	}
+	selected := r.selectColumns(cols, data)
+
+	var hrefCol, descCol column
+	for _, col := range selected {
+		switch col.key {
+		case "href":
+			hrefCol = col
+		case "description":
+			descCol = col
+		}
+	}
+
+	assert.Greater(t, hrefCol.width, 40, "URL column should retain actual width")
+	assert.True(t, hrefCol.containsURL, "URL column should be flagged")
+	assert.Equal(t, 40, descCol.width, "non-URL column should be capped at 40")
+	assert.False(t, descCol.containsURL, "non-URL column should not be flagged")
+}
+
+func TestSelectColumnsExemptsURLColumnsForSuffixFields(t *testing.T) {
+	r := &Renderer{width: 120}
+	cols := []column{
+		{key: "name", header: "Name", priority: 2},
+		{key: "todolists_url", header: "Todolists Url", priority: 5},
+	}
+	data := []map[string]any{
+		{
+			"name":          "Project Alpha",
+			"todolists_url": "https://3.basecampapi.com/1234567/buckets/8888/todolists.json",
+		},
+	}
+	selected := r.selectColumns(cols, data)
+
+	for _, col := range selected {
+		if col.key == "todolists_url" {
+			assert.Greater(t, col.width, 40, "URL column with _url suffix should retain actual width")
+			assert.True(t, col.containsURL, "URL column should be flagged")
 		}
 	}
 }
