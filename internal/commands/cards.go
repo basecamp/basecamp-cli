@@ -472,7 +472,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", createdCardID, e.Message)
 						return e
 					}
-					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, err)
+					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, sdkErr)
 				}
 			}
 
@@ -538,7 +538,7 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards update 789 --body "new body"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && due == "" && assignee == "" {
+			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && due == "" && !cmd.Flags().Changed("assignee") {
 				return noChanges(cmd)
 			}
 
@@ -1009,7 +1009,7 @@ func NewCardCmd() *cobra.Command {
 						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", createdCardID, e.Message)
 						return e
 					}
-					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, err)
+					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, sdkErr)
 				}
 			}
 
