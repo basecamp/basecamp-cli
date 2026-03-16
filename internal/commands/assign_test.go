@@ -575,7 +575,7 @@ func TestAssignBatchLazyResolution(t *testing.T) {
 	log := transport.requestLog
 	transport.mu.Unlock()
 
-	var todoGetIdx, profileIdx int
+	todoGetIdx, profileIdx := -1, -1
 	for i, entry := range log {
 		if strings.Contains(entry, "/todos/222") && strings.HasPrefix(entry, "GET") {
 			todoGetIdx = i
@@ -584,6 +584,8 @@ func TestAssignBatchLazyResolution(t *testing.T) {
 			profileIdx = i
 		}
 	}
+	require.NotEqual(t, -1, todoGetIdx, "expected GET /todos/222 in request log")
+	require.NotEqual(t, -1, profileIdx, "expected GET /my/profile.json in request log")
 	assert.Greater(t, profileIdx, todoGetIdx, "person resolution should happen after the valid todo is fetched")
 }
 

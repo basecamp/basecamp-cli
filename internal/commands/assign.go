@@ -122,6 +122,7 @@ func (e *fatalAssignError) Unwrap() error { return e.err }
 
 // assignResult holds the outcome of a single assign/unassign operation.
 type assignResult struct {
+	id          string
 	item        any
 	summary     string
 	breadcrumbs []output.Breadcrumb
@@ -143,6 +144,9 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 	}
 
 	extractedIDs := extractIDs(args)
+	if len(extractedIDs) == 0 {
+		return missingArg(cmd, "<id|url>...")
+	}
 
 	var results []*assignResult
 	var failed []string
@@ -195,7 +199,7 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 
 	batchBreadcrumbs := []output.Breadcrumb{{
 		Action:      "unassign",
-		Cmd:         fmt.Sprintf("basecamp unassign %s%s --from %s --project %s", extractedIDs[0], typeFlag, assigneeID, resolvedProjectID),
+		Cmd:         fmt.Sprintf("basecamp unassign %s%s --from %s --project %s", results[0].id, typeFlag, assigneeID, resolvedProjectID),
 		Description: "Remove assignee",
 	}}
 
@@ -233,6 +237,9 @@ func unassignItems(cmd *cobra.Command, args []string, assignee *string, project 
 	}
 
 	extractedIDs := extractIDs(args)
+	if len(extractedIDs) == 0 {
+		return missingArg(cmd, "<id|url>...")
+	}
 
 	var results []*assignResult
 	var failed []string
@@ -284,7 +291,7 @@ func unassignItems(cmd *cobra.Command, args []string, assignee *string, project 
 
 	batchBreadcrumbs := []output.Breadcrumb{{
 		Action:      "assign",
-		Cmd:         fmt.Sprintf("basecamp assign %s%s --to <person> --project %s", extractedIDs[0], typeFlag, resolvedProjectID),
+		Cmd:         fmt.Sprintf("basecamp assign %s%s --to <person> --project %s", results[0].id, typeFlag, resolvedProjectID),
 		Description: "Add assignee",
 	}}
 
@@ -543,6 +550,7 @@ func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID str
 	if containsID(assigneeIDs, assigneeIDInt) {
 		assigneeName := findAssigneeName(todo.Assignees, assigneeIDInt)
 		return &assignResult{
+			id:      todoIDStr,
 			item:    todo,
 			summary: fmt.Sprintf("%s is already assigned to to-do #%s", assigneeName, todoIDStr),
 		}, nil
@@ -559,6 +567,7 @@ func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID str
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
 	return &assignResult{
+		id:      todoIDStr,
 		item:    updated,
 		summary: fmt.Sprintf("Assigned to-do #%s to %s", todoIDStr, assigneeName),
 		breadcrumbs: []output.Breadcrumb{
@@ -587,6 +596,7 @@ func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID str
 	if containsID(assigneeIDs, assigneeIDInt) {
 		assigneeName := findAssigneeName(card.Assignees, assigneeIDInt)
 		return &assignResult{
+			id:      cardIDStr,
 			item:    card,
 			summary: fmt.Sprintf("%s is already assigned to card #%s", assigneeName, cardIDStr),
 		}, nil
@@ -603,6 +613,7 @@ func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID str
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
 	return &assignResult{
+		id:      cardIDStr,
 		item:    updated,
 		summary: fmt.Sprintf("Assigned card #%s to %s", cardIDStr, assigneeName),
 		breadcrumbs: []output.Breadcrumb{
@@ -631,6 +642,7 @@ func doAssignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID str
 	if containsID(assigneeIDs, assigneeIDInt) {
 		assigneeName := findAssigneeName(step.Assignees, assigneeIDInt)
 		return &assignResult{
+			id:      stepIDStr,
 			item:    step,
 			summary: fmt.Sprintf("%s is already assigned to step #%s", assigneeName, stepIDStr),
 		}, nil
@@ -647,6 +659,7 @@ func doAssignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID str
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
 	return &assignResult{
+		id:      stepIDStr,
 		item:    updated,
 		summary: fmt.Sprintf("Assigned step #%s to %s", stepIDStr, assigneeName),
 		breadcrumbs: []output.Breadcrumb{
@@ -676,6 +689,7 @@ func doUnassignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr string, assig
 	}
 
 	return &assignResult{
+		id:      todoIDStr,
 		item:    updated,
 		summary: fmt.Sprintf("Removed assignee from to-do #%s", todoIDStr),
 		breadcrumbs: []output.Breadcrumb{
@@ -710,6 +724,7 @@ func doUnassignCard(cmd *cobra.Command, app *appctx.App, cardIDStr string, assig
 	}
 
 	return &assignResult{
+		id:      cardIDStr,
 		item:    updated,
 		summary: fmt.Sprintf("Removed assignee from card #%s", cardIDStr),
 		breadcrumbs: []output.Breadcrumb{
@@ -744,6 +759,7 @@ func doUnassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assig
 	}
 
 	return &assignResult{
+		id:      stepIDStr,
 		item:    updated,
 		summary: fmt.Sprintf("Removed assignee from step #%s", stepIDStr),
 		breadcrumbs: []output.Breadcrumb{
