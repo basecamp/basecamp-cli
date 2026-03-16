@@ -651,7 +651,7 @@ func TestAgentHelpFiltersTodolistFromInheritedFlags(t *testing.T) {
 	cmd.AddCommand(commands.NewAPICmd())
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"api", "--agent", "--help"})
-	_ = cmd.Execute()
+	require.NoError(t, cmd.Execute())
 
 	var info agentHelpInfo
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
@@ -674,7 +674,7 @@ func TestAgentHelpSuppressesProjectForIDURLCommands(t *testing.T) {
 	cmd.AddCommand(commands.NewSubscriptionsCmd())
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"subscriptions", "show", "--agent", "--help"})
-	_ = cmd.Execute()
+	require.NoError(t, cmd.Execute())
 
 	var info agentHelpInfo
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
@@ -685,4 +685,30 @@ func TestAgentHelpSuppressesProjectForIDURLCommands(t *testing.T) {
 	}
 	assert.NotContains(t, names, "project", "agent help should suppress --project for <id|url> commands")
 	assert.Contains(t, names, "json")
+}
+
+func TestAgentHelpPromotesParentScopedFlags(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewChatCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"chat", "post", "--agent", "--help"})
+	require.NoError(t, cmd.Execute())
+
+	var info agentHelpInfo
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+
+	flagNames := make([]string, len(info.Flags))
+	for i, f := range info.Flags {
+		flagNames[i] = f.Name
+	}
+	assert.Contains(t, flagNames, "room", "parent-scoped --room should be promoted to flags")
+
+	inheritedNames := make([]string, len(info.InheritedFlags))
+	for i, f := range info.InheritedFlags {
+		inheritedNames[i] = f.Name
+	}
+	assert.NotContains(t, inheritedNames, "room", "--room should not appear in inherited flags")
 }

@@ -727,6 +727,18 @@ func emitAgentHelp(cmd *cobra.Command) {
 		})
 	})
 
+	// Parent-scoped flags (e.g. --room on chat subcommands) — promoted into
+	// flags to match text help's parentScopedFlags promotion.
+	parentScopedFlags(cmd).VisitAll(func(f *pflag.Flag) {
+		info.Flags = append(info.Flags, agentFlag{
+			Name:      f.Name,
+			Shorthand: f.Shorthand,
+			Type:      f.Value.Type(),
+			Default:   f.DefValue,
+			Usage:     f.Usage,
+		})
+	})
+
 	// Inherited flags — shared logic with filterInheritedFlags (text help)
 	curatedInheritedFlags(cmd).VisitAll(func(f *pflag.Flag) {
 		info.InheritedFlags = append(info.InheritedFlags, agentFlag{
