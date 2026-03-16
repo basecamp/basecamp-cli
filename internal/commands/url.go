@@ -25,7 +25,7 @@ type ParsedURL struct {
 // NewURLCmd creates the url command for parsing Basecamp URLs.
 func NewURLCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "url [parse] <url>",
+		Use:   "url <url>",
 		Short: "Parse Basecamp URLs",
 		Long: `Parse and work with Basecamp URLs.
 
