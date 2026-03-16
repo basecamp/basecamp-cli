@@ -1,0 +1,23 @@
+e2e/smoke/smoke_lineup.bats
+  ee4158c5fe67bc7f 14-15,19,29-32,36,38,44-47,51-53,55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "5f4ec8655d7850b3fb34754e13e05a6baef6a553",
+  "prompts": {
+    "ee4158c5fe67bc7f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "391238dd-6bbb-46d3-883c-b77c437b6632",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 8,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    }
+  }
+}
