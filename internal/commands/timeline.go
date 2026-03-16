@@ -423,14 +423,14 @@ func formatEvent(e basecamp.TimelineEvent) string {
 }
 
 func runTimelineWatch(cmd *cobra.Command, args []string, project, person string, interval time.Duration, limit, page int, all bool) error {
-	if err := validateTimelinePagination(limit, page, all); err != nil {
-		return err
-	}
 	if all {
 		return output.ErrUsage("--all cannot be used with --watch")
 	}
 	if page > 0 {
 		return output.ErrUsage("--page cannot be used with --watch")
+	}
+	if err := validateTimelinePagination(limit, page, all); err != nil {
+		return err
 	}
 
 	app := appctx.FromContext(cmd.Context())
