@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
@@ -174,17 +175,14 @@ For example, clone a Chat to create a second chat room in the same project.`,
 				return err
 			}
 
-			created, err := app.Account().Tools().Create(cmd.Context(), sourceToolID)
-			if err != nil {
-				return convertSDKError(err)
+			var cloneOpts *basecamp.CloneToolOptions
+			if title != "" {
+				cloneOpts = &basecamp.CloneToolOptions{Title: title}
 			}
 
-			// Rename the tool if a title was provided
-			if title != "" {
-				created, err = app.Account().Tools().Update(cmd.Context(), created.ID, title)
-				if err != nil {
-					return convertSDKError(err)
-				}
+			created, err := app.Account().Tools().Create(cmd.Context(), sourceToolID, cloneOpts)
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.OK(created,

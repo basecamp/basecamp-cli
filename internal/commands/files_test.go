@@ -10,6 +10,32 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
+func TestIsStorageURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"https://storage.3.basecamp.com/123/blobs/abc/download/file.eml", true},
+		{"https://storage.3.basecamp.com/99/blobs/def-ghi/download/My%20Doc.pdf", true},
+		{"https://3.basecamp.com/123/buckets/456/uploads/789", false},
+		{"789", false},
+		{"", false},
+		{"https://storage.3.basecamp.com/123/blobs/abc", false},                  // no /download/
+		{"https://evil.com/blobs/abc/download/file.eml", false},                  // wrong host
+		{"https://storage.3.basecamp.com/123/uploads/789", false},                // no /blobs/
+		{"https://storage.evil.basecamp.com.evil.com/blobs/x/download/y", false}, // wrong TLD
+		{"http://storage.3.basecamp.com/123/blobs/abc/download/file.eml", false}, // http not allowed
+		{"ftp://storage.3.basecamp.com/123/blobs/abc/download/file.eml", false},  // wrong scheme
+		{"storage.3.basecamp.com/123/blobs/abc/download/file.eml", false},        // no scheme
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, isStorageURL(tt.input))
+		})
+	}
+}
+
 // TestDocsCreateHasSubscribeFlags tests that docs create has --subscribe and --no-subscribe flags.
 func TestDocsCreateHasSubscribeFlags(t *testing.T) {
 	cmd := NewFilesCmd()

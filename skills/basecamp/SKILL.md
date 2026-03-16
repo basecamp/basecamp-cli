@@ -160,6 +160,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Download file | `basecamp files download <id> --in <project>` |
+| Download inline attachment | `basecamp files download "https://storage.3.basecamp.com/.../download/report.pdf"` |
 | Watch timeline | `basecamp timeline --watch` |
 
 ## URL Parsing
@@ -296,6 +297,9 @@ basecamp cards move <card_id> --to <column_id> --position 1 --in <project>
 
 ```bash
 basecamp files download <upload_id> --in <project> --out ./downloads
+
+# Download inline attachment from a storage URL (no --in needed)
+basecamp files download "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf"
 ```
 
 ## Resource Reference
@@ -425,6 +429,7 @@ basecamp files list --vault <folder_id> --in <project>  # List folder contents
 basecamp files show <id> --in <project>                 # Show item (auto-detects type)
 basecamp files download <id> --in <project>             # Download file
 basecamp files download <id> --out ./dir                # Download to specific dir
+basecamp files download "https://storage.../download/f" # Download inline attachment
 basecamp files folder create "Folder" --in <project>
 basecamp files doc create "Doc" "Body" --in <project>
 basecamp files doc create "Draft" --draft --in <project>

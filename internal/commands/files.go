@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1351,10 +1352,14 @@ func newFilesDownloadCmd(project *string) *cobra.Command {
 		Short: "Download an uploaded file",
 		Long: `Download an uploaded file to the local filesystem.
 
-You can pass either an upload ID or a Basecamp URL:
+You can pass either an upload ID, a Basecamp URL, or a storage URL:
   basecamp files download 789 --in my-project
   basecamp files download https://3.basecamp.com/123/buckets/456/uploads/789
-  basecamp files download 789 --out ./downloads --in my-project`,
+  basecamp files download "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf"
+  basecamp files download 789 --out ./downloads --in my-project
+
+Storage URLs (from inline attachments in rich text) are downloaded directly
+via the API. No --in flag is needed for storage URLs.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -1363,7 +1368,37 @@ You can pass either an upload ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
+			// Storage URL path: download via SDK (handles URL rewriting, auth, redirects)
+			if isStorageURL(args[0]) {
+				result, err := app.Account().DownloadURL(cmd.Context(), args[0])
+				if err != nil {
+					return convertSDKError(err)
+				}
+				defer result.Body.Close()
+
+				filename, outputPath, bytesWritten, err := writeDownloadToFile(result, outDir, result.Filename)
+				if err != nil {
+					return err
+				}
+
+				downloadResult := struct {
+					URL      string `json:"url"`
+					Filename string `json:"filename"`
+					Path     string `json:"path"`
+					ByteSize int64  `json:"byte_size"`
+				}{
+					URL:      args[0],
+					Filename: filename,
+					Path:     outputPath,
+					ByteSize: bytesWritten,
+				}
+
+				return app.OK(downloadResult,
+					output.WithSummary(fmt.Sprintf("Downloaded %s (%d bytes)", filename, bytesWritten)),
+				)
+			}
+
+			// Upload ID path: two-step download via SDK
 			uploadIDStr, urlProjectID := extractWithProject(args[0])
 
 			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
@@ -1401,39 +1436,10 @@ You can pass either an upload ID or a Basecamp URL:
 			}
 			defer result.Body.Close()
 
-			// Determine output directory
-			outputDir := outDir
-			if outputDir == "" {
-				outputDir = "."
-			}
-
-			// Create output file path with sanitized filename to prevent path traversal
-			filename := result.Filename
-			if filename == "" {
-				filename = fmt.Sprintf("upload-%d", uploadID)
-			}
-			// Sanitize filename: use only the base name to prevent path traversal
-			filename = filepath.Base(filename)
-			outputPath := filepath.Join(outputDir, filename)
-
-			// Verify the resolved path is within outputDir to prevent traversal attacks
-			absOutputDir, _ := filepath.Abs(outputDir)
-			absOutputPath, _ := filepath.Abs(outputPath)
-			if !strings.HasPrefix(absOutputPath, absOutputDir+string(filepath.Separator)) && absOutputPath != absOutputDir {
-				return output.ErrUsage("Invalid filename: path traversal detected")
-			}
-
-			// Create output file
-			outFile, err := createFile(outputPath)
+			fallback := fmt.Sprintf("upload-%d", uploadID)
+			filename, outputPath, bytesWritten, err := writeDownloadToFile(result, outDir, fallback)
 			if err != nil {
-				return fmt.Errorf("failed to create output file: %w", err)
-			}
-			defer outFile.Close()
-
-			// Copy content to file
-			bytesWritten, err := copyFileContent(outFile, result.Body)
-			if err != nil {
-				return fmt.Errorf("failed to write file: %w", err)
+				return err
 			}
 
 			// Build result for output
@@ -1484,6 +1490,64 @@ func createFile(path string) (*os.File, error) {
 // copyFileContent copies from reader to writer and returns bytes written.
 func copyFileContent(dst *os.File, src io.Reader) (int64, error) {
 	return io.Copy(dst, src)
+}
+
+// writeDownloadToFile writes a DownloadResult to a file in outDir, using
+// result.Filename if available, otherwise fallbackName. Returns the sanitized
+// filename, output path, and bytes written.
+func writeDownloadToFile(result *basecamp.DownloadResult, outDir, fallbackName string) (filename, outputPath string, written int64, err error) {
+	dir := outDir
+	if dir == "" {
+		dir = "."
+	}
+
+	filename = result.Filename
+	if filename == "" {
+		filename = fallbackName
+	}
+	filename = filepath.Base(filename)
+	if filename == "." || filename == "" {
+		filename = "download"
+	}
+	outputPath = filepath.Join(dir, filename)
+
+	// Verify the resolved path is within dir to prevent traversal attacks
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to resolve output directory: %w", err)
+	}
+	absPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to resolve output path: %w", err)
+	}
+	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+		return "", "", 0, output.ErrUsage("Invalid filename: path traversal detected")
+	}
+
+	outFile, err := createFile(outputPath)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	written, err = copyFileContent(outFile, result.Body)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to write file: %w", err)
+	}
+	return filename, outputPath, written, nil
+}
+
+// isStorageURL returns true if the argument looks like a Basecamp storage blob URL.
+func isStorageURL(arg string) bool {
+	u, err := url.Parse(arg)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "https" &&
+		strings.HasSuffix(u.Hostname(), ".basecamp.com") &&
+		strings.HasPrefix(u.Hostname(), "storage.") &&
+		strings.Contains(u.Path, "/blobs/") &&
+		strings.Contains(u.Path, "/download/")
 }
 
 // humanSize formats bytes as a human-readable string (e.g., "9.1mb").

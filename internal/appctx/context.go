@@ -105,6 +105,11 @@ func NewApp(cfg *config.Config) *App {
 	// Note: resilience.GatingHooks implements basecamp.GatingHooks, while CLIHooks implements basecamp.Hooks
 	hooks := basecamp.NewChainHooks(gatingHooks, cliHooks)
 
+	// Create a shared transport for both the SDK and manual HTTP requests.
+	// This ensures connection pooling, proxy settings, and custom CA/mTLS
+	// are consistent across all HTTP calls.
+	transport := http.DefaultTransport
+
 	// Create SDK client with auth adapter and chained hooks
 	// Note: AccountID is NOT set here - use app.Account() for account-scoped operations
 	sdkCfg := &basecamp.Config{
@@ -114,7 +119,10 @@ func NewApp(cfg *config.Config) *App {
 		CacheDir:     cfg.CacheDir,
 		CacheEnabled: cfg.CacheEnabled,
 	}
-	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr}, basecamp.WithHooks(hooks))
+	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr},
+		basecamp.WithHooks(hooks),
+		basecamp.WithTransport(transport),
+	)
 
 	// Create name resolver using SDK client and account ID
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
