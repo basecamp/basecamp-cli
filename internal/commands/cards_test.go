@@ -1067,3 +1067,177 @@ func TestCardShortcutFlagsAfterTitle(t *testing.T) {
 		assert.NotEqual(t, "Project ID required", e.Message)
 	}
 }
+
+// =============================================================================
+// Card Content HTML Conversion Tests
+// =============================================================================
+
+// mockCardCreateTransport handles resolver and dock API calls, and captures the POST body.
+type mockCardCreateTransport struct {
+	capturedBody []byte
+	capturedPath string
+}
+
+func (t *mockCardCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		if strings.Contains(req.URL.Path, "/projects.json") {
+			body = `[{"id": 123, "name": "Test Project"}]`
+		} else if strings.Contains(req.URL.Path, "/projects/") {
+			body = `{"id": 123, "dock": [{"name": "card_table", "id": 777, "enabled": true}]}`
+		} else {
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" || req.Method == "PUT" {
+		t.capturedPath = req.URL.Path
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "title": "Test", "status": "active"}`
+		status := 201
+		if req.Method == "PUT" {
+			status = 200
+		}
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func setupCardsMockApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkCfg := &basecamp.Config{}
+	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+}
+
+func TestCardsCreateContentIsHTML(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardsCmd()
+	err := executeCommand(cmd, app, "create", "Title", "**bold** text", "--column", "12345")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "<strong>bold</strong>")
+}
+
+func TestCardsUpdateContentIsHTML(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardsCmd()
+	err := executeCommand(cmd, app, "update", "999", "--body", "**bold** text")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "<strong>bold</strong>")
+}
+
+func TestCardShortcutContentIsHTML(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardCmd()
+	err := executeCommand(cmd, app, "Title", "**bold** text", "--column", "12345")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "<strong>bold</strong>")
+}
+
+func TestCardsCreateLocalImageErrors(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardsCmd()
+	// Local image path triggers resolveLocalImages which should error on missing file
+	err := executeCommand(cmd, app, "create", "Title", "![alt](./missing.png)", "--column", "12345")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing.png")
+}
+
+func TestCardsUpdateLocalImageErrors(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardsCmd()
+	err := executeCommand(cmd, app, "update", "999", "--body", "![alt](./missing.png)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing.png")
+}
+
+func TestCardsCreateRemoteImagePassesThrough(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardsCmd()
+	err := executeCommand(cmd, app, "create", "Title", "![alt](https://example.com/img.png)", "--column", "12345")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, `<img src="https://example.com/img.png"`)
+}

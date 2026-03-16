@@ -1083,6 +1083,21 @@ Examples:
 				)
 			}
 
+			// Convert comment through rich text pipeline
+			commentHTML := comment
+			if comment != "" {
+				commentHTML = richtext.MarkdownToHTML(comment)
+				var pipelineErr error
+				commentHTML, pipelineErr = resolveLocalImages(cmd, app, commentHTML)
+				if pipelineErr != nil {
+					return pipelineErr
+				}
+				commentHTML, pipelineErr = resolveMentions(cmd.Context(), app.Names, commentHTML)
+				if pipelineErr != nil {
+					return pipelineErr
+				}
+			}
+
 			// Execute actions
 			result := SweepResult{
 				Count:          len(todoIDs),
@@ -1095,7 +1110,7 @@ Examples:
 
 				// Add comment if specified
 				if comment != "" {
-					req := &basecamp.CreateCommentRequest{Content: comment}
+					req := &basecamp.CreateCommentRequest{Content: commentHTML}
 					_, commentErr := app.Account().Comments().Create(cmd.Context(), todoID, req)
 					if commentErr != nil {
 						result.CommentFailed = append(result.CommentFailed, todoID)
