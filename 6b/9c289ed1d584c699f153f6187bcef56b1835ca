@@ -1,0 +1,25 @@
+e2e/core.bats
+  3014505b64c8cd2b 83
+e2e/errors.bats
+  3014505b64c8cd2b 116,125,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "6b9c289ed1d584c699f153f6187bcef56b1835ca",
+  "prompts": {
+    "3014505b64c8cd2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af8c8cdb-02d9-4255-a4e7-fb77266985bb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 2,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
