@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1845,7 +1846,7 @@ func TestWrapText(t *testing.T) {
 			name:     "unicode characters",
 			text:     "hello 世界 emoji 🎉 test",
 			maxWidth: 15,
-			expected: "hello 世界 emoji\n🎉 test",
+			expected: "hello 世界\nemoji 🎉 test",
 		},
 		{
 			name:     "zero width defaults to 80",
@@ -2176,6 +2177,15 @@ func TestFormatCellDoesNotTruncateURLs(t *testing.T) {
 		assert.Equal(t, httpURL, result)
 	})
 
+	t.Run("emoji string truncated by display width", func(t *testing.T) {
+		// 38 runes but 42 display cells (4 emoji x 2 cells each = +4 extra)
+		// Old rune-count code wouldn't truncate (38 < 40); new code does (42 > 40)
+		input := "Hello world with some emoji here: 🎉🎊🎈🎆"
+		result := formatCell(input)
+		assert.LessOrEqual(t, ansi.StringWidth(result), 40)
+		assert.True(t, strings.HasSuffix(result, "..."))
+	})
+
 	t.Run("URL-like string with spaces is truncated", func(t *testing.T) {
 		// After newline collapsing, a value like "https://example.com\n(extra...)"
 		// becomes "https://example.com (extra...)" — not a real URL.
@@ -2225,6 +2235,46 @@ func TestStyledRenderTablePreservesURLs(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, buf.String(), url)
+}
+
+func TestStyledRenderTableEmojiAlignment(t *testing.T) {
+	data := []any{
+		map[string]any{
+			"title": "Plain ASCII title here",
+			"id":    1,
+		},
+		map[string]any{
+			"title": "Title with emoji 🎉🎊🎈🎆 and more text padding it out",
+			"id":    2,
+		},
+		map[string]any{
+			"title": "CJK混合English标题needs correct width",
+			"id":    3,
+		},
+	}
+
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	lines := strings.Split(output, "\n")
+
+	// All data lines in the table should have the same display width,
+	// proving that selectColumns (lipgloss.Width) and formatCell
+	// (ansi.StringWidth + ansi.Truncate) agree on cell widths.
+	var widths []int
+	for _, line := range lines {
+		w := ansi.StringWidth(line)
+		if w > 0 {
+			widths = append(widths, w)
+		}
+	}
+	require.NotEmpty(t, widths)
+	for _, w := range widths[1:] {
+		assert.Equal(t, widths[0], w, "all table lines should have equal display width")
+	}
 }
 
 func TestMarkdownRenderTableSkipsURLColumns(t *testing.T) {
