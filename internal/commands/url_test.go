@@ -394,7 +394,7 @@ func TestURLParseBreadcrumbsForStep(t *testing.T) {
 func TestURLCmdCreation(t *testing.T) {
 	cmd := NewURLCmd()
 	require.NotNil(t, cmd, "NewURLCmd returned nil")
-	assert.Equal(t, "url [parse] <url>", cmd.Use)
+	assert.Equal(t, "url <url>", cmd.Use)
 	assert.NotEmpty(t, cmd.Short, "command should have short description")
 
 	// Should have parse subcommand

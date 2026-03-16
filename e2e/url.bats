@@ -9,6 +9,8 @@ load test_helper
 @test "basecamp url --help shows help" {
   run basecamp url --help
   assert_success
+  assert_output_contains "<url>"
+  assert_output_not_contains "[parse]"
   assert_output_contains "parse"
 }
 
