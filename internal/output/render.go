@@ -396,7 +396,9 @@ var skipMarkdownExtra = map[string]bool{
 // keepURLColumns lists _url-suffixed fields that carry meaningful data
 // and should not be filtered from markdown tables.
 var keepURLColumns = map[string]bool{
-	"base_url": true,
+	"base_url":     true,
+	"payload_url":  true,
+	"download_url": true,
 }
 
 func skipMarkdownColumn(key string) bool {
