@@ -372,7 +372,7 @@ basecamp cards move <id> --to <column_id>             # Move to column (numeric 
 basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
 basecamp cards move <id> --to "Done" --position 1 --card-table <table_id>  # Move to position
 basecamp cards move <id> --on-hold                    # Move to on-hold of current column
-basecamp cards move <id> --to "Done" --on-hold        # Move to on-hold of target column
+basecamp cards move <id> --to <column_id> --on-hold   # Move to on-hold of target column
 ```
 
 **Archived/trashed cards:** `cards list` only returns active cards. For archived or trashed cards, use `basecamp recordings cards --status archived --in <project>` or `--status trashed`.

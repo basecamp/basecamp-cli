@@ -77,4 +77,4 @@ require (
 	golang.org/x/term v0.36.0 // indirect
 )
 
-replace github.com/basecamp/basecamp-sdk/go => github.com/nnemirovsky/basecamp-sdk/go v0.5.1-0.20260316052450-bb6cf7ecd87b
+replace github.com/basecamp/basecamp-sdk/go => github.com/nnemirovsky/basecamp-sdk/go v0.5.1-0.20260316054246-f5ec05a8d942

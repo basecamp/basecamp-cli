@@ -641,11 +641,11 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"
   basecamp cards move 789 --to "Done" --position 1 --in my-project
   basecamp cards move 789 --on-hold --in my-project
-  basecamp cards move 789 --to "Developing" --on-hold --in my-project`,
+  basecamp cards move 789 --to 456 --on-hold --in my-project`,
 		Args:    cobra.ExactArgs(1),
 		Aliases: []string{"mv"},
 		Annotations: map[string]string{
-			"notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
+			"agent_notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
 				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
 				"Cards do NOT support --assignee filtering.",
 		},
@@ -657,6 +657,9 @@ You can pass either a card ID or a Basecamp URL:
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
 			if positionSet && position <= 0 {
 				return output.ErrUsage("--position must be a positive integer (1-indexed)")
+			}
+			if positionSet && onHold {
+				return output.ErrUsage("--position cannot be used with --on-hold")
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -802,28 +805,44 @@ You can pass either a card ID or a Basecamp URL:
 }
 
 func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr, projectID, targetColumn, cardTableFlag string) error {
-	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
-	if err != nil {
-		return convertSDKError(err)
-	}
-
-	cardTableIDVal, err := getCardTableID(cmd, app, projectID, cardTableFlag)
-	if err != nil {
-		return err
-	}
-
-	cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid card table ID")
-	}
-
-	cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
-	if err != nil {
-		return convertSDKError(err)
-	}
-
 	var column *basecamp.CardColumn
-	if targetColumn != "" {
+
+	if targetColumn != "" && isNumericID(targetColumn) {
+		columnID, err := strconv.ParseInt(targetColumn, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid column ID")
+		}
+		col, err := app.Account().CardColumns().Get(cmd.Context(), columnID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		column = col
+	} else if targetColumn == "" {
+		card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		if card.Parent == nil {
+			return output.ErrUsage("Card has no parent column")
+		}
+		col, err := app.Account().CardColumns().Get(cmd.Context(), card.Parent.ID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		column = col
+	} else {
+		cardTableIDVal, err := getCardTableID(cmd, app, projectID, cardTableFlag)
+		if err != nil {
+			return err
+		}
+		cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid card table ID")
+		}
+		cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
+		if err != nil {
+			return convertSDKError(err)
+		}
 		colID := resolveColumn(cardTableData.Lists, targetColumn)
 		if colID == 0 {
 			return output.ErrUsageHint(
@@ -837,19 +856,6 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 				break
 			}
 		}
-	} else {
-		if card.Parent == nil {
-			return output.ErrUsage("Card has no parent column")
-		}
-		for i := range cardTableData.Lists {
-			if cardTableData.Lists[i].ID == card.Parent.ID {
-				column = &cardTableData.Lists[i]
-				break
-			}
-		}
-		if column == nil {
-			return output.ErrUsage("Could not find card's current column")
-		}
 	}
 
 	if column.OnHold == nil || column.OnHold.ID == 0 {
@@ -859,7 +865,7 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 		)
 	}
 
-	err = app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID)
+	err := app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID)
 	if err != nil {
 		return convertSDKError(err)
 	}

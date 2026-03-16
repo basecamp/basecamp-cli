@@ -326,6 +326,45 @@ func TestCardsMoveRequiresCardTable(t *testing.T) {
 	}
 }
 
+// TestCardsMovePositionWithOnHoldRejected tests that --position and --on-hold cannot be used together.
+func TestCardsMovePositionWithOnHoldRejected(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cardTable := "999"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "789", "--on-hold", "--position", "1")
+	require.NotNil(t, err, "expected error, got nil")
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--position cannot be used with --on-hold", e.Message)
+	}
+}
+
+// TestCardsMoveOnHoldWithoutToDoesNotRequireCardTable tests that --on-hold without --to
+// does not require --card-table (uses CardColumns().Get on the card's parent column).
+func TestCardsMoveOnHoldWithoutToDoesNotRequireCardTable(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cardTable := "" // no card table
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--on-hold")
+
+	if err != nil {
+		var e *output.Error
+		if errors.As(err, &e) {
+			assert.NotEqual(t, "--card-table is required when --to is a column name", e.Message,
+				"--on-hold without --to should not require --card-table")
+		}
+	}
+}
+
 // TestCardShortcutShowsHelpWithoutTitle tests that help is shown when --title is missing.
 func TestCardShortcutShowsHelpWithoutTitle(t *testing.T) {
 	app, _ := setupTestApp(t)
