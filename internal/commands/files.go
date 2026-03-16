@@ -1,16 +1,13 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -1371,16 +1368,15 @@ via the API. No --in flag is needed for storage URLs.`,
 				return err
 			}
 
-			// Storage URL path: rewrite to API host and download with OAuth
+			// Storage URL path: download via SDK (handles URL rewriting, auth, redirects)
 			if isStorageURL(args[0]) {
-				result, err := downloadStorageURL(cmd.Context(), app, args[0])
+				result, err := app.Account().DownloadURL(cmd.Context(), args[0])
 				if err != nil {
-					return err
+					return convertSDKError(err)
 				}
 				defer result.Body.Close()
 
-				fallback := parseStorageFilename(args[0])
-				filename, outputPath, bytesWritten, err := writeDownloadToFile(result, outDir, fallback)
+				filename, outputPath, bytesWritten, err := writeDownloadToFile(result, outDir, result.Filename)
 				if err != nil {
 					return err
 				}
@@ -1510,6 +1506,9 @@ func writeDownloadToFile(result *basecamp.DownloadResult, outDir, fallbackName s
 		filename = fallbackName
 	}
 	filename = filepath.Base(filename)
+	if filename == "." || filename == "" {
+		filename = "download"
+	}
 	outputPath = filepath.Join(dir, filename)
 
 	// Verify the resolved path is within dir to prevent traversal attacks
@@ -1521,7 +1520,7 @@ func writeDownloadToFile(result *basecamp.DownloadResult, outDir, fallbackName s
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to resolve output path: %w", err)
 	}
-	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
+	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
 		return "", "", 0, output.ErrUsage("Invalid filename: path traversal detected")
 	}
 
@@ -1549,115 +1548,6 @@ func isStorageURL(arg string) bool {
 		strings.HasPrefix(u.Hostname(), "storage.") &&
 		strings.Contains(u.Path, "/blobs/") &&
 		strings.Contains(u.Path, "/download/")
-}
-
-// parseStorageFilename extracts and URL-decodes the filename from a storage URL.
-// The filename is the last path segment (after /download/).
-func parseStorageFilename(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "download"
-	}
-	segments := strings.Split(strings.TrimRight(u.Path, "/"), "/")
-	if len(segments) == 0 {
-		return "download"
-	}
-	name, err := url.PathUnescape(segments[len(segments)-1])
-	if err != nil {
-		return segments[len(segments)-1]
-	}
-	if name == "" {
-		return "download"
-	}
-	return name
-}
-
-// storageToAPIURL rewrites a storage.X.basecamp.com URL to X.basecampapi.com
-// so the request goes through the API (which accepts OAuth bearer tokens) instead
-// of the storage host (which requires cookie auth).
-func storageToAPIURL(rawURL string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid storage URL: %w", err)
-	}
-	// storage.3.basecamp.com → 3.basecampapi.com
-	host := u.Hostname()
-	host = strings.TrimPrefix(host, "storage.")
-	host = strings.Replace(host, ".basecamp.com", ".basecampapi.com", 1)
-	u.Host = host
-	return u.String(), nil
-}
-
-// downloadStorageURL fetches a file from a Basecamp storage blob URL.
-// It rewrites the URL to the API host and authenticates with an OAuth bearer token.
-func downloadStorageURL(ctx context.Context, app *appctx.App, rawURL string) (*basecamp.DownloadResult, error) {
-	apiURL, err := storageToAPIURL(rawURL)
-	if err != nil {
-		return nil, err
-	}
-
-	token, err := app.Auth.AccessToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get access token: %w", err)
-	}
-
-	// Use a client that does NOT follow redirects automatically, so we can
-	// strip the Authorization header before following the redirect to S3.
-	client := &http.Client{
-		Timeout: 5 * time.Minute,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("invalid storage URL: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "Basecamp CLI")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("storage download failed: %w", err)
-	}
-
-	// Follow any redirect to signed S3 URL (without auth header)
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		resp.Body.Close()
-		location := resp.Header.Get("Location")
-		if location == "" {
-			return nil, fmt.Errorf("storage download: redirect with no Location header")
-		}
-		locURL, err := url.Parse(location)
-		if err != nil {
-			return nil, fmt.Errorf("invalid redirect URL: %w", err)
-		}
-		if !locURL.IsAbs() {
-			locURL = req.URL.ResolveReference(locURL)
-		}
-		req2, err := http.NewRequestWithContext(ctx, http.MethodGet, locURL.String(), nil)
-		if err != nil {
-			return nil, fmt.Errorf("invalid redirect URL: %w", err)
-		}
-		resp, err = (&http.Client{}).Do(req2)
-		if err != nil {
-			return nil, fmt.Errorf("storage download failed: %w", err)
-		}
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("storage download returned %s", resp.Status)
-	}
-
-	filename := parseStorageFilename(rawURL)
-	return &basecamp.DownloadResult{
-		Body:          resp.Body,
-		ContentType:   resp.Header.Get("Content-Type"),
-		ContentLength: resp.ContentLength,
-		Filename:      filename,
-	}, nil
 }
 
 // humanSize formats bytes as a human-readable string (e.g., "9.1mb").
