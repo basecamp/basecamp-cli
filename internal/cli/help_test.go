@@ -561,6 +561,73 @@ func TestRootHelpContainsJQFlag(t *testing.T) {
 	assert.Contains(t, out, "Filter JSON with jq expression")
 }
 
+func TestBareGroupWithFlagsSuppressesHelp(t *testing.T) {
+	// Bare group invocation with explicit local flags suppresses help output
+	// so cli.Execute() can emit a usage error. Cobra still returns nil —
+	// the error conversion happens in Execute() which calls os.Exit.
+	isolateHelpTest(t)
+
+	tests := []struct {
+		name   string
+		args   []string
+		addCmd func() *cobra.Command
+	}{
+		{"cards --in", []string{"cards", "--in", "myproject"}, commands.NewCardsCmd},
+		{"cards --project", []string{"cards", "--project", "myproject"}, commands.NewCardsCmd},
+		{"cards --in --json", []string{"cards", "--in", "myproject", "--json"}, commands.NewCardsCmd},
+		{"cards --in --agent", []string{"cards", "--in", "myproject", "--agent"}, commands.NewCardsCmd},
+		{"messages --in", []string{"messages", "--in", "myproject"}, commands.NewMessagesCmd},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd := NewRootCmd()
+			cmd.AddCommand(tt.addCmd())
+			cmd.SetOut(&buf)
+			cmd.SetArgs(tt.args)
+
+			executedCmd, err := cmd.ExecuteC()
+			require.NoError(t, err, "Cobra returns nil for non-runnable commands")
+			assert.Empty(t, buf.String(), "help text should be suppressed")
+			assert.True(t, isBareGroupWithFlags(executedCmd),
+				"Execute() should detect this and convert to a usage error")
+		})
+	}
+}
+
+func TestBareGroupWithoutFlagsShowsHelp(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewCardsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cards"})
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "COMMANDS")
+	assert.Contains(t, out, "USAGE")
+}
+
+func TestBareGroupWithFlagsAndHelpShowsHelp(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewCardsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cards", "--in", "myproject", "--help"})
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "COMMANDS")
+	assert.Contains(t, out, "USAGE")
+}
+
 func TestGroupCommandHelpOmitsArguments(t *testing.T) {
 	isolateHelpTest(t)
 

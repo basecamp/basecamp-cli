@@ -295,6 +295,16 @@ func Execute() {
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
+
+	// Bare group command with explicit flags (e.g. "cards --in X"): the help
+	// function suppressed output. Convert to a usage error.
+	if err == nil && executedCmd != cmd && isBareGroupWithFlags(executedCmd) {
+		err = output.ErrUsageHint(
+			"subcommand required",
+			"Usage: "+executedCmd.CommandPath()+" <command> [flags]",
+		)
+	}
+
 	if err != nil {
 		// When a command receives zero args but requires some, show help instead of an error —
 		// but only for interactive human users. Machine consumers (--agent, --json, piped stdout)

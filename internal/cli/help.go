@@ -17,6 +17,13 @@ import (
 // and a consistent styled layout for every subcommand.
 func rootHelpFunc() func(*cobra.Command, []string) {
 	return func(cmd *cobra.Command, args []string) {
+		// Bare group with explicit flags (e.g. "cards --in X"): suppress
+		// help output so Execute() can emit a usage error with non-zero exit.
+		// Must run before machine-help branches to avoid mixed output.
+		if isBareGroupWithFlags(cmd) {
+			return
+		}
+
 		pf := cmd.Root().PersistentFlags()
 		if agent, _ := pf.GetBool("agent"); agent {
 			emitAgentHelp(cmd)
@@ -30,8 +37,34 @@ func rootHelpFunc() func(*cobra.Command, []string) {
 			renderRootHelp(cmd.OutOrStdout(), cmd)
 			return
 		}
+
 		renderCommandHelp(cmd)
 	}
+}
+
+// hasExplicitLocalFlags reports whether any flag declared directly on cmd
+// (not inherited from parents) was explicitly set, excluding --help.
+func hasExplicitLocalFlags(cmd *cobra.Command) bool {
+	found := false
+	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) {
+		if f.Changed && f.Name != "help" {
+			found = true
+		}
+	})
+	return found
+}
+
+// isBareGroupWithFlags reports whether cmd is a non-runnable group command
+// that was invoked bare (no subcommand) with explicitly-set local flags.
+// Explicit --help always renders help regardless of other flags.
+func isBareGroupWithFlags(cmd *cobra.Command) bool {
+	if cmd.Runnable() || !cmd.HasSubCommands() {
+		return false
+	}
+	if helpFlag := cmd.Flags().Lookup("help"); helpFlag != nil && helpFlag.Changed {
+		return false
+	}
+	return hasExplicitLocalFlags(cmd)
 }
 
 // curatedCategories defines the subset of categories and commands shown in root help.
