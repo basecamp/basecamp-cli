@@ -370,7 +370,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 
 	// If todolist is specified, list todos in that list
 	if todolist != "" {
-		return listTodosInList(cmd, app, project, todolist, flags.status, flags.limit, flags.page, flags.all, flags.sortField, flags.reverse)
+		return listTodosInList(cmd, app, project, todolist, flags.status, flags.limit, flags.all, flags.sortField, flags.reverse)
 	}
 
 	// --page is not meaningful when aggregating across todolists
@@ -488,7 +488,7 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	return result, totalCount, nil
 }
 
-func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit, page int, all bool, sortField string, reverse bool) error {
+func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit int, all bool, sortField string, reverse bool) error {
 	resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 	if err != nil {
 		return err
@@ -499,17 +499,8 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		return output.ErrUsage("Invalid todolist ID")
 	}
 
-	// Reject --page for grouped todolists before doing any expensive
-	// todo fetches. The groups-list call is lightweight (metadata only).
-	if page > 0 {
-		groupsResult, err := app.Account().TodolistGroups().List(cmd.Context(), todolistID, nil)
-		if err != nil {
-			return convertSDKError(err)
-		}
-		if len(groupsResult.Groups) > 0 {
-			return output.ErrUsage("--page is not supported for todolists with groups; use --limit to cap results")
-		}
-	}
+	// --page 1 is the only valid value (runTodosList rejects 2+) and is the
+	// SDK default, so it's always a no-op — no special handling needed.
 
 	// Determine the SDK limit to pass through. fetchTodosIncludingGroups
 	// uses this for the no-groups fast path and for cross-list aggregation.

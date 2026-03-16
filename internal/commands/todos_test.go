@@ -931,7 +931,7 @@ func (groupTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// groupErrorTransport is like groupTodoTransport but returns HTTP 500 for
+// groupErrorTransport is like groupTodoTransport but returns HTTP 403 for
 // the /groups.json endpoint.
 type groupErrorTransport struct{}
 
@@ -1063,13 +1063,22 @@ func TestTodosListInListLimitCapsFlattened(t *testing.T) {
 	assert.NotEmpty(t, resp.Notice, "should include truncation notice")
 }
 
-func TestTodosListInListPageErrorsWithGroups(t *testing.T) {
-	app, _ := setupGroupTodoApp(t, groupTodoTransport{})
+func TestTodosListInListPageOneIsNoOp(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
 
 	cmd := NewTodosCmd()
+	// --page 1 is the only valid value (2+ rejected by runTodosList) and is
+	// the SDK default, so it succeeds even with grouped todolists.
 	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--page", "1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--page is not supported for todolists with groups")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Len(t, resp.Data, 3, "should return all todos including group todos")
 }
 
 func TestTodosListInListLimitPreservedCrossList(t *testing.T) {
