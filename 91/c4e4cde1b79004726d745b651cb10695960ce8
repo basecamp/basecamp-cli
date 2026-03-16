@@ -1,0 +1,25 @@
+internal/commands/chat.go
+  a410c8de51b1f5de 125,145,252,361,497,594,691,737
+internal/tui/resolve/dock.go
+  a410c8de51b1f5de 181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "91c4e4cde1b79004726d745b651cb10695960ce8",
+  "prompts": {
+    "a410c8de51b1f5de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84fda414-9269-4c51-a5c3-55fcf82c2dff",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 9,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
