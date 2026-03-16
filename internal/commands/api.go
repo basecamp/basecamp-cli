@@ -18,8 +18,8 @@ func NewAPICmd() *cobra.Command {
 		Use:   "api <verb> <path>",
 		Short: "Raw API access",
 		Long:  "Make raw API requests to any Basecamp endpoint. Useful for operations not covered by dedicated commands.",
-		Example: `  basecamp api get /projects.json
-  basecamp api post /buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'`,
+		Example: `  basecamp api get projects.json
+  basecamp api post buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'`,
 	}
 
 	cmd.AddCommand(
@@ -37,8 +37,8 @@ func newAPIGetCmd() *cobra.Command {
 		Use:   "get <path>",
 		Short: "GET request to API",
 		Long:  "Make a raw GET request to any Basecamp API endpoint.",
-		Example: `  basecamp api get /projects.json
-  basecamp api get /buckets/123/todos/456.json
+		Example: `  basecamp api get projects.json
+  basecamp api get buckets/123/todos/456.json
   basecamp api get https://3.basecampapi.com/999/projects.json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,8 +71,8 @@ func newAPIPostCmd() *cobra.Command {
 		Use:   "post <path>",
 		Short: "POST request to API",
 		Long:  "Make a raw POST request to any Basecamp API endpoint.",
-		Example: `  basecamp api post /buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'
-  basecamp api post /buckets/123/message_boards/789/messages.json -d '{"subject":"Hello","content":"<p>World</p>"}'`,
+		Example: `  basecamp api post buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'
+  basecamp api post buckets/123/message_boards/789/messages.json -d '{"subject":"Hello","content":"<p>World</p>"}'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
@@ -121,7 +121,7 @@ func newAPIPutCmd() *cobra.Command {
 		Use:     "put <path>",
 		Short:   "PUT request to API",
 		Long:    "Make a raw PUT request to any Basecamp API endpoint.",
-		Example: `  basecamp api put /buckets/123/todos/456.json -d '{"content":"Updated todo"}'`,
+		Example: `  basecamp api put buckets/123/todos/456.json -d '{"content":"Updated todo"}'`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
@@ -168,7 +168,7 @@ func newAPIDeleteCmd() *cobra.Command {
 		Use:     "delete <path>",
 		Short:   "DELETE request to API",
 		Long:    "Make a raw DELETE request to any Basecamp API endpoint.",
-		Example: `  basecamp api delete /buckets/123/todos/456.json`,
+		Example: `  basecamp api delete buckets/123/todos/456.json`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -192,19 +192,17 @@ func newAPIDeleteCmd() *cobra.Command {
 }
 
 // parsePath extracts and normalizes the API path.
-// Handles full URLs, relative paths, and auto-adds leading slash.
+// Handles full URLs and relative paths. The leading slash is stripped because
+// the SDK's accountPath and buildURL both add one — keeping it here would
+// double-slash and, on Windows, MSYS/Git Bash converts /path to C:\...\path.
 func parsePath(input string) string {
-	// Extract path from full URL
-	// Matches: https://3.basecampapi.com/12345/projects.json
 	urlPattern := regexp.MustCompile(`^https?://[^/]+/[0-9]+(/.*)`)
 	if matches := urlPattern.FindStringSubmatch(input); len(matches) > 1 {
 		return matches[1]
 	}
 
-	// Ensure leading slash
-	if !strings.HasPrefix(input, "/") {
-		input = "/" + input
-	}
+	// Strip leading slash — the SDK prefixes the account path.
+	input = strings.TrimPrefix(input, "/")
 
 	return input
 }
