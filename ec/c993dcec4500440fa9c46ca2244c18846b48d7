@@ -1,0 +1,31 @@
+internal/tui/workspace/views/todos_test.go
+  3466e0b0ecc578e5 784
+internal/presenter/schemas/todo.yaml
+  3466e0b0ecc578e5 33
+internal/presenter/presenter_test.go
+  3466e0b0ecc578e5 194,200-201,403-404,929-930
+internal/tui/workspace/views/todos.go
+  3466e0b0ecc578e5 315
+skills/basecamp/SKILL.md
+  3466e0b0ecc578e5 337
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "ecc993dcec4500440fa9c46ca2244c18846b48d7",
+  "prompts": {
+    "3466e0b0ecc578e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70fd410d-7521-496e-8d16-39f2dbcfe3ab",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 15,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
