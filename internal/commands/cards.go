@@ -796,7 +796,7 @@ You can pass either a card ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name")
+	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name (optional with --on-hold)")
 	cmd.Flags().IntVar(&position, "position", 0, "Position in column (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
 	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
@@ -861,7 +861,7 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 	if column.OnHold == nil || column.OnHold.ID == 0 {
 		return output.ErrUsageHint(
 			fmt.Sprintf("Column '%s' does not have an on-hold section", column.Title),
-			"Enable on-hold with: basecamp cards column on-hold <column-id> --enable",
+			"Enable on-hold with: basecamp cards column on-hold <column-id>",
 		)
 	}
 

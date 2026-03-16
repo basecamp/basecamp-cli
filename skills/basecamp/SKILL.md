@@ -297,8 +297,11 @@ basecamp cards move <card_id> --to <column_id> --position 1 --in <project>
 # Move card to on-hold section of its current column
 basecamp cards move <card_id> --on-hold --in <project>
 
-# Move card to on-hold section of a specific column
+# Move card to on-hold section of a specific column (numeric ID)
 basecamp cards move <card_id> --to <column_id> --on-hold --in <project>
+
+# Move card to on-hold section of a named column (requires --card-table)
+basecamp cards move <card_id> --to "Column Name" --on-hold --card-table <table_id> --in <project>
 ```
 
 ### Download File from Basecamp

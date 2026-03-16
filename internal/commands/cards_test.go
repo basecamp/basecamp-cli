@@ -344,25 +344,64 @@ func TestCardsMovePositionWithOnHoldRejected(t *testing.T) {
 	}
 }
 
+// mockOnHoldTransport handles the API calls for --on-hold card moves.
+// Flow: GET card -> GET column (with on_hold) -> POST move.
+type mockOnHoldTransport struct {
+	capturedMovePath string
+	capturedMoveBody []byte
+}
+
+func (t *mockOnHoldTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
+			body = `{"id": 456, "title": "Test Card", "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
+		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
+			body = `{"id": 777, "title": "Developing", "on_hold": {"id": 888, "enabled": true, "cards_count": 0, "cards_url": "https://example.com/cards.json"}}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	if req.Method == "POST" && strings.Contains(req.URL.Path, "/moves.json") {
+		t.capturedMovePath = req.URL.Path
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedMoveBody = body
+			req.Body.Close()
+		}
+		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
 // TestCardsMoveOnHoldWithoutToDoesNotRequireCardTable tests that --on-hold without --to
-// does not require --card-table (uses CardColumns().Get on the card's parent column).
+// fetches the card's current column via CardColumns().Get and moves to its on-hold section,
+// without requiring --card-table.
 func TestCardsMoveOnHoldWithoutToDoesNotRequireCardTable(t *testing.T) {
-	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
+	transport := &mockOnHoldTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
 
 	project := ""
-	cardTable := "" // no card table
+	cardTable := ""
 	cmd := newCardsMoveCmd(&project, &cardTable)
 
 	err := executeCommand(cmd, app, "456", "--on-hold")
+	require.NoError(t, err)
 
-	if err != nil {
-		var e *output.Error
-		if errors.As(err, &e) {
-			assert.NotEqual(t, "--card-table is required when --to is a column name", e.Message,
-				"--on-hold without --to should not require --card-table")
-		}
-	}
+	assert.Contains(t, transport.capturedMovePath, "/card_tables/cards/456/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
+	assert.Equal(t, float64(888), body["column_id"])
 }
 
 // TestCardShortcutShowsHelpWithoutTitle tests that help is shown when --title is missing.
