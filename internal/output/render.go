@@ -381,6 +381,24 @@ var skipColumns = map[string]bool{
 	"app_url":         true,
 }
 
+// skipMarkdownExtra lists fields excluded from markdown tables only.
+// These are internal counters or type markers that add noise to wide tables.
+// The styled renderer handles this via terminal-width-based column pruning.
+var skipMarkdownExtra = map[string]bool{
+	"comments_count":  true,
+	"boosts_count":    true,
+	"position":        true,
+	"attachable_sgid": true,
+	"personable_type": true,
+	"recording_type":  true,
+}
+
+func skipMarkdownColumn(key string) bool {
+	return skipColumns[key] ||
+		skipMarkdownExtra[key] ||
+		strings.HasSuffix(key, "_url")
+}
+
 type column struct {
 	key         string
 	header      string
@@ -968,7 +986,7 @@ func (r *MarkdownRenderer) detectColumns(data []map[string]any) []column {
 	var cols []column
 
 	for key, val := range first {
-		if skipColumns[key] {
+		if skipMarkdownColumn(key) {
 			continue
 		}
 
