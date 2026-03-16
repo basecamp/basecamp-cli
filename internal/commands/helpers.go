@@ -506,3 +506,15 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, html string)
 		},
 	)
 }
+
+// projectFlagChanged reports whether the user explicitly passed --project or
+// its --in alias on the command line.
+func projectFlagChanged(cmd *cobra.Command) bool {
+	if f := cmd.Flags().Lookup("project"); f != nil && f.Changed {
+		return true
+	}
+	if f := cmd.Flags().Lookup("in"); f != nil && f.Changed {
+		return true
+	}
+	return false
+}

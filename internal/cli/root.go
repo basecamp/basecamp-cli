@@ -203,6 +203,7 @@ func NewRootCmd() *cobra.Command {
 	// DefaultCacheDirFunc checks --cache-dir flag, then app context, then env vars.
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("account", completer.AccountCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("profile", completer.ProfileCompletion())
 
