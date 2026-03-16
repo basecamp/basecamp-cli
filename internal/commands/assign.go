@@ -27,18 +27,18 @@ func NewAssignCmd() *cobra.Command {
 		Short: "Assign someone to an item",
 		Long: `Assign a person to one or more to-dos, cards, or card steps.
 
-By default assigns to a to-do. Use --card or --step for other types.
+	By default assigns to a to-do. Use --card or --step for other types.
 
-Person can be:
-  - "me" for the current user
-  - A numeric person ID
-  - An email address (will be resolved to ID)
+	Person can be:
+	  - "me" for the current user
+	  - A numeric person ID
+	  - An email address (will be resolved to ID)
 
-Examples:
-  basecamp assign 123 --to me                     # Assign to-do
-  basecamp assign 123 456 --to me                  # Assign multiple to-dos
-  basecamp assign 456 --card --to me               # Assign card
-  basecamp assign 789 --step --to me               # Assign card step`,
+	Examples:
+	  basecamp assign 123 --to me                     # Assign to-do
+	  basecamp assign 123 456 --to me                  # Assign multiple to-dos
+	  basecamp assign 456 --card --to me               # Assign card
+	  basecamp assign 789 --step --to me               # Assign card step`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>...")
@@ -76,18 +76,18 @@ func NewUnassignCmd() *cobra.Command {
 		Short: "Remove assignment",
 		Long: `Remove a person from one or more to-dos, cards, or card steps.
 
-By default unassigns from a to-do. Use --card or --step for other types.
+	By default unassigns from a to-do. Use --card or --step for other types.
 
-Person can be:
-  - "me" for the current user
-  - A numeric person ID
-  - An email address (will be resolved to ID)
+	Person can be:
+	  - "me" for the current user
+	  - A numeric person ID
+	  - An email address (will be resolved to ID)
 
-Examples:
-  basecamp unassign 123 --from me                     # Unassign from to-do
-  basecamp unassign 123 456 --from me                  # Unassign multiple to-dos
-  basecamp unassign 456 --card --from me               # Unassign from card
-  basecamp unassign 789 --step --from me               # Unassign from card step`,
+	Examples:
+	  basecamp unassign 123 --from me                     # Unassign from to-do
+	  basecamp unassign 123 456 --from me                  # Unassign multiple to-dos
+	  basecamp unassign 456 --card --from me               # Unassign from card
+	  basecamp unassign 789 --step --from me               # Unassign from card step`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>...")
@@ -355,7 +355,7 @@ func assignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, i
 		}
 		return doAssignCard(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, card)
 	case isStep:
-		step, err := validateStep(cmd, app, itemID, resolvedProjectID)
+		step, err := validateStep(cmd, app, itemID)
 		if err != nil {
 			return nil, err
 		}
@@ -406,7 +406,7 @@ func unassignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard,
 		}
 		return doUnassignCard(cmd, app, itemID, *assigneeIDInt, resolvedProjectID, card)
 	case isStep:
-		step, err := validateStep(cmd, app, itemID, resolvedProjectID)
+		step, err := validateStep(cmd, app, itemID)
 		if err != nil {
 			return nil, err
 		}
@@ -512,21 +512,16 @@ func validateCard(cmd *cobra.Command, app *appctx.App, cardIDStr string) (*basec
 }
 
 // validateStep fetches a card step to verify it exists before showing the person picker.
-func validateStep(cmd *cobra.Command, app *appctx.App, stepIDStr, resolvedProjectID string) (*basecamp.CardStep, error) {
+func validateStep(cmd *cobra.Command, app *appctx.App, stepIDStr string) (*basecamp.CardStep, error) {
 	stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 	if err != nil {
 		return nil, output.ErrUsage("Invalid step ID")
 	}
-	stepPath := fmt.Sprintf("/buckets/%s/card_steps/%d.json", resolvedProjectID, stepID)
-	resp, err := app.Account().Get(cmd.Context(), stepPath)
+	step, err := app.Account().CardSteps().Get(cmd.Context(), stepID)
 	if err != nil {
 		return nil, notFoundOrConvert(err, "step", stepIDStr)
 	}
-	var step basecamp.CardStep
-	if err := resp.UnmarshalData(&step); err != nil {
-		return nil, fmt.Errorf("failed to parse step: %w", err)
-	}
-	return &step, nil
+	return step, nil
 }
 
 // notFoundOrConvert returns a friendly not-found error for the item type,

@@ -402,6 +402,101 @@ func TestAssignCardRequiresAssigneeNonInteractive(t *testing.T) {
 	assert.Contains(t, e.Hint, "Use --to")
 }
 
+// stepPathTransport captures the request path for step-fetch calls.
+type stepPathTransport struct {
+	capturedPath string
+}
+
+func (s *stepPathTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	if req.Method == "GET" && strings.Contains(path, "/projects.json") {
+		body := `[{"id": 123, "name": "Test Project"}]`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "GET" && strings.Contains(path, "card_tables/steps/") {
+		s.capturedPath = path
+		body := `{"id": 456, "title": "Test Step", "assignees": []}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "GET" && strings.Contains(path, "/my/profile.json") {
+		body := `{"id": 999, "name": "Test User"}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("unexpected HTTP request: %s %s", req.Method, path)
+}
+
+func setupStepPathTestApp(t *testing.T, transport *stepPathTransport) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+	app.Flags.JSON = true
+	return app
+}
+
+func TestValidateStepUsesSDKGet(t *testing.T) {
+	t.Run("assign", func(t *testing.T) {
+		transport := &stepPathTransport{}
+		app := setupStepPathTestApp(t, transport)
+
+		cmd := NewAssignCmd()
+		_ = executeAssignCommand(cmd, app, "456", "--step", "--to", "me", "-p", "123")
+
+		require.NotEmpty(t, transport.capturedPath, "step-fetch request was never made")
+		assert.Contains(t, transport.capturedPath, "card_tables/steps/456")
+	})
+
+	t.Run("unassign", func(t *testing.T) {
+		transport := &stepPathTransport{}
+		app := setupStepPathTestApp(t, transport)
+
+		cmd := NewUnassignCmd()
+		_ = executeAssignCommand(cmd, app, "456", "--step", "--from", "me", "-p", "123")
+
+		require.NotEmpty(t, transport.capturedPath, "step-fetch request was never made")
+		assert.Contains(t, transport.capturedPath, "card_tables/steps/456")
+	})
+}
+
 func TestUnassignStepRequiresAssigneeNonInteractive(t *testing.T) {
 	app := setupAssignGuardTestApp(t)
 
