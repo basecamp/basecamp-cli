@@ -6,15 +6,15 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 37 | 136 |
+| ✅ Implemented | 37 | 137 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **41** | **148** |
+| **Total (docs)** | **41** | **149** |
 
-**100% coverage of in-scope API** (136/136 endpoints)
+**100% coverage of in-scope API** (137/137 endpoints)
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
-**SDK version:** v0.4.0 — uniform pagination (Limit/Page) on all List methods; `types.FlexibleTime` and `types.FlexInt` for wire format handling.
+**SDK version:** v0.6.0 — uniform pagination (Limit/Page) on all List methods; `types.FlexibleTime` and `types.FlexInt` for wire format handling.
 
 ## Coverage by Section
 
@@ -77,7 +77,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | **Chatbots** |
 | chatbots | 10 | - | ⏭️ | skip | Requires chatbot key, not OAuth (see notes) |
 | **Lineup** |
-| lineup_markers | 3 | `lineup` | ✅ | - | create, update, delete markers |
+| lineup_markers | 4 | `lineup` | ✅ | - | list, create, update, delete markers |
 | **Reference Only** |
 | basecamps | 0 | - | - | - | Documentation reference, no endpoints |
 | rich_text | 0 | - | - | - | Documentation reference, no endpoints |

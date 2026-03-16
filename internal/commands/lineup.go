@@ -29,12 +29,43 @@ They apply to the entire Basecamp account.`,
 	}
 
 	cmd.AddCommand(
+		newLineupListCmd(),
 		newLineupCreateCmd(),
 		newLineupUpdateCmd(),
 		newLineupDeleteCmd(),
 	)
 
 	return cmd
+}
+
+func newLineupListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List lineup markers",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			result, err := app.Account().Lineup().ListMarkers(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(result.Markers,
+				output.WithSummary(fmt.Sprintf("%d lineup markers", len(result.Markers))),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "create",
+						Cmd:         "basecamp lineup create <name> <date>",
+						Description: "Create new marker",
+					},
+				),
+			)
+		},
+	}
 }
 
 func newLineupCreateCmd() *cobra.Command {

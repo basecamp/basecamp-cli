@@ -22,6 +22,9 @@ test_timesheet_item_returns_timesheet_item_detail # timesheets not enabled — s
 
 # Lineup API may not exist on all environments
 test_lineup_create_creates_a_lineup_marker # API not available on some servers — smoke
+test_lineup_list_returns_markers # API not available on some servers — smoke
+test_lineup_update_updates_a_lineup_marker # depends on lineup create — smoke
+test_lineup_delete_removes_a_lineup_marker # depends on lineup create — smoke
 
 # SDK bug: TodolistOrGroup0 union type expects wrapped JSON, API returns flat
 test_todolists_show_returns_todolist_detail # SDK deserialization mismatch — smoke
