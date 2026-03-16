@@ -1,0 +1,23 @@
+.surface-breaking
+  a410c8de51b1f5de 718-724
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "ee91000b0e5459ae38e57a77277e585beb0af46d",
+  "prompts": {
+    "a410c8de51b1f5de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84fda414-9269-4c51-a5c3-55fcf82c2dff",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 0,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
