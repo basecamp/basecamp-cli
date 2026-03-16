@@ -128,9 +128,9 @@ func TestMarkdownToHTML(t *testing.T) {
 			expected: "<p>First</p>\n<br>\n<p>Second</p>",
 		},
 		{
-			name:     "no spacing without blank line",
+			name:     "consecutive lines join into one paragraph",
 			input:    "Line one\nLine two",
-			expected: "<p>Line one</p>\n<p>Line two</p>",
+			expected: "<p>Line one Line two</p>",
 		},
 		{
 			name:     "blank line before list",
@@ -156,6 +156,31 @@ func TestMarkdownToHTML(t *testing.T) {
 			name:     "blank line before horizontal rule",
 			input:    "Intro\n\n---",
 			expected: "<p>Intro</p>\n<br>\n<hr>",
+		},
+		{
+			name:     "heading flushes accumulated paragraph",
+			input:    "Text\n# Heading",
+			expected: "<p>Text</p>\n<h1>Heading</h1>",
+		},
+		{
+			name:     "list flushes accumulated paragraph",
+			input:    "Text\n- Item",
+			expected: "<p>Text</p>\n<ul>\n<li>Item</li>\n</ul>",
+		},
+		{
+			name:     "blockquote flushes accumulated paragraph",
+			input:    "Text\n> Quote",
+			expected: "<p>Text</p>\n<blockquote>Quote</blockquote>",
+		},
+		{
+			name:     "code fence flushes accumulated paragraph",
+			input:    "Text\n```go\nx\n```",
+			expected: "<p>Text</p>\n<pre><code class=\"language-go\">x</code></pre>",
+		},
+		{
+			name:     "horizontal rule flushes accumulated paragraph",
+			input:    "Text\n---",
+			expected: "<p>Text</p>\n<hr>",
 		},
 	}
 
@@ -518,6 +543,10 @@ func TestRoundTrip(t *testing.T) {
 			name:     "unordered list",
 			markdown: "- Item 1\n- Item 2",
 		},
+		{
+			name:     "consecutive lines merge into single paragraph",
+			markdown: "Line 1\nLine 2",
+		},
 	}
 
 	for _, tt := range tests {
@@ -541,6 +570,19 @@ func TestRoundTrip(t *testing.T) {
 			t.Logf("Back: %q", back)
 		})
 	}
+
+	// Consecutive lines should round-trip through a single paragraph
+	t.Run("consecutive lines round-trip as single paragraph", func(t *testing.T) {
+		input := "Line 1\nLine 2"
+		html := MarkdownToHTML(input)
+		back := HTMLToMarkdown(html)
+		if strings.Contains(back, "\n\n") {
+			t.Errorf("round-trip produced two paragraphs, want one\nhtml: %q\nback: %q", html, back)
+		}
+		if !strings.Contains(back, "Line 1") || !strings.Contains(back, "Line 2") {
+			t.Errorf("round-trip lost content\nhtml: %q\nback: %q", html, back)
+		}
+	})
 }
 
 func TestMarkdownToHTMLListVariants(t *testing.T) {

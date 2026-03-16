@@ -136,11 +136,21 @@ func MarkdownToHTML(md string) string {
 	var listItems []string
 	var listType string // "ul" or "ol"
 	var pendingBreak bool
+	var paraLines []string
 
 	flushPendingBreak := func() {
 		if pendingBreak {
 			result.WriteString("<br>\n")
 			pendingBreak = false
+		}
+	}
+
+	flushParagraph := func() {
+		if len(paraLines) > 0 {
+			flushPendingBreak()
+			text := strings.Join(paraLines, " ")
+			result.WriteString("<p>" + convertInline(text) + "</p>\n")
+			paraLines = nil
 		}
 	}
 
@@ -177,6 +187,7 @@ func MarkdownToHTML(md string) string {
 				codeBlockLang = ""
 			} else {
 				// Start code block
+				flushParagraph()
 				flushList()
 				flushPendingBreak()
 				inCodeBlock = true
@@ -195,6 +206,7 @@ func MarkdownToHTML(md string) string {
 		olMatch := olPattern.FindStringSubmatch(line)
 
 		if ulMatch != nil {
+			flushParagraph()
 			if !inList || listType != "ul" {
 				flushList()
 				flushPendingBreak()
@@ -206,6 +218,7 @@ func MarkdownToHTML(md string) string {
 		}
 
 		if olMatch != nil {
+			flushParagraph()
 			if !inList || listType != "ol" {
 				flushList()
 				flushPendingBreak()
@@ -219,19 +232,23 @@ func MarkdownToHTML(md string) string {
 		// Not a list item, flush any pending list
 		flushList()
 
-		// Empty line — record that we need paragraph spacing before the next block.
-		// Basecamp's Trix editor does not render margins on <p> tags, so an
-		// explicit <br> is required to produce visible separation between blocks.
+		// Empty line — flush accumulated paragraph and record that we need
+		// paragraph spacing before the next block.  Basecamp's Trix editor
+		// does not render margins on <p> tags, so an explicit <br> is
+		// required to produce visible separation between blocks.
 		if strings.TrimSpace(line) == "" {
+			flushParagraph()
 			if result.Len() > 0 {
 				pendingBreak = true
 			}
 			continue
 		}
 
-		flushPendingBreak()
-
 		// Headings
+		if strings.HasPrefix(line, "#") {
+			flushParagraph()
+			flushPendingBreak()
+		}
 		if after, ok := strings.CutPrefix(line, "######"); ok {
 			result.WriteString("<h6>" + convertInline(strings.TrimSpace(after)) + "</h6>\n")
 			continue
@@ -258,6 +275,10 @@ func MarkdownToHTML(md string) string {
 		}
 
 		// Blockquote
+		if strings.HasPrefix(line, ">") {
+			flushParagraph()
+			flushPendingBreak()
+		}
 		if after, ok := strings.CutPrefix(line, ">"); ok {
 			quote := strings.TrimSpace(after)
 			result.WriteString("<blockquote>" + convertInline(quote) + "</blockquote>\n")
@@ -267,15 +288,18 @@ func MarkdownToHTML(md string) string {
 		// Horizontal rule
 		trimmed := strings.TrimSpace(line)
 		if len(trimmed) >= 3 && (allChars(trimmed, '-') || allChars(trimmed, '*') || allChars(trimmed, '_')) {
+			flushParagraph()
+			flushPendingBreak()
 			result.WriteString("<hr>\n")
 			continue
 		}
 
-		// Regular paragraph
-		result.WriteString("<p>" + convertInline(line) + "</p>\n")
+		// Accumulate paragraph lines
+		paraLines = append(paraLines, line)
 	}
 
-	// Flush any remaining list
+	// Flush any remaining paragraph or list
+	flushParagraph()
 	flushList()
 
 	// Handle unclosed code block
