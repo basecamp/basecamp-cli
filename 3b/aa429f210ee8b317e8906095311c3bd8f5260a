@@ -1,0 +1,40 @@
+internal/output/output_test.go
+  89ba1a7fdc60356e 2218,2527-2543
+  e956f52bfba5616f 2470-2526
+internal/output/render.go
+  e956f52bfba5616f 390,502-503,507-509,511-514
+  89ba1a7fdc60356e 532-544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "3baa429f210ee8b317e8906095311c3bd8f5260a",
+  "prompts": {
+    "89ba1a7fdc60356e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7e0a613-4fad-4fa3-a03d-064c2e404dfb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 0,
+      "accepted_lines": 31,
+      "overriden_lines": 0
+    },
+    "e956f52bfba5616f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c743f2a-9ce2-45dc-a932-cfe1c5a80312",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 67,
+      "overriden_lines": 0
+    }
+  }
+}

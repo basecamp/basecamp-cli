@@ -1,0 +1,40 @@
+internal/output/render.go
+  e956f52bfba5616f 390,502-503,507-509,511-514
+  89ba1a7fdc60356e 532-544
+internal/output/output_test.go
+  89ba1a7fdc60356e 2218,2519,2522,2527,2530-2546
+  e956f52bfba5616f 2470-2518,2520-2521,2523-2526,2528-2529
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "8ea3dd06af8f81b73e3d32e33e73ff94e891bd37",
+  "prompts": {
+    "89ba1a7fdc60356e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7e0a613-4fad-4fa3-a03d-064c2e404dfb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 0,
+      "accepted_lines": 34,
+      "overriden_lines": 0
+    },
+    "e956f52bfba5616f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c743f2a-9ce2-45dc-a932-cfe1c5a80312",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 67,
+      "overriden_lines": 0
+    }
+  }
+}
