@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -914,8 +913,8 @@ func (groupTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Direct todos in todolist 500
 	case strings.Contains(path, "/todolists/500/todos.json"):
-		body = fmt.Sprintf(`[{"id": 1, "title": "First", "position": 1, "status": "active"},` +
-			`{"id": 3, "title": "Third", "position": 3, "status": "active"}]`)
+		body = `[{"id": 1, "title": "First", "position": 1, "status": "active"},` +
+			`{"id": 3, "title": "Third", "position": 3, "status": "active"}]`
 
 	// No groups on group sublists
 	case strings.Contains(path, "/todolists/600/groups.json"):
@@ -1077,7 +1076,9 @@ func TestTodosListInListLimitPreservedCrossList(t *testing.T) {
 	app, buf := setupGroupTodoApp(t, groupTodoTransport{})
 
 	cmd := NewTodosCmd()
-	// Cross-list with --limit should still cap per-list via SDK
+	// Cross-list with --limit 1 should cap per-list results. Todolist 500
+	// has groups, so the helper fetches all 3 todos for position merge then
+	// caps to 1 before returning.
 	err := executeTodosCommand(cmd, app, "list", "--limit", "1")
 	require.NoError(t, err)
 
@@ -1087,11 +1088,7 @@ func TestTodosListInListLimitPreservedCrossList(t *testing.T) {
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
-	// With limit=1 per source (no groups path since groups fail gracefully
-	// in non-group-aware SDKLimit), the no-groups fast path returns 1 direct todo.
-	// The exact count depends on how limit interacts with the SDK default,
-	// but it should be fewer than the full 3.
-	assert.LessOrEqual(t, len(resp.Data), 3)
+	assert.Equal(t, 1, len(resp.Data))
 }
 
 // =============================================================================
