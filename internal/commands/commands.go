@@ -96,6 +96,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "forwards", Category: "communication", Description: "Manage email forwards (inbox)", Actions: []string{"list", "show", "inbox", "replies", "reply"}},
 				{Name: "subscriptions", Category: "communication", Description: "Manage notification subscriptions", Actions: []string{"show", "subscribe", "unsubscribe", "add", "remove"}},
 				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "update", "trash", "archive", "restore"}},
+				{Name: "attachments", Category: "communication", Description: "List attachments on items", Actions: []string{"list"}},
 				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
 			},
 		},
