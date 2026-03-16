@@ -1,0 +1,23 @@
+internal/commands/config_test.go
+  518449c0db3c6b2c 396,477-501
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "d14927ccbf825f387c41f078fdbb749f101da0c9",
+  "prompts": {
+    "518449c0db3c6b2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "356c5792-5d73-4079-9849-6d4bc630186a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 26,
+      "overriden_lines": 0
+    }
+  }
+}
