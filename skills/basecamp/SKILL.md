@@ -477,7 +477,7 @@ basecamp timeline --watch                         # Live monitoring (TUI)
 basecamp timeline --watch --interval 60           # Poll every 60 seconds
 ```
 
-**Note:** `basecamp timeline` (account-wide) works reliably. The `--limit` flag is not supported on timeline commands.
+Use `--limit N` to cap results or `--all` to fetch everything (default: 100 events). `--all` and `--page` cannot be combined with `--watch`.
 
 ### Recordings (Cross-project)
 
