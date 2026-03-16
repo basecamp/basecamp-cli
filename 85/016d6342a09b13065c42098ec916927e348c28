@@ -1,0 +1,25 @@
+e2e/smoke/.qa-allowlist
+  ee4158c5fe67bc7f 27-29
+e2e/smoke/smoke_lineup.bats
+  ee4158c5fe67bc7f 38-39,42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "85016d6342a09b13065c42098ec916927e348c28",
+  "prompts": {
+    "ee4158c5fe67bc7f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "391238dd-6bbb-46d3-883c-b77c437b6632",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 6,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    }
+  }
+}
