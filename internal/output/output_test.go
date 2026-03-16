@@ -2472,7 +2472,7 @@ func TestSelectColumnsUsesFormattedDateWidth(t *testing.T) {
 // URL Column Width Exemption
 // =============================================================================
 
-func TestSelectColumnsExempsURLColumnsFromWidthCap(t *testing.T) {
+func TestSelectColumnsExemptsURLColumnsFromWidthCap(t *testing.T) {
 	r := &Renderer{width: 120}
 	cols := []column{
 		{key: "name", header: "Name", priority: 2},
@@ -2504,7 +2504,7 @@ func TestSelectColumnsExempsURLColumnsFromWidthCap(t *testing.T) {
 	assert.False(t, descCol.containsURL, "non-URL column should not be flagged")
 }
 
-func TestSelectColumnsExempsURLColumnsForSuffixFields(t *testing.T) {
+func TestSelectColumnsExemptsURLColumnsForSuffixFields(t *testing.T) {
 	r := &Renderer{width: 120}
 	cols := []column{
 		{key: "name", header: "Name", priority: 2},
