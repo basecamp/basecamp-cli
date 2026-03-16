@@ -1,0 +1,39 @@
+internal/commands/timeline.go
+  c255452606611d12 29-31,47,49,58-60,65-95,118-119,122,127,132,136,141,155-161,164,178,188,202-208,211,225,241,255-261,425-435,476-477,494,512,530,540
+skills/basecamp/SKILL.md
+  c255452606611d12 480
+  57e89b89f6ca7abc 256-281,364-365,403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "2da74afbfa4caf34a3d4424ae3024fcb9f06818d",
+  "prompts": {
+    "57e89b89f6ca7abc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2427ba21-33b6-4ec8-a08c-5e254e6f0851",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 29,
+      "overriden_lines": 0
+    },
+    "c255452606611d12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60f36a1a-fde2-408a-ba78-1c6aedee331e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 91,
+      "overriden_lines": 0
+    }
+  }
+}
