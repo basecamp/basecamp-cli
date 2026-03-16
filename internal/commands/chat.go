@@ -269,6 +269,7 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 	return app.OK(lines,
 		output.WithSummary(summary),
 		output.WithEntity("chat_line"),
+		output.WithDisplayData(chatLinesDisplayData(lines)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
@@ -531,8 +532,20 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		)
 	}
 
+	// Build summary — prefer attachment filename from API response over local basename
+	uploadName := filename
+	if len(line.Attachments) > 0 && line.Attachments[0].Filename != "" {
+		uploadName = line.Attachments[0].Filename
+	}
+	summary := fmt.Sprintf("Uploaded %s (#%d)", uploadName, line.ID)
+	if len(line.Attachments) > 0 && line.Attachments[0].ByteSize > 0 {
+		summary = fmt.Sprintf("Uploaded %s (%s) (#%d)", uploadName, humanSize(line.Attachments[0].ByteSize), line.ID)
+	}
+
 	return app.OK(line,
-		output.WithSummary(fmt.Sprintf("Uploaded %s (#%d)", filename, line.ID)),
+		output.WithSummary(summary),
+		output.WithEntity("chat_line"),
+		output.WithDisplayData(chatLineDisplayData(line)),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }
@@ -613,6 +626,7 @@ You can pass either a line ID or a Basecamp line URL:
 			return app.OK(line,
 				output.WithSummary(summary),
 				output.WithEntity("chat_line"),
+				output.WithDisplayData(chatLineDisplayData(line)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
@@ -735,4 +749,135 @@ You can pass either a line ID or a Basecamp line URL:
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
 func getChatID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat", "chat")
+}
+
+// chatLineDisplayContent produces human-readable content for a campfire line,
+// injecting attachment file sizes where present.
+func chatLineDisplayContent(line *basecamp.CampfireLine) string {
+	if line.Content != "" {
+		if richtext.IsHTML(line.Content) {
+			text := richtext.HTMLToMarkdown(line.Content)
+			return injectAttachmentSizes(text, line.Attachments)
+		}
+		if len(line.Attachments) > 0 {
+			return line.Content + "\n" + formatChatAttachments(line.Attachments)
+		}
+		return line.Content
+	}
+	if len(line.Attachments) > 0 {
+		return formatChatAttachments(line.Attachments)
+	}
+	if line.Title != "" {
+		return line.Title
+	}
+	return ""
+}
+
+// injectAttachmentSizes rewrites deterministic attachment marker lines
+// (📎 filename) produced by richtext.HTMLToMarkdown, appending (size).
+// Only exact marker lines are modified; user-authored text is untouched.
+func injectAttachmentSizes(text string, attachments []basecamp.CampfireLineAttachment) string {
+	if len(attachments) == 0 {
+		return text
+	}
+
+	// Build filename → []ByteSize lookup (handles duplicate filenames).
+	type sizeEntry struct {
+		sizes []int64
+		idx   int
+	}
+	lookup := make(map[string]*sizeEntry, len(attachments))
+	for _, att := range attachments {
+		name := att.Filename
+		if name == "" {
+			name = att.Title
+		}
+		if name == "" {
+			continue
+		}
+		entry, ok := lookup[name]
+		if !ok {
+			entry = &sizeEntry{}
+			lookup[name] = entry
+		}
+		entry.sizes = append(entry.sizes, att.ByteSize)
+	}
+
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "📎 ") {
+			continue
+		}
+		filename := strings.TrimPrefix(trimmed, "📎 ")
+		entry, ok := lookup[filename]
+		if !ok || entry.idx >= len(entry.sizes) {
+			continue
+		}
+		size := entry.sizes[entry.idx]
+		entry.idx++
+		if size > 0 {
+			lines[i] = fmt.Sprintf("📎 %s (%s)", filename, humanSize(size))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatChatAttachments builds 📎 lines from an attachment array.
+func formatChatAttachments(attachments []basecamp.CampfireLineAttachment) string {
+	var b strings.Builder
+	for i, att := range attachments {
+		name := att.Filename
+		if name == "" {
+			name = att.Title
+		}
+		if name == "" {
+			name = "attachment"
+		}
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if att.ByteSize > 0 {
+			fmt.Fprintf(&b, "📎 %s (%s)", name, humanSize(att.ByteSize))
+		} else {
+			fmt.Fprintf(&b, "📎 %s", name)
+		}
+	}
+	return b.String()
+}
+
+// chatLinesDisplayData builds display-data for a slice of campfire lines.
+// The original structs are preserved for JSON; only the "content" field
+// is replaced with the display-ready version for styled/markdown output.
+func chatLinesDisplayData(lines []basecamp.CampfireLine) any {
+	normalized := output.NormalizeData(lines)
+
+	// NormalizeData returns []map[string]any when all elements are objects.
+	if items, ok := normalized.([]map[string]any); ok {
+		n := len(lines)
+		if len(items) < n {
+			n = len(items)
+		}
+		for i := range n {
+			if display := chatLineDisplayContent(&lines[i]); display != "" {
+				items[i]["content"] = display
+			}
+		}
+		return items
+	}
+	return normalized
+}
+
+// chatLineDisplayData builds display-data for a single campfire line.
+func chatLineDisplayData(line *basecamp.CampfireLine) any {
+	normalized := output.NormalizeData(line)
+	m, ok := normalized.(map[string]any)
+	if !ok {
+		return normalized
+	}
+	display := chatLineDisplayContent(line)
+	if display != "" {
+		m["content"] = display
+	}
+	return m
 }

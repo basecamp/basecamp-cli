@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -831,4 +832,226 @@ func TestChatDeleteForceSkipsPrompt(t *testing.T) {
 
 	assert.Equal(t, "DELETE", transport.capturedMethod)
 	assert.Contains(t, transport.capturedPath, "/lines/")
+}
+
+// =============================================================================
+// Display content helper tests
+// =============================================================================
+
+func TestChatLineDisplayContent_HTMLWithAttachments(t *testing.T) {
+	line := &basecamp.CampfireLine{
+		Content: `<p>Check this out</p><bc-attachment filename="report.pdf">report.pdf</bc-attachment>`,
+		Attachments: []basecamp.CampfireLineAttachment{
+			{Filename: "report.pdf", ByteSize: 9_100_000},
+		},
+	}
+	got := chatLineDisplayContent(line)
+	assert.Contains(t, got, "Check this out")
+	assert.Contains(t, got, "📎 report.pdf (9.1mb)")
+}
+
+func TestChatLineDisplayContent_PlainTextWithAttachments(t *testing.T) {
+	line := &basecamp.CampfireLine{
+		Content: "Here's the file",
+		Attachments: []basecamp.CampfireLineAttachment{
+			{Filename: "notes.txt", ByteSize: 512},
+		},
+	}
+	got := chatLineDisplayContent(line)
+	assert.Contains(t, got, "Here's the file")
+	assert.Contains(t, got, "📎 notes.txt (512b)")
+}
+
+func TestChatLineDisplayContent_EmptyContentWithAttachments(t *testing.T) {
+	line := &basecamp.CampfireLine{
+		Attachments: []basecamp.CampfireLineAttachment{
+			{Filename: "image.png", ByteSize: 2_500_000},
+		},
+	}
+	got := chatLineDisplayContent(line)
+	assert.Equal(t, "📎 image.png (2.5mb)", got)
+}
+
+func TestChatLineDisplayContent_EmptyContentWithTitle(t *testing.T) {
+	line := &basecamp.CampfireLine{
+		Title: "A sound clip",
+	}
+	got := chatLineDisplayContent(line)
+	assert.Equal(t, "A sound clip", got)
+}
+
+func TestChatLineDisplayContent_PlainTextOnly(t *testing.T) {
+	line := &basecamp.CampfireLine{
+		Content: "Just a message",
+	}
+	got := chatLineDisplayContent(line)
+	assert.Equal(t, "Just a message", got)
+}
+
+func TestInjectAttachmentSizes_MidLineNotRewritten(t *testing.T) {
+	// User-authored text containing 📎 filename mid-line should not be rewritten
+	text := "I renamed the file to 📎 report.pdf yesterday"
+	attachments := []basecamp.CampfireLineAttachment{
+		{Filename: "report.pdf", ByteSize: 1_000},
+	}
+	got := injectAttachmentSizes(text, attachments)
+	assert.Equal(t, text, got)
+}
+
+func TestFormatChatAttachments_ZeroByteSize(t *testing.T) {
+	attachments := []basecamp.CampfireLineAttachment{
+		{Filename: "mystery.dat", ByteSize: 0},
+	}
+	got := formatChatAttachments(attachments)
+	assert.Equal(t, "📎 mystery.dat", got)
+	assert.NotContains(t, got, "(")
+}
+
+func TestFormatChatAttachments_TitleFallback(t *testing.T) {
+	attachments := []basecamp.CampfireLineAttachment{
+		{Title: "My Document", ByteSize: 5_000},
+	}
+	got := formatChatAttachments(attachments)
+	assert.Equal(t, "📎 My Document (5.0kb)", got)
+}
+
+func TestInjectAttachmentSizes_DuplicateFilenames(t *testing.T) {
+	text := "📎 doc.pdf\nsome text\n📎 doc.pdf"
+	attachments := []basecamp.CampfireLineAttachment{
+		{Filename: "doc.pdf", ByteSize: 1_000},
+		{Filename: "doc.pdf", ByteSize: 2_000},
+	}
+	got := injectAttachmentSizes(text, attachments)
+	lines := strings.Split(got, "\n")
+	assert.Equal(t, "📎 doc.pdf (1.0kb)", lines[0])
+	assert.Equal(t, "some text", lines[1])
+	assert.Equal(t, "📎 doc.pdf (2.0kb)", lines[2])
+}
+
+func TestChatLinesDisplayData_ReplacesContent(t *testing.T) {
+	lines := []basecamp.CampfireLine{
+		{
+			ID:      1,
+			Content: `<bc-attachment filename="file.pdf">file.pdf</bc-attachment>`,
+			Attachments: []basecamp.CampfireLineAttachment{
+				{Filename: "file.pdf", ByteSize: 5_000},
+			},
+		},
+	}
+	result := chatLinesDisplayData(lines)
+	items, ok := result.([]map[string]any)
+	require.True(t, ok, "expected []map[string]any, got %T", result)
+	require.Len(t, items, 1)
+	assert.Contains(t, items[0]["content"], "📎 file.pdf (5.0kb)")
+}
+
+// =============================================================================
+// Upload command-level test
+// =============================================================================
+
+// mockChatUploadTransport handles the multipart upload and returns a line with attachments.
+type mockChatUploadTransport struct{}
+
+func (t *mockChatUploadTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/123"):
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		// Drain the body
+		if req.Body != nil {
+			io.ReadAll(req.Body)
+			req.Body.Close()
+		}
+		mockResp := `{
+			"id": 555,
+			"content": "",
+			"created_at": "2024-01-01T00:00:00Z",
+			"attachments": [{"filename": "photo.jpg", "byte_size": 3500000, "content_type": "image/jpeg"}]
+		}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func TestChatUploadSummaryIncludesFileSize(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	app, buf := newTestAppWithTransport(t, &mockChatUploadTransport{})
+
+	// Create a temp file to upload
+	tmp := t.TempDir()
+	filePath := tmp + "/photo.jpg"
+	require.NoError(t, os.WriteFile(filePath, []byte("fake image data"), 0644))
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "upload", filePath)
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data    map[string]any `json:"data"`
+		Summary string         `json:"summary"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	assert.Contains(t, envelope.Summary, "photo.jpg")
+	assert.Contains(t, envelope.Summary, "3.5mb")
+}
+
+func TestChatUploadStyledOutputIncludesFileSize(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &chatTestTokenProvider{},
+		basecamp.WithTransport(&mockChatUploadTransport{}),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatStyled,
+			Writer: buf,
+		}),
+	}
+
+	tmp := t.TempDir()
+	filePath := tmp + "/photo.jpg"
+	require.NoError(t, os.WriteFile(filePath, []byte("fake image data"), 0644))
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "upload", filePath)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), "📎 photo.jpg (3.5mb)")
 }
