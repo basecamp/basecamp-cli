@@ -511,7 +511,14 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 		sdkLimit = limit
 	}
 
-	todos, totalCount, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, status, sdkLimit, true)
+	// Normalize "incomplete" to "pending" for the SDK, which documents
+	// "completed" and "pending" as valid Status values.
+	sdkStatus := status
+	if sdkStatus == "incomplete" {
+		sdkStatus = "pending"
+	}
+
+	todos, totalCount, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, sdkStatus, sdkLimit, true)
 	if err != nil {
 		return convertSDKError(err)
 	}
