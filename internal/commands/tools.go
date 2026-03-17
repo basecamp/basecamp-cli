@@ -30,7 +30,7 @@ Disabling a tool hides it from the dock but preserves its content.`,
 		Annotations: map[string]string{"agent_notes": "Dock tools are the sidebar navigation items in a project\nEnable/disable controls visibility without deleting\nEach tool has a type (e.g., Todoset, Schedule, MessageBoard, Vault, Chat::Campfire)"},
 	}
 
-	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name (for breadcrumbs)")
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	cmd.AddCommand(
@@ -44,6 +44,47 @@ Disabling a tool hides it from the dock but preserves its content.`,
 	)
 
 	return cmd
+}
+
+// resolveToolsProject optionally resolves a project for breadcrumb display.
+// Returns the resolved project ID string, or "" if no project was specified.
+// If the user explicitly provided a project via flag (--in/--project) that
+// cannot be resolved, the error is returned. Config defaults are best-effort:
+// resolution failures are silently ignored since the user didn't ask for
+// project context on this invocation.
+func resolveToolsProject(cmd *cobra.Command, app *appctx.App, project string) (string, error) {
+	explicit := project != ""
+
+	projectID := project
+	if projectID == "" {
+		projectID = app.Flags.Project
+		if projectID != "" {
+			explicit = true
+		}
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		return "", nil
+	}
+
+	resolved, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		if explicit {
+			return "", err
+		}
+		return "", nil
+	}
+	return resolved, nil
+}
+
+// toolBreadcrumbFlag returns " --in <id>" if projectID is non-empty, or "".
+func toolBreadcrumbFlag(projectID string) string {
+	if projectID == "" {
+		return ""
+	}
+	return " --in " + projectID
 }
 
 func newToolsShowCmd(project *string) *cobra.Command {
@@ -64,25 +105,11 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
+			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			tool, err := app.Account().Tools().Get(cmd.Context(), toolID)
 			if err != nil {
@@ -95,25 +122,29 @@ func newToolsShowCmd(project *string) *cobra.Command {
 			}
 			summary := fmt.Sprintf("%s (%s) at position %s", tool.Title, tool.Name, posStr)
 
+			crumbs := []output.Breadcrumb{
+				{
+					Action:      "rename",
+					Cmd:         fmt.Sprintf("basecamp tools update %d \"New Name\"%s", toolID, inFlag),
+					Description: "Rename tool",
+				},
+				{
+					Action:      "reposition",
+					Cmd:         fmt.Sprintf("basecamp tools reposition %d --position 1%s", toolID, inFlag),
+					Description: "Move tool",
+				},
+			}
+			if resolvedProjectID != "" {
+				crumbs = append(crumbs, output.Breadcrumb{
+					Action:      "project",
+					Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
+					Description: "View project",
+				})
+			}
+
 			return app.OK(tool,
 				output.WithSummary(summary),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "rename",
-						Cmd:         fmt.Sprintf("basecamp tools update %d \"New Name\" --in %s", toolID, resolvedProjectID),
-						Description: "Rename tool",
-					},
-					output.Breadcrumb{
-						Action:      "reposition",
-						Cmd:         fmt.Sprintf("basecamp tools reposition %d --position 1 --in %s", toolID, resolvedProjectID),
-						Description: "Move tool",
-					},
-					output.Breadcrumb{
-						Action:      "project",
-						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
-						Description: "View project",
-					},
-				),
+				output.WithBreadcrumbs(crumbs...),
 			)
 		},
 	}
@@ -155,25 +186,11 @@ For example, clone a Chat to create a second chat room in the same project.`,
 				}
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
+			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			var cloneOpts *basecamp.CloneToolOptions
 			if title != "" {
@@ -185,20 +202,24 @@ For example, clone a Chat to create a second chat room in the same project.`,
 				return convertSDKError(err)
 			}
 
+			crumbs := []output.Breadcrumb{
+				{
+					Action:      "tool",
+					Cmd:         fmt.Sprintf("basecamp tools show %d%s", created.ID, inFlag),
+					Description: "View tool",
+				},
+			}
+			if resolvedProjectID != "" {
+				crumbs = append(crumbs, output.Breadcrumb{
+					Action:      "project",
+					Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
+					Description: "View project",
+				})
+			}
+
 			return app.OK(created,
 				output.WithSummary(fmt.Sprintf("Created: %s", created.Title)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "tool",
-						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", created.ID, resolvedProjectID),
-						Description: "View tool",
-					},
-					output.Breadcrumb{
-						Action:      "project",
-						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
-						Description: "View project",
-					},
-				),
+				output.WithBreadcrumbs(crumbs...),
 			)
 		},
 	}
@@ -241,45 +262,35 @@ func newToolsUpdateCmd(project *string) *cobra.Command {
 				return output.ErrUsage(fmt.Sprintf("Tool name too long (%d characters, max 64)", n))
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
+			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			tool, err := app.Account().Tools().Update(cmd.Context(), toolID, title)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
+			crumbs := []output.Breadcrumb{
+				{
+					Action:      "tool",
+					Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, inFlag),
+					Description: "View tool",
+				},
+			}
+			if resolvedProjectID != "" {
+				crumbs = append(crumbs, output.Breadcrumb{
+					Action:      "project",
+					Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
+					Description: "View project",
+				})
+			}
+
 			return app.OK(tool,
 				output.WithSummary(fmt.Sprintf("Renamed to: %s", tool.Title)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "tool",
-						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", toolID, resolvedProjectID),
-						Description: "View tool",
-					},
-					output.Breadcrumb{
-						Action:      "project",
-						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
-						Description: "View project",
-					},
-				),
+				output.WithBreadcrumbs(crumbs...),
 			)
 		},
 	}
@@ -308,22 +319,7 @@ WARNING: This permanently removes the tool and all its content.`,
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
@@ -333,15 +329,18 @@ WARNING: This permanently removes the tool and all its content.`,
 				return convertSDKError(err)
 			}
 
+			var crumbs []output.Breadcrumb
+			if resolvedProjectID != "" {
+				crumbs = append(crumbs, output.Breadcrumb{
+					Action:      "project",
+					Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
+					Description: "View project",
+				})
+			}
+
 			return app.OK(map[string]any{"trashed": true},
 				output.WithSummary(fmt.Sprintf("Tool %d trashed", toolID)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "project",
-						Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
-						Description: "View project",
-					},
-				),
+				output.WithBreadcrumbs(crumbs...),
 			)
 		},
 	}
@@ -367,25 +366,11 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
+			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			err = app.Account().Tools().Enable(cmd.Context(), toolID)
 			if err != nil {
@@ -397,7 +382,7 @@ func newToolsEnableCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, inFlag),
 						Description: "View tool",
 					},
 				),
@@ -426,25 +411,11 @@ The tool is not deleted - just hidden. Use 'basecamp tools enable' to restore.`,
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
+			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			err = app.Account().Tools().Disable(cmd.Context(), toolID)
 			if err != nil {
@@ -456,7 +427,7 @@ The tool is not deleted - just hidden. Use 'basecamp tools enable' to restore.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "enable",
-						Cmd:         fmt.Sprintf("basecamp tools enable %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools enable %d%s", toolID, inFlag),
 						Description: "Re-enable tool",
 					},
 				),
@@ -490,25 +461,11 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid tool ID")
 			}
 
-			// Resolve project, with interactive fallback
-			projectID := *project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
 			if err != nil {
 				return err
 			}
+			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			err = app.Account().Tools().Reposition(cmd.Context(), toolID, position)
 			if err != nil {
@@ -520,7 +477,7 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "tool",
-						Cmd:         fmt.Sprintf("basecamp tools show %d --in %s", toolID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, inFlag),
 						Description: "View tool",
 					},
 				),

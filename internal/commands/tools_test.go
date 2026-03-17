@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -152,5 +155,184 @@ func TestToolsCreateAcceptsMaxTitle(t *testing.T) {
 	var e *output.Error
 	if errors.As(err, &e) {
 		assert.NotContains(t, e.Message, "too long")
+	}
+}
+
+// TestToolsShowNoProjectRequired verifies that tools show works without --in or a default project.
+func TestToolsShowNoProjectRequired(t *testing.T) {
+	app, _ := setupTestApp(t)
+	// No ProjectID configured — should not prompt or error about project
+
+	project := ""
+	cmd := newToolsShowCmd(&project)
+
+	err := executeCommand(cmd, app, "123")
+	// Should reach the API call (network error), not fail on project resolution
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "project")
+}
+
+// TestToolsEnableNoProjectRequired verifies that tools enable works without --in.
+func TestToolsEnableNoProjectRequired(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	project := ""
+	cmd := newToolsEnableCmd(&project)
+
+	err := executeCommand(cmd, app, "123")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "project")
+}
+
+// TestToolsDisableNoProjectRequired verifies that tools disable works without --in.
+func TestToolsDisableNoProjectRequired(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	project := ""
+	cmd := newToolsDisableCmd(&project)
+
+	err := executeCommand(cmd, app, "123")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "project")
+}
+
+// TestToolsTrashNoProjectRequired verifies that tools trash works without --in.
+func TestToolsTrashNoProjectRequired(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	project := ""
+	cmd := newToolsTrashCmd(&project)
+
+	err := executeCommand(cmd, app, "123")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "project")
+}
+
+// TestToolsRepositionNoProjectRequired verifies that tools reposition works without --in.
+func TestToolsRepositionNoProjectRequired(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	project := ""
+	cmd := newToolsRepositionCmd(&project)
+
+	err := executeCommand(cmd, app, "456", "--position", "2")
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "project")
+}
+
+// TestToolsShowWithExplicitProjectErrorSurfaces verifies that an invalid explicit --in
+// produces an error rather than silently dropping breadcrumbs.
+func TestToolsShowWithExplicitProjectErrorSurfaces(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	// Simulate explicit --in flag (non-numeric triggers name lookup which hits the network)
+	project := "nonexistent-project"
+	cmd := newToolsShowCmd(&project)
+
+	err := executeCommand(cmd, app, "123")
+	// The error must come from project resolution, not from the Tools API call.
+	// noNetworkTransport causes the name resolver to fail when resolving a name.
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "Invalid tool ID")
+}
+
+// TestToolsShowConfigProjectErrorIgnored verifies that a config default project that
+// fails resolution is silently ignored (best-effort breadcrumbs).
+func TestToolsShowConfigProjectErrorIgnored(t *testing.T) {
+	app, _ := setupTestApp(t)
+	// Config default with a name (not numeric) — resolution will fail on noNetworkTransport
+	app.Config.ProjectID = "stale-project-name"
+
+	project := "" // no explicit flag
+	cmd := newToolsShowCmd(&project)
+
+	err := executeCommand(cmd, app, "123")
+	// Should reach the API call, not fail on project resolution
+	require.NotNil(t, err)
+	assert.NotContains(t, err.Error(), "stale-project-name")
+}
+
+// mockToolTransport serves canned responses for tools and project resolution.
+type mockToolTransport struct{}
+
+func (t *mockToolTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	var body string
+	switch {
+	case strings.Contains(req.URL.Path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test Project"}]`
+	case strings.HasSuffix(req.URL.Path, "/tools/555"):
+		body = `{"id": 555, "title": "Chat", "name": "chat", "enabled": true, "position": 2,` +
+			`"status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestToolsShowBreadcrumbsWithProject verifies that --in produces breadcrumbs containing --in <id>.
+func TestToolsShowBreadcrumbsWithProject(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockToolTransport{})
+	app.Config.ProjectID = "" // clear default so only explicit flag matters
+	app.Flags.Hints = true    // enable breadcrumbs in output
+
+	project := "123"
+	cmd := newToolsShowCmd(&project)
+
+	err := executeCommand(cmd, app, "555")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	// Should have rename, reposition, and project breadcrumbs
+	require.Len(t, envelope.Breadcrumbs, 3)
+
+	assert.Contains(t, envelope.Breadcrumbs[0].Cmd, "--in 123")
+	assert.Contains(t, envelope.Breadcrumbs[1].Cmd, "--in 123")
+	assert.Equal(t, "project", envelope.Breadcrumbs[2].Action)
+	assert.Contains(t, envelope.Breadcrumbs[2].Cmd, "projects show 123")
+}
+
+// TestToolsShowBreadcrumbsWithoutProject verifies that omitting --in produces
+// breadcrumbs without --in and no "View project" breadcrumb.
+func TestToolsShowBreadcrumbsWithoutProject(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockToolTransport{})
+	app.Config.ProjectID = "" // no default project
+	app.Flags.Hints = true    // enable breadcrumbs in output
+
+	project := ""
+	cmd := newToolsShowCmd(&project)
+
+	err := executeCommand(cmd, app, "555")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	// Should have rename and reposition breadcrumbs only — no project breadcrumb
+	require.Len(t, envelope.Breadcrumbs, 2)
+
+	for _, bc := range envelope.Breadcrumbs {
+		assert.NotContains(t, bc.Cmd, "--in")
+		assert.NotEqual(t, "project", bc.Action)
 	}
 }
