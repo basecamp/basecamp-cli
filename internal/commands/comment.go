@@ -233,10 +233,11 @@ You can pass either a comment ID or a Basecamp URL:
 			}
 
 			// Resolve @mentions
-			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}
+			html = mentionResult.HTML
 
 			req := &basecamp.UpdateCommentRequest{
 				Content: html,
@@ -247,7 +248,7 @@ You can pass either a comment ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			return app.OK(comment,
+			respOpts := []output.ResponseOption{
 				output.WithEntity("comment"),
 				output.WithSummary(fmt.Sprintf("Updated comment #%s", commentIDStr)),
 				output.WithBreadcrumbs(
@@ -257,7 +258,11 @@ You can pass either a comment ID or a Basecamp URL:
 						Description: "View comment",
 					},
 				),
-			)
+			}
+			if notice := unresolvedMentionNotice(mentionResult.Unresolved); notice != "" {
+				respOpts = append(respOpts, output.WithNotice(notice))
+			}
+			return app.OK(comment, respOpts...)
 		},
 	}
 
@@ -352,10 +357,12 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 			}
 
 			// Resolve @mentions (e.g., @John, @John.Doe → clickable mention tags)
-			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}
+			html = mentionResult.HTML
+			mentionNotice := unresolvedMentionNotice(mentionResult.Unresolved)
 
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
@@ -421,7 +428,7 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 
 			// Single comment: return the comment object directly
 			if len(commented) == 1 && len(failed) == 0 && lastComment != nil {
-				return app.OK(lastComment,
+				respOpts := []output.ResponseOption{
 					output.WithEntity("comment"),
 					output.WithSummary(fmt.Sprintf("Commented on #%s", commented[0])),
 					output.WithBreadcrumbs(
@@ -436,7 +443,11 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 							Description: "Update comment",
 						},
 					),
-				)
+				}
+				if mentionNotice != "" {
+					respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				}
+				return app.OK(lastComment, respOpts...)
 			}
 
 			// Batch: build result map
@@ -453,9 +464,13 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 				summary = fmt.Sprintf("Added %d comment(s) to: %s", len(commented), strings.Join(commented, ", "))
 			}
 
-			return app.OK(result,
+			batchOpts := []output.ResponseOption{
 				output.WithSummary(summary),
-			)
+			}
+			if mentionNotice != "" {
+				batchOpts = append(batchOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(result, batchOpts...)
 		},
 	}
 

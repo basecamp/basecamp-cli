@@ -323,10 +323,12 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 			}
 
 			// Resolve @mentions
-			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}
+			html = mentionResult.HTML
+			mentionNotice := unresolvedMentionNotice(mentionResult.Unresolved)
 
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
@@ -355,7 +357,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return convertSDKError(err)
 			}
 
-			return app.OK(message,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
 				output.WithEntity("message"),
 				output.WithBreadcrumbs(
@@ -370,7 +372,11 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 						Description: "List messages",
 					},
 				),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(message, respOpts...)
 		},
 	}
 
@@ -426,10 +432,11 @@ You can pass either a message ID or a Basecamp URL:
 			}
 
 			// Resolve @mentions
-			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}
+			html = mentionResult.HTML
 
 			req := &basecamp.UpdateMessageRequest{
 				Subject: title,
@@ -441,7 +448,7 @@ You can pass either a message ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			return app.OK(message,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Updated message #%s", messageIDStr)),
 				output.WithEntity("message"),
 				output.WithBreadcrumbs(
@@ -451,7 +458,11 @@ You can pass either a message ID or a Basecamp URL:
 						Description: "View message",
 					},
 				),
-			)
+			}
+			if notice := unresolvedMentionNotice(mentionResult.Unresolved); notice != "" {
+				respOpts = append(respOpts, output.WithNotice(notice))
+			}
+			return app.OK(message, respOpts...)
 		},
 	}
 
@@ -722,10 +733,12 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 			}
 
 			// Resolve @mentions
-			html, err = resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
 			if err != nil {
 				return err
 			}
+			html = mentionResult.HTML
+			mentionNotice := unresolvedMentionNotice(mentionResult.Unresolved)
 
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
@@ -752,7 +765,7 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 				return convertSDKError(err)
 			}
 
-			return app.OK(message,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
 				output.WithEntity("message"),
 				output.WithBreadcrumbs(
@@ -767,7 +780,11 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 						Description: "List messages",
 					},
 				),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(message, respOpts...)
 		},
 	}
 

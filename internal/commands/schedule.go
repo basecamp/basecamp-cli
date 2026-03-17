@@ -465,16 +465,19 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	scheduleIDInt, _ := strconv.ParseInt(scheduleID, 10, 64)
 
 	// Convert description through rich text pipeline
+	var mentionNotice string
 	if description != "" {
 		description = richtext.MarkdownToHTML(description)
 		description, err = resolveLocalImages(cmd, app, description)
 		if err != nil {
 			return err
 		}
-		description, err = resolveMentions(cmd.Context(), app.Names, description)
-		if err != nil {
-			return err
+		mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, description)
+		if mentionErr != nil {
+			return mentionErr
 		}
+		description = mentionResult.HTML
+		mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
 	}
 
 	// Build request
@@ -508,7 +511,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 
 	resultSummary := fmt.Sprintf("Created schedule entry #%d: %s", entry.ID, summary)
 
-	return app.OK(entry,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(resultSummary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -522,7 +525,11 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 				Description: "View all entries",
 			},
 		),
-	)
+	}
+	if mentionNotice != "" {
+		respOpts = append(respOpts, output.WithNotice(mentionNotice))
+	}
+	return app.OK(entry, respOpts...)
 }
 
 func newScheduleUpdateCmd(project *string) *cobra.Command {
@@ -593,17 +600,19 @@ You can pass either an entry ID or a Basecamp URL:
 				req.EndsAt = endsAt
 				hasChanges = true
 			}
+			var mentionNotice string
 			if description != "" {
 				html := richtext.MarkdownToHTML(description)
 				html, err = resolveLocalImages(cmd, app, html)
 				if err != nil {
 					return err
 				}
-				html, err = resolveMentions(cmd.Context(), app.Names, html)
-				if err != nil {
-					return err
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, html)
+				if mentionErr != nil {
+					return mentionErr
 				}
-				req.Description = html
+				req.Description = mentionResult.HTML
+				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
@@ -639,7 +648,7 @@ You can pass either an entry ID or a Basecamp URL:
 
 			resultSummary := fmt.Sprintf("Updated schedule entry #%s", entryID)
 
-			return app.OK(entry,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(resultSummary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -648,7 +657,11 @@ You can pass either an entry ID or a Basecamp URL:
 						Description: "View entry",
 					},
 				),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(entry, respOpts...)
 		},
 	}
 

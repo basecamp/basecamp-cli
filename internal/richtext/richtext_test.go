@@ -968,8 +968,8 @@ func TestResolveMentions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if result != tt.expected {
-				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			if result.HTML != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, tt.expected)
 			}
 		})
 	}
@@ -1034,8 +1034,8 @@ func TestResolveMentions_MentionSGID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if result != tt.expected {
-				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			if result.HTML != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, tt.expected)
 			}
 		})
 	}
@@ -1093,8 +1093,8 @@ func TestResolveMentions_PersonID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if result != tt.expected {
-				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			if result.HTML != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, tt.expected)
 			}
 		})
 	}
@@ -1134,8 +1134,8 @@ func TestResolveMentions_SGIDInline(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if result != tt.expected {
-				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, tt.expected)
+			if result.HTML != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, tt.expected)
 			}
 		})
 	}
@@ -1156,8 +1156,8 @@ func TestResolveMentions_Mixed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result != expected {
-			t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result, expected)
+		if result.HTML != expected {
+			t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, expected)
 		}
 	})
 }
@@ -1168,4 +1168,84 @@ func TestResolveMentions_PersonSchemeNilLookup(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for person: scheme with nil lookupByID")
 	}
+}
+
+func TestResolveMentions_ErrMentionSkip(t *testing.T) {
+	lookup := func(name string) (string, string, error) {
+		people := map[string][2]string{
+			"John":     {"sgid-john", "John Doe"},
+			"John Doe": {"sgid-john", "John Doe"},
+			"Beth":     {"sgid-beth", "Beth Smith"},
+		}
+		if p, ok := people[name]; ok {
+			return p[0], p[1], nil
+		}
+		return "", "", fmt.Errorf("%w: not found: %s", ErrMentionSkip, name)
+	}
+
+	t.Run("mixed valid and invalid mentions", func(t *testing.T) {
+		input := `<p>Hey @John, @Beth, and @Bobby are you around</p>`
+		result, err := ResolveMentions(input, lookup, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := `<p>Hey ` + MentionToHTML("sgid-john", "John Doe") + `, ` +
+			MentionToHTML("sgid-beth", "Beth Smith") + `, and @Bobby are you around</p>`
+		if result.HTML != expected {
+			t.Errorf("HTML =\n  %q\nwant:\n  %q", result.HTML, expected)
+		}
+		if len(result.Unresolved) != 1 || result.Unresolved[0] != "@Bobby" {
+			t.Errorf("Unresolved = %v, want [@Bobby]", result.Unresolved)
+		}
+	})
+
+	t.Run("all invalid fuzzy mentions", func(t *testing.T) {
+		input := `<p>Hey @Unknown and @Nobody</p>`
+		result, err := ResolveMentions(input, lookup, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.HTML != input {
+			t.Errorf("HTML should be unchanged, got:\n  %q", result.HTML)
+		}
+		if len(result.Unresolved) != 2 {
+			t.Errorf("Unresolved = %v, want 2 entries", result.Unresolved)
+		}
+	})
+
+	t.Run("all valid mentions returns empty unresolved", func(t *testing.T) {
+		input := `<p>Hey @John and @Beth</p>`
+		result, err := ResolveMentions(input, lookup, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(result.Unresolved) != 0 {
+			t.Errorf("Unresolved should be empty, got %v", result.Unresolved)
+		}
+	})
+
+	t.Run("non-skip error still fails", func(t *testing.T) {
+		failLookup := func(name string) (string, string, error) {
+			return "", "", fmt.Errorf("network timeout")
+		}
+		input := `<p>Hey @John</p>`
+		_, err := ResolveMentions(input, failLookup, nil)
+		if err == nil {
+			t.Error("expected error for non-skip failure")
+		}
+	})
+
+	t.Run("person ID scheme still hard fails", func(t *testing.T) {
+		lookupByID := func(id string) (string, string, error) {
+			return "", "", fmt.Errorf("not pingable")
+		}
+		input := `<a href="person:99999">@Ghost</a>`
+		_, err := ResolveMentions(input, lookup, lookupByID)
+		if err == nil {
+			t.Error("expected error for person:ID resolution failure")
+		}
+	})
 }

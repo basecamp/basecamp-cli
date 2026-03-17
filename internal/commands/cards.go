@@ -437,16 +437,19 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 			}
 
 			// Convert content through rich text pipeline
+			var mentionNotice string
 			if content != "" {
 				content = richtext.MarkdownToHTML(content)
 				content, err = resolveLocalImages(cmd, app, content)
 				if err != nil {
 					return err
 				}
-				content, err = resolveMentions(cmd.Context(), app.Names, content)
-				if err != nil {
-					return err
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, content)
+				if mentionErr != nil {
+					return mentionErr
 				}
+				content = mentionResult.HTML
+				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
 			}
 
 			// Build request
@@ -504,10 +507,14 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				Description: "List cards",
 			})
 
-			return app.OK(card,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
 				output.WithBreadcrumbs(breadcrumbs...),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(card, respOpts...)
 		},
 	}
 
@@ -560,17 +567,19 @@ You can pass either a card ID or a Basecamp URL:
 			if title != "" {
 				req.Title = title
 			}
+			var mentionNotice string
 			if content != "" {
 				html := richtext.MarkdownToHTML(content)
 				html, err = resolveLocalImages(cmd, app, html)
 				if err != nil {
 					return err
 				}
-				html, err = resolveMentions(cmd.Context(), app.Names, html)
-				if err != nil {
-					return err
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, html)
+				if mentionErr != nil {
+					return mentionErr
 				}
-				req.Content = html
+				req.Content = mentionResult.HTML
+				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
 			}
 			if due != "" {
 				req.DueOn = dateparse.Parse(due)
@@ -588,7 +597,7 @@ You can pass either a card ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			return app.OK(card,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Updated card #%s", cardIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -597,7 +606,11 @@ You can pass either a card ID or a Basecamp URL:
 						Description: "View card",
 					},
 				),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(card, respOpts...)
 		},
 	}
 
@@ -974,16 +987,19 @@ func NewCardCmd() *cobra.Command {
 			}
 
 			// Convert content through rich text pipeline
+			var mentionNotice string
 			if content != "" {
 				content = richtext.MarkdownToHTML(content)
 				content, err = resolveLocalImages(cmd, app, content)
 				if err != nil {
 					return err
 				}
-				content, err = resolveMentions(cmd.Context(), app.Names, content)
-				if err != nil {
-					return err
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, content)
+				if mentionErr != nil {
+					return mentionErr
 				}
+				content = mentionResult.HTML
+				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
 			}
 
 			// Build request
@@ -1040,10 +1056,14 @@ func NewCardCmd() *cobra.Command {
 				Description: "List cards",
 			})
 
-			return app.OK(card,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
 				output.WithBreadcrumbs(cardBreadcrumbs...),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(card, respOpts...)
 		},
 	}
 

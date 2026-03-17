@@ -1192,6 +1192,7 @@ Examples:
 
 			// Convert comment through rich text pipeline
 			commentHTML := comment
+			var mentionNotice string
 			if comment != "" {
 				commentHTML = richtext.MarkdownToHTML(comment)
 				var pipelineErr error
@@ -1199,10 +1200,12 @@ Examples:
 				if pipelineErr != nil {
 					return pipelineErr
 				}
-				commentHTML, pipelineErr = resolveMentions(cmd.Context(), app.Names, commentHTML)
+				mentionResult, pipelineErr := resolveMentions(cmd.Context(), app.Names, commentHTML)
 				if pipelineErr != nil {
 					return pipelineErr
 				}
+				commentHTML = mentionResult.HTML
+				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
 			}
 
 			// Execute actions
@@ -1245,7 +1248,7 @@ Examples:
 				summary += fmt.Sprintf(", completed %d", len(result.Completed))
 			}
 
-			return app.OK(result,
+			respOpts := []output.ResponseOption{
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -1254,7 +1257,11 @@ Examples:
 						Description: "List todos",
 					},
 				),
-			)
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+			}
+			return app.OK(result, respOpts...)
 		},
 	}
 

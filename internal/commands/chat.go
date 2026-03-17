@@ -364,21 +364,23 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 
 	// Resolve @mentions — skip if user explicitly set a non-HTML content type.
 	// HTML-escape plain text first so characters like < > & are safe.
+	var mentionNotice string
 	if contentType == "" || contentType == "text/html" {
 		mentionInput := content
 		if contentType == "" {
 			mentionInput = richtext.MarkdownToHTML(content)
 		}
-		resolved, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionInput)
+		result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionInput)
 		if resolveErr != nil {
 			return resolveErr
 		}
-		if resolved != mentionInput {
-			content = resolved
+		if result.HTML != mentionInput || len(result.Unresolved) > 0 {
+			content = result.HTML
 			if contentType == "" {
 				contentType = "text/html"
 			}
 		}
+		mentionNotice = unresolvedMentionNotice(result.Unresolved)
 	}
 
 	// Post message using SDK
@@ -423,11 +425,15 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		)
 	}
 
-	return app.OK(line,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithEntity("chat_line"),
 		output.WithBreadcrumbs(breadcrumbs...),
-	)
+	}
+	if mentionNotice != "" {
+		respOpts = append(respOpts, output.WithNotice(mentionNotice))
+	}
+	return app.OK(line, respOpts...)
 }
 
 func newChatUploadCmd(project, chatID *string) *cobra.Command {
