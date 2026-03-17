@@ -31,7 +31,7 @@ Disabling a tool hides it from the dock but preserves its content.`,
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name (for breadcrumbs)")
-	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID or name (alias for --project)")
 
 	cmd.AddCommand(
 		newToolsShowCmd(&project),

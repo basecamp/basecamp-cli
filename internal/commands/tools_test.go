@@ -169,7 +169,7 @@ func TestToolsShowNoProjectRequired(t *testing.T) {
 	err := executeCommand(cmd, app, "123")
 	// Should reach the API call (network error), not fail on project resolution
 	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "project")
+	assert.NotContains(t, strings.ToLower(err.Error()), "project")
 }
 
 // TestToolsEnableNoProjectRequired verifies that tools enable works without --in.
@@ -181,7 +181,7 @@ func TestToolsEnableNoProjectRequired(t *testing.T) {
 
 	err := executeCommand(cmd, app, "123")
 	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "project")
+	assert.NotContains(t, strings.ToLower(err.Error()), "project")
 }
 
 // TestToolsDisableNoProjectRequired verifies that tools disable works without --in.
@@ -193,7 +193,7 @@ func TestToolsDisableNoProjectRequired(t *testing.T) {
 
 	err := executeCommand(cmd, app, "123")
 	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "project")
+	assert.NotContains(t, strings.ToLower(err.Error()), "project")
 }
 
 // TestToolsTrashNoProjectRequired verifies that tools trash works without --in.
@@ -205,7 +205,7 @@ func TestToolsTrashNoProjectRequired(t *testing.T) {
 
 	err := executeCommand(cmd, app, "123")
 	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "project")
+	assert.NotContains(t, strings.ToLower(err.Error()), "project")
 }
 
 // TestToolsRepositionNoProjectRequired verifies that tools reposition works without --in.
@@ -217,23 +217,58 @@ func TestToolsRepositionNoProjectRequired(t *testing.T) {
 
 	err := executeCommand(cmd, app, "456", "--position", "2")
 	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "project")
+	assert.NotContains(t, strings.ToLower(err.Error()), "project")
+}
+
+// mockToolProjectFailTransport returns tools successfully but fails project resolution.
+// This lets us prove that an explicit --in error stops the command before the tools API.
+type mockToolProjectFailTransport struct {
+	toolsCalled bool
+}
+
+func (t *mockToolProjectFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case strings.Contains(req.URL.Path, "/projects.json"):
+		// Return empty project list so name resolution fails with "not found"
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[]`)),
+			Header:     header,
+		}, nil
+	case strings.Contains(req.URL.Path, "/tools/"):
+		t.toolsCalled = true
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id": 123, "title": "Chat", "name": "chat"}`)),
+			Header:     header,
+		}, nil
+	default:
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Header:     header,
+		}, nil
+	}
 }
 
 // TestToolsShowWithExplicitProjectErrorSurfaces verifies that an invalid explicit --in
-// produces an error rather than silently dropping breadcrumbs.
+// produces an error rather than silently dropping breadcrumbs, and the tools API is never called.
 func TestToolsShowWithExplicitProjectErrorSurfaces(t *testing.T) {
-	app, _ := setupTestApp(t)
+	transport := &mockToolProjectFailTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = ""
 
-	// Simulate explicit --in flag (non-numeric triggers name lookup which hits the network)
+	// Explicit --in with a name that won't match any project
 	project := "nonexistent-project"
 	cmd := newToolsShowCmd(&project)
 
 	err := executeCommand(cmd, app, "123")
-	// The error must come from project resolution, not from the Tools API call.
-	// noNetworkTransport causes the name resolver to fail when resolving a name.
 	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "Invalid tool ID")
+	assert.Contains(t, strings.ToLower(err.Error()), "not found")
+	assert.False(t, transport.toolsCalled, "tools API should not be called when project resolution fails")
 }
 
 // TestToolsShowConfigProjectErrorIgnored verifies that a config default project that
