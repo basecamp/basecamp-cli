@@ -796,8 +796,7 @@ func formatTableCell(key string, val any) string {
 // Date columns get human-readable formatting via formatDateValue.
 // Unlike formatCell, string values are not truncated — detail views show full content.
 func formatDetailValue(key string, val any) string {
-	isDateColumn := strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on") || strings.HasSuffix(key, "_date")
-	if isDateColumn {
+	if isDateColumn(key) {
 		return formatDateValue(key, val)
 	}
 
@@ -821,11 +820,12 @@ func formatDetailValue(key string, val any) string {
 // formatDateValue formats date fields in a human-readable way.
 // For date columns (created_at, updated_at, due_on, due_date), it converts
 // ISO8601 timestamps to a more readable format.
-func formatDateValue(key string, val any) string {
-	// Check if this is a date column
-	isDateColumn := strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on") || strings.HasSuffix(key, "_date")
+func isDateColumn(key string) bool {
+	return strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on") || strings.HasSuffix(key, "_date")
+}
 
-	if !isDateColumn {
+func formatDateValue(key string, val any) string {
+	if !isDateColumn(key) {
 		return formatCell(val)
 	}
 
