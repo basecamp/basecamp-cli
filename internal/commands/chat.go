@@ -363,7 +363,8 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 	}
 
 	// Resolve @mentions — skip if user explicitly set a non-HTML content type.
-	// HTML-escape plain text first so characters like < > & are safe.
+	// When contentType is unset, convert Markdown to HTML first so the mention
+	// resolver operates on HTML input.
 	var mentionNotice string
 	if contentType == "" || contentType == "text/html" {
 		mentionInput := content
