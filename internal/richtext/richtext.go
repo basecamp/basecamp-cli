@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -882,6 +883,7 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 		result = result[:mentionStart] + tag + result[mentionEnd:]
 	}
 
+	slices.Reverse(unresolved)
 	return result, unresolved, nil
 }
 

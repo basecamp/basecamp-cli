@@ -73,10 +73,11 @@ const (
 
 // Options controls output behavior.
 type Options struct {
-	Format   Format
-	Writer   io.Writer
-	Verbose  bool
-	JQFilter string // jq expression to apply to JSON output (built-in via gojq)
+	Format    Format
+	Writer    io.Writer
+	ErrWriter io.Writer // Diagnostic output (notices in quiet mode); defaults to os.Stderr.
+	Verbose   bool
+	JQFilter  string // jq expression to apply to JSON output (built-in via gojq)
 }
 
 // DefaultOptions returns options for standard output.
@@ -99,6 +100,9 @@ type Writer struct {
 func New(opts Options) *Writer {
 	if opts.Writer == nil {
 		opts.Writer = os.Stdout
+	}
+	if opts.ErrWriter == nil {
+		opts.ErrWriter = os.Stderr
 	}
 	w := &Writer{opts: opts}
 	if opts.JQFilter != "" {
@@ -184,6 +188,16 @@ func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
 }
 
 func (w *Writer) write(v any) error {
+	// In quiet mode (--agent/--quiet), surface notices on stderr so
+	// automation consumers can detect degraded operations (e.g. unresolved
+	// mentions). This runs before the --jq early-return so that
+	// --agent --jq still emits the diagnostic.
+	if w.opts.Format == FormatQuiet {
+		if resp, ok := v.(*Response); ok && resp.Notice != "" {
+			fmt.Fprintf(w.opts.ErrWriter, "notice: %s\n", resp.Notice)
+		}
+	}
+
 	// --jq flag: serialize to JSON, apply the jq filter, print results
 	if w.opts.JQFilter != "" {
 		return w.writeJQ(v)
@@ -202,7 +216,6 @@ func (w *Writer) write(v any) error {
 
 	switch format {
 	case FormatQuiet:
-		// Extract just the data field for quiet mode
 		if resp, ok := v.(*Response); ok {
 			return w.writeQuiet(resp.Data)
 		}

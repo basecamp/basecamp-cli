@@ -488,9 +488,13 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, html string)
 		func(name string) (string, string, error) {
 			person, err := resolver.ResolvePersonByName(ctx, name)
 			if err != nil {
-				// Downgrade not-found and ambiguous to skip — leave as plain text.
+				// Downgrade resolver-level not-found and ambiguous to skip — leave
+				// as plain text. Only match errors without an HTTP status; API-level
+				// failures (e.g. 404 from the pingable endpoint) carry HTTPStatus
+				// and must still hard-fail.
 				var cliErr *output.Error
-				if errors.As(err, &cliErr) && (cliErr.Code == output.CodeNotFound || cliErr.Code == output.CodeAmbiguous) {
+				if errors.As(err, &cliErr) && cliErr.HTTPStatus == 0 &&
+					(cliErr.Code == output.CodeNotFound || cliErr.Code == output.CodeAmbiguous) {
 					return "", "", fmt.Errorf("%w: %w", richtext.ErrMentionSkip, err)
 				}
 				return "", "", err

@@ -1200,7 +1200,7 @@ func TestResolveMentions_ErrMentionSkip(t *testing.T) {
 		}
 	})
 
-	t.Run("all invalid fuzzy mentions", func(t *testing.T) {
+	t.Run("all invalid fuzzy mentions preserves input order", func(t *testing.T) {
 		input := `<p>Hey @Unknown and @Nobody</p>`
 		result, err := ResolveMentions(input, lookup, nil)
 		if err != nil {
@@ -1210,8 +1210,14 @@ func TestResolveMentions_ErrMentionSkip(t *testing.T) {
 		if result.HTML != input {
 			t.Errorf("HTML should be unchanged, got:\n  %q", result.HTML)
 		}
-		if len(result.Unresolved) != 2 {
-			t.Errorf("Unresolved = %v, want 2 entries", result.Unresolved)
+		want := []string{"@Unknown", "@Nobody"}
+		if len(result.Unresolved) != len(want) {
+			t.Fatalf("Unresolved = %v, want %v", result.Unresolved, want)
+		}
+		for i, name := range want {
+			if result.Unresolved[i] != name {
+				t.Errorf("Unresolved[%d] = %q, want %q", i, result.Unresolved[i], name)
+			}
 		}
 	})
 
