@@ -1460,6 +1460,21 @@ func TestParseAttachments(t *testing.T) {
 			},
 		},
 		{
+			name:     "uppercase tag name",
+			html:     `<BC-ATTACHMENT sgid="UP1" content-type="image/png" filename="upper.png"></BC-ATTACHMENT>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filename != "upper.png" {
+					t.Errorf("Filename = %q, want upper.png", atts[0].Filename)
+				}
+			},
+		},
+		{
+			name:     "bare tag with no attributes",
+			html:     `<bc-attachment>content</bc-attachment>`,
+			expected: 1,
+		},
+		{
 			name:     "missing attributes handled gracefully",
 			html:     `<bc-attachment sgid="BARE"></bc-attachment>`,
 			expected: 1,
