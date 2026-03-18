@@ -95,7 +95,7 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 				return &output.Error{
 					Code:    output.CodeUsage,
 					Message: "No todolists to track on the hill chart",
-					Hint:    fmt.Sprintf("Create todolists first, then track them:\n  basecamp todolists create \"My list\" --in %s\n  basecamp hillcharts track <id> --in %s", resolvedProjectID, resolvedProjectID),
+					Hint:    fmt.Sprintf("Create todolists first, then track them:\n  basecamp todolists create \"My list\" --in %s\n  basecamp hillcharts track <todolist-ids> --in %s", resolvedProjectID, resolvedProjectID),
 				}
 			}
 			if tsErr == nil && todoset.TodolistsCount > 0 {
