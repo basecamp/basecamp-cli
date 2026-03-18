@@ -1087,10 +1087,12 @@ func extractAttr(attrs, name string) string {
 		if !strings.EqualFold(m[1], name) {
 			continue
 		}
+		val := m[2]
 		if m[3] != "" {
-			return html.UnescapeString(m[3])
+			val = m[3]
 		}
-		return html.UnescapeString(m[2])
+		val = html.UnescapeString(val)
+		return strings.ReplaceAll(val, "\u00A0", " ")
 	}
 	return ""
 }

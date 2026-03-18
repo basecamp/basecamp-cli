@@ -62,12 +62,12 @@ You can pass either an ID or a Basecamp URL:
 func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	id, recordType := resolveAttachmentTarget(arg, recordType)
+	id, resolvedType := resolveAttachmentTarget(arg, recordType)
 
 	// Validate type early (before account check) for better error messages
-	if !isGenericType(recordType) && typeToEndpoint(recordType, id) == "" {
+	if !isGenericType(resolvedType) && typeToEndpoint(resolvedType, id) == "" {
 		return output.ErrUsageHint(
-			fmt.Sprintf("Unknown type: %s", recordType),
+			fmt.Sprintf("Unknown type: %s", resolvedType),
 			"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload",
 		)
 	}
@@ -79,7 +79,7 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	// Fetch the item — same two-step pattern as show.go:
 	// 1. Generic recording lookup to discover type
 	// 2. Re-fetch via type-specific endpoint for full content
-	content, err := fetchItemContent(cmd, app, id, recordType)
+	content, err := fetchItemContent(cmd, app, id, resolvedType)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 
 	// JSON/agent output
 	showCmd := fmt.Sprintf("basecamp show %s", id)
-	if showType := normalizeShowType(recordType); showType != "" {
+	if showType := normalizeShowType(resolvedType); showType != "" {
 		showCmd = fmt.Sprintf("basecamp show %s --type %s", id, showType)
 	}
 
@@ -126,7 +126,7 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 		{Action: "show", Cmd: showCmd, Description: "Show item"},
 	}
 	// Only suggest commenting when the target isn't itself a comment.
-	if recordType != "comment" && recordType != "comments" {
+	if resolvedType != "comment" && resolvedType != "comments" {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "comment",
 			Cmd:         fmt.Sprintf("basecamp comment %s <text>", id),
@@ -152,16 +152,11 @@ func isGenericType(recordType string) bool {
 // fetchItemContent retrieves the HTML content field from a Basecamp item.
 // Uses the same recording-type discovery pattern as show.go.
 func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string) (string, error) {
-	// If type is provided, go directly to the type-specific endpoint
+	// If type is provided, go directly to the type-specific endpoint.
+	// Caller validates the type before calling, so typeToEndpoint won't return "".
 	var endpoint string
 	if !isGenericType(recordType) {
 		endpoint = typeToEndpoint(recordType, id)
-		if endpoint == "" {
-			return "", output.ErrUsageHint(
-				fmt.Sprintf("Unknown type: %s", recordType),
-				"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload",
-			)
-		}
 	} else {
 		// Generic recording lookup first
 		endpoint = fmt.Sprintf("/recordings/%s.json", id)
