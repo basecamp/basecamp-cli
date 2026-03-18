@@ -50,7 +50,7 @@ func newHillchartsShowCmd(project *string) *cobra.Command {
 		Long: `Show the hill chart state for a todoset, including all tracked todolists.
 
   basecamp hillcharts show --in MyProject
-  basecamp hillcharts show --todoset 12345`,
+  basecamp hillcharts show --in MyProject --todoset 12345`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHillchartsShow(cmd, *project, todosetID)
 		},
@@ -85,8 +85,9 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 
 	hillChart, err := app.Account().HillCharts().Get(cmd.Context(), tsID)
 	if err != nil {
-		// BC3 returns 403 when the hill chart has no tracked todolists.
-		// Detect this and provide a more helpful error with a next step.
+		// FIXME: BC3 returns 403 when the hill chart is simply disabled (no tracked
+		// todolists). Ideally the API would return a more specific status so we don't
+		// have to sniff the todoset to distinguish "disabled" from "access denied".
 		var sdkErr *basecamp.Error
 		if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeForbidden {
 			todoset, tsErr := app.Account().Todosets().Get(cmd.Context(), tsID)
@@ -108,10 +109,7 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 		return convertSDKError(err)
 	}
 
-	summary := "Hill chart disabled"
-	if hillChart.Enabled {
-		summary = fmt.Sprintf("Hill chart: %d dot(s) tracked", len(hillChart.Dots))
-	}
+	summary := fmt.Sprintf("Hill chart: %d dot(s) tracked", len(hillChart.Dots))
 
 	return app.OK(hillChart,
 		output.WithSummary(summary),

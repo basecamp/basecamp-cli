@@ -27,6 +27,15 @@ load test_helper
   assert_output_contains "project"
 }
 
+@test "hillcharts show with --todoset but no project shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts show --todoset 12345
+  assert_failure
+  assert_output_contains "project"
+}
+
 @test "hillcharts track without args shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
