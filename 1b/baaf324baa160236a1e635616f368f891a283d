@@ -1,0 +1,23 @@
+scripts/manage-release-env.sh
+  68adfe78068efa89 21-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "1bbaaf324baa160236a1e635616f368f891a283d",
+  "prompts": {
+    "68adfe78068efa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ba324fb-4b1d-4cce-8e86-3917ffbd4f48",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremydaer@gmail.com>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 4,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
