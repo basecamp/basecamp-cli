@@ -159,7 +159,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
-| Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project>` |
+| Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |
 | Download file | `basecamp files download <id> --in <project>` |
 | Download inline attachment | `basecamp files download "https://storage.3.basecamp.com/.../download/report.pdf"` |
 | Watch timeline | `basecamp timeline --watch` |
