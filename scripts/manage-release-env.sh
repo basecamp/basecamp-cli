@@ -18,10 +18,10 @@ set -euo pipefail
 # ── Repo manifest ────────────────────────────────────────────────────────────
 # Each entry: repo|env_name|deploy_ref_pattern|reviewer_team|admin_bypass
 MANIFEST=(
-  "basecamp/basecamp-cli|release|v*|basecamp/sip|false"
-  "basecamp/hey-cli|release|v*|basecamp/sip|false"
-  "basecamp/fizzy-cli|release|v*|basecamp/sip|false"
-  "basecamp/cli|release|v*|basecamp/sip|false"
+  "basecamp/basecamp-cli|release|v*|basecamp/cli|false"
+  "basecamp/hey-cli|release|v*|basecamp/cli|false"
+  "basecamp/fizzy-cli|release|v*|basecamp/cli|false"
+  "basecamp/cli|release|v*|basecamp/cli|false"
 )
 
 # Secrets to migrate per repo (repo|secret_name|op_reference)
