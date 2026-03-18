@@ -4,53 +4,63 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
-func TestAttachmentsCommentURLPrefersCommentID(t *testing.T) {
-	// A comment URL with a #__recording_NNN fragment should resolve to the
-	// comment's recording ID, not the parent item's recording ID.
-	parsed := urlarg.Parse("https://3.basecamp.com/123/buckets/456/todos/111#__recording_789")
-	assert.NotNil(t, parsed)
-
-	// Simulate the command's URL resolution logic: prefer CommentID.
-	var id, recordType string
-	if parsed.CommentID != "" {
-		id = parsed.CommentID
-		recordType = "comment"
-	} else if parsed.RecordingID != "" {
-		id = parsed.RecordingID
+func TestResolveAttachmentTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		arg      string
+		typeHint string
+		wantID   string
+		wantType string
+	}{
+		{
+			name:     "comment URL prefers CommentID",
+			arg:      "https://3.basecamp.com/123/buckets/456/todos/111#__recording_789",
+			wantID:   "789",
+			wantType: "comment",
+		},
+		{
+			name:     "comment URL with explicit --type comment",
+			arg:      "https://3.basecamp.com/123/buckets/456/todos/111#__recording_789",
+			typeHint: "comment",
+			wantID:   "789",
+			wantType: "comment",
+		},
+		{
+			name:     "comment URL with explicit --type todo uses RecordingID",
+			arg:      "https://3.basecamp.com/123/buckets/456/todos/111#__recording_789",
+			typeHint: "todo",
+			wantID:   "111",
+			wantType: "todo",
+		},
+		{
+			name:     "plain URL without comment fragment",
+			arg:      "https://3.basecamp.com/123/buckets/456/todos/111",
+			wantID:   "111",
+			wantType: "todos",
+		},
+		{
+			name:     "plain ID with no type",
+			arg:      "42",
+			wantID:   "42",
+			wantType: "",
+		},
+		{
+			name:     "plain ID with explicit type",
+			arg:      "42",
+			typeHint: "message",
+			wantID:   "42",
+			wantType: "message",
+		},
 	}
-
-	assert.Equal(t, "789", id)
-	assert.Equal(t, "comment", recordType)
-}
-
-func TestAttachmentsCommentURLWithExplicitType(t *testing.T) {
-	// When --type is something other than comment, CommentID should NOT
-	// override the recording ID (avoids type/ID mismatch).
-	parsed := urlarg.Parse("https://3.basecamp.com/123/buckets/456/todos/111#__recording_789")
-	assert.NotNil(t, parsed)
-
-	recordType := "todo" // explicit --type todo
-	var id string
-	if parsed.CommentID != "" && (recordType == "" || recordType == "comment" || recordType == "comments") {
-		id = parsed.CommentID
-		recordType = "comment"
-	} else if parsed.RecordingID != "" {
-		id = parsed.RecordingID
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, typ := resolveAttachmentTarget(tt.arg, tt.typeHint)
+			assert.Equal(t, tt.wantID, id)
+			assert.Equal(t, tt.wantType, typ)
+		})
 	}
-
-	assert.Equal(t, "111", id)
-	assert.Equal(t, "todo", recordType)
-}
-
-func TestAttachmentsURLWithoutComment(t *testing.T) {
-	parsed := urlarg.Parse("https://3.basecamp.com/123/buckets/456/todos/111")
-	assert.NotNil(t, parsed)
-	assert.Equal(t, "", parsed.CommentID)
-	assert.Equal(t, "111", parsed.RecordingID)
 }
 
 func TestTypeToEndpointAnswerAliases(t *testing.T) {

@@ -62,23 +62,7 @@ You can pass either an ID or a Basecamp URL:
 func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	id := extractID(arg)
-
-	// Auto-detect type from URL if not specified (mirrors show.go).
-	// Prefer CommentID when present and type is compatible (comment.go convention).
-	if parsed := urlarg.Parse(arg); parsed != nil {
-		if parsed.CommentID != "" && (recordType == "" || recordType == "comment" || recordType == "comments") {
-			id = parsed.CommentID
-			if recordType == "" {
-				recordType = "comment"
-			}
-		} else if parsed.RecordingID != "" {
-			id = parsed.RecordingID
-		}
-		if recordType == "" && parsed.Type != "" {
-			recordType = parsed.Type
-		}
-	}
+	id, recordType := resolveAttachmentTarget(arg, recordType)
 
 	// Validate type early (before account check) for better error messages
 	if !isGenericType(recordType) && typeToEndpoint(recordType, id) == "" {
@@ -231,6 +215,30 @@ func extractContentField(data map[string]any) string {
 	return strings.Join(parts, "\n")
 }
 
+// resolveAttachmentTarget extracts the recording ID and type from a raw
+// argument (plain ID or Basecamp URL) and an optional explicit type hint.
+// Prefers CommentID when present and type is compatible.
+func resolveAttachmentTarget(arg, recordType string) (id, resolvedType string) {
+	id = extractID(arg)
+	resolvedType = recordType
+
+	if parsed := urlarg.Parse(arg); parsed != nil {
+		if parsed.CommentID != "" && (resolvedType == "" || resolvedType == "comment" || resolvedType == "comments") {
+			id = parsed.CommentID
+			if resolvedType == "" {
+				resolvedType = "comment"
+			}
+		} else if parsed.RecordingID != "" {
+			id = parsed.RecordingID
+		}
+		if resolvedType == "" && parsed.Type != "" {
+			resolvedType = parsed.Type
+		}
+	}
+
+	return id, resolvedType
+}
+
 // normalizeShowType maps attachment type aliases to canonical types that
 // basecamp show accepts. Returns "" for generic types (no --type needed).
 func normalizeShowType(recordType string) string {
@@ -271,7 +279,8 @@ func normalizeShowType(recordType string) string {
 }
 
 // typeToEndpoint maps a user-provided type string to the API endpoint.
-// Kept in sync with show.go's isValidRecordType / recordingTypeEndpoint.
+// Superset of show.go's types — includes URL path segment aliases
+// (e.g. question_answers, schedule_entries) that show.go doesn't accept.
 func typeToEndpoint(recordType, id string) string {
 	switch recordType {
 	case "todo", "todos":

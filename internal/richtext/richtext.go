@@ -1038,7 +1038,7 @@ type ParsedAttachment struct {
 
 // reBcAttachmentTag matches <bc-attachment> tags, both self-closing and wrapped.
 // Group 1 captures the attributes string.
-var reBcAttachmentTag = regexp.MustCompile(`(?si)<bc-attachment\b([^>]*)(?:>.*?</bc-attachment>|/>)`)
+var reBcAttachmentTag = regexp.MustCompile(`(?si)<bc-attachment([\s/>][^>]*)(?:>.*?</bc-attachment>|/>)`)
 
 // ParseAttachments extracts file attachment metadata from HTML content.
 // It finds all <bc-attachment> tags and returns their metadata, excluding
