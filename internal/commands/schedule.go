@@ -24,7 +24,7 @@ func NewScheduleCmd() *cobra.Command {
 		Short: "Manage schedules and entries",
 		Long: `Manage project schedules and schedule entries.
 
-Use 'basecamp schedule' to view the project schedule.
+Use 'basecamp schedule info' to view the project schedule.
 Use 'basecamp schedule entries' to list schedule entries.
 Use 'basecamp schedule create' to create new entries.
 

@@ -451,7 +451,7 @@ basecamp files update <id> --title "New" --content "Updated"
 For upcoming events across all projects, use `basecamp reports schedule --json`.
 
 ```bash
-basecamp schedule --in <project> --json           # Schedule info
+basecamp schedule info --in <project> --json       # Schedule info
 basecamp schedule entries --in <project> --json   # List entries
 basecamp schedule show <id> --in <project>        # Entry details
 basecamp schedule show <id> --date 20240315       # Specific occurrence (recurring)
