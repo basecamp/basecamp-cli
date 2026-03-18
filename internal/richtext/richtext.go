@@ -105,7 +105,11 @@ var (
 )
 
 // Pre-compiled regexes for IsHTML detection
-var reSafeTag = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
+var (
+	reSafeTag      = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
+	reFencedBlock  = regexp.MustCompile("(?m)^```[^\n]*\n[\\s\\S]*?^```")
+	reBacktickSpan = regexp.MustCompile("`[^`]+`")
+)
 
 // Pre-compiled regexes for IsMarkdown detection
 var reMarkdownPatterns = []*regexp.Regexp{
@@ -984,12 +988,16 @@ func ExtractAttachments(html string) []InlineAttachment {
 // IsHTML attempts to detect if the input string contains HTML.
 // Only returns true for well-formed HTML with common content tags.
 // Does not detect arbitrary tags like <script> to prevent XSS passthrough.
+// Tags inside Markdown code spans (`...`) and fenced code blocks (```) are ignored.
 func IsHTML(s string) bool {
 	if s == "" {
 		return false
 	}
 
-	// Check for common safe HTML content tags (opening and closing)
-	// This list intentionally excludes script, style, and other potentially dangerous tags
-	return reSafeTag.MatchString(s)
+	// Strip fenced code blocks and backtick code spans so that HTML tags
+	// appearing inside code contexts don't trigger a false positive.
+	stripped := reFencedBlock.ReplaceAllString(s, "")
+	stripped = reBacktickSpan.ReplaceAllString(stripped, "")
+
+	return reSafeTag.MatchString(stripped)
 }
