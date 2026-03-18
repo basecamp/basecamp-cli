@@ -1290,3 +1290,256 @@ func TestResolveMentions_ErrMentionSkip(t *testing.T) {
 		}
 	})
 }
+
+func TestParseAttachments(t *testing.T) {
+	tests := []struct {
+		name     string
+		html     string
+		expected int
+		check    func(*testing.T, []ParsedAttachment)
+	}{
+		{
+			name:     "no attachments",
+			html:     `<p>Just some regular HTML content</p>`,
+			expected: 0,
+		},
+		{
+			name:     "empty string",
+			html:     "",
+			expected: 0,
+		},
+		{
+			name: "single image with nested figure",
+			html: `<bc-attachment sgid="BAh7CEkiCG" content-type="image/jpeg" width="2560" height="1536" url="https://example.com/image.jpg" href="https://example.com/image.jpg" filename="photo.jpg" caption="My photo">
+  <figure><img src="..."><figcaption>My photo</figcaption></figure>
+</bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.SGID != "BAh7CEkiCG" {
+					t.Errorf("SGID = %q, want BAh7CEkiCG", a.SGID)
+				}
+				if a.ContentType != "image/jpeg" {
+					t.Errorf("ContentType = %q, want image/jpeg", a.ContentType)
+				}
+				if a.Filename != "photo.jpg" {
+					t.Errorf("Filename = %q, want photo.jpg", a.Filename)
+				}
+				if a.Caption != "My photo" {
+					t.Errorf("Caption = %q, want My photo", a.Caption)
+				}
+				if a.Width != "2560" || a.Height != "1536" {
+					t.Errorf("Dimensions = %sx%s, want 2560x1536", a.Width, a.Height)
+				}
+				if !a.IsImage() {
+					t.Error("IsImage() = false, want true")
+				}
+				if a.DisplayName() != "My photo" {
+					t.Errorf("DisplayName() = %q, want My photo", a.DisplayName())
+				}
+			},
+		},
+		{
+			name: "multiple attachments",
+			html: `<div>
+  <bc-attachment sgid="SGIDone" content-type="image/png" filename="first.png" url="https://example.com/first.png"></bc-attachment>
+  <bc-attachment sgid="SGIDtwo" content-type="image/gif" filename="second.gif" url="https://example.com/second.gif"></bc-attachment>
+</div>`,
+			expected: 2,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filename != "first.png" {
+					t.Errorf("first filename = %q, want first.png", atts[0].Filename)
+				}
+				if atts[1].Filename != "second.gif" {
+					t.Errorf("second filename = %q, want second.gif", atts[1].Filename)
+				}
+			},
+		},
+		{
+			name:     "self-closing tag",
+			html:     `<bc-attachment sgid="TEST123" content-type="application/pdf" filename="document.pdf" url="https://example.com/doc.pdf" />`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.ContentType != "application/pdf" {
+					t.Errorf("ContentType = %q, want application/pdf", a.ContentType)
+				}
+				if a.IsImage() {
+					t.Error("IsImage() = true, want false for PDF")
+				}
+			},
+		},
+		{
+			name: "mentions filtered out",
+			html: `<bc-attachment sgid="MENTION1" content-type="application/vnd.basecamp.mention">@Jane</bc-attachment>
+<bc-attachment sgid="FILE1" content-type="image/png" filename="real.png"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filename != "real.png" {
+					t.Errorf("Filename = %q, want real.png", atts[0].Filename)
+				}
+			},
+		},
+		{
+			name:     "apostrophe in double-quoted attribute value",
+			html:     `<bc-attachment sgid="APO1" content-type="image/jpeg" filename="Brian's Report.jpg" caption="It's done"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.Filename != "Brian's Report.jpg" {
+					t.Errorf("Filename = %q, want %q", a.Filename, "Brian's Report.jpg")
+				}
+				if a.Caption != "It's done" {
+					t.Errorf("Caption = %q, want %q", a.Caption, "It's done")
+				}
+			},
+		},
+		{
+			name:     "single-quoted attribute values",
+			html:     `<bc-attachment sgid='SQ1' content-type='image/png' filename='single.png' url='https://example.com/single.png'></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.SGID != "SQ1" {
+					t.Errorf("SGID = %q, want SQ1", a.SGID)
+				}
+				if a.Filename != "single.png" {
+					t.Errorf("Filename = %q, want single.png", a.Filename)
+				}
+			},
+		},
+		{
+			name:     "url attr not confused with data-url",
+			html:     `<bc-attachment sgid="BD1" content-type="image/png" data-url="https://wrong.com" url="https://right.com" filename="boundary.png"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.URL != "https://right.com" {
+					t.Errorf("URL = %q, want https://right.com", a.URL)
+				}
+			},
+		},
+		{
+			name:     "HTML entities decoded in attributes",
+			html:     `<bc-attachment sgid="ENT1" content-type="image/png" filename="O&#39;Brien &amp; Co.png" url="https://example.com/file?a=1&amp;b=2"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.Filename != "O'Brien & Co.png" {
+					t.Errorf("Filename = %q, want %q", a.Filename, "O'Brien & Co.png")
+				}
+				if a.URL != "https://example.com/file?a=1&b=2" {
+					t.Errorf("URL = %q, want decoded URL", a.URL)
+				}
+			},
+		},
+		{
+			name:     "tag boundary prevents false match on bc-attachment-foo",
+			html:     `<bc-attachment-custom sgid="NOPE" content-type="image/png" filename="nope.png"></bc-attachment-custom>`,
+			expected: 0,
+		},
+		{
+			name: "case-insensitive mention filtering",
+			html: `<bc-attachment sgid="M1" content-type="Application/Vnd.Basecamp.Mention">@Jane</bc-attachment>
+<bc-attachment sgid="F1" content-type="image/png" filename="real.png"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filename != "real.png" {
+					t.Errorf("Filename = %q, want real.png", atts[0].Filename)
+				}
+			},
+		},
+		{
+			name:     "mixed-case image content type",
+			html:     `<bc-attachment sgid="MC1" content-type="Image/PNG" filename="mixed.png"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if !atts[0].IsImage() {
+					t.Error("IsImage() = false for mixed-case Image/PNG, want true")
+				}
+			},
+		},
+		{
+			name:     "uppercase tag name",
+			html:     `<BC-ATTACHMENT sgid="UP1" content-type="image/png" filename="upper.png"></BC-ATTACHMENT>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filename != "upper.png" {
+					t.Errorf("Filename = %q, want upper.png", atts[0].Filename)
+				}
+			},
+		},
+		{
+			name:     "bare tag with no attributes",
+			html:     `<bc-attachment>content</bc-attachment>`,
+			expected: 1,
+		},
+		{
+			name:     "missing attributes handled gracefully",
+			html:     `<bc-attachment sgid="BARE"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.SGID != "BARE" {
+					t.Errorf("SGID = %q, want BARE", a.SGID)
+				}
+				if a.Filename != "" {
+					t.Errorf("Filename = %q, want empty", a.Filename)
+				}
+				if a.DisplayName() != "Unnamed attachment" {
+					t.Errorf("DisplayName() = %q, want Unnamed attachment", a.DisplayName())
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			atts := ParseAttachments(tt.html)
+			if len(atts) != tt.expected {
+				t.Fatalf("got %d attachments, want %d", len(atts), tt.expected)
+			}
+			if tt.check != nil {
+				tt.check(t, atts)
+			}
+		})
+	}
+}
+
+func TestParsedAttachmentDisplayName(t *testing.T) {
+	tests := []struct {
+		name     string
+		att      ParsedAttachment
+		expected string
+	}{
+		{"caption wins", ParsedAttachment{Caption: "My Caption", Filename: "file.jpg"}, "My Caption"},
+		{"filename fallback", ParsedAttachment{Filename: "document.pdf"}, "document.pdf"},
+		{"unnamed fallback", ParsedAttachment{}, "Unnamed attachment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.att.DisplayName(); got != tt.expected {
+				t.Errorf("DisplayName() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParsedAttachmentDisplayURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		att      ParsedAttachment
+		expected string
+	}{
+		{"URL wins", ParsedAttachment{URL: "https://a.com", Href: "https://b.com"}, "https://a.com"},
+		{"href fallback", ParsedAttachment{Href: "https://b.com"}, "https://b.com"},
+		{"empty", ParsedAttachment{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.att.DisplayURL(); got != tt.expected {
+				t.Errorf("DisplayURL() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}

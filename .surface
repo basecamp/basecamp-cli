@@ -9,6 +9,8 @@ CMD basecamp api post
 CMD basecamp api put
 CMD basecamp assign
 CMD basecamp attach
+CMD basecamp attachments
+CMD basecamp attachments list
 CMD basecamp auth
 CMD basecamp auth login
 CMD basecamp auth logout
@@ -534,6 +536,47 @@ FLAG basecamp attach --stats type=bool
 FLAG basecamp attach --styled type=bool
 FLAG basecamp attach --todolist type=string
 FLAG basecamp attach --verbose type=count
+FLAG basecamp attachments --account type=string
+FLAG basecamp attachments --agent type=bool
+FLAG basecamp attachments --cache-dir type=string
+FLAG basecamp attachments --count type=bool
+FLAG basecamp attachments --hints type=bool
+FLAG basecamp attachments --ids-only type=bool
+FLAG basecamp attachments --in type=string
+FLAG basecamp attachments --jq type=string
+FLAG basecamp attachments --json type=bool
+FLAG basecamp attachments --markdown type=bool
+FLAG basecamp attachments --md type=bool
+FLAG basecamp attachments --no-hints type=bool
+FLAG basecamp attachments --no-stats type=bool
+FLAG basecamp attachments --profile type=string
+FLAG basecamp attachments --project type=string
+FLAG basecamp attachments --quiet type=bool
+FLAG basecamp attachments --stats type=bool
+FLAG basecamp attachments --styled type=bool
+FLAG basecamp attachments --todolist type=string
+FLAG basecamp attachments --verbose type=count
+FLAG basecamp attachments list --account type=string
+FLAG basecamp attachments list --agent type=bool
+FLAG basecamp attachments list --cache-dir type=string
+FLAG basecamp attachments list --count type=bool
+FLAG basecamp attachments list --hints type=bool
+FLAG basecamp attachments list --ids-only type=bool
+FLAG basecamp attachments list --in type=string
+FLAG basecamp attachments list --jq type=string
+FLAG basecamp attachments list --json type=bool
+FLAG basecamp attachments list --markdown type=bool
+FLAG basecamp attachments list --md type=bool
+FLAG basecamp attachments list --no-hints type=bool
+FLAG basecamp attachments list --no-stats type=bool
+FLAG basecamp attachments list --profile type=string
+FLAG basecamp attachments list --project type=string
+FLAG basecamp attachments list --quiet type=bool
+FLAG basecamp attachments list --stats type=bool
+FLAG basecamp attachments list --styled type=bool
+FLAG basecamp attachments list --todolist type=string
+FLAG basecamp attachments list --type type=string
+FLAG basecamp attachments list --verbose type=count
 FLAG basecamp auth --account type=string
 FLAG basecamp auth --agent type=bool
 FLAG basecamp auth --cache-dir type=string
@@ -7115,6 +7158,8 @@ SUB basecamp api post
 SUB basecamp api put
 SUB basecamp assign
 SUB basecamp attach
+SUB basecamp attachments
+SUB basecamp attachments list
 SUB basecamp auth
 SUB basecamp auth login
 SUB basecamp auth logout

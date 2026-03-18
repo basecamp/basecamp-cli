@@ -47,7 +47,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | uploads | 8 | `files`, `uploads` | ✅ | - | list, show |
 | vaults | 8 | `files`, `vaults` | ✅ | - | list, show, create |
 | documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe` |
-| attachments | 1 | `uploads` | ✅ | - | Attachment metadata |
+| attachments | 1 | `uploads`, `attachments` | ✅ | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | **Schedule** |
 | schedules | 2 | `schedule` | ✅ | - | Schedule container + settings |
 | schedule_entries | 5 | `schedule` | ✅ | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |

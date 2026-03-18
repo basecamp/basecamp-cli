@@ -158,6 +158,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post silently | `basecamp message "Title" "Body" --no-subscribe --in <project> --json` |
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
 | Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
+| List attachments | `basecamp attachments list <id\|url> --json` |
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |

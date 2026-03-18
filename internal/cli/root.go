@@ -290,6 +290,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
 	cmd.AddCommand(commands.NewSkillCmd())
+	cmd.AddCommand(commands.NewAttachmentsCmd())
 	cmd.AddCommand(commands.NewAttachCmd())
 	cmd.AddCommand(commands.NewUploadCmd())
 	cmd.AddCommand(commands.NewTUICmd())

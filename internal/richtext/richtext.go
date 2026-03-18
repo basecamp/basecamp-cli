@@ -5,6 +5,7 @@ package richtext
 import (
 	"errors"
 	"fmt"
+	"html"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1021,4 +1022,101 @@ func IsHTML(s string) bool {
 	stripped = reCodeSpan.ReplaceAllString(stripped, "")
 
 	return reSafeTag.MatchString(stripped)
+}
+
+// ParsedAttachment holds metadata extracted from a <bc-attachment> tag in HTML content.
+type ParsedAttachment struct {
+	SGID        string `json:"sgid,omitempty"`
+	Filename    string `json:"filename,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Href        string `json:"href,omitempty"`
+	Width       string `json:"width,omitempty"`
+	Height      string `json:"height,omitempty"`
+	Caption     string `json:"caption,omitempty"`
+}
+
+// reBcAttachmentTag matches <bc-attachment> tags, both self-closing and wrapped.
+// Group 1 captures the attributes string.
+var reBcAttachmentTag = regexp.MustCompile(`(?si)<bc-attachment(\s[^>]*|)(?:>.*?</bc-attachment>|/>)`)
+
+// ParseAttachments extracts file attachment metadata from HTML content.
+// It finds all <bc-attachment> tags and returns their metadata, excluding
+// mention attachments (content-type="application/vnd.basecamp.mention").
+func ParseAttachments(content string) []ParsedAttachment {
+	matches := reBcAttachmentTag.FindAllStringSubmatch(content, -1)
+	attachments := make([]ParsedAttachment, 0, len(matches))
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		attrs := match[1]
+
+		contentType := extractAttr(attrs, "content-type")
+		if strings.EqualFold(contentType, "application/vnd.basecamp.mention") {
+			continue
+		}
+
+		attachments = append(attachments, ParsedAttachment{
+			SGID:        extractAttr(attrs, "sgid"),
+			Filename:    extractAttr(attrs, "filename"),
+			ContentType: contentType,
+			URL:         extractAttr(attrs, "url"),
+			Href:        extractAttr(attrs, "href"),
+			Width:       extractAttr(attrs, "width"),
+			Height:      extractAttr(attrs, "height"),
+			Caption:     extractAttr(attrs, "caption"),
+		})
+	}
+
+	return attachments
+}
+
+// reAttrValue matches any HTML attribute as name="value" or name='value'.
+// Group 1 = attribute name, group 2 = double-quoted value, group 3 = single-quoted value.
+var reAttrValue = regexp.MustCompile(`(?:\s|^)([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+
+// extractAttr extracts the value of an HTML attribute from an attribute string.
+// Handles both double-quoted and single-quoted values independently so that
+// an apostrophe inside a double-quoted value (or vice versa) is not treated
+// as a delimiter. The attribute name must match as a whole word to avoid
+// partial matches (e.g. "url" won't match "data-url").
+func extractAttr(attrs, name string) string {
+	for _, m := range reAttrValue.FindAllStringSubmatch(attrs, -1) {
+		if !strings.EqualFold(m[1], name) {
+			continue
+		}
+		val := m[2]
+		if m[3] != "" {
+			val = m[3]
+		}
+		val = html.UnescapeString(val)
+		return strings.ReplaceAll(val, "\u00A0", " ")
+	}
+	return ""
+}
+
+// IsImage returns true if the attachment has an image content type.
+func (a *ParsedAttachment) IsImage() bool {
+	return len(a.ContentType) >= 6 && strings.EqualFold(a.ContentType[:6], "image/")
+}
+
+// DisplayName returns the best display name: caption, then filename, then fallback.
+func (a *ParsedAttachment) DisplayName() string {
+	if a.Caption != "" {
+		return a.Caption
+	}
+	if a.Filename != "" {
+		return a.Filename
+	}
+	return "Unnamed attachment"
+}
+
+// DisplayURL returns the best available URL for the attachment.
+func (a *ParsedAttachment) DisplayURL() string {
+	if a.URL != "" {
+		return a.URL
+	}
+	return a.Href
 }
