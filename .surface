@@ -146,6 +146,10 @@ CMD basecamp forwards replies
 CMD basecamp forwards reply
 CMD basecamp forwards show
 CMD basecamp help
+CMD basecamp hillcharts
+CMD basecamp hillcharts show
+CMD basecamp hillcharts track
+CMD basecamp hillcharts untrack
 CMD basecamp lineup
 CMD basecamp lineup create
 CMD basecamp lineup delete
@@ -3547,6 +3551,89 @@ FLAG basecamp help --stats type=bool
 FLAG basecamp help --styled type=bool
 FLAG basecamp help --todolist type=string
 FLAG basecamp help --verbose type=count
+FLAG basecamp hillcharts --account type=string
+FLAG basecamp hillcharts --agent type=bool
+FLAG basecamp hillcharts --cache-dir type=string
+FLAG basecamp hillcharts --count type=bool
+FLAG basecamp hillcharts --hints type=bool
+FLAG basecamp hillcharts --ids-only type=bool
+FLAG basecamp hillcharts --in type=string
+FLAG basecamp hillcharts --jq type=string
+FLAG basecamp hillcharts --json type=bool
+FLAG basecamp hillcharts --markdown type=bool
+FLAG basecamp hillcharts --md type=bool
+FLAG basecamp hillcharts --no-hints type=bool
+FLAG basecamp hillcharts --no-stats type=bool
+FLAG basecamp hillcharts --profile type=string
+FLAG basecamp hillcharts --project type=string
+FLAG basecamp hillcharts --quiet type=bool
+FLAG basecamp hillcharts --stats type=bool
+FLAG basecamp hillcharts --styled type=bool
+FLAG basecamp hillcharts --todolist type=string
+FLAG basecamp hillcharts --verbose type=count
+FLAG basecamp hillcharts show --account type=string
+FLAG basecamp hillcharts show --agent type=bool
+FLAG basecamp hillcharts show --cache-dir type=string
+FLAG basecamp hillcharts show --count type=bool
+FLAG basecamp hillcharts show --hints type=bool
+FLAG basecamp hillcharts show --ids-only type=bool
+FLAG basecamp hillcharts show --in type=string
+FLAG basecamp hillcharts show --jq type=string
+FLAG basecamp hillcharts show --json type=bool
+FLAG basecamp hillcharts show --markdown type=bool
+FLAG basecamp hillcharts show --md type=bool
+FLAG basecamp hillcharts show --no-hints type=bool
+FLAG basecamp hillcharts show --no-stats type=bool
+FLAG basecamp hillcharts show --profile type=string
+FLAG basecamp hillcharts show --project type=string
+FLAG basecamp hillcharts show --quiet type=bool
+FLAG basecamp hillcharts show --stats type=bool
+FLAG basecamp hillcharts show --styled type=bool
+FLAG basecamp hillcharts show --todolist type=string
+FLAG basecamp hillcharts show --todoset type=string
+FLAG basecamp hillcharts show --verbose type=count
+FLAG basecamp hillcharts track --account type=string
+FLAG basecamp hillcharts track --agent type=bool
+FLAG basecamp hillcharts track --cache-dir type=string
+FLAG basecamp hillcharts track --count type=bool
+FLAG basecamp hillcharts track --hints type=bool
+FLAG basecamp hillcharts track --ids-only type=bool
+FLAG basecamp hillcharts track --in type=string
+FLAG basecamp hillcharts track --jq type=string
+FLAG basecamp hillcharts track --json type=bool
+FLAG basecamp hillcharts track --markdown type=bool
+FLAG basecamp hillcharts track --md type=bool
+FLAG basecamp hillcharts track --no-hints type=bool
+FLAG basecamp hillcharts track --no-stats type=bool
+FLAG basecamp hillcharts track --profile type=string
+FLAG basecamp hillcharts track --project type=string
+FLAG basecamp hillcharts track --quiet type=bool
+FLAG basecamp hillcharts track --stats type=bool
+FLAG basecamp hillcharts track --styled type=bool
+FLAG basecamp hillcharts track --todolist type=string
+FLAG basecamp hillcharts track --todoset type=string
+FLAG basecamp hillcharts track --verbose type=count
+FLAG basecamp hillcharts untrack --account type=string
+FLAG basecamp hillcharts untrack --agent type=bool
+FLAG basecamp hillcharts untrack --cache-dir type=string
+FLAG basecamp hillcharts untrack --count type=bool
+FLAG basecamp hillcharts untrack --hints type=bool
+FLAG basecamp hillcharts untrack --ids-only type=bool
+FLAG basecamp hillcharts untrack --in type=string
+FLAG basecamp hillcharts untrack --jq type=string
+FLAG basecamp hillcharts untrack --json type=bool
+FLAG basecamp hillcharts untrack --markdown type=bool
+FLAG basecamp hillcharts untrack --md type=bool
+FLAG basecamp hillcharts untrack --no-hints type=bool
+FLAG basecamp hillcharts untrack --no-stats type=bool
+FLAG basecamp hillcharts untrack --profile type=string
+FLAG basecamp hillcharts untrack --project type=string
+FLAG basecamp hillcharts untrack --quiet type=bool
+FLAG basecamp hillcharts untrack --stats type=bool
+FLAG basecamp hillcharts untrack --styled type=bool
+FLAG basecamp hillcharts untrack --todolist type=string
+FLAG basecamp hillcharts untrack --todoset type=string
+FLAG basecamp hillcharts untrack --verbose type=count
 FLAG basecamp lineup --account type=string
 FLAG basecamp lineup --agent type=bool
 FLAG basecamp lineup --cache-dir type=string
@@ -7344,6 +7431,10 @@ SUB basecamp forwards replies
 SUB basecamp forwards reply
 SUB basecamp forwards show
 SUB basecamp help
+SUB basecamp hillcharts
+SUB basecamp hillcharts show
+SUB basecamp hillcharts track
+SUB basecamp hillcharts untrack
 SUB basecamp lineup
 SUB basecamp lineup create
 SUB basecamp lineup delete

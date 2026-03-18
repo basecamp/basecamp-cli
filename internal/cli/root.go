@@ -273,6 +273,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewBoostsCmd())
 	cmd.AddCommand(commands.NewBoostShortcutCmd())
 	cmd.AddCommand(commands.NewTodosetsCmd())
+	cmd.AddCommand(commands.NewHillchartsCmd())
 	cmd.AddCommand(commands.NewToolsCmd())
 	cmd.AddCommand(commands.NewConfigCmd())
 	cmd.AddCommand(commands.NewTodolistgroupsCmd())
