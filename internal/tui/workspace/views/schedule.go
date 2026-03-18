@@ -324,11 +324,12 @@ func (v *Schedule) dispatchCreate(summary, startDate, endDate string) tea.Cmd {
 	scope := v.session.Scope()
 	hub := v.session.Hub()
 	ctx := hub.ProjectContext()
+	allDay := true
 	req := &basecamp.CreateScheduleEntryRequest{
 		Summary:  summary,
 		StartsAt: startDate + "T00:00:00Z",
 		EndsAt:   endDate + "T00:00:00Z",
-		AllDay:   true,
+		AllDay:   &allDay,
 	}
 	return func() tea.Msg {
 		err := hub.CreateScheduleEntry(ctx, scope.AccountID, scope.ProjectID, scope.ToolID, req)

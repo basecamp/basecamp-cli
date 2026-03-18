@@ -488,7 +488,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		StartsAt:      startsAt,
 		EndsAt:        endsAt,
 		Description:   description,
-		AllDay:        allDay,
+		AllDay:        &allDay,
 		Notify:        notify,
 		Subscriptions: subs,
 	}
@@ -618,7 +618,7 @@ You can pass either an entry ID or a Basecamp URL:
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
-				req.AllDay = allDay
+				req.AllDay = &allDay
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("notify") {

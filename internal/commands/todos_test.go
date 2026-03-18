@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -233,7 +234,7 @@ func TestReopenShowsHelpWithoutID(t *testing.T) {
 func TestTodosSubcommands(t *testing.T) {
 	cmd := NewTodosCmd()
 
-	expected := []string{"list", "show", "create", "complete", "uncomplete", "position"}
+	expected := []string{"list", "show", "create", "update", "complete", "uncomplete", "position"}
 	for _, name := range expected {
 		sub, _, err := cmd.Find([]string{name})
 		require.NoError(t, err, "expected subcommand %q to exist", name)
@@ -1346,6 +1347,173 @@ func TestSweepCommentLocalImageErrors(t *testing.T) {
 
 	cmd := NewTodosCmd()
 	err := executeTodosCommand(cmd, app, "sweep", "--overdue", "--comment", "![alt](./missing.png)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing.png")
+}
+
+// =============================================================================
+// Todos Update Tests
+// =============================================================================
+
+// mockTodoUpdateTransport handles GET and PUT for todo update tests.
+type mockTodoUpdateTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "PUT" {
+		if req.Body != nil {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("reading request body: %w", err)
+			}
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "title": "Updated", "status": "active", "completed": false}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func setupTodoUpdateApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{
+		AccountID: "99999",
+	}
+
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+}
+
+func TestTodosUpdateShowsHelpWithoutID(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update")
+	require.NoError(t, err, "expected help output, not an error")
+}
+
+func TestTodosUpdateNoChangesShowsHelp(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "123")
+	// In non-machine mode (no format set), noChanges shows help → no error
+	assert.NoError(t, err)
+}
+
+func TestTodosUpdatePositionalTitle(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "New title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "New title", content)
+}
+
+func TestTodosUpdateFlagTitle(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--title", "Flag title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "Flag title", content)
+}
+
+func TestTodosUpdatePositionalTitleTakesPrecedence(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "Positional", "--title", "Flag")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "Positional", content)
+}
+
+func TestTodosUpdateDescriptionIsHTML(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--description", "**bold** text")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	desc, ok := body["description"].(string)
+	require.True(t, ok)
+	assert.Contains(t, desc, "<strong>bold</strong>")
+}
+
+func TestTodosUpdateLocalImageErrors(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--description", "![alt](./missing.png)")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
 }

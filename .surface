@@ -265,6 +265,7 @@ CMD basecamp todos show
 CMD basecamp todos sweep
 CMD basecamp todos trash
 CMD basecamp todos uncomplete
+CMD basecamp todos update
 CMD basecamp todosets
 CMD basecamp todosets list
 CMD basecamp todosets show
@@ -6156,6 +6157,33 @@ FLAG basecamp todos uncomplete --stats type=bool
 FLAG basecamp todos uncomplete --styled type=bool
 FLAG basecamp todos uncomplete --todolist type=string
 FLAG basecamp todos uncomplete --verbose type=count
+FLAG basecamp todos update --account type=string
+FLAG basecamp todos update --agent type=bool
+FLAG basecamp todos update --assignee type=string
+FLAG basecamp todos update --cache-dir type=string
+FLAG basecamp todos update --count type=bool
+FLAG basecamp todos update --description type=string
+FLAG basecamp todos update --due type=string
+FLAG basecamp todos update --hints type=bool
+FLAG basecamp todos update --ids-only type=bool
+FLAG basecamp todos update --in type=string
+FLAG basecamp todos update --jq type=string
+FLAG basecamp todos update --json type=bool
+FLAG basecamp todos update --markdown type=bool
+FLAG basecamp todos update --md type=bool
+FLAG basecamp todos update --no-hints type=bool
+FLAG basecamp todos update --no-stats type=bool
+FLAG basecamp todos update --notify type=bool
+FLAG basecamp todos update --profile type=string
+FLAG basecamp todos update --project type=string
+FLAG basecamp todos update --quiet type=bool
+FLAG basecamp todos update --starts-on type=string
+FLAG basecamp todos update --stats type=bool
+FLAG basecamp todos update --styled type=bool
+FLAG basecamp todos update --title type=string
+FLAG basecamp todos update --to type=string
+FLAG basecamp todos update --todolist type=string
+FLAG basecamp todos update --verbose type=count
 FLAG basecamp todosets --account type=string
 FLAG basecamp todosets --agent type=bool
 FLAG basecamp todosets --cache-dir type=string
@@ -7414,6 +7442,7 @@ SUB basecamp todos show
 SUB basecamp todos sweep
 SUB basecamp todos trash
 SUB basecamp todos uncomplete
+SUB basecamp todos update
 SUB basecamp todosets
 SUB basecamp todosets list
 SUB basecamp todosets show

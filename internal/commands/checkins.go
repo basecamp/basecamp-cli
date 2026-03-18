@@ -344,8 +344,8 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				Schedule: &basecamp.QuestionSchedule{
 					Frequency: frequency,
 					Days:      daysArray,
-					Hour:      hour,
-					Minute:    minute,
+					Hour:      &hour,
+					Minute:    &minute,
 				},
 			}
 
@@ -457,8 +457,8 @@ You can pass either a question ID or a Basecamp URL:
 					if err != nil {
 						return output.ErrUsage("Invalid time format: " + timeOfDay)
 					}
-					schedule.Hour = hour
-					schedule.Minute = minute
+					schedule.Hour = &hour
+					schedule.Minute = &minute
 				}
 				if days != "" {
 					dayParts := strings.Split(days, ",")

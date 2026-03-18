@@ -49,6 +49,7 @@ func NewTodosCmd() *cobra.Command {
 		newTodosListCmd(),
 		newTodosShowCmd(),
 		newTodosCreateCmd(),
+		newTodosUpdateCmd(),
 		newTodosCompleteCmd(),
 		newTodosUncompleteCmd(),
 		newTodosSweepCmd(),
@@ -724,6 +725,11 @@ You can pass either a todo ID or a Basecamp URL:
 				output.WithEntity("todo"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
+						Action:      "update",
+						Cmd:         fmt.Sprintf("basecamp todos update %d --title <title>", todoID),
+						Description: "Update this todo",
+					},
+					output.Breadcrumb{
 						Action:      "complete",
 						Cmd:         fmt.Sprintf("basecamp done %d", todoID),
 						Description: "Complete this todo",
@@ -913,6 +919,137 @@ func newTodosCreateCmd() *cobra.Command {
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
+
+	return cmd
+}
+
+func newTodosUpdateCmd() *cobra.Command {
+	var title string
+	var description string
+	var assignee string
+	var due string
+	var startsOn string
+	var notify bool
+
+	cmd := &cobra.Command{
+		Use:   "update <id|url> [title]",
+		Short: "Update a todo",
+		Long: `Update an existing todo.
+
+You can pass either a todo ID or a Basecamp URL:
+  basecamp todos update 789 "New title"
+  basecamp todos update 789 --title "New title"
+  basecamp todos update 789 --due "next friday"
+  basecamp todos update https://3.basecamp.com/123/buckets/456/todos/789 --description "Details"`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>")
+			}
+
+			// Positional title: args[1:] joined
+			positionalTitle := strings.Join(args[1:], " ")
+
+			// Effective title: positional takes precedence over --title flag
+			effectiveTitle := title
+			if strings.TrimSpace(positionalTitle) != "" {
+				effectiveTitle = positionalTitle
+			}
+
+			// No-op guard: at least one effective field required
+			assigneeChanged := (cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to")) && strings.TrimSpace(assignee) != ""
+			if strings.TrimSpace(effectiveTitle) == "" &&
+				strings.TrimSpace(description) == "" &&
+				strings.TrimSpace(due) == "" && strings.TrimSpace(startsOn) == "" &&
+				!assigneeChanged &&
+				(!cmd.Flags().Changed("notify") || !notify) {
+				return noChanges(cmd)
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Extract ID from URL if provided
+			todoIDStr := extractID(args[0])
+			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todo ID")
+			}
+
+			req := &basecamp.UpdateTodoRequest{}
+			if effectiveTitle != "" {
+				req.Content = effectiveTitle
+			}
+			if description != "" {
+				descHTML := richtext.MarkdownToHTML(description)
+				descHTML, err = resolveLocalImages(cmd, app, descHTML)
+				if err != nil {
+					return err
+				}
+				req.Description = descHTML
+			}
+			if strings.TrimSpace(due) != "" {
+				if parsed := dateparse.Parse(due); parsed != "" {
+					req.DueOn = parsed
+				}
+			}
+			if strings.TrimSpace(startsOn) != "" {
+				if parsed := dateparse.Parse(startsOn); parsed != "" {
+					req.StartsOn = parsed
+				}
+			}
+			if assigneeChanged {
+				assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
+				if err != nil {
+					return err
+				}
+				req.AssigneeIDs = assigneeIDs
+			}
+			if cmd.Flags().Changed("notify") && notify {
+				req.Notify = true
+			}
+
+			todo, err := app.Account().Todos().Update(cmd.Context(), todoID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(todo,
+				output.WithEntity("todo"),
+				output.WithSummary(fmt.Sprintf("Updated todo #%s", todoIDStr)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("basecamp todos show %s", todoIDStr),
+						Description: "View todo",
+					},
+					output.Breadcrumb{
+						Action:      "complete",
+						Cmd:         fmt.Sprintf("basecamp done %s", todoIDStr),
+						Description: "Complete todo",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVarP(&title, "title", "t", "", "Todo title (plain text)")
+	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignees (names or IDs, comma-separated)")
+	cmd.Flags().StringVar(&assignee, "to", "", "Assignees (alias for --assignee)")
+	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&startsOn, "starts-on", "", "Start date (natural language or YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Notify assignees")
+
+	// Register tab completion for assignee flags
+	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 

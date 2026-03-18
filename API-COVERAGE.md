@@ -22,7 +22,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 |---------|-----------|-------------|--------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | - | list, show, create, update, delete |
-| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | - | list, show, create, complete, uncomplete, position |
+| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | - | list, show, create, update, complete, uncomplete, position |
 | todolists | 8 | `todolists` | ✅ | - | list, show, create, update |
 | todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |

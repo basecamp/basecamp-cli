@@ -85,6 +85,17 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "todos update updates a todo" {
+  local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
+  local todo_id
+  todo_id=$(<"$id_file")
+
+  run_smoke basecamp todos update "$todo_id" --title "Updated smoke todo $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "todos trash trashes a todo" {
   local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
