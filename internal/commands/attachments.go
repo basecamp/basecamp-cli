@@ -65,9 +65,9 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	id := extractID(arg)
 
 	// Auto-detect type from URL if not specified (mirrors show.go).
-	// Prefer CommentID when present (comment.go convention).
+	// Prefer CommentID when present and type is compatible (comment.go convention).
 	if parsed := urlarg.Parse(arg); parsed != nil {
-		if parsed.CommentID != "" {
+		if parsed.CommentID != "" && (recordType == "" || recordType == "comment" || recordType == "comments") {
 			id = parsed.CommentID
 			if recordType == "" {
 				recordType = "comment"

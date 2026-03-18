@@ -27,6 +27,25 @@ func TestAttachmentsCommentURLPrefersCommentID(t *testing.T) {
 	assert.Equal(t, "comment", recordType)
 }
 
+func TestAttachmentsCommentURLWithExplicitType(t *testing.T) {
+	// When --type is something other than comment, CommentID should NOT
+	// override the recording ID (avoids type/ID mismatch).
+	parsed := urlarg.Parse("https://3.basecamp.com/123/buckets/456/todos/111#__recording_789")
+	assert.NotNil(t, parsed)
+
+	recordType := "todo" // explicit --type todo
+	var id string
+	if parsed.CommentID != "" && (recordType == "" || recordType == "comment" || recordType == "comments") {
+		id = parsed.CommentID
+		recordType = "comment"
+	} else if parsed.RecordingID != "" {
+		id = parsed.RecordingID
+	}
+
+	assert.Equal(t, "111", id)
+	assert.Equal(t, "todo", recordType)
+}
+
 func TestAttachmentsURLWithoutComment(t *testing.T) {
 	parsed := urlarg.Parse("https://3.basecamp.com/123/buckets/456/todos/111")
 	assert.NotNil(t, parsed)

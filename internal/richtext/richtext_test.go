@@ -1434,6 +1434,22 @@ func TestParseAttachments(t *testing.T) {
 			},
 		},
 		{
+			name:     "tag boundary prevents false match on bc-attachment-foo",
+			html:     `<bc-attachment-custom sgid="NOPE" content-type="image/png" filename="nope.png"></bc-attachment-custom>`,
+			expected: 0,
+		},
+		{
+			name: "case-insensitive mention filtering",
+			html: `<bc-attachment sgid="M1" content-type="Application/Vnd.Basecamp.Mention">@Jane</bc-attachment>
+<bc-attachment sgid="F1" content-type="image/png" filename="real.png"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filename != "real.png" {
+					t.Errorf("Filename = %q, want real.png", atts[0].Filename)
+				}
+			},
+		},
+		{
 			name:     "missing attributes handled gracefully",
 			html:     `<bc-attachment sgid="BARE"></bc-attachment>`,
 			expected: 1,

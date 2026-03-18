@@ -1038,7 +1038,7 @@ type ParsedAttachment struct {
 
 // reBcAttachmentTag matches <bc-attachment> tags, both self-closing and wrapped.
 // Group 1 captures the attributes string.
-var reBcAttachmentTag = regexp.MustCompile(`(?si)<bc-attachment([^>]*)(?:>.*?</bc-attachment>|/>)`)
+var reBcAttachmentTag = regexp.MustCompile(`(?si)<bc-attachment\b([^>]*)(?:>.*?</bc-attachment>|/>)`)
 
 // ParseAttachments extracts file attachment metadata from HTML content.
 // It finds all <bc-attachment> tags and returns their metadata, excluding
@@ -1054,7 +1054,7 @@ func ParseAttachments(html string) []ParsedAttachment {
 		attrs := match[1]
 
 		contentType := extractAttr(attrs, "content-type")
-		if contentType == "application/vnd.basecamp.mention" {
+		if strings.EqualFold(contentType, "application/vnd.basecamp.mention") {
 			continue
 		}
 
@@ -1084,7 +1084,7 @@ var reAttrValue = regexp.MustCompile(`(?:\s|^)([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']
 // partial matches (e.g. "url" won't match "data-url").
 func extractAttr(attrs, name string) string {
 	for _, m := range reAttrValue.FindAllStringSubmatch(attrs, -1) {
-		if m[1] != name {
+		if !strings.EqualFold(m[1], name) {
 			continue
 		}
 		if m[3] != "" {
