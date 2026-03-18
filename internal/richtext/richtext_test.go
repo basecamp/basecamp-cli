@@ -1450,6 +1450,16 @@ func TestParseAttachments(t *testing.T) {
 			},
 		},
 		{
+			name:     "mixed-case image content type",
+			html:     `<bc-attachment sgid="MC1" content-type="Image/PNG" filename="mixed.png"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if !atts[0].IsImage() {
+					t.Error("IsImage() = false for mixed-case Image/PNG, want true")
+				}
+			},
+		},
+		{
 			name:     "missing attributes handled gracefully",
 			html:     `<bc-attachment sgid="BARE"></bc-attachment>`,
 			expected: 1,

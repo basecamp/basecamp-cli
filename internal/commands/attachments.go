@@ -134,8 +134,8 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 
 	// JSON/agent output
 	showCmd := fmt.Sprintf("basecamp show %s", id)
-	if !isGenericType(recordType) {
-		showCmd = fmt.Sprintf("basecamp show %s --type %s", id, recordType)
+	if showType := normalizeShowType(recordType); showType != "" {
+		showCmd = fmt.Sprintf("basecamp show %s --type %s", id, showType)
 	}
 
 	breadcrumbs := []output.Breadcrumb{
@@ -229,6 +229,43 @@ func extractContentField(data map[string]any) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// normalizeShowType maps attachment type aliases to canonical types that
+// basecamp show accepts. Returns "" for generic types (no --type needed).
+func normalizeShowType(recordType string) string {
+	switch recordType {
+	case "":
+		return ""
+	case "todos":
+		return "todo"
+	case "todolists":
+		return "todolist"
+	case "messages":
+		return "message"
+	case "comments":
+		return "comment"
+	case "cards":
+		return "card"
+	case "card_tables":
+		return "card-table"
+	case "documents":
+		return "document"
+	case "schedule_entries":
+		return "schedule-entry"
+	case "answer", "question_answers":
+		return "checkin"
+	case "questions":
+		return "checkin"
+	case "forwards":
+		return "forward"
+	case "uploads":
+		return "upload"
+	case "recording", "recordings":
+		return ""
+	default:
+		return recordType
+	}
 }
 
 // typeToEndpoint maps a user-provided type string to the API endpoint.

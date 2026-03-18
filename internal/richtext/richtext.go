@@ -1043,8 +1043,8 @@ var reBcAttachmentTag = regexp.MustCompile(`(?si)<bc-attachment\b([^>]*)(?:>.*?<
 // ParseAttachments extracts file attachment metadata from HTML content.
 // It finds all <bc-attachment> tags and returns their metadata, excluding
 // mention attachments (content-type="application/vnd.basecamp.mention").
-func ParseAttachments(html string) []ParsedAttachment {
-	matches := reBcAttachmentTag.FindAllStringSubmatch(html, -1)
+func ParseAttachments(content string) []ParsedAttachment {
+	matches := reBcAttachmentTag.FindAllStringSubmatch(content, -1)
 	attachments := make([]ParsedAttachment, 0, len(matches))
 
 	for _, match := range matches {
@@ -1097,7 +1097,7 @@ func extractAttr(attrs, name string) string {
 
 // IsImage returns true if the attachment has an image content type.
 func (a *ParsedAttachment) IsImage() bool {
-	return strings.HasPrefix(a.ContentType, "image/")
+	return len(a.ContentType) >= 6 && strings.EqualFold(a.ContentType[:6], "image/")
 }
 
 // DisplayName returns the best display name: caption, then filename, then fallback.

@@ -59,6 +59,30 @@ func TestTypeToEndpointAnswerAliases(t *testing.T) {
 	assert.Equal(t, "", typeToEndpoint("question_answer", "42"))
 }
 
+func TestNormalizeShowType(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"", ""},
+		{"todo", "todo"},
+		{"todos", "todo"},
+		{"question_answers", "checkin"},
+		{"answer", "checkin"},
+		{"questions", "checkin"},
+		{"schedule_entries", "schedule-entry"},
+		{"card_tables", "card-table"},
+		{"recording", ""},
+		{"recordings", ""},
+		{"comment", "comment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, normalizeShowType(tt.input))
+		})
+	}
+}
+
 func TestTypeToEndpointKnownTypes(t *testing.T) {
 	tests := []struct {
 		typ      string
