@@ -182,6 +182,16 @@ func TestMarkdownToHTML(t *testing.T) {
 			input:    "Text\n---",
 			expected: "<p>Text</p>\n<hr>",
 		},
+		{
+			name:     "code span containing HTML tag is converted not passthrough",
+			input:    "the `<div>` container",
+			expected: "<p>the <code>&lt;div&gt;</code> container</p>",
+		},
+		{
+			name:     "fenced code block containing HTML tags is converted",
+			input:    "intro\n\n```\n<div>hello</div>\n```",
+			expected: "<p>intro</p>\n<br>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;</code></pre>",
+		},
 	}
 
 	for _, tt := range tests {
@@ -508,6 +518,31 @@ func TestIsHTML(t *testing.T) {
 			name:     "bc-attachment file",
 			input:    `<bc-attachment sgid="BAh7" content-type="application/pdf" filename="report.pdf"></bc-attachment>`,
 			expected: true,
+		},
+		{
+			name:     "HTML tag inside backtick code span",
+			input:    "the `<div>` container",
+			expected: false,
+		},
+		{
+			name:     "HTML tag inside multi-word code span",
+			input:    "use `<strong>bold</strong>` for emphasis",
+			expected: false,
+		},
+		{
+			name:     "real HTML with code span containing tag",
+			input:    `<p>the <code>&lt;div&gt;</code> container</p>`,
+			expected: true,
+		},
+		{
+			name:     "HTML tag inside fenced code block",
+			input:    "```\n<div>hello</div>\n```",
+			expected: false,
+		},
+		{
+			name:     "mixed markdown with code span tag",
+			input:    "Check `<br>` and **bold** text",
+			expected: false,
 		},
 	}
 
