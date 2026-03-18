@@ -1,0 +1,27 @@
+internal/commands/checkins.go
+  aadbdcb118493bc3 347-348,460-461
+internal/tui/workspace/views/schedule.go
+  aadbdcb118493bc3 327,332
+internal/commands/schedule.go
+  aadbdcb118493bc3 491,621
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "3d337269e50162e0f990bc4593c6379c89375e70",
+  "prompts": {
+    "aadbdcb118493bc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8c21037-cd0c-4132-8500-b7cea4cbad62",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 8,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
