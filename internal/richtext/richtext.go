@@ -3,8 +3,10 @@
 package richtext
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -700,6 +702,17 @@ type MentionLookupFunc func(name string) (sgid, displayName string, err error)
 // Used by the person:ID mention syntax.
 type PersonByIDFunc func(id string) (sgid, canonicalName string, err error)
 
+// ErrMentionSkip is a sentinel error that lookup functions can return to indicate
+// that a fuzzy @Name mention should be left as plain text instead of failing the
+// entire operation. Use this for recoverable errors like not-found or ambiguous.
+var ErrMentionSkip = errors.New("mention skip")
+
+// MentionResult holds the resolved HTML and any mentions that could not be resolved.
+type MentionResult struct {
+	HTML       string
+	Unresolved []string
+}
+
 // MentionToHTML builds a <bc-attachment> mention tag.
 func MentionToHTML(sgid, name string) string {
 	return `<bc-attachment sgid="` + escapeAttr(sgid) +
@@ -717,26 +730,27 @@ func MentionToHTML(sgid, name string) string {
 //
 // lookupByID may be nil if person:ID syntax is not needed; encountering a person:ID
 // anchor with a nil lookupByID returns an error.
-func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByIDFunc) (string, error) {
+func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByIDFunc) (MentionResult, error) {
 	// Pass 1: Markdown mention anchors
 	var err error
 	html, err = resolveMentionAnchors(html, lookupByID)
 	if err != nil {
-		return "", err
+		return MentionResult{}, err
 	}
 
 	// Pass 2: @sgid:VALUE
 	html = resolveSGIDMentions(html)
 
 	// Pass 3: fuzzy @Name (skip when no lookup function provided)
+	var unresolved []string
 	if lookup != nil {
-		html, err = resolveNameMentions(html, lookup)
+		html, unresolved, err = resolveNameMentions(html, lookup)
 		if err != nil {
-			return "", err
+			return MentionResult{}, err
 		}
 	}
 
-	return html, nil
+	return MentionResult{HTML: html, Unresolved: unresolved}, nil
 }
 
 // resolveMentionAnchors processes <a href="mention:SGID">@Name</a> and
@@ -817,14 +831,17 @@ func resolveSGIDMentions(html string) string {
 }
 
 // resolveNameMentions processes fuzzy @Name and @First.Last patterns.
-func resolveNameMentions(html string, lookup MentionLookupFunc) (string, error) {
+// When a lookup returns ErrMentionSkip (wrapped or direct), the mention is left
+// as plain text and its name is collected in the unresolved slice.
+func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []string, error) {
 	matches := reMentionInput.FindAllStringSubmatchIndex(html, -1)
 	if len(matches) == 0 {
-		return html, nil
+		return html, nil, nil
 	}
 
 	result := html
 	htmlLower := strings.ToLower(html)
+	var unresolved []string
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		mentionStart, mentionEnd := m[4], m[5]
@@ -855,14 +872,19 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, error) 
 
 		sgid, displayName, err := lookup(name)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve mention %s: %w", mention, err)
+			if errors.Is(err, ErrMentionSkip) {
+				unresolved = append(unresolved, mention)
+				continue
+			}
+			return "", nil, fmt.Errorf("failed to resolve mention %s: %w", mention, err)
 		}
 
 		tag := MentionToHTML(sgid, displayName)
 		result = result[:mentionStart] + tag + result[mentionEnd:]
 	}
 
-	return result, nil
+	slices.Reverse(unresolved)
+	return result, unresolved, nil
 }
 
 // isInsideHTMLTag checks if position pos is inside an HTML tag (between < and >).

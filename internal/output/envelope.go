@@ -30,16 +30,17 @@ func TruncationNoticeWithTotal(count, totalCount int) string {
 
 // Response is the success envelope for JSON output.
 type Response struct {
-	OK            bool                      `json:"ok"`
-	Data          any                       `json:"data,omitempty"`
-	Summary       string                    `json:"summary,omitempty"`
-	Notice        string                    `json:"notice,omitempty"` // Informational message (e.g., truncation warning)
-	Breadcrumbs   []Breadcrumb              `json:"breadcrumbs,omitempty"`
-	Context       map[string]any            `json:"context,omitempty"`
-	Meta          map[string]any            `json:"meta,omitempty"`
-	Entity        string                    `json:"-"` // Schema hint for presenter (not serialized)
-	DisplayData   any                       `json:"-"` // Alternate data for styled/markdown rendering (not serialized)
-	presenterOpts []presenter.PresentOption // Display options for presenter (not serialized)
+	OK               bool                      `json:"ok"`
+	Data             any                       `json:"data,omitempty"`
+	Summary          string                    `json:"summary,omitempty"`
+	Notice           string                    `json:"notice,omitempty"` // Informational message (e.g., truncation warning)
+	Breadcrumbs      []Breadcrumb              `json:"breadcrumbs,omitempty"`
+	Context          map[string]any            `json:"context,omitempty"`
+	Meta             map[string]any            `json:"meta,omitempty"`
+	Entity           string                    `json:"-"` // Schema hint for presenter (not serialized)
+	DisplayData      any                       `json:"-"` // Alternate data for styled/markdown rendering (not serialized)
+	presenterOpts    []presenter.PresentOption // Display options for presenter (not serialized)
+	noticeDiagnostic bool                      // when true, emit Notice to stderr in quiet mode
 }
 
 // Breadcrumb is a suggested follow-up action.
@@ -73,10 +74,11 @@ const (
 
 // Options controls output behavior.
 type Options struct {
-	Format   Format
-	Writer   io.Writer
-	Verbose  bool
-	JQFilter string // jq expression to apply to JSON output (built-in via gojq)
+	Format    Format
+	Writer    io.Writer
+	ErrWriter io.Writer // Diagnostic output (notices in quiet mode); defaults to os.Stderr.
+	Verbose   bool
+	JQFilter  string // jq expression to apply to JSON output (built-in via gojq)
 }
 
 // DefaultOptions returns options for standard output.
@@ -99,6 +101,9 @@ type Writer struct {
 func New(opts Options) *Writer {
 	if opts.Writer == nil {
 		opts.Writer = os.Stdout
+	}
+	if opts.ErrWriter == nil {
+		opts.ErrWriter = os.Stderr
 	}
 	w := &Writer{opts: opts}
 	if opts.JQFilter != "" {
@@ -184,6 +189,17 @@ func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
 }
 
 func (w *Writer) write(v any) error {
+	// In quiet mode (--agent/--quiet), surface diagnostic notices on stderr so
+	// automation consumers can detect degraded operations (e.g. unresolved
+	// mentions). Only notices marked as diagnostic emit here — informational
+	// notices like truncation warnings stay silent. This runs before the --jq
+	// early-return so that --agent --jq still emits the diagnostic.
+	if w.opts.Format == FormatQuiet {
+		if resp, ok := v.(*Response); ok && resp.noticeDiagnostic && resp.Notice != "" {
+			fmt.Fprintf(w.opts.ErrWriter, "notice: %s\n", resp.Notice)
+		}
+	}
+
 	// --jq flag: serialize to JSON, apply the jq filter, print results
 	if w.opts.JQFilter != "" {
 		return w.writeJQ(v)
@@ -202,7 +218,6 @@ func (w *Writer) write(v any) error {
 
 	switch format {
 	case FormatQuiet:
-		// Extract just the data field for quiet mode
 		if resp, ok := v.(*Response); ok {
 			return w.writeQuiet(resp.Data)
 		}
@@ -413,7 +428,15 @@ func WithSummary(s string) ResponseOption {
 // WithNotice adds an informational notice to the response.
 // Use this for non-error messages like truncation warnings.
 func WithNotice(s string) ResponseOption {
-	return func(r *Response) { r.Notice = s }
+	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = false }
+}
+
+// WithDiagnostic sets a notice that is also emitted to stderr in quiet mode.
+// Use this for degraded-operation warnings (e.g. unresolved mentions) that
+// automation consumers need to detect. Truncation and other informational
+// notices should use WithNotice instead.
+func WithDiagnostic(s string) ResponseOption {
+	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = true }
 }
 
 // WithBreadcrumbs adds breadcrumbs to the response.

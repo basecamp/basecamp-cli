@@ -774,6 +774,155 @@ func TestChatPostPlainTextOptOut(t *testing.T) {
 		"@mention should be left as literal text")
 }
 
+// mockChatMultiMentionTransport has multiple people but not all — simulating a
+// message with valid and invalid @mentions.
+type mockChatMultiMentionTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockChatMultiMentionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/"):
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
+		case strings.Contains(req.URL.Path, "/circles/people.json") || strings.Contains(req.URL.Path, "/people/pingable.json"):
+			body = `[
+				{"id": 42000, "name": "Jane Smith", "email_address": "jane@example.com", "attachable_sgid": "sgid-jane"},
+				{"id": 42001, "name": "John Doe", "email_address": "john@example.com", "attachable_sgid": "sgid-john"}
+			]`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "POST" {
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "content": "Test", "created_at": "2024-01-01T00:00:00Z"}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(mockResp)),
+			Header:     header,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+// TestChatPostMixedValidInvalidMentions verifies that a message with both
+// valid and invalid @mentions is posted with valid ones resolved and invalid
+// ones left as plain text, plus a notice in the response.
+func TestChatPostMixedValidInvalidMentions(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatMultiMentionTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "post", "Hey @Jane.Smith and @Bobby, check this",
+		"--room", "789", "--in", "123")
+	require.NoError(t, err, "post with mixed mentions should succeed")
+	require.NotEmpty(t, transport.capturedBody)
+
+	// The message should have been posted
+	var requestBody map[string]any
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err)
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+
+	// Valid mention should be resolved
+	assert.Contains(t, content, "bc-attachment",
+		"valid mention should be resolved to bc-attachment")
+	assert.Contains(t, content, "sgid-jane",
+		"Jane's SGID should be in the content")
+
+	// Invalid mention should be left as plain text
+	assert.Contains(t, content, "@Bobby",
+		"unresolved mention should remain as plain text")
+
+	// Response should include a notice about unresolved mentions
+	var envelope map[string]any
+	err = json.Unmarshal(buf.Bytes(), &envelope)
+	require.NoError(t, err)
+	notice, _ := envelope["notice"].(string)
+	assert.Contains(t, notice, "@Bobby",
+		"notice should mention the unresolved @Bobby")
+}
+
+// TestChatPostAllInvalidMentionsStillPosts verifies that when all @mentions
+// are invalid, the message is still posted as HTML with mentions as plain text.
+// This catches a regression where all-unresolved mentions would silently fall
+// back to plain-text delivery, dropping any markdown-to-HTML conversion.
+func TestChatPostAllInvalidMentionsStillPosts(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatMultiMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "post", "Hey @Nobody and @Ghost",
+		"--room", "789", "--in", "123")
+	require.NoError(t, err, "post with all invalid mentions should succeed")
+	require.NotEmpty(t, transport.capturedBody, "message should still be posted")
+
+	var requestBody map[string]any
+	err = json.Unmarshal(transport.capturedBody, &requestBody)
+	require.NoError(t, err)
+
+	// Content type must be promoted to text/html even when all mentions are
+	// unresolved, because the markdown-to-HTML conversion already happened.
+	assert.Equal(t, "text/html", requestBody["content_type"],
+		"content_type should be text/html even with all unresolved mentions")
+}
+
+// TestChatPostAgentModeWarningOnStderr verifies that in quiet/agent mode,
+// the unresolved mention warning appears on stderr while stdout contains
+// data-only JSON (no envelope).
+func TestChatPostAgentModeWarningOnStderr(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatMultiMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	// Override output to FormatQuiet with separate stdout/stderr buffers
+	var stdout, stderr bytes.Buffer
+	app.Output = output.New(output.Options{
+		Format:    output.FormatQuiet,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "post", "Hey @Jane.Smith and @Bobby, check this",
+		"--room", "789", "--in", "123")
+	require.NoError(t, err)
+
+	// stdout should contain data-only JSON (no envelope wrapper)
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &data))
+	_, hasOK := data["ok"]
+	assert.False(t, hasOK, "quiet mode should not include envelope ok field")
+
+	// stderr should contain the diagnostic warning
+	assert.Contains(t, stderr.String(), "notice: Unresolved mentions left as text: @Bobby")
+}
+
 // TestChatDeleteReturnsDeletedPayload verifies that delete returns {"deleted": true, "id": "..."}.
 func TestChatDeleteReturnsDeletedPayload(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")

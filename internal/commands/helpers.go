@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -478,11 +479,24 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 //
 // Also supports @sgid:VALUE inline syntax for pipeline composability.
 // Silently returns unchanged HTML if no mentions are found.
-func resolveMentions(ctx context.Context, resolver *names.Resolver, html string) (string, error) {
+//
+// Fuzzy @Name mentions that cannot be resolved (not found or ambiguous) are
+// left as plain text; their names are returned in the Unresolved slice.
+// Deterministic syntaxes (mention:SGID, person:ID) still hard-fail on error.
+func resolveMentions(ctx context.Context, resolver *names.Resolver, html string) (richtext.MentionResult, error) {
 	return richtext.ResolveMentions(html,
 		func(name string) (string, string, error) {
 			person, err := resolver.ResolvePersonByName(ctx, name)
 			if err != nil {
+				// Downgrade resolver-level not-found and ambiguous to skip — leave
+				// as plain text. Only match errors without an HTTP status; API-level
+				// failures (e.g. 404 from the pingable endpoint) carry HTTPStatus
+				// and must still hard-fail.
+				var cliErr *output.Error
+				if errors.As(err, &cliErr) && cliErr.HTTPStatus == 0 &&
+					(cliErr.Code == output.CodeNotFound || cliErr.Code == output.CodeAmbiguous) {
+					return "", "", fmt.Errorf("%w: %w", richtext.ErrMentionSkip, err)
+				}
 				return "", "", err
 			}
 			if person.AttachableSGID == "" {
@@ -505,6 +519,14 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, html string)
 			return person.AttachableSGID, person.Name, nil
 		},
 	)
+}
+
+// unresolvedMentionWarning formats a warning string for unresolved mentions.
+func unresolvedMentionWarning(unresolved []string) string {
+	if len(unresolved) == 0 {
+		return ""
+	}
+	return "Unresolved mentions left as text: " + strings.Join(unresolved, ", ")
 }
 
 // projectFlagChanged reports whether the user explicitly passed --project or
