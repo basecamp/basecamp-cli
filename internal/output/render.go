@@ -644,7 +644,7 @@ func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 		label := formatHeader(f.key)
 		labelStyled := r.Muted.Render(fmt.Sprintf("%-*s: ", maxLen, label))
 
-		value := formatDateValue(f.key, data[f.key])
+		value := formatDetailValue(f.key, data[f.key])
 		// Hyperlink title/name fields when styled
 		if r.styled && (f.key == "title" || f.key == "name") {
 			if url, ok := data["app_url"].(string); ok && url != "" {
@@ -792,14 +792,40 @@ func formatTableCell(key string, val any) string {
 	return formatDateValue(key, val)
 }
 
+// formatDetailValue formats a value for detail (single-object) display.
+// Date columns get human-readable formatting via formatDateValue.
+// Unlike formatCell, string values are not truncated — detail views show full content.
+func formatDetailValue(key string, val any) string {
+	if isDateColumn(key) {
+		return formatDateValue(key, val)
+	}
+
+	switch v := val.(type) {
+	case nil:
+		return ""
+	case string:
+		v = ansi.Strip(v)
+		if richtext.IsHTML(v) {
+			v = richtext.HTMLToMarkdown(v)
+		}
+		if strings.ContainsAny(v, "\n\r") {
+			v = strings.Join(strings.Fields(v), " ")
+		}
+		return v
+	default:
+		return formatCell(val)
+	}
+}
+
 // formatDateValue formats date fields in a human-readable way.
 // For date columns (created_at, updated_at, due_on, due_date), it converts
 // ISO8601 timestamps to a more readable format.
-func formatDateValue(key string, val any) string {
-	// Check if this is a date column
-	isDateColumn := strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on") || strings.HasSuffix(key, "_date")
+func isDateColumn(key string) bool {
+	return strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on") || strings.HasSuffix(key, "_date")
+}
 
-	if !isDateColumn {
+func formatDateValue(key string, val any) string {
+	if !isDateColumn(key) {
 		return formatCell(val)
 	}
 
@@ -1071,7 +1097,7 @@ func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any)
 
 	for _, f := range fields {
 		label := formatHeader(f.key)
-		value := formatDateValue(f.key, data[f.key])
+		value := formatDetailValue(f.key, data[f.key])
 		b.WriteString("- **" + label + ":** " + value + "\n")
 	}
 }

@@ -1264,6 +1264,76 @@ func TestRenderObjectOrdering(t *testing.T) {
 }
 
 // =============================================================================
+// renderObject Detail Value (no truncation) Tests
+// =============================================================================
+
+func TestRenderObjectDetailValueNotTruncated(t *testing.T) {
+	longContent := "This is a very long description that clearly exceeds the forty character truncation limit used by table cells"
+
+	t.Run("styled output preserves full content", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{
+			Format: FormatStyled,
+			Writer: &buf,
+		})
+
+		data := map[string]any{
+			"id":          float64(1),
+			"description": longContent,
+		}
+
+		err := w.OK(data)
+		require.NoError(t, err)
+
+		output := buf.String()
+		assert.Contains(t, output, longContent,
+			"detail view should show full content without truncation")
+		assert.NotContains(t, output, "...",
+			"detail view should not contain truncation ellipsis")
+	})
+
+	t.Run("markdown output preserves full content", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{
+			Format: FormatMarkdown,
+			Writer: &buf,
+		})
+
+		data := map[string]any{
+			"id":          float64(1),
+			"description": longContent,
+		}
+
+		err := w.OK(data)
+		require.NoError(t, err)
+
+		output := buf.String()
+		assert.Contains(t, output, longContent,
+			"markdown detail view should show full content without truncation")
+	})
+
+	t.Run("HTML content is converted to markdown", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{
+			Format: FormatStyled,
+			Writer: &buf,
+		})
+
+		data := map[string]any{
+			"id":      float64(1),
+			"content": "<p>Status report with important details about the project</p>",
+		}
+
+		err := w.OK(data)
+		require.NoError(t, err)
+
+		output := buf.String()
+		assert.Contains(t, output, "Status report with important details about the project")
+		assert.NotContains(t, output, "<p>")
+	})
+}
+
+// =============================================================================
 // renderObject Header Humanization Tests
 // =============================================================================
 
