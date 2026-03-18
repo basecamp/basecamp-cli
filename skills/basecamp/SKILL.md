@@ -152,6 +152,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | List cards | `basecamp cards list --in <project> --json` |
 | Create card | `basecamp card "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> [--position N] --in <project> --json` |
+| Move card to on-hold | `basecamp cards move <id> --on-hold --in <project> --json` |
 | Post message | `basecamp message "Title" "Body" --in <project> --json` |
 | Post with @mention | `basecamp message "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp message "Title" "Body" --no-subscribe --in <project> --json` |
@@ -292,6 +293,15 @@ basecamp cards move <card_id> --to <column_id> --in <project>
 
 # Move card to specific position in column (1-indexed)
 basecamp cards move <card_id> --to <column_id> --position 1 --in <project>
+
+# Move card to on-hold section of its current column
+basecamp cards move <card_id> --on-hold --in <project>
+
+# Move card to on-hold section of a specific column (numeric ID)
+basecamp cards move <card_id> --to <column_id> --on-hold --in <project>
+
+# Move card to on-hold section of a named column (requires --card-table)
+basecamp cards move <card_id> --to "Column Name" --on-hold --card-table <table_id> --in <project>
 ```
 
 ### Download File from Basecamp
@@ -364,6 +374,8 @@ basecamp cards update <id> --title "New" --due tomorrow --assignee me
 basecamp cards move <id> --to <column_id>             # Move to column (numeric ID)
 basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
 basecamp cards move <id> --to "Done" --position 1 --card-table <table_id>  # Move to position
+basecamp cards move <id> --on-hold                    # Move to on-hold of current column
+basecamp cards move <id> --to <column_id> --on-hold   # Move to on-hold of target column
 ```
 
 **Archived/trashed cards:** `cards list` only returns active cards. For archived or trashed cards, use `basecamp recordings cards --status archived --in <project>` or `--status trashed`.
