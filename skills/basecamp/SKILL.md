@@ -51,9 +51,11 @@ triggers:
   # My work
   - my todos
   - my tasks
+  - my schedule
   - my basecamp
   - assigned to me
   - overdue todos
+  - upcoming events
   # URLs
   - 3.basecamp.com
   - basecampapi.com
@@ -80,7 +82,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp recordings <type>` for browsing by type.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type.
 
 ### Output Modes
 
@@ -133,13 +135,14 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp reports overdue`, `basecamp recordings <type>`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`.
 
 | Task | Command |
 |------|---------|
 | List projects | `basecamp projects list --json` |
 | My todos (in project) | `basecamp todos list --assignee me --in <project> --json` |
 | My todos (cross-project) | `basecamp reports assigned --json` (defaults to "me") |
+| My schedule (cross-project) | `basecamp reports schedule --json` (upcoming events across all projects) |
 | All todos (cross-project) | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
 | Overdue todos (cross-project) | `basecamp reports overdue --json` |
@@ -201,6 +204,7 @@ Need to find something?
 ├── Know the type + project? → basecamp <type> list --in <project> --json
 │   (some groups have default list behavior; use --agent --help if unsure)
 ├── My assigned work? → basecamp reports assigned --json (defaults to "me")
+├── Upcoming schedule? → basecamp reports schedule --json (cross-project)
 ├── Overdue across projects? → basecamp reports overdue --json
 ├── Browse by type cross-project? → basecamp recordings <type> --json
 │   (types: todos, messages, documents, comments, cards, uploads)
@@ -443,6 +447,8 @@ basecamp files update <id> --title "New" --content "Updated"
 **Subcommands:** `folders`, `uploads`, `documents` (each with pagination flags)
 
 ### Schedule
+
+For upcoming events across all projects, use `basecamp reports schedule --json`.
 
 ```bash
 basecamp schedule --in <project> --json           # Schedule info
