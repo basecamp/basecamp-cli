@@ -823,7 +823,10 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 			return convertSDKError(err)
 		}
 		if card.Parent == nil {
-			return output.ErrUsage("Card has no parent column")
+			return output.ErrUsageHint(
+				"Card has no parent column",
+				fmt.Sprintf("Specify the target column: basecamp cards move %s --to <column-id> --on-hold", cardIDStr),
+			)
 		}
 		col, err := app.Account().CardColumns().Get(cmd.Context(), card.Parent.ID)
 		if err != nil {
