@@ -3,10 +3,15 @@
 package urlarg
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
+
+// chatAtRe matches the Basecamp web URL form chats/{chatID}@{lineID}
+// and normalizes it to chats/{chatID}/lines/{lineID} before routing.
+var chatAtRe = regexp.MustCompile(`(/chats/\d+)@(\d+)`)
 
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
@@ -23,7 +28,8 @@ var router = basecamp.DefaultRouter()
 // IsURL checks if the input looks like a Basecamp URL.
 // Returns true if the URL can be matched (either as an API route or structurally).
 func IsURL(input string) bool {
-	return router.Match(input) != nil
+	normalized := chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	return router.Match(normalized) != nil
 }
 
 // Parse extracts IDs from a Basecamp URL.
@@ -33,9 +39,14 @@ func IsURL(input string) bool {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}#__recording_{comment}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/card_tables/cards/{id}
+//   - https://3.basecamp.com/{account}/buckets/{bucket}/chats/{id}@{lineId}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
-	m := router.Match(input)
+	// Normalize the Basecamp web @-form for chat lines (chats/789@111)
+	// into the slash form (chats/789/lines/111) before routing.
+	normalized := chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+
+	m := router.Match(normalized)
 	if m == nil {
 		return nil
 	}

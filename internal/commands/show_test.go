@@ -39,6 +39,8 @@ func TestRecordingTypeEndpoint(t *testing.T) {
 		{"Todolist::Todo", "124", "/todos/124.json"},
 		{"Inbox::Forward", "600", "/forwards/600.json"},
 		{"Upload", "700", "/uploads/700.json"},
+		{"Vault", "800", "/vaults/800.json"},
+		{"Chat::Transcript", "900", "/chats/900.json"},
 	}
 
 	for _, tt := range tests {
@@ -193,6 +195,187 @@ func TestShowGenericRecordingFallsBackOnRefetchError(t *testing.T) {
 
 	// Output should contain the sparse recording data
 	assert.Contains(t, buf.String(), "sparse title")
+}
+
+func TestShowFragmentURLResolvesComment(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showFragmentTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/todos/789#__recording_999"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	// Should fetch recording 999 (the comment), not 789 (the parent todo)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/999.json")
+}
+
+// showFragmentTransport returns comment data for /recordings/999.
+type showFragmentTransport struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (t *showFragmentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.requests = append(t.requests, req.URL.Path)
+	t.mu.Unlock()
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	var body string
+	if strings.Contains(req.URL.Path, "/recordings/999") {
+		body = `{"id": 999, "type": "Comment", "content": "This is the comment"}`
+	} else if strings.Contains(req.URL.Path, "/comments/999") {
+		body = `{"id": 999, "type": "Comment", "content": "Rich comment content"}`
+	} else {
+		body = `{"id": 789, "type": "Todo", "title": "Parent todo"}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func (t *showFragmentTransport) getRequests() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, len(t.requests))
+	copy(out, t.requests)
+	return out
+}
+
+func TestShowChatAtURLResolvesLine(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showRefetchTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	// The @-form chat line URL from the QA issue
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/chats/789@111"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	// The @-form should normalize to lines type and use /recordings/{lineID}
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/111.json")
+}
+
+func TestShowProjectURLReturnsHelpfulError(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/projects/456"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "projects show")
+}
+
+func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/circles/789@456"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be shown")
 }
 
 // showRefetchFailTransport returns sparse recording data, then fails on refetch.

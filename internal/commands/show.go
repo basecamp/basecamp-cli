@@ -22,9 +22,11 @@ func NewShowCmd() *cobra.Command {
 		Long: `Show details of any Basecamp item by ID or URL.
 
 Types: todo, todolist, message, comment, card, card-table, document,
-       schedule-entry, checkin, forward, upload
+       schedule-entry, checkin, forward, upload, vault, chat, line
 
 If no type specified, uses generic lookup.
+
+URLs with #__recording_ fragments resolve the referenced recording directly.
 
 You can also pass a Basecamp URL directly:
   basecamp show https://3.basecamp.com/123/buckets/456/todos/789
@@ -47,10 +49,29 @@ You can also pass a Basecamp URL directly:
 
 			// Check if the id is a URL and extract components
 			if parsed := urlarg.Parse(id); parsed != nil {
-				id = parsed.RecordingID
-				// Auto-detect type from URL if not specified
-				if recordType == "" && parsed.Type != "" {
-					recordType = parsed.Type
+				if parsed.CommentID != "" {
+					// Fragment URL (#__recording_N) — resolve the referenced
+					// recording directly instead of the parent resource.
+					id = parsed.CommentID
+					recordType = "" // generic lookup will auto-detect
+				} else if parsed.RecordingID != "" {
+					id = parsed.RecordingID
+					// Auto-detect type from URL if not specified
+					if recordType == "" && parsed.Type != "" {
+						recordType = parsed.Type
+					}
+				} else if parsed.ProjectID != "" && parsed.Type == "project" {
+					// Project URL — redirect to "projects show"
+					return output.ErrUsageHint(
+						"Use 'projects show' for project URLs",
+						fmt.Sprintf("basecamp projects show %s", parsed.ProjectID),
+					)
+				} else {
+					// URL was recognized but has no recording ID (e.g. circle URLs).
+					return output.ErrUsageHint(
+						"This URL type cannot be shown",
+						"Supported URL types: todos, messages, comments, cards, documents, vaults, chats, chat lines",
+					)
 				}
 			}
 
@@ -58,7 +79,7 @@ You can also pass a Basecamp URL directly:
 			if !isValidRecordType(recordType) {
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
+					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload, vault, chat, line",
 				)
 			}
 
@@ -91,13 +112,21 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/forwards/%s.json", id)
 			case "upload", "uploads":
 				endpoint = fmt.Sprintf("/uploads/%s.json", id)
+			case "vault", "vaults":
+				endpoint = fmt.Sprintf("/vaults/%s.json", id)
+			case "chat", "chats", "campfire", "campfires":
+				endpoint = fmt.Sprintf("/chats/%s.json", id)
+			case "line", "lines":
+				// Chat lines need both chat ID and line ID for the specific
+				// endpoint, but we only have the line ID. Use generic recording.
+				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 			case "", "recording", "recordings":
 				// Generic recording lookup
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 			default:
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
+					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload, vault, chat, line",
 				)
 			}
 
@@ -127,7 +156,9 @@ You can also pass a Basecamp URL directly:
 			// endpoint to get full content (the /recordings/ endpoint returns
 			// sparse data). The endpoint is derived from the response's type
 			// field — never from the url field, which could point off-origin.
-			if recordType == "" || recordType == "recording" || recordType == "recordings" {
+			// Chat lines also use /recordings/ since the specific endpoint
+			// requires a parent chat ID we may not have.
+			if recordType == "" || recordType == "recording" || recordType == "recordings" || recordType == "line" || recordType == "lines" {
 				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
 					if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {
@@ -208,6 +239,10 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return fmt.Sprintf("/forwards/%s.json", id)
 	case "Upload":
 		return fmt.Sprintf("/uploads/%s.json", id)
+	case "Vault":
+		return fmt.Sprintf("/vaults/%s.json", id)
+	case "Chat::Transcript":
+		return fmt.Sprintf("/chats/%s.json", id)
 	default:
 		return ""
 	}
@@ -220,7 +255,9 @@ func isValidRecordType(t string) bool {
 		"comment", "comments", "card", "cards", "card-table", "card_table",
 		"cardtable", "document", "documents", "recording", "recordings",
 		"schedule-entry", "schedule_entry", "checkin", "check-in", "check_in",
-		"forward", "forwards", "upload", "uploads":
+		"forward", "forwards", "upload", "uploads",
+		"vault", "vaults", "chat", "chats", "campfire", "campfires",
+		"line", "lines":
 		return true
 	default:
 		return false
