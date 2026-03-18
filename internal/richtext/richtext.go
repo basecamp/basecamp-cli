@@ -106,9 +106,8 @@ var (
 
 // Pre-compiled regexes for IsHTML detection
 var (
-	reSafeTag      = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
-	reFencedBlock  = regexp.MustCompile("(?m)^```[^\n]*\n[\\s\\S]*?^```")
-	reBacktickSpan = regexp.MustCompile("`[^`]+`")
+	reSafeTag     = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
+	reFencedBlock = regexp.MustCompile("(?m)^```[^\n]*\n[\\s\\S]*?^```")
 )
 
 // Pre-compiled regexes for IsMarkdown detection
@@ -997,7 +996,7 @@ func IsHTML(s string) bool {
 	// Strip fenced code blocks and backtick code spans so that HTML tags
 	// appearing inside code contexts don't trigger a false positive.
 	stripped := reFencedBlock.ReplaceAllString(s, "")
-	stripped = reBacktickSpan.ReplaceAllString(stripped, "")
+	stripped = reCodeSpan.ReplaceAllString(stripped, "")
 
 	return reSafeTag.MatchString(stripped)
 }
