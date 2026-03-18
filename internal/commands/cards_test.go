@@ -374,7 +374,7 @@ func (t *mockOnHoldTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
 			body = `{"id": 456, "title": "Test Card", "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
 		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
-			body = `{"id": 777, "title": "Developing", "on_hold": {"id": 888, "enabled": true, "cards_count": 0, "cards_url": "https://example.com/cards.json"}}`
+			body = `{"id": 777, "title": "Developing", "on_hold": {"id": 888, "status": "active", "inherits_status": false, "title": "On hold", "cards_count": 0, "cards_url": "https://example.com/cards.json"}}`
 		default:
 			return nil, fmt.Errorf("unexpected GET request: %s", req.URL.Path)
 		}
@@ -459,6 +459,66 @@ func (t *mockOnHoldDisabledTransport) RoundTrip(req *http.Request) (*http.Respon
 			body = `{"id": 456, "title": "Test Card", "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
 		case strings.Contains(req.URL.Path, "/card_tables/columns/777"):
 			body = `{"id": 777, "title": "Developing"}`
+		default:
+			return nil, fmt.Errorf("unexpected GET request: %s", req.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+}
+
+// TestCardsMoveOnHoldWithNamedColumn tests --on-hold with a named --to column.
+// The card should resolve the column by name from the card table and move to its on-hold section.
+func TestCardsMoveOnHoldWithNamedColumn(t *testing.T) {
+	transport := &mockOnHoldNamedColumnTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cardTable := "999"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to", "Developing", "--on-hold")
+	require.NoError(t, err)
+
+	assert.Contains(t, transport.capturedMovePath, "/card_tables/cards/456/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
+	assert.Equal(t, float64(888), body["column_id"])
+}
+
+// mockOnHoldNamedColumnTransport handles API calls for --on-hold with a named column.
+// Flow: GET /projects.json -> GET card table (with lists) -> POST move.
+type mockOnHoldNamedColumnTransport struct {
+	capturedMovePath string
+	capturedMoveBody []byte
+}
+
+func (t *mockOnHoldNamedColumnTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "POST" && strings.Contains(req.URL.Path, "/moves.json") {
+		t.capturedMovePath = req.URL.Path
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedMoveBody = body
+			req.Body.Close()
+		}
+		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+	}
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/123"):
+			body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 999, "title": "Board"}]}`
+		case strings.Contains(req.URL.Path, "/card_tables/999"):
+			body = `{"id": 999, "lists": [{"id": 777, "title": "Developing", "on_hold": {"id": 888, "status": "active", "inherits_status": false, "title": "On hold", "cards_count": 0, "cards_url": "https://example.com/cards.json"}}]}`
 		default:
 			return nil, fmt.Errorf("unexpected GET request: %s", req.URL.Path)
 		}
