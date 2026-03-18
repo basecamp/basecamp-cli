@@ -33,3 +33,29 @@ func TestAttachmentsURLWithoutComment(t *testing.T) {
 	assert.Equal(t, "", parsed.CommentID)
 	assert.Equal(t, "111", parsed.RecordingID)
 }
+
+func TestTypeToEndpointAnswerAliases(t *testing.T) {
+	assert.Equal(t, "/question_answers/42.json", typeToEndpoint("answer", "42"))
+	assert.Equal(t, "/question_answers/42.json", typeToEndpoint("question_answers", "42"))
+	assert.Equal(t, "", typeToEndpoint("question_answer", "42"))
+}
+
+func TestTypeToEndpointKnownTypes(t *testing.T) {
+	tests := []struct {
+		typ      string
+		expected string
+	}{
+		{"todo", "/todos/1.json"},
+		{"comment", "/comments/1.json"},
+		{"message", "/messages/1.json"},
+		{"document", "/documents/1.json"},
+		{"upload", "/uploads/1.json"},
+		{"forward", "/forwards/1.json"},
+		{"bogus", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.typ, func(t *testing.T) {
+			assert.Equal(t, tt.expected, typeToEndpoint(tt.typ, "1"))
+		})
+	}
+}

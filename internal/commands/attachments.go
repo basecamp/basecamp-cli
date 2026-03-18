@@ -54,7 +54,7 @@ You can pass either an ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Item type hint (todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload)")
+	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Item type hint (todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload)")
 
 	return cmd
 }
@@ -84,7 +84,7 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	if !isGenericType(recordType) && typeToEndpoint(recordType, id) == "" {
 		return output.ErrUsageHint(
 			fmt.Sprintf("Unknown type: %s", recordType),
-			"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
+			"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload",
 		)
 	}
 
@@ -175,7 +175,7 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 		if endpoint == "" {
 			return "", output.ErrUsageHint(
 				fmt.Sprintf("Unknown type: %s", recordType),
-				"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
+				"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload",
 			)
 		}
 	} else {
@@ -191,7 +191,7 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 		if isGenericType(recordType) {
 			return "", output.ErrUsageHint(
 				fmt.Sprintf("Item %s not found or type required", id),
-				"Specify a type: basecamp attachments list <id> --type todo|todolist|message|comment|card|card-table|document|schedule-entry|checkin|forward|upload",
+				"Specify a type: basecamp attachments list <id> --type todo|todolist|message|comment|card|card-table|document|schedule-entry|checkin|answer|forward|upload",
 			)
 		}
 		return "", output.ErrNotFound("item", id)
@@ -251,6 +251,8 @@ func typeToEndpoint(recordType, id string) string {
 		return fmt.Sprintf("/documents/%s.json", id)
 	case "schedule-entry", "schedule_entry", "schedule_entries":
 		return fmt.Sprintf("/schedule_entries/%s.json", id)
+	case "answer", "question_answers":
+		return fmt.Sprintf("/question_answers/%s.json", id)
 	case "checkin", "check-in", "check_in", "questions":
 		return fmt.Sprintf("/questions/%s.json", id)
 	case "forward", "forwards":
