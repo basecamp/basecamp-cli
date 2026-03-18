@@ -1205,7 +1205,7 @@ Examples:
 					return pipelineErr
 				}
 				commentHTML = mentionResult.HTML
-				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
+				mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
 			}
 
 			// Execute actions
@@ -1259,7 +1259,7 @@ Examples:
 				),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(result, respOpts...)
 		},

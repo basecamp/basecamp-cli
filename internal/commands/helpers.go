@@ -521,8 +521,8 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, html string)
 	)
 }
 
-// unresolvedMentionNotice formats a notice string for unresolved mentions.
-func unresolvedMentionNotice(unresolved []string) string {
+// unresolvedMentionWarning formats a warning string for unresolved mentions.
+func unresolvedMentionWarning(unresolved []string) string {
 	if len(unresolved) == 0 {
 		return ""
 	}

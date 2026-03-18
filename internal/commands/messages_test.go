@@ -533,3 +533,63 @@ func TestMessagesCreateDefaultOmitsSubscriptions(t *testing.T) {
 	_, ok := body["subscriptions"]
 	assert.False(t, ok, "expected subscriptions to be omitted when neither flag is set")
 }
+
+// mockMessageListTransport handles the resolution chain and returns a truncated
+// messages list (fewer messages than TotalCount) to exercise the truncation notice path.
+type mockMessageListTransport struct{}
+
+func (mockMessageListTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method != "GET" {
+		return nil, errors.New("unexpected method: " + req.Method)
+	}
+
+	var body string
+	switch {
+	case strings.Contains(req.URL.Path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test Project"}]`
+	case strings.Contains(req.URL.Path, "/projects/"):
+		body = `{"id": 123, "dock": [{"name": "message_board", "id": 777, "enabled": true}]}`
+	case strings.Contains(req.URL.Path, "/messages.json"):
+		// Return 2 messages but signal 50 total via header
+		header.Set("X-Total-Count", "50")
+		body = `[{"id": 1, "subject": "Msg 1"}, {"id": 2, "subject": "Msg 2"}]`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestMessagesListAgentModeTruncationSilent verifies that truncation notices
+// do not leak to stderr in quiet/agent mode. Only diagnostic warnings
+// (e.g. unresolved mentions) should appear on stderr.
+func TestMessagesListAgentModeTruncationSilent(t *testing.T) {
+	transport := mockMessageListTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	// Override output to FormatQuiet with separate stdout/stderr buffers
+	var stdout, stderr bytes.Buffer
+	app.Output = output.New(output.Options{
+		Format:    output.FormatQuiet,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	cmd := NewMessagesCmd()
+	err := executeMessagesCommand(cmd, app, "list", "--in", "123")
+	require.NoError(t, err)
+
+	// stdout should contain data
+	assert.NotEmpty(t, stdout.String())
+
+	// stderr must be empty — truncation notice should NOT leak
+	assert.Empty(t, stderr.String(),
+		"truncation notices should not appear on stderr in quiet mode")
+}

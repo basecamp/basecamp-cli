@@ -381,7 +381,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 				contentType = "text/html"
 			}
 		}
-		mentionNotice = unresolvedMentionNotice(result.Unresolved)
+		mentionNotice = unresolvedMentionWarning(result.Unresolved)
 	}
 
 	// Post message using SDK
@@ -432,7 +432,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		output.WithBreadcrumbs(breadcrumbs...),
 	}
 	if mentionNotice != "" {
-		respOpts = append(respOpts, output.WithNotice(mentionNotice))
+		respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 	}
 	return app.OK(line, respOpts...)
 }

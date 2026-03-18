@@ -328,7 +328,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return err
 			}
 			html = mentionResult.HTML
-			mentionNotice := unresolvedMentionNotice(mentionResult.Unresolved)
+			mentionNotice := unresolvedMentionWarning(mentionResult.Unresolved)
 
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
@@ -374,7 +374,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(message, respOpts...)
 		},
@@ -459,8 +459,8 @@ You can pass either a message ID or a Basecamp URL:
 					},
 				),
 			}
-			if notice := unresolvedMentionNotice(mentionResult.Unresolved); notice != "" {
-				respOpts = append(respOpts, output.WithNotice(notice))
+			if notice := unresolvedMentionWarning(mentionResult.Unresolved); notice != "" {
+				respOpts = append(respOpts, output.WithDiagnostic(notice))
 			}
 			return app.OK(message, respOpts...)
 		},
@@ -738,7 +738,7 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 				return err
 			}
 			html = mentionResult.HTML
-			mentionNotice := unresolvedMentionNotice(mentionResult.Unresolved)
+			mentionNotice := unresolvedMentionWarning(mentionResult.Unresolved)
 
 			// Upload explicit --attach files and embed
 			if len(attachFiles) > 0 {
@@ -782,7 +782,7 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 				),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(message, respOpts...)
 		},

@@ -449,7 +449,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 					return mentionErr
 				}
 				content = mentionResult.HTML
-				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
+				mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
 			}
 
 			// Build request
@@ -512,7 +512,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 				output.WithBreadcrumbs(breadcrumbs...),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(card, respOpts...)
 		},
@@ -579,7 +579,7 @@ You can pass either a card ID or a Basecamp URL:
 					return mentionErr
 				}
 				req.Content = mentionResult.HTML
-				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
+				mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
 			}
 			if due != "" {
 				req.DueOn = dateparse.Parse(due)
@@ -608,7 +608,7 @@ You can pass either a card ID or a Basecamp URL:
 				),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(card, respOpts...)
 		},
@@ -999,7 +999,7 @@ func NewCardCmd() *cobra.Command {
 					return mentionErr
 				}
 				content = mentionResult.HTML
-				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
+				mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
 			}
 
 			// Build request
@@ -1061,7 +1061,7 @@ func NewCardCmd() *cobra.Command {
 				output.WithBreadcrumbs(cardBreadcrumbs...),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(card, respOpts...)
 		},

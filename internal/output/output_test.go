@@ -443,7 +443,7 @@ func TestWriterQuietFormat(t *testing.T) {
 	assert.False(t, exists, "Quiet format should not include envelope ok field")
 }
 
-func TestWriterQuietFormatNoticeOnStderr(t *testing.T) {
+func TestWriterQuietFormatDiagnosticOnStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := New(Options{
 		Format:    FormatQuiet,
@@ -452,7 +452,7 @@ func TestWriterQuietFormatNoticeOnStderr(t *testing.T) {
 	})
 
 	data := map[string]string{"id": "123"}
-	err := w.OK(data, WithNotice("Unresolved mentions left as text: @Bobby"))
+	err := w.OK(data, WithDiagnostic("Unresolved mentions left as text: @Bobby"))
 	require.NoError(t, err)
 
 	// Data on stdout should not contain the notice
@@ -462,7 +462,7 @@ func TestWriterQuietFormatNoticeOnStderr(t *testing.T) {
 	_, hasNotice := decoded["notice"]
 	assert.False(t, hasNotice, "notice should not appear in quiet stdout")
 
-	// Notice should appear on stderr
+	// Diagnostic notice should appear on stderr
 	assert.Contains(t, stderr.String(), "Unresolved mentions left as text: @Bobby")
 }
 
@@ -481,7 +481,7 @@ func TestWriterQuietFormatNoNoticeOnStderr(t *testing.T) {
 	assert.Empty(t, stderr.String(), "stderr should be empty when there is no notice")
 }
 
-func TestWriterQuietJQNoticeOnStderr(t *testing.T) {
+func TestWriterQuietJQDiagnosticOnStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := New(Options{
 		Format:    FormatQuiet,
@@ -491,14 +491,29 @@ func TestWriterQuietJQNoticeOnStderr(t *testing.T) {
 	})
 
 	data := map[string]any{"id": "123"}
-	err := w.OK(data, WithNotice("Unresolved mentions left as text: @Bobby"))
+	err := w.OK(data, WithDiagnostic("Unresolved mentions left as text: @Bobby"))
 	require.NoError(t, err)
 
 	// jq output on stdout should contain the extracted value
 	assert.Contains(t, stdout.String(), "123")
 
-	// Notice should still appear on stderr despite --jq
+	// Diagnostic notice should still appear on stderr despite --jq
 	assert.Contains(t, stderr.String(), "Unresolved mentions left as text: @Bobby")
+}
+
+func TestWriterQuietFormatNoticeDoesNotWriteStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{
+		Format:    FormatQuiet,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	data := map[string]string{"id": "123"}
+	err := w.OK(data, WithNotice("Showing 25 of 100 results"))
+	require.NoError(t, err)
+
+	assert.Empty(t, stderr.String(), "plain WithNotice should not write to stderr")
 }
 
 func TestWriterQuietFormatString(t *testing.T) {

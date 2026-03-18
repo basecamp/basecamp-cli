@@ -891,6 +891,38 @@ func TestChatPostAllInvalidMentionsStillPosts(t *testing.T) {
 		"content_type should be text/html even with all unresolved mentions")
 }
 
+// TestChatPostAgentModeWarningOnStderr verifies that in quiet/agent mode,
+// the unresolved mention warning appears on stderr while stdout contains
+// data-only JSON (no envelope).
+func TestChatPostAgentModeWarningOnStderr(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatMultiMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	// Override output to FormatQuiet with separate stdout/stderr buffers
+	var stdout, stderr bytes.Buffer
+	app.Output = output.New(output.Options{
+		Format:    output.FormatQuiet,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "post", "Hey @Jane.Smith and @Bobby, check this",
+		"--room", "789", "--in", "123")
+	require.NoError(t, err)
+
+	// stdout should contain data-only JSON (no envelope wrapper)
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &data))
+	_, hasOK := data["ok"]
+	assert.False(t, hasOK, "quiet mode should not include envelope ok field")
+
+	// stderr should contain the diagnostic warning
+	assert.Contains(t, stderr.String(), "notice: Unresolved mentions left as text: @Bobby")
+}
+
 // TestChatDeleteReturnsDeletedPayload verifies that delete returns {"deleted": true, "id": "..."}.
 func TestChatDeleteReturnsDeletedPayload(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")

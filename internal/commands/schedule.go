@@ -477,7 +477,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 			return mentionErr
 		}
 		description = mentionResult.HTML
-		mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
+		mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
 	}
 
 	// Build request
@@ -527,7 +527,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		),
 	}
 	if mentionNotice != "" {
-		respOpts = append(respOpts, output.WithNotice(mentionNotice))
+		respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 	}
 	return app.OK(entry, respOpts...)
 }
@@ -612,7 +612,7 @@ You can pass either an entry ID or a Basecamp URL:
 					return mentionErr
 				}
 				req.Description = mentionResult.HTML
-				mentionNotice = unresolvedMentionNotice(mentionResult.Unresolved)
+				mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
@@ -659,7 +659,7 @@ You can pass either an entry ID or a Basecamp URL:
 				),
 			}
 			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithNotice(mentionNotice))
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 			}
 			return app.OK(entry, respOpts...)
 		},
