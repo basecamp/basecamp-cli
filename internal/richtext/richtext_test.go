@@ -1420,6 +1420,20 @@ func TestParseAttachments(t *testing.T) {
 			},
 		},
 		{
+			name:     "HTML entities decoded in attributes",
+			html:     `<bc-attachment sgid="ENT1" content-type="image/png" filename="O&#39;Brien &amp; Co.png" url="https://example.com/file?a=1&amp;b=2"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				a := atts[0]
+				if a.Filename != "O'Brien & Co.png" {
+					t.Errorf("Filename = %q, want %q", a.Filename, "O'Brien & Co.png")
+				}
+				if a.URL != "https://example.com/file?a=1&b=2" {
+					t.Errorf("URL = %q, want decoded URL", a.URL)
+				}
+			},
+		},
+		{
 			name:     "missing attributes handled gracefully",
 			html:     `<bc-attachment sgid="BARE"></bc-attachment>`,
 			expected: 1,

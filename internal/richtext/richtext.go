@@ -5,6 +5,7 @@ package richtext
 import (
 	"errors"
 	"fmt"
+	"html"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1087,9 +1088,9 @@ func extractAttr(attrs, name string) string {
 			continue
 		}
 		if m[3] != "" {
-			return m[3]
+			return html.UnescapeString(m[3])
 		}
-		return m[2]
+		return html.UnescapeString(m[2])
 	}
 	return ""
 }
