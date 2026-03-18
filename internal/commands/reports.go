@@ -261,7 +261,7 @@ func newReportsScheduleCmd() *cobra.Command {
 		Short: "View upcoming schedule entries",
 		Long: `View upcoming schedule entries and assignables within a date window.
 
-By default shows the upcoming schedule. Use --start and --end to specify a date range.
+By default starts from today. Use --start and --end to specify a different range.
 Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD format.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -272,6 +272,10 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 
 			// Parse dates if provided (dateparse handles natural language like "today", "+7")
 			// Unrecognized formats are normalized (trimmed/lowercased) and passed through for the API to validate
+			// Default start to today when omitted (API requires at least a start date)
+			if startDate == "" {
+				startDate = "today"
+			}
 			parsedStart := dateparse.Parse(startDate)
 			parsedEnd := dateparse.Parse(endDate)
 
