@@ -254,7 +254,9 @@ func normalizeShowType(recordType string) string {
 	case "schedule_entries":
 		return "schedule-entry"
 	case "answer", "question_answers":
-		return "checkin"
+		// show has no type alias for question_answers; omit --type
+		// so generic recording lookup finds the right endpoint.
+		return ""
 	case "questions":
 		return "checkin"
 	case "forwards":
