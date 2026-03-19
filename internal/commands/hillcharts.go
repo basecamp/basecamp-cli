@@ -68,9 +68,24 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 		return err
 	}
 
-	resolvedProjectID, err := resolveProjectID(cmd, app, project)
-	if err != nil {
-		return err
+	var resolvedProjectID string
+	if todosetID != "" {
+		if project != "" {
+			var err error
+			resolvedProjectID, err = resolveProjectID(cmd, app, project)
+			if err != nil {
+				return err
+			}
+			if err := validateTodosetOwnership(cmd, app, todosetID, resolvedProjectID); err != nil {
+				return err
+			}
+		}
+	} else {
+		var err error
+		resolvedProjectID, err = resolveProjectID(cmd, app, project)
+		if err != nil {
+			return err
+		}
 	}
 
 	resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todosetID)
@@ -86,8 +101,9 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 	hillChart, err := app.Account().HillCharts().Get(cmd.Context(), tsID)
 	if err != nil {
 		// FIXME: BC3 returns 403 when the hill chart is simply disabled (no tracked
-		// todolists). Ideally the API would return a more specific status so we don't
-		// have to sniff the todoset to distinguish "disabled" from "access denied".
+		// todolists). We only replace the 403 when TodolistsCount == 0, which is
+		// unambiguous — can't have a hill chart with no todolists. All other 403s
+		// (including non-empty todosets) fall through as genuine access errors.
 		var sdkErr *basecamp.Error
 		if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeForbidden {
 			todoset, tsErr := app.Account().Todosets().Get(cmd.Context(), tsID)
@@ -95,20 +111,14 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 				return &output.Error{
 					Code:    output.CodeUsage,
 					Message: "No todolists to track on the hill chart",
-					Hint:    fmt.Sprintf("Create todolists first, then track them:\n  basecamp todolists create \"My list\" --in %s\n  basecamp hillcharts track <todolist-ids> --in %s", resolvedProjectID, resolvedProjectID),
-				}
-			}
-			if tsErr == nil && todoset.TodolistsCount > 0 {
-				return &output.Error{
-					Code:    output.CodeUsage,
-					Message: "Hill chart is not enabled (no todolists are tracked)",
-					Hint:    fmt.Sprintf("Track todolists to enable it:\n  basecamp hillcharts track <todolist-ids> --in %s", resolvedProjectID),
+					Hint:    emptyTodosetHint(resolvedProjectID, resolvedTodosetID, todosetID),
 				}
 			}
 		}
 		return convertSDKError(err)
 	}
 
+	scope := hillchartScope(resolvedProjectID, todosetID)
 	summary := fmt.Sprintf("Hill chart: %d dot(s) tracked", len(hillChart.Dots))
 
 	return app.OK(hillChart,
@@ -116,12 +126,12 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "track",
-				Cmd:         fmt.Sprintf("basecamp hillcharts track <todolist-ids> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp hillcharts track <todolist-ids> %s", scope),
 				Description: "Track todolists on hill chart",
 			},
 			output.Breadcrumb{
 				Action:      "untrack",
-				Cmd:         fmt.Sprintf("basecamp hillcharts untrack <todolist-ids> --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp hillcharts untrack <todolist-ids> %s", scope),
 				Description: "Untrack todolists from hill chart",
 			},
 		),
@@ -179,9 +189,24 @@ func runHillchartsUpdateSettings(cmd *cobra.Command, project, todosetID, listsAr
 		return err
 	}
 
-	resolvedProjectID, err := resolveProjectID(cmd, app, project)
-	if err != nil {
-		return err
+	var resolvedProjectID string
+	if todosetID != "" {
+		if project != "" {
+			var err error
+			resolvedProjectID, err = resolveProjectID(cmd, app, project)
+			if err != nil {
+				return err
+			}
+			if err := validateTodosetOwnership(cmd, app, todosetID, resolvedProjectID); err != nil {
+				return err
+			}
+		}
+	} else {
+		var err error
+		resolvedProjectID, err = resolveProjectID(cmd, app, project)
+		if err != nil {
+			return err
+		}
 	}
 
 	resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todosetID)
@@ -233,14 +258,57 @@ func runHillchartsUpdateSettings(cmd *cobra.Command, project, todosetID, listsAr
 		action = "Untracked"
 	}
 
+	scope := hillchartScope(resolvedProjectID, todosetID)
+
 	return app.OK(hillChart,
 		output.WithSummary(fmt.Sprintf("%s %d todolist(s) on hill chart", action, len(todolistIDs))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp hillcharts show --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp hillcharts show %s", scope),
 				Description: "View hill chart",
 			},
 		),
 	)
+}
+
+func hillchartScope(projectID, todosetFlag string) string {
+	if todosetFlag != "" {
+		return "--todoset " + todosetFlag
+	}
+	return "--in " + projectID
+}
+
+func validateTodosetOwnership(cmd *cobra.Command, app *appctx.App, todosetID, resolvedProjectID string) error {
+	tsID, err := strconv.ParseInt(todosetID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid todoset ID")
+	}
+	todoset, err := app.Account().Todosets().Get(cmd.Context(), tsID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	projectNum, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if todoset.Bucket == nil || todoset.Bucket.ID != projectNum {
+		bucketID := int64(0)
+		if todoset.Bucket != nil {
+			bucketID = todoset.Bucket.ID
+		}
+		return output.ErrUsage(fmt.Sprintf(
+			"--todoset %s belongs to project %d, not %s",
+			todosetID, bucketID, resolvedProjectID))
+	}
+	return nil
+}
+
+func emptyTodosetHint(resolvedProjectID, resolvedTodosetID, todosetFlag string) string {
+	if resolvedProjectID != "" {
+		scope := hillchartScope(resolvedProjectID, todosetFlag)
+		return fmt.Sprintf(
+			"Create todolists first, then track them:\n  basecamp todolists create \"My list\" --in %s\n  basecamp hillcharts track <todolist-ids> %s",
+			resolvedProjectID, scope)
+	}
+	return fmt.Sprintf(
+		"Create todolists in the project that owns this todoset, then track them:\n  basecamp hillcharts track <todolist-ids> --todoset %s",
+		resolvedTodosetID)
 }
