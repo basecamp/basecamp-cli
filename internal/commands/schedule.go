@@ -279,6 +279,12 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 	// occurrence date that the URL encodes.
 	var urlProjectID string
 	if parsed := urlarg.Parse(entryID); parsed != nil {
+		if parsed.RecordingID == "" {
+			return output.ErrUsageHint(
+				"This URL does not point to a schedule entry",
+				"Paste a schedule entry URL or pass an entry ID",
+			)
+		}
 		entryID = parsed.RecordingID
 		urlProjectID = parsed.ProjectID
 		if occurrenceDate == "" {

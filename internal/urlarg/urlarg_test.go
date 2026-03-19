@@ -14,6 +14,7 @@ func TestIsURL(t *testing.T) {
 		{"http://localhost:3000/123/buckets/456/todos/789", true},
 		{"123", false},
 		{"my-project", false},
+		{"https://3.basecamp.com/123/buckets/456/chats/789@111", true},
 		{"", false},
 	}
 
