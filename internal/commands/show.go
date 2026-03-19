@@ -73,7 +73,8 @@ You can also pass a Basecamp URL directly:
 					// URL was recognized but has no recording ID (e.g. circle URLs).
 					return output.ErrUsageHint(
 						"This URL type cannot be shown",
-						"Supported URL types: todos, messages, comments, cards, documents, vaults, chats, chat lines",
+						"Supported URL types: todos, messages, comments, documents, cards, "+
+							"uploads, vaults, chats, schedule_entries, inbox_forwards",
 					)
 				}
 			}
@@ -222,7 +223,7 @@ You can also pass a Basecamp URL directly:
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (todo, todolist, message, comment, card, card-table, document)")
+	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
 
 	return cmd
 }
