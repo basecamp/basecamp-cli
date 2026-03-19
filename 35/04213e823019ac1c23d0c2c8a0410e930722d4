@@ -1,0 +1,23 @@
+internal/commands/wizard_agents.go
+  85bd5bc189bc70ce 68,108,262,287,350
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "3504213e823019ac1c23d0c2c8a0410e930722d4",
+  "prompts": {
+    "85bd5bc189bc70ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8be86fff-a59f-437b-b127-76a44c97cc0f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 5,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
