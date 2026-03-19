@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -50,6 +51,13 @@ You can also pass a Basecamp URL directly:
 				id = args[1]
 			}
 
+			// Capture whether the user performed an untyped lookup before
+			// URL parsing can modify recordType. Fragment URLs intentionally
+			// clear recordType, so checking after parsing would misclassify
+			// them as untyped. This drives the 204 error message: untyped
+			// lookups get a "type required" hint, typed ones get "not found".
+			untypedLookup := recordType == "" || recordType == "recording" || recordType == "recordings"
+
 			// Check if the id is a URL and extract components
 			var occurrenceDate string
 			if parsed := urlarg.Parse(id); parsed != nil {
@@ -61,6 +69,7 @@ You can also pass a Basecamp URL directly:
 					// its type will be auto-detected from the API response.
 					id = parsed.CommentID
 					recordType = ""
+					untypedLookup = false // user targeted a specific recording via fragment
 				} else if parsed.IsCollection {
 					// Collection URL (e.g. .../todosets/777/todolists) — the ID
 					// belongs to the parent container, not a child resource.
@@ -197,7 +206,7 @@ You can also pass a Basecamp URL directly:
 
 			// Check for empty response (204 No Content)
 			if resp.StatusCode == http.StatusNoContent {
-				if needsRefetch {
+				if untypedLookup {
 					return output.ErrUsageHint(
 						fmt.Sprintf("Item %s not found or type required", id),
 						"Specify a type: basecamp show todo|todolist|message|comment|card|document <id>",
@@ -274,6 +283,16 @@ You can also pass a Basecamp URL directly:
 // causing the caller to fall through to sparse recording data (no regression).
 func recordingTypeEndpoint(data map[string]any, id string) string {
 	t, _ := data["type"].(string)
+
+	// Chat lines have multiple subtypes (Chat::Lines::Text, Chat::Lines::Attachment, …).
+	// They require the parent chat ID for the dedicated endpoint.
+	if strings.HasPrefix(t, "Chat::Lines::") {
+		if parentID := parentRecordingID(data); parentID != "" {
+			return fmt.Sprintf("/chats/%s/lines/%s.json", parentID, id)
+		}
+		return ""
+	}
+
 	switch t {
 	case "Todo", "Todolist::Todo":
 		return fmt.Sprintf("/todos/%s.json", id)
@@ -315,9 +334,28 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return fmt.Sprintf("/card_tables/columns/%s.json", id)
 	case "Kanban::Step":
 		return fmt.Sprintf("/card_tables/steps/%s.json", id)
+	case "Inbox::Forward::Reply":
+		if parentID := parentRecordingID(data); parentID != "" {
+			return fmt.Sprintf("/inbox_forwards/%s/replies/%s.json", parentID, id)
+		}
+		return ""
 	default:
 		return ""
 	}
+}
+
+// parentRecordingID extracts the parent recording's ID from the "parent"
+// object in a recording response. Returns "" if absent.
+func parentRecordingID(data map[string]any) string {
+	parent, ok := data["parent"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	// JSON-decoded numbers are float64.
+	if id, ok := parent["id"].(float64); ok {
+		return fmt.Sprintf("%.0f", id)
+	}
+	return ""
 }
 
 // isValidRecordType checks if the given type is a valid recording type.

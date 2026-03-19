@@ -77,6 +77,36 @@ func TestRecordingTypeEndpoint_EmptyType(t *testing.T) {
 	assert.Equal(t, "", result, "empty type should return empty string")
 }
 
+func TestRecordingTypeEndpoint_ChatLine(t *testing.T) {
+	data := map[string]any{
+		"type":   "Chat::Lines::Text",
+		"parent": map[string]any{"id": float64(789), "type": "Chat::Transcript"},
+	}
+	result := recordingTypeEndpoint(data, "111")
+	assert.Equal(t, "/chats/789/lines/111.json", result)
+}
+
+func TestRecordingTypeEndpoint_ChatLineNoParent(t *testing.T) {
+	data := map[string]any{"type": "Chat::Lines::Text"}
+	result := recordingTypeEndpoint(data, "111")
+	assert.Equal(t, "", result, "should return empty when parent is missing")
+}
+
+func TestRecordingTypeEndpoint_InboxReply(t *testing.T) {
+	data := map[string]any{
+		"type":   "Inbox::Forward::Reply",
+		"parent": map[string]any{"id": float64(380), "type": "Inbox::Forward"},
+	}
+	result := recordingTypeEndpoint(data, "400")
+	assert.Equal(t, "/inbox_forwards/380/replies/400.json", result)
+}
+
+func TestRecordingTypeEndpoint_InboxReplyNoParent(t *testing.T) {
+	data := map[string]any{"type": "Inbox::Forward::Reply"}
+	result := recordingTypeEndpoint(data, "400")
+	assert.Equal(t, "", result, "should return empty when parent is missing")
+}
+
 // TestKnownURLPathTypesAreValid checks that every PathType we know the SDK
 // router can return for a recording-like URL is accepted by isValidRecordType.
 // This is a curated list — if the SDK adds new PathTypes, they must be added
@@ -459,6 +489,111 @@ func TestShowStructuralListURLReturnsListError(t *testing.T) {
 	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todolists")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "list")
+}
+
+// --- Line/reply refetch tests ---
+
+func TestShowLineRefetchesViaParent(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/") {
+				return 200, `{"id": 111, "type": "Chat::Lines::Text", "content": "sparse", "parent": {"id": 789, "type": "Chat::Transcript"}}`
+			}
+			if strings.Contains(path, "/chats/789/lines/111") {
+				return 200, `{"id": 111, "type": "Chat::Lines::Text", "content": "Rich line content with extras"}`
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"line", "111"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /chats/{parentId}/lines/")
+	assert.Contains(t, reqs[0], "/recordings/111.json")
+	assert.Contains(t, reqs[1], "/chats/789/lines/111.json")
+	assert.Contains(t, buf.String(), "Rich line content with extras")
+}
+
+func TestShowReplyRefetchesViaParent(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/") {
+				return 200, `{"id": 400, "type": "Inbox::Forward::Reply", "content": "sparse", "parent": {"id": 380, "type": "Inbox::Forward"}}`
+			}
+			if strings.Contains(path, "/inbox_forwards/380/replies/400") {
+				return 200, `{"id": 400, "type": "Inbox::Forward::Reply", "content": "Rich reply content"}`
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"replies", "400"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /inbox_forwards/{parentId}/replies/")
+	assert.Contains(t, reqs[0], "/recordings/400.json")
+	assert.Contains(t, reqs[1], "/inbox_forwards/380/replies/400.json")
+	assert.Contains(t, buf.String(), "Rich reply content")
+}
+
+// --- 204 error message tests ---
+
+func TestShowLine204ReturnsNotFound(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			return 204, ""
+		},
+	}
+	_, err := runShowCmd(t, transport, "line", "789")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	assert.NotContains(t, err.Error(), "type required")
+}
+
+func TestShowFragment204ReturnsNotFound(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			return 204, ""
+		},
+	}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todos/789#__recording_999")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	assert.NotContains(t, err.Error(), "type required")
+}
+
+func TestShowUntyped204ReturnsTypeHint(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			return 204, ""
+		},
+	}
+	_, err := runShowCmd(t, transport, "789")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "type required")
 }
 
 // --- Reply URL tests ---
