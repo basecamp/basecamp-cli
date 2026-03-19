@@ -27,13 +27,31 @@ load test_helper
   assert_output_contains "project"
 }
 
-@test "hillcharts show with --todoset but no project shows error" {
+@test "hillcharts show with --todoset skips project requirement" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp hillcharts show --todoset 12345
   assert_failure
-  assert_output_contains "project"
+  assert_output_not_contains "project"
+}
+
+@test "hillcharts track with --todoset skips project requirement" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts track 111 --todoset 12345
+  assert_failure
+  assert_output_not_contains "project"
+}
+
+@test "hillcharts untrack with --todoset skips project requirement" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts untrack 111 --todoset 12345
+  assert_failure
+  assert_output_not_contains "project"
 }
 
 @test "hillcharts track without args shows error" {
