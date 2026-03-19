@@ -65,7 +65,7 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 
 			var scopeErrors []string
 			for _, scope := range reinstallScopes {
-				args := []string{"plugin", "install", harness.ClaudePluginName, "--scope", scope}
+				args := []string{"plugin", "install", harness.ClaudeExpectedPluginKey, "--scope", scope}
 				installCmd := exec.CommandContext(ctx, claudePath, args...) //nolint:gosec // G204: claudePath from FindClaudeBinary
 				installCmd.Stdout = w
 				installCmd.Stderr = cmd.ErrOrStderr()
@@ -105,7 +105,7 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 			}
 
 			// Install the plugin
-			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
+			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudeExpectedPluginKey) //nolint:gosec // G204: claudePath from exec.LookPath
 			installCmd.Stdout = w
 			installCmd.Stderr = cmd.ErrOrStderr()
 			if err := installCmd.Run(); err != nil {
@@ -259,7 +259,7 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 			_ = mktCmd.Run()
 
 			for _, scope := range reinstallScopes {
-				args := []string{"plugin", "install", harness.ClaudePluginName, "--scope", scope}
+				args := []string{"plugin", "install", harness.ClaudeExpectedPluginKey, "--scope", scope}
 				installCmd := exec.CommandContext(ctx, claudePath, args...) //nolint:gosec // G204: claudePath from FindClaudeBinary
 				installCmd.Stderr = w
 				if err := installCmd.Run(); err != nil {
@@ -284,7 +284,7 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 			_ = marketplaceCmd.Run()
 
 			// Install the plugin
-			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudePluginName) //nolint:gosec // G204: claudePath from exec.LookPath
+			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudeExpectedPluginKey) //nolint:gosec // G204: claudePath from exec.LookPath
 			installCmd.Stderr = w
 			if err := installCmd.Run(); err != nil {
 				errs = append(errs, fmt.Sprintf("plugin install: %s", err))
@@ -347,7 +347,7 @@ func removeStaleClaudePlugins(ctx context.Context, claudePath string, plugins []
 // claudeManualInstallHint returns the two-line manual install instructions.
 func claudeManualInstallHint(styles *tui.Styles) (string, string) {
 	return styles.Bold.Render(fmt.Sprintf("    claude plugin marketplace add %s", harness.ClaudeMarketplaceSource)),
-		styles.Bold.Render(fmt.Sprintf("    claude plugin install %s", harness.ClaudePluginName))
+		styles.Bold.Render(fmt.Sprintf("    claude plugin install %s", harness.ClaudeExpectedPluginKey))
 }
 
 // newSetupAgentCmds generates `setup <agent>` subcommands from the registry.
