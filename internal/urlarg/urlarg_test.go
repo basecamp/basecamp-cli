@@ -105,6 +105,36 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			name:  "inbox forward URL",
+			input: "https://3.basecamp.com/123/buckets/456/inbox_forwards/789",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "inbox_forwards",
+				RecordingID: "789",
+			},
+		},
+		{
+			name:  "schedule entry URL",
+			input: "https://3.basecamp.com/123/buckets/456/schedule_entries/789",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "schedule_entries",
+				RecordingID: "789",
+			},
+		},
+		{
+			name:  "schedule entry occurrence URL extracts entry ID",
+			input: "https://3.basecamp.com/123/buckets/456/schedule_entries/789/occurrences/20251229",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "schedule_entries",
+				RecordingID: "789",
+			},
+		},
+		{
 			name:  "project URL",
 			input: "https://3.basecamp.com/123/projects/456",
 			want: &Parsed{

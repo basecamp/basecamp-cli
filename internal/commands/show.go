@@ -104,11 +104,11 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/card_tables/%s.json", id)
 			case "document", "documents":
 				endpoint = fmt.Sprintf("/documents/%s.json", id)
-			case "schedule-entry", "schedule_entry":
+			case "schedule-entry", "schedule_entry", "schedule_entries":
 				endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
 			case "checkin", "check-in", "check_in":
 				endpoint = fmt.Sprintf("/questions/%s.json", id)
-			case "forward", "forwards":
+			case "forward", "forwards", "inbox_forwards":
 				endpoint = fmt.Sprintf("/forwards/%s.json", id)
 			case "upload", "uploads":
 				endpoint = fmt.Sprintf("/uploads/%s.json", id)
@@ -254,8 +254,9 @@ func isValidRecordType(t string) bool {
 	case "", "todo", "todos", "todolist", "todolists", "message", "messages",
 		"comment", "comments", "card", "cards", "card-table", "card_table",
 		"cardtable", "document", "documents", "recording", "recordings",
-		"schedule-entry", "schedule_entry", "checkin", "check-in", "check_in",
-		"forward", "forwards", "upload", "uploads",
+		"schedule-entry", "schedule_entry", "schedule_entries",
+		"checkin", "check-in", "check_in",
+		"forward", "forwards", "inbox_forwards", "upload", "uploads",
 		"vault", "vaults", "chat", "chats", "campfire", "campfires",
 		"line", "lines":
 		return true

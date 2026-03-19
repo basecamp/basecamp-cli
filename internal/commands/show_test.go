@@ -378,6 +378,116 @@ func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
 	assert.Contains(t, err.Error(), "cannot be shown")
 }
 
+func TestShowInboxForwardURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/inbox_forwards/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/forwards/789.json")
+}
+
+func TestShowScheduleEntryOccurrenceURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/schedule_entries/789/occurrences/20251229"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/schedule_entries/789.json")
+}
+
+// showTypeTrackingTransport returns generic success responses and tracks request paths.
+type showTypeTrackingTransport struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (t *showTypeTrackingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.requests = append(t.requests, req.URL.Path)
+	t.mu.Unlock()
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	body := `{"id": 789, "type": "Inbox::Forward", "title": "Forwarded email"}`
+	if strings.Contains(req.URL.Path, "/schedule_entries/") {
+		body = `{"id": 789, "type": "Schedule::Entry", "title": "Team standup"}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func (t *showTypeTrackingTransport) getRequests() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, len(t.requests))
+	copy(out, t.requests)
+	return out
+}
+
 // showRefetchFailTransport returns sparse recording data, then fails on refetch.
 type showRefetchFailTransport struct{}
 

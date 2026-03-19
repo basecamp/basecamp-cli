@@ -50,11 +50,24 @@ func Parse(input string) *Parsed {
 	if m == nil {
 		return nil
 	}
+
+	pathType := m.PathType
+	resourceID := m.ResourceID()
+
+	// Occurrence URLs (.../schedule_entries/{id}/occurrences/{date}) resolve
+	// to the parent schedule entry, not the occurrence date.
+	if pathType == "occurrences" {
+		if entryID, ok := m.Params["entryId"]; ok && entryID != "" {
+			pathType = "schedule_entries"
+			resourceID = entryID
+		}
+	}
+
 	return &Parsed{
 		AccountID:   m.AccountID,
 		ProjectID:   m.ProjectID,
-		Type:        m.PathType,
-		RecordingID: m.ResourceID(),
+		Type:        pathType,
+		RecordingID: resourceID,
 		CommentID:   m.CommentID,
 	}
 }
