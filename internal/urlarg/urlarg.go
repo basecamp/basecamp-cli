@@ -41,6 +41,7 @@ func IsURL(input string) bool {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}#__recording_{comment}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/card_tables/cards/{id}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/chats/{id}@{lineId}
+//   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
 	// Normalize the Basecamp web @-form for chat lines (chats/789@111)

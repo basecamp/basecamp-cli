@@ -79,13 +79,19 @@ You can also pass a Basecamp URL directly:
 						"Use 'projects show' for project URLs",
 						fmt.Sprintf("basecamp projects show %s", parsed.ProjectID),
 					)
+				} else if parsed.Type != "" && parsed.RecordingID == "" && parsed.ProjectID != "" {
+					// Type-level URL (e.g. .../todolists, .../messages) — structural
+					// match with no specific item ID.
+					return output.ErrUsageHint(
+						"This URL points to a list, not an individual item",
+						"Paste the URL of a specific item from this list to show it",
+					)
 				} else {
 					// URL was recognized but has no recording ID (e.g. circle URLs
 					// which represent people groups, not viewable items).
 					return output.ErrUsageHint(
-						"This URL type cannot be shown (circles are people groups, not items)",
-						"Supported URL types: todos, messages, comments, documents, cards, "+
-							"uploads, vaults, chats, schedule_entries, inbox_forwards",
+						"This URL type cannot be shown",
+						"Try pasting the URL of a specific item instead",
 					)
 				}
 			}
@@ -96,7 +102,7 @@ You can also pass a Basecamp URL directly:
 					fmt.Sprintf("Unknown type: %s", recordType),
 					"Supported types: todo, todolist, message, comment, card, card-table, "+
 						"document, schedule-entry, checkin, forward, upload, vault, chat, "+
-						"line, people, boosts, or any Basecamp URL",
+						"line, replies, people, boosts, or any Basecamp URL",
 				)
 			}
 
@@ -164,16 +170,18 @@ You can also pass a Basecamp URL directly:
 				// "show line 123" invocation. Use generic recording lookup.
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 				needsRefetch = true
+			case "replies":
+				// Replies require a parent forward ID for the dedicated endpoint
+				// (/inbox_forwards/{id}/replies/{id}), which we don't have from
+				// a plain "show replies 123" invocation. Use generic recording lookup.
+				endpoint = fmt.Sprintf("/recordings/%s.json", id)
+				needsRefetch = true
 			case "", "recording", "recordings":
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 				needsRefetch = true
 			default:
-				return output.ErrUsageHint(
-					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported types: todo, todolist, message, comment, card, card-table, "+
-						"document, schedule-entry, checkin, forward, upload, vault, chat, "+
-						"line, people, boosts, or any Basecamp URL",
-				)
+				// isValidRecordType guards against this; unreachable in practice.
+				return fmt.Errorf("internal: unhandled record type %q", recordType)
 			}
 
 			resp, err := app.Account().Get(cmd.Context(), endpoint)
@@ -183,7 +191,7 @@ You can also pass a Basecamp URL directly:
 
 			// Check for empty response (204 No Content)
 			if resp.StatusCode == http.StatusNoContent {
-				if recordType == "" || recordType == "recording" || recordType == "recordings" {
+				if needsRefetch {
 					return output.ErrUsageHint(
 						fmt.Sprintf("Item %s not found or type required", id),
 						"Specify a type: basecamp show todo|todolist|message|comment|card|document <id>",
@@ -317,7 +325,7 @@ func isValidRecordType(t string) bool {
 		"checkin", "check-in", "check_in", "questions", "question_answers",
 		"forward", "forwards", "inbox_forwards", "upload", "uploads",
 		"vault", "vaults", "chat", "chats", "campfire", "campfires",
-		"line", "lines", "columns", "steps",
+		"line", "lines", "replies", "columns", "steps",
 		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
 		"people", "boosts":
 		return true

@@ -77,16 +77,16 @@ func TestRecordingTypeEndpoint_EmptyType(t *testing.T) {
 	assert.Equal(t, "", result, "empty type should return empty string")
 }
 
-// TestAllURLPathTypesAreValid ensures every PathType the SDK router can return
-// for a recording-like URL is accepted by isValidRecordType. This prevents the
-// "Unknown type" error class from recurring for new URL shapes.
-func TestAllURLPathTypesAreValid(t *testing.T) {
-	// Every PathType the SDK router returns for URLs users might paste.
+// TestKnownURLPathTypesAreValid checks that every PathType we know the SDK
+// router can return for a recording-like URL is accepted by isValidRecordType.
+// This is a curated list — if the SDK adds new PathTypes, they must be added
+// here and to isValidRecordType.
+func TestKnownURLPathTypesAreValid(t *testing.T) {
 	urlPathTypes := []string{
 		// Standard recording types
 		"todos", "todolists", "messages", "comments", "documents",
 		"uploads", "vaults", "chats", "lines",
-		"schedule_entries", "inbox_forwards",
+		"schedule_entries", "inbox_forwards", "replies",
 		// Card table types
 		"cards", "card_tables", "columns", "steps",
 		// Checkin types
@@ -297,7 +297,7 @@ func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
 	transport := &showTrackingTransport{}
 	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/circles/789@456")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "circles")
+	assert.Contains(t, err.Error(), "cannot be shown")
 }
 
 func TestShowInboxForwardURL(t *testing.T) {
@@ -444,6 +444,23 @@ func TestShowCollectionURLLinesReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "list")
 }
 
+func TestShowStructuralListURLReturnsListError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todolists")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list")
+}
+
+// --- Reply URL tests ---
+
+func TestShowReplyURLRoutesToRecordings(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "replies", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/789.json")
+}
+
 // --- Dedicated container endpoint tests ---
 
 func TestShowContainerEndpoints(t *testing.T) {
@@ -485,7 +502,7 @@ func TestAllValidRecordTypesHandledInSwitch(t *testing.T) {
 		"checkin", "check-in", "check_in", "questions", "question_answers",
 		"forward", "forwards", "inbox_forwards", "upload", "uploads",
 		"vault", "vaults", "chat", "chats", "campfire", "campfires",
-		"line", "lines", "columns", "steps",
+		"line", "lines", "replies", "columns", "steps",
 		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
 		"people", "boosts",
 	}
