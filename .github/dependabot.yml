@@ -17,7 +17,7 @@ updates:
         patterns:
           - "*"
     cooldown:
-      default-days: 2
+      default-days: 10
       semver-major-days: 7
       semver-minor-days: 3
       semver-patch-days: 2
@@ -38,6 +38,6 @@ updates:
         patterns:
           - "*"
     cooldown:
-      default-days: 2
+      default-days: 10
     commit-message:
       prefix: "ci"
