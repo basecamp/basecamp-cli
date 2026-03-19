@@ -82,6 +82,7 @@ You can also pass a Basecamp URL directly:
 					// Auto-detect type from URL if not specified
 					if recordType == "" && parsed.Type != "" {
 						recordType = parsed.Type
+						untypedLookup = false // URL carries the type
 					}
 					occurrenceDate = parsed.OccurrenceDate
 				} else if parsed.ProjectID != "" && parsed.Type == "project" {

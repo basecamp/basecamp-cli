@@ -585,6 +585,18 @@ func TestShowFragment204ReturnsNotFound(t *testing.T) {
 	assert.NotContains(t, err.Error(), "type required")
 }
 
+func TestShowTypedURL204ReturnsNotFound(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			return 204, ""
+		},
+	}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todos/789")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	assert.NotContains(t, err.Error(), "type required")
+}
+
 func TestShowUntyped204ReturnsTypeHint(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {
