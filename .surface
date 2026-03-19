@@ -149,6 +149,7 @@ CMD basecamp help
 CMD basecamp lineup
 CMD basecamp lineup create
 CMD basecamp lineup delete
+CMD basecamp lineup list
 CMD basecamp lineup update
 CMD basecamp login
 CMD basecamp logout
@@ -3606,6 +3607,26 @@ FLAG basecamp lineup delete --stats type=bool
 FLAG basecamp lineup delete --styled type=bool
 FLAG basecamp lineup delete --todolist type=string
 FLAG basecamp lineup delete --verbose type=count
+FLAG basecamp lineup list --account type=string
+FLAG basecamp lineup list --agent type=bool
+FLAG basecamp lineup list --cache-dir type=string
+FLAG basecamp lineup list --count type=bool
+FLAG basecamp lineup list --hints type=bool
+FLAG basecamp lineup list --ids-only type=bool
+FLAG basecamp lineup list --in type=string
+FLAG basecamp lineup list --jq type=string
+FLAG basecamp lineup list --json type=bool
+FLAG basecamp lineup list --markdown type=bool
+FLAG basecamp lineup list --md type=bool
+FLAG basecamp lineup list --no-hints type=bool
+FLAG basecamp lineup list --no-stats type=bool
+FLAG basecamp lineup list --profile type=string
+FLAG basecamp lineup list --project type=string
+FLAG basecamp lineup list --quiet type=bool
+FLAG basecamp lineup list --stats type=bool
+FLAG basecamp lineup list --styled type=bool
+FLAG basecamp lineup list --todolist type=string
+FLAG basecamp lineup list --verbose type=count
 FLAG basecamp lineup update --account type=string
 FLAG basecamp lineup update --agent type=bool
 FLAG basecamp lineup update --cache-dir type=string
@@ -7326,6 +7347,7 @@ SUB basecamp help
 SUB basecamp lineup
 SUB basecamp lineup create
 SUB basecamp lineup delete
+SUB basecamp lineup list
 SUB basecamp lineup update
 SUB basecamp login
 SUB basecamp logout

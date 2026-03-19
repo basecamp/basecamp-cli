@@ -573,6 +573,7 @@ basecamp subscriptions remove <id> --people 1,2,3  # Remove people
 ### Lineup (Account-wide Markers)
 
 ```bash
+basecamp lineup list                              # List all markers
 basecamp lineup create "Milestone" "2024-03-15"   # Create marker
 basecamp lineup create "Launch" tomorrow          # Natural date parsing
 basecamp lineup update <id> "New Name" "+7"

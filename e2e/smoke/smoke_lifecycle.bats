@@ -128,16 +128,6 @@ load smoke_helper
   mark_out_of_scope "Bulk completion — destructive, no undo"
 }
 
-# --- Structurally untestable (API returns 204 No Content, no ID to chain) ---
-
-@test "lineup update is out of scope" {
-  mark_out_of_scope "API returns 204 No Content — no ID to chain"
-}
-
-@test "lineup delete is out of scope" {
-  mark_out_of_scope "API returns 204 No Content — no ID to chain"
-}
-
 # --- Code-path equivalence: docs group shares implementation with files ---
 
 @test "docs archive is out of scope" {
