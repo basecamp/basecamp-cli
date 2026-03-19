@@ -279,10 +279,10 @@ jobs:
       - name: Compare benchmarks
         if: steps.filter.outputs.bench == 'true' && hashFiles('benchmarks-baseline.txt') != ''
         run: |
-          echo "## Benchmark Comparison" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          benchstat benchmarks-baseline.txt benchmarks.txt >> $GITHUB_STEP_SUMMARY 2>&1 || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "## Benchmark Comparison" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          benchstat benchmarks-baseline.txt benchmarks.txt >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check for significant regression
         if: steps.filter.outputs.bench == 'true' && hashFiles('benchmarks-baseline.txt') != ''

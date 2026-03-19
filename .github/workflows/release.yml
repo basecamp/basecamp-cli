@@ -285,7 +285,7 @@ jobs:
       - name: Build and verify
         run: |
           STORE_PATH=$(nix build --no-link --print-out-paths)
-          $STORE_PATH/bin/basecamp --version
+          "$STORE_PATH/bin/basecamp" --version
 
   sync-skills:
     name: Sync skills
