@@ -357,6 +357,122 @@ func TestRunClaudeSetupRepairsSkillLink(t *testing.T) {
 	assert.NoError(t, statErr, "skill link should exist after setup repairs it")
 }
 
+// TestSetupClaudeNonInteractiveRemovesStalePlugins verifies that non-interactive
+// setup detects and removes stale plugin entries from old marketplaces.
+func TestSetupClaudeNonInteractiveRemovesStalePlugins(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Seed installed_plugins.json with stale + correct entries
+	pluginDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{`+
+			`"basecamp@basecamp":[{"scope":"user","version":"0.1.0"},{"scope":"project","version":"0.1.0"}],`+
+			`"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
+		0o644))
+
+	// Create stub claude binary that logs invocations.
+	// Succeeds once per uninstall key (marker file), fails on repeat.
+	binDir := filepath.Join(home, "bin")
+	markerDir := filepath.Join(home, "markers")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.MkdirAll(markerDir, 0o755))
+	logFile := filepath.Join(home, "claude-calls.log")
+	stubScript := "#!/bin/sh\n" +
+		"echo \"$*\" >> \"" + logFile + "\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"plugin uninstall\")\n" +
+		"    MARKER=\"" + markerDir + "/$3_$5.removed\"\n" +
+		"    if [ ! -f \"$MARKER\" ]; then\n" +
+		"      > \"$MARKER\"\n" +
+		"      exit 0\n" +
+		"    fi\n" +
+		"    exit 1\n" +
+		"    ;;\n" +
+		"  *) exit 0 ;;\n" +
+		"esac\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(stubScript), 0o755)) //nolint:gosec // G306: test helper
+	t.Setenv("PATH", binDir)
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// Verify stub was called with uninstall for the stale key
+	calls, readErr := os.ReadFile(logFile)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(calls), "plugin uninstall basecamp@basecamp --scope user")
+	assert.Contains(t, string(calls), "plugin uninstall basecamp@basecamp --scope project")
+}
+
+// TestSetupClaudeNonInteractiveScopeAwareReinstall verifies that reinstall
+// preserves the scopes from stale entries removed during migration.
+func TestSetupClaudeNonInteractiveScopeAwareReinstall(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Seed installed_plugins.json with ONLY stale entries (no correct entry)
+	pluginDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{`+
+			`"basecamp@basecamp":[{"scope":"user","version":"0.1.0"},{"scope":"project","version":"0.1.0"}]}}`),
+		0o644))
+
+	// Create stub claude binary that logs invocations
+	binDir := filepath.Join(home, "bin")
+	markerDir := filepath.Join(home, "markers")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.MkdirAll(markerDir, 0o755))
+	logFile := filepath.Join(home, "claude-calls.log")
+	stubScript := "#!/bin/sh\n" +
+		"echo \"$*\" >> \"" + logFile + "\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"plugin uninstall\")\n" +
+		"    MARKER=\"" + markerDir + "/$3_$5.removed\"\n" +
+		"    if [ ! -f \"$MARKER\" ]; then\n" +
+		"      > \"$MARKER\"\n" +
+		"      exit 0\n" +
+		"    fi\n" +
+		"    exit 1\n" +
+		"    ;;\n" +
+		"  *) exit 0 ;;\n" +
+		"esac\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(stubScript), 0o755)) //nolint:gosec // G306: test helper
+	t.Setenv("PATH", binDir)
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// Verify install calls preserve scopes from stale entries
+	calls, readErr := os.ReadFile(logFile)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope user")
+	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope project")
+}
+
 // TestJoinNames verifies name joining with commas and "and".
 func TestJoinNames(t *testing.T) {
 	assert.Equal(t, "", joinNames(nil))

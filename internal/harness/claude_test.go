@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPluginInstalled_ArrayFormat(t *testing.T) {
@@ -13,9 +14,10 @@ func TestPluginInstalled_ArrayFormat(t *testing.T) {
 	assert.True(t, pluginInstalled(data))
 }
 
-func TestPluginInstalled_ArrayFormat_FullQualified(t *testing.T) {
+func TestPluginInstalled_ArrayFormat_StaleMarketplace(t *testing.T) {
+	// basecamp@basecamp is a stale marketplace — should not count as installed
 	data := []byte(`[{"package": "basecamp@basecamp", "version": "1.0.0"}]`)
-	assert.True(t, pluginInstalled(data))
+	assert.False(t, pluginInstalled(data))
 }
 
 func TestPluginInstalled_ArrayFormat_NotFound(t *testing.T) {
@@ -23,9 +25,10 @@ func TestPluginInstalled_ArrayFormat_NotFound(t *testing.T) {
 	assert.False(t, pluginInstalled(data))
 }
 
-func TestPluginInstalled_MapFormat(t *testing.T) {
+func TestPluginInstalled_MapFormat_StaleMarketplace(t *testing.T) {
+	// basecamp@basecamp is a stale marketplace — should not count as installed
 	data := []byte(`{"basecamp@basecamp": {"version": "1.0.0"}}`)
-	assert.True(t, pluginInstalled(data))
+	assert.False(t, pluginInstalled(data))
 }
 
 func TestPluginInstalled_MapFormat_Simple(t *testing.T) {
@@ -58,9 +61,10 @@ func TestPluginInstalled_EmptyData(t *testing.T) {
 	assert.False(t, pluginInstalled(data))
 }
 
-func TestPluginInstalled_V2Envelope(t *testing.T) {
+func TestPluginInstalled_V2Envelope_StaleMarketplace(t *testing.T) {
+	// basecamp@basecamp is a stale marketplace — should not count as installed
 	data := []byte(`{"version":2,"plugins":{"basecamp@basecamp":[{"scope":"user","version":"0.1.0"}]}}`)
-	assert.True(t, pluginInstalled(data))
+	assert.False(t, pluginInstalled(data))
 }
 
 func TestPluginInstalled_V2Envelope_AltMarketplace(t *testing.T) {
@@ -146,4 +150,76 @@ func TestDetectClaude_BinaryOnly(t *testing.T) {
 	t.Setenv("PATH", binDir)
 
 	assert.True(t, DetectClaude(), "claude binary on PATH should make DetectClaude true")
+}
+
+func TestStalePluginKeys_V2_StaleOnly(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@basecamp":[{"scope":"user"}]}}`)
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@basecamp", Scopes: []string{"user"}}}, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_V2_Mixed(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}],"basecamp@basecamp":[{"scope":"user"}]}}`)
+	plugins := stalePluginKeys(data)
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@basecamp", Scopes: []string{"user"}}}, plugins)
+}
+
+func TestStalePluginKeys_V2_CorrectOnly(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}]}}`)
+	assert.Empty(t, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_V1_Stale(t *testing.T) {
+	data := []byte(`{"basecamp@basecamp":{"version":"1.0.0"}}`)
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@basecamp"}}, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_V1_Correct(t *testing.T) {
+	data := []byte(`{"basecamp@37signals":{"version":"1.0.0"}}`)
+	assert.Empty(t, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_BareKey(t *testing.T) {
+	// Bare "basecamp" key (no marketplace) is not stale — it's legacy
+	data := []byte(`{"basecamp":{"version":"1.0.0"}}`)
+	assert.Empty(t, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_ArrayFormat_Stale(t *testing.T) {
+	data := []byte(`[{"package":"basecamp@basecamp","version":"1.0.0"},{"package":"basecamp@37signals","version":"0.1.0"}]`)
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@basecamp"}}, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_ArrayFormat_NoneStale(t *testing.T) {
+	data := []byte(`[{"name":"basecamp","version":"1.0.0"}]`)
+	assert.Empty(t, stalePluginKeys(data))
+}
+
+func TestStalePluginKeys_Empty(t *testing.T) {
+	assert.Empty(t, stalePluginKeys([]byte(`{}`)))
+	assert.Empty(t, stalePluginKeys([]byte(`[]`)))
+	assert.Empty(t, stalePluginKeys([]byte(`not json`)))
+}
+
+func TestStalePluginKeys_V2_MultiScope(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@basecamp":[{"scope":"user","version":"0.1.0"},{"scope":"project","version":"0.1.0"}]}}`)
+	plugins := stalePluginKeys(data)
+	require.Len(t, plugins, 1)
+	assert.Equal(t, "basecamp@basecamp", plugins[0].Key)
+	assert.Equal(t, []string{"user", "project"}, plugins[0].Scopes)
+}
+
+func TestStalePluginKeys_ArrayFormat_WithScope(t *testing.T) {
+	data := []byte(`[{"package":"basecamp@basecamp","scope":"user","version":"1.0.0"}]`)
+	plugins := stalePluginKeys(data)
+	require.Len(t, plugins, 1)
+	assert.Equal(t, "basecamp@basecamp", plugins[0].Key)
+	assert.Equal(t, []string{"user"}, plugins[0].Scopes)
+}
+
+func TestIsStalePluginKey(t *testing.T) {
+	assert.True(t, isStalePluginKey("basecamp@basecamp"))
+	assert.False(t, isStalePluginKey("basecamp@old-marketplace"))
+	assert.False(t, isStalePluginKey("basecamp@37signals"))
+	assert.False(t, isStalePluginKey("basecamp"))
+	assert.False(t, isStalePluginKey("other@basecamp"))
 }

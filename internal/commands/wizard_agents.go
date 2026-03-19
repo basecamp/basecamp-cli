@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,7 +42,44 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 	w := cmd.OutOrStdout()
 
-	// If the plugin is already installed, skip to skill link repair (no binary needed)
+	// Clean up stale plugin entries from old marketplaces before checking status.
+	var reinstallScopes []string
+	if stalePlugins := harness.StalePluginKeys(); len(stalePlugins) > 0 {
+		if claudePath := harness.FindClaudeBinary(); claudePath != "" {
+			removed, scopes := removeStaleClaudePlugins(cmd.Context(), claudePath, stalePlugins)
+			reinstallScopes = scopes
+			for _, key := range removed {
+				fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Removed stale plugin %s", key)))
+			}
+		}
+	}
+
+	// Reinstall at scopes removed from stale entries (preserves project/local installs).
+	if len(reinstallScopes) > 0 {
+		if claudePath := harness.FindClaudeBinary(); claudePath != "" {
+			ctx := cmd.Context()
+			mktCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from FindClaudeBinary
+			mktCmd.Stdout = w
+			mktCmd.Stderr = cmd.ErrOrStderr()
+			_ = mktCmd.Run()
+
+			var scopeErrors []string
+			for _, scope := range reinstallScopes {
+				args := []string{"plugin", "install", harness.ClaudePluginName, "--scope", scope}
+				installCmd := exec.CommandContext(ctx, claudePath, args...) //nolint:gosec // G204: claudePath from FindClaudeBinary
+				installCmd.Stdout = w
+				installCmd.Stderr = cmd.ErrOrStderr()
+				if err := installCmd.Run(); err != nil {
+					scopeErrors = append(scopeErrors, scope)
+				}
+			}
+			if len(scopeErrors) > 0 {
+				fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Plugin reinstall failed for scope(s): %s", strings.Join(scopeErrors, ", "))))
+			}
+		}
+	}
+
+	// If the plugin is already installed correctly (or was just reinstalled), skip to skill link repair
 	pluginOK := harness.CheckClaudePlugin().Status == "pass"
 	if pluginOK {
 		fmt.Fprintln(w, styles.RenderStatus(true, "Claude Code plugin installed"))
@@ -108,7 +146,7 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 
 	// Check if all detected agents are already fully set up
 	// (agent checks pass AND baseline skill is installed)
-	allGood := baselineSkillInstalled()
+	allGood := baselineSkillInstalled() && len(harness.StalePluginKeys()) == 0
 	if allGood {
 		for _, a := range agents {
 			if a.Checks == nil {
@@ -203,7 +241,35 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 	var errs []string
 
-	// If the plugin is already installed, skip to skill link repair (no binary needed)
+	// Clean up stale plugin entries from old marketplaces before checking status.
+	var reinstallScopes []string
+	if stalePlugins := harness.StalePluginKeys(); len(stalePlugins) > 0 {
+		if claudePath := harness.FindClaudeBinary(); claudePath != "" {
+			_, reinstallScopes = removeStaleClaudePlugins(cmd.Context(), claudePath, stalePlugins)
+		}
+	}
+
+	// Reinstall at scopes removed from stale entries (preserves project/local installs).
+	if len(reinstallScopes) > 0 {
+		if claudePath := harness.FindClaudeBinary(); claudePath != "" {
+			ctx := cmd.Context()
+			w := cmd.ErrOrStderr()
+			mktCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from FindClaudeBinary
+			mktCmd.Stderr = w
+			_ = mktCmd.Run()
+
+			for _, scope := range reinstallScopes {
+				args := []string{"plugin", "install", harness.ClaudePluginName, "--scope", scope}
+				installCmd := exec.CommandContext(ctx, claudePath, args...) //nolint:gosec // G204: claudePath from FindClaudeBinary
+				installCmd.Stderr = w
+				if err := installCmd.Run(); err != nil {
+					errs = append(errs, fmt.Sprintf("plugin install (scope %s): %s", scope, err))
+				}
+			}
+		}
+	}
+
+	// If the plugin is still not installed, do a fresh default install.
 	if check := harness.CheckClaudePlugin(); check.Status != "pass" {
 		claudePath := harness.FindClaudeBinary()
 		if claudePath == "" {
@@ -235,6 +301,47 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// removeStaleClaudePlugins uninstalls plugin entries from old/dead marketplaces.
+// When scope information is available, each scope is uninstalled explicitly.
+// Otherwise, we retry uninstall until it fails (entry gone) or a safety cap of
+// 10 iterations is reached.
+func removeStaleClaudePlugins(ctx context.Context, claudePath string, plugins []harness.StalePlugin) ([]string, []string) {
+	var removed []string
+	scopeSeen := map[string]bool{}
+	var scopes []string
+	for _, p := range plugins {
+		if len(p.Scopes) > 0 {
+			anyRemoved := false
+			for _, scope := range p.Scopes {
+				c := exec.CommandContext(ctx, claudePath, "plugin", "uninstall", p.Key, "--scope", scope) //nolint:gosec // G204: claudePath from FindClaudeBinary
+				if err := c.Run(); err == nil {
+					anyRemoved = true
+					if !scopeSeen[scope] {
+						scopeSeen[scope] = true
+						scopes = append(scopes, scope)
+					}
+				}
+			}
+			if anyRemoved {
+				removed = append(removed, p.Key)
+			}
+		} else {
+			n := 0
+			for i := 0; i < 10; i++ {
+				c := exec.CommandContext(ctx, claudePath, "plugin", "uninstall", p.Key) //nolint:gosec // G204: claudePath from FindClaudeBinary
+				if err := c.Run(); err != nil {
+					break
+				}
+				n++
+			}
+			if n > 0 {
+				removed = append(removed, p.Key)
+			}
+		}
+	}
+	return removed, scopes
 }
 
 // claudeManualInstallHint returns the two-line manual install instructions.

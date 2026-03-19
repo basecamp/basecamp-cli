@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 func init() {
@@ -33,6 +32,12 @@ const ClaudeMarketplaceSource = "basecamp/claude-plugins"
 
 // ClaudePluginName is the plugin identifier to install.
 const ClaudePluginName = "basecamp"
+
+// ClaudeMarketplaceName is the marketplace name as it appears in plugin keys.
+const ClaudeMarketplaceName = "37signals"
+
+// ClaudeExpectedPluginKey is the fully-qualified key for a correctly installed plugin.
+const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
 
 // DetectClaude returns true if Claude Code is installed.
 // Checks ~/.claude/ directory first, then falls back to binary on PATH.
@@ -179,16 +184,16 @@ func pluginInstalled(data []byte) bool {
 		if inner, ok := pluginMap["plugins"]; ok {
 			if innerMap, ok := inner.(map[string]any); ok {
 				for key := range innerMap {
-					if key == "basecamp" || matchesPluginKey(key) {
+					if matchesPluginKey(key) {
 						return true
 					}
 				}
 				return false
 			}
 		}
-		// v1 flat map: {"basecamp@basecamp": {...}}
+		// v1 flat map: {"basecamp@37signals": {...}}
 		for key := range pluginMap {
-			if key == "basecamp" || matchesPluginKey(key) {
+			if matchesPluginKey(key) {
 				return true
 			}
 		}
@@ -212,16 +217,19 @@ func matchesBasecamp(p map[string]any) bool {
 	return false
 }
 
-// matchesPluginKey returns true if the key identifies the basecamp plugin
-// (e.g. "basecamp@basecamp", "basecamp@37signals").
+// matchesPluginKey returns true if the key identifies a correctly installed
+// basecamp plugin — either bare "basecamp" (legacy) or the expected
+// marketplace-qualified key "basecamp@37signals".
 func matchesPluginKey(key string) bool {
-	return key == "basecamp" || strings.HasPrefix(key, "basecamp@")
+	return key == "basecamp" || key == ClaudeExpectedPluginKey
 }
 
 func jsonContainsBasecamp(data []byte) bool {
-	// Fallback: raw string search for the plugin identifier
+	// Fallback: raw string search for the expected plugin key or bare name.
+	// Note: `"basecamp"` (with quotes) won't match `"basecamp@old"` since
+	// the closing quote requires an exact boundary.
 	s := string(data)
-	return len(s) > 0 && (contains(s, `"basecamp"`) || contains(s, `"basecamp@`))
+	return len(s) > 0 && (contains(s, `"`+ClaudeExpectedPluginKey+`"`) || contains(s, `"basecamp"`))
 }
 
 func contains(s, substr string) bool {
@@ -235,4 +243,116 @@ func indexOf(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// StalePlugin carries a stale plugin key along with the scopes it was found in.
+type StalePlugin struct {
+	Key    string
+	Scopes []string // empty = unknown, fall back to unscoped uninstall
+}
+
+// StalePluginKeys returns stale plugin entries from installed_plugins.json
+// that belong to old/dead marketplaces.
+func StalePluginKeys() []StalePlugin {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
+	if err != nil {
+		return nil
+	}
+	return stalePluginKeys(data)
+}
+
+// stalePluginKeys extracts known stale plugin entries (e.g. basecamp@basecamp from
+// the marketplace rename), including per-scope information when the format provides it.
+func stalePluginKeys(data []byte) []StalePlugin {
+	// Try as array of objects: [{"package": "basecamp@basecamp", "scope": "user", ...}]
+	var plugins []map[string]any
+	if err := json.Unmarshal(data, &plugins); err == nil {
+		byKey := map[string][]string{}
+		var order []string
+		for _, p := range plugins {
+			var key string
+			for _, field := range []string{"package", "id", "name"} {
+				if v, ok := p[field]; ok {
+					if s, ok := v.(string); ok && isStalePluginKey(s) {
+						key = s
+						break
+					}
+				}
+			}
+			if key == "" {
+				continue
+			}
+			if _, exists := byKey[key]; !exists {
+				order = append(order, key)
+				byKey[key] = nil
+			}
+			if s, ok := p["scope"].(string); ok && s != "" {
+				byKey[key] = appendUnique(byKey[key], s)
+			}
+		}
+		stale := make([]StalePlugin, 0, len(order))
+		for _, k := range order {
+			stale = append(stale, StalePlugin{Key: k, Scopes: byKey[k]})
+		}
+		return stale
+	}
+
+	var pluginMap map[string]any
+	if err := json.Unmarshal(data, &pluginMap); err != nil {
+		return nil
+	}
+
+	// v2 format: {"version": 2, "plugins": {"basecamp@old": [{"scope":"user"}, ...]}}
+	if inner, ok := pluginMap["plugins"]; ok {
+		if innerMap, ok := inner.(map[string]any); ok {
+			var stale []StalePlugin
+			for key, val := range innerMap {
+				if !isStalePluginKey(key) {
+					continue
+				}
+				var scopes []string
+				if arr, ok := val.([]any); ok {
+					for _, entry := range arr {
+						if obj, ok := entry.(map[string]any); ok {
+							if s, ok := obj["scope"].(string); ok && s != "" {
+								scopes = appendUnique(scopes, s)
+							}
+						}
+					}
+				}
+				stale = append(stale, StalePlugin{Key: key, Scopes: scopes})
+			}
+			return stale
+		}
+	}
+
+	// v1 flat map — no scope info available
+	var stale []StalePlugin
+	for key := range pluginMap {
+		if isStalePluginKey(key) {
+			stale = append(stale, StalePlugin{Key: key})
+		}
+	}
+	return stale
+}
+
+// claudeStalePluginKey is the known stale key from the basecamp → 37signals marketplace rename.
+const claudeStalePluginKey = ClaudePluginName + "@" + "basecamp"
+
+// isStalePluginKey returns true only for the known stale marketplace key.
+func isStalePluginKey(key string) bool {
+	return key == claudeStalePluginKey
+}
+
+func appendUnique(ss []string, s string) []string {
+	for _, existing := range ss {
+		if existing == s {
+			return ss
+		}
+	}
+	return append(ss, s)
 }
