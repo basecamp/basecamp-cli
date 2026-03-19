@@ -1,0 +1,54 @@
+internal/commands/checkins.go
+  ee4158c5fe67bc7f 347-348,460-461
+internal/tui/workspace/views/schedule.go
+  ee4158c5fe67bc7f 327,332
+internal/commands/schedule.go
+  ee4158c5fe67bc7f 486,610
+e2e/smoke/.qa-allowlist
+  ee4158c5fe67bc7f 25-27
+internal/commands/lineup.go
+  1bc85dc17fb9d80a 32,41-70
+e2e/smoke/smoke_lineup.bats
+  1bc85dc17fb9d80a 22-27,33-35,37,41,50-52,54,57
+  ee4158c5fe67bc7f 14-15,19,29-32,36,38-40,42,46-49,55-56
+internal/commands/commands.go
+  1bc85dc17fb9d80a 88
+API-COVERAGE.md
+  1bc85dc17fb9d80a 9,11,13,80
+  ee4158c5fe67bc7f 17
+skills/basecamp/SKILL.md
+  1bc85dc17fb9d80a 576
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "004e0c3f96d94f9141fdd0f7a45853abf12bc72d",
+  "prompts": {
+    "1bc85dc17fb9d80a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f39bc98-74ac-4c60-8751-68b71bfec054",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 84,
+      "total_deletions": 11,
+      "accepted_lines": 53,
+      "overriden_lines": 0
+    },
+    "ee4158c5fe67bc7f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "391238dd-6bbb-46d3-883c-b77c437b6632",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 10,
+      "accepted_lines": 30,
+      "overriden_lines": 0
+    }
+  }
+}
