@@ -55,8 +55,18 @@ You can also pass a Basecamp URL directly:
 				if parsed.CommentID != "" {
 					// Fragment URL (#__recording_N) — resolve the referenced
 					// recording directly instead of the parent resource.
+					// Intentionally clears recordType even if --type was provided,
+					// because the fragment identifies the specific recording and
+					// its type will be auto-detected from the API response.
 					id = parsed.CommentID
-					recordType = "" // generic lookup will auto-detect
+					recordType = ""
+				} else if parsed.IsCollection {
+					// Collection URL (e.g. .../todosets/777/todolists) — the ID
+					// belongs to the parent container, not a child resource.
+					return output.ErrUsageHint(
+						"This URL points to a list, not an individual item",
+						"Paste the URL of a specific item from this list to show it",
+					)
 				} else if parsed.RecordingID != "" {
 					id = parsed.RecordingID
 					// Auto-detect type from URL if not specified
@@ -70,9 +80,10 @@ You can also pass a Basecamp URL directly:
 						fmt.Sprintf("basecamp projects show %s", parsed.ProjectID),
 					)
 				} else {
-					// URL was recognized but has no recording ID (e.g. circle URLs).
+					// URL was recognized but has no recording ID (e.g. circle URLs
+					// which represent people groups, not viewable items).
 					return output.ErrUsageHint(
-						"This URL type cannot be shown",
+						"This URL type cannot be shown (circles are people groups, not items)",
 						"Supported URL types: todos, messages, comments, documents, cards, "+
 							"uploads, vaults, chats, schedule_entries, inbox_forwards",
 					)
@@ -133,10 +144,24 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/people/%s.json", id)
 			case "boosts":
 				endpoint = fmt.Sprintf("/boosts/%s.json", id)
-			case "line", "lines",
-				"columns", "steps",
-				"todosets", "message_boards", "schedules", "questionnaires", "inboxes":
-				// Types without shortcut endpoints — use generic recording lookup.
+			case "columns":
+				endpoint = fmt.Sprintf("/card_tables/columns/%s.json", id)
+			case "steps":
+				endpoint = fmt.Sprintf("/card_tables/steps/%s.json", id)
+			case "todosets":
+				endpoint = fmt.Sprintf("/todosets/%s.json", id)
+			case "message_boards":
+				endpoint = fmt.Sprintf("/message_boards/%s.json", id)
+			case "schedules":
+				endpoint = fmt.Sprintf("/schedules/%s.json", id)
+			case "questionnaires":
+				endpoint = fmt.Sprintf("/questionnaires/%s.json", id)
+			case "inboxes":
+				endpoint = fmt.Sprintf("/inboxes/%s.json", id)
+			case "line", "lines":
+				// Lines require a parent chat ID for the dedicated endpoint
+				// (/chats/{id}/lines/{id}), which we don't have from a plain
+				// "show line 123" invocation. Use generic recording lookup.
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 				needsRefetch = true
 			case "", "recording", "recordings":
@@ -262,6 +287,20 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return fmt.Sprintf("/vaults/%s.json", id)
 	case "Chat::Transcript":
 		return fmt.Sprintf("/chats/%s.json", id)
+	case "Todoset":
+		return fmt.Sprintf("/todosets/%s.json", id)
+	case "Message::Board":
+		return fmt.Sprintf("/message_boards/%s.json", id)
+	case "Schedule":
+		return fmt.Sprintf("/schedules/%s.json", id)
+	case "Questionnaire":
+		return fmt.Sprintf("/questionnaires/%s.json", id)
+	case "Inbox":
+		return fmt.Sprintf("/inboxes/%s.json", id)
+	case "Kanban::Column":
+		return fmt.Sprintf("/card_tables/columns/%s.json", id)
+	case "Kanban::Step":
+		return fmt.Sprintf("/card_tables/steps/%s.json", id)
 	default:
 		return ""
 	}

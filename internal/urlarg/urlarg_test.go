@@ -135,6 +135,60 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			name:  "collection URL: todosets/todolists",
+			input: "https://3.basecamp.com/123/buckets/456/todosets/777/todolists",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "todolists",
+				RecordingID:  "777",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "collection URL: card_tables/columns",
+			input: "https://3.basecamp.com/123/buckets/456/card_tables/789/columns",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "columns",
+				RecordingID:  "789",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "collection URL: questionnaires/questions",
+			input: "https://3.basecamp.com/123/buckets/456/questionnaires/999/questions",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "questions",
+				RecordingID:  "999",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "collection URL: chats/lines",
+			input: "https://3.basecamp.com/123/buckets/456/chats/789/lines",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "lines",
+				RecordingID:  "789",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "individual resource URL is not a collection",
+			input: "https://3.basecamp.com/123/buckets/456/todos/789",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "todos",
+				RecordingID: "789",
+			},
+		},
+		{
 			name:  "project URL",
 			input: "https://3.basecamp.com/123/projects/456",
 			want: &Parsed{
@@ -144,7 +198,7 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			name:  "type list URL (todolists)",
+			name:  "type list URL (todolists) structural match is not IsCollection",
 			input: "https://3.basecamp.com/123/buckets/456/todolists",
 			want: &Parsed{
 				AccountID: "123",
@@ -196,6 +250,9 @@ func TestParse(t *testing.T) {
 			}
 			if got.CommentID != tt.want.CommentID {
 				t.Errorf("CommentID = %q, want %q", got.CommentID, tt.want.CommentID)
+			}
+			if got.IsCollection != tt.want.IsCollection {
+				t.Errorf("IsCollection = %v, want %v", got.IsCollection, tt.want.IsCollection)
 			}
 		})
 	}

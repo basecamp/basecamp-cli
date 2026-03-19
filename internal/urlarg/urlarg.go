@@ -15,11 +15,12 @@ var chatAtRe = regexp.MustCompile(`(/chats/\d+)@(\d+)`)
 
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
-	AccountID   string
-	ProjectID   string // BucketID in Basecamp terminology
-	Type        string // e.g., "todos", "messages", "cards"
-	RecordingID string
-	CommentID   string
+	AccountID    string
+	ProjectID    string // BucketID in Basecamp terminology
+	Type         string // e.g., "todos", "messages", "cards"
+	RecordingID  string
+	CommentID    string
+	IsCollection bool // URL points to a list of items, not an individual resource
 }
 
 // router is the shared SDK router instance.
@@ -65,12 +66,27 @@ func Parse(input string) *Parsed {
 		}
 	}
 
+	// Detect collection URLs (e.g. .../todosets/777/todolists, .../chats/789/lines).
+	// The SDK router matches these with the parent's ID as ResourceID and an
+	// operation like "ListTodolists" or "CreateCardColumn" — never "Get*".
+	// Structural matches for collection URLs already have empty ResourceID.
+	isCollection := false
+	if m.Source == basecamp.MatchedAPI && resourceID != "" {
+		if getOp, hasGet := m.Operations["GET"]; hasGet {
+			isCollection = strings.HasPrefix(getOp, "List")
+		} else {
+			// No GET operation (e.g. POST-only CreateCardColumn) — a collection route.
+			isCollection = true
+		}
+	}
+
 	return &Parsed{
-		AccountID:   m.AccountID,
-		ProjectID:   m.ProjectID,
-		Type:        pathType,
-		RecordingID: resourceID,
-		CommentID:   m.CommentID,
+		AccountID:    m.AccountID,
+		ProjectID:    m.ProjectID,
+		Type:         pathType,
+		RecordingID:  resourceID,
+		CommentID:    m.CommentID,
+		IsCollection: isCollection,
 	}
 }
 

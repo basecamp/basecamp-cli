@@ -41,6 +41,13 @@ func TestRecordingTypeEndpoint(t *testing.T) {
 		{"Upload", "700", "/uploads/700.json"},
 		{"Vault", "800", "/vaults/800.json"},
 		{"Chat::Transcript", "900", "/chats/900.json"},
+		{"Todoset", "1000", "/todosets/1000.json"},
+		{"Message::Board", "1100", "/message_boards/1100.json"},
+		{"Schedule", "1200", "/schedules/1200.json"},
+		{"Questionnaire", "1300", "/questionnaires/1300.json"},
+		{"Inbox", "1400", "/inboxes/1400.json"},
+		{"Kanban::Column", "1500", "/card_tables/columns/1500.json"},
+		{"Kanban::Step", "1600", "/card_tables/steps/1600.json"},
 	}
 
 	for _, tt := range tests {
@@ -290,7 +297,7 @@ func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
 	transport := &showTrackingTransport{}
 	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/circles/789@456")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be shown")
+	assert.Contains(t, err.Error(), "circles")
 }
 
 func TestShowInboxForwardURL(t *testing.T) {
@@ -341,20 +348,20 @@ func TestShowPeopleURL(t *testing.T) {
 	assert.Contains(t, reqs[0], "/people/789.json")
 }
 
-func TestShowContainerURLUsesGenericRecording(t *testing.T) {
+func TestShowContainerURLUsesDedicatedEndpoint(t *testing.T) {
 	transport := &showTrackingTransport{}
 	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todosets/789")
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/recordings/789.json")
+	assert.Contains(t, reqs[0], "/todosets/789.json")
 }
 
-func TestShowColumnURLUsesGenericRecording(t *testing.T) {
+func TestShowColumnURLUsesDedicatedEndpoint(t *testing.T) {
 	transport := &showTrackingTransport{}
 	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/card_tables/columns/789")
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/recordings/789.json")
+	assert.Contains(t, reqs[0], "/card_tables/columns/789.json")
 }
 
 // --- Positional type arg tests (basecamp show <type> <id>) ---
@@ -389,4 +396,108 @@ func TestShowPositionalBoosts(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(reqs), 1)
 	assert.Contains(t, reqs[0], "/boosts/789.json")
+}
+
+func TestShowPositionalCampfire(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "campfire", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/chats/789.json")
+}
+
+func TestShowPositionalCampfires(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "campfires", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/chats/789.json")
+}
+
+// --- Collection URL tests ---
+
+func TestShowCollectionURLTodolistsReturnsError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todosets/777/todolists")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list")
+}
+
+func TestShowCollectionURLColumnsReturnsError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/card_tables/789/columns")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list")
+}
+
+func TestShowCollectionURLQuestionsReturnsError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/questionnaires/999/questions")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list")
+}
+
+func TestShowCollectionURLLinesReturnsError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/chats/789/lines")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list")
+}
+
+// --- Dedicated container endpoint tests ---
+
+func TestShowContainerEndpoints(t *testing.T) {
+	tests := []struct {
+		typ      string
+		expected string
+	}{
+		{"columns", "/card_tables/columns/789.json"},
+		{"steps", "/card_tables/steps/789.json"},
+		{"todosets", "/todosets/789.json"},
+		{"message_boards", "/message_boards/789.json"},
+		{"schedules", "/schedules/789.json"},
+		{"questionnaires", "/questionnaires/789.json"},
+		{"inboxes", "/inboxes/789.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typ, func(t *testing.T) {
+			transport := &showTrackingTransport{}
+			reqs, err := runShowCmd(t, transport, tt.typ, "789")
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, len(reqs), 1)
+			assert.Contains(t, reqs[0], tt.expected)
+		})
+	}
+}
+
+// --- Switch coverage test ---
+
+// TestAllValidRecordTypesHandledInSwitch ensures every type accepted by
+// isValidRecordType is routed by the switch in RunE (never hits default).
+func TestAllValidRecordTypesHandledInSwitch(t *testing.T) {
+	validTypes := []string{
+		"todo", "todos", "todolist", "todolists", "message", "messages",
+		"comment", "comments", "card", "cards",
+		"card-table", "card_table", "cardtable", "card_tables",
+		"document", "documents", "recording", "recordings",
+		"schedule-entry", "schedule_entry", "schedule_entries",
+		"checkin", "check-in", "check_in", "questions", "question_answers",
+		"forward", "forwards", "inbox_forwards", "upload", "uploads",
+		"vault", "vaults", "chat", "chats", "campfire", "campfires",
+		"line", "lines", "columns", "steps",
+		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
+		"people", "boosts",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			transport := &showTrackingTransport{}
+			_, err := runShowCmd(t, transport, typ, "999")
+			if err != nil {
+				assert.NotContains(t, err.Error(), "Unknown type",
+					"type %q passes isValidRecordType but is not handled in switch", typ)
+			}
+		})
+	}
 }
