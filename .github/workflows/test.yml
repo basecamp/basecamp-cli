@@ -202,7 +202,7 @@ jobs:
       - name: Run skill evals
         if: steps.filter.outputs.skill == 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }} # zizmor: ignore[secrets-outside-env] -- fork PRs don't receive secrets so untrusted code never sees the key; adding an environment would block PR-triggered runs
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::warning::ANTHROPIC_API_KEY not configured, skipping skill evals"
