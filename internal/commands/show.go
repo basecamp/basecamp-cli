@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -22,12 +21,15 @@ func NewShowCmd() *cobra.Command {
 		Short: "Show any item by ID or URL",
 		Long: `Show details of any Basecamp item by ID or URL.
 
-Types: todo, todolist, message, comment, card, card-table, document,
-       schedule-entry, checkin, forward, upload, vault, chat, line
+Common types: todo, todolist, message, comment, card, card-table,
+  document, schedule-entry, checkin, forward, upload, vault, chat,
+  line, people, boosts
+
+Also accepts URL path types directly (e.g. inbox_forwards,
+question_answers, card_tables, columns, steps, todosets).
 
 If no type specified, uses generic lookup.
-
-URLs with #__recording_ fragments resolve the referenced recording directly.
+URLs with #__recording_ fragments resolve the referenced recording.
 
 You can also pass a Basecamp URL directly:
   basecamp show https://3.basecamp.com/123/buckets/456/todos/789
@@ -80,7 +82,9 @@ You can also pass a Basecamp URL directly:
 			if !isValidRecordType(recordType) {
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload, vault, chat, line",
+					"Supported types: todo, todolist, message, comment, card, card-table, "+
+						"document, schedule-entry, checkin, forward, upload, vault, chat, "+
+						"line, people, boosts, or any Basecamp URL",
 				)
 			}
 
@@ -88,8 +92,13 @@ You can also pass a Basecamp URL directly:
 				return err
 			}
 
-			// Determine endpoint based on type
-			var endpoint string
+			// Determine endpoint based on type. Types without a dedicated
+			// shortcut endpoint go through /recordings/ and need a refetch
+			// to get full content.
+			var (
+				endpoint     string
+				needsRefetch bool
+			)
 			switch recordType {
 			case "todo", "todos":
 				endpoint = fmt.Sprintf("/todos/%s.json", id)
@@ -128,13 +137,16 @@ You can also pass a Basecamp URL directly:
 				"todosets", "message_boards", "schedules", "questionnaires", "inboxes":
 				// Types without shortcut endpoints — use generic recording lookup.
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
+				needsRefetch = true
 			case "", "recording", "recordings":
-				// Generic recording lookup
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
+				needsRefetch = true
 			default:
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload, vault, chat, line",
+					"Supported types: todo, todolist, message, comment, card, card-table, "+
+						"document, schedule-entry, checkin, forward, upload, vault, chat, "+
+						"line, people, boosts, or any Basecamp URL",
 				)
 			}
 
@@ -164,7 +176,7 @@ You can also pass a Basecamp URL directly:
 			// endpoint to get full content (the /recordings/ endpoint returns
 			// sparse data). The endpoint is derived from the response's type
 			// field — never from the url field, which could point off-origin.
-			if strings.Contains(endpoint, "/recordings/") {
+			if needsRefetch {
 				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
 					if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {

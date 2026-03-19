@@ -55,7 +55,9 @@ func Parse(input string) *Parsed {
 	resourceID := m.ResourceID()
 
 	// Occurrence URLs (.../schedule_entries/{id}/occurrences/{date}) resolve
-	// to the parent schedule entry, not the occurrence date.
+	// to the parent schedule entry, not the occurrence date. The "entryId"
+	// param name comes from the SDK's url-routes.json route table entry for
+	// /{accountId}/schedule_entries/{entryId}/occurrences/{date}.
 	if pathType == "occurrences" {
 		if entryID, ok := m.Params["entryId"]; ok && entryID != "" {
 			pathType = "schedule_entries"

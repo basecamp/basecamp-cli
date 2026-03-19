@@ -97,6 +97,8 @@ func TestAllURLPathTypesAreValid(t *testing.T) {
 	}
 }
 
+// --- Test helpers ---
+
 // showTestTokenProvider is a mock token provider for show tests.
 type showTestTokenProvider struct{}
 
@@ -104,513 +106,10 @@ func (showTestTokenProvider) AccessToken(_ context.Context) (string, error) {
 	return "test-token", nil
 }
 
-// showRefetchTransport tracks which endpoints are hit and returns appropriate responses.
-type showRefetchTransport struct {
-	mu       sync.Mutex
-	requests []string
-}
-
-func (t *showRefetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.mu.Lock()
-	t.requests = append(t.requests, req.URL.Path)
-	t.mu.Unlock()
-
-	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
-
-	var body string
-	if strings.Contains(req.URL.Path, "/recordings/") {
-		// Sparse recording response with type field
-		body = `{"id": 42, "type": "Todo", "title": "sparse title"}`
-	} else if strings.Contains(req.URL.Path, "/todos/") {
-		// Rich type-specific response
-		body = `{"id": 42, "type": "Todo", "title": "Buy milk", "content": "Full todo content", "completed": false}`
-	} else {
-		body = `{}`
-	}
-
-	return &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader(body)),
-		Header:     header,
-	}, nil
-}
-
-func (t *showRefetchTransport) getRequests() []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	out := make([]string, len(t.requests))
-	copy(out, t.requests)
-	return out
-}
-
-func TestShowGenericRecordingRefetchesTypeEndpoint(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showRefetchTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"42"}) // No type → generic recording lookup
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /todos/")
-	assert.Contains(t, reqs[0], "/recordings/42.json")
-	assert.Contains(t, reqs[1], "/todos/42.json")
-
-	// Output should contain the richer response content
-	assert.Contains(t, buf.String(), "Full todo content")
-}
-
-func TestShowGenericRecordingFallsBackOnRefetchError(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	// Transport that returns sparse data for /recordings/ and 500 for the refetch
-	transport := &showRefetchFailTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"42"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err, "should succeed with sparse data when refetch fails")
-
-	// Output should contain the sparse recording data
-	assert.Contains(t, buf.String(), "sparse title")
-}
-
-func TestShowFragmentURLResolvesComment(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showFragmentTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/todos/789#__recording_999"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	// Should fetch recording 999 (the comment), not 789 (the parent todo)
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/recordings/999.json")
-}
-
-// showFragmentTransport returns comment data for /recordings/999.
-type showFragmentTransport struct {
-	mu       sync.Mutex
-	requests []string
-}
-
-func (t *showFragmentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.mu.Lock()
-	t.requests = append(t.requests, req.URL.Path)
-	t.mu.Unlock()
-
-	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
-
-	var body string
-	if strings.Contains(req.URL.Path, "/recordings/999") {
-		body = `{"id": 999, "type": "Comment", "content": "This is the comment"}`
-	} else if strings.Contains(req.URL.Path, "/comments/999") {
-		body = `{"id": 999, "type": "Comment", "content": "Rich comment content"}`
-	} else {
-		body = `{"id": 789, "type": "Todo", "title": "Parent todo"}`
-	}
-
-	return &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader(body)),
-		Header:     header,
-	}, nil
-}
-
-func (t *showFragmentTransport) getRequests() []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	out := make([]string, len(t.requests))
-	copy(out, t.requests)
-	return out
-}
-
-func TestShowChatAtURLResolvesLine(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showRefetchTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
-
-	// The @-form chat line URL from the QA issue
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/chats/789@111"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	// The @-form should normalize to lines type and use /recordings/{lineID}
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/recordings/111.json")
-}
-
-func TestShowProjectURLReturnsHelpfulError(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: &bytes.Buffer{},
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/projects/456"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "projects show")
-}
-
-func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: &bytes.Buffer{},
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/circles/789@456"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be shown")
-}
-
-func TestShowInboxForwardURL(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/inbox_forwards/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/forwards/789.json")
-}
-
-func TestShowScheduleEntryOccurrenceURL(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	buf := &bytes.Buffer{}
-	cfg := &config.Config{AccountID: "99999"}
-	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
-		basecamp.WithTransport(transport),
-		basecamp.WithMaxRetries(1),
-	)
-
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		SDK:    sdkClient,
-		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
-		Output: output.New(output.Options{
-			Format: output.FormatJSON,
-			Writer: buf,
-		}),
-	}
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/schedule_entries/789/occurrences/20251229"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/schedule_entries/789.json")
-}
-
-func TestShowQuestionURL(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	app := showTestApp(t, transport)
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/questions/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/questions/789.json")
-}
-
-func TestShowQuestionAnswerURL(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	app := showTestApp(t, transport)
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/question_answers/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/question_answers/789.json")
-}
-
-func TestShowCardTablesURL(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	app := showTestApp(t, transport)
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/card_tables/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/card_tables/789.json")
-}
-
-func TestShowPeopleURL(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	app := showTestApp(t, transport)
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/people/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/people/789.json")
-}
-
-func TestShowContainerURLUsesGenericRecording(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	app := showTestApp(t, transport)
-
-	// Todoset is a container type — no shortcut endpoint, uses generic recording
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/todosets/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/recordings/789.json")
-}
-
-func TestShowColumnURLUsesGenericRecording(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-
-	transport := &showTypeTrackingTransport{}
-	app := showTestApp(t, transport)
-
-	cmd := NewShowCmd()
-	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/card_tables/columns/789"})
-	ctx := appctx.WithApp(context.Background(), app)
-	cmd.SetContext(ctx)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	err := cmd.Execute()
-	require.NoError(t, err)
-
-	reqs := transport.getRequests()
-	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/recordings/789.json")
-}
-
 // showTestApp creates a test App with the given transport for show command tests.
 func showTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	cfg := &config.Config{AccountID: "99999"}
 	authMgr := auth.NewManager(cfg, nil)
 	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
@@ -629,13 +128,16 @@ func showTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 	}
 }
 
-// showTypeTrackingTransport returns generic success responses and tracks request paths.
-type showTypeTrackingTransport struct {
-	mu       sync.Mutex
-	requests []string
+// showTrackingTransport records request paths and returns configurable responses.
+// By default it returns a generic success response. Set the responder field to
+// customize per-request response bodies.
+type showTrackingTransport struct {
+	mu        sync.Mutex
+	requests  []string
+	responder func(path string) (int, string) // optional: (statusCode, body)
 }
 
-func (t *showTypeTrackingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *showTrackingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.mu.Lock()
 	t.requests = append(t.requests, req.URL.Path)
 	t.mu.Unlock()
@@ -643,16 +145,20 @@ func (t *showTypeTrackingTransport) RoundTrip(req *http.Request) (*http.Response
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
+	status := 200
 	body := `{"id": 789, "type": "Item", "title": "Test item"}`
+	if t.responder != nil {
+		status, body = t.responder(req.URL.Path)
+	}
 
 	return &http.Response{
-		StatusCode: 200,
+		StatusCode: status,
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     header,
 	}, nil
 }
 
-func (t *showTypeTrackingTransport) getRequests() []string {
+func (t *showTrackingTransport) getRequests() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := make([]string, len(t.requests))
@@ -660,26 +166,227 @@ func (t *showTypeTrackingTransport) getRequests() []string {
 	return out
 }
 
-// showRefetchFailTransport returns sparse recording data, then fails on refetch.
-type showRefetchFailTransport struct{}
+// runShowCmd is a helper that executes the show command with the given args
+// and returns the error (if any) and the transport's recorded requests.
+func runShowCmd(t *testing.T, transport *showTrackingTransport, args ...string) ([]string, error) {
+	t.Helper()
+	app := showTestApp(t, transport)
+	cmd := NewShowCmd()
+	cmd.SetArgs(args)
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	return transport.getRequests(), err
+}
 
-func (showRefetchFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
+// --- Generic recording refetch tests ---
 
-	if strings.Contains(req.URL.Path, "/recordings/") {
-		body := `{"id": 42, "type": "Todo", "title": "sparse title"}`
-		return &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     header,
-		}, nil
+func TestShowGenericRecordingRefetchesTypeEndpoint(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/") {
+				return 200, `{"id": 42, "type": "Todo", "title": "sparse title"}`
+			}
+			if strings.Contains(path, "/todos/") {
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "content": "Full todo content", "completed": false}`
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+	// Override output writer so we can inspect it
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"42"}) // No type → generic recording lookup
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /todos/")
+	assert.Contains(t, reqs[0], "/recordings/42.json")
+	assert.Contains(t, reqs[1], "/todos/42.json")
+	assert.Contains(t, buf.String(), "Full todo content")
+}
+
+func TestShowGenericRecordingFallsBackOnRefetchError(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/") {
+				return 200, `{"id": 42, "type": "Todo", "title": "sparse title"}`
+			}
+			return 500, `{"error":"internal"}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"42"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err, "should succeed with sparse data when refetch fails")
+	assert.Contains(t, buf.String(), "sparse title")
+}
+
+// --- URL type routing tests ---
+
+func TestShowFragmentURLResolvesComment(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/999") {
+				return 200, `{"id": 999, "type": "Comment", "content": "This is the comment"}`
+			}
+			if strings.Contains(path, "/comments/999") {
+				return 200, `{"id": 999, "type": "Comment", "content": "Rich comment content"}`
+			}
+			return 200, `{"id": 789, "type": "Todo", "title": "Parent todo"}`
+		},
 	}
 
-	// Refetch fails with 500
-	return &http.Response{
-		StatusCode: 500,
-		Body:       io.NopCloser(strings.NewReader(`{"error":"internal"}`)),
-		Header:     header,
-	}, nil
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todos/789#__recording_999")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/999.json")
+}
+
+func TestShowChatAtURLResolvesLine(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/") {
+				return 200, `{"id": 111, "type": "Chat::Lines::Text", "content": "hello"}`
+			}
+			return 200, `{}`
+		},
+	}
+
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/chats/789@111")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/111.json")
+}
+
+func TestShowProjectURLReturnsHelpfulError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/projects/456")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "projects show")
+}
+
+func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/circles/789@456")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be shown")
+}
+
+func TestShowInboxForwardURL(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/inbox_forwards/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/forwards/789.json")
+}
+
+func TestShowScheduleEntryOccurrenceURL(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/schedule_entries/789/occurrences/20251229")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/schedule_entries/789.json")
+}
+
+func TestShowQuestionURL(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/questions/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/questions/789.json")
+}
+
+func TestShowQuestionAnswerURL(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/question_answers/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/question_answers/789.json")
+}
+
+func TestShowCardTablesURL(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/card_tables/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/card_tables/789.json")
+}
+
+func TestShowPeopleURL(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/people/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/people/789.json")
+}
+
+func TestShowContainerURLUsesGenericRecording(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todosets/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/789.json")
+}
+
+func TestShowColumnURLUsesGenericRecording(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/card_tables/columns/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/789.json")
+}
+
+// --- Positional type arg tests (basecamp show <type> <id>) ---
+
+func TestShowPositionalVault(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "vault", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/vaults/789.json")
+}
+
+func TestShowPositionalChat(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "chat", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/chats/789.json")
+}
+
+func TestShowPositionalPeople(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "people", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/people/789.json")
+}
+
+func TestShowPositionalBoosts(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "boosts", "789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/boosts/789.json")
 }
