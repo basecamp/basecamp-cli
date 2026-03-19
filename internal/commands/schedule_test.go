@@ -175,3 +175,92 @@ func TestScheduleUpdateLocalImageErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
 }
+
+// =============================================================================
+// Schedule Show Occurrence URL Tests
+// =============================================================================
+
+// mockScheduleShowTransport tracks GET requests to verify occurrence routing.
+type mockScheduleShowTransport struct {
+	requests []string
+}
+
+func (t *mockScheduleShowTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests = append(t.requests, req.URL.Path)
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	body := `{"id": 789, "summary": "Recurring Event", "starts_at": "2025-12-29T09:00:00Z", "ends_at": "2025-12-29T10:00:00Z"}`
+	if strings.Contains(req.URL.Path, "/projects.json") {
+		body = `[{"id": 456, "name": "Test Project"}]`
+	} else if strings.Contains(req.URL.Path, "/projects/") {
+		body = `{"id": 456, "dock": [{"name": "schedule", "id": 777, "enabled": true}]}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func TestScheduleShowOccurrenceURLExtractsDate(t *testing.T) {
+	transport := &mockScheduleShowTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewScheduleCmd()
+	err := executeMessagesCommand(cmd, app, "show",
+		"https://3.basecamp.com/99999/buckets/456/schedule_entries/789/occurrences/20251229")
+	require.NoError(t, err)
+
+	// Verify the occurrence endpoint was called, not the plain entry endpoint
+	var hitOccurrence bool
+	for _, path := range transport.requests {
+		if strings.Contains(path, "/schedule_entries/789/occurrences/20251229") {
+			hitOccurrence = true
+		}
+	}
+	assert.True(t, hitOccurrence,
+		"occurrence URL should hit the occurrence endpoint; got requests: %v", transport.requests)
+}
+
+func TestScheduleShowOccurrenceURLDateFlagTakesPrecedence(t *testing.T) {
+	transport := &mockScheduleShowTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewScheduleCmd()
+	// --date flag should override the date from the URL
+	err := executeMessagesCommand(cmd, app, "show",
+		"https://3.basecamp.com/99999/buckets/456/schedule_entries/789/occurrences/20251229",
+		"--date", "20260101")
+	require.NoError(t, err)
+
+	var hitFlagDate bool
+	for _, path := range transport.requests {
+		if strings.Contains(path, "/occurrences/20260101") {
+			hitFlagDate = true
+		}
+	}
+	assert.True(t, hitFlagDate,
+		"--date flag should take precedence over URL date; got requests: %v", transport.requests)
+}
+
+func TestScheduleShowPlainEntryURLNoOccurrence(t *testing.T) {
+	transport := &mockScheduleShowTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewScheduleCmd()
+	err := executeMessagesCommand(cmd, app, "show",
+		"https://3.basecamp.com/99999/buckets/456/schedule_entries/789")
+	require.NoError(t, err)
+
+	var hitPlainEntry bool
+	for _, path := range transport.requests {
+		if strings.Contains(path, "/schedule_entries/789") && !strings.Contains(path, "/occurrences/") {
+			hitPlainEntry = true
+		}
+	}
+	assert.True(t, hitPlainEntry,
+		"plain entry URL should not hit the occurrence endpoint; got requests: %v", transport.requests)
+}

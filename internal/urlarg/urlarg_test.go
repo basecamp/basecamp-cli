@@ -125,13 +125,14 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			name:  "schedule entry occurrence URL extracts entry ID",
+			name:  "schedule entry occurrence URL extracts entry ID and date",
 			input: "https://3.basecamp.com/123/buckets/456/schedule_entries/789/occurrences/20251229",
 			want: &Parsed{
-				AccountID:   "123",
-				ProjectID:   "456",
-				Type:        "schedule_entries",
-				RecordingID: "789",
+				AccountID:      "123",
+				ProjectID:      "456",
+				Type:           "schedule_entries",
+				RecordingID:    "789",
+				OccurrenceDate: "20251229",
 			},
 		},
 		{
@@ -253,6 +254,9 @@ func TestParse(t *testing.T) {
 			}
 			if got.IsCollection != tt.want.IsCollection {
 				t.Errorf("IsCollection = %v, want %v", got.IsCollection, tt.want.IsCollection)
+			}
+			if got.OccurrenceDate != tt.want.OccurrenceDate {
+				t.Errorf("OccurrenceDate = %q, want %q", got.OccurrenceDate, tt.want.OccurrenceDate)
 			}
 		})
 	}

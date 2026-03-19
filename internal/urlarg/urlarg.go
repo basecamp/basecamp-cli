@@ -15,12 +15,13 @@ var chatAtRe = regexp.MustCompile(`(/chats/\d+)@(\d+)`)
 
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
-	AccountID    string
-	ProjectID    string // BucketID in Basecamp terminology
-	Type         string // e.g., "todos", "messages", "cards"
-	RecordingID  string
-	CommentID    string
-	IsCollection bool // URL points to a list of items, not an individual resource
+	AccountID      string
+	ProjectID      string // BucketID in Basecamp terminology
+	Type           string // e.g., "todos", "messages", "cards"
+	RecordingID    string
+	CommentID      string
+	IsCollection   bool   // URL points to a list of items, not an individual resource
+	OccurrenceDate string // date from schedule_entries/{id}/occurrences/{date} URLs
 }
 
 // router is the shared SDK router instance.
@@ -57,11 +58,15 @@ func Parse(input string) *Parsed {
 	resourceID := m.ResourceID()
 
 	// Occurrence URLs (.../schedule_entries/{id}/occurrences/{date}) resolve
-	// to the parent schedule entry, not the occurrence date. The "entryId"
-	// param name comes from the SDK's url-routes.json route table entry for
-	// /{accountId}/schedule_entries/{entryId}/occurrences/{date}.
+	// to the parent schedule entry. The SDK router returns PathType="occurrences"
+	// with the date as ResourceID. We rewrite to the parent entry but preserve
+	// the date so callers (show, schedule show) can use the occurrence endpoint.
+	// The "entryId" param name comes from the SDK's url-routes.json route table
+	// entry for /{accountId}/schedule_entries/{entryId}/occurrences/{date}.
+	var occurrenceDate string
 	if pathType == "occurrences" {
 		if entryID, ok := m.Params["entryId"]; ok && entryID != "" {
+			occurrenceDate = resourceID // resourceID is the date segment
 			pathType = "schedule_entries"
 			resourceID = entryID
 		}
@@ -82,12 +87,13 @@ func Parse(input string) *Parsed {
 	}
 
 	return &Parsed{
-		AccountID:    m.AccountID,
-		ProjectID:    m.ProjectID,
-		Type:         pathType,
-		RecordingID:  resourceID,
-		CommentID:    m.CommentID,
-		IsCollection: isCollection,
+		AccountID:      m.AccountID,
+		ProjectID:      m.ProjectID,
+		Type:           pathType,
+		RecordingID:    resourceID,
+		CommentID:      m.CommentID,
+		IsCollection:   isCollection,
+		OccurrenceDate: occurrenceDate,
 	}
 }
 

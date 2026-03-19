@@ -313,7 +313,17 @@ func TestShowScheduleEntryOccurrenceURL(t *testing.T) {
 	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/schedule_entries/789/occurrences/20251229")
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/schedule_entries/789.json")
+	assert.Contains(t, reqs[0], "/schedule_entries/789/occurrences/20251229.json",
+		"occurrence URL should route to the occurrence endpoint, not the parent entry")
+}
+
+func TestShowScheduleEntryURLWithoutOccurrence(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/schedule_entries/789")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/schedule_entries/789.json",
+		"plain schedule entry URL should route to the entry endpoint")
 }
 
 func TestShowQuestionURL(t *testing.T) {

@@ -51,6 +51,7 @@ You can also pass a Basecamp URL directly:
 			}
 
 			// Check if the id is a URL and extract components
+			var occurrenceDate string
 			if parsed := urlarg.Parse(id); parsed != nil {
 				if parsed.CommentID != "" {
 					// Fragment URL (#__recording_N) — resolve the referenced
@@ -73,6 +74,7 @@ You can also pass a Basecamp URL directly:
 					if recordType == "" && parsed.Type != "" {
 						recordType = parsed.Type
 					}
+					occurrenceDate = parsed.OccurrenceDate
 				} else if parsed.ProjectID != "" && parsed.Type == "project" {
 					// Project URL — redirect to "projects show"
 					return output.ErrUsageHint(
@@ -133,7 +135,11 @@ You can also pass a Basecamp URL directly:
 			case "document", "documents":
 				endpoint = fmt.Sprintf("/documents/%s.json", id)
 			case "schedule-entry", "schedule_entry", "schedule_entries":
-				endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
+				if occurrenceDate != "" {
+					endpoint = fmt.Sprintf("/schedule_entries/%s/occurrences/%s.json", id, occurrenceDate)
+				} else {
+					endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
+				}
 			case "checkin", "check-in", "check_in", "questions":
 				endpoint = fmt.Sprintf("/questions/%s.json", id)
 			case "question_answers":
