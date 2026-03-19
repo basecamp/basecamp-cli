@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -100,14 +101,16 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/comments/%s.json", id)
 			case "card", "cards":
 				endpoint = fmt.Sprintf("/card_tables/cards/%s.json", id)
-			case "card-table", "card_table", "cardtable":
+			case "card-table", "card_table", "cardtable", "card_tables":
 				endpoint = fmt.Sprintf("/card_tables/%s.json", id)
 			case "document", "documents":
 				endpoint = fmt.Sprintf("/documents/%s.json", id)
 			case "schedule-entry", "schedule_entry", "schedule_entries":
 				endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
-			case "checkin", "check-in", "check_in":
+			case "checkin", "check-in", "check_in", "questions":
 				endpoint = fmt.Sprintf("/questions/%s.json", id)
+			case "question_answers":
+				endpoint = fmt.Sprintf("/question_answers/%s.json", id)
 			case "forward", "forwards", "inbox_forwards":
 				endpoint = fmt.Sprintf("/forwards/%s.json", id)
 			case "upload", "uploads":
@@ -116,9 +119,14 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/vaults/%s.json", id)
 			case "chat", "chats", "campfire", "campfires":
 				endpoint = fmt.Sprintf("/chats/%s.json", id)
-			case "line", "lines":
-				// Chat lines need both chat ID and line ID for the specific
-				// endpoint, but we only have the line ID. Use generic recording.
+			case "people":
+				endpoint = fmt.Sprintf("/people/%s.json", id)
+			case "boosts":
+				endpoint = fmt.Sprintf("/boosts/%s.json", id)
+			case "line", "lines",
+				"columns", "steps",
+				"todosets", "message_boards", "schedules", "questionnaires", "inboxes":
+				// Types without shortcut endpoints — use generic recording lookup.
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 			case "", "recording", "recordings":
 				// Generic recording lookup
@@ -156,9 +164,7 @@ You can also pass a Basecamp URL directly:
 			// endpoint to get full content (the /recordings/ endpoint returns
 			// sparse data). The endpoint is derived from the response's type
 			// field — never from the url field, which could point off-origin.
-			// Chat lines also use /recordings/ since the specific endpoint
-			// requires a parent chat ID we may not have.
-			if recordType == "" || recordType == "recording" || recordType == "recordings" || recordType == "line" || recordType == "lines" {
+			if strings.Contains(endpoint, "/recordings/") {
 				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
 					if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {
@@ -252,13 +258,16 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 func isValidRecordType(t string) bool {
 	switch t {
 	case "", "todo", "todos", "todolist", "todolists", "message", "messages",
-		"comment", "comments", "card", "cards", "card-table", "card_table",
-		"cardtable", "document", "documents", "recording", "recordings",
+		"comment", "comments", "card", "cards",
+		"card-table", "card_table", "cardtable", "card_tables",
+		"document", "documents", "recording", "recordings",
 		"schedule-entry", "schedule_entry", "schedule_entries",
-		"checkin", "check-in", "check_in",
+		"checkin", "check-in", "check_in", "questions", "question_answers",
 		"forward", "forwards", "inbox_forwards", "upload", "uploads",
 		"vault", "vaults", "chat", "chats", "campfire", "campfires",
-		"line", "lines":
+		"line", "lines", "columns", "steps",
+		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
+		"people", "boosts":
 		return true
 	default:
 		return false

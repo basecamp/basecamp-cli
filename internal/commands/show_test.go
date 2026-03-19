@@ -70,6 +70,33 @@ func TestRecordingTypeEndpoint_EmptyType(t *testing.T) {
 	assert.Equal(t, "", result, "empty type should return empty string")
 }
 
+// TestAllURLPathTypesAreValid ensures every PathType the SDK router can return
+// for a recording-like URL is accepted by isValidRecordType. This prevents the
+// "Unknown type" error class from recurring for new URL shapes.
+func TestAllURLPathTypesAreValid(t *testing.T) {
+	// Every PathType the SDK router returns for URLs users might paste.
+	urlPathTypes := []string{
+		// Standard recording types
+		"todos", "todolists", "messages", "comments", "documents",
+		"uploads", "vaults", "chats", "lines",
+		"schedule_entries", "inbox_forwards",
+		// Card table types
+		"cards", "card_tables", "columns", "steps",
+		// Checkin types
+		"questions", "question_answers",
+		// Container/dock types
+		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
+		// Account-level types
+		"people", "boosts", "recordings",
+	}
+
+	for _, pt := range urlPathTypes {
+		t.Run(pt, func(t *testing.T) {
+			assert.True(t, isValidRecordType(pt), "URL PathType %q should be accepted by isValidRecordType", pt)
+		})
+	}
+}
+
 // showTestTokenProvider is a mock token provider for show tests.
 type showTestTokenProvider struct{}
 
@@ -454,6 +481,154 @@ func TestShowScheduleEntryOccurrenceURL(t *testing.T) {
 	assert.Contains(t, reqs[0], "/schedule_entries/789.json")
 }
 
+func TestShowQuestionURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/questions/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/questions/789.json")
+}
+
+func TestShowQuestionAnswerURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/question_answers/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/question_answers/789.json")
+}
+
+func TestShowCardTablesURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/card_tables/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/card_tables/789.json")
+}
+
+func TestShowPeopleURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/people/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/people/789.json")
+}
+
+func TestShowContainerURLUsesGenericRecording(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	app := showTestApp(t, transport)
+
+	// Todoset is a container type — no shortcut endpoint, uses generic recording
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/todosets/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/789.json")
+}
+
+func TestShowColumnURLUsesGenericRecording(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &showTypeTrackingTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"https://3.basecamp.com/99999/buckets/456/card_tables/columns/789"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/789.json")
+}
+
+// showTestApp creates a test App with the given transport for show command tests.
+func showTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+	t.Helper()
+	cfg := &config.Config{AccountID: "99999"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: &bytes.Buffer{},
+		}),
+	}
+}
+
 // showTypeTrackingTransport returns generic success responses and tracks request paths.
 type showTypeTrackingTransport struct {
 	mu       sync.Mutex
@@ -468,10 +643,7 @@ func (t *showTypeTrackingTransport) RoundTrip(req *http.Request) (*http.Response
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	body := `{"id": 789, "type": "Inbox::Forward", "title": "Forwarded email"}`
-	if strings.Contains(req.URL.Path, "/schedule_entries/") {
-		body = `{"id": 789, "type": "Schedule::Entry", "title": "Team standup"}`
-	}
+	body := `{"id": 789, "type": "Item", "title": "Test item"}`
 
 	return &http.Response{
 		StatusCode: 200,
