@@ -9,12 +9,7 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  id-token: write
-  security-events: write
-  pull-requests: read
-  models: read
+permissions: {}
 
 jobs:
   security:
