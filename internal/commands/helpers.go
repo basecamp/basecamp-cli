@@ -367,9 +367,12 @@ func resolveTodolistInTodoset(cmd *cobra.Command, app *appctx.App, todolist, pro
 		return "", output.ErrAmbiguous("todolist", matchNames)
 	}
 
-	return "", output.ErrNotFoundHint("Todolist", todolist,
-		fmt.Sprintf("Not found in todoset %s. Use 'basecamp todolists --in %s --todoset %s' to see available lists",
-			explicitTodosetID, projectID, explicitTodosetID))
+	hint := fmt.Sprintf("Not found in todoset %s.", explicitTodosetID)
+	if projectID != "" {
+		hint += fmt.Sprintf(" Use 'basecamp todolists --in %s --todoset %s' to see available lists",
+			projectID, explicitTodosetID)
+	}
+	return "", output.ErrNotFoundHint("Todolist", todolist, hint)
 }
 
 // ensurePersonInProject resolves a person ID interactively from project members.

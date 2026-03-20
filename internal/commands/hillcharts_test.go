@@ -43,6 +43,8 @@ type hillchartsTransport struct {
 	todosetBody string
 	// projectsBody is the response body for GET /projects.json
 	projectsBody string
+	// todolistsBody is the response body for GET .../todolists.json (name resolution)
+	todolistsBody string
 	// updateStatus is the HTTP status for PUT .../hills/settings.json
 	updateStatus int
 	// updateBody is the response body for PUT .../hills/settings.json
@@ -91,6 +93,19 @@ func (t *hillchartsTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 		return &http.Response{
 			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	// GET .../todolists.json — todolist name resolution
+	if strings.Contains(path, "/todolists.json") {
+		body := t.todolistsBody
+		if body == "" {
+			body = `[]`
+		}
+		return &http.Response{
+			StatusCode: 200,
 			Body:       io.NopCloser(strings.NewReader(body)),
 			Header:     header,
 		}, nil
@@ -336,6 +351,45 @@ func TestHillchartsUntrackTodosetOnly(t *testing.T) {
 	cmd := NewHillchartsCmd()
 	err := executeHillchartsCommand(cmd, app, "untrack", "111", "--todoset", "12345")
 	require.NoError(t, err)
+}
+
+// --- Comma parsing and name resolution ---
+
+func TestHillchartsTrackCommaSeparatedIDs(t *testing.T) {
+	transport := &hillchartsTransport{
+		updateStatus: 200,
+		updateBody:   `{"enabled": true, "stale": false, "dots": [{"id": 111}, {"id": 222}]}`,
+	}
+	app, _ := setupHillchartsMockApp(t, transport)
+
+	cmd := NewHillchartsCmd()
+	err := executeHillchartsCommand(cmd, app, "track", "111, 222", "--todoset", "12345")
+	require.NoError(t, err)
+}
+
+func TestHillchartsTrackNameResolution(t *testing.T) {
+	transport := &hillchartsTransport{
+		todolistsBody: `[{"id": 111, "name": "Shopping list"}, {"id": 222, "name": "Chores"}]`,
+		updateStatus:  200,
+		updateBody:    `{"enabled": true, "stale": false, "dots": [{"id": 111, "label": "Shopping list", "position": 0}]}`,
+	}
+	app, _ := setupHillchartsMockApp(t, transport)
+
+	cmd := NewHillchartsCmd()
+	err := executeHillchartsCommand(cmd, app, "track", "Shopping list", "--todoset", "12345")
+	require.NoError(t, err)
+}
+
+func TestHillchartsTrackNameNotFound(t *testing.T) {
+	transport := &hillchartsTransport{
+		todolistsBody: `[{"id": 111, "name": "Shopping list"}]`,
+	}
+	app, _ := setupHillchartsMockApp(t, transport)
+
+	cmd := NewHillchartsCmd()
+	err := executeHillchartsCommand(cmd, app, "track", "Nonexistent", "--todoset", "12345")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
 // --- Breadcrumb scope tests ---

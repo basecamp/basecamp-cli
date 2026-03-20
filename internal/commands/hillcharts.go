@@ -108,11 +108,10 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 		if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeForbidden {
 			todoset, tsErr := app.Account().Todosets().Get(cmd.Context(), tsID)
 			if tsErr == nil && todoset.TodolistsCount == 0 {
-				return &output.Error{
-					Code:    output.CodeUsage,
-					Message: "No todolists to track on the hill chart",
-					Hint:    emptyTodosetHint(resolvedProjectID, resolvedTodosetID, todosetID),
-				}
+				return output.ErrUsageHint(
+					"No todolists to track on the hill chart",
+					emptyTodosetHint(resolvedProjectID, resolvedTodosetID, todosetID),
+				)
 			}
 		}
 		return convertSDKError(err)
