@@ -10,7 +10,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' # zizmor: ignore[bot-conditions] -- dual check is intentional: actor validates current trigger, user.login validates PR origin; on:pull_request (not pull_request_target) so actor is set by GitHub based on who pushed
     steps:
       - name: Fetch Dependabot metadata
         id: metadata

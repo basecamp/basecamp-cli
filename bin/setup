@@ -10,7 +10,7 @@ fi
 # Install Go via mise (reads .mise.toml)
 mise install
 
-# Install dev tools (golangci-lint, govulncheck, etc.)
+# Install dev tools (golangci-lint, govulncheck, actionlint, zizmor, etc.)
 make tools
 
 # Build and install the binary

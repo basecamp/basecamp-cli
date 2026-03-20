@@ -7,13 +7,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
@@ -54,6 +55,8 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -73,6 +76,8 @@ jobs:
   lint-actions:
     name: GitHub Actions audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -90,6 +95,8 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -110,6 +117,8 @@ jobs:
   race-check:
     name: Race Detection
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
@@ -128,6 +137,8 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
@@ -159,6 +170,8 @@ jobs:
   cli-surface:
     name: CLI Surface Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
@@ -195,6 +208,8 @@ jobs:
   skill-eval:
     name: Skill Evals
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -230,6 +245,8 @@ jobs:
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     env:

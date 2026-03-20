@@ -329,7 +329,15 @@ check-smoke-coverage: build
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-smoke-coverage provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-smoke-coverage provenance-check tidy-check
+
+# Lint GitHub Actions workflows (requires actionlint + zizmor)
+.PHONY: lint-actions
+lint-actions:
+	@command -v actionlint >/dev/null || (echo "Install actionlint: make tools (or: go install github.com/rhysd/actionlint/cmd/actionlint@latest)" && exit 1)
+	@command -v zizmor >/dev/null || (echo "Install zizmor: https://docs.zizmor.sh/installation/" && exit 1)
+	actionlint
+	zizmor .
 
 # Full pre-flight for release: check + replace-check + vuln + race + surface compat
 .PHONY: release-check
@@ -458,6 +466,14 @@ tools:
 	$(GOCMD) install golang.org/x/perf/cmd/benchstat@latest
 	$(GOCMD) install github.com/zricethezav/gitleaks/v8@latest
 	@command -v jq >/dev/null 2>&1 || echo "NOTE: jq is also required (install via your package manager)"
+	@command -v actionlint >/dev/null 2>&1 || { echo "Installing actionlint..."; $(GOCMD) install github.com/rhysd/actionlint/cmd/actionlint@latest; }
+	@command -v zizmor >/dev/null 2>&1 || { \
+		echo "Installing zizmor..."; \
+		if command -v brew >/dev/null 2>&1; then brew install zizmor; \
+		elif command -v pacman >/dev/null 2>&1; then sudo pacman -S --noconfirm zizmor; \
+		else echo "Could not auto-install zizmor: https://docs.zizmor.sh/installation/" && exit 1; \
+		fi; \
+	}
 
 
 # Run skill evals (requires ANTHROPIC_API_KEY and Ruby)
@@ -516,6 +532,7 @@ help:
 	@echo "  fmt            Format code"
 	@echo "  fmt-check      Check code formatting"
 	@echo "  lint           Run golangci-lint"
+	@echo "  lint-actions   Lint GitHub Actions workflows (actionlint + zizmor)"
 	@echo "  tidy-check     Verify go.mod/go.sum are tidy"
 	@echo "  check          Run all checks (local CI gate)"
 	@echo "  check-surface  Generate CLI surface snapshot (validates --help --agent output)"
