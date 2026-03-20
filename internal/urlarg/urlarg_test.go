@@ -14,6 +14,7 @@ func TestIsURL(t *testing.T) {
 		{"http://localhost:3000/123/buckets/456/todos/789", true},
 		{"123", false},
 		{"my-project", false},
+		{"https://3.basecamp.com/123/buckets/456/chats/789@111", true},
 		{"", false},
 	}
 
@@ -85,13 +86,108 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			name:  "chat line URL",
+			name:  "chat line URL (slash form)",
 			input: "https://3.basecamp.com/123/buckets/456/chats/789/lines/111",
 			want: &Parsed{
 				AccountID:   "123",
 				ProjectID:   "456",
 				Type:        "lines",
 				RecordingID: "111",
+			},
+		},
+		{
+			name:  "chat line URL (@ form)",
+			input: "https://3.basecamp.com/123/buckets/456/chats/789@111",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "lines",
+				RecordingID: "111",
+			},
+		},
+		{
+			name:  "inbox forward URL",
+			input: "https://3.basecamp.com/123/buckets/456/inbox_forwards/789",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "inbox_forwards",
+				RecordingID: "789",
+			},
+		},
+		{
+			name:  "schedule entry URL",
+			input: "https://3.basecamp.com/123/buckets/456/schedule_entries/789",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "schedule_entries",
+				RecordingID: "789",
+			},
+		},
+		{
+			name:  "schedule entry occurrence URL extracts entry ID and date",
+			input: "https://3.basecamp.com/123/buckets/456/schedule_entries/789/occurrences/20251229",
+			want: &Parsed{
+				AccountID:      "123",
+				ProjectID:      "456",
+				Type:           "schedule_entries",
+				RecordingID:    "789",
+				OccurrenceDate: "20251229",
+			},
+		},
+		{
+			name:  "collection URL: todosets/todolists",
+			input: "https://3.basecamp.com/123/buckets/456/todosets/777/todolists",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "todolists",
+				RecordingID:  "777",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "collection URL: card_tables/columns",
+			input: "https://3.basecamp.com/123/buckets/456/card_tables/789/columns",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "columns",
+				RecordingID:  "789",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "collection URL: questionnaires/questions",
+			input: "https://3.basecamp.com/123/buckets/456/questionnaires/999/questions",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "questions",
+				RecordingID:  "999",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "collection URL: chats/lines",
+			input: "https://3.basecamp.com/123/buckets/456/chats/789/lines",
+			want: &Parsed{
+				AccountID:    "123",
+				ProjectID:    "456",
+				Type:         "lines",
+				RecordingID:  "789",
+				IsCollection: true,
+			},
+		},
+		{
+			name:  "individual resource URL is not a collection",
+			input: "https://3.basecamp.com/123/buckets/456/todos/789",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "todos",
+				RecordingID: "789",
 			},
 		},
 		{
@@ -104,7 +200,7 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			name:  "type list URL (todolists)",
+			name:  "type list URL (todolists) structural match is not IsCollection",
 			input: "https://3.basecamp.com/123/buckets/456/todolists",
 			want: &Parsed{
 				AccountID: "123",
@@ -156,6 +252,12 @@ func TestParse(t *testing.T) {
 			}
 			if got.CommentID != tt.want.CommentID {
 				t.Errorf("CommentID = %q, want %q", got.CommentID, tt.want.CommentID)
+			}
+			if got.IsCollection != tt.want.IsCollection {
+				t.Errorf("IsCollection = %v, want %v", got.IsCollection, tt.want.IsCollection)
+			}
+			if got.OccurrenceDate != tt.want.OccurrenceDate {
+				t.Errorf("OccurrenceDate = %q, want %q", got.OccurrenceDate, tt.want.OccurrenceDate)
 			}
 		})
 	}

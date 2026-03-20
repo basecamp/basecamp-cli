@@ -3,18 +3,25 @@
 package urlarg
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
+// chatAtRe matches the Basecamp web URL form chats/{chatID}@{lineID}
+// and normalizes it to chats/{chatID}/lines/{lineID} before routing.
+var chatAtRe = regexp.MustCompile(`(/chats/\d+)@(\d+)`)
+
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
-	AccountID   string
-	ProjectID   string // BucketID in Basecamp terminology
-	Type        string // e.g., "todos", "messages", "cards"
-	RecordingID string
-	CommentID   string
+	AccountID      string
+	ProjectID      string // BucketID in Basecamp terminology
+	Type           string // e.g., "todos", "messages", "cards"
+	RecordingID    string
+	CommentID      string
+	IsCollection   bool   // URL points to a list of items, not an individual resource
+	OccurrenceDate string // date from schedule_entries/{id}/occurrences/{date} URLs
 }
 
 // router is the shared SDK router instance.
@@ -23,7 +30,8 @@ var router = basecamp.DefaultRouter()
 // IsURL checks if the input looks like a Basecamp URL.
 // Returns true if the URL can be matched (either as an API route or structurally).
 func IsURL(input string) bool {
-	return router.Match(input) != nil
+	normalized := chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	return router.Match(normalized) != nil
 }
 
 // Parse extracts IDs from a Basecamp URL.
@@ -33,18 +41,59 @@ func IsURL(input string) bool {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}#__recording_{comment}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/card_tables/cards/{id}
+//   - https://3.basecamp.com/{account}/buckets/{bucket}/chats/{id}@{lineId}
+//   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
-	m := router.Match(input)
+	// Normalize the Basecamp web @-form for chat lines (chats/789@111)
+	// into the slash form (chats/789/lines/111) before routing.
+	normalized := chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+
+	m := router.Match(normalized)
 	if m == nil {
 		return nil
 	}
+
+	pathType := m.PathType
+	resourceID := m.ResourceID()
+
+	// Occurrence URLs (.../schedule_entries/{id}/occurrences/{date}) resolve
+	// to the parent schedule entry. The SDK router returns PathType="occurrences"
+	// with the date as ResourceID. We rewrite to the parent entry but preserve
+	// the date so callers (show, schedule show) can use the occurrence endpoint.
+	// The "entryId" param name comes from the SDK's url-routes.json route table
+	// entry for /{accountId}/schedule_entries/{entryId}/occurrences/{date}.
+	var occurrenceDate string
+	if pathType == "occurrences" {
+		if entryID, ok := m.Params["entryId"]; ok && entryID != "" {
+			occurrenceDate = resourceID // resourceID is the date segment
+			pathType = "schedule_entries"
+			resourceID = entryID
+		}
+	}
+
+	// Detect collection URLs (e.g. .../todosets/777/todolists, .../chats/789/lines).
+	// The SDK router matches these with the parent's ID as ResourceID and an
+	// operation like "ListTodolists" or "CreateCardColumn" — never "Get*".
+	// Structural matches for collection URLs already have empty ResourceID.
+	isCollection := false
+	if m.Source == basecamp.MatchedAPI && resourceID != "" {
+		if getOp, hasGet := m.Operations["GET"]; hasGet {
+			isCollection = strings.HasPrefix(getOp, "List")
+		} else {
+			// No GET operation (e.g. POST-only CreateCardColumn) — a collection route.
+			isCollection = true
+		}
+	}
+
 	return &Parsed{
-		AccountID:   m.AccountID,
-		ProjectID:   m.ProjectID,
-		Type:        m.PathType,
-		RecordingID: m.ResourceID(),
-		CommentID:   m.CommentID,
+		AccountID:      m.AccountID,
+		ProjectID:      m.ProjectID,
+		Type:           pathType,
+		RecordingID:    resourceID,
+		CommentID:      m.CommentID,
+		IsCollection:   isCollection,
+		OccurrenceDate: occurrenceDate,
 	}
 }
 

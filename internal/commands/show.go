@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,10 +22,15 @@ func NewShowCmd() *cobra.Command {
 		Short: "Show any item by ID or URL",
 		Long: `Show details of any Basecamp item by ID or URL.
 
-Types: todo, todolist, message, comment, card, card-table, document,
-       schedule-entry, checkin, forward, upload
+Common types: todo, todolist, message, comment, card, card-table,
+  document, schedule-entry, checkin, forward, upload, vault, chat,
+  line, people, boosts
+
+Also accepts URL path types directly (e.g. inbox_forwards,
+question_answers, card_tables, columns, steps, todosets).
 
 If no type specified, uses generic lookup.
+URLs with #__recording_ fragments resolve the referenced recording.
 
 You can also pass a Basecamp URL directly:
   basecamp show https://3.basecamp.com/123/buckets/456/todos/789
@@ -45,12 +51,60 @@ You can also pass a Basecamp URL directly:
 				id = args[1]
 			}
 
+			// Capture whether the user performed an untyped lookup before
+			// URL parsing can modify recordType. Fragment URLs intentionally
+			// clear recordType, so checking after parsing would misclassify
+			// them as untyped. This drives the 204 error message: untyped
+			// lookups get a "type required" hint, typed ones get "not found".
+			untypedLookup := recordType == "" || recordType == "recording" || recordType == "recordings"
+
 			// Check if the id is a URL and extract components
+			var occurrenceDate string
 			if parsed := urlarg.Parse(id); parsed != nil {
-				id = parsed.RecordingID
-				// Auto-detect type from URL if not specified
-				if recordType == "" && parsed.Type != "" {
-					recordType = parsed.Type
+				if parsed.CommentID != "" {
+					// Fragment URL (#__recording_N) — resolve the referenced
+					// recording directly instead of the parent resource.
+					// Intentionally clears recordType even if --type was provided,
+					// because the fragment identifies the specific recording and
+					// its type will be auto-detected from the API response.
+					id = parsed.CommentID
+					recordType = ""
+					untypedLookup = false // user targeted a specific recording via fragment
+				} else if parsed.IsCollection {
+					// Collection URL (e.g. .../todosets/777/todolists) — the ID
+					// belongs to the parent container, not a child resource.
+					return output.ErrUsageHint(
+						"This URL points to a list, not an individual item",
+						"Paste the URL of a specific item from this list to show it",
+					)
+				} else if parsed.RecordingID != "" {
+					id = parsed.RecordingID
+					// Auto-detect type from URL if not specified
+					if recordType == "" && parsed.Type != "" {
+						recordType = parsed.Type
+						untypedLookup = false // URL carries the type
+					}
+					occurrenceDate = parsed.OccurrenceDate
+				} else if parsed.ProjectID != "" && parsed.Type == "project" {
+					// Project URL — redirect to "projects show"
+					return output.ErrUsageHint(
+						"Use 'projects show' for project URLs",
+						fmt.Sprintf("basecamp projects show %s", parsed.ProjectID),
+					)
+				} else if parsed.Type != "" && parsed.RecordingID == "" && parsed.ProjectID != "" {
+					// Type-level URL (e.g. .../todolists, .../messages) — structural
+					// match with no specific item ID.
+					return output.ErrUsageHint(
+						"This URL points to a list, not an individual item",
+						"Paste the URL of a specific item from this list to show it",
+					)
+				} else {
+					// URL was recognized but has no recording ID (e.g. circle URLs
+					// which represent people groups, not viewable items).
+					return output.ErrUsageHint(
+						"This URL type cannot be shown",
+						"Try pasting the URL of a specific item instead",
+					)
 				}
 			}
 
@@ -58,7 +112,9 @@ You can also pass a Basecamp URL directly:
 			if !isValidRecordType(recordType) {
 				return output.ErrUsageHint(
 					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
+					"Supported types: todo, todolist, message, comment, card, card-table, "+
+						"document, schedule-entry, checkin, forward, upload, vault, chat, "+
+						"line, replies, people, boosts, or any Basecamp URL",
 				)
 			}
 
@@ -66,8 +122,13 @@ You can also pass a Basecamp URL directly:
 				return err
 			}
 
-			// Determine endpoint based on type
-			var endpoint string
+			// Determine endpoint based on type. Types without a dedicated
+			// shortcut endpoint go through /recordings/ and need a refetch
+			// to get full content.
+			var (
+				endpoint     string
+				needsRefetch bool
+			)
 			switch recordType {
 			case "todo", "todos":
 				endpoint = fmt.Sprintf("/todos/%s.json", id)
@@ -79,26 +140,64 @@ You can also pass a Basecamp URL directly:
 				endpoint = fmt.Sprintf("/comments/%s.json", id)
 			case "card", "cards":
 				endpoint = fmt.Sprintf("/card_tables/cards/%s.json", id)
-			case "card-table", "card_table", "cardtable":
+			case "card-table", "card_table", "cardtable", "card_tables":
 				endpoint = fmt.Sprintf("/card_tables/%s.json", id)
 			case "document", "documents":
 				endpoint = fmt.Sprintf("/documents/%s.json", id)
-			case "schedule-entry", "schedule_entry":
-				endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
-			case "checkin", "check-in", "check_in":
+			case "schedule-entry", "schedule_entry", "schedule_entries":
+				if occurrenceDate != "" {
+					endpoint = fmt.Sprintf("/schedule_entries/%s/occurrences/%s.json", id, occurrenceDate)
+				} else {
+					endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
+				}
+			case "checkin", "check-in", "check_in", "questions":
 				endpoint = fmt.Sprintf("/questions/%s.json", id)
-			case "forward", "forwards":
+			case "question_answers":
+				endpoint = fmt.Sprintf("/question_answers/%s.json", id)
+			case "forward", "forwards", "inbox_forwards":
 				endpoint = fmt.Sprintf("/forwards/%s.json", id)
 			case "upload", "uploads":
 				endpoint = fmt.Sprintf("/uploads/%s.json", id)
-			case "", "recording", "recordings":
-				// Generic recording lookup
+			case "vault", "vaults":
+				endpoint = fmt.Sprintf("/vaults/%s.json", id)
+			case "chat", "chats", "campfire", "campfires":
+				endpoint = fmt.Sprintf("/chats/%s.json", id)
+			case "people":
+				endpoint = fmt.Sprintf("/people/%s.json", id)
+			case "boosts":
+				endpoint = fmt.Sprintf("/boosts/%s.json", id)
+			case "columns":
+				endpoint = fmt.Sprintf("/card_tables/columns/%s.json", id)
+			case "steps":
+				endpoint = fmt.Sprintf("/card_tables/steps/%s.json", id)
+			case "todosets":
+				endpoint = fmt.Sprintf("/todosets/%s.json", id)
+			case "message_boards":
+				endpoint = fmt.Sprintf("/message_boards/%s.json", id)
+			case "schedules":
+				endpoint = fmt.Sprintf("/schedules/%s.json", id)
+			case "questionnaires":
+				endpoint = fmt.Sprintf("/questionnaires/%s.json", id)
+			case "inboxes":
+				endpoint = fmt.Sprintf("/inboxes/%s.json", id)
+			case "line", "lines":
+				// Lines require a parent chat ID for the dedicated endpoint
+				// (/chats/{id}/lines/{id}), which we don't have from a plain
+				// "show line 123" invocation. Use generic recording lookup.
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
+				needsRefetch = true
+			case "replies":
+				// Replies require a parent forward ID for the dedicated endpoint
+				// (/inbox_forwards/{id}/replies/{id}), which we don't have from
+				// a plain "show replies 123" invocation. Use generic recording lookup.
+				endpoint = fmt.Sprintf("/recordings/%s.json", id)
+				needsRefetch = true
+			case "", "recording", "recordings":
+				endpoint = fmt.Sprintf("/recordings/%s.json", id)
+				needsRefetch = true
 			default:
-				return output.ErrUsageHint(
-					fmt.Sprintf("Unknown type: %s", recordType),
-					"Supported: todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, forward, upload",
-				)
+				// isValidRecordType guards against this; unreachable in practice.
+				return fmt.Errorf("internal: unhandled record type %q", recordType)
 			}
 
 			resp, err := app.Account().Get(cmd.Context(), endpoint)
@@ -108,7 +207,7 @@ You can also pass a Basecamp URL directly:
 
 			// Check for empty response (204 No Content)
 			if resp.StatusCode == http.StatusNoContent {
-				if recordType == "" || recordType == "recording" || recordType == "recordings" {
+				if untypedLookup {
 					return output.ErrUsageHint(
 						fmt.Sprintf("Item %s not found or type required", id),
 						"Specify a type: basecamp show todo|todolist|message|comment|card|document <id>",
@@ -127,7 +226,7 @@ You can also pass a Basecamp URL directly:
 			// endpoint to get full content (the /recordings/ endpoint returns
 			// sparse data). The endpoint is derived from the response's type
 			// field — never from the url field, which could point off-origin.
-			if recordType == "" || recordType == "recording" || recordType == "recordings" {
+			if needsRefetch {
 				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
 					if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {
@@ -173,7 +272,7 @@ You can also pass a Basecamp URL directly:
 		},
 	}
 
-	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (todo, todolist, message, comment, card, card-table, document)")
+	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
 
 	return cmd
 }
@@ -185,6 +284,16 @@ You can also pass a Basecamp URL directly:
 // causing the caller to fall through to sparse recording data (no regression).
 func recordingTypeEndpoint(data map[string]any, id string) string {
 	t, _ := data["type"].(string)
+
+	// Chat lines have multiple subtypes (Chat::Lines::Text, Chat::Lines::Attachment, …).
+	// They require the parent chat ID for the dedicated endpoint.
+	if strings.HasPrefix(t, "Chat::Lines::") {
+		if parentID := parentRecordingID(data); parentID != "" {
+			return fmt.Sprintf("/chats/%s/lines/%s.json", parentID, id)
+		}
+		return ""
+	}
+
 	switch t {
 	case "Todo", "Todolist::Todo":
 		return fmt.Sprintf("/todos/%s.json", id)
@@ -208,19 +317,62 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return fmt.Sprintf("/forwards/%s.json", id)
 	case "Upload":
 		return fmt.Sprintf("/uploads/%s.json", id)
+	case "Vault":
+		return fmt.Sprintf("/vaults/%s.json", id)
+	case "Chat::Transcript":
+		return fmt.Sprintf("/chats/%s.json", id)
+	case "Todoset":
+		return fmt.Sprintf("/todosets/%s.json", id)
+	case "Message::Board":
+		return fmt.Sprintf("/message_boards/%s.json", id)
+	case "Schedule":
+		return fmt.Sprintf("/schedules/%s.json", id)
+	case "Questionnaire":
+		return fmt.Sprintf("/questionnaires/%s.json", id)
+	case "Inbox":
+		return fmt.Sprintf("/inboxes/%s.json", id)
+	case "Kanban::Column":
+		return fmt.Sprintf("/card_tables/columns/%s.json", id)
+	case "Kanban::Step":
+		return fmt.Sprintf("/card_tables/steps/%s.json", id)
+	case "Inbox::Forward::Reply":
+		if parentID := parentRecordingID(data); parentID != "" {
+			return fmt.Sprintf("/inbox_forwards/%s/replies/%s.json", parentID, id)
+		}
+		return ""
 	default:
 		return ""
 	}
+}
+
+// parentRecordingID extracts the parent recording's ID from the "parent"
+// object in a recording response. Returns "" if absent.
+func parentRecordingID(data map[string]any) string {
+	parent, ok := data["parent"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	// JSON-decoded numbers are float64.
+	if id, ok := parent["id"].(float64); ok {
+		return fmt.Sprintf("%.0f", id)
+	}
+	return ""
 }
 
 // isValidRecordType checks if the given type is a valid recording type.
 func isValidRecordType(t string) bool {
 	switch t {
 	case "", "todo", "todos", "todolist", "todolists", "message", "messages",
-		"comment", "comments", "card", "cards", "card-table", "card_table",
-		"cardtable", "document", "documents", "recording", "recordings",
-		"schedule-entry", "schedule_entry", "checkin", "check-in", "check_in",
-		"forward", "forwards", "upload", "uploads":
+		"comment", "comments", "card", "cards",
+		"card-table", "card_table", "cardtable", "card_tables",
+		"document", "documents", "recording", "recordings",
+		"schedule-entry", "schedule_entry", "schedule_entries",
+		"checkin", "check-in", "check_in", "questions", "question_answers",
+		"forward", "forwards", "inbox_forwards", "upload", "uploads",
+		"vault", "vaults", "chat", "chats", "campfire", "campfires",
+		"line", "lines", "replies", "columns", "steps",
+		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
+		"people", "boosts":
 		return true
 	default:
 		return false

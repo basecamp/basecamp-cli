@@ -12,6 +12,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewScheduleCmd creates the schedule command for managing schedules.
@@ -273,9 +274,23 @@ You can pass either an entry ID or a Basecamp URL:
 }
 
 func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project, occurrenceDate string) error {
-	// Extract ID and project from URL if provided
-	extractedID, urlProjectID := extractWithProject(entryID)
-	entryID = extractedID
+	// Extract ID, project, and occurrence date from URL if provided.
+	// Uses Parse directly (instead of extractWithProject) to access the
+	// occurrence date that the URL encodes.
+	var urlProjectID string
+	if parsed := urlarg.Parse(entryID); parsed != nil {
+		if parsed.RecordingID == "" {
+			return output.ErrUsageHint(
+				"This URL does not point to a schedule entry",
+				"Paste a schedule entry URL or pass an entry ID",
+			)
+		}
+		entryID = parsed.RecordingID
+		urlProjectID = parsed.ProjectID
+		if occurrenceDate == "" {
+			occurrenceDate = parsed.OccurrenceDate
+		}
+	}
 
 	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
