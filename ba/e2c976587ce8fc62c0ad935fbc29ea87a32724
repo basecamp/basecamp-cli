@@ -1,0 +1,27 @@
+internal/commands/hillcharts_test.go
+  2f05206cbaf8e6f5 1-368
+e2e/hillcharts.bats
+  2f05206cbaf8e6f5 30-38
+internal/commands/hillcharts.go
+  2f05206cbaf8e6f5 71-85,88,104-106,114,121,129,134,192-206,209,261,268,274-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "bae2c976587ce8fc62c0ad935fbc29ea87a32724",
+  "prompts": {
+    "2f05206cbaf8e6f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4a2e755f-7f77-4648-800c-c7793a43fe27",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 459,
+      "overriden_lines": 0
+    }
+  }
+}
