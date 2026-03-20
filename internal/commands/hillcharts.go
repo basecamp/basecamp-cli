@@ -288,7 +288,10 @@ func validateTodosetOwnership(cmd *cobra.Command, app *appctx.App, todosetID, re
 	if err != nil {
 		return convertSDKError(err)
 	}
-	projectNum, _ := strconv.ParseInt(resolvedProjectID, 10, 64)
+	projectNum, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("Invalid project ID: %s", resolvedProjectID))
+	}
 	if todoset.Bucket == nil || todoset.Bucket.ID != projectNum {
 		bucketID := int64(0)
 		if todoset.Bucket != nil {
