@@ -6,11 +6,11 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 37 | 137 |
+| ✅ Implemented | 38 | 139 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **41** | **149** |
+| **Total (docs)** | **42** | **151** |
 
-**100% coverage of in-scope API** (137/137 endpoints)
+**100% coverage of in-scope API** (139/139 endpoints)
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
@@ -26,6 +26,8 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | todolists | 8 | `todolists` | ✅ | - | list, show, create, update |
 | todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
+| **Hill Charts** |
+| hill_charts | 2 | `hillcharts` | ✅ | - | show, track/untrack todolists |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
 | message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
