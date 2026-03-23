@@ -548,10 +548,15 @@ func TestRefreshAllInstalledSkills_SkipsProjectRelativePaths(t *testing.T) {
 	version.Version = "5.0.0"
 	defer func() { version.Version = origVersion }()
 
-	// Create project-relative skill file in cwd
+	// Use a temp dir as working directory to avoid polluting the repo
+	projectDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(projectDir))
+	defer os.Chdir(origDir) //nolint:errcheck // cleanup
+
+	// Create project-relative skill file in the temp working directory
 	require.NoError(t, os.MkdirAll(filepath.Join(".claude", "skills", "basecamp"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(".claude", "skills", "basecamp", "SKILL.md"), []byte("project"), 0o644))
-	defer os.RemoveAll(".claude") //nolint:errcheck // cleanup
 
 	// Install baseline so refresh returns true
 	baseline := filepath.Join(home, ".agents", "skills", "basecamp")

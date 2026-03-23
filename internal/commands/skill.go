@@ -351,17 +351,14 @@ func RefreshSkillsIfVersionChanged() bool {
 	return refreshed
 }
 
-// refreshAllInstalledSkills overwrites the skill file at every known location
-// where it was previously installed. Project-relative paths are skipped because
-// there is no reliable project root in the post-run hook. Returns true if at
-// least one file was updated.
 func refreshAllInstalledSkills() bool {
 	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
 	if err != nil {
 		return false
 	}
 
-	refreshed := false
+	updated := 0
+	failed := 0
 	for _, loc := range skillLocations {
 		// Skip project-relative paths — no reliable project root in PostRunE.
 		if !strings.HasPrefix(loc.Path, "~") && !filepath.IsAbs(loc.Path) {
@@ -374,17 +371,21 @@ func refreshAllInstalledSkills() bool {
 		}
 
 		if writeErr := os.WriteFile(expanded, embedded, 0o644); writeErr == nil { //nolint:gosec // G306: Skill files are not secrets
-			refreshed = true
+			updated++
+		} else {
+			failed++
 		}
 	}
 
-	// Stamp installed version in the baseline directory.
-	if home, err := os.UserHomeDir(); err == nil {
-		baselineDir := filepath.Join(home, ".agents", "skills", "basecamp")
-		_ = os.WriteFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+	// Stamp installed version in the baseline directory only on full success.
+	if failed == 0 && updated > 0 {
+		if home, err := os.UserHomeDir(); err == nil {
+			baselineDir := filepath.Join(home, ".agents", "skills", "basecamp")
+			_ = os.WriteFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+		}
 	}
 
-	return refreshed
+	return updated > 0 && failed == 0
 }
 
 // repairClaudeSkillLink repairs a broken symlink at ~/.claude/skills/basecamp.
