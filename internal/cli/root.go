@@ -175,8 +175,8 @@ func NewRootCmd() *cobra.Command {
 			}
 		}
 
-		// Ambient update notice — only for interactive TTY sessions
-		if updateCheck != nil {
+		// Ambient update notice — only for interactive TTY sessions, skip after upgrade
+		if updateCheck != nil && cmd.Name() != "upgrade" {
 			if notice := updateCheck.Notice(); notice != "" {
 				if app != nil && app.IsInteractive() && !app.IsMachineOutput() {
 					fmt.Fprintln(os.Stderr, notice)
