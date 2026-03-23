@@ -203,7 +203,7 @@ func CheckClaudePluginVersion() *StatusCheck {
 	return &StatusCheck{
 		Name:    "Claude Code Plugin Version",
 		Status:  "warn",
-		Message: fmt.Sprintf("Outdated (plugin %s, CLI %s)", installed, cliVersion),
+		Message: fmt.Sprintf("Mismatched (plugin %s, CLI %s)", installed, cliVersion),
 		Hint:    AutoUpdateHint,
 	}
 }
@@ -223,7 +223,7 @@ func InstalledPluginVersion() string {
 }
 
 // installedPluginVersion extracts the version of the basecamp plugin from
-// the installed_plugins.json data. Handles v2 and array formats.
+// the installed_plugins.json data. Handles v2, v1 flat map, and array formats.
 func installedPluginVersion(data []byte) string {
 	// v2 format: {"version": 2, "plugins": {"basecamp@37signals": [{"version": "1.0.0", ...}]}}
 	var pluginMap map[string]any
@@ -234,13 +234,27 @@ func installedPluginVersion(data []byte) string {
 					if !matchesPluginKey(key) {
 						continue
 					}
-					if arr, ok := val.([]any); ok && len(arr) > 0 {
-						if obj, ok := arr[0].(map[string]any); ok {
-							if v, ok := obj["version"].(string); ok {
-								return v
+					if arr, ok := val.([]any); ok {
+						for _, entry := range arr {
+							if obj, ok := entry.(map[string]any); ok {
+								if v, ok := obj["version"].(string); ok {
+									return v
+								}
 							}
 						}
 					}
+				}
+			}
+		}
+
+		// v1 flat map: {"basecamp@37signals": {"version": "1.0.0"}}
+		for key, val := range pluginMap {
+			if !matchesPluginKey(key) {
+				continue
+			}
+			if obj, ok := val.(map[string]any); ok {
+				if v, ok := obj["version"].(string); ok {
+					return v
 				}
 			}
 		}

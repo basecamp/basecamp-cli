@@ -251,6 +251,11 @@ func TestInstalledPluginVersion_Array_NotFound(t *testing.T) {
 	assert.Equal(t, "", installedPluginVersion(data))
 }
 
+func TestInstalledPluginVersion_V1FlatMap(t *testing.T) {
+	data := []byte(`{"basecamp@37signals":{"version":"1.0.0"}}`)
+	assert.Equal(t, "1.0.0", installedPluginVersion(data))
+}
+
 func TestInstalledPluginVersion_Empty(t *testing.T) {
 	assert.Equal(t, "", installedPluginVersion([]byte(`{}`)))
 	assert.Equal(t, "", installedPluginVersion([]byte(`[]`)))

@@ -166,7 +166,7 @@ func NewRootCmd() *cobra.Command {
 
 				// One-time hint: if plugin is outdated after a CLI upgrade, nudge the user
 				if pv := harness.InstalledPluginVersion(); pv != "" && pv != version.Version && !version.IsDev() {
-					fmt.Fprintf(os.Stderr, "Basecamp plugin outdated (plugin %s, CLI %s) — %s\n", pv, version.Version, harness.AutoUpdateHint)
+					fmt.Fprintf(os.Stderr, "Basecamp plugin version mismatch (plugin %s, CLI %s) — %s\n", pv, version.Version, harness.AutoUpdateHint)
 				}
 			}
 		}

@@ -131,10 +131,12 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Claude skill symlink failed: %s", err)))
 	}
 
-	// Nudge: recommend enabling auto-update for the marketplace
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, styles.Muted.Render("  Tip: Enable auto-update to stay current with new CLI releases:"))
-	fmt.Fprintln(w, styles.Muted.Render("  "+harness.AutoUpdateHint))
+	// Nudge: recommend enabling auto-update (only when plugin is actually installed)
+	if harness.CheckClaudePlugin().Status == "pass" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, styles.Muted.Render("  Tip: Enable auto-update to stay current with new CLI releases:"))
+		fmt.Fprintln(w, styles.Muted.Render("  "+harness.AutoUpdateHint))
+	}
 
 	return nil
 }
