@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 func TestPluginInstalled_ArrayFormat(t *testing.T) {
@@ -222,4 +224,109 @@ func TestIsStalePluginKey(t *testing.T) {
 	assert.False(t, isStalePluginKey("basecamp@37signals"))
 	assert.False(t, isStalePluginKey("basecamp"))
 	assert.False(t, isStalePluginKey("other@basecamp"))
+}
+
+func TestInstalledPluginVersion_V2(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"1.2.3"}]}}`)
+	assert.Equal(t, "1.2.3", installedPluginVersion(data))
+}
+
+func TestInstalledPluginVersion_V2_BareKey(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp":[{"scope":"user","version":"0.5.0"}]}}`)
+	assert.Equal(t, "0.5.0", installedPluginVersion(data))
+}
+
+func TestInstalledPluginVersion_V2_NotFound(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"other@marketplace":[{"scope":"user","version":"1.0.0"}]}}`)
+	assert.Equal(t, "", installedPluginVersion(data))
+}
+
+func TestInstalledPluginVersion_Array(t *testing.T) {
+	data := []byte(`[{"name":"basecamp@37signals","version":"2.0.0"}]`)
+	assert.Equal(t, "2.0.0", installedPluginVersion(data))
+}
+
+func TestInstalledPluginVersion_Array_NotFound(t *testing.T) {
+	data := []byte(`[{"name":"other-plugin","version":"1.0.0"}]`)
+	assert.Equal(t, "", installedPluginVersion(data))
+}
+
+func TestInstalledPluginVersion_Empty(t *testing.T) {
+	assert.Equal(t, "", installedPluginVersion([]byte(`{}`)))
+	assert.Equal(t, "", installedPluginVersion([]byte(`[]`)))
+	assert.Equal(t, "", installedPluginVersion([]byte(`invalid`)))
+}
+
+func TestCheckClaudePluginVersion_UpToDate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origVersion := version.Version
+	version.Version = "1.5.0"
+	defer func() { version.Version = origVersion }()
+
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginsDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"1.5.0"}]}}`),
+		0o644,
+	))
+
+	check := CheckClaudePluginVersion()
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "1.5.0")
+}
+
+func TestCheckClaudePluginVersion_Outdated(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origVersion := version.Version
+	version.Version = "2.0.0"
+	defer func() { version.Version = origVersion }()
+
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginsDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
+		0o644,
+	))
+
+	check := CheckClaudePluginVersion()
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "0.1.0")
+	assert.Contains(t, check.Message, "2.0.0")
+	assert.Contains(t, check.Hint, "auto-update")
+}
+
+func TestCheckClaudePluginVersion_DevBuild(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origVersion := version.Version
+	version.Version = "dev"
+	defer func() { version.Version = origVersion }()
+
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginsDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
+		0o644,
+	))
+
+	check := CheckClaudePluginVersion()
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "dev build")
+}
+
+func TestCheckClaudePluginVersion_NoFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	check := CheckClaudePluginVersion()
+	assert.Equal(t, "pass", check.Status)
+	assert.Contains(t, check.Message, "not tracked")
 }
