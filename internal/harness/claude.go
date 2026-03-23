@@ -17,12 +17,11 @@ func init() {
 		Detect: DetectClaude,
 		Checks: func() []*StatusCheck {
 			checks := []*StatusCheck{CheckClaudePlugin()}
-			// Only check the skill link and plugin version if ~/.claude exists
+			// Only check the skill link if ~/.claude exists (i.e. Claude is dir-detected)
 			home, err := os.UserHomeDir()
 			if err == nil {
 				if info, statErr := os.Stat(filepath.Join(home, ".claude")); statErr == nil && info.IsDir() {
 					checks = append(checks, CheckClaudeSkillLink())
-					checks = append(checks, CheckClaudePluginVersion())
 				}
 			}
 			return checks
