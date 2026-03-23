@@ -14,6 +14,15 @@ import (
 // checkInterval is how often we query GitHub for the latest version.
 var checkInterval = 24 * time.Hour
 
+// stdoutIsTerminal reports whether stdout is a terminal. Extracted for testability.
+var stdoutIsTerminal = func() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
 // UpdateCheck holds state for a non-blocking version check.
 type UpdateCheck struct {
 	latest string
@@ -30,14 +39,22 @@ func StartUpdateCheck() *UpdateCheck {
 		return nil
 	}
 
+	// Skip for non-interactive sessions — no point fetching if we won't display
+	if !stdoutIsTerminal() {
+		return nil
+	}
+
 	uc := &UpdateCheck{done: make(chan struct{})}
 	cached := readUpdateCache()
 
-	if cached != nil && time.Since(cached.CheckedAt) < checkInterval {
-		// Cache is fresh — use it directly, no goroutine needed
-		uc.latest = cached.LatestVersion
-		close(uc.done)
-		return uc
+	if cached != nil {
+		age := time.Since(cached.CheckedAt)
+		if age >= 0 && age < checkInterval {
+			// Cache is fresh — use it directly, no goroutine needed
+			uc.latest = cached.LatestVersion
+			close(uc.done)
+			return uc
+		}
 	}
 
 	// Cache is stale or missing — fetch in the background

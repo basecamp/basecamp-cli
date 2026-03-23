@@ -33,6 +33,19 @@ func TestStartUpdateCheck_SkipsWhenEnvSet(t *testing.T) {
 	assert.Nil(t, uc)
 }
 
+func TestStartUpdateCheck_SkipsNonInteractive(t *testing.T) {
+	origVersion := version.Version
+	version.Version = "1.0.0"
+	defer func() { version.Version = origVersion }()
+
+	origTTY := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return false }
+	defer func() { stdoutIsTerminal = origTTY }()
+
+	uc := StartUpdateCheck()
+	assert.Nil(t, uc)
+}
+
 func TestStartUpdateCheck_UsesFreshCache(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configDir)
@@ -40,6 +53,10 @@ func TestStartUpdateCheck_UsesFreshCache(t *testing.T) {
 	origVersion := version.Version
 	version.Version = "1.0.0"
 	defer func() { version.Version = origVersion }()
+
+	origTTY := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return true }
+	defer func() { stdoutIsTerminal = origTTY }()
 
 	// Write a fresh cache entry
 	cache := updateCache{
@@ -68,6 +85,10 @@ func TestStartUpdateCheck_CacheHitSameVersion(t *testing.T) {
 	version.Version = "1.0.0"
 	defer func() { version.Version = origVersion }()
 
+	origTTY := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return true }
+	defer func() { stdoutIsTerminal = origTTY }()
+
 	cache := updateCache{
 		LatestVersion: "1.0.0",
 		CheckedAt:     time.Now().UTC(),
@@ -90,6 +111,10 @@ func TestStartUpdateCheck_StaleCacheFetchesInBackground(t *testing.T) {
 	origVersion := version.Version
 	version.Version = "1.0.0"
 	defer func() { version.Version = origVersion }()
+
+	origTTY := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return true }
+	defer func() { stdoutIsTerminal = origTTY }()
 
 	origChecker := versionChecker
 	versionChecker = func() (string, error) { return "3.0.0", nil }
@@ -127,6 +152,10 @@ func TestStartUpdateCheck_NoCacheFetchesInBackground(t *testing.T) {
 	origVersion := version.Version
 	version.Version = "1.0.0"
 	defer func() { version.Version = origVersion }()
+
+	origTTY := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return true }
+	defer func() { stdoutIsTerminal = origTTY }()
 
 	origChecker := versionChecker
 	versionChecker = func() (string, error) { return "1.5.0", nil }
