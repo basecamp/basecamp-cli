@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v jq &>/dev/null; then
+if ! command -v jq >/dev/null; then
   echo "Error: jq is required but not found. Install with your package manager." >&2
   exit 1
 fi
