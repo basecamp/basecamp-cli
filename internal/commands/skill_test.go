@@ -576,7 +576,7 @@ func TestRepairClaudeSkillLink_BrokenSymlink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Create ~/.claude so DetectClaude returns true
+	// Ensure ~/.claude/skills exists so the symlink can be placed there
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755))
 
 	// Create baseline skill

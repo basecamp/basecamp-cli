@@ -367,7 +367,10 @@ func refreshAllInstalledSkills() bool {
 
 		expanded := expandSkillPath(loc.Path)
 		if _, statErr := os.Stat(expanded); statErr != nil {
-			continue // not installed at this location
+			if !os.IsNotExist(statErr) {
+				failed++ // permission or IO error on a known location
+			}
+			continue
 		}
 
 		if writeErr := os.WriteFile(expanded, embedded, 0o644); writeErr == nil { //nolint:gosec // G306: Skill files are not secrets
