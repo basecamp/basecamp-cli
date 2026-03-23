@@ -22,6 +22,8 @@ Run this in your terminal:
 curl -fsSL https://basecamp.com/install-cli | bash
 ```
 
+> **Note:** The install script auto-detects non-interactive environments (CI, piped input, coding agents) and skips the interactive setup wizard. You can also explicitly skip it with `BASECAMP_SKIP_SETUP=1`.
+
 Alternatively install manually:
 
 ### Option A: Homebrew (macOS/Linux) — Recommended

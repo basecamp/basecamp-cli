@@ -5,8 +5,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 #
 # Options (via environment):
-#   BASECAMP_BIN_DIR  Where to install binary (default: ~/.local/bin)
-#   BASECAMP_VERSION  Specific version to install (default: latest)
+#   BASECAMP_BIN_DIR    Where to install binary (default: ~/.local/bin)
+#   BASECAMP_VERSION    Specific version to install (default: latest)
+#   BASECAMP_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
 
 set -euo pipefail
 
@@ -328,7 +329,30 @@ main() {
   verify_install "$platform"
 
   echo ""
-  "$BIN_DIR/$binary_name" setup
+
+  # Run interactive setup wizard only when stdin is a TTY and not explicitly skipped.
+  # Non-interactive environments (CI, piped input, coding agents like Claude Code)
+  # get the agent skill installed and next-step instructions instead — the wizard
+  # requires interactive prompts that don't work without a terminal.
+  if [[ "${BASECAMP_SKIP_SETUP:-}" == "1" ]]; then
+    step "Skipping setup wizard (BASECAMP_SKIP_SETUP=1)"
+    "$BIN_DIR/$binary_name" setup claude 2>/dev/null || true
+    echo ""
+    echo "  Next steps:"
+    echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
+    echo "    $(bold "basecamp setup")             Run interactive setup wizard"
+    echo ""
+  elif [[ -t 0 ]] && [[ -t 1 ]]; then
+    "$BIN_DIR/$binary_name" setup
+  else
+    info "Skipping interactive setup (no terminal detected)."
+    "$BIN_DIR/$binary_name" setup claude 2>/dev/null || true
+    echo ""
+    echo "  Next steps:"
+    echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
+    echo "    $(bold "basecamp setup")             Run interactive setup wizard"
+    echo ""
+  fi
 }
 
 main "$@"
