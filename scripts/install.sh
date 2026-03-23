@@ -336,7 +336,7 @@ main() {
   # requires interactive prompts that don't work without a terminal.
   if [[ "${BASECAMP_SKIP_SETUP:-}" == "1" ]]; then
     step "Skipping setup wizard (BASECAMP_SKIP_SETUP=1)"
-    "$BIN_DIR/$binary_name" setup claude 2>/dev/null || true
+    "$BIN_DIR/$binary_name" setup claude || true
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
@@ -346,7 +346,7 @@ main() {
     "$BIN_DIR/$binary_name" setup
   else
     info "Skipping interactive setup (no terminal detected)."
-    "$BIN_DIR/$binary_name" setup claude 2>/dev/null || true
+    "$BIN_DIR/$binary_name" setup claude || true
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
