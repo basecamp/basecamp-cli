@@ -211,7 +211,7 @@ func CheckClaudePluginVersion() *StatusCheck {
 // ~/.claude/plugins/installed_plugins.json. Returns "" if unreadable.
 func InstalledPluginVersion() string {
 	home, err := os.UserHomeDir()
-	if err != nil {
+	if err != nil || home == "" {
 		return ""
 	}
 	data, err := os.ReadFile(filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
