@@ -550,7 +550,8 @@ func TestRefreshAllInstalledSkills_SkipsProjectRelativePaths(t *testing.T) {
 
 	// Use a temp dir as working directory to avoid polluting the repo
 	projectDir := t.TempDir()
-	origDir, _ := os.Getwd()
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
 	require.NoError(t, os.Chdir(projectDir))
 	defer os.Chdir(origDir) //nolint:errcheck // cleanup
 
