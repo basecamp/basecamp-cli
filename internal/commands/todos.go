@@ -1640,17 +1640,25 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 }
 
 func newTodosPositionCmd() *cobra.Command {
-	var position int
+	var (
+		position int
+		list     string
+	)
 
 	cmd := &cobra.Command{
 		Use:     "position <id|url>",
 		Aliases: []string{"move", "reorder"},
-		Short:   "Change todo position",
-		Long: `Reorder a todo within its todolist. Position is 1-based (1 = top).
+		Short:   "Change todo position or move between lists",
+		Long: `Reorder a todo within its todolist, or move it to a different list in the
+same project. Position is 1-based (1 = top).
 
 You can pass either a todo ID or a Basecamp URL:
   basecamp todos position 789 --to 1
-  basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
+  basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1
+
+Move to a different todolist in the same project:
+  basecamp todos position 789 --to 1 --list 321
+  basecamp todos position <todo-url> --to 1 --list <todolist-url>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>")
@@ -1669,21 +1677,44 @@ You can pass either a todo ID or a Basecamp URL:
 				return output.ErrUsage("--to is required (1 = top)")
 			}
 
-			// Extract ID from URL if provided
-			todoIDStr := extractID(args[0])
+			// Extract todo ID and project from URL if provided
+			todoIDStr, todoProjectID := extractWithProject(args[0])
 
 			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position, nil)
+			// Resolve destination todolist when --list is provided
+			var parentID *int64
+			if list != "" {
+				listIDStr, listProjectID := extractWithProject(list)
+
+				// Cross-project moves are not supported by the reposition endpoint
+				if todoProjectID != "" && listProjectID != "" && todoProjectID != listProjectID {
+					return output.ErrUsage("Cannot move a todo to a list in a different project. " +
+						"Cross-project moves are not yet supported.")
+				}
+
+				listID, parseErr := strconv.ParseInt(listIDStr, 10, 64)
+				if parseErr != nil {
+					return output.ErrUsage("Invalid todolist ID")
+				}
+				parentID = &listID
+			}
+
+			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position, parentID)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
+			summary := fmt.Sprintf("Moved todo #%d to position %d", todoID, position)
+			if parentID != nil {
+				summary = fmt.Sprintf("Moved todo #%d to list #%d at position %d", todoID, *parentID, position)
+			}
+
 			return app.OK(map[string]any{"repositioned": true, "position": position},
-				output.WithSummary(fmt.Sprintf("Moved todo #%d to position %d", todoID, position)),
+				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -1697,6 +1728,7 @@ You can pass either a todo ID or a Basecamp URL:
 
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
+	cmd.Flags().StringVarP(&list, "list", "l", "", "Destination todolist ID or URL (move to a different list)")
 
 	return cmd
 }

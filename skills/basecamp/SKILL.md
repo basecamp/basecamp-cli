@@ -373,6 +373,7 @@ basecamp unassign <id> [id...] --card --from <person> --in <project> # Remove ca
 basecamp assign <id> [id...] --step --to <person> --in <project>   # Assign card step
 basecamp unassign <id> [id...] --step --from <person> --in <project> # Remove step assignee
 basecamp todos position <id> --to 1                     # Move to top
+basecamp todos position <id> --to 1 --list <list>       # Move to different list
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 ```
 
