@@ -947,10 +947,8 @@ func (t *mockCardMoveTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return nil, errors.New("unexpected request")
 }
 
-// TestCardsMovePositionPayload verifies the CLI sends the intended request contract
-// (source_id=card, target_id=column, position) to /card_tables/{id}/moves.json.
-// This proves the CLI wiring is correct; it does not prove the BC3 API accepts
-// card-as-source on this endpoint — that requires manual/integration validation.
+// TestCardsMovePositionPayload verifies the CLI sends the SDK move-card contract
+// (column_id + position) to /card_tables/cards/{id}/moves.json.
 func TestCardsMovePositionPayload(t *testing.T) {
 	transport := &mockCardMoveTransport{}
 	app, _ := newTestAppWithTransport(t, transport)
@@ -962,19 +960,18 @@ func TestCardsMovePositionPayload(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--to", "Done", "--position", "1")
 	require.NoError(t, err)
 
-	// Verify URL path hits the card_tables moves endpoint
-	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+	// Verify URL path hits the cards move endpoint
+	assert.Contains(t, transport.capturedPath, "/card_tables/cards/456/moves.json")
 
 	// Verify payload shape
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
-	assert.Equal(t, float64(456), body["source_id"])
-	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(777), body["column_id"])
 	assert.Equal(t, float64(1), body["position"])
 }
 
-// TestCardsMovePositionPosAlias verifies that --pos triggers the same
-// positioned-move contract as --position.
+// TestCardsMovePositionPosAlias verifies that --pos triggers the same payload
+// contract as --position.
 func TestCardsMovePositionPosAlias(t *testing.T) {
 	transport := &mockCardMoveTransport{}
 	app, _ := newTestAppWithTransport(t, transport)
@@ -986,36 +983,32 @@ func TestCardsMovePositionPosAlias(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--to", "Done", "--pos", "2")
 	require.NoError(t, err)
 
-	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+	assert.Contains(t, transport.capturedPath, "/card_tables/cards/456/moves.json")
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
-	assert.Equal(t, float64(456), body["source_id"])
-	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(777), body["column_id"])
 	assert.Equal(t, float64(2), body["position"])
 }
 
-// TestCardsMovePositionNumericToSingleTableAutoResolves verifies that a
-// positioned move with numeric --to and no --card-table auto-resolves
-// the card table when the project has exactly one.
-func TestCardsMovePositionNumericToSingleTableAutoResolves(t *testing.T) {
+// TestCardsMovePositionNumericToColumnID verifies that the SDK move endpoint
+// accepts a numeric destination column directly with position.
+func TestCardsMovePositionNumericToColumnID(t *testing.T) {
 	transport := &mockCardMoveTransport{}
 	app, _ := newTestAppWithTransport(t, transport)
 
 	project := ""
-	cardTable := "" // no --card-table
+	cardTable := ""
 	cmd := newCardsMoveCmd(&project, &cardTable)
 
 	err := executeCommand(cmd, app, "456", "--to", "777", "--position", "1")
 	require.NoError(t, err)
 
-	// Should auto-resolve to card table 555 (single table in mock dock)
-	assert.Contains(t, transport.capturedPath, "/card_tables/555/moves.json")
+	assert.Contains(t, transport.capturedPath, "/card_tables/cards/456/moves.json")
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
-	assert.Equal(t, float64(456), body["source_id"])
-	assert.Equal(t, float64(777), body["target_id"])
+	assert.Equal(t, float64(777), body["column_id"])
 	assert.Equal(t, float64(1), body["position"])
 }
 

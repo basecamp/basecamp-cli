@@ -773,19 +773,11 @@ You can pass either a card ID or a Basecamp URL:
 				}
 			}
 
+			var moveOpts *basecamp.MoveCardOptions
 			if positionSet && position > 0 {
-				cardTableIDInt, parseErr := strconv.ParseInt(cardTableIDVal, 10, 64)
-				if parseErr != nil {
-					return output.ErrUsage("Invalid card table ID")
-				}
-				err = app.Account().CardColumns().Move(cmd.Context(), cardTableIDInt, &basecamp.MoveColumnRequest{
-					SourceID: cardID,
-					TargetID: columnID,
-					Position: position,
-				})
-			} else {
-				err = app.Account().Cards().Move(cmd.Context(), cardID, columnID)
+				moveOpts = &basecamp.MoveCardOptions{Position: int32(position)}
 			}
+			err = app.Account().Cards().Move(cmd.Context(), cardID, columnID, moveOpts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -895,7 +887,7 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 		)
 	}
 
-	err := app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID)
+	err := app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
