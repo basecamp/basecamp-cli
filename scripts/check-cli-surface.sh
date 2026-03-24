@@ -13,6 +13,10 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+# Capture root persistent flags once — these are available on every subcommand
+# but --help --agent only reports them on the root command itself.
+ROOT_FLAGS=$("$BINARY" --help --agent 2>/dev/null | jq -c '[.flags // [] | .[] | {name, type}]')
+
 walk_commands() {
   local cmd_path="$1"
   local json
@@ -36,12 +40,13 @@ walk_commands() {
   fi
   rm -f "$stderr_file"
 
-  # Emit: every record carries the full command path to stay unique after sort
-  echo "$json" | jq -r --arg path "$cmd_path" '
+  # Emit: every record carries the full command path to stay unique after sort.
+  # Merge direct flags, inherited flags, and root persistent flags, then deduplicate.
+  echo "$json" | jq -r --arg path "$cmd_path" --argjson root "$ROOT_FLAGS" '
     "CMD \($path)",
     ((.args // []) | to_entries | .[] |
       "ARG \($path) \(.key | tostring | if length < 2 then "0" + . else . end) \(if .value.required then "<" else "[" end)\(.value.name)\(if .value.required then ">" else "]" end)\(if .value.variadic then "..." else "" end)"),
-    ((.flags // []) | sort_by(.name) | .[] |
+    (((.flags // []) + (.inherited_flags // []) + $root | group_by(.name) | map(.[0]) | sort_by(.name)) | .[] |
       "FLAG \($path) --\(.name) type=\(.type)"),
     ((.subcommands // []) | sort_by(.name) | .[] |
       "SUB \($path) \(.name)")
