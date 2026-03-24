@@ -43,6 +43,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "publish", "pin", "unpin", "trash", "archive", "restore"}},
 				{Name: "chat", Category: "core", Description: "Chat in real-time", Actions: []string{"list", "messages", "post", "upload", "line", "delete"}},
 				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "columns", "steps", "trash", "archive", "restore"}},
+				{Name: "gauges", Category: "core", Description: "Manage project gauges", Actions: []string{"list", "needles", "show", "create", "update", "delete", "enable", "disable"}},
 			},
 		},
 		{
