@@ -321,6 +321,11 @@ Options:
 				}
 			}
 
+			// If all operations failed, return an error for automation
+			if downloaded == 0 && failed > 0 {
+				return fmt.Errorf("all %d download(s) failed: %s", failed, strings.Join(errors, "; "))
+			}
+
 			parts := []string{fmt.Sprintf("%d downloaded", downloaded)}
 			if skipped > 0 {
 				parts = append(parts, fmt.Sprintf("%d skipped", skipped))
