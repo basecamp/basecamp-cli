@@ -728,3 +728,5 @@ FLAG basecamp chat list --chat type=string
 FLAG basecamp chat messages --chat type=string
 FLAG basecamp chat post --chat type=string
 FLAG basecamp chat upload --chat type=string
+FLAG basecamp recordings --assignee type=string
+FLAG basecamp recordings list --assignee type=string
