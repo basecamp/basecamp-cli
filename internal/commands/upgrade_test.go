@@ -86,6 +86,22 @@ func TestUpgradeAvailable(t *testing.T) {
 	assert.Contains(t, appBuf.String(), "releases/tag/v1.3.0")
 }
 
+func TestUpgradeSuppressesOlderLatestRelease(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "0.4.1-0.20260313174735-243815fa23b2"
+	t.Cleanup(func() { version.Version = orig })
+
+	stubUpgradeCheckers(t, "0.4.0", false)
+
+	cmdOut, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.Contains(t, cmdOut, "already up to date")
+	assert.Contains(t, appBuf.String(), "up_to_date")
+	assert.NotContains(t, cmdOut, "update available")
+}
+
 // TestUpgradeOutputGoesToWriter verifies output uses cmd.OutOrStdout(), not os.Stdout.
 func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	app, _ := setupPeopleTestApp(t)

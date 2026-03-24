@@ -55,7 +55,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not check for updates: %w", err)
 	}
 
-	if latest == current {
+	if !isUpdateAvailable(current, latest) {
 		fmt.Fprintln(w, "already up to date")
 		return app.OK(
 			map[string]string{"status": "up_to_date", "version": current},

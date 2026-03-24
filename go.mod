@@ -20,6 +20,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/zalando/go-keyring v0.2.7
+	golang.org/x/mod v0.34.0
 	golang.org/x/sys v0.42.0
 	golang.org/x/text v0.35.0
 	gopkg.in/yaml.v3 v3.0.1

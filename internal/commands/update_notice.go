@@ -85,7 +85,7 @@ func (uc *UpdateCheck) Notice() string {
 		return ""
 	}
 
-	if uc.latest == "" || uc.latest == version.Version {
+	if !isUpdateAvailable(version.Version, uc.latest) {
 		return ""
 	}
 

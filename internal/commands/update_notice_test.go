@@ -185,6 +185,20 @@ func TestNotice_NonBlocking(t *testing.T) {
 	assert.Equal(t, "", uc.Notice())
 }
 
+func TestNotice_SuppressesOlderLatestVersion(t *testing.T) {
+	origVersion := version.Version
+	version.Version = "0.4.1-0.20260313174735-243815fa23b2"
+	defer func() { version.Version = origVersion }()
+
+	uc := &UpdateCheck{
+		latest: "0.4.0",
+		done:   make(chan struct{}),
+	}
+	close(uc.done)
+
+	assert.Equal(t, "", uc.Notice())
+}
+
 func TestUpdateCacheRoundTrip(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configDir)

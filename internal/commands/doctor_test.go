@@ -116,6 +116,21 @@ func TestCheckVersion(t *testing.T) {
 	assert.Contains(t, checkVerbose.Message, "commit")
 }
 
+func TestCheckVersionSuppressesOlderLatestRelease(t *testing.T) {
+	origVersion := version.Version
+	version.Version = "0.4.1-0.20260313174735-243815fa23b2"
+	defer func() { version.Version = origVersion }()
+
+	origChecker := versionChecker
+	versionChecker = func() (string, error) { return "0.4.0", nil }
+	defer func() { versionChecker = origChecker }()
+
+	check := checkVersion(false)
+	assert.Equal(t, "pass", check.Status)
+	assert.Equal(t, "0.4.1-0.20260313174735-243815fa23b2", check.Message)
+	assert.Empty(t, check.Hint)
+}
+
 func TestCheckSDKProvenance(t *testing.T) {
 	// Non-verbose: shows version string (works for both pseudo-versions and semver)
 	check := checkSDKProvenance(false)

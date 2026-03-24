@@ -252,8 +252,8 @@ func checkVersion(verbose bool) Check {
 	check.Message = v
 
 	// Try to check for latest version (non-blocking, best effort)
-	latest, err := fetchLatestVersion()
-	if err == nil && latest != "" && latest != v {
+	latest, err := versionChecker()
+	if err == nil && isUpdateAvailable(v, latest) {
 		check.Status = "warn"
 		check.Message = fmt.Sprintf("%s (update available: %s)", v, latest)
 		check.Hint = "Run: basecamp upgrade"
