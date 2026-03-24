@@ -371,7 +371,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 
 	// If todolist is specified, list todos in that list
 	if todolist != "" {
-		return listTodosInList(cmd, app, project, todolist, flags.status, flags.limit, flags.all, flags.sortField, flags.reverse)
+		return listTodosInList(cmd, app, project, todolist, flags.assignee, flags.status, flags.limit, flags.all, flags.sortField, flags.reverse)
 	}
 
 	// --page is not meaningful when aggregating across todolists
@@ -489,7 +489,7 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	return result, totalCount, nil
 }
 
-func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, status string, limit int, all bool, sortField string, reverse bool) error {
+func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, assignee, status string, limit int, all bool, sortField string, reverse bool) error {
 	resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 	if err != nil {
 		return err
@@ -505,8 +505,10 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 
 	// Determine the SDK limit to pass through. fetchTodosIncludingGroups
 	// uses this for the no-groups fast path and for cross-list aggregation.
+	// When assignee filtering is active, fetch all so client-side filtering
+	// doesn't miss matches beyond the default cap.
 	sdkLimit := 0 // SDK default
-	if all {
+	if all || assignee != "" {
 		sdkLimit = -1
 	} else if limit > 0 {
 		sdkLimit = limit
@@ -522,6 +524,34 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, sta
 	todos, totalCount, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, sdkStatus, sdkLimit, true)
 	if err != nil {
 		return convertSDKError(err)
+	}
+
+	// Filter by assignee client-side (API has no server-side assignee filter)
+	if assignee != "" {
+		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
+		if err != nil {
+			return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
+		}
+		assigneeID, _ := strconv.ParseInt(resolvedID, 10, 64)
+		if assigneeID != 0 {
+			filtered := todos[:0]
+			for _, todo := range todos {
+				for _, a := range todo.Assignees {
+					if a.ID == assigneeID {
+						filtered = append(filtered, todo)
+						break
+					}
+				}
+			}
+			todos = filtered
+			totalCount = len(todos)
+		}
+	}
+
+	// Apply --limit after client-side filtering so the cap reflects
+	// the filtered set, not the pre-filter fetch.
+	if assignee != "" && !all && limit > 0 && len(todos) > limit {
+		todos = todos[:limit]
 	}
 
 	// Apply client-side sort when requested (field already validated in runTodosList)
