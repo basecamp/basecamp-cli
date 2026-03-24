@@ -83,6 +83,11 @@ func TestMarkdownToHTML(t *testing.T) {
 			expected: "<ol>\n<li><strong>Item</strong> - <a href=\"url\">Link</a> (time)  <br>\nDescription here</li>\n<li><strong>Next</strong> - <a href=\"url\">Link</a></li>\n</ol>",
 		},
 		{
+			name:     "list followed by blank line then paragraph",
+			input:    "- Item 1\n- Item 2\n\nFollowing paragraph.",
+			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<br>\n<p>Following paragraph.</p>",
+		},
+		{
 			name:     "blockquote",
 			input:    "> This is a quote",
 			expected: "<blockquote>This is a quote</blockquote>",

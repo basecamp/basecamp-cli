@@ -248,8 +248,9 @@ func MarkdownToHTML(md string) string {
 		// Empty line - handle differently based on context
 		if strings.TrimSpace(line) == "" {
 			if inList {
-				// In a list: empty lines between items create spacing but don't break the list
-				// We'll track this for later when we render the list
+				// In a list: empty lines between items create spacing but don't break the list.
+				// Record pending break so content after the list gets proper separation.
+				pendingBreak = true
 				continue
 			}
 			// Not in a list: flush paragraph and record break
