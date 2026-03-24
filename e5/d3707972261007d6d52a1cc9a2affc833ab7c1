@@ -1,0 +1,25 @@
+internal/commands/todos.go
+  95d6e38edda520a4 527-554,965-967,978-983,989-1005,1021-1022,1042-1049,1051,1053-1062,1064-1076,1078-1116,1118-1123,1125,1128-1169,1198-1200
+internal/commands/todos_test.go
+  95d6e38edda520a4 1368,1371,1521-1560,1562-1748,1751-1753,1758,1762-1769,1772-1863,1865-1875,1877-1908,1911,1915-1918
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "e5d3707972261007d6d52a1cc9a2affc833ab7c1",
+  "prompts": {
+    "95d6e38edda520a4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7cfd900-4ed9-410a-96dc-2858012c12fd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 111,
+      "total_deletions": 56,
+      "accepted_lines": 560,
+      "overriden_lines": 0
+    }
+  }
+}
