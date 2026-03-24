@@ -714,76 +714,6 @@ func TestEmbedAttachmentsEmpty(t *testing.T) {
 	}
 }
 
-func TestExtractAttachments(t *testing.T) {
-	tests := []struct {
-		name string
-		html string
-		want []InlineAttachment
-	}{
-		{
-			name: "empty input",
-			html: "",
-			want: nil,
-		},
-		{
-			name: "no attachments",
-			html: "<p>Hello world</p>",
-			want: nil,
-		},
-		{
-			name: "mention excluded",
-			html: `<bc-attachment sgid="BAh7" content-type="application/vnd.basecamp.mention" href="https://example.com">@Alice</bc-attachment>`,
-			want: nil,
-		},
-		{
-			name: "attachment without href excluded",
-			html: `<bc-attachment sgid="BAh7" content-type="application/pdf" filename="report.pdf"></bc-attachment>`,
-			want: nil,
-		},
-		{
-			name: "single file attachment",
-			html: `<bc-attachment sgid="BAh7CEk" content-type="application/pdf" href="https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf" filename="report.pdf" filesize="12345"></bc-attachment>`,
-			want: []InlineAttachment{
-				{
-					Href:        "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf",
-					Filename:    "report.pdf",
-					Filesize:    "12345",
-					ContentType: "application/pdf",
-					SGID:        "BAh7CEk",
-				},
-			},
-		},
-		{
-			name: "multiple mixed: mention + file",
-			html: `<p>Hey <bc-attachment sgid="m1" content-type="application/vnd.basecamp.mention" href="https://example.com">@Alice</bc-attachment> see ` +
-				`<bc-attachment sgid="f1" content-type="message/rfc822" href="https://storage.3.basecamp.com/123/blobs/def/download/email.eml" filename="email.eml" filesize="9999"></bc-attachment></p>`,
-			want: []InlineAttachment{
-				{
-					Href:        "https://storage.3.basecamp.com/123/blobs/def/download/email.eml",
-					Filename:    "email.eml",
-					Filesize:    "9999",
-					ContentType: "message/rfc822",
-					SGID:        "f1",
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractAttachments(tt.html)
-			if len(got) != len(tt.want) {
-				t.Fatalf("ExtractAttachments() returned %d attachments, want %d", len(got), len(tt.want))
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("attachment[%d]\ngot:  %+v\nwant: %+v", i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}
-
 func TestHTMLToMarkdownBcAttachment(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1486,6 +1416,16 @@ func TestParseAttachments(t *testing.T) {
 			check: func(t *testing.T, atts []ParsedAttachment) {
 				if atts[0].Filename != "upper.png" {
 					t.Errorf("Filename = %q, want upper.png", atts[0].Filename)
+				}
+			},
+		},
+		{
+			name:     "filesize extracted",
+			html:     `<bc-attachment sgid="FS1" content-type="application/pdf" filename="report.pdf" filesize="12345" href="https://example.com/report.pdf"></bc-attachment>`,
+			expected: 1,
+			check: func(t *testing.T, atts []ParsedAttachment) {
+				if atts[0].Filesize != "12345" {
+					t.Errorf("Filesize = %q, want 12345", atts[0].Filesize)
 				}
 			},
 		},
