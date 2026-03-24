@@ -1,0 +1,25 @@
+internal/commands/chat.go
+  bfc0eb902bf2d550 256
+internal/commands/chat_test.go
+  bfc0eb902bf2d550 9,11,631-768,772-782
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "6ed6dd3a6ddf4ba429b93b9bcda0c475349ca714",
+  "prompts": {
+    "bfc0eb902bf2d550": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15688387-e63c-41f7-b786-df48efb044fd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 167,
+      "total_deletions": 64,
+      "accepted_lines": 152,
+      "overriden_lines": 0
+    }
+  }
+}
