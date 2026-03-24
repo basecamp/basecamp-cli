@@ -1602,6 +1602,40 @@ func TestTodosUpdateEmptyDueClearsField(t *testing.T) {
 	assert.False(t, exists, "due_on must be omitted when --due is empty")
 }
 
+func TestTodosUpdateEmptyStartsOnClearsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--starts-on", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["starts_on"]
+	assert.False(t, exists, "starts_on must be omitted when --starts-on is empty")
+}
+
+func TestTodosUpdateEmptyDescriptionClearsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--description", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["description"]
+	assert.False(t, exists, "description must be omitted when --description is empty")
+}
+
 func TestTodosUpdateConflictingNoDueAndDue(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 

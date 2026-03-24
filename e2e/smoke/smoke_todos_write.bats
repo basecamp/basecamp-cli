@@ -97,14 +97,18 @@ setup_file() {
 }
 
 @test "todos update preserves fields when updating title only" {
-  # Create a todo with description, due, and starts-on populated
+  # Create a todo with description and due populated.
+  # todos create lacks --starts-on, so set it via a follow-up update.
   run_smoke basecamp todos create "Field preservation test $(date +%s)" \
     --list "$QA_TODOLIST" -p "$QA_PROJECT" \
-    --due "2026-06-15" --starts-on "2026-06-01" \
+    --due "2026-06-15" \
     --description "Original description" --json
   assert_success
   local todo_id
   todo_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp todos update "$todo_id" --starts-on "2026-06-01" --json
+  assert_success
 
   # Update only the title via the SDK typed path (no --no-* flags)
   run_smoke basecamp todos update "$todo_id" --title "Renamed title" --json
@@ -117,21 +121,28 @@ setup_file() {
   assert_json_value '.data.content' 'Renamed title'
   assert_json_value '.data.due_on' '2026-06-15'
   assert_json_value '.data.starts_on' '2026-06-01'
-  assert_json_value '.data.description' 'Original description'
+  # Description is returned as HTML (<p>...</p>)
+  local desc
+  desc=$(echo "$output" | jq -r '.data.description')
+  [[ "$desc" == *"Original description"* ]] || { echo "description not preserved: $desc"; return 1; }
 
   # Clean up
   run_smoke basecamp todos trash "$todo_id" -p "$QA_PROJECT" --json
 }
 
 @test "todos update --no-due clears due and preserves other fields" {
-  # Create a todo with all clearable fields populated
+  # Create a todo with due and description populated.
+  # todos create lacks --starts-on, so set it via a follow-up update.
   run_smoke basecamp todos create "Clear test $(date +%s)" \
     --list "$QA_TODOLIST" -p "$QA_PROJECT" \
-    --due "2026-07-15" --starts-on "2026-07-01" \
+    --due "2026-07-15" \
     --description "Keep this" --json
   assert_success
   local todo_id
   todo_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp todos update "$todo_id" --starts-on "2026-07-01" --json
+  assert_success
 
   # Clear the due date (raw PUT path)
   run_smoke basecamp todos update "$todo_id" --no-due --json
@@ -154,7 +165,7 @@ setup_file() {
 
   [[ "$due_on" == "null" ]] || { echo "due_on not cleared: $due_on"; return 1; }
   [[ "$starts_on" == "null" ]] || { echo "starts_on not cleared: $starts_on"; return 1; }
-  [[ "$desc" == "Keep this" ]] || { echo "description not preserved: $desc"; return 1; }
+  [[ "$desc" == *"Keep this"* ]] || { echo "description not preserved: $desc"; return 1; }
 
   # Clean up
   run_smoke basecamp todos trash "$todo_id" -p "$QA_PROJECT" --json
