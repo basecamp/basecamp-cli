@@ -1417,23 +1417,7 @@ Use --out - to stream the file to stdout (for piping to other commands).`,
 				if err != nil {
 					return output.ErrUsage("Invalid upload ID")
 				}
-				projectID := urlProjectID
-				if projectID == "" {
-					projectID = *project
-				}
-				if projectID == "" {
-					projectID = app.Flags.Project
-				}
-				if projectID == "" {
-					projectID = app.Config.ProjectID
-				}
-				if projectID == "" {
-					if err := ensureProject(cmd, app); err != nil {
-						return err
-					}
-					projectID = app.Config.ProjectID
-				}
-				if _, _, err := app.Names.ResolveProject(cmd.Context(), projectID); err != nil {
+				if _, err := resolveDownloadProject(cmd, app, urlProjectID, *project); err != nil {
 					return err
 				}
 				result, err := app.Account().Uploads().Download(cmd.Context(), uploadID)
@@ -1483,25 +1467,7 @@ Use --out - to stream the file to stdout (for piping to other commands).`,
 				return output.ErrUsage("Invalid upload ID")
 			}
 
-			// Resolve project - URL > flag > config, with interactive fallback
-			projectID := urlProjectID
-			if projectID == "" {
-				projectID = *project
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveDownloadProject(cmd, app, urlProjectID, *project)
 			if err != nil {
 				return err
 			}
@@ -1612,6 +1578,33 @@ func writeDownloadToFile(result *basecamp.DownloadResult, outDir, fallbackName s
 		return "", "", 0, fmt.Errorf("failed to write file: %w", err)
 	}
 	return filename, outputPath, written, nil
+}
+
+// resolveDownloadProject resolves a project ID for file download commands
+// using the standard precedence: URL-extracted > --project flag > global flag
+// > config > interactive fallback. Returns the resolved project ID.
+func resolveDownloadProject(cmd *cobra.Command, app *appctx.App, urlProjectID, flagProject string) (string, error) {
+	projectID := urlProjectID
+	if projectID == "" {
+		projectID = flagProject
+	}
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return "", err
+		}
+		projectID = app.Config.ProjectID
+	}
+	resolved, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 // isStorageURL returns true if the argument looks like a Basecamp storage blob URL.

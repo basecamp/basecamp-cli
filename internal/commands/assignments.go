@@ -18,6 +18,7 @@ func NewAssignmentsCmd() *cobra.Command {
 
 Shows both priority and non-priority items. Use subcommands to filter
 by completion status or due date.`,
+		Args: cobra.NoArgs,
 		Annotations: map[string]string{
 			"agent_notes": "Account-wide — no --in <project> needed.\n" +
 				"Shows priorities and non-priorities.\n" +

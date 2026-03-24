@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -745,11 +746,22 @@ func TestShowPreservesNativeAttachmentsField(t *testing.T) {
 	err := cmd.Execute()
 	require.NoError(t, err)
 
-	out := buf.String()
-	// Native API field preserved
-	assert.Contains(t, out, "native-sgid")
-	assert.Contains(t, out, "native.pdf")
-	// Field-scoped collection added separately
-	assert.Contains(t, out, "content_attachments")
-	assert.Contains(t, out, "inline.png")
+	// Parse JSON envelope to inspect data keys directly
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	var data map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(envelope.Data, &data))
+
+	// Native "attachments" key preserved with original content
+	native, ok := data["attachments"]
+	require.True(t, ok, "native 'attachments' key should be preserved")
+	assert.Contains(t, string(native), "native-sgid")
+
+	// Field-scoped collection added under its own key
+	scoped, ok := data["content_attachments"]
+	require.True(t, ok, "content_attachments key should be present")
+	assert.Contains(t, string(scoped), "inline.png")
 }
