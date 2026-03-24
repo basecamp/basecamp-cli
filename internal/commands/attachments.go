@@ -259,18 +259,27 @@ Options:
 				allAttachments = []richtext.ParsedAttachment{selected}
 			}
 
-			// Filter by filename if specified (operates on full list for name matching)
+			// Filter by filename if specified. Match against the full list
+			// first so we can distinguish "name doesn't exist" from
+			// "name exists but has no download URL".
 			attachments := allAttachments
 			if filename != "" {
-				filtered := filterParsedAttachments(downloadableAttachments(attachments), filename)
-				if len(filtered) == 0 {
+				allMatches := filterParsedAttachments(attachments, filename)
+				if len(allMatches) == 0 {
 					names := parsedAttachmentFilenames(downloadableAttachments(attachments))
 					return output.ErrUsageHint(
 						fmt.Sprintf("No attachment matching %q", filename),
 						fmt.Sprintf("Available: %s", strings.Join(names, ", ")),
 					)
 				}
-				attachments = filtered
+				downloadable := downloadableAttachments(allMatches)
+				if len(downloadable) == 0 {
+					return output.ErrUsageHint(
+						fmt.Sprintf("Attachment %q has no download URL", filename),
+						"This attachment has metadata but no downloadable URL",
+					)
+				}
+				attachments = downloadable
 			}
 
 			// After filtering/selection, verify at least one attachment
@@ -878,7 +887,9 @@ func attachmentBreadcrumb(id string, n int) output.Breadcrumb {
 func addDownloadAttachmentsFlag(cmd *cobra.Command) *string {
 	var dir string
 	cmd.Flags().StringVar(&dir, "download-attachments", "", "Download attachments to `dir` (default: OS temp dir)")
-	cmd.Flags().Lookup("download-attachments").NoOptDefVal = ""
+	// NoOptDefVal must be non-empty for pflag to treat the value as optional.
+	// Use the OS temp dir so --download-attachments (bare) works as documented.
+	cmd.Flags().Lookup("download-attachments").NoOptDefVal = os.TempDir()
 	return &dir
 }
 
