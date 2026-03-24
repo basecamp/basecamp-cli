@@ -27,6 +27,7 @@ import (
 // NewRootCmd creates the root cobra command.
 func NewRootCmd() *cobra.Command {
 	var flags appctx.GlobalFlags
+	var updateCheck *commands.UpdateCheck
 
 	cmd := &cobra.Command{
 		Use:                        "basecamp",
@@ -42,6 +43,9 @@ func NewRootCmd() *cobra.Command {
 			if cmd.Name() == "help" || cmd.Name() == "version" {
 				return nil
 			}
+
+			// Start background update check early so it runs during command execution
+			updateCheck = commands.StartUpdateCheck()
 
 			// Bare root (no subcommand, no args) will show help or
 			// quickstart depending on mode. Tolerate config/profile
@@ -170,6 +174,17 @@ func NewRootCmd() *cobra.Command {
 				}
 			}
 		}
+
+		// Ambient update notice — only for interactive TTY sessions.
+		// Skip after upgrade (just acted on it) and doctor (has its own version check).
+		if updateCheck != nil && cmd.Name() != "upgrade" && cmd.Name() != "doctor" {
+			if notice := updateCheck.Notice(); notice != "" {
+				if app != nil && app.IsInteractive() && !app.IsMachineOutput() {
+					fmt.Fprintln(os.Stderr, notice)
+				}
+			}
+		}
+
 		return nil
 	}
 
