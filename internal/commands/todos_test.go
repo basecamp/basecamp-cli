@@ -1365,7 +1365,7 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header.Set("Content-Type", "application/json")
 
 	if req.Method == "GET" {
-		mockTodo := `{"id": 999, "title": "Test", "status": "active", "completed": false, "bucket": {"id": 456, "name": "Test Project", "type": "Project"}}`
+		mockTodo := `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}]}`
 		return &http.Response{
 			StatusCode: 200,
 			Body:       io.NopCloser(strings.NewReader(mockTodo)),
@@ -1519,7 +1519,7 @@ func TestTodosUpdateLocalImageErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing.png")
 }
 
-func TestTodosUpdateNoDueSendsNull(t *testing.T) {
+func TestTodosUpdateNoDueOmitsField(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1532,12 +1532,18 @@ func TestTodosUpdateNoDueSendsNull(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	val, exists := body["due_on"]
-	require.True(t, exists, "due_on key must be present")
-	assert.Nil(t, val, "due_on must be null")
+	_, exists := body["due_on"]
+	assert.False(t, exists, "due_on must be omitted to clear")
+
+	// Other fields preserved from existing todo
+	assert.Equal(t, "Test todo", body["content"])
+	assert.Equal(t, "Existing desc", body["description"])
+	// starts_on is also omitted when clearing due (Basecamp enforces starts <= due)
+	_, startsExists := body["starts_on"]
+	assert.False(t, startsExists, "starts_on must also be omitted when clearing due")
 }
 
-func TestTodosUpdateNoDescriptionSendsNull(t *testing.T) {
+func TestTodosUpdateNoDescriptionOmitsField(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1550,12 +1556,15 @@ func TestTodosUpdateNoDescriptionSendsNull(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	val, exists := body["description"]
-	require.True(t, exists, "description key must be present")
-	assert.Nil(t, val, "description must be null")
+	_, exists := body["description"]
+	assert.False(t, exists, "description must be omitted to clear")
+
+	// Other fields preserved
+	assert.Equal(t, "2026-04-01", body["due_on"])
+	assert.Equal(t, "2026-03-25", body["starts_on"])
 }
 
-func TestTodosUpdateNoStartsOnSendsNull(t *testing.T) {
+func TestTodosUpdateNoStartsOnOmitsField(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1568,9 +1577,12 @@ func TestTodosUpdateNoStartsOnSendsNull(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	val, exists := body["starts_on"]
-	require.True(t, exists, "starts_on key must be present")
-	assert.Nil(t, val, "starts_on must be null")
+	_, exists := body["starts_on"]
+	assert.False(t, exists, "starts_on must be omitted to clear")
+
+	// Other fields preserved
+	assert.Equal(t, "2026-04-01", body["due_on"])
+	assert.Equal(t, "Existing desc", body["description"])
 }
 
 func TestTodosUpdateEmptyDueClearsField(t *testing.T) {
@@ -1586,9 +1598,8 @@ func TestTodosUpdateEmptyDueClearsField(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	val, exists := body["due_on"]
-	require.True(t, exists, "due_on key must be present")
-	assert.Nil(t, val, "due_on must be null when --due is empty")
+	_, exists := body["due_on"]
+	assert.False(t, exists, "due_on must be omitted when --due is empty")
 }
 
 func TestTodosUpdateConflictingNoDueAndDue(t *testing.T) {
@@ -1631,13 +1642,31 @@ func TestTodosUpdateClearWithSetCombined(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	val, exists := body["due_on"]
-	require.True(t, exists, "due_on key must be present")
-	assert.Nil(t, val, "due_on must be null")
+	_, exists := body["due_on"]
+	assert.False(t, exists, "due_on must be omitted to clear")
 
-	content, ok := body["content"].(string)
-	require.True(t, ok)
-	assert.Equal(t, "New title", content)
+	assert.Equal(t, "New title", body["content"])
+	// Other fields preserved (except starts_on, cleared alongside due)
+	assert.Equal(t, "Existing desc", body["description"])
+}
+
+func TestTodosUpdateClearPreservesAssignees(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	ids, ok := body["assignee_ids"].([]any)
+	require.True(t, ok, "assignee_ids must be preserved")
+	require.Len(t, ids, 1)
+	assert.Equal(t, float64(42), ids[0])
 }
 
 // =============================================================================

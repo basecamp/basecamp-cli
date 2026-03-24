@@ -1042,55 +1042,81 @@ Clear a field by passing its --no- flag or an empty value:
 			var todo *basecamp.Todo
 
 			if needsClear {
-				// Clearing fields requires sending JSON null, which the SDK's
-				// typed UpdateTodoRequest cannot express (omitempty on value types).
-				// Use a raw PUT with nil map values, same pattern as the TUI (hub.go).
+				// The BC3 API clears fields by omission: include all fields you
+				// want to keep, omit those you want to clear. The SDK's typed
+				// UpdateTodoRequest always includes all fields, so we use a raw
+				// PUT with a hand-built body instead.
 				existingTodo, err := app.Account().Todos().Get(cmd.Context(), todoID)
 				if err != nil {
 					return convertSDKError(err)
 				}
+				if existingTodo.Bucket == nil {
+					return fmt.Errorf("todo %d has no associated project", todoID)
+				}
 
+				// Start with content (required). User-provided title overrides.
 				body := map[string]any{}
 				if effectiveTitle != "" {
 					body["content"] = effectiveTitle
+				} else {
+					body["content"] = existingTodo.Content
 				}
-				if clearDescription {
-					body["description"] = nil
-				} else if description != "" {
-					descHTML := richtext.MarkdownToHTML(description)
-					descHTML, err = resolveLocalImages(cmd, app, descHTML)
-					if err != nil {
-						return err
-					}
-					body["description"] = descHTML
-				}
-				if clearDue {
-					body["due_on"] = nil
-				} else if strings.TrimSpace(due) != "" {
-					if parsed := dateparse.Parse(due); parsed != "" {
-						body["due_on"] = parsed
-					}
-				}
-				if clearStarts {
-					body["starts_on"] = nil
-				} else if strings.TrimSpace(startsOn) != "" {
-					if parsed := dateparse.Parse(startsOn); parsed != "" {
-						body["starts_on"] = parsed
+
+				// Description: omit to clear, include new or existing to preserve.
+				if !clearDescription {
+					if description != "" {
+						descHTML := richtext.MarkdownToHTML(description)
+						descHTML, err = resolveLocalImages(cmd, app, descHTML)
+						if err != nil {
+							return err
+						}
+						body["description"] = descHTML
+					} else {
+						body["description"] = existingTodo.Description
 					}
 				}
+
+				// Due date: omit to clear, include new or existing to preserve.
+				// Clearing due also clears starts (Basecamp enforces starts <= due).
+				if !clearDue {
+					if strings.TrimSpace(due) != "" {
+						if parsed := dateparse.Parse(due); parsed != "" {
+							body["due_on"] = parsed
+						}
+					} else if existingTodo.DueOn != "" {
+						body["due_on"] = existingTodo.DueOn
+					}
+				}
+
+				// Start date: omit to clear, include new or existing to preserve.
+				// Also omitted when clearing due (see above).
+				if !clearStarts && !clearDue {
+					if strings.TrimSpace(startsOn) != "" {
+						if parsed := dateparse.Parse(startsOn); parsed != "" {
+							body["starts_on"] = parsed
+						}
+					} else if existingTodo.StartsOn != "" {
+						body["starts_on"] = existingTodo.StartsOn
+					}
+				}
+
+				// Assignees: preserve existing unless explicitly changed.
 				if assigneeChanged {
 					assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
 					if err != nil {
 						return err
 					}
 					body["assignee_ids"] = assigneeIDs
-				}
-				if cmd.Flags().Changed("notify") && notify {
-					body["notify"] = true
+				} else if len(existingTodo.Assignees) > 0 {
+					ids := make([]int64, len(existingTodo.Assignees))
+					for i, a := range existingTodo.Assignees {
+						ids[i] = a.ID
+					}
+					body["assignee_ids"] = ids
 				}
 
-				if existingTodo.Bucket == nil {
-					return fmt.Errorf("todo %d has no associated project", todoID)
+				if cmd.Flags().Changed("notify") && notify {
+					body["notify"] = true
 				}
 
 				path := fmt.Sprintf("/buckets/%d/todos/%d.json", existingTodo.Bucket.ID, todoID)
