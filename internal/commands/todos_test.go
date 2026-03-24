@@ -1765,4 +1765,3 @@ func TestTodosListInListAssigneeNoGroupsLimitAfterFilter(t *testing.T) {
 	require.Len(t, resp.Data, 1)
 	assert.Equal(t, int64(2), resp.Data[0].ID, "should be Alice's first match via no-groups path")
 }
-
