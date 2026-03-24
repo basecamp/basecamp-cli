@@ -962,6 +962,9 @@ func newTodosUpdateCmd() *cobra.Command {
 	var due string
 	var startsOn string
 	var notify bool
+	var noDue bool
+	var noStartsOn bool
+	var noDescription bool
 
 	cmd := &cobra.Command{
 		Use:   "update <id|url> [title]",
@@ -972,11 +975,33 @@ You can pass either a todo ID or a Basecamp URL:
   basecamp todos update 789 "New title"
   basecamp todos update 789 --title "New title"
   basecamp todos update 789 --due "next friday"
-  basecamp todos update https://3.basecamp.com/123/buckets/456/todos/789 --description "Details"`,
+  basecamp todos update https://3.basecamp.com/123/buckets/456/todos/789 --description "Details"
+
+Clear a field by passing its --no- flag or an empty value:
+  basecamp todos update 789 --no-due
+  basecamp todos update 789 --due ""
+  basecamp todos update 789 --no-description`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>")
 			}
+
+			// Conflict detection: --no-X and --X with a value are contradictory
+			if noDue && strings.TrimSpace(due) != "" {
+				return output.ErrUsage("--no-due and --due cannot be used together")
+			}
+			if noStartsOn && strings.TrimSpace(startsOn) != "" {
+				return output.ErrUsage("--no-starts-on and --starts-on cannot be used together")
+			}
+			if noDescription && strings.TrimSpace(description) != "" {
+				return output.ErrUsage("--no-description and --description cannot be used together")
+			}
+
+			// Detect clear intent: explicit --no-X flag or empty value via --X ""
+			clearDue := noDue || (cmd.Flags().Changed("due") && strings.TrimSpace(due) == "")
+			clearStarts := noStartsOn || (cmd.Flags().Changed("starts-on") && strings.TrimSpace(startsOn) == "")
+			clearDescription := noDescription || (cmd.Flags().Changed("description") && strings.TrimSpace(description) == "")
+			needsClear := clearDue || clearStarts || clearDescription
 
 			// Positional title: args[1:] joined
 			positionalTitle := strings.Join(args[1:], " ")
@@ -993,7 +1018,8 @@ You can pass either a todo ID or a Basecamp URL:
 				strings.TrimSpace(description) == "" &&
 				strings.TrimSpace(due) == "" && strings.TrimSpace(startsOn) == "" &&
 				!assigneeChanged &&
-				(!cmd.Flags().Changed("notify") || !notify) {
+				(!cmd.Flags().Changed("notify") || !notify) &&
+				!needsClear {
 				return noChanges(cmd)
 			}
 
@@ -1013,42 +1039,104 @@ You can pass either a todo ID or a Basecamp URL:
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			req := &basecamp.UpdateTodoRequest{}
-			if effectiveTitle != "" {
-				req.Content = effectiveTitle
-			}
-			if description != "" {
-				descHTML := richtext.MarkdownToHTML(description)
-				descHTML, err = resolveLocalImages(cmd, app, descHTML)
-				if err != nil {
-					return err
-				}
-				req.Description = descHTML
-			}
-			if strings.TrimSpace(due) != "" {
-				if parsed := dateparse.Parse(due); parsed != "" {
-					req.DueOn = parsed
-				}
-			}
-			if strings.TrimSpace(startsOn) != "" {
-				if parsed := dateparse.Parse(startsOn); parsed != "" {
-					req.StartsOn = parsed
-				}
-			}
-			if assigneeChanged {
-				assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
-				if err != nil {
-					return err
-				}
-				req.AssigneeIDs = assigneeIDs
-			}
-			if cmd.Flags().Changed("notify") && notify {
-				req.Notify = true
-			}
+			var todo *basecamp.Todo
 
-			todo, err := app.Account().Todos().Update(cmd.Context(), todoID, req)
-			if err != nil {
-				return convertSDKError(err)
+			if needsClear {
+				// Clearing fields requires sending JSON null, which the SDK's
+				// typed UpdateTodoRequest cannot express (omitempty on value types).
+				// Use a raw PUT with nil map values, same pattern as the TUI (hub.go).
+				existingTodo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+
+				body := map[string]any{}
+				if effectiveTitle != "" {
+					body["content"] = effectiveTitle
+				}
+				if clearDescription {
+					body["description"] = nil
+				} else if description != "" {
+					descHTML := richtext.MarkdownToHTML(description)
+					descHTML, err = resolveLocalImages(cmd, app, descHTML)
+					if err != nil {
+						return err
+					}
+					body["description"] = descHTML
+				}
+				if clearDue {
+					body["due_on"] = nil
+				} else if strings.TrimSpace(due) != "" {
+					if parsed := dateparse.Parse(due); parsed != "" {
+						body["due_on"] = parsed
+					}
+				}
+				if clearStarts {
+					body["starts_on"] = nil
+				} else if strings.TrimSpace(startsOn) != "" {
+					if parsed := dateparse.Parse(startsOn); parsed != "" {
+						body["starts_on"] = parsed
+					}
+				}
+				if assigneeChanged {
+					assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
+					if err != nil {
+						return err
+					}
+					body["assignee_ids"] = assigneeIDs
+				}
+				if cmd.Flags().Changed("notify") && notify {
+					body["notify"] = true
+				}
+
+				path := fmt.Sprintf("/buckets/%d/todos/%d.json", existingTodo.Bucket.ID, todoID)
+				_, err = app.Account().Put(cmd.Context(), path, body)
+				if err != nil {
+					return convertSDKError(err)
+				}
+
+				todo, err = app.Account().Todos().Get(cmd.Context(), todoID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+			} else {
+				req := &basecamp.UpdateTodoRequest{}
+				if effectiveTitle != "" {
+					req.Content = effectiveTitle
+				}
+				if description != "" {
+					descHTML := richtext.MarkdownToHTML(description)
+					descHTML, err = resolveLocalImages(cmd, app, descHTML)
+					if err != nil {
+						return err
+					}
+					req.Description = descHTML
+				}
+				if strings.TrimSpace(due) != "" {
+					if parsed := dateparse.Parse(due); parsed != "" {
+						req.DueOn = parsed
+					}
+				}
+				if strings.TrimSpace(startsOn) != "" {
+					if parsed := dateparse.Parse(startsOn); parsed != "" {
+						req.StartsOn = parsed
+					}
+				}
+				if assigneeChanged {
+					assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
+					if err != nil {
+						return err
+					}
+					req.AssigneeIDs = assigneeIDs
+				}
+				if cmd.Flags().Changed("notify") && notify {
+					req.Notify = true
+				}
+
+				todo, err = app.Account().Todos().Update(cmd.Context(), todoID, req)
+				if err != nil {
+					return convertSDKError(err)
+				}
 			}
 
 			return app.OK(todo,
@@ -1077,6 +1165,9 @@ You can pass either a todo ID or a Basecamp URL:
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&startsOn, "starts-on", "", "Start date (natural language or YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify assignees")
+	cmd.Flags().BoolVar(&noDue, "no-due", false, "Clear the due date")
+	cmd.Flags().BoolVar(&noStartsOn, "no-starts-on", false, "Clear the start date")
+	cmd.Flags().BoolVar(&noDescription, "no-description", false, "Clear the description")
 
 	// Register tab completion for assignee flags
 	completer := completion.NewCompleter(nil)
