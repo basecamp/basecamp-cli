@@ -406,8 +406,12 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 		return "", output.ErrNotFound("item", id)
 	}
 
+	// UseNumber so parentRecordingID sees json.Number for large IDs
+	// (lines/replies need parent.id to build the refetch endpoint).
 	var data map[string]any
-	if err := json.Unmarshal(resp.Data, &data); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(resp.Data))
+	dec.UseNumber()
+	if err := dec.Decode(&data); err != nil {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -417,7 +421,9 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 			refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
 			if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {
 				var richer map[string]any
-				if json.Unmarshal(refetchResp.Data, &richer) == nil {
+				refetchDec := json.NewDecoder(bytes.NewReader(refetchResp.Data))
+				refetchDec.UseNumber()
+				if refetchDec.Decode(&richer) == nil {
 					data = richer
 				}
 			}

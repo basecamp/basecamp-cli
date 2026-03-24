@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
@@ -467,4 +470,42 @@ func TestWriteBodyToFile(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "path traversal")
 	})
+}
+
+// TestFetchItemContentRefetchesLineWithLargeParentID verifies that
+// fetchItemContent uses UseNumber when decoding the recording response,
+// so parentRecordingID can build the correct refetch endpoint even when
+// the parent ID exceeds 2^53.
+func TestFetchItemContentRefetchesLineWithLargeParentID(t *testing.T) {
+	largeID := "9007199254740993" // 2^53 + 1
+
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/") {
+				return 200, `{"id": 111, "type": "Chat::Lines::Text", "content": "sparse",` +
+					`"parent": {"id": ` + largeID + `, "type": "Chat::Transcript"}}`
+			}
+			if strings.Contains(path, "/chats/"+largeID+"/lines/111") {
+				return 200, `{"id": 111, "type": "Chat::Lines::Text",` +
+					`"content": "<p>Rich <bc-attachment url=\"https://example.com/a.png\" filename=\"a.png\"></bc-attachment></p>"}`
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+
+	cmd := NewAttachmentsCmd()
+	cmd.SetArgs([]string{"list", "111"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /chats/{largeParentId}/lines/")
+	assert.Contains(t, reqs[0], "/recordings/111.json")
+	assert.Contains(t, reqs[1], "/chats/"+largeID+"/lines/111.json")
 }
