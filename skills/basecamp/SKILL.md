@@ -466,10 +466,24 @@ basecamp message "Update" --attach ./doc.pdf --in <project>
 basecamp comment 123 "Here's the file" --attach <file> --in <project>
 ```
 
-**Image sources for scripting:** The Unsplash Source API is deprecated. Use `picsum.photos` instead:
+**Finding images for content:** Use Wikimedia Commons — free, no API key, returns semantically relevant results:
+
 ```bash
-curl -sL "https://picsum.photos/800/600?random=1" -o image.jpg
+# Search and download in one shot (replace QUERY with your search term)
+QUERY="mountain+landscape"
+THUMB_URL=$(curl -s "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${QUERY}&gsrnamespace=6&gsrlimit=1&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json" \
+  | python3 -c "import json,sys;d=json.loads(sys.stdin.read());[print(ii['thumburl']) for p in d.get('query',{}).get('pages',{}).values() for ii in p.get('imageinfo',[])][0]" 2>/dev/null)
+curl -sL "$THUMB_URL" -o image.jpg
+
+# Verify it's actually an image
+file image.jpg  # Should show "JPEG image data"
 ```
+
+**Tips:**
+- Use `gsrlimit=3` to get multiple results and pick the best one
+- Change `iiurlwidth=800` to control thumbnail size (original via `url` instead of `thumburl`)
+- Add `+` between search terms for multi-word queries (e.g., `sunset+beach`)
+- Small file sizes (under 1KB) usually indicate an error — re-check the URL
 
 ```bash
 basecamp files list --in <project> --json               # List all (folders, files, docs)
