@@ -201,7 +201,7 @@ Options:
   --out -         Stream a single file to stdout (requires single selection)
   --file <name>   Download only the named file
   --index <n>     Select attachment by 1-based index (disambiguates duplicate names)
-  --type <type>   Recording type hint (todo, message, comment, card, document, upload, forward, schedule-entry, checkin, answer)`,
+  --type <type>   Recording type hint (todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload)`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -237,6 +237,9 @@ Options:
 			}
 
 			// Apply --index over the full set (matches list numbering)
+			if index < 0 {
+				return output.ErrUsage("--index must be a positive integer (1-based)")
+			}
 			if index > 0 {
 				if index > len(allAttachments) {
 					return output.ErrUsageHint(
@@ -334,7 +337,7 @@ Options:
 	cmd.Flags().StringVarP(&outDir, "out", "o", "", "Output directory (default: current directory), use - for stdout")
 	cmd.Flags().StringVar(&filename, "file", "", "Download only the named file")
 	cmd.Flags().IntVar(&index, "index", 0, "Select attachment by 1-based index")
-	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type hint (todo, message, comment, card, document, upload, forward, schedule-entry, checkin, answer)")
+	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type hint (todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload)")
 
 	return cmd
 }
@@ -604,7 +607,7 @@ func downloadParsedAttachments(ctx context.Context, app *appctx.App, attachments
 
 			dl, err := app.Account().DownloadURL(ctx, dlURL)
 			if err != nil {
-				results[i] = attachmentResult{URL: dlURL, Filename: fname, Error: err.Error()}
+				results[i] = attachmentResult{URL: dlURL, Filename: fname, Error: convertSDKError(err).Error()}
 				return
 			}
 			defer dl.Body.Close()

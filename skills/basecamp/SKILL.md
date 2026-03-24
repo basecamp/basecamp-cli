@@ -90,11 +90,6 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    - **`[@Name](person:ID)`** — one API call, resolves person ID to SGID via pingable set
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
-   
-   **Image support:** Most content types support inline images via the `--attach` flag:
-   - **Todos, cards, messages, comments, documents** — use `--attach <file>` to embed images that display inline
-   - Inline images in descriptions work when attached via `--attach`, not when referenced by URL
-   
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges.
 
@@ -180,7 +175,10 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |
 | Download file | `basecamp files download <id> --in <project>` |
+| Stream file to stdout | `basecamp files download <id> --out - --in <project>` |
 | Download inline attachment | `basecamp files download "https://storage.3.basecamp.com/.../download/report.pdf"` |
+| Download inline attachments | `basecamp attachments download <id> --out /tmp/` |
+| Stream attachment to stdout | `basecamp attachments download <id> --file <name> --out -` |
 | My assignments | `basecamp assignments --json` (priorities + non-priorities) |
 | Overdue assignments | `basecamp assignments due overdue --json` |
 | Completed assignments | `basecamp assignments completed --json` |
@@ -342,7 +340,31 @@ basecamp files download <upload_id> --in <project> --out ./downloads
 
 # Download inline attachment from a storage URL (no --in needed)
 basecamp files download "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf"
+
+# Stream to stdout (for piping)
+basecamp files download <upload_id> --out - --in <project>
 ```
+
+### Working with Inline Attachments
+
+Messages, todos, cards, and documents may contain inline images and file attachments.
+Show commands surface these as `inline_attachments` in the response data.
+
+```bash
+# Download all attachments from any recording
+basecamp attachments download <id|url> --out /tmp/attachments
+
+# Stream a single attachment to stdout (for piping)
+basecamp attachments download <id> --file mockup.png --out -
+
+# Select by index when names collide (1-based)
+basecamp attachments download <id> --index 2 --out -
+
+# For multimodal agents: read downloaded images with your file-read tool
+```
+
+When a show command response contains `inline_attachments`, follow up with
+`basecamp attachments download <id>` to pull the files for viewing.
 
 ## Resource Reference
 
@@ -465,46 +487,7 @@ basecamp comment <recording_id> "@Jane.Smith, looks good!" --in <project>  # Wit
 basecamp comments update <id> "Updated" --in <project>
 ```
 
-**Attaching files to comments:** Use `--attach <file>` to include images or files. The file is uploaded as an attachment to the comment (not listed in Files section).
-```bash
-basecamp comment 123 "Here's the image!" --attach ./photo.jpg --in <project>
-```
-
 ### Files & Documents
-
-**Files uploaded via `files uploads create` vs content attachments:**
-- `files uploads create` - Uploads to the project's Files section (permanent, browsable)
-- `todo --attach`, `card --attach`, `message --attach`, `comment --attach`, `doc --attach` - Attaches directly to content (not in Files section, only visible with that item)
-
-```bash
-# Upload to Files section
-basecamp files uploads create <file> --in <project> --json
-
-# Attach to todos, cards, messages, comments, or documents
-basecamp todo "Task" --attach ./file.pdf --in <project>
-basecamp card "Title" --attach ./image.jpg --in <project>
-basecamp message "Update" --attach ./doc.pdf --in <project>
-basecamp comment 123 "Here's the file" --attach <file> --in <project>
-```
-
-**Finding images for content:** Use Wikimedia Commons — free, no API key, returns semantically relevant results:
-
-```bash
-# Search and download in one shot (replace QUERY with your search term)
-QUERY="mountain+landscape"
-THUMB_URL=$(curl -s "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${QUERY}&gsrnamespace=6&gsrlimit=1&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json" \
-  | python3 -c "import json,sys;d=json.loads(sys.stdin.read());[print(ii['thumburl']) for p in d.get('query',{}).get('pages',{}).values() for ii in p.get('imageinfo',[])][0]" 2>/dev/null)
-curl -sL "$THUMB_URL" -o image.jpg
-
-# Verify it's actually an image
-file image.jpg  # Should show "JPEG image data"
-```
-
-**Tips:**
-- Use `gsrlimit=3` to get multiple results and pick the best one
-- Change `iiurlwidth=800` to control thumbnail size (original via `url` instead of `thumburl`)
-- Add `+` between search terms for multi-word queries (e.g., `sunset+beach`)
-- Small file sizes (under 1KB) usually indicate an error — re-check the URL
 
 ```bash
 basecamp files list --in <project> --json               # List all (folders, files, docs)
@@ -536,9 +519,7 @@ basecamp schedule show <id> --date 20240315       # Specific occurrence (recurri
 basecamp schedule create "Event" --starts-at "2024-03-15T09:00:00Z" --ends-at "2024-03-15T10:00:00Z" --in <project>
 basecamp schedule create "Meeting" --all-day --notify --participants 1,2,3 --in <project>
 basecamp schedule create "Sync" --starts-at "..." --ends-at "..." --no-subscribe --in <project>
-basecamp schedule create "Meeting with Attachment" --starts-at "..." --ends-at "..." --attach ./agenda.pdf --in <project>
 basecamp schedule update <id> --summary "New title" --starts-at "..."
-basecamp schedule update <id> --description "Updated with file" --attach ./updated.pdf --in <project>
 basecamp schedule settings --include-due --in <project>  # Include todos/cards due dates
 ```
 
@@ -713,8 +694,6 @@ basecamp chat --in <project> --json           # List chats
 basecamp chat messages --in <project> --json  # List messages
 basecamp chat post "Hello!" --in <project>
 basecamp chat post "@Jane.Smith, check this" --in <project>  # With @mention (auto text/html)
-basecamp chat post "Here's the file" --attach ./document.pdf --in <project>  # With attachment
-basecamp chat post "Screenshot" --attach ./image.png --in <project>  # Image attachment
 basecamp chat line <line_id> --in <project>   # Show line
 basecamp chat delete <line_id> --in <project> --force # Delete line (permanent, not trashable)
 ```
