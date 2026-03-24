@@ -1,0 +1,85 @@
+internal/richtext/richtext.go
+  57d6193e1685fb71 991,1025
+internal/richtext/richtext_test.go
+  57d6193e1685fb71 1423-1431
+internal/commands/show_test.go
+  642931d28818a3d7 678-715
+internal/commands/todos_test.go
+  642931d28818a3d7 127-130,137-138
+internal/commands/commands.go
+  57d6193e1685fb71 101
+e2e/smoke/smoke_communication.bats
+  642931d28818a3d7 137-138
+internal/commands/todos.go
+  642931d28818a3d7 787-789,791,793-795,797
+  57d6193e1685fb71 727-737,739-741,744-753,755,758-769,771-786,790,792,798-799
+internal/commands/attachments_test.go
+  57d6193e1685fb71 185,191-192,202,210-306,308-321,324-328,330,332-333
+  d2c1db4a78c0783d 19,127-137,420-421,428,433,438-439,445
+  642931d28818a3d7 4,186,194,198-199,207,470
+internal/commands/show.go
+  642931d28818a3d7 4,222-224,226-228,241-243,282-288,290-295,297-298,300-306,308-309,311,314-315,404-408,410-411
+  57d6193e1685fb71 21,296,299,310,312,324
+internal/commands/cards.go
+  57d6193e1685fb71 267,269,271-272,274-293,296-302,316,331
+  642931d28818a3d7 303-315,317-329
+internal/commands/files.go
+  57d6193e1685fb71 1000,1163,1165-1169,1189,1391
+  642931d28818a3d7 1170-1175,1177
+internal/commands/messages.go
+  642931d28818a3d7 235-241,243
+  57d6193e1685fb71 194,196-197,199-201,203-204,206-209,211-234,242,244-246,248,250
+skills/basecamp/SKILL.md
+  57d6193e1685fb71 165-167,173,321,328,330-331,334,336,338,341-342,344-347,349-350,352,354-356,358-365,368,506
+  642931d28818a3d7 332-333,339-340,348,372-375
+internal/commands/attachments.go
+  642931d28818a3d7 4,166-167,262,271-272,281-284,405,415,646,726,746,761-768,773-775,777,780
+  57d6193e1685fb71 14,29,32,191-192,264-267,269-270,277-279,285-286,291,307-308,310,313-319,323-326,331,588,595-598,604-605,610,613-630,632,636,644-645,647-648,656-659,663-664,668,676,748-758,784-787,790-792,805-823,825-835,850-878,880-901
+  d2c1db4a78c0783d 115,134-144,206,218-225,234-260,273-276,299-304,322,327-329,354,365-367,369-374,437,563-565,574-575,606,639,650,654,670,672-674,677,721-725
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "4fe66628e1f5d7b356516c17415b67dd1c3db3dc",
+  "prompts": {
+    "57d6193e1685fb71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ca92b76-2172-4b4b-bc45-0c20cd76b2c6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 486,
+      "overriden_lines": 0
+    },
+    "642931d28818a3d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f5b5890-478e-40d2-abe4-bf43b4cb306c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 42,
+      "total_deletions": 3,
+      "accepted_lines": 183,
+      "overriden_lines": 0
+    },
+    "d2c1db4a78c0783d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e8e9d038-0e58-4d93-a0f6-ad2018c4dd5f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 3,
+      "accepted_lines": 111,
+      "overriden_lines": 0
+    }
+  }
+}
