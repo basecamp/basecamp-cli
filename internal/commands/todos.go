@@ -1712,9 +1712,10 @@ Move to a different todolist in the same project:
 				}
 
 				// Cross-project moves are not supported by the reposition endpoint.
-				// This catches the URL-vs-URL and URL-vs-config cases. Bare numeric
-				// list IDs without a project context rely on server rejection.
-				if resolvedProject != "" && listProjectID != "" && resolvedProject != listProjectID {
+				// Only enforce when the todo's project comes from its URL (high
+				// confidence). Config/flag project is a default context — it may
+				// not match where a bare-ID todo actually lives.
+				if todoProjectID != "" && listProjectID != "" && resolvedProject != listProjectID {
 					return output.ErrUsageHint(
 						"Cannot move a todo to a list in a different project.",
 						"Pass a todolist from the same project; cross-project moves are not supported.",
@@ -1750,7 +1751,12 @@ Move to a different todolist in the same project:
 				summary = fmt.Sprintf("Moved todo #%d to list #%d at position %d", todoID, *parentID, position)
 			}
 
-			return app.OK(map[string]any{"repositioned": true, "position": position},
+			response := map[string]any{"repositioned": true, "position": position}
+			if parentID != nil {
+				response["todolist_id"] = *parentID
+			}
+
+			return app.OK(response,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
