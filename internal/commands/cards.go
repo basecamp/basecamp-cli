@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -775,6 +776,9 @@ You can pass either a card ID or a Basecamp URL:
 
 			var moveOpts *basecamp.MoveCardOptions
 			if positionSet && position > 0 {
+				if position > math.MaxInt32 {
+					return output.ErrUsage("Position is too large")
+				}
 				moveOpts = &basecamp.MoveCardOptions{Position: int32(position)}
 			}
 			err = app.Account().Cards().Move(cmd.Context(), cardID, columnID, moveOpts)

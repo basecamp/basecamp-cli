@@ -650,7 +650,6 @@ You can pass either an entry ID or a Basecamp URL:
 						return attachErr
 					}
 					html = richtext.EmbedAttachments(html, refs)
-					hasChanges = true
 				}
 
 				req.Description = html
