@@ -1,0 +1,27 @@
+skills/basecamp/SKILL.md
+  24c888f8893e0a99 382
+internal/commands/todos.go
+  24c888f8893e0a99 1643-1646,1651-1653,1657-1662,1681-1682,1689-1743,1748-1754,1768
+internal/commands/todos_test.go
+  24c888f8893e0a99 184-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "33141af95a7dcbd7499bb1f1ff034f9909ccbd3c",
+  "prompts": {
+    "24c888f8893e0a99": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "129d777f-1883-4960-9268-c3be34217dde",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 9,
+      "accepted_lines": 146,
+      "overriden_lines": 0
+    }
+  }
+}
