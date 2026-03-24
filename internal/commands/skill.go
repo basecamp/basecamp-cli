@@ -333,22 +333,89 @@ func RefreshSkillsIfVersionChanged() bool {
 		return false
 	}
 
-	refreshed := false
-	needsRefresh := baselineSkillInstalled()
-	if needsRefresh {
-		if _, err := installSkillFiles(); err == nil {
-			refreshed = true
-		}
+	refreshed := refreshAllInstalledSkills()
+
+	// Repair Claude symlink if broken (e.g. baseline dir was recreated)
+	if harness.DetectClaude() {
+		repairClaudeSkillLink()
 	}
 
 	// Update sentinel only when no refresh was needed or it succeeded.
 	// On transient failure, leave the sentinel stale so the next run retries.
+	needsRefresh := baselineSkillInstalled()
 	if !needsRefresh || refreshed {
 		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o755)             //nolint:gosec // G301: config dir
 		_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
 	}
 
 	return refreshed
+}
+
+func refreshAllInstalledSkills() bool {
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	if err != nil {
+		return false
+	}
+
+	updated := 0
+	failed := 0
+	for _, loc := range skillLocations {
+		// Skip project-relative paths — no reliable project root in PostRunE.
+		if !strings.HasPrefix(loc.Path, "~") && !filepath.IsAbs(loc.Path) {
+			continue
+		}
+
+		expanded := expandSkillPath(loc.Path)
+		if _, statErr := os.Stat(expanded); statErr != nil {
+			if !os.IsNotExist(statErr) {
+				failed++ // permission or IO error on a known location
+			}
+			continue
+		}
+
+		if writeErr := os.WriteFile(expanded, embedded, 0o644); writeErr == nil { //nolint:gosec // G306: Skill files are not secrets
+			updated++
+		} else {
+			failed++
+		}
+	}
+
+	// Stamp installed version in the baseline directory only on full success.
+	if failed == 0 && updated > 0 {
+		if home, err := os.UserHomeDir(); err == nil {
+			baselineDir := filepath.Join(home, ".agents", "skills", "basecamp")
+			_ = os.WriteFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+		}
+	}
+
+	return updated > 0 && failed == 0
+}
+
+// repairClaudeSkillLink repairs a broken symlink at ~/.claude/skills/basecamp.
+// If the path is a directory (copy fallback), the file refresh already handled it.
+func repairClaudeSkillLink() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
+	info, err := os.Lstat(symlinkPath)
+	if err != nil {
+		return // doesn't exist, nothing to repair
+	}
+
+	if info.Mode()&os.ModeSymlink == 0 {
+		return // not a symlink (directory copy fallback), file refresh handled it
+	}
+
+	// It's a symlink — check if the target is reachable
+	if _, statErr := os.Stat(symlinkPath); statErr == nil {
+		return // symlink is healthy
+	}
+
+	// Broken symlink — repair it
+	_, _, _ = linkSkillToClaude()
 }
 
 func copySkillFiles(src, dst string) error {

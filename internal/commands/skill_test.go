@@ -450,7 +450,7 @@ func TestRefreshSkillsIfVersionChanged_NoSentinelUpdateOnFailure(t *testing.T) {
 	defer func() { version.Version = origVersion }()
 
 	// Install baseline skill, then make the skill file read-only
-	// so installSkillFiles() will fail on write
+	// so refreshAllInstalledSkills() will fail on write
 	_, err := installSkillFiles()
 	require.NoError(t, err)
 
@@ -471,4 +471,153 @@ func TestRefreshSkillsIfVersionChanged_NoSentinelUpdateOnFailure(t *testing.T) {
 	sentinel, err := os.ReadFile(sentinelPath)
 	require.NoError(t, err)
 	assert.Equal(t, "2.0.0", string(sentinel), "sentinel should remain unchanged on failure")
+}
+
+func TestRefreshAllInstalledSkills_MultipleLocations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	origVersion := version.Version
+	version.Version = "5.0.0"
+	defer func() { version.Version = origVersion }()
+
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+
+	// Pre-install skill at baseline and Claude global locations
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+
+	claudeSkill := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(claudeSkill, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeSkill, "SKILL.md"), []byte("old"), 0o644))
+
+	opencode := filepath.Join(home, ".config", "opencode", "skill", "basecamp")
+	require.NoError(t, os.MkdirAll(opencode, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(opencode, "SKILL.md"), []byte("old"), 0o644))
+
+	refreshed := refreshAllInstalledSkills()
+	assert.True(t, refreshed)
+
+	// All three should be updated
+	for _, path := range []string{
+		filepath.Join(baseline, "SKILL.md"),
+		filepath.Join(claudeSkill, "SKILL.md"),
+		filepath.Join(opencode, "SKILL.md"),
+	} {
+		got, readErr := os.ReadFile(path)
+		require.NoError(t, readErr, "reading %s", path)
+		assert.Equal(t, string(embedded), string(got), "content mismatch at %s", path)
+	}
+
+	// Version stamp should be updated
+	assert.Equal(t, "5.0.0", installedSkillVersion())
+}
+
+func TestRefreshAllInstalledSkills_SkipsAbsentLocations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	origVersion := version.Version
+	version.Version = "5.0.0"
+	defer func() { version.Version = origVersion }()
+
+	// Only install at baseline
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+
+	refreshed := refreshAllInstalledSkills()
+	assert.True(t, refreshed)
+
+	// Claude location should NOT have been created
+	claudeSkill := filepath.Join(home, ".claude", "skills", "basecamp", "SKILL.md")
+	_, err := os.Stat(claudeSkill)
+	assert.True(t, os.IsNotExist(err), "should not create skill at absent location")
+}
+
+func TestRefreshAllInstalledSkills_SkipsProjectRelativePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	origVersion := version.Version
+	version.Version = "5.0.0"
+	defer func() { version.Version = origVersion }()
+
+	// Use a temp dir as working directory to avoid polluting the repo
+	projectDir := t.TempDir()
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(projectDir))
+	defer os.Chdir(origDir) //nolint:errcheck // cleanup
+
+	// Create project-relative skill file in the temp working directory
+	require.NoError(t, os.MkdirAll(filepath.Join(".claude", "skills", "basecamp"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(".claude", "skills", "basecamp", "SKILL.md"), []byte("project"), 0o644))
+
+	// Install baseline so refresh returns true
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+
+	refreshAllInstalledSkills()
+
+	// Project-relative file should be untouched
+	got, err := os.ReadFile(filepath.Join(".claude", "skills", "basecamp", "SKILL.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "project", string(got), "project-relative skill should not be refreshed")
+}
+
+func TestRepairClaudeSkillLink_BrokenSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Ensure ~/.claude/skills exists so the symlink can be placed there
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755))
+
+	// Create baseline skill
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("skill"), 0o644))
+
+	// Create a broken symlink
+	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.Symlink("/nonexistent/target", symlinkPath))
+
+	// Verify it's broken
+	_, err := os.Stat(symlinkPath)
+	require.True(t, os.IsNotExist(err), "symlink should be broken")
+
+	repairClaudeSkillLink()
+
+	// Symlink should now be healthy
+	_, err = os.Stat(filepath.Join(symlinkPath, "SKILL.md"))
+	assert.NoError(t, err, "skill should be reachable through repaired symlink")
+}
+
+func TestRepairClaudeSkillLink_HealthySymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create baseline skill and a healthy symlink
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("skill"), 0o644))
+
+	symlinkDir := filepath.Join(home, ".claude", "skills")
+	require.NoError(t, os.MkdirAll(symlinkDir, 0o755))
+	require.NoError(t, os.Symlink(baseline, filepath.Join(symlinkDir, "basecamp")))
+
+	// Read the symlink target before repair
+	targetBefore, _ := os.Readlink(filepath.Join(symlinkDir, "basecamp"))
+
+	repairClaudeSkillLink()
+
+	// Target should be unchanged (no unnecessary repair)
+	targetAfter, _ := os.Readlink(filepath.Join(symlinkDir, "basecamp"))
+	assert.Equal(t, targetBefore, targetAfter, "healthy symlink should not be modified")
 }
