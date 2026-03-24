@@ -1,0 +1,11 @@
+internal/commands/attachments.go
+  d2c1db4a78c0783d 113,132-142,204,216-223,232-255,257-261,264-268,276,281,283,301,311,337,348-350,352-357,420,546-548,557-558,584-585,597-599,602,608,612,614,621,625,669-673
+internal/commands/attachments_test.go
+  d2c1db4a78c0783d 18,126-136,309-310,317,322,327-328,334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "da6ca626da82a99246848884aa049b336415e375",
+  "prompts": {}
+}
