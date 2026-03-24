@@ -304,6 +304,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewVersionCmd())
 	cmd.AddCommand(commands.NewTimelineCmd())
 	cmd.AddCommand(commands.NewReportsCmd())
+	cmd.AddCommand(commands.NewNotificationsCmd())
 	cmd.AddCommand(commands.NewCompletionCmd())
 	cmd.AddCommand(commands.NewSetupCmd())
 	cmd.AddCommand(commands.NewLoginCmd())

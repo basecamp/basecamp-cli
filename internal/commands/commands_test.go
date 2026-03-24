@@ -107,6 +107,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewVersionCmd())
 	root.AddCommand(commands.NewTimelineCmd())
 	root.AddCommand(commands.NewReportsCmd())
+	root.AddCommand(commands.NewNotificationsCmd())
 	root.AddCommand(commands.NewCompletionCmd())
 	root.AddCommand(commands.NewSetupCmd())
 	root.AddCommand(commands.NewLoginCmd())
