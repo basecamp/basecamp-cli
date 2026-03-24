@@ -1365,9 +1365,10 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header.Set("Content-Type", "application/json")
 
 	if req.Method == "GET" {
+		mockTodo := `{"id": 999, "title": "Test", "status": "active", "completed": false, "bucket": {"id": 456, "name": "Test Project", "type": "Project"}}`
 		return &http.Response{
 			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Body:       io.NopCloser(strings.NewReader(mockTodo)),
 			Header:     header,
 		}, nil
 	}
@@ -1516,6 +1517,127 @@ func TestTodosUpdateLocalImageErrors(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "update", "999", "--description", "![alt](./missing.png)")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
+}
+
+func TestTodosUpdateNoDueSendsNull(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	val, exists := body["due_on"]
+	require.True(t, exists, "due_on key must be present")
+	assert.Nil(t, val, "due_on must be null")
+}
+
+func TestTodosUpdateNoDescriptionSendsNull(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-description")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	val, exists := body["description"]
+	require.True(t, exists, "description key must be present")
+	assert.Nil(t, val, "description must be null")
+}
+
+func TestTodosUpdateNoStartsOnSendsNull(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-starts-on")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	val, exists := body["starts_on"]
+	require.True(t, exists, "starts_on key must be present")
+	assert.Nil(t, val, "starts_on must be null")
+}
+
+func TestTodosUpdateEmptyDueClearsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--due", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	val, exists := body["due_on"]
+	require.True(t, exists, "due_on key must be present")
+	assert.Nil(t, val, "due_on must be null when --due is empty")
+}
+
+func TestTodosUpdateConflictingNoDueAndDue(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--due", "next friday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-due and --due cannot be used together")
+}
+
+func TestTodosUpdateConflictingNoDescriptionAndDescription(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-description", "--description", "text")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-description and --description cannot be used together")
+}
+
+func TestTodosUpdateConflictingNoStartsOnAndStartsOn(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-starts-on", "--starts-on", "next monday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-starts-on and --starts-on cannot be used together")
+}
+
+func TestTodosUpdateClearWithSetCombined(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--title", "New title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	val, exists := body["due_on"]
+	require.True(t, exists, "due_on key must be present")
+	assert.Nil(t, val, "due_on must be null")
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "New title", content)
 }
 
 // =============================================================================

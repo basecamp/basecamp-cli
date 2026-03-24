@@ -1089,6 +1089,10 @@ Clear a field by passing its --no- flag or an empty value:
 					body["notify"] = true
 				}
 
+				if existingTodo.Bucket == nil {
+					return fmt.Errorf("todo %d has no associated project", todoID)
+				}
+
 				path := fmt.Sprintf("/buckets/%d/todos/%d.json", existingTodo.Bucket.ID, todoID)
 				_, err = app.Account().Put(cmd.Context(), path, body)
 				if err != nil {
