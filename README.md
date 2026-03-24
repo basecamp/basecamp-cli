@@ -20,7 +20,7 @@ That's it. You now have full access to Basecamp from your terminal.
 **Brew / macOS**
 
 ```
-brew install --cask basecamp/tap/basecamp
+brew install --cask basecamp/tap/basecamp-cli
 ```
 
 **Arch Linux / Omarchy (AUR):**
@@ -40,7 +40,7 @@ Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checks
 **Scoop (Windows):**
 ```bash
 scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install basecamp
+scoop install basecamp-cli
 ```
 
 **Shell script:**

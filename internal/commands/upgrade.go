@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -14,10 +15,17 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
-// versionChecker and homebrewChecker abstract external checks for testability.
+const (
+	homebrewCask       = "basecamp/tap/basecamp-cli"
+	legacyHomebrewCask = "basecamp/tap/basecamp"
+	homebrewCaskroom   = "/Caskroom/"
+)
+
+// versionChecker and homebrew checkers abstract external checks for testability.
 var (
-	versionChecker  = fetchLatestVersion
-	homebrewChecker = isHomebrew
+	versionChecker       = fetchLatestVersion
+	homebrewChecker      = isHomebrew
+	legacyHomebrewCasker = hasLegacyHomebrewCask
 )
 
 // NewUpgradeCmd creates the upgrade command.
@@ -66,13 +74,30 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(w, "update available: %s\n", latest)
 
 	ctx := cmd.Context()
+	if legacyHomebrewCasker(ctx) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "The CLI cask has been renamed. To upgrade, run:")
+		fmt.Fprintf(w, "  brew uninstall --cask %s\n", legacyHomebrewCask)
+		fmt.Fprintf(w, "  brew install --cask %s\n", homebrewCask)
+		return app.OK(
+			map[string]string{
+				"status":      "migration_required",
+				"from":        current,
+				"to":          latest,
+				"legacy_cask": legacyHomebrewCask,
+				"replacement": homebrewCask,
+			},
+			output.WithSummary("Homebrew cask rename detected — manual migration required"),
+		)
+	}
+
 	if homebrewChecker(ctx) {
 		fmt.Fprintln(w, "Upgrading via Homebrew…")
-		upgrade := exec.CommandContext(ctx, "brew", "upgrade", "basecamp")
+		upgrade := exec.CommandContext(ctx, "brew", "upgrade", "--cask", homebrewCask)
 		upgrade.Stdout = w
 		upgrade.Stderr = cmd.ErrOrStderr()
 		if err := upgrade.Run(); err != nil {
-			return fmt.Errorf("brew upgrade failed: %w", err)
+			return fmt.Errorf("brew upgrade failed for cask %s: %w", homebrewCask, err)
 		}
 		return app.OK(
 			map[string]string{"status": "upgraded", "from": current, "to": latest},
@@ -90,20 +115,34 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	)
 }
 
-// isHomebrew returns true if the binary appears to be installed via Homebrew.
+// isHomebrew returns true if the CLI appears to be installed via the renamed Homebrew cask.
 func isHomebrew(ctx context.Context) bool {
 	exe, err := os.Executable()
-	if err != nil {
+	if err == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+			exe = resolved
+		}
+		if strings.Contains(exe, homebrewCaskroom) {
+			return true
+		}
+	}
+
+	return homebrewHasCask(ctx, homebrewCask)
+}
+
+func hasLegacyHomebrewCask(ctx context.Context) bool {
+	return homebrewHasCask(ctx, legacyHomebrewCask)
+}
+
+func homebrewHasCask(ctx context.Context, cask string) bool {
+	switch cask {
+	case homebrewCask, legacyHomebrewCask:
+		// allowed
+	default:
 		return false
 	}
 
-	// Check common Homebrew prefix paths
-	if strings.Contains(exe, "/Cellar/") || strings.Contains(exe, "/homebrew/") {
-		return true
-	}
-
-	// Check if brew knows about us
-	out, err := exec.CommandContext(ctx, "brew", "list", "basecamp").CombinedOutput()
+	out, err := exec.CommandContext(ctx, "brew", "list", "--cask", cask).CombinedOutput() //nolint:gosec // G204: cask is validated against known constants above
 	if err != nil {
 		return false
 	}

@@ -131,7 +131,7 @@ release:
 
     **macOS:**
     ```sh
-    brew install --cask basecamp/tap/basecamp
+    brew install --cask basecamp/tap/basecamp-cli
     basecamp auth login
     ```
 
@@ -160,14 +160,14 @@ release:
     **Windows:**
     ```sh
     scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-    scoop install basecamp
+    scoop install basecamp-cli
     basecamp auth login
     ```
 
     **Other platforms:** download the matching archive from the assets below.
 
 homebrew_casks:
-  - name: basecamp
+  - name: basecamp-cli
     repository:
       owner: basecamp
       name: homebrew-tap
@@ -184,7 +184,7 @@ homebrew_casks:
     skip_upload: auto
 
 scoops:
-  - name: basecamp
+  - name: basecamp-cli
     repository:
       owner: basecamp
       name: homebrew-tap

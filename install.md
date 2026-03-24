@@ -28,13 +28,13 @@ Alternatively install manually:
 
 ### Option A: Homebrew (macOS/Linux) — Recommended
 ```bash
-brew install --cask basecamp/tap/basecamp
+brew install --cask basecamp/tap/basecamp-cli
 ```
 
 ### Option B: Scoop (Windows)
 ```bash
 scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install basecamp
+scoop install basecamp-cli
 ```
 
 ### Option C: Linux package (Debian/Ubuntu, Fedora/RHEL, Alpine)

@@ -13,8 +13,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
-// stubUpgradeCheckers overrides versionChecker and homebrewChecker for tests.
-func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool) {
+// stubUpgradeCheckers overrides version and Homebrew detection for tests.
+func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLegacyCask bool) {
 	t.Helper()
 
 	origVC := versionChecker
@@ -24,6 +24,10 @@ func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool) {
 	origHC := homebrewChecker
 	homebrewChecker = func(context.Context) bool { return isBrew }
 	t.Cleanup(func() { homebrewChecker = origHC })
+
+	origLegacy := legacyHomebrewCasker
+	legacyHomebrewCasker = func(context.Context) bool { return hasLegacyCask }
+	t.Cleanup(func() { legacyHomebrewCasker = origLegacy })
 }
 
 // executeUpgradeCommand runs the upgrade command and returns the combined
@@ -63,7 +67,7 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.2.3", false)
+	stubUpgradeCheckers(t, "1.2.3", false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -78,7 +82,7 @@ func TestUpgradeAvailable(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false)
+	stubUpgradeCheckers(t, "1.3.0", false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -110,7 +114,7 @@ func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	version.Version = "1.0.0"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.0.0", false)
+	stubUpgradeCheckers(t, "1.0.0", false, false)
 
 	cmd := NewUpgradeCmd()
 	cmd.SetArgs(nil)
@@ -134,4 +138,21 @@ func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	// Progressive output should be captured in our buffer, not leaked to os.Stdout
 	assert.Contains(t, buf.String(), "Current version: 1.0.0")
 	assert.Contains(t, buf.String(), "already up to date")
+}
+
+func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	stubUpgradeCheckers(t, "1.3.0", false, true)
+
+	cmdOut, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.Contains(t, cmdOut, "The CLI cask has been renamed. To upgrade, run:")
+	assert.Contains(t, cmdOut, "brew uninstall --cask basecamp/tap/basecamp")
+	assert.Contains(t, cmdOut, "brew install --cask basecamp/tap/basecamp-cli")
+	assert.Contains(t, appBuf.String(), "migration_required")
 }

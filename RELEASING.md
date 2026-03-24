@@ -28,8 +28,8 @@ make release VERSION=0.2.0 DRY_RUN=1
    - Signs and notarizes macOS binaries (Developer ID via GoReleaser/quill)
    - Signs checksums with cosign (keyless via Sigstore OIDC)
    - Generates SBOM for supply chain transparency
-   - Updates Homebrew cask in `basecamp/homebrew-tap`
-   - Updates Scoop manifest in `basecamp/homebrew-tap`
+   - Updates Homebrew cask (`basecamp-cli`) in `basecamp/homebrew-tap`
+   - Updates Scoop manifest (`basecamp-cli`) in `basecamp/homebrew-tap`
    - Updates AUR `basecamp-cli` package (when `AUR_KEY` is configured)
    - Verifies Nix flake builds successfully
 
@@ -88,8 +88,8 @@ make update-nix-hash
 | Channel | Location | Updated by |
 |---------|----------|------------|
 | GitHub Releases | [basecamp/basecamp-cli](https://github.com/basecamp/basecamp-cli/releases) | GoReleaser |
-| Homebrew cask | `basecamp/homebrew-tap` Casks/ | GoReleaser |
-| Scoop | `basecamp/homebrew-tap` root | GoReleaser |
+| Homebrew cask (`basecamp-cli`) | `basecamp/homebrew-tap` Casks/ | GoReleaser |
+| Scoop (`basecamp-cli`) | `basecamp/homebrew-tap` root | GoReleaser |
 | AUR | `basecamp-cli` | GoReleaser |
 | deb/rpm/apk packages | GitHub Release assets | GoReleaser (nfpm) |
 | Nix flake | `flake.nix` in repo | Self-serve (`nix profile install github:basecamp/basecamp-cli`) |
