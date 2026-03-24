@@ -1,0 +1,47 @@
+internal/commands/commands_test.go
+  d2c1db4a78c0783d 115
+internal/cli/root.go
+  d2c1db4a78c0783d 291
+internal/commands/files.go
+  d2c1db4a78c0783d 1153,1156-1175,1379,1383-1384,1393-1437
+internal/commands/show.go
+  d2c1db4a78c0783d 13,30-32,55-61,269,272-289,305-314,362-370
+internal/commands/cards.go
+  d2c1db4a78c0783d 287,296-310,527-531,623-627,674-676,719-723,819-905,1165-1169
+skills/basecamp/SKILL.md
+  d2c1db4a78c0783d 169,171-172,304-312,322-324,326-342,345-346
+internal/commands/todos.go
+  d2c1db4a78c0783d 411-418,423-492,724,743-757,936-1066,1411-1415
+internal/commands/attachments_test.go
+  d2c1db4a78c0783d 1-263,265-348
+internal/commands/commands.go
+  d2c1db4a78c0783d 99
+COMMUNIQUE-inline-attachments-api.md
+  d2c1db4a78c0783d 1-156
+e2e/smoke/smoke_communication.bats
+  d2c1db4a78c0783d 131-146
+internal/commands/attachments.go
+  d2c1db4a78c0783d 1-13,15-19,21-31,33-35,37-313,321-327,329-355,357-362,364-631,636-691
+internal/commands/messages.go
+  d2c1db4a78c0783d 212,222-236,389-393,475-479,797-801
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "18609ea4f1bd57190aa54910befaad06a651fe23",
+  "prompts": {
+    "d2c1db4a78c0783d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e8e9d038-0e58-4d93-a0f6-ad2018c4dd5f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 1047,
+      "total_deletions": 33,
+      "accepted_lines": 1734,
+      "overriden_lines": 0
+    }
+  }
+}
