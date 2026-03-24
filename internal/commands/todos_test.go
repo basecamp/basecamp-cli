@@ -1629,6 +1629,15 @@ func TestTodosUpdateConflictingNoStartsOnAndStartsOn(t *testing.T) {
 	assert.Contains(t, err.Error(), "--no-starts-on and --starts-on cannot be used together")
 }
 
+func TestTodosUpdateConflictingNoDueAndStartsOn(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--starts-on", "next monday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-due and --starts-on cannot be used together")
+}
+
 func TestTodosUpdateClearWithSetCombined(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
