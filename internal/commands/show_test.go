@@ -755,10 +755,11 @@ func TestShowPreservesNativeAttachmentsField(t *testing.T) {
 	var data map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(envelope.Data, &data))
 
-	// Native "attachments" key preserved with original content
+	// Native "attachments" key preserved with original content intact
 	native, ok := data["attachments"]
 	require.True(t, ok, "native 'attachments' key should be preserved")
 	assert.Contains(t, string(native), "native-sgid")
+	assert.Contains(t, string(native), "native.pdf")
 
 	// Field-scoped collection added under its own key
 	scoped, ok := data["content_attachments"]
