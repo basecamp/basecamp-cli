@@ -134,8 +134,10 @@ setup_file() {
 @test "attachments download handles recording without attachments" {
   ensure_message || return 0
 
-  # A message without inline attachments produces a structured error
-  run_smoke basecamp attachments download "$QA_MESSAGE" --json
+  # A message without inline attachments produces a structured error.
+  # Use --out to avoid polluting the working directory if the message
+  # happens to contain attachments.
+  run_smoke basecamp attachments download "$QA_MESSAGE" --out "$BATS_FILE_TMPDIR" --json
   if [[ "$status" -eq 0 ]]; then
     # Recording has attachments — verify structured result
     assert_json_value '.ok' 'true'

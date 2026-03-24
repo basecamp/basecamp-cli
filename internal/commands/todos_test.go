@@ -124,15 +124,18 @@ func TestTodosCreateShowsHelpWithoutContent(t *testing.T) {
 	require.NoError(t, err, "expected help output, not an error")
 }
 
-// TestTodosShowShowsHelpWithoutID tests that todos show shows help when no ID given.
-func TestTodosShowShowsHelpWithoutID(t *testing.T) {
+// TestTodosShowRequiresID tests that todos show requires an ID argument.
+// Cobra validates args count, so we get a Cobra error (consistent with
+// cards show, messages show, etc.).
+func TestTodosShowRequiresID(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 	app.Config.ProjectID = "123"
 
 	cmd := NewTodosCmd()
 
 	err := executeTodosCommand(cmd, app, "show")
-	require.NoError(t, err, "expected help output, not an error")
+	require.NotNil(t, err, "expected error, got nil")
+	assert.Equal(t, "accepts 1 arg(s), received 0", err.Error())
 }
 
 // TestTodosCompleteShowsHelpWithoutID tests that todos complete shows help when no ID given.

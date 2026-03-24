@@ -724,14 +724,12 @@ func newTodosShowCmd() *cobra.Command {
 You can pass either a todo ID or a Basecamp URL:
   basecamp todos show 789
   basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
+		Args: cobra.ExactArgs(1),
 	}
 
 	dlDir := addDownloadAttachmentsFlag(cmd)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return missingArg(cmd, "<id|url>")
-		}
 
 		app := appctx.FromContext(cmd.Context())
 		if app == nil {
