@@ -27,9 +27,136 @@ Reports provide cross-project views of assignments and schedules.`,
 	cmd.AddCommand(
 		newReportsAssignableCmd(),
 		newReportsAssignedCmd(),
+		newReportsMineCmd(),
+		newReportsCompletedCmd(),
+		newReportsDueCmd(),
 		newReportsOverdueCmd(),
 		newReportsScheduleCmd(),
 	)
+
+	return cmd
+}
+
+func newReportsMineCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mine",
+		Short: "View your active assignments",
+		Long:  "View the current user's active assignments, split into priorities and non-priorities.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			result, err := app.Account().MyAssignments().Get(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			total := len(result.Priorities) + len(result.NonPriorities)
+			return app.OK(result,
+				output.WithSummary(fmt.Sprintf("%d active assignments", total)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "due",
+						Cmd:         "basecamp reports due",
+						Description: "View due assignments",
+					},
+					output.Breadcrumb{
+						Action:      "completed",
+						Cmd:         "basecamp reports completed",
+						Description: "View completed assignments",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newReportsCompletedCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "completed",
+		Short: "View your completed assignments",
+		Long:  "View assignments the current user has completed.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			result, err := app.Account().MyAssignments().Completed(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(result,
+				output.WithSummary(fmt.Sprintf("%d completed assignments", len(result))),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "mine",
+						Cmd:         "basecamp reports mine",
+						Description: "View active assignments",
+					},
+					output.Breadcrumb{
+						Action:      "due",
+						Cmd:         "basecamp reports due",
+						Description: "View due assignments",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newReportsDueCmd() *cobra.Command {
+	var scope string
+
+	cmd := &cobra.Command{
+		Use:   "due",
+		Short: "View your due assignments",
+		Long:  "View due assignments for the current user, optionally filtered by due-date scope.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			if err := validateReportsDueScope(scope); err != nil {
+				return err
+			}
+
+			result, err := app.Account().MyAssignments().Due(cmd.Context(), scope)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			summary := fmt.Sprintf("%d due assignments", len(result))
+			if scope != "" {
+				summary += fmt.Sprintf(" (%s)", scope)
+			}
+
+			return app.OK(result,
+				output.WithSummary(summary),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "mine",
+						Cmd:         "basecamp reports mine",
+						Description: "View active assignments",
+					},
+					output.Breadcrumb{
+						Action:      "completed",
+						Cmd:         "basecamp reports completed",
+						Description: "View completed assignments",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&scope, "scope", "", "Filter due assignments (overdue, due_today, due_tomorrow, due_later_this_week, due_next_week, due_later)")
 
 	return cmd
 }
@@ -249,6 +376,15 @@ Todos are grouped into categories:
 				),
 			)
 		},
+	}
+}
+
+func validateReportsDueScope(scope string) error {
+	switch scope {
+	case "", "overdue", "due_today", "due_tomorrow", "due_later_this_week", "due_next_week", "due_later":
+		return nil
+	default:
+		return output.ErrUsage("--scope must be overdue, due_today, due_tomorrow, due_later_this_week, due_next_week, or due_later")
 	}
 }
 
