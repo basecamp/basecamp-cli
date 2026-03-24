@@ -209,7 +209,7 @@ You can pass either a message ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			return app.OK(message,
+			opts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
 				output.WithEntity("message"),
 				output.WithBreadcrumbs(
@@ -219,7 +219,21 @@ You can pass either a message ID or a Basecamp URL:
 						Description: "Add comment",
 					},
 				),
-			)
+			}
+
+			data := any(message)
+			attachments := richtext.ExtractAttachments(message.Content)
+			if len(attachments) > 0 {
+				data = withInlineAttachments(message, attachments)
+				opts = append(opts,
+					output.WithNotice(fmt.Sprintf(
+						"%d inline attachment(s) — download: basecamp attachments download %s",
+						len(attachments), messageIDStr)),
+					output.WithBreadcrumbs(attachmentBreadcrumb(messageIDStr, len(attachments))),
+				)
+			}
+
+			return app.OK(data, opts...)
 		},
 	}
 	return cmd

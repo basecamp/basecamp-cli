@@ -284,7 +284,7 @@ You can pass either a card ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			return app.OK(card,
+			opts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -293,7 +293,21 @@ You can pass either a card ID or a Basecamp URL:
 						Description: "Add comment",
 					},
 				),
-			)
+			}
+
+			data := any(card)
+			attachments := richtext.ExtractAttachments(card.Content)
+			if len(attachments) > 0 {
+				data = withInlineAttachments(card, attachments)
+				opts = append(opts,
+					output.WithNotice(fmt.Sprintf(
+						"%d inline attachment(s) — download: basecamp attachments download %s",
+						len(attachments), cardIDStr)),
+					output.WithBreadcrumbs(attachmentBreadcrumb(cardIDStr, len(attachments))),
+				)
+			}
+
+			return app.OK(data, opts...)
 		},
 	}
 	return cmd

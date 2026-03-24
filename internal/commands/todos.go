@@ -751,7 +751,7 @@ You can pass either a todo ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			return app.OK(todo,
+			opts := []output.ResponseOption{
 				output.WithEntity("todo"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -770,7 +770,21 @@ You can pass either a todo ID or a Basecamp URL:
 						Description: "Add comment",
 					},
 				),
-			)
+			}
+
+			data := any(todo)
+			attachments := richtext.ExtractAttachments(todo.Description)
+			if len(attachments) > 0 {
+				data = withInlineAttachments(todo, attachments)
+				opts = append(opts,
+					output.WithNotice(fmt.Sprintf(
+						"%d inline attachment(s) — download: basecamp attachments download %s",
+						len(attachments), todoIDStr)),
+					output.WithBreadcrumbs(attachmentBreadcrumb(todoIDStr, len(attachments))),
+				)
+			}
+
+			return app.OK(data, opts...)
 		},
 	}
 

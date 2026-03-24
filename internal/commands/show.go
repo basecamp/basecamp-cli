@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
@@ -265,10 +266,27 @@ You can also pass a Basecamp URL directly:
 				},
 			}
 
-			return app.OK(resp.Data,
+			opts := []output.ResponseOption{
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
-			)
+			}
+
+			// Check for inline attachments in content fields
+			content := extractContentField(data)
+			attachments := richtext.ExtractAttachments(content)
+			resultData := any(resp.Data)
+			if len(attachments) > 0 {
+				data["inline_attachments"] = inlineAttachmentMeta(attachments)
+				resultData = data
+				opts = append(opts,
+					output.WithNotice(fmt.Sprintf(
+						"%d inline attachment(s) — download: basecamp attachments download %s",
+						len(attachments), id)),
+					output.WithBreadcrumbs(attachmentBreadcrumb(id, len(attachments))),
+				)
+			}
+
+			return app.OK(resultData, opts...)
 		},
 	}
 

@@ -1150,10 +1150,29 @@ You can pass either an item ID or a Basecamp URL:
 				})
 			}
 
-			return app.OK(result,
+			opts := []output.ResponseOption{
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
-			)
+			}
+
+			data := result
+			if detectedType == "document" {
+				doc, ok := result.(*basecamp.Document)
+				if ok {
+					attachments := richtext.ExtractAttachments(doc.Content)
+					if len(attachments) > 0 {
+						data = withInlineAttachments(doc, attachments)
+						opts = append(opts,
+							output.WithNotice(fmt.Sprintf(
+								"%d inline attachment(s) — download: basecamp attachments download %s",
+								len(attachments), itemIDStr)),
+							output.WithBreadcrumbs(attachmentBreadcrumb(itemIDStr, len(attachments))),
+						)
+					}
+				}
+			}
+
+			return app.OK(data, opts...)
 		},
 	}
 
@@ -1357,14 +1376,62 @@ You can pass either an upload ID, a Basecamp URL, or a storage URL:
   basecamp files download https://3.basecamp.com/123/buckets/456/uploads/789
   basecamp files download "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf"
   basecamp files download 789 --out ./downloads --in my-project
+  basecamp files download 789 --out - --in my-project  # stream to stdout
 
 Storage URLs (from inline attachments in rich text) are downloaded directly
-via the API. No --in flag is needed for storage URLs.`,
+via the API. No --in flag is needed for storage URLs.
+
+Use --out - to stream the file to stdout (for piping to other commands).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Stdout streaming: --out -
+			if outDir == "-" {
+				if isStorageURL(args[0]) {
+					result, err := app.Account().DownloadURL(cmd.Context(), args[0])
+					if err != nil {
+						return convertSDKError(err)
+					}
+					defer result.Body.Close()
+					_, err = io.Copy(cmd.OutOrStdout(), result.Body)
+					return err
+				}
+				// Upload ID path — resolve project, then stream
+				uploadIDStr, urlProjectID := extractWithProject(args[0])
+				uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid upload ID")
+				}
+				projectID := urlProjectID
+				if projectID == "" {
+					projectID = *project
+				}
+				if projectID == "" {
+					projectID = app.Flags.Project
+				}
+				if projectID == "" {
+					projectID = app.Config.ProjectID
+				}
+				if projectID == "" {
+					if err := ensureProject(cmd, app); err != nil {
+						return err
+					}
+					projectID = app.Config.ProjectID
+				}
+				if _, _, err := app.Names.ResolveProject(cmd.Context(), projectID); err != nil {
+					return err
+				}
+				result, err := app.Account().Uploads().Download(cmd.Context(), uploadID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				defer result.Body.Close()
+				_, err = io.Copy(cmd.OutOrStdout(), result.Body)
 				return err
 			}
 
