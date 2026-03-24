@@ -1,0 +1,27 @@
+e2e/smoke/smoke_todos_write.bats
+  95d6e38edda520a4 99-161
+internal/commands/todos.go
+  95d6e38edda520a4 965-967,978-983,989-1005,1021-1022,1042-1049,1051,1053-1062,1064-1076,1078-1116,1118-1123,1125,1128-1169,1198-1200
+internal/commands/todos_test.go
+  95d6e38edda520a4 1368,1371,1522-1560,1562-1671
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "e7c108399d6b8c3bf37a380a167dc4506eed5758",
+  "prompts": {
+    "95d6e38edda520a4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7cfd900-4ed9-410a-96dc-2858012c12fd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 65,
+      "total_deletions": 2,
+      "accepted_lines": 365,
+      "overriden_lines": 0
+    }
+  }
+}
