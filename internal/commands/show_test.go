@@ -713,3 +713,43 @@ func TestShowInjectsFieldScopedAttachments(t *testing.T) {
 	// Notice mentions download command
 	assert.Contains(t, out, "attachment(s)")
 }
+
+// TestShowPreservesNativeAttachmentsField verifies that when a recording
+// already has a native API "attachments" field (e.g. CampfireLine), the
+// show command preserves it untouched while adding field-scoped
+// content_attachments alongside it.
+func TestShowPreservesNativeAttachmentsField(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			// Simulate a CampfireLine-like record with both a native
+			// "attachments" array and inline bc-attachment tags in content.
+			return 200, `{
+				"id": 99,
+				"type": "Chat::Lines::Text",
+				"content": "<p>See <bc-attachment url=\"https://example.com/inline.png\" filename=\"inline.png\"></bc-attachment></p>",
+				"attachments": [{"sgid": "native-sgid", "filename": "native.pdf"}]
+			}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"99"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	out := buf.String()
+	// Native API field preserved
+	assert.Contains(t, out, "native-sgid")
+	assert.Contains(t, out, "native.pdf")
+	// Field-scoped collection added separately
+	assert.Contains(t, out, "content_attachments")
+	assert.Contains(t, out, "inline.png")
+}

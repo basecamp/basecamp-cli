@@ -1,12 +1,16 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -79,4 +83,77 @@ func TestDocsCreateSubscribeMutualExclusion(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "mutually exclusive")
+}
+
+// TestFilesDownloadStdoutStreamsStorageURL verifies that `files download --out -`
+// with a storage URL streams the response body to stdout without writing files.
+func TestFilesDownloadStdoutStreamsStorageURL(t *testing.T) {
+	fileContent := "PDF-binary-content-here"
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			// DownloadURL rewrites the storage URL to the API host.
+			// The path is preserved from the original storage URL.
+			if strings.Contains(path, "/blobs/") {
+				return 200, fileContent
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewFilesCmd()
+	cmd.SetArgs([]string{
+		"download",
+		"https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf",
+		"--out", "-",
+	})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	assert.Equal(t, fileContent, stdout.String(),
+		"storage URL body should be streamed directly to stdout")
+}
+
+// TestFilesDownloadStdoutStreamsUploadID verifies that `files download --out -`
+// with an upload ID streams the response body to stdout.
+func TestFilesDownloadStdoutStreamsUploadID(t *testing.T) {
+	fileContent := "spreadsheet-data"
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/projects.json") {
+				return 200, `[{"id": 456, "name": "Test Project"}]`
+			}
+			// Uploads.Get fetches metadata at /{accountId}/uploads/{id}.json
+			if strings.Contains(path, "/uploads/789") {
+				return 200, `{"id": 789, "filename": "report.xlsx", "download_url": "https://signed.example.com/report.xlsx"}`
+			}
+			// fetchSignedDownload fetches the signed URL
+			if strings.Contains(path, "/report.xlsx") {
+				return 200, fileContent
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	stdout := &bytes.Buffer{}
+	cmd := NewFilesCmd()
+	cmd.SetArgs([]string{"download", "789", "--out", "-"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	assert.Equal(t, fileContent, stdout.String(),
+		"upload body should be streamed directly to stdout")
 }
