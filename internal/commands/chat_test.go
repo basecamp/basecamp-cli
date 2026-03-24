@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -624,6 +626,161 @@ func TestChatListAllBreadcrumbSyntax(t *testing.T) {
 		assert.Contains(t, bc.Cmd, "--room")
 		assert.NotContains(t, bc.Cmd, "chat <id> messages")
 	}
+}
+
+// mockChatMessagesTransport returns a fixed set of 5 campfire lines (newest-first).
+type mockChatMessagesTransport struct{}
+
+func (t *mockChatMessagesTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/") && !strings.Contains(req.URL.Path, "/chats/"):
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
+		case strings.Contains(req.URL.Path, "/lines.json"):
+			body = `[
+				{"id": 1, "content": "msg1", "created_at": "2026-01-01T00:05:00Z"},
+				{"id": 2, "content": "msg2", "created_at": "2026-01-01T00:04:00Z"},
+				{"id": 3, "content": "msg3", "created_at": "2026-01-01T00:03:00Z"},
+				{"id": 4, "content": "msg4", "created_at": "2026-01-01T00:02:00Z"},
+				{"id": 5, "content": "msg5", "created_at": "2026-01-01T00:01:00Z"}
+			]`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+			Request:    req,
+		}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+// TestChatMessagesLimitReturnsNewest verifies that --limit returns the
+// first N items from the API (newest-first order) rather than the last N.
+func TestChatMessagesLimitReturnsNewest(t *testing.T) {
+	transport := &mockChatMessagesTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "messages", "--limit", "3", "--room", "789")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 3)
+
+	ids := []int64{envelope.Data[0].ID, envelope.Data[1].ID, envelope.Data[2].ID}
+	assert.Equal(t, []int64{1, 2, 3}, ids, "should return newest messages (IDs 1-3), not oldest")
+}
+
+// TestChatMessagesLimitPaginates verifies that requesting more than one
+// page of results actually follows pagination via Link headers.
+func TestChatMessagesLimitPaginates(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	pages := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case strings.Contains(r.URL.Path, "/projects.json"):
+			fmt.Fprint(w, `[{"id": 123, "name": "Test Project"}]`)
+		case strings.Contains(r.URL.Path, "/projects/") && !strings.Contains(r.URL.Path, "/chats/"):
+			fmt.Fprint(w, `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`)
+		case strings.Contains(r.URL.Path, "/lines.json"):
+			pages++
+			baseURL := fmt.Sprintf("http://%s%s", r.Host, r.URL.Path)
+			page := r.URL.Query().Get("page")
+			switch page {
+			case "3":
+				fmt.Fprint(w, `[
+					{"id": 11, "content": "msg11", "created_at": "2026-01-01T00:00:00Z"},
+					{"id": 12, "content": "msg12", "created_at": "2025-12-31T23:59:59Z"},
+					{"id": 13, "content": "msg13", "created_at": "2025-12-31T23:59:58Z"},
+					{"id": 14, "content": "msg14", "created_at": "2025-12-31T23:59:57Z"},
+					{"id": 15, "content": "msg15", "created_at": "2025-12-31T23:59:56Z"}
+				]`)
+			case "2":
+				w.Header().Set("Link", `<`+baseURL+`?page=3>; rel="next"`)
+				fmt.Fprint(w, `[
+					{"id": 6, "content": "msg6", "created_at": "2026-01-01T00:00:05Z"},
+					{"id": 7, "content": "msg7", "created_at": "2026-01-01T00:00:04Z"},
+					{"id": 8, "content": "msg8", "created_at": "2026-01-01T00:00:03Z"},
+					{"id": 9, "content": "msg9", "created_at": "2026-01-01T00:00:02Z"},
+					{"id": 10, "content": "msg10", "created_at": "2026-01-01T00:00:01Z"}
+				]`)
+			default:
+				w.Header().Set("Link", `<`+baseURL+`?page=2>; rel="next"`)
+				w.Header().Set("X-Total-Count", "15")
+				fmt.Fprint(w, `[
+					{"id": 1, "content": "msg1", "created_at": "2026-01-01T00:05:00Z"},
+					{"id": 2, "content": "msg2", "created_at": "2026-01-01T00:04:00Z"},
+					{"id": 3, "content": "msg3", "created_at": "2026-01-01T00:03:00Z"},
+					{"id": 4, "content": "msg4", "created_at": "2026-01-01T00:02:00Z"},
+					{"id": 5, "content": "msg5", "created_at": "2026-01-01T00:01:00Z"}
+				]`)
+			}
+		default:
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		&chatTestTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "messages", "--limit", "8", "--room", "789")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 8, "should collect 8 messages across two pages")
+	for i, msg := range envelope.Data {
+		assert.Equal(t, int64(i+1), msg.ID, "message %d should have ID %d", i, i+1)
+	}
+	// With nil opts (old bug), the SDK default of 100 would exhaust all 3 pages.
+	// With Limit: 8, the SDK stops after page 2 (10 items collected >= 8).
+	assert.Equal(t, 2, pages, "should stop after 2 pages, not fetch page 3")
 }
 
 // TestChatPostViaSubcommandWithRoomFlag verifies the proper way to post

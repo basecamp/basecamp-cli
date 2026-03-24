@@ -252,17 +252,16 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		return output.ErrUsage("Invalid chat room ID")
 	}
 
+	if limit < 0 {
+		return output.ErrUsage("--limit must not be negative")
+	}
+
 	// Get recent messages (lines) using SDK
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), chatIDInt, nil)
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), chatIDInt, &basecamp.CampfireLineListOptions{Limit: limit})
 	if err != nil {
 		return err
 	}
 	lines := result.Lines
-
-	// Take last N messages (newest)
-	if limit > 0 && len(lines) > limit {
-		lines = lines[len(lines)-limit:]
-	}
 
 	summary := fmt.Sprintf("%d messages", len(lines))
 
