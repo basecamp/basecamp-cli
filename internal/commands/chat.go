@@ -420,7 +420,12 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		uploadLine, err := app.Account().Campfires().CreateUpload(cmd.Context(), chatIDInt, filename, mimeType, f)
 		f.Close()
 		if err != nil {
-			return convertSDKError(fmt.Errorf("%s: %w", filePath, err))
+			sdkErr := convertSDKError(err)
+			if outErr, ok := sdkErr.(*output.Error); ok {
+				outErr.Message = fmt.Sprintf("%s: %s", filePath, outErr.Message)
+				return outErr
+			}
+			return fmt.Errorf("%s: %w", filePath, err)
 		}
 		uploadIDs = append(uploadIDs, uploadLine.ID)
 	}
