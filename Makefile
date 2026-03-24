@@ -474,6 +474,13 @@ tools:
 		else echo "Could not auto-install zizmor: https://docs.zizmor.sh/installation/" && exit 1; \
 		fi; \
 	}
+	@command -v bats >/dev/null 2>&1 || { \
+		echo "Installing bats..."; \
+		if command -v brew >/dev/null 2>&1; then brew install bats-core; \
+		elif command -v pacman >/dev/null 2>&1; then sudo pacman -S --noconfirm bats; \
+		else echo "Could not auto-install bats: https://github.com/bats-core/bats-core#installation" && exit 1; \
+		fi; \
+	}
 
 
 # Run skill evals (requires ANTHROPIC_API_KEY and Ruby)
