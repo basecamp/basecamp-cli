@@ -114,7 +114,7 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Auth & Config",
 			Commands: []CommandInfo{
-				{Name: "accounts", Category: "auth", Description: "Manage accounts", Actions: []string{"list", "use"}},
+				{Name: "accounts", Category: "auth", Description: "Manage accounts", Actions: []string{"list", "show", "use", "rename", "logo"}},
 				{Name: "auth", Category: "auth", Description: "Authenticate with Basecamp", Actions: []string{"login", "logout", "status", "refresh"}},
 				{Name: "login", Category: "auth", Description: "Authenticate with Basecamp"},
 				{Name: "logout", Category: "auth", Description: "Remove stored credentials"},

@@ -2,12 +2,15 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
 )
 
@@ -22,10 +25,51 @@ func NewAccountsCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newAccountsListCmd(),
+		newAccountsShowCmd(),
 		newAccountsUseCmd(),
+		newAccountsRenameCmd(),
+		newAccountsLogoCmd(),
 	)
 
 	return cmd
+}
+
+func newAccountsShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Show current account details",
+		Long:  "Show details for the currently selected Basecamp account.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
+			account, err := app.Account().Account().GetAccount(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(account,
+				output.WithSummary(fmt.Sprintf("Account: %s", account.Name)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "rename",
+						Cmd:         "basecamp accounts rename <name>",
+						Description: "Rename this account",
+					},
+					output.Breadcrumb{
+						Action:      "logo",
+						Cmd:         "basecamp accounts logo set <path>",
+						Description: "Update the account logo",
+					},
+				),
+			)
+		},
+	}
 }
 
 func newAccountsListCmd() *cobra.Command {
@@ -160,4 +204,165 @@ func newAccountsUseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&scope, "scope", "global", "Config scope (global or local)")
 
 	return cmd
+}
+
+func newAccountsRenameCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <name>",
+		Short: "Rename the current account",
+		Long:  "Rename the currently selected Basecamp account.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
+			account, err := app.Account().Account().UpdateName(cmd.Context(), args[0])
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(account,
+				output.WithSummary(fmt.Sprintf("Renamed account to %s", account.Name)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp accounts show",
+						Description: "Show account details",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newAccountsLogoCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "logo",
+		Short: "Manage the current account logo",
+		Long:  "Upload, replace, or remove the logo for the currently selected Basecamp account.",
+	}
+
+	cmd.AddCommand(
+		newAccountsLogoSetCmd(),
+		newAccountsLogoRemoveCmd(),
+	)
+
+	return cmd
+}
+
+func newAccountsLogoSetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <path>",
+		Short: "Upload or replace the account logo",
+		Long:  "Upload or replace the logo for the currently selected Basecamp account.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
+			path := filepath.Clean(args[0])
+			if err := validateAccountLogoFile(path); err != nil {
+				return output.ErrUsage(err.Error())
+			}
+
+			f, err := os.Open(path)
+			if err != nil {
+				return fmt.Errorf("open logo: %w", err)
+			}
+			defer f.Close()
+
+			filename := filepath.Base(path)
+			contentType := richtext.DetectMIME(path)
+			if err := app.Account().Account().UpdateLogo(cmd.Context(), f, filename, contentType); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{
+				"logo":         filename,
+				"content_type": contentType,
+				"updated":      true,
+			},
+				output.WithSummary(fmt.Sprintf("Updated account logo from %s", filename)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp accounts show",
+						Description: "Show account details",
+					},
+					output.Breadcrumb{
+						Action:      "remove",
+						Cmd:         "basecamp accounts logo remove",
+						Description: "Remove the account logo",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newAccountsLogoRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove",
+		Short: "Remove the account logo",
+		Long:  "Remove the logo from the currently selected Basecamp account.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			if err := app.RequireAccount(); err != nil {
+				return err
+			}
+
+			if err := app.Account().Account().RemoveLogo(cmd.Context()); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{"removed": true},
+				output.WithSummary("Removed account logo"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp accounts show",
+						Description: "Show account details",
+					},
+					output.Breadcrumb{
+						Action:      "set",
+						Cmd:         "basecamp accounts logo set <path>",
+						Description: "Upload a new account logo",
+					},
+				),
+			)
+		},
+	}
+}
+
+func validateAccountLogoFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot access %s: %w", filepath.Base(path), err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", filepath.Base(path))
+	}
+	if info.Size() > 5*1024*1024 {
+		return fmt.Errorf("%s exceeds maximum size of 5MB", filepath.Base(path))
+	}
+	contentType := richtext.DetectMIME(path)
+	switch contentType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/heic":
+		return nil
+	default:
+		return fmt.Errorf("%s must be PNG, JPEG, GIF, WebP, AVIF, or HEIC", filepath.Base(path))
+	}
 }
