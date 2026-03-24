@@ -88,6 +88,11 @@ func TestMarkdownToHTML(t *testing.T) {
 			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<br>\n<p>Following paragraph.</p>",
 		},
 		{
+			name:     "blank between list items does not leak break after list",
+			input:    "- One\n\n- Two\nAfter",
+			expected: "<ul>\n<li>One</li>\n<li>Two</li>\n</ul>\n<p>After</p>",
+		},
+		{
 			name:     "blockquote",
 			input:    "> This is a quote",
 			expected: "<blockquote>This is a quote</blockquote>",

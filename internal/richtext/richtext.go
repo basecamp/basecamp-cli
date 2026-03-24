@@ -229,6 +229,7 @@ func MarkdownToHTML(md string) string {
 				inList = true
 				listType = "ul"
 			}
+			pendingBreak = false // blank was between items, not after the list
 			listItems = append(listItems, convertInline(ulMatch[2]))
 			continue
 		}
@@ -241,6 +242,7 @@ func MarkdownToHTML(md string) string {
 				inList = true
 				listType = "ol"
 			}
+			pendingBreak = false // blank was between items, not after the list
 			listItems = append(listItems, convertInline(olMatch[2]))
 			continue
 		}
@@ -270,6 +272,7 @@ func MarkdownToHTML(md string) string {
 				// Append to last list item with <br> separator
 				lastItemIndex := len(listItems) - 1
 				listItems[lastItemIndex] = listItems[lastItemIndex] + "<br>\n" + convertInline(trimmedLine)
+				pendingBreak = false // blank was before continuation, not after the list
 				continue
 			}
 		}
