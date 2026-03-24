@@ -398,7 +398,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		var err error
 		line, err = app.Account().Campfires().CreateLine(cmd.Context(), chatIDInt, content, opts)
 		if err != nil {
-			return err
+			return convertSDKError(err)
 		}
 	}
 
@@ -420,7 +420,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		uploadLine, err := app.Account().Campfires().CreateUpload(cmd.Context(), chatIDInt, filename, mimeType, f)
 		f.Close()
 		if err != nil {
-			return convertSDKError(err)
+			return convertSDKError(fmt.Errorf("%s: %w", filePath, err))
 		}
 		uploadIDs = append(uploadIDs, uploadLine.ID)
 	}
@@ -475,7 +475,10 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 
 	// Text-only: return the Line object directly (preserves JSON contract)
 	if line != nil && len(uploadIDs) == 0 {
-		respOpts = append(respOpts, output.WithEntity("chat_line"))
+		respOpts = append(respOpts,
+			output.WithEntity("chat_line"),
+			output.WithDisplayData(chatLineDisplayData(line)),
+		)
 		return app.OK(line, respOpts...)
 	}
 
