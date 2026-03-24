@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 // NewShowCmd creates the show command for viewing any recording.
 func NewShowCmd() *cobra.Command {
 	var recordType string
+	var dlDir *string
 
 	cmd := &cobra.Command{
 		Use:   "show [type] <id|url>",
@@ -217,9 +219,13 @@ You can also pass a Basecamp URL directly:
 				return output.ErrNotFound("item", id)
 			}
 
-			// Parse response for summary
+			// Parse response for summary. UseNumber preserves integer
+			// precision so IDs survive the map round-trip when we inject
+			// attachment metadata below.
 			var data map[string]any
-			if err := json.Unmarshal(resp.Data, &data); err != nil {
+			dec := json.NewDecoder(bytes.NewReader(resp.Data))
+			dec.UseNumber()
+			if err := dec.Decode(&data); err != nil {
 				return err
 			}
 
@@ -232,7 +238,9 @@ You can also pass a Basecamp URL directly:
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
 					if refetchErr == nil && refetchResp.StatusCode != http.StatusNoContent {
 						var richer map[string]any
-						if json.Unmarshal(refetchResp.Data, &richer) == nil {
+						refetchDec := json.NewDecoder(bytes.NewReader(refetchResp.Data))
+						refetchDec.UseNumber()
+						if refetchDec.Decode(&richer) == nil {
 							data = richer
 							resp = refetchResp
 						}
@@ -271,18 +279,40 @@ You can also pass a Basecamp URL directly:
 				output.WithBreadcrumbs(breadcrumbs...),
 			}
 
-			// Check for inline attachments in content fields
-			content := extractContentField(data)
-			attachments := richtext.ExtractAttachments(content)
+			// Check for attachments in content and description fields independently
+			contentStr, _ := data["content"].(string)
+			contentAtts := downloadableAttachments(richtext.ParseAttachments(contentStr))
+
+			descStr, _ := data["description"].(string)
+			descAtts := downloadableAttachments(richtext.ParseAttachments(descStr))
+
 			resultData := any(resp.Data)
-			if len(attachments) > 0 {
-				data["inline_attachments"] = inlineAttachmentMeta(attachments)
+			total := len(contentAtts) + len(descAtts)
+			if total > 0 {
+				allAtts := append(contentAtts, descAtts...)
+				dl := runDownloadAttachments(cmd, app, allAtts, dlDir)
+
+				var contentDL, descDL []attachmentResult
+				if dl != nil {
+					contentDL = dl.Results[:len(contentAtts)]
+					descDL = dl.Results[len(contentAtts):]
+				}
+
+				if len(contentAtts) > 0 {
+					data["content_attachments"] = attachmentMeta(contentAtts, contentDL)
+				}
+				if len(descAtts) > 0 {
+					data["description_attachments"] = attachmentMeta(descAtts, descDL)
+				}
 				resultData = data
+
+				notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s", total, id)
+				if dl != nil && dl.Notice != "" {
+					notice += "; " + dl.Notice
+				}
 				opts = append(opts,
-					output.WithNotice(fmt.Sprintf(
-						"%d inline attachment(s) — download: basecamp attachments download %s",
-						len(attachments), id)),
-					output.WithBreadcrumbs(attachmentBreadcrumb(id, len(attachments))),
+					output.WithNotice(notice),
+					output.WithBreadcrumbs(attachmentBreadcrumb(id, total)),
 				)
 			}
 
@@ -291,6 +321,7 @@ You can also pass a Basecamp URL directly:
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
+	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd
 }
@@ -370,11 +401,15 @@ func parentRecordingID(data map[string]any) string {
 	if !ok {
 		return ""
 	}
-	// JSON-decoded numbers are float64.
-	if id, ok := parent["id"].(float64); ok {
+	// Handle both json.Number (UseNumber) and float64 (standard decode).
+	switch id := parent["id"].(type) {
+	case json.Number:
+		return id.String()
+	case float64:
 		return fmt.Sprintf("%.0f", id)
+	default:
+		return ""
 	}
-	return ""
 }
 
 // isValidRecordType checks if the given type is a valid recording type.

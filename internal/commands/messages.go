@@ -189,53 +189,65 @@ You can pass either a message ID or a Basecamp URL:
   basecamp messages show 789
   basecamp messages show https://3.basecamp.com/123/buckets/456/messages/789`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Extract ID from URL if provided
-			messageIDStr := extractID(args[0])
-
-			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid message ID")
-			}
-
-			message, err := app.Account().Messages().Get(cmd.Context(), messageID)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			opts := []output.ResponseOption{
-				output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
-				output.WithEntity("message"),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment %s <text>", messageIDStr),
-						Description: "Add comment",
-					},
-				),
-			}
-
-			data := any(message)
-			attachments := richtext.ExtractAttachments(message.Content)
-			if len(attachments) > 0 {
-				data = withInlineAttachments(message, attachments)
-				opts = append(opts,
-					output.WithNotice(fmt.Sprintf(
-						"%d inline attachment(s) — download: basecamp attachments download %s",
-						len(attachments), messageIDStr)),
-					output.WithBreadcrumbs(attachmentBreadcrumb(messageIDStr, len(attachments))),
-				)
-			}
-
-			return app.OK(data, opts...)
-		},
 	}
+
+	dlDir := addDownloadAttachmentsFlag(cmd)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		app := appctx.FromContext(cmd.Context())
+
+		if err := ensureAccount(cmd, app); err != nil {
+			return err
+		}
+
+		// Extract ID from URL if provided
+		messageIDStr := extractID(args[0])
+
+		messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid message ID")
+		}
+
+		message, err := app.Account().Messages().Get(cmd.Context(), messageID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+
+		opts := []output.ResponseOption{
+			output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
+			output.WithEntity("message"),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "comment",
+					Cmd:         fmt.Sprintf("basecamp comment %s <text>", messageIDStr),
+					Description: "Add comment",
+				},
+			),
+		}
+
+		data := any(message)
+		attachments := downloadableAttachments(richtext.ParseAttachments(message.Content))
+		if len(attachments) > 0 {
+			dl := runDownloadAttachments(cmd, app, attachments, dlDir)
+			var dlResults []attachmentResult
+			if dl != nil {
+				dlResults = dl.Results
+			}
+			data = withAttachmentMeta(message, "content", attachments, dlResults)
+			notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+				len(attachments), messageIDStr)
+			if dl != nil && dl.Notice != "" {
+				notice += "; " + dl.Notice
+			}
+			opts = append(opts,
+				output.WithNotice(notice),
+				output.WithBreadcrumbs(attachmentBreadcrumb(messageIDStr, len(attachments))),
+			)
+		}
+
+		return app.OK(data, opts...)
+	}
+
 	return cmd
 }
 

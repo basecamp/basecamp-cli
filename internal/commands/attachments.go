@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
@@ -24,10 +26,10 @@ import (
 func NewAttachmentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "attachments",
-		Short: "List and download inline attachments",
+		Short: "List and download attachments",
 		Long: `List and download file attachments embedded in Basecamp items.
 
-Inline attachments are files embedded in rich text content via <bc-attachment>
+Attachments are files embedded in rich text content via <bc-attachment>
 elements. Use 'list' to inspect them or 'download' to save them locally.`,
 		Annotations: map[string]string{"agent_notes": "Parses <bc-attachment> tags from item content\nWorks on any recording type — todos, messages, cards, comments\nUse --type to skip the generic recording lookup when you know the type\nSupports --out - for stdout streaming (single file only)"},
 	}
@@ -186,8 +188,8 @@ func newAttachmentsDownloadCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "download <id|url>",
-		Short: "Download inline attachments from a recording",
-		Long: `Download inline file attachments from any Basecamp recording.
+		Short: "Download attachments from a recording",
+		Long: `Download file attachments from any Basecamp recording.
 
 Fetches the recording's rich text content, extracts <bc-attachment> elements,
 and downloads the referenced files in parallel.
@@ -257,25 +259,12 @@ Options:
 				allAttachments = []richtext.ParsedAttachment{selected}
 			}
 
-			// Filter to downloadable only (must have a URL)
-			var attachments []richtext.ParsedAttachment
-			for _, a := range allAttachments {
-				if a.DisplayURL() != "" {
-					attachments = append(attachments, a)
-				}
-			}
-			if len(attachments) == 0 {
-				return output.ErrUsageHint(
-					"No downloadable attachments found",
-					"This recording has no embedded file attachments with download URLs",
-				)
-			}
-
-			// Filter by filename if specified
+			// Filter by filename if specified (operates on full list for name matching)
+			attachments := allAttachments
 			if filename != "" {
-				filtered := filterParsedAttachments(attachments, filename)
+				filtered := filterParsedAttachments(downloadableAttachments(attachments), filename)
 				if len(filtered) == 0 {
-					names := parsedAttachmentFilenames(attachments)
+					names := parsedAttachmentFilenames(downloadableAttachments(attachments))
 					return output.ErrUsageHint(
 						fmt.Sprintf("No attachment matching %q", filename),
 						fmt.Sprintf("Available: %s", strings.Join(names, ", ")),
@@ -286,13 +275,20 @@ Options:
 
 			// Stdout streaming: --out -
 			if outDir == "-" {
-				if len(attachments) > 1 {
+				downloadable := downloadableAttachments(attachments)
+				if len(downloadable) == 0 {
+					return output.ErrUsageHint(
+						"No downloadable attachments found",
+						"This recording has no embedded file attachments with download URLs",
+					)
+				}
+				if len(downloadable) > 1 {
 					return output.ErrUsageHint(
 						"Multiple attachments match",
 						"Use --index <n> to select one when streaming to stdout",
 					)
 				}
-				att := attachments[0]
+				att := downloadable[0]
 				result, err := app.Account().DownloadURL(cmd.Context(), att.DisplayURL())
 				if err != nil {
 					return convertSDKError(err)
@@ -302,19 +298,37 @@ Options:
 				return err
 			}
 
-			// Parallel download to directory
-			results := downloadParsedAttachments(cmd.Context(), app, attachments, outDir)
+			// Progress writer: stderr for TTY, nil for machine output
+			var progress io.Writer
+			if !app.IsMachineOutput() {
+				progress = cmd.ErrOrStderr()
+			}
 
-			summary := fmt.Sprintf("Downloaded %d attachment(s)", len(results))
+			// Download all attachments (skips non-downloadable with status)
+			results := downloadParsedAttachments(cmd.Context(), app, attachments, outDir, progress)
+
+			var downloaded, skipped, failed int
 			var errors []string
 			for _, r := range results {
-				if r.Error != "" {
+				switch r.Status {
+				case "downloaded":
+					downloaded++
+				case "skipped":
+					skipped++
+				case "error":
+					failed++
 					errors = append(errors, fmt.Sprintf("%s: %s", r.Filename, r.Error))
 				}
 			}
-			if len(errors) > 0 {
-				summary = fmt.Sprintf("Downloaded %d/%d attachment(s)", len(results)-len(errors), len(results))
+
+			parts := []string{fmt.Sprintf("%d downloaded", downloaded)}
+			if skipped > 0 {
+				parts = append(parts, fmt.Sprintf("%d skipped", skipped))
 			}
+			if failed > 0 {
+				parts = append(parts, fmt.Sprintf("%d failed", failed))
+			}
+			summary := strings.Join(parts, ", ")
 
 			opts := []output.ResponseOption{
 				output.WithSummary(summary),
@@ -571,34 +585,54 @@ func parsedAttachmentFilenames(atts []richtext.ParsedAttachment) []string {
 type attachmentResult struct {
 	URL         string `json:"url"`
 	Filename    string `json:"filename"`
+	Status      string `json:"status"`
 	Path        string `json:"path,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
 	ByteSize    int64  `json:"byte_size,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
 
-// downloadParsedAttachments downloads attachments in parallel with bounded concurrency.
-func downloadParsedAttachments(ctx context.Context, app *appctx.App, attachments []richtext.ParsedAttachment, outDir string) []attachmentResult {
+// downloadParsedAttachments processes ALL attachments — downloadable entries
+// are fetched in parallel, non-downloadable ones are marked as skipped.
+// Progress lines are written to progress (nil suppresses output).
+func downloadParsedAttachments(ctx context.Context, app *appctx.App, attachments []richtext.ParsedAttachment, outDir string, progress io.Writer) []attachmentResult {
 	dir := outDir
 	if dir == "" {
 		dir = "."
 	}
 
-	results := make([]attachmentResult, len(attachments))
+	total := len(attachments)
+	results := make([]attachmentResult, total)
 	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	used := make(map[string]bool)
+	var completed atomic.Int32
 
 	for i, att := range attachments {
+		dlURL := att.DisplayURL()
+		fname := att.Filename
+		if fname == "" {
+			fname = att.DisplayName()
+		}
+
+		if dlURL == "" {
+			seq := completed.Add(1)
+			results[i] = attachmentResult{
+				Filename: fname,
+				Status:   "skipped",
+			}
+			if progress != nil {
+				fmt.Fprintf(progress, "  [%d/%d] Skipped: %s (no download URL)\n", seq, total, fname)
+			}
+			continue
+		}
+
 		wg.Add(1)
-		go func(i int, att richtext.ParsedAttachment) {
+		go func(i int, att richtext.ParsedAttachment, dlURL, fname string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			dlURL := att.DisplayURL()
-			fname := att.Filename
 
 			mu.Lock()
 			name := uniqueFilename(dir, used, fname)
@@ -607,24 +641,39 @@ func downloadParsedAttachments(ctx context.Context, app *appctx.App, attachments
 
 			dl, err := app.Account().DownloadURL(ctx, dlURL)
 			if err != nil {
-				results[i] = attachmentResult{URL: dlURL, Filename: fname, Error: convertSDKError(err).Error()}
+				seq := completed.Add(1)
+				errMsg := convertSDKError(err).Error()
+				results[i] = attachmentResult{URL: dlURL, Filename: fname, Status: "error", Error: errMsg}
+				if progress != nil {
+					fmt.Fprintf(progress, "  [%d/%d] Error: %s — %s\n", seq, total, fname, errMsg)
+				}
 				return
 			}
 			defer dl.Body.Close()
 
 			path, bytes, writeErr := writeBodyToFile(dl.Body, dir, name)
 			if writeErr != nil {
-				results[i] = attachmentResult{URL: dlURL, Filename: name, Error: writeErr.Error()}
+				seq := completed.Add(1)
+				results[i] = attachmentResult{URL: dlURL, Filename: name, Status: "error", Error: writeErr.Error()}
+				if progress != nil {
+					fmt.Fprintf(progress, "  [%d/%d] Error: %s — %s\n", seq, total, name, writeErr.Error())
+				}
 				return
 			}
+
+			seq := completed.Add(1)
 			results[i] = attachmentResult{
 				URL:         dlURL,
 				Filename:    name,
+				Status:      "downloaded",
 				Path:        path,
 				ContentType: att.ContentType,
 				ByteSize:    bytes,
 			}
-		}(i, att)
+			if progress != nil {
+				fmt.Fprintf(progress, "  [%d/%d] Downloaded %s (%s)\n", seq, total, path, humanSize(bytes))
+			}
+		}(i, att, dlURL, fname)
 	}
 	wg.Wait()
 	return results
@@ -694,31 +743,53 @@ func writeBodyToFile(body io.Reader, dir, name string) (outputPath string, writt
 // Shared helpers — show command integration
 // ---------------------------------------------------------------------------
 
-// withInlineAttachments adds an "inline_attachments" field to data by
+// withAttachmentMeta adds a "<field>_attachments" field to data by
 // JSON-marshaling the struct to a map and inserting the field. Falls back
-// to the original data on any marshal error.
-func withInlineAttachments(data any, atts []richtext.InlineAttachment) any {
+// to the original data on any marshal error. When dlResults is non-nil,
+// each attachment's metadata gains path/status/error fields from the
+// corresponding download result.
+//
+// The field parameter names the source rich-text attribute (e.g. "content",
+// "description") so recordings with multiple rich-text fields produce
+// distinct attachment collections (content_attachments, description_attachments).
+//
+// Can be called sequentially on the same data — the second call operates on
+// the map returned by the first, preserving both keys.
+func withAttachmentMeta(data any, field string, atts []richtext.ParsedAttachment, dlResults []attachmentResult) any {
 	if len(atts) == 0 {
 		return data
 	}
+
+	// If data is already a map (from a prior call), reuse it directly.
+	if m, ok := data.(map[string]any); ok {
+		m[field+"_attachments"] = attachmentMeta(atts, dlResults)
+		return m
+	}
+
 	b, err := json.Marshal(data)
 	if err != nil {
 		return data
 	}
+	// Decode with UseNumber to preserve integer precision (IDs > 2^53).
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
+	if err := dec.Decode(&m); err != nil {
 		return data
 	}
-	m["inline_attachments"] = inlineAttachmentMeta(atts)
+	m[field+"_attachments"] = attachmentMeta(atts, dlResults)
 	return m
 }
 
-// inlineAttachmentMeta converts InlineAttachment slice to JSON-friendly metadata.
-func inlineAttachmentMeta(atts []richtext.InlineAttachment) []map[string]string {
+// attachmentMeta converts ParsedAttachment slice to JSON-friendly metadata.
+// When dlResults is non-nil, each entry gains "path", "download_status",
+// and (on failure) "download_error" fields from the corresponding result.
+func attachmentMeta(atts []richtext.ParsedAttachment, dlResults []attachmentResult) []map[string]string {
 	result := make([]map[string]string, len(atts))
 	for i, a := range atts {
-		m := map[string]string{
-			"href": a.Href,
+		m := map[string]string{}
+		if url := a.DisplayURL(); url != "" {
+			m["url"] = url
 		}
 		if a.Filename != "" {
 			m["filename"] = a.Filename
@@ -732,7 +803,36 @@ func inlineAttachmentMeta(atts []richtext.InlineAttachment) []map[string]string 
 		if a.SGID != "" {
 			m["sgid"] = a.SGID
 		}
+		if a.Width != "" {
+			m["width"] = a.Width
+		}
+		if a.Height != "" {
+			m["height"] = a.Height
+		}
+		if dlResults != nil && i < len(dlResults) {
+			r := dlResults[i]
+			if r.Path != "" {
+				m["path"] = r.Path
+			}
+			if r.Status != "" {
+				m["download_status"] = r.Status
+			}
+			if r.Error != "" {
+				m["download_error"] = r.Error
+			}
+		}
 		result[i] = m
+	}
+	return result
+}
+
+// downloadableAttachments returns only attachments that have a download URL.
+func downloadableAttachments(atts []richtext.ParsedAttachment) []richtext.ParsedAttachment {
+	var result []richtext.ParsedAttachment
+	for _, a := range atts {
+		if a.DisplayURL() != "" {
+			result = append(result, a)
+		}
 	}
 	return result
 }
@@ -748,4 +848,54 @@ func attachmentBreadcrumb(id string, n int) output.Breadcrumb {
 		Cmd:         fmt.Sprintf("basecamp attachments download %s", id),
 		Description: desc,
 	}
+}
+
+// addDownloadAttachmentsFlag registers --download-attachments on a command.
+// Returns a pointer to the flag value. Use cmd.Flags().Changed() to detect use.
+func addDownloadAttachmentsFlag(cmd *cobra.Command) *string {
+	var dir string
+	cmd.Flags().StringVar(&dir, "download-attachments", "", "Download attachments to `dir` (default: OS temp dir)")
+	cmd.Flags().Lookup("download-attachments").NoOptDefVal = ""
+	return &dir
+}
+
+// downloadAttachmentResults holds the outcome of runDownloadAttachments.
+type downloadAttachmentResults struct {
+	Results []attachmentResult
+	Notice  string // non-empty when some downloads failed
+}
+
+// runDownloadAttachments downloads attachments when --download-attachments is set.
+// Returns nil when the flag was not set, otherwise the full per-attachment results
+// with status, path, and error information.
+func runDownloadAttachments(cmd *cobra.Command, app *appctx.App, attachments []richtext.ParsedAttachment, dirFlag *string) *downloadAttachmentResults {
+	if !cmd.Flags().Changed("download-attachments") {
+		return nil
+	}
+
+	dir := *dirFlag
+	if dir == "" {
+		dir = os.TempDir()
+	}
+
+	var progress io.Writer
+	if !app.IsMachineOutput() {
+		progress = cmd.ErrOrStderr()
+		fmt.Fprintf(progress, "Downloading attachments to %s\n", dir)
+	}
+
+	results := downloadParsedAttachments(cmd.Context(), app, attachments, dir, progress)
+
+	var errors []string
+	for _, r := range results {
+		if r.Status == "error" {
+			errors = append(errors, fmt.Sprintf("%s: %s", r.Filename, r.Error))
+		}
+	}
+	var notice string
+	if len(errors) > 0 {
+		notice = "Some downloads failed: " + strings.Join(errors, "; ")
+	}
+
+	return &downloadAttachmentResults{Results: results, Notice: notice}
 }

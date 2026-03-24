@@ -171,14 +171,15 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
 | Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
+| Download attachments | `basecamp attachments download <id> --out /tmp/` |
+| Show + download | `basecamp todos show <id> --download-attachments --json` |
+| Stream attachment to stdout | `basecamp attachments download <id> --file <name> --out -` |
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |
 | Download file | `basecamp files download <id> --in <project>` |
 | Stream file to stdout | `basecamp files download <id> --out - --in <project>` |
-| Download inline attachment | `basecamp files download "https://storage.3.basecamp.com/.../download/report.pdf"` |
-| Download inline attachments | `basecamp attachments download <id> --out /tmp/` |
-| Stream attachment to stdout | `basecamp attachments download <id> --file <name> --out -` |
+| Download storage URL | `basecamp files download "https://storage.3.basecamp.com/.../download/report.pdf"` |
 | My assignments | `basecamp assignments --json` (priorities + non-priorities) |
 | Overdue assignments | `basecamp assignments due overdue --json` |
 | Completed assignments | `basecamp assignments completed --json` |
@@ -338,33 +339,61 @@ basecamp cards move <card_id> --to "Column Name" --on-hold --card-table <table_i
 ```bash
 basecamp files download <upload_id> --in <project> --out ./downloads
 
-# Download inline attachment from a storage URL (no --in needed)
+# Download attachment from a storage URL (no --in needed)
 basecamp files download "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf"
 
 # Stream to stdout (for piping)
 basecamp files download <upload_id> --out - --in <project>
 ```
 
-### Working with Inline Attachments
+### Working with Attachments (Multimodal Agent Workflow)
 
-Messages, todos, cards, and documents may contain inline images and file attachments.
-Show commands surface these as `inline_attachments` in the response data.
+Messages, todos, cards, and documents may contain images and file attachments
+(mockups, screenshots, annotated designs). Show commands surface these as
+field-scoped collections — `content_attachments` and/or `description_attachments`
+— keyed by which rich-text attribute contained them. The notice field hints at
+the download command.
 
+**Step 1: Fetch the recording and check for attachments**
 ```bash
-# Download all attachments from any recording
-basecamp attachments download <id|url> --out /tmp/attachments
-
-# Stream a single attachment to stdout (for piping)
-basecamp attachments download <id> --file mockup.png --out -
-
-# Select by index when names collide (1-based)
-basecamp attachments download <id> --index 2 --out -
-
-# For multimodal agents: read downloaded images with your file-read tool
+basecamp todos show <id> --json
+# Response includes description_attachments when attachments are present
+# Messages/documents use content_attachments; cards may have both
+# The notice field hints: "3 attachment(s) — download: basecamp attachments download <id>"
 ```
 
-When a show command response contains `inline_attachments`, follow up with
-`basecamp attachments download <id>` to pull the files for viewing.
+**Step 2 (one-shot): Download attachments with the show command**
+```bash
+# --download-attachments fetches + downloads in one shot
+basecamp todos show <id> --download-attachments --json
+# content_attachments/description_attachments entries now include "path" pointing to local files
+# Downloads to OS temp dir by default, or specify: --download-attachments /tmp/att
+```
+
+**Step 2 (two-step alternative): Download separately**
+```bash
+# Download all at once (shows progress on stderr)
+basecamp attachments download <id> --out /tmp/attachments
+```
+
+**Step 3: View images with your native file-read tool**
+For multimodal LLMs (Claude, Gemini), use your file-read tool on the `path`
+from the response to view downloaded images directly — no browser needed.
+This surfaces visual context (mockups, screenshots, annotated designs) that
+is often the most important part of a Basecamp todo or message.
+
+```bash
+# Stream a single image to stdout for piping
+basecamp attachments download <id> --file mockup.png --out -
+
+# Select by index when names collide
+basecamp attachments download <id> --index 2 --out -
+```
+
+**Key pattern:** When a show command response contains `content_attachments`
+or `description_attachments`, always download and view them — visual context is
+often more important than the text content. Use `--download-attachments` for
+one-shot fetch+download, or follow the breadcrumb hint for two-step control.
 
 ## Resource Reference
 
@@ -495,7 +524,7 @@ basecamp files list --vault <folder_id> --in <project>  # List folder contents
 basecamp files show <id> --in <project>                 # Show item (auto-detects type)
 basecamp files download <id> --in <project>             # Download file
 basecamp files download <id> --out ./dir                # Download to specific dir
-basecamp files download "https://storage.../download/f" # Download inline attachment
+basecamp files download "https://storage.../download/f" # Download from storage URL
 basecamp files uploads create <file> --in <project>      # Upload file to root
 basecamp files uploads create <file> --vault <folder_id> --in <project>  # Upload to folder
 basecamp files folder create "Folder" --in <project>

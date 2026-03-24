@@ -997,6 +997,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 func newFilesShowCmd(project *string) *cobra.Command {
 	var itemType string
+	var dlDir *string
 
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
@@ -1159,13 +1160,21 @@ You can pass either an item ID or a Basecamp URL:
 			if detectedType == "document" {
 				doc, ok := result.(*basecamp.Document)
 				if ok {
-					attachments := richtext.ExtractAttachments(doc.Content)
+					attachments := downloadableAttachments(richtext.ParseAttachments(doc.Content))
 					if len(attachments) > 0 {
-						data = withInlineAttachments(doc, attachments)
+						dl := runDownloadAttachments(cmd, app, attachments, dlDir)
+						var dlResults []attachmentResult
+						if dl != nil {
+							dlResults = dl.Results
+						}
+						data = withAttachmentMeta(doc, "content", attachments, dlResults)
+						notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+							len(attachments), itemIDStr)
+						if dl != nil && dl.Notice != "" {
+							notice += "; " + dl.Notice
+						}
 						opts = append(opts,
-							output.WithNotice(fmt.Sprintf(
-								"%d inline attachment(s) — download: basecamp attachments download %s",
-								len(attachments), itemIDStr)),
+							output.WithNotice(notice),
 							output.WithBreadcrumbs(attachmentBreadcrumb(itemIDStr, len(attachments))),
 						)
 					}
@@ -1177,6 +1186,7 @@ You can pass either an item ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document)")
+	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd
 }
@@ -1378,7 +1388,7 @@ You can pass either an upload ID, a Basecamp URL, or a storage URL:
   basecamp files download 789 --out ./downloads --in my-project
   basecamp files download 789 --out - --in my-project  # stream to stdout
 
-Storage URLs (from inline attachments in rich text) are downloaded directly
+Storage URLs (from attachments in rich text) are downloaded directly
 via the API. No --in flag is needed for storage URLs.
 
 Use --out - to stream the file to stdout (for piping to other commands).`,

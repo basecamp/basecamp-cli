@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,45 +182,155 @@ func TestUniqueFilename(t *testing.T) {
 	})
 }
 
-func TestWithInlineAttachments(t *testing.T) {
-	t.Run("adds field to struct", func(t *testing.T) {
+func TestWithAttachmentMeta(t *testing.T) {
+	t.Run("adds field-scoped key to struct", func(t *testing.T) {
 		type sample struct {
 			Title string `json:"title"`
 		}
 		data := sample{Title: "test"}
-		atts := []richtext.InlineAttachment{
-			{Href: "https://example.com/a.png", Filename: "a.png", ContentType: "image/png"},
+		atts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/a.png", Filename: "a.png", ContentType: "image/png"},
 		}
-		result := withInlineAttachments(data, atts)
+		result := withAttachmentMeta(data, "content", atts, nil)
 		m, ok := result.(map[string]any)
 		require.True(t, ok)
 		assert.Equal(t, "test", m["title"])
-		assert.NotNil(t, m["inline_attachments"])
-		attachments := m["inline_attachments"].([]map[string]string)
+		assert.NotNil(t, m["content_attachments"])
+		attachments := m["content_attachments"].([]map[string]string)
 		assert.Len(t, attachments, 1)
 		assert.Equal(t, "a.png", attachments[0]["filename"])
+		assert.Equal(t, "https://example.com/a.png", attachments[0]["url"])
 	})
 
 	t.Run("empty attachments returns original", func(t *testing.T) {
 		data := map[string]string{"title": "test"}
-		result := withInlineAttachments(data, nil)
+		result := withAttachmentMeta(data, "content", nil, nil)
 		assert.Equal(t, data, result)
+	})
+
+	t.Run("merges download results", func(t *testing.T) {
+		type sample struct {
+			Title string `json:"title"`
+		}
+		data := sample{Title: "test"}
+		atts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/a.png", Filename: "a.png"},
+			{URL: "https://example.com/b.png", Filename: "b.png"},
+		}
+		dlResults := []attachmentResult{
+			{Path: "/tmp/a.png", Status: "downloaded"},
+			{Filename: "b.png", Status: "error", Error: "not found"},
+		}
+		result := withAttachmentMeta(data, "description", atts, dlResults)
+		m := result.(map[string]any)
+		attachments := m["description_attachments"].([]map[string]string)
+		assert.Equal(t, "/tmp/a.png", attachments[0]["path"])
+		assert.Equal(t, "downloaded", attachments[0]["download_status"])
+		assert.Equal(t, "error", attachments[1]["download_status"])
+		assert.Equal(t, "not found", attachments[1]["download_error"])
+	})
+
+	t.Run("sequential calls produce both keys", func(t *testing.T) {
+		type sample struct {
+			Title string `json:"title"`
+		}
+		data := sample{Title: "card"}
+		contentAtts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/c.png", Filename: "c.png"},
+		}
+		descAtts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/d.png", Filename: "d.png"},
+		}
+		result := withAttachmentMeta(data, "content", contentAtts, nil)
+		result = withAttachmentMeta(result, "description", descAtts, nil)
+		m := result.(map[string]any)
+		assert.Equal(t, "card", m["title"])
+		assert.NotNil(t, m["content_attachments"])
+		assert.NotNil(t, m["description_attachments"])
+		cAtts := m["content_attachments"].([]map[string]string)
+		dAtts := m["description_attachments"].([]map[string]string)
+		assert.Equal(t, "c.png", cAtts[0]["filename"])
+		assert.Equal(t, "d.png", dAtts[0]["filename"])
+	})
+
+	t.Run("preserves native attachments key", func(t *testing.T) {
+		// CampfireLine records have a native API "attachments" array.
+		// Field-scoped keys must not collide with it.
+		data := map[string]any{
+			"id":          float64(42),
+			"content":     "<p>see attached</p>",
+			"attachments": []any{map[string]any{"sgid": "native-sgid"}},
+		}
+		atts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/a.png", Filename: "a.png"},
+		}
+		result := withAttachmentMeta(data, "content", atts, nil)
+		m := result.(map[string]any)
+		// Native API field untouched
+		native := m["attachments"].([]any)
+		assert.Len(t, native, 1)
+		// Field-scoped collection added separately
+		scoped := m["content_attachments"].([]map[string]string)
+		assert.Len(t, scoped, 1)
+		assert.Equal(t, "a.png", scoped[0]["filename"])
+	})
+
+	t.Run("preserves integer precision through marshal round-trip", func(t *testing.T) {
+		// IDs above 2^53 must survive the struct → map conversion.
+		type sample struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		}
+		data := sample{ID: 9007199254740993, Title: "big-id"} // 2^53 + 1
+		atts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/a.png", Filename: "a.png"},
+		}
+		result := withAttachmentMeta(data, "content", atts, nil)
+		m := result.(map[string]any)
+		// json.Number preserves the exact string representation
+		idNum, ok := m["id"].(json.Number)
+		require.True(t, ok, "id should be json.Number, got %T", m["id"])
+		assert.Equal(t, "9007199254740993", idNum.String())
 	})
 }
 
-func TestInlineAttachmentMeta(t *testing.T) {
-	atts := []richtext.InlineAttachment{
-		{Href: "https://example.com/a.png", Filename: "a.png", ContentType: "image/png", Filesize: "1024"},
-		{Href: "https://example.com/b.txt"},
+func TestAttachmentMeta(t *testing.T) {
+	t.Run("uses DisplayURL", func(t *testing.T) {
+		atts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/a.png", Href: "https://example.com/a-href.png", Filename: "a.png", ContentType: "image/png", Filesize: "1024"},
+			{Href: "https://example.com/b.txt"},
+		}
+		result := attachmentMeta(atts, nil)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "a.png", result[0]["filename"])
+		assert.Equal(t, "image/png", result[0]["content_type"])
+		assert.Equal(t, "1024", result[0]["filesize"])
+		assert.Equal(t, "https://example.com/a.png", result[0]["url"])
+		assert.Equal(t, "https://example.com/b.txt", result[1]["url"])
+		_, hasFilename := result[1]["filename"]
+		assert.False(t, hasFilename)
+	})
+
+	t.Run("surfaces width and height", func(t *testing.T) {
+		atts := []richtext.ParsedAttachment{
+			{URL: "https://example.com/img.jpg", Filename: "img.jpg", ContentType: "image/jpeg", Width: "1920", Height: "1080"},
+		}
+		result := attachmentMeta(atts, nil)
+		assert.Equal(t, "1920", result[0]["width"])
+		assert.Equal(t, "1080", result[0]["height"])
+	})
+}
+
+func TestDownloadableAttachments(t *testing.T) {
+	atts := []richtext.ParsedAttachment{
+		{URL: "https://example.com/a.png", Filename: "a.png"},
+		{Filename: "no-url.png"},
+		{Href: "https://example.com/b.txt", Filename: "b.txt"},
 	}
-	result := inlineAttachmentMeta(atts)
+	result := downloadableAttachments(atts)
 	assert.Len(t, result, 2)
-	assert.Equal(t, "a.png", result[0]["filename"])
-	assert.Equal(t, "image/png", result[0]["content_type"])
-	assert.Equal(t, "1024", result[0]["filesize"])
-	assert.Equal(t, "https://example.com/b.txt", result[1]["href"])
-	_, hasFilename := result[1]["filename"]
-	assert.False(t, hasFilename)
+	assert.Equal(t, "a.png", result[0].Filename)
+	assert.Equal(t, "b.txt", result[1].Filename)
 }
 
 func TestAttachmentBreadcrumb(t *testing.T) {

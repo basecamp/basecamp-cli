@@ -264,52 +264,73 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards show 789
   basecamp cards show https://3.basecamp.com/123/buckets/456/card_tables/cards/789`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Extract ID from URL if provided
-			cardIDStr := extractID(args[0])
-
-			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid card ID")
-			}
-
-			card, err := app.Account().Cards().Get(cmd.Context(), cardID)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			opts := []output.ResponseOption{
-				output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment %s <text>", cardIDStr),
-						Description: "Add comment",
-					},
-				),
-			}
-
-			data := any(card)
-			attachments := richtext.ExtractAttachments(card.Content)
-			if len(attachments) > 0 {
-				data = withInlineAttachments(card, attachments)
-				opts = append(opts,
-					output.WithNotice(fmt.Sprintf(
-						"%d inline attachment(s) — download: basecamp attachments download %s",
-						len(attachments), cardIDStr)),
-					output.WithBreadcrumbs(attachmentBreadcrumb(cardIDStr, len(attachments))),
-				)
-			}
-
-			return app.OK(data, opts...)
-		},
 	}
+
+	dlDir := addDownloadAttachmentsFlag(cmd)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		app := appctx.FromContext(cmd.Context())
+
+		if err := ensureAccount(cmd, app); err != nil {
+			return err
+		}
+
+		// Extract ID from URL if provided
+		cardIDStr := extractID(args[0])
+
+		cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid card ID")
+		}
+
+		card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+
+		opts := []output.ResponseOption{
+			output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "comment",
+					Cmd:         fmt.Sprintf("basecamp comment %s <text>", cardIDStr),
+					Description: "Add comment",
+				},
+			),
+		}
+
+		data := any(card)
+		contentAtts := downloadableAttachments(richtext.ParseAttachments(card.Content))
+		descAtts := downloadableAttachments(richtext.ParseAttachments(card.Description))
+		total := len(contentAtts) + len(descAtts)
+		if total > 0 {
+			allAtts := append(contentAtts, descAtts...)
+			dl := runDownloadAttachments(cmd, app, allAtts, dlDir)
+			var contentDL, descDL []attachmentResult
+			if dl != nil {
+				contentDL = dl.Results[:len(contentAtts)]
+				descDL = dl.Results[len(contentAtts):]
+			}
+			if len(contentAtts) > 0 {
+				data = withAttachmentMeta(card, "content", contentAtts, contentDL)
+			}
+			if len(descAtts) > 0 {
+				data = withAttachmentMeta(data, "description", descAtts, descDL)
+			}
+			notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+				total, cardIDStr)
+			if dl != nil && dl.Notice != "" {
+				notice += "; " + dl.Notice
+			}
+			opts = append(opts,
+				output.WithNotice(notice),
+				output.WithBreadcrumbs(attachmentBreadcrumb(cardIDStr, total)),
+			)
+		}
+
+		return app.OK(data, opts...)
+	}
+
 	return cmd
 }
 
