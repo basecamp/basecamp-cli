@@ -51,24 +51,28 @@ func newForwardsListCmd(project, inboxID *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var sortField string
+	var reverse bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List forwards in project inbox",
 		Long:  "List all email forwards in the project inbox.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runForwardsList(cmd, *project, *inboxID, limit, page, all)
+			return runForwardsList(cmd, *project, *inboxID, limit, page, all, sortField, reverse)
 		},
 	}
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&sortField, "sort", "", "Sort by field (created or updated)")
+	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 
 	return cmd
 }
 
-func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page int, all bool) error {
+func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page int, all bool, sortField string, reverse bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Validate flag combinations
@@ -80,6 +84,11 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 	}
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
+	switch sortField {
+	case "", "created", "updated":
+	default:
+		return output.ErrUsage("--sort must be created or updated")
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -126,6 +135,18 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 	}
 	if page > 0 {
 		opts.Page = page
+	}
+	if sortField != "" {
+		if sortField == "created" {
+			opts.Sort = "created_at"
+		} else {
+			opts.Sort = "updated_at"
+		}
+		if reverse {
+			opts.Direction = "desc"
+		} else {
+			opts.Direction = "asc"
+		}
 	}
 
 	forwardsResult, err := app.Account().Forwards().List(cmd.Context(), inboxIDInt, opts)
