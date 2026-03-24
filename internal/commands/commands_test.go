@@ -101,7 +101,6 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewToolsCmd())
 	root.AddCommand(commands.NewConfigCmd())
 	root.AddCommand(commands.NewTodolistgroupsCmd())
-	root.AddCommand(commands.NewMCPCmd())
 	root.AddCommand(commands.NewCommandsCmd())
 	root.AddCommand(commands.NewVersionCmd())
 	root.AddCommand(commands.NewTimelineCmd())

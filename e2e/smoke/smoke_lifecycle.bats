@@ -48,9 +48,6 @@ load smoke_helper
   mark_out_of_scope "Shell completion generation"
 }
 
-@test "mcp is out of scope" {
-  mark_out_of_scope "MCP server — long-running process"
-}
 
 @test "tui is out of scope" {
   mark_out_of_scope "Terminal UI — interactive"
