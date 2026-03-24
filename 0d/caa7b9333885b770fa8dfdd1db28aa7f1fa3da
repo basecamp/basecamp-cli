@@ -1,0 +1,29 @@
+internal/commands/show_test.go
+  642931d28818a3d7 6,749-766
+internal/commands/assignments.go
+  642931d28818a3d7 21
+internal/commands/files.go
+  642931d28818a3d7 1420,1470,1583-1609
+internal/commands/notifications.go
+  642931d28818a3d7 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "0dcaa7b9333885b770fa8dfdd1db28aa7f1fa3da",
+  "prompts": {
+    "642931d28818a3d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f5b5890-478e-40d2-abe4-bf43b4cb306c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 50,
+      "total_deletions": 43,
+      "accepted_lines": 50,
+      "overriden_lines": 0
+    }
+  }
+}
