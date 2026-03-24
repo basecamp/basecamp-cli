@@ -163,8 +163,9 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 			Description: "Add comment",
 		})
 	}
-	if len(attachments) > 0 {
-		breadcrumbs = append(breadcrumbs, attachmentBreadcrumb(id, len(attachments)))
+	downloadable := downloadableAttachments(attachments)
+	if len(downloadable) > 0 {
+		breadcrumbs = append(breadcrumbs, attachmentBreadcrumb(id, len(downloadable)))
 	}
 
 	respOpts := []output.ResponseOption{
@@ -755,7 +756,7 @@ func writeBodyToFile(body io.Reader, dir, name string) (outputPath string, writt
 		expectedPrefix += string(filepath.Separator)
 	}
 	if !strings.HasPrefix(absPath, expectedPrefix) {
-		return "", 0, fmt.Errorf("invalid filename: path traversal detected")
+		return "", 0, output.ErrUsage("Invalid filename: path traversal detected")
 	}
 
 	outFile, err := createFile(outputPath)

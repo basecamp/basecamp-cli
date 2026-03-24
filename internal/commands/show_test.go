@@ -675,3 +675,41 @@ func TestAllValidRecordTypesHandledInSwitch(t *testing.T) {
 		})
 	}
 }
+
+// --- Attachment discovery tests ---
+
+func TestShowInjectsFieldScopedAttachments(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			return 200, `{
+				"id": 42,
+				"type": "Message",
+				"title": "Design review",
+				"content": "<p>See <bc-attachment url=\"https://example.com/a.png\" filename=\"a.png\"></bc-attachment></p>",
+				"description": "<p>Also <bc-attachment url=\"https://example.com/b.pdf\" filename=\"b.pdf\"></bc-attachment></p>"
+			}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"message", "42"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	out := buf.String()
+	// Field-scoped keys present
+	assert.Contains(t, out, "content_attachments")
+	assert.Contains(t, out, "description_attachments")
+	// Flat "attachments" key not injected (avoids collision with native API field)
+	assert.NotContains(t, out, `"attachments"`)
+	// Notice mentions download command
+	assert.Contains(t, out, "attachment(s)")
+}
