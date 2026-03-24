@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -256,12 +257,19 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		return output.ErrUsage("--limit must not be negative")
 	}
 
-	// Get recent messages (lines) using SDK
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), chatIDInt, &basecamp.CampfireLineListOptions{Limit: limit})
+	// Get recent messages (lines) using SDK, newest first
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), chatIDInt, &basecamp.CampfireLineListOptions{
+		Sort:      "created_at",
+		Direction: "desc",
+		Limit:     limit,
+	})
 	if err != nil {
 		return err
 	}
 	lines := result.Lines
+
+	// Reverse to chronological order for display (API returns newest-first)
+	slices.Reverse(lines)
 
 	summary := fmt.Sprintf("%d messages", len(lines))
 
