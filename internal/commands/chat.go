@@ -386,7 +386,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 	}
 
 	// Post message using SDK
-	var lineID int64
+	var line *basecamp.CampfireLine
 	var uploadIDs []int64
 
 	// Post text message if there's content
@@ -395,11 +395,11 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		if contentType != "" {
 			opts = &basecamp.CreateLineOptions{ContentType: contentType}
 		}
-		line, err := app.Account().Campfires().CreateLine(cmd.Context(), chatIDInt, content, opts)
+		var err error
+		line, err = app.Account().Campfires().CreateLine(cmd.Context(), chatIDInt, content, opts)
 		if err != nil {
 			return err
 		}
-		lineID = line.ID
 	}
 
 	// Upload attachments using CreateUpload
@@ -409,7 +409,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 			return fmt.Errorf("%s: %w", filePath, err)
 		}
 
-		contentType := richtext.DetectMIME(normalized)
+		mimeType := richtext.DetectMIME(normalized)
 		filename := filepath.Base(normalized)
 
 		f, err := os.Open(normalized)
@@ -417,20 +417,20 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 			return fmt.Errorf("%s: %w", filePath, err)
 		}
 
-		uploadLine, err := app.Account().Campfires().CreateUpload(cmd.Context(), chatIDInt, filename, contentType, f)
+		uploadLine, err := app.Account().Campfires().CreateUpload(cmd.Context(), chatIDInt, filename, mimeType, f)
 		f.Close()
 		if err != nil {
-			return fmt.Errorf("failed to upload %s: %w", filePath, err)
+			return convertSDKError(err)
 		}
 		uploadIDs = append(uploadIDs, uploadLine.ID)
 	}
 
 	// Build summary
 	var summary string
-	if lineID != 0 && len(uploadIDs) > 0 {
-		summary = fmt.Sprintf("Posted message #%d with %d attachment(s)", lineID, len(uploadIDs))
-	} else if lineID != 0 {
-		summary = fmt.Sprintf("Posted message #%d", lineID)
+	if line != nil && len(uploadIDs) > 0 {
+		summary = fmt.Sprintf("Posted message #%d with %d attachment(s)", line.ID, len(uploadIDs))
+	} else if line != nil {
+		summary = fmt.Sprintf("Posted message #%d", line.ID)
 	} else if len(uploadIDs) > 0 {
 		summary = fmt.Sprintf("Posted %d attachment(s)", len(uploadIDs))
 	}
@@ -467,17 +467,25 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
-		output.WithEntity("chat_line"),
 		output.WithBreadcrumbs(breadcrumbs...),
 	}
 	if mentionNotice != "" {
 		respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
 	}
 
-	// Return result with all created IDs
-	result := map[string]interface{}{
-		"message_id": lineID,
-		"upload_ids": uploadIDs,
+	// Text-only: return the Line object directly (preserves JSON contract)
+	if line != nil && len(uploadIDs) == 0 {
+		respOpts = append(respOpts, output.WithEntity("chat_line"))
+		return app.OK(line, respOpts...)
+	}
+
+	// Uploads involved: return composite result
+	result := map[string]any{}
+	if line != nil {
+		result["message_id"] = line.ID
+	}
+	if len(uploadIDs) > 0 {
+		result["upload_ids"] = uploadIDs
 	}
 	return app.OK(result, respOpts...)
 }
