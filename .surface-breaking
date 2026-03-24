@@ -42,7 +42,6 @@ CMD basecamp campfire list
 CMD basecamp campfire messages
 CMD basecamp campfire post
 CMD basecamp campfire upload
-CMD basecamp mcp
 CMD basecamp upload archive
 CMD basecamp upload doc
 CMD basecamp upload doc create
@@ -349,7 +348,6 @@ FLAG basecamp lineup create --date type=string
 FLAG basecamp lineup create --name type=string
 FLAG basecamp lineup update --date type=string
 FLAG basecamp lineup update --name type=string
-FLAG basecamp mcp --help type=bool
 FLAG basecamp message --body type=string
 FLAG basecamp message --content type=string
 FLAG basecamp message --subject type=string
@@ -654,7 +652,6 @@ SUB basecamp campfire list
 SUB basecamp campfire messages
 SUB basecamp campfire post
 SUB basecamp campfire upload
-SUB basecamp mcp
 SUB basecamp upload archive
 SUB basecamp upload doc
 SUB basecamp upload doc create
