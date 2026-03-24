@@ -116,6 +116,7 @@ setup_file() {
   assert_success
   assert_json_value '.data.content' 'Renamed title'
   assert_json_value '.data.due_on' '2026-06-15'
+  assert_json_value '.data.starts_on' '2026-06-01'
   assert_json_value '.data.description' 'Original description'
 
   # Clean up

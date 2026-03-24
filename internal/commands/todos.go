@@ -996,15 +996,16 @@ Clear a field by passing its --no- flag or an empty value:
 			if noDescription && strings.TrimSpace(description) != "" {
 				return output.ErrUsage("--no-description and --description cannot be used together")
 			}
-			if noDue && strings.TrimSpace(startsOn) != "" {
-				return output.ErrUsage("--no-due and --starts-on cannot be used together (Basecamp requires a due date when a start date is set)")
-			}
-
 			// Detect clear intent: explicit --no-X flag or empty value via --X ""
 			clearDue := noDue || (cmd.Flags().Changed("due") && strings.TrimSpace(due) == "")
 			clearStarts := noStartsOn || (cmd.Flags().Changed("starts-on") && strings.TrimSpace(startsOn) == "")
 			clearDescription := noDescription || (cmd.Flags().Changed("description") && strings.TrimSpace(description) == "")
 			needsClear := clearDue || clearStarts || clearDescription
+
+			// Clearing due while setting starts is contradictory (Basecamp enforces starts <= due)
+			if clearDue && strings.TrimSpace(startsOn) != "" {
+				return output.ErrUsage("cannot clear due date and set start date together (Basecamp requires a due date when a start date is set)")
+			}
 
 			// Positional title: args[1:] joined
 			positionalTitle := strings.Join(args[1:], " ")

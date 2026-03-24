@@ -1635,7 +1635,16 @@ func TestTodosUpdateConflictingNoDueAndStartsOn(t *testing.T) {
 	cmd := NewTodosCmd()
 	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--starts-on", "next monday")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--no-due and --starts-on cannot be used together")
+	assert.Contains(t, err.Error(), "cannot clear due date and set start date together")
+}
+
+func TestTodosUpdateConflictingEmptyDueAndStartsOn(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--due", "", "--starts-on", "next monday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot clear due date and set start date together")
 }
 
 func TestTodosUpdateClearWithSetCombined(t *testing.T) {
