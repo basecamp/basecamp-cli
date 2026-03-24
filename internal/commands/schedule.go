@@ -677,8 +677,8 @@ You can pass either an entry ID or a Basecamp URL:
 				}
 			}
 
-			// Handle attachments-only updates (no description text provided)
-			if !hasChanges && len(attachFiles) > 0 {
+			// Handle attachments when no description text provided
+			if description == "" && len(attachFiles) > 0 {
 				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
 				if attachErr != nil {
 					return attachErr
