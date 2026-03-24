@@ -1700,8 +1700,21 @@ Move to a different todolist in the same project:
 					project = app.Config.ProjectID
 				}
 
-				// Cross-project moves are not supported by the reposition endpoint
-				if project != "" && listProjectID != "" && project != listProjectID {
+				// Resolve project name to numeric ID before comparing
+				// against the numeric project ID from a list URL.
+				resolvedProject := project
+				if project != "" && !isNumeric(project) {
+					rp, _, resolveErr := app.Names.ResolveProject(cmd.Context(), project)
+					if resolveErr != nil {
+						return resolveErr
+					}
+					resolvedProject = rp
+				}
+
+				// Cross-project moves are not supported by the reposition endpoint.
+				// This catches the URL-vs-URL and URL-vs-config cases. Bare numeric
+				// list IDs without a project context rely on server rejection.
+				if resolvedProject != "" && listProjectID != "" && resolvedProject != listProjectID {
 					return output.ErrUsageHint(
 						"Cannot move a todo to a list in a different project.",
 						"Pass a todolist from the same project; cross-project moves are not supported.",
@@ -1710,12 +1723,8 @@ Move to a different todolist in the same project:
 
 				// Resolve todolist name to ID when not already numeric
 				if !isNumeric(listIDStr) {
-					if project == "" {
+					if resolvedProject == "" {
 						return output.ErrUsage("--in is required to resolve todolist names")
-					}
-					resolvedProject, _, resolveErr := app.Names.ResolveProject(cmd.Context(), project)
-					if resolveErr != nil {
-						return resolveErr
 					}
 					resolved, resolveErr := resolveTodolistInTodoset(cmd, app, listIDStr, resolvedProject, "")
 					if resolveErr != nil {
