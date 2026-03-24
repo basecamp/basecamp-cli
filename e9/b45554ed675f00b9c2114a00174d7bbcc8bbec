@@ -1,0 +1,29 @@
+e2e/smoke/smoke_account.bats
+  077fa23b5aaa4958 78-83
+skills/basecamp/SKILL.md
+  077fa23b5aaa4958 6-7,27-30,62-63,66-67,78,99,152,184-192,231-234,652-708
+internal/commands/gauges.go
+  077fa23b5aaa4958 169,206-208,234
+internal/commands/notifications.go
+  077fa23b5aaa4958 98-100,105-106,109,120,125-126,162-165,167-168,189-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "e9b45554ed675f00b9c2114a00174d7bbcc8bbec",
+  "prompts": {
+    "077fa23b5aaa4958": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30edaebb-7272-4620-bcae-b26bfddb7216",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 113,
+      "total_deletions": 17,
+      "accepted_lines": 113,
+      "overriden_lines": 0
+    }
+  }
+}
