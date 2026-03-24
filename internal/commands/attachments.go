@@ -273,6 +273,18 @@ Options:
 				attachments = filtered
 			}
 
+			// After filtering/selection, verify at least one attachment
+			// has a download URL. Without this, recordings whose
+			// <bc-attachment> tags have metadata but no url/href would
+			// proceed to download, mark everything as "skipped", and
+			// exit 0 — making automation treat a no-op as success.
+			if len(downloadableAttachments(attachments)) == 0 {
+				return output.ErrUsageHint(
+					"No downloadable attachments found",
+					"This recording has attachment metadata but no downloadable URLs",
+				)
+			}
+
 			// Stdout streaming: --out -
 			if outDir == "-" {
 				downloadable := downloadableAttachments(attachments)
@@ -654,9 +666,9 @@ func downloadParsedAttachments(ctx context.Context, app *appctx.App, attachments
 			if err != nil {
 				seq := completed.Add(1)
 				errMsg := convertSDKError(err).Error()
-				results[i] = attachmentResult{URL: dlURL, Filename: fname, Status: "error", Error: errMsg}
+				results[i] = attachmentResult{URL: dlURL, Filename: name, Status: "error", Error: errMsg}
 				if progress != nil {
-					fmt.Fprintf(progress, "  [%d/%d] Error: %s — %s\n", seq, total, fname, errMsg)
+					fmt.Fprintf(progress, "  [%d/%d] Error: %s — %s\n", seq, total, name, errMsg)
 				}
 				return
 			}
