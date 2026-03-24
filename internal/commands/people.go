@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/completion"
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -149,6 +150,9 @@ func NewPeopleCmd() *cobra.Command {
 
 	cmd.AddCommand(newPeopleListCmd())
 	cmd.AddCommand(newPeopleShowCmd())
+	cmd.AddCommand(newPeopleProfileCmd())
+	cmd.AddCommand(newPeoplePreferencesCmd())
+	cmd.AddCommand(newPeopleOutOfOfficeCmd())
 	cmd.AddCommand(newPeoplePingableCmd())
 	cmd.AddCommand(newPeopleAddCmd())
 	cmd.AddCommand(newPeopleRemoveCmd())
@@ -364,6 +368,407 @@ func runPeopleShow(cmd *cobra.Command, args []string) error {
 	return app.OK(person, output.WithSummary(person.Name))
 }
 
+func newPeopleProfileCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "profile",
+		Short: "Manage your profile",
+		Long:  "Show or update the current authenticated person's Basecamp profile.",
+	}
+
+	cmd.AddCommand(
+		newPeopleProfileShowCmd(),
+		newPeopleProfileUpdateCmd(),
+	)
+
+	return cmd
+}
+
+func newPeopleProfileShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Show your profile",
+		Long:  "Show the current authenticated person's Basecamp profile.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			person, err := app.Account().People().Me(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(person,
+				output.WithSummary(person.Name),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "update",
+						Cmd:         "basecamp people profile update --name <name>",
+						Description: "Update your profile",
+					},
+					output.Breadcrumb{
+						Action:      "preferences",
+						Cmd:         "basecamp people preferences show",
+						Description: "Show your preferences",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newPeopleProfileUpdateCmd() *cobra.Command {
+	var name string
+	var email string
+	var title string
+	var bio string
+	var location string
+	var timeZone string
+	var firstWeekDay string
+	var timeFormat string
+
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update your profile",
+		Long:  "Update the current authenticated person's Basecamp profile fields.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("name") &&
+				!cmd.Flags().Changed("email") &&
+				!cmd.Flags().Changed("title") &&
+				!cmd.Flags().Changed("bio") &&
+				!cmd.Flags().Changed("location") &&
+				!cmd.Flags().Changed("time-zone") &&
+				!cmd.Flags().Changed("first-week-day") &&
+				!cmd.Flags().Changed("time-format") {
+				return noChanges(cmd)
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			req := &basecamp.UpdateMyProfileRequest{}
+			if cmd.Flags().Changed("name") {
+				req.Name = &name
+			}
+			if cmd.Flags().Changed("email") {
+				req.EmailAddress = &email
+			}
+			if cmd.Flags().Changed("title") {
+				req.Title = &title
+			}
+			if cmd.Flags().Changed("bio") {
+				req.Bio = &bio
+			}
+			if cmd.Flags().Changed("location") {
+				req.Location = &location
+			}
+			if cmd.Flags().Changed("time-zone") {
+				req.TimeZoneName = &timeZone
+			}
+			if cmd.Flags().Changed("first-week-day") {
+				day, err := parseFirstWeekDay(firstWeekDay)
+				if err != nil {
+					return err
+				}
+				req.FirstWeekDay = &day
+			}
+			if cmd.Flags().Changed("time-format") {
+				req.TimeFormat = &timeFormat
+			}
+
+			if err := app.Account().People().UpdateMyProfile(cmd.Context(), req); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{"updated": true},
+				output.WithSummary("Updated your profile"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp people profile show",
+						Description: "Show your profile",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Display name")
+	cmd.Flags().StringVar(&email, "email", "", "Email address")
+	cmd.Flags().StringVar(&title, "title", "", "Job title")
+	cmd.Flags().StringVar(&bio, "bio", "", "Short biography")
+	cmd.Flags().StringVar(&location, "location", "", "Location")
+	cmd.Flags().StringVar(&timeZone, "time-zone", "", "Rails time zone name (for example America/Chicago)")
+	cmd.Flags().StringVar(&firstWeekDay, "first-week-day", "", "First day of the week (Sunday through Saturday)")
+	cmd.Flags().StringVar(&timeFormat, "time-format", "", "Time display format (twelve_hour or twenty_four_hour)")
+
+	return cmd
+}
+
+func newPeoplePreferencesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "preferences",
+		Short: "Manage your preferences",
+		Long:  "Show or update the current authenticated person's Basecamp preferences.",
+	}
+
+	cmd.AddCommand(
+		newPeoplePreferencesShowCmd(),
+		newPeoplePreferencesUpdateCmd(),
+	)
+
+	return cmd
+}
+
+func newPeoplePreferencesShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Show your preferences",
+		Long:  "Show the current authenticated person's Basecamp preferences.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			prefs, err := app.Account().People().GetMyPreferences(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(prefs,
+				output.WithSummary("Your preferences"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "update",
+						Cmd:         "basecamp people preferences update --time-format twenty_four_hour",
+						Description: "Update your preferences",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newPeoplePreferencesUpdateCmd() *cobra.Command {
+	var firstWeekDay string
+	var timeFormat string
+	var timeZone string
+
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update your preferences",
+		Long:  "Update the current authenticated person's Basecamp preferences.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("first-week-day") &&
+				!cmd.Flags().Changed("time-format") &&
+				!cmd.Flags().Changed("time-zone") {
+				return noChanges(cmd)
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			req := &basecamp.UpdateMyPreferencesRequest{}
+			if cmd.Flags().Changed("first-week-day") {
+				day, err := parseFirstWeekDay(firstWeekDay)
+				if err != nil {
+					return err
+				}
+				req.FirstWeekDay = string(day)
+			}
+			if cmd.Flags().Changed("time-format") {
+				req.TimeFormat = timeFormat
+			}
+			if cmd.Flags().Changed("time-zone") {
+				req.TimeZoneName = timeZone
+			}
+
+			if err := app.Account().People().UpdateMyPreferences(cmd.Context(), req); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{"updated": true},
+				output.WithSummary("Updated your preferences"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp people preferences show",
+						Description: "Show your preferences",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&firstWeekDay, "first-week-day", "", "First day of the week (Sunday through Saturday)")
+	cmd.Flags().StringVar(&timeFormat, "time-format", "", "Time display format (twelve_hour or twenty_four_hour)")
+	cmd.Flags().StringVar(&timeZone, "time-zone", "", "Rails time zone name (for example America/Chicago)")
+
+	return cmd
+}
+
+func newPeopleOutOfOfficeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "out-of-office",
+		Aliases: []string{"ooo"},
+		Short:   "Manage out-of-office status",
+		Long:    "Show, enable, or disable out-of-office status for yourself or another visible person.",
+	}
+
+	cmd.AddCommand(
+		newPeopleOutOfOfficeShowCmd(),
+		newPeopleOutOfOfficeEnableCmd(),
+		newPeopleOutOfOfficeDisableCmd(),
+	)
+
+	return cmd
+}
+
+func newPeopleOutOfOfficeShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show [person]",
+		Short: "Show out-of-office status",
+		Long:  "Show out-of-office status for a person. Defaults to the current user.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			personID, displayName, err := resolvePersonArg(cmd, app, args)
+			if err != nil {
+				return err
+			}
+
+			ooo, err := app.Account().People().GetOutOfOffice(cmd.Context(), personID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			summary := fmt.Sprintf("Out of office for %s", displayName)
+			if ooo.Enabled {
+				summary = fmt.Sprintf("%s: %s to %s", summary, ooo.StartDate, ooo.EndDate)
+			}
+
+			return app.OK(ooo,
+				output.WithSummary(summary),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "enable",
+						Cmd:         "basecamp people out-of-office enable --from <date> --to <date>",
+						Description: "Enable out-of-office",
+					},
+					output.Breadcrumb{
+						Action:      "disable",
+						Cmd:         "basecamp people out-of-office disable",
+						Description: "Disable out-of-office",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newPeopleOutOfOfficeEnableCmd() *cobra.Command {
+	var startDate string
+	var endDate string
+
+	cmd := &cobra.Command{
+		Use:   "enable [person]",
+		Short: "Enable out-of-office status",
+		Long:  "Enable out-of-office status for a person. Defaults to the current user.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if startDate == "" || endDate == "" {
+				return output.ErrUsage("--from and --to are required")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			personID, displayName, err := resolvePersonArg(cmd, app, args)
+			if err != nil {
+				return err
+			}
+
+			ooo, err := app.Account().People().EnableOutOfOffice(cmd.Context(), personID, &basecamp.EnableOutOfOfficeRequest{
+				StartDate: dateparse.Parse(startDate),
+				EndDate:   dateparse.Parse(endDate),
+			})
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(ooo,
+				output.WithSummary(fmt.Sprintf("Enabled out-of-office for %s", displayName)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp people out-of-office show",
+						Description: "Show out-of-office status",
+					},
+					output.Breadcrumb{
+						Action:      "disable",
+						Cmd:         "basecamp people out-of-office disable",
+						Description: "Disable out-of-office",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&startDate, "from", "", "Start date (natural language or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&endDate, "to", "", "End date (natural language or YYYY-MM-DD)")
+
+	return cmd
+}
+
+func newPeopleOutOfOfficeDisableCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "disable [person]",
+		Short: "Disable out-of-office status",
+		Long:  "Disable out-of-office status for a person. Defaults to the current user.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			personID, displayName, err := resolvePersonArg(cmd, app, args)
+			if err != nil {
+				return err
+			}
+
+			if err := app.Account().People().DisableOutOfOffice(cmd.Context(), personID); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{"disabled": true},
+				output.WithSummary(fmt.Sprintf("Disabled out-of-office for %s", displayName)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         "basecamp people out-of-office show",
+						Description: "Show out-of-office status",
+					},
+				),
+			)
+		},
+	}
+}
+
 func newPeoplePingableCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pingable",
@@ -389,6 +794,47 @@ func runPeoplePingable(cmd *cobra.Command, args []string) error {
 	summary := fmt.Sprintf("%d pingable people", len(result.People))
 
 	return app.OK(result.People, output.WithSummary(summary))
+}
+
+func resolvePersonArg(cmd *cobra.Command, app *appctx.App, args []string) (int64, string, error) {
+	person := "me"
+	if len(args) > 0 {
+		person = args[0]
+	}
+
+	personIDStr, personName, err := app.Names.ResolvePerson(cmd.Context(), person)
+	if err != nil {
+		return 0, "", err
+	}
+	personID, err := strconv.ParseInt(personIDStr, 10, 64)
+	if err != nil {
+		return 0, "", output.ErrUsage("Invalid person ID")
+	}
+	if personName == "" {
+		personName = personIDStr
+	}
+	return personID, personName, nil
+}
+
+func parseFirstWeekDay(value string) (basecamp.FirstWeekDay, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "sunday":
+		return basecamp.FirstWeekDaySunday, nil
+	case "monday":
+		return basecamp.FirstWeekDayMonday, nil
+	case "tuesday":
+		return basecamp.FirstWeekDayTuesday, nil
+	case "wednesday":
+		return basecamp.FirstWeekDayWednesday, nil
+	case "thursday":
+		return basecamp.FirstWeekDayThursday, nil
+	case "friday":
+		return basecamp.FirstWeekDayFriday, nil
+	case "saturday":
+		return basecamp.FirstWeekDaySaturday, nil
+	default:
+		return "", output.ErrUsage("first week day must be Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, or Saturday")
+	}
 }
 
 func newPeopleAddCmd() *cobra.Command {

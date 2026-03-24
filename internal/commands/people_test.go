@@ -524,6 +524,9 @@ func setupPeopleMockServer(t *testing.T, accountID string, projectID int64) *htt
 		projectPeoplePath := fmt.Sprintf("/%s/projects/%d/people.json", accountID, projectID)
 		accountPeoplePath := fmt.Sprintf("/%s/people.json", accountID)
 		accessPath := fmt.Sprintf("/%s/projects/%d/people/users.json", accountID, projectID)
+		mePath := fmt.Sprintf("/%s/my/profile.json", accountID)
+		prefsPath := fmt.Sprintf("/%s/my/preferences.json", accountID)
+		outOfOfficePath := fmt.Sprintf("/%s/people/%d/out_of_office.json", accountID, 1001)
 
 		switch {
 		case r.URL.Path == projectsPath && r.Method == http.MethodGet:
@@ -538,6 +541,59 @@ func setupPeopleMockServer(t *testing.T, accountID string, projectID int64) *htt
 				{"id": 2001, "name": "Account Bob", "title": "PM", "employee": true, "admin": true, "email_address": "bob@example.com"},
 				{"id": 2002, "name": "Account Carol", "title": "Design", "employee": true, "admin": false, "email_address": "carol@example.com"},
 			})
+		case r.URL.Path == mePath && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":            1001,
+				"name":          "Alice Test",
+				"email_address": "alice@example.com",
+			})
+		case r.URL.Path == mePath && r.Method == http.MethodPut:
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, fmt.Sprintf("bad request body: %v", err), http.StatusBadRequest)
+				return
+			}
+			json.NewEncoder(w).Encode(req)
+		case r.URL.Path == prefsPath && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{
+				"first_week_day": "Monday",
+				"time_format":    "twenty_four_hour",
+				"time_zone_name": "America/Chicago",
+			})
+		case r.URL.Path == prefsPath && r.Method == http.MethodPut:
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, fmt.Sprintf("bad request body: %v", err), http.StatusBadRequest)
+				return
+			}
+			json.NewEncoder(w).Encode(req)
+		case r.URL.Path == outOfOfficePath && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{
+				"enabled":    true,
+				"start_date": "2026-03-24",
+				"end_date":   "2026-03-28",
+				"person": map[string]any{
+					"id":   1001,
+					"name": "Alice Test",
+				},
+			})
+		case r.URL.Path == outOfOfficePath && r.Method == http.MethodPost:
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, fmt.Sprintf("bad request body: %v", err), http.StatusBadRequest)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"enabled":    true,
+				"start_date": req["out_of_office"].(map[string]any)["start_date"],
+				"end_date":   req["out_of_office"].(map[string]any)["end_date"],
+				"person": map[string]any{
+					"id":   1001,
+					"name": "Alice Test",
+				},
+			})
+		case r.URL.Path == outOfOfficePath && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == projectPeoplePath && r.Method == http.MethodGet:
 			// Project-scoped people list — return a distinct set
 			json.NewEncoder(w).Encode([]map[string]any{
@@ -718,4 +774,74 @@ func TestPeopleRemoveNoProject(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Contains(t, e.Message, "--project (or --in) is required")
+}
+
+func TestPeopleProfileUpdate(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "profile", "update", "--name", "Alice Example", "--first-week-day", "Monday")
+	require.NoError(t, err)
+}
+
+func TestPeoplePreferencesShow(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "preferences", "show")
+	require.NoError(t, err)
+
+	var result struct {
+		Data struct {
+			TimeFormat string `json:"time_format"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.Equal(t, "twenty_four_hour", result.Data.TimeFormat)
+}
+
+func TestPeoplePreferencesUpdate(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "preferences", "update", "--time-format", "twelve_hour", "--time-zone", "America/New_York")
+	require.NoError(t, err)
+}
+
+func TestPeopleOutOfOfficeShow(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "show", "1001")
+	require.NoError(t, err)
+
+	var result struct {
+		Data struct {
+			Enabled bool `json:"enabled"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.True(t, result.Data.Enabled)
+}
+
+func TestPeopleOutOfOfficeEnable(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "enable", "1001", "--from", "2026-03-24", "--to", "2026-03-28")
+	require.NoError(t, err)
+}
+
+func TestPeopleOutOfOfficeDisable(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "disable", "1001")
+	require.NoError(t, err)
 }
