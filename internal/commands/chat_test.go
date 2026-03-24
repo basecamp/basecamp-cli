@@ -628,8 +628,12 @@ func TestChatListAllBreadcrumbSyntax(t *testing.T) {
 	}
 }
 
-// mockChatMessagesTransport returns a fixed set of 5 campfire lines (newest-first).
-type mockChatMessagesTransport struct{}
+// mockChatMessagesTransport returns a fixed set of 5 campfire lines (newest-first)
+// and captures the query parameters sent on the lines request.
+type mockChatMessagesTransport struct {
+	capturedSort      string
+	capturedDirection string
+}
 
 func (t *mockChatMessagesTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	header := make(http.Header)
@@ -643,6 +647,8 @@ func (t *mockChatMessagesTransport) RoundTrip(req *http.Request) (*http.Response
 		case strings.Contains(req.URL.Path, "/projects/") && !strings.Contains(req.URL.Path, "/chats/"):
 			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
 		case strings.Contains(req.URL.Path, "/lines.json"):
+			t.capturedSort = req.URL.Query().Get("sort")
+			t.capturedDirection = req.URL.Query().Get("direction")
 			body = `[
 				{"id": 1, "content": "msg1", "created_at": "2026-01-01T00:05:00Z"},
 				{"id": 2, "content": "msg2", "created_at": "2026-01-01T00:04:00Z"},
@@ -665,7 +671,8 @@ func (t *mockChatMessagesTransport) RoundTrip(req *http.Request) (*http.Response
 }
 
 // TestChatMessagesLimitReturnsNewest verifies that --limit returns the
-// first N items from the API (newest-first order) rather than the last N.
+// first N items from the API (newest-first order) rather than the last N,
+// and that sort/direction params are sent to request newest-first.
 func TestChatMessagesLimitReturnsNewest(t *testing.T) {
 	transport := &mockChatMessagesTransport{}
 	app, buf := newTestAppWithTransport(t, transport)
@@ -673,6 +680,10 @@ func TestChatMessagesLimitReturnsNewest(t *testing.T) {
 	cmd := NewChatCmd()
 	err := executeChatCommand(cmd, app, "messages", "--limit", "3", "--room", "789")
 	require.NoError(t, err)
+
+	// Verify sort params request newest-first from the API
+	assert.Equal(t, "created_at", transport.capturedSort)
+	assert.Equal(t, "desc", transport.capturedDirection)
 
 	var envelope struct {
 		Data []struct {
@@ -683,7 +694,7 @@ func TestChatMessagesLimitReturnsNewest(t *testing.T) {
 	require.Len(t, envelope.Data, 3)
 
 	ids := []int64{envelope.Data[0].ID, envelope.Data[1].ID, envelope.Data[2].ID}
-	assert.Equal(t, []int64{1, 2, 3}, ids, "should return newest messages (IDs 1-3), not oldest")
+	assert.Equal(t, []int64{3, 2, 1}, ids, "should display in chronological order (oldest to newest)")
 }
 
 // TestChatMessagesLimitPaginates verifies that requesting more than one
@@ -775,8 +786,9 @@ func TestChatMessagesLimitPaginates(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
 	require.Len(t, envelope.Data, 8, "should collect 8 messages across two pages")
+	// API returns newest-first (id 1 = newest), then slices.Reverse gives chronological
 	for i, msg := range envelope.Data {
-		assert.Equal(t, int64(i+1), msg.ID, "message %d should have ID %d", i, i+1)
+		assert.Equal(t, int64(8-i), msg.ID, "message %d should have ID %d (chronological order)", i, 8-i)
 	}
 	// With nil opts (old bug), the SDK default of 100 would exhaust all 3 pages.
 	// With Limit: 8, the SDK stops after page 2 (10 items collected >= 8).
