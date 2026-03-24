@@ -1517,3 +1517,252 @@ func TestTodosUpdateLocalImageErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
 }
+
+// =============================================================================
+// --assignee filtering tests (single-list path)
+// =============================================================================
+
+// assigneeTodoTransport serves a todolist with assignee data on todos.
+// The fixture is ordered so the first direct todo is a non-match (Bob),
+// ensuring tests can distinguish pre-filter from post-filter limiting.
+//
+//	Position 1: direct todo (ID 1) — assigned to Bob (43)
+//	Position 2: direct todo (ID 2) — assigned to Alice (42)
+//	Position 3: group 600 containing todo (ID 3) — assigned to Alice (42)
+//	Position 4: direct todo (ID 4) — unassigned
+type assigneeTodoTransport struct{}
+
+func (assigneeTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+
+	switch {
+	case strings.Contains(path, "/my/profile.json"):
+		body = `{"id": 42, "name": "Alice"}`
+
+	case strings.Contains(path, "/people.json"):
+		body = `[{"id": 42, "name": "Alice", "email_address": "alice@example.com"},` +
+			`{"id": 43, "name": "Bob", "email_address": "bob@example.com"}]`
+
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/projects/"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 900, "enabled": true}]}`
+
+	case strings.Contains(path, "/todosets/900/todolists"):
+		body = `[{"id": 500, "name": "Sprint"}]`
+
+	case strings.Contains(path, "/todolists/500/groups.json"):
+		body = `[{"id": 600, "position": 3, "name": "Group A"}]`
+
+	case strings.Contains(path, "/todolists/600/groups.json"):
+		body = `[]`
+
+	case strings.Contains(path, "/todolists/600/todos.json"):
+		body = `[{"id": 3, "content": "Group todo", "position": 1, "status": "active", "assignees": [{"id": 42, "name": "Alice"}]}]`
+
+	case strings.Contains(path, "/todolists/500/todos.json"):
+		body = `[` +
+			`{"id": 1, "content": "First", "position": 1, "status": "active", "assignees": [{"id": 43, "name": "Bob"}]},` +
+			`{"id": 2, "content": "Second", "position": 2, "status": "active", "assignees": [{"id": 42, "name": "Alice"}]},` +
+			`{"id": 4, "content": "Fourth", "position": 4, "status": "active", "assignees": []}` +
+			`]`
+
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func setupAssigneeTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{
+		AccountID: "99999",
+		ProjectID: "123",
+	}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{
+			Format: output.FormatJSON,
+			Writer: buf,
+		}),
+	}, buf
+}
+
+func TestTodosListInListFiltersByAssignee(t *testing.T) {
+	app, buf := setupAssigneeTodoApp(t, assigneeTodoTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--assignee", "me")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 2, "expected 2 todos assigned to Alice (direct + group)")
+	assert.Equal(t, int64(2), resp.Data[0].ID)
+	assert.Equal(t, int64(3), resp.Data[1].ID)
+}
+
+func TestTodosListInListAssigneeNumericIDIncludesGroupTodos(t *testing.T) {
+	app, buf := setupAssigneeTodoApp(t, assigneeTodoTransport{})
+
+	cmd := NewTodosCmd()
+	// Numeric ID 42 = Alice. Should return both her direct todo (ID 2) and
+	// her group-nested todo (ID 3).
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--assignee", "42")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 2, "expected direct + group todo for Alice via numeric ID")
+	assert.Equal(t, int64(2), resp.Data[0].ID, "direct todo")
+	assert.Equal(t, int64(3), resp.Data[1].ID, "group-nested todo")
+}
+
+func TestTodosListInListAssigneeNoMatchReturnsEmpty(t *testing.T) {
+	app, buf := setupAssigneeTodoApp(t, assigneeTodoTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--assignee", "99")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Empty(t, resp.Data, "no todos assigned to person 99")
+}
+
+func TestTodosListInListAssigneeLimitAppliedAfterFilter(t *testing.T) {
+	app, buf := setupAssigneeTodoApp(t, assigneeTodoTransport{})
+
+	cmd := NewTodosCmd()
+	// The fixture's first todo (position 1) is Bob — a non-match for Alice.
+	// Alice's first match is at position 2. A broken implementation that
+	// applied --limit 1 before filtering would fetch only the first todo
+	// (Bob's), filter it out, and return empty. Correct behavior: fetch all,
+	// filter to Alice's 2 todos (IDs 2, 3), then cap to 1.
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--assignee", "me", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1, "should cap to --limit 1 after assignee filtering")
+	assert.Equal(t, int64(2), resp.Data[0].ID, "should be Alice's first match, not the first todo overall")
+}
+
+// assigneeNoGroupsTransport serves a todolist without groups, exercising the
+// no-groups fast path in fetchTodosIncludingGroups. First todo is a non-match.
+type assigneeNoGroupsTransport struct{}
+
+func (assigneeNoGroupsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+
+	switch {
+	case strings.Contains(path, "/my/profile.json"):
+		body = `{"id": 42, "name": "Alice"}`
+	case strings.Contains(path, "/people.json"):
+		body = `[{"id": 42, "name": "Alice"}]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/projects/"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 900, "enabled": true}]}`
+	case strings.Contains(path, "/todosets/900/todolists"):
+		body = `[{"id": 500, "name": "Sprint"}]`
+	case strings.Contains(path, "/groups.json"):
+		body = `[]`
+	case strings.Contains(path, "/todos.json"):
+		body = `[` +
+			`{"id": 1, "content": "First", "position": 1, "status": "active", "assignees": [{"id": 43, "name": "Bob"}]},` +
+			`{"id": 2, "content": "Second", "position": 2, "status": "active", "assignees": [{"id": 42, "name": "Alice"}]},` +
+			`{"id": 3, "content": "Third", "position": 3, "status": "active", "assignees": [{"id": 42, "name": "Alice"}]}` +
+			`]`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func TestTodosListInListAssigneeNoGroupsFilters(t *testing.T) {
+	app, buf := setupAssigneeTodoApp(t, assigneeNoGroupsTransport{})
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--assignee", "me")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 2, "expected Alice's 2 todos from the no-groups path")
+	assert.Equal(t, int64(2), resp.Data[0].ID)
+	assert.Equal(t, int64(3), resp.Data[1].ID)
+}
+
+func TestTodosListInListAssigneeNoGroupsLimitAfterFilter(t *testing.T) {
+	app, buf := setupAssigneeTodoApp(t, assigneeNoGroupsTransport{})
+
+	cmd := NewTodosCmd()
+	// First todo is Bob (non-match). A pre-filter limit of 1 would fetch only
+	// Bob's todo, filter it out → empty. Correct: fetch all, filter to Alice's
+	// 2 todos, then cap to 1.
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--assignee", "me", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, int64(2), resp.Data[0].ID, "should be Alice's first match via no-groups path")
+}
+
