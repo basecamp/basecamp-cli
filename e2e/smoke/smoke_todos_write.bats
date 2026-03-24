@@ -96,6 +96,69 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "todos update preserves fields when updating title only" {
+  # Create a todo with description, due, and starts-on populated
+  run_smoke basecamp todos create "Field preservation test $(date +%s)" \
+    --list "$QA_TODOLIST" -p "$QA_PROJECT" \
+    --due "2026-06-15" --starts-on "2026-06-01" \
+    --description "Original description" --json
+  assert_success
+  local todo_id
+  todo_id=$(echo "$output" | jq -r '.data.id')
+
+  # Update only the title via the SDK typed path (no --no-* flags)
+  run_smoke basecamp todos update "$todo_id" --title "Renamed title" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  # Verify the other fields survived the update
+  run_smoke basecamp todos show "$todo_id" --json
+  assert_success
+  assert_json_value '.data.content' 'Renamed title'
+  assert_json_value '.data.due_on' '2026-06-15'
+  assert_json_value '.data.description' 'Original description'
+
+  # Clean up
+  run_smoke basecamp todos trash "$todo_id" -p "$QA_PROJECT" --json
+}
+
+@test "todos update --no-due clears due and preserves other fields" {
+  # Create a todo with all clearable fields populated
+  run_smoke basecamp todos create "Clear test $(date +%s)" \
+    --list "$QA_TODOLIST" -p "$QA_PROJECT" \
+    --due "2026-07-15" --starts-on "2026-07-01" \
+    --description "Keep this" --json
+  assert_success
+  local todo_id
+  todo_id=$(echo "$output" | jq -r '.data.id')
+
+  # Clear the due date (raw PUT path)
+  run_smoke basecamp todos update "$todo_id" --no-due --json
+  assert_success
+
+  # Verify due (and starts, since Basecamp enforces starts <= due) are cleared
+  # while description and content survive.
+  # Use the raw API via the todo's own URL to bypass SDK omitempty on null fields.
+  local bucket_id
+  run_smoke basecamp todos show "$todo_id" --json
+  assert_success
+  bucket_id=$(echo "$output" | jq -r '.data.bucket.id')
+
+  run_smoke basecamp api get "/buckets/$bucket_id/todos/$todo_id.json" --json
+  assert_success
+  local due_on starts_on desc
+  due_on=$(echo "$output" | jq -r '.data.due_on')
+  starts_on=$(echo "$output" | jq -r '.data.starts_on')
+  desc=$(echo "$output" | jq -r '.data.description')
+
+  [[ "$due_on" == "null" ]] || { echo "due_on not cleared: $due_on"; return 1; }
+  [[ "$starts_on" == "null" ]] || { echo "starts_on not cleared: $starts_on"; return 1; }
+  [[ "$desc" == "Keep this" ]] || { echo "description not preserved: $desc"; return 1; }
+
+  # Clean up
+  run_smoke basecamp todos trash "$todo_id" -p "$QA_PROJECT" --json
+}
+
 @test "todos trash trashes a todo" {
   local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
