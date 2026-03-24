@@ -1,0 +1,39 @@
+e2e/smoke/smoke_account.bats
+  077fa23b5aaa4958 55-77
+internal/commands/commands_test.go
+  077fa23b5aaa4958 119-121
+internal/cli/root.go
+  077fa23b5aaa4958 317-319
+internal/commands/commands.go
+  077fa23b5aaa4958 42,82,104,120
+API-COVERAGE.md
+  077fa23b5aaa4958 9,11,13,17,31,39,48,84-85
+scripts/check-bare-groups.sh
+  077fa23b5aaa4958 18-21
+internal/commands/notifications.go
+  077fa23b5aaa4958 1-186
+e2e/smoke/smoke_notifications.bats
+  077fa23b5aaa4958 1-20
+internal/commands/accounts.go
+  077fa23b5aaa4958 5-6,13,29-31,170-349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "9c06abb4d1c94ad217ec1e7f21c6466faaa965d8",
+  "prompts": {
+    "077fa23b5aaa4958": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30edaebb-7272-4620-bcae-b26bfddb7216",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 438,
+      "overriden_lines": 0
+    }
+  }
+}
