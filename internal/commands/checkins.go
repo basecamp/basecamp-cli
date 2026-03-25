@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -12,6 +13,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
+
+var checkinsNow = time.Now
 
 // NewCheckinsCmd creates the checkins command group.
 func NewCheckinsCmd() *cobra.Command {
@@ -774,6 +777,10 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 			if err != nil {
 				return output.ErrUsage("Invalid question ID")
 			}
+			effectiveGroupOn := groupOn
+			if effectiveGroupOn == "" {
+				effectiveGroupOn = checkinsNow().Format("2006-01-02")
+			}
 
 			html := richtext.MarkdownToHTML(content)
 
@@ -794,7 +801,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 
 			req := &basecamp.CreateAnswerRequest{
 				Content: html,
-				GroupOn: groupOn,
+				GroupOn: effectiveGroupOn,
 			}
 
 			answer, err := app.Account().Checkins().CreateAnswer(cmd.Context(), qID, req)
@@ -825,7 +832,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22)")
+	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22; defaults to today)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
