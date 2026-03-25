@@ -1,0 +1,25 @@
+e2e/smoke/smoke_aliases.bats
+  2726f96e2eb1542b 1-252
+e2e/smoke/smoke_campfire.bats
+  2726f96e2eb1542b 59-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "b53bf6a35326a5535fd2a2185d1e928f8e35faf6",
+  "prompts": {
+    "2726f96e2eb1542b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46e708a6-b7a7-48a0-9c2e-0f1828482daf",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 259,
+      "total_deletions": 0,
+      "accepted_lines": 259,
+      "overriden_lines": 0
+    }
+  }
+}
