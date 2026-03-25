@@ -14,8 +14,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
-// stubUpgradeCheckers overrides version and Homebrew helpers for tests.
-func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLegacyCask bool) {
+// stubUpgradeCheckers overrides version and package manager helpers for tests.
+func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLegacyCask bool, isScoopInstall bool, hasLegacyScoopInstall bool) {
 	t.Helper()
 
 	origVC := versionChecker
@@ -30,9 +30,21 @@ func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLeg
 	legacyHomebrewCasker = func(context.Context) bool { return hasLegacyCask }
 	t.Cleanup(func() { legacyHomebrewCasker = origLegacy })
 
-	origUpgrader := homebrewUpgrader
+	origHU := homebrewUpgrader
 	homebrewUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
-	t.Cleanup(func() { homebrewUpgrader = origUpgrader })
+	t.Cleanup(func() { homebrewUpgrader = origHU })
+
+	origSC := scoopChecker
+	scoopChecker = func(context.Context) bool { return isScoopInstall }
+	t.Cleanup(func() { scoopChecker = origSC })
+
+	origLegacyScoop := legacyScoopChecker
+	legacyScoopChecker = func(context.Context) bool { return hasLegacyScoopInstall }
+	t.Cleanup(func() { legacyScoopChecker = origLegacyScoop })
+
+	origSU := scoopUpgrader
+	scoopUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+	t.Cleanup(func() { scoopUpgrader = origSU })
 }
 
 // executeUpgradeCommand runs the upgrade command and returns the combined
@@ -72,7 +84,7 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.2.3", false, false)
+	stubUpgradeCheckers(t, "1.2.3", false, false, false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -87,7 +99,7 @@ func TestUpgradeAvailable(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false, false)
+	stubUpgradeCheckers(t, "1.3.0", false, false, false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -102,7 +114,7 @@ func TestUpgradeSuppressesOlderLatestRelease(t *testing.T) {
 	version.Version = "0.4.1-0.20260313174735-243815fa23b2"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "0.4.0", false, false)
+	stubUpgradeCheckers(t, "0.4.0", false, false, false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -119,7 +131,7 @@ func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	version.Version = "1.0.0"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.0.0", false, false)
+	stubUpgradeCheckers(t, "1.0.0", false, false, false, false)
 
 	cmd := NewUpgradeCmd()
 	cmd.SetArgs(nil)
@@ -152,7 +164,7 @@ func TestUpgradePrefersRenamedHomebrewCaskOverLegacyMigration(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", true, true)
+	stubUpgradeCheckers(t, "1.3.0", true, true, false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -168,12 +180,45 @@ func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false, true)
+	stubUpgradeCheckers(t, "1.3.0", false, true, false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	assert.Contains(t, cmdOut, "The CLI cask has been renamed. To upgrade, run:")
 	assert.Contains(t, cmdOut, "  brew uninstall --cask basecamp/tap/basecamp\n")
 	assert.Contains(t, cmdOut, "  brew install --cask basecamp/tap/basecamp-cli\n")
+	assert.Contains(t, appBuf.String(), "migration_required")
+}
+
+func TestUpgradePrefersRenamedScoopAppOverLegacyMigration(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	stubUpgradeCheckers(t, "1.3.0", false, false, true, true)
+
+	cmdOut, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.Contains(t, cmdOut, "Upgrading via Scoop…")
+	assert.Contains(t, appBuf.String(), "upgraded")
+	assert.NotContains(t, appBuf.String(), "migration_required")
+}
+
+func TestUpgradeLegacyScoopMigrationInstructions(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	stubUpgradeCheckers(t, "1.3.0", false, false, false, true)
+
+	cmdOut, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.Contains(t, cmdOut, "The CLI Scoop manifest has been renamed. To upgrade, run:")
+	assert.Contains(t, cmdOut, "  scoop uninstall basecamp\n")
+	assert.Contains(t, cmdOut, "  scoop install basecamp-cli\n")
 	assert.Contains(t, appBuf.String(), "migration_required")
 }

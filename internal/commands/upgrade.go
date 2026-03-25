@@ -19,16 +19,23 @@ import (
 const (
 	homebrewCask               = "basecamp/tap/basecamp-cli"
 	legacyHomebrewCask         = "basecamp/tap/basecamp"
-	homebrewCaskroomPath       = "/Caskroom/basecamp-cli/"
-	legacyHomebrewCaskroomPath = "/Caskroom/basecamp/"
+	homebrewCaskroomPath       = "/caskroom/basecamp-cli/"
+	legacyHomebrewCaskroomPath = "/caskroom/basecamp/"
+	scoopApp                   = "basecamp-cli"
+	legacyScoopApp             = "basecamp"
+	scoopAppPath               = "/scoop/apps/basecamp-cli/"
+	legacyScoopAppPath         = "/scoop/apps/basecamp/"
 )
 
-// versionChecker and Homebrew helpers abstract external checks for testability.
+// versionChecker and package manager helpers abstract external checks for testability.
 var (
 	versionChecker       = fetchLatestVersion
 	homebrewChecker      = isHomebrew
 	legacyHomebrewCasker = hasLegacyHomebrewCask
 	homebrewUpgrader     = upgradeHomebrew
+	scoopChecker         = isScoop
+	legacyScoopChecker   = hasLegacyScoop
+	scoopUpgrader        = upgradeScoop
 )
 
 // NewUpgradeCmd creates the upgrade command.
@@ -88,6 +95,17 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	if scoopChecker(ctx) {
+		fmt.Fprintln(w, "Upgrading via Scoop…")
+		if err := scoopUpgrader(ctx, w, cmd.ErrOrStderr()); err != nil {
+			return fmt.Errorf("scoop update failed for app %s: %w", scoopApp, err)
+		}
+		return app.OK(
+			map[string]string{"status": "upgraded", "from": current, "to": latest},
+			output.WithSummary(fmt.Sprintf("Upgraded %s → %s", current, latest)),
+		)
+	}
+
 	if legacyHomebrewCasker(ctx) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "The CLI cask has been renamed. To upgrade, run:")
@@ -105,6 +123,23 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	if legacyScoopChecker(ctx) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "The CLI Scoop manifest has been renamed. To upgrade, run:")
+		fmt.Fprintf(w, "  scoop uninstall %s\n", legacyScoopApp)
+		fmt.Fprintf(w, "  scoop install %s\n", scoopApp)
+		return app.OK(
+			map[string]string{
+				"status":          "migration_required",
+				"from":            current,
+				"to":              latest,
+				"legacy_manifest": legacyScoopApp,
+				"replacement":     scoopApp,
+			},
+			output.WithSummary("Scoop manifest rename detected — manual migration required"),
+		)
+	}
+
 	downloadURL := fmt.Sprintf("https://github.com/basecamp/basecamp-cli/releases/tag/v%s", latest)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Download the latest release from:\n")
@@ -117,6 +152,13 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 func upgradeHomebrew(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
 	upgrade := exec.CommandContext(ctx, "brew", "upgrade", "--cask", homebrewCask)
+	upgrade.Stdout = stdout
+	upgrade.Stderr = stderr
+	return upgrade.Run()
+}
+
+func upgradeScoop(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
+	upgrade := exec.CommandContext(ctx, "scoop", "update", scoopApp)
 	upgrade.Stdout = stdout
 	upgrade.Stderr = stderr
 	return upgrade.Run()
@@ -141,6 +183,26 @@ func hasLegacyHomebrewCask(_ context.Context) bool {
 	return strings.Contains(exe, legacyHomebrewCaskroomPath)
 }
 
+// isScoop returns true if the running CLI binary appears to come from the renamed Scoop app,
+// or if Scoop reports the renamed app is installed.
+func isScoop(ctx context.Context) bool {
+	exe, ok := resolvedExecutablePath()
+	if ok && strings.Contains(exe, scoopAppPath) {
+		return true
+	}
+
+	return scoopHasApp(ctx, scoopApp)
+}
+
+func hasLegacyScoop(ctx context.Context) bool {
+	exe, ok := resolvedExecutablePath()
+	if ok && strings.Contains(exe, legacyScoopAppPath) {
+		return true
+	}
+
+	return scoopHasApp(ctx, legacyScoopApp)
+}
+
 func resolvedExecutablePath() (string, bool) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -151,5 +213,28 @@ func resolvedExecutablePath() (string, bool) {
 		exe = resolved
 	}
 
-	return filepath.ToSlash(exe), true
+	return strings.ToLower(filepath.ToSlash(exe)), true
+}
+
+func scoopHasApp(ctx context.Context, app string) bool {
+	switch app {
+	case scoopApp, legacyScoopApp:
+		// allowed
+	default:
+		return false
+	}
+
+	out, err := exec.CommandContext(ctx, "scoop", "list", app).CombinedOutput() //nolint:gosec // G204: app is validated against known constants above
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) > 0 && fields[0] == app {
+			return true
+		}
+	}
+
+	return false
 }
