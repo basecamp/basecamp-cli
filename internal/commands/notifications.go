@@ -77,10 +77,14 @@ func runNotificationsList(cmd *cobra.Command, page int32) error {
 	if page == 0 {
 		nextPage = 2
 	}
+	readCmd := "basecamp notifications read <id>"
+	if page > 0 {
+		readCmd = fmt.Sprintf("basecamp notifications read <id> --page %d", page)
+	}
 	breadcrumbs := []output.Breadcrumb{
 		{
 			Action:      "read",
-			Cmd:         "basecamp notifications read <id>",
+			Cmd:         readCmd,
 			Description: "Mark as read",
 		},
 		{
