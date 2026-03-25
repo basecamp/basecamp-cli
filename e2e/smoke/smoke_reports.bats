@@ -23,7 +23,16 @@ setup_file() {
 
 @test "reports schedule returns schedule entries" {
   run_smoke basecamp reports schedule --json
-  # 400 on some dev environments where schedule reports aren't configured
+  # API error (exit 7) can occur in dev environments where the reports feature
+  # is not fully configured. A missing-parameter 400 is no longer possible here
+  # because --start and --end both have defaults (today and +30 respectively).
+  [[ "$status" -eq 7 ]] && mark_unverifiable "Schedule reports not available in this environment"
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "reports schedule with explicit window returns schedule entries" {
+  run_smoke basecamp reports schedule --start today --end "+7" --json
   [[ "$status" -eq 7 ]] && mark_unverifiable "Schedule reports not available in this environment"
   assert_success
   assert_json_value '.ok' 'true'
