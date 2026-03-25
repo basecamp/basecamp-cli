@@ -1368,9 +1368,10 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header.Set("Content-Type", "application/json")
 
 	if req.Method == "GET" {
+		mockTodo := `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}]}`
 		return &http.Response{
 			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Body:       io.NopCloser(strings.NewReader(mockTodo)),
 			Header:     header,
 		}, nil
 	}
@@ -1519,6 +1520,208 @@ func TestTodosUpdateLocalImageErrors(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "update", "999", "--description", "![alt](./missing.png)")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
+}
+
+func TestTodosUpdateNoDueOmitsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["due_on"]
+	assert.False(t, exists, "due_on must be omitted to clear")
+
+	// Other fields preserved from existing todo
+	assert.Equal(t, "Test todo", body["content"])
+	assert.Equal(t, "Existing desc", body["description"])
+	// starts_on is also omitted when clearing due (Basecamp enforces starts <= due)
+	_, startsExists := body["starts_on"]
+	assert.False(t, startsExists, "starts_on must also be omitted when clearing due")
+}
+
+func TestTodosUpdateNoDescriptionOmitsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-description")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["description"]
+	assert.False(t, exists, "description must be omitted to clear")
+
+	// Other fields preserved
+	assert.Equal(t, "2026-04-01", body["due_on"])
+	assert.Equal(t, "2026-03-25", body["starts_on"])
+}
+
+func TestTodosUpdateNoStartsOnOmitsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-starts-on")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["starts_on"]
+	assert.False(t, exists, "starts_on must be omitted to clear")
+
+	// Other fields preserved
+	assert.Equal(t, "2026-04-01", body["due_on"])
+	assert.Equal(t, "Existing desc", body["description"])
+}
+
+func TestTodosUpdateEmptyDueClearsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--due", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["due_on"]
+	assert.False(t, exists, "due_on must be omitted when --due is empty")
+}
+
+func TestTodosUpdateEmptyStartsOnClearsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--starts-on", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["starts_on"]
+	assert.False(t, exists, "starts_on must be omitted when --starts-on is empty")
+}
+
+func TestTodosUpdateEmptyDescriptionClearsField(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--description", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["description"]
+	assert.False(t, exists, "description must be omitted when --description is empty")
+}
+
+func TestTodosUpdateConflictingNoDueAndDue(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--due", "next friday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-due and --due cannot be used together")
+}
+
+func TestTodosUpdateConflictingNoDescriptionAndDescription(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-description", "--description", "text")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-description and --description cannot be used together")
+}
+
+func TestTodosUpdateConflictingNoStartsOnAndStartsOn(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-starts-on", "--starts-on", "next monday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-starts-on and --starts-on cannot be used together")
+}
+
+func TestTodosUpdateConflictingNoDueAndStartsOn(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--starts-on", "next monday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot clear due date and set start date together")
+}
+
+func TestTodosUpdateConflictingEmptyDueAndStartsOn(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--due", "", "--starts-on", "next monday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot clear due date and set start date together")
+}
+
+func TestTodosUpdateClearWithSetCombined(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due", "--title", "New title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["due_on"]
+	assert.False(t, exists, "due_on must be omitted to clear")
+
+	assert.Equal(t, "New title", body["content"])
+	// Other fields preserved (except starts_on, cleared alongside due)
+	assert.Equal(t, "Existing desc", body["description"])
+}
+
+func TestTodosUpdateClearPreservesAssignees(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	ids, ok := body["assignee_ids"].([]any)
+	require.True(t, ok, "assignee_ids must be preserved")
+	require.Len(t, ids, 1)
+	assert.Equal(t, float64(42), ids[0])
 }
 
 // =============================================================================
