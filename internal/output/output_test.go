@@ -870,6 +870,30 @@ func TestFormatCellWithMapArray(t *testing.T) {
 	}
 	result = formatCell(attachments)
 	assert.Equal(t, "100, 200", result)
+
+	// Test maps with summary fallback (schedule entries: the reports/upcoming API
+	// uses the calendar partial which emits summary but not title, so title arrives
+	// as an empty string from the SDK zero-value; summary must win).
+	entries := []any{
+		map[string]any{"id": float64(1), "title": "", "summary": "Team standup"},
+		map[string]any{"id": float64(2), "title": "", "summary": "Paul G OUT (Sabbatical)"},
+	}
+	result = formatCell(entries)
+	assert.Equal(t, "Team standup, Paul G OUT (Sabbatical)", result)
+
+	// Test that a non-empty title still wins over summary.
+	withBoth := []any{
+		map[string]any{"id": float64(1), "title": "Explicit title", "summary": "Summary text"},
+	}
+	result = formatCell(withBoth)
+	assert.Equal(t, "Explicit title", result)
+
+	// Test that an empty name does not shadow a valid title (empty-string guard).
+	emptyName := []any{
+		map[string]any{"id": float64(1), "name": "", "title": "A task"},
+	}
+	result = formatCell(emptyName)
+	assert.Equal(t, "A task", result)
 }
 
 // =============================================================================

@@ -763,11 +763,16 @@ func formatCell(val any) string {
 			case int, int64:
 				items = append(items, fmt.Sprintf("%d", elem))
 			case map[string]any:
-				// Try name, then title, then id, then fallback
-				if name, ok := elem["name"].(string); ok {
+				// Try name → title → summary → id.
+				// summary is checked after title because schedule entries omit title
+				// from the calendar/reports API response and use summary as their
+				// display name (Schedule::Entry#title delegates to summary in bc3).
+				if name, ok := elem["name"].(string); ok && name != "" {
 					items = append(items, ansi.Strip(name))
-				} else if title, ok := elem["title"].(string); ok {
+				} else if title, ok := elem["title"].(string); ok && title != "" {
 					items = append(items, ansi.Strip(title))
+				} else if summary, ok := elem["summary"].(string); ok && summary != "" {
+					items = append(items, ansi.Strip(summary))
 				} else if id, ok := elem["id"]; ok {
 					items = append(items, fmt.Sprintf("%v", id))
 				}
