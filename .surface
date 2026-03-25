@@ -1,10 +1,13 @@
+ARG basecamp account logo upload 00 <file>
 ARG basecamp account use 00 <id>
+ARG basecamp accounts logo upload 00 <file>
 ARG basecamp accounts use 00 <id>
 ARG basecamp api delete 00 <path>
 ARG basecamp api get 00 <path>
 ARG basecamp api post 00 <path>
 ARG basecamp api put 00 <path>
 ARG basecamp assign 00 <id|url>...
+ARG basecamp assignments due 00 [scope]
 ARG basecamp attach 00 <file>
 ARG basecamp attach 01 [<file2]
 ARG basecamp attachments list 00 <id|url>
@@ -200,6 +203,9 @@ ARG basecamp forwards replies 00 <forward_id|url>
 ARG basecamp forwards reply 00 <forward_id|url>
 ARG basecamp forwards reply 01 <reply_id|url>
 ARG basecamp forwards show 00 <id|url>
+ARG basecamp gauges delete 00 <id>
+ARG basecamp gauges needle 00 <id>
+ARG basecamp gauges update 00 <id>
 ARG basecamp help 00 [command]
 ARG basecamp hillcharts track 00 <todolist-ids>
 ARG basecamp hillcharts untrack 00 <todolist-ids>
@@ -236,6 +242,7 @@ ARG basecamp msgs show 00 <id|url>
 ARG basecamp msgs trash 00 <id|url>
 ARG basecamp msgs unpin 00 <id|url>
 ARG basecamp msgs update 00 <id|url>
+ARG basecamp notifications read 00 <id>...
 ARG basecamp people add 00 <person-id>...
 ARG basecamp people remove 00 <person-id>...
 ARG basecamp people show 00 <id|name>
@@ -414,9 +421,19 @@ ARG basecamp webhooks update 00 <id>
 CMD basecamp
 CMD basecamp account
 CMD basecamp account list
+CMD basecamp account logo
+CMD basecamp account logo remove
+CMD basecamp account logo upload
+CMD basecamp account show
+CMD basecamp account update
 CMD basecamp account use
 CMD basecamp accounts
 CMD basecamp accounts list
+CMD basecamp accounts logo
+CMD basecamp accounts logo remove
+CMD basecamp accounts logo upload
+CMD basecamp accounts show
+CMD basecamp accounts update
 CMD basecamp accounts use
 CMD basecamp api
 CMD basecamp api delete
@@ -424,6 +441,10 @@ CMD basecamp api get
 CMD basecamp api post
 CMD basecamp api put
 CMD basecamp assign
+CMD basecamp assignments
+CMD basecamp assignments completed
+CMD basecamp assignments due
+CMD basecamp assignments list
 CMD basecamp attach
 CMD basecamp attachments
 CMD basecamp attachments list
@@ -730,6 +751,15 @@ CMD basecamp forwards list
 CMD basecamp forwards replies
 CMD basecamp forwards reply
 CMD basecamp forwards show
+CMD basecamp gauges
+CMD basecamp gauges create
+CMD basecamp gauges delete
+CMD basecamp gauges disable
+CMD basecamp gauges enable
+CMD basecamp gauges list
+CMD basecamp gauges needle
+CMD basecamp gauges needles
+CMD basecamp gauges update
 CMD basecamp help
 CMD basecamp hillcharts
 CMD basecamp hillcharts show
@@ -775,6 +805,9 @@ CMD basecamp msgs show
 CMD basecamp msgs trash
 CMD basecamp msgs unpin
 CMD basecamp msgs update
+CMD basecamp notifications
+CMD basecamp notifications list
+CMD basecamp notifications read
 CMD basecamp people
 CMD basecamp people add
 CMD basecamp people list
@@ -1088,6 +1121,112 @@ FLAG basecamp account list --stats type=bool
 FLAG basecamp account list --styled type=bool
 FLAG basecamp account list --todolist type=string
 FLAG basecamp account list --verbose type=count
+FLAG basecamp account logo --account type=string
+FLAG basecamp account logo --agent type=bool
+FLAG basecamp account logo --cache-dir type=string
+FLAG basecamp account logo --count type=bool
+FLAG basecamp account logo --help type=bool
+FLAG basecamp account logo --hints type=bool
+FLAG basecamp account logo --ids-only type=bool
+FLAG basecamp account logo --in type=string
+FLAG basecamp account logo --jq type=string
+FLAG basecamp account logo --json type=bool
+FLAG basecamp account logo --markdown type=bool
+FLAG basecamp account logo --md type=bool
+FLAG basecamp account logo --no-hints type=bool
+FLAG basecamp account logo --no-stats type=bool
+FLAG basecamp account logo --profile type=string
+FLAG basecamp account logo --project type=string
+FLAG basecamp account logo --quiet type=bool
+FLAG basecamp account logo --stats type=bool
+FLAG basecamp account logo --styled type=bool
+FLAG basecamp account logo --todolist type=string
+FLAG basecamp account logo --verbose type=count
+FLAG basecamp account logo remove --account type=string
+FLAG basecamp account logo remove --agent type=bool
+FLAG basecamp account logo remove --cache-dir type=string
+FLAG basecamp account logo remove --count type=bool
+FLAG basecamp account logo remove --help type=bool
+FLAG basecamp account logo remove --hints type=bool
+FLAG basecamp account logo remove --ids-only type=bool
+FLAG basecamp account logo remove --in type=string
+FLAG basecamp account logo remove --jq type=string
+FLAG basecamp account logo remove --json type=bool
+FLAG basecamp account logo remove --markdown type=bool
+FLAG basecamp account logo remove --md type=bool
+FLAG basecamp account logo remove --no-hints type=bool
+FLAG basecamp account logo remove --no-stats type=bool
+FLAG basecamp account logo remove --profile type=string
+FLAG basecamp account logo remove --project type=string
+FLAG basecamp account logo remove --quiet type=bool
+FLAG basecamp account logo remove --stats type=bool
+FLAG basecamp account logo remove --styled type=bool
+FLAG basecamp account logo remove --todolist type=string
+FLAG basecamp account logo remove --verbose type=count
+FLAG basecamp account logo upload --account type=string
+FLAG basecamp account logo upload --agent type=bool
+FLAG basecamp account logo upload --cache-dir type=string
+FLAG basecamp account logo upload --count type=bool
+FLAG basecamp account logo upload --help type=bool
+FLAG basecamp account logo upload --hints type=bool
+FLAG basecamp account logo upload --ids-only type=bool
+FLAG basecamp account logo upload --in type=string
+FLAG basecamp account logo upload --jq type=string
+FLAG basecamp account logo upload --json type=bool
+FLAG basecamp account logo upload --markdown type=bool
+FLAG basecamp account logo upload --md type=bool
+FLAG basecamp account logo upload --no-hints type=bool
+FLAG basecamp account logo upload --no-stats type=bool
+FLAG basecamp account logo upload --profile type=string
+FLAG basecamp account logo upload --project type=string
+FLAG basecamp account logo upload --quiet type=bool
+FLAG basecamp account logo upload --stats type=bool
+FLAG basecamp account logo upload --styled type=bool
+FLAG basecamp account logo upload --todolist type=string
+FLAG basecamp account logo upload --verbose type=count
+FLAG basecamp account show --account type=string
+FLAG basecamp account show --agent type=bool
+FLAG basecamp account show --cache-dir type=string
+FLAG basecamp account show --count type=bool
+FLAG basecamp account show --help type=bool
+FLAG basecamp account show --hints type=bool
+FLAG basecamp account show --ids-only type=bool
+FLAG basecamp account show --in type=string
+FLAG basecamp account show --jq type=string
+FLAG basecamp account show --json type=bool
+FLAG basecamp account show --markdown type=bool
+FLAG basecamp account show --md type=bool
+FLAG basecamp account show --no-hints type=bool
+FLAG basecamp account show --no-stats type=bool
+FLAG basecamp account show --profile type=string
+FLAG basecamp account show --project type=string
+FLAG basecamp account show --quiet type=bool
+FLAG basecamp account show --stats type=bool
+FLAG basecamp account show --styled type=bool
+FLAG basecamp account show --todolist type=string
+FLAG basecamp account show --verbose type=count
+FLAG basecamp account update --account type=string
+FLAG basecamp account update --agent type=bool
+FLAG basecamp account update --cache-dir type=string
+FLAG basecamp account update --count type=bool
+FLAG basecamp account update --help type=bool
+FLAG basecamp account update --hints type=bool
+FLAG basecamp account update --ids-only type=bool
+FLAG basecamp account update --in type=string
+FLAG basecamp account update --jq type=string
+FLAG basecamp account update --json type=bool
+FLAG basecamp account update --markdown type=bool
+FLAG basecamp account update --md type=bool
+FLAG basecamp account update --name type=string
+FLAG basecamp account update --no-hints type=bool
+FLAG basecamp account update --no-stats type=bool
+FLAG basecamp account update --profile type=string
+FLAG basecamp account update --project type=string
+FLAG basecamp account update --quiet type=bool
+FLAG basecamp account update --stats type=bool
+FLAG basecamp account update --styled type=bool
+FLAG basecamp account update --todolist type=string
+FLAG basecamp account update --verbose type=count
 FLAG basecamp account use --account type=string
 FLAG basecamp account use --agent type=bool
 FLAG basecamp account use --cache-dir type=string
@@ -1152,6 +1291,112 @@ FLAG basecamp accounts list --stats type=bool
 FLAG basecamp accounts list --styled type=bool
 FLAG basecamp accounts list --todolist type=string
 FLAG basecamp accounts list --verbose type=count
+FLAG basecamp accounts logo --account type=string
+FLAG basecamp accounts logo --agent type=bool
+FLAG basecamp accounts logo --cache-dir type=string
+FLAG basecamp accounts logo --count type=bool
+FLAG basecamp accounts logo --help type=bool
+FLAG basecamp accounts logo --hints type=bool
+FLAG basecamp accounts logo --ids-only type=bool
+FLAG basecamp accounts logo --in type=string
+FLAG basecamp accounts logo --jq type=string
+FLAG basecamp accounts logo --json type=bool
+FLAG basecamp accounts logo --markdown type=bool
+FLAG basecamp accounts logo --md type=bool
+FLAG basecamp accounts logo --no-hints type=bool
+FLAG basecamp accounts logo --no-stats type=bool
+FLAG basecamp accounts logo --profile type=string
+FLAG basecamp accounts logo --project type=string
+FLAG basecamp accounts logo --quiet type=bool
+FLAG basecamp accounts logo --stats type=bool
+FLAG basecamp accounts logo --styled type=bool
+FLAG basecamp accounts logo --todolist type=string
+FLAG basecamp accounts logo --verbose type=count
+FLAG basecamp accounts logo remove --account type=string
+FLAG basecamp accounts logo remove --agent type=bool
+FLAG basecamp accounts logo remove --cache-dir type=string
+FLAG basecamp accounts logo remove --count type=bool
+FLAG basecamp accounts logo remove --help type=bool
+FLAG basecamp accounts logo remove --hints type=bool
+FLAG basecamp accounts logo remove --ids-only type=bool
+FLAG basecamp accounts logo remove --in type=string
+FLAG basecamp accounts logo remove --jq type=string
+FLAG basecamp accounts logo remove --json type=bool
+FLAG basecamp accounts logo remove --markdown type=bool
+FLAG basecamp accounts logo remove --md type=bool
+FLAG basecamp accounts logo remove --no-hints type=bool
+FLAG basecamp accounts logo remove --no-stats type=bool
+FLAG basecamp accounts logo remove --profile type=string
+FLAG basecamp accounts logo remove --project type=string
+FLAG basecamp accounts logo remove --quiet type=bool
+FLAG basecamp accounts logo remove --stats type=bool
+FLAG basecamp accounts logo remove --styled type=bool
+FLAG basecamp accounts logo remove --todolist type=string
+FLAG basecamp accounts logo remove --verbose type=count
+FLAG basecamp accounts logo upload --account type=string
+FLAG basecamp accounts logo upload --agent type=bool
+FLAG basecamp accounts logo upload --cache-dir type=string
+FLAG basecamp accounts logo upload --count type=bool
+FLAG basecamp accounts logo upload --help type=bool
+FLAG basecamp accounts logo upload --hints type=bool
+FLAG basecamp accounts logo upload --ids-only type=bool
+FLAG basecamp accounts logo upload --in type=string
+FLAG basecamp accounts logo upload --jq type=string
+FLAG basecamp accounts logo upload --json type=bool
+FLAG basecamp accounts logo upload --markdown type=bool
+FLAG basecamp accounts logo upload --md type=bool
+FLAG basecamp accounts logo upload --no-hints type=bool
+FLAG basecamp accounts logo upload --no-stats type=bool
+FLAG basecamp accounts logo upload --profile type=string
+FLAG basecamp accounts logo upload --project type=string
+FLAG basecamp accounts logo upload --quiet type=bool
+FLAG basecamp accounts logo upload --stats type=bool
+FLAG basecamp accounts logo upload --styled type=bool
+FLAG basecamp accounts logo upload --todolist type=string
+FLAG basecamp accounts logo upload --verbose type=count
+FLAG basecamp accounts show --account type=string
+FLAG basecamp accounts show --agent type=bool
+FLAG basecamp accounts show --cache-dir type=string
+FLAG basecamp accounts show --count type=bool
+FLAG basecamp accounts show --help type=bool
+FLAG basecamp accounts show --hints type=bool
+FLAG basecamp accounts show --ids-only type=bool
+FLAG basecamp accounts show --in type=string
+FLAG basecamp accounts show --jq type=string
+FLAG basecamp accounts show --json type=bool
+FLAG basecamp accounts show --markdown type=bool
+FLAG basecamp accounts show --md type=bool
+FLAG basecamp accounts show --no-hints type=bool
+FLAG basecamp accounts show --no-stats type=bool
+FLAG basecamp accounts show --profile type=string
+FLAG basecamp accounts show --project type=string
+FLAG basecamp accounts show --quiet type=bool
+FLAG basecamp accounts show --stats type=bool
+FLAG basecamp accounts show --styled type=bool
+FLAG basecamp accounts show --todolist type=string
+FLAG basecamp accounts show --verbose type=count
+FLAG basecamp accounts update --account type=string
+FLAG basecamp accounts update --agent type=bool
+FLAG basecamp accounts update --cache-dir type=string
+FLAG basecamp accounts update --count type=bool
+FLAG basecamp accounts update --help type=bool
+FLAG basecamp accounts update --hints type=bool
+FLAG basecamp accounts update --ids-only type=bool
+FLAG basecamp accounts update --in type=string
+FLAG basecamp accounts update --jq type=string
+FLAG basecamp accounts update --json type=bool
+FLAG basecamp accounts update --markdown type=bool
+FLAG basecamp accounts update --md type=bool
+FLAG basecamp accounts update --name type=string
+FLAG basecamp accounts update --no-hints type=bool
+FLAG basecamp accounts update --no-stats type=bool
+FLAG basecamp accounts update --profile type=string
+FLAG basecamp accounts update --project type=string
+FLAG basecamp accounts update --quiet type=bool
+FLAG basecamp accounts update --stats type=bool
+FLAG basecamp accounts update --styled type=bool
+FLAG basecamp accounts update --todolist type=string
+FLAG basecamp accounts update --verbose type=count
 FLAG basecamp accounts use --account type=string
 FLAG basecamp accounts use --agent type=bool
 FLAG basecamp accounts use --cache-dir type=string
@@ -1305,6 +1550,90 @@ FLAG basecamp assign --styled type=bool
 FLAG basecamp assign --to type=string
 FLAG basecamp assign --todolist type=string
 FLAG basecamp assign --verbose type=count
+FLAG basecamp assignments --account type=string
+FLAG basecamp assignments --agent type=bool
+FLAG basecamp assignments --cache-dir type=string
+FLAG basecamp assignments --count type=bool
+FLAG basecamp assignments --help type=bool
+FLAG basecamp assignments --hints type=bool
+FLAG basecamp assignments --ids-only type=bool
+FLAG basecamp assignments --in type=string
+FLAG basecamp assignments --jq type=string
+FLAG basecamp assignments --json type=bool
+FLAG basecamp assignments --markdown type=bool
+FLAG basecamp assignments --md type=bool
+FLAG basecamp assignments --no-hints type=bool
+FLAG basecamp assignments --no-stats type=bool
+FLAG basecamp assignments --profile type=string
+FLAG basecamp assignments --project type=string
+FLAG basecamp assignments --quiet type=bool
+FLAG basecamp assignments --stats type=bool
+FLAG basecamp assignments --styled type=bool
+FLAG basecamp assignments --todolist type=string
+FLAG basecamp assignments --verbose type=count
+FLAG basecamp assignments completed --account type=string
+FLAG basecamp assignments completed --agent type=bool
+FLAG basecamp assignments completed --cache-dir type=string
+FLAG basecamp assignments completed --count type=bool
+FLAG basecamp assignments completed --help type=bool
+FLAG basecamp assignments completed --hints type=bool
+FLAG basecamp assignments completed --ids-only type=bool
+FLAG basecamp assignments completed --in type=string
+FLAG basecamp assignments completed --jq type=string
+FLAG basecamp assignments completed --json type=bool
+FLAG basecamp assignments completed --markdown type=bool
+FLAG basecamp assignments completed --md type=bool
+FLAG basecamp assignments completed --no-hints type=bool
+FLAG basecamp assignments completed --no-stats type=bool
+FLAG basecamp assignments completed --profile type=string
+FLAG basecamp assignments completed --project type=string
+FLAG basecamp assignments completed --quiet type=bool
+FLAG basecamp assignments completed --stats type=bool
+FLAG basecamp assignments completed --styled type=bool
+FLAG basecamp assignments completed --todolist type=string
+FLAG basecamp assignments completed --verbose type=count
+FLAG basecamp assignments due --account type=string
+FLAG basecamp assignments due --agent type=bool
+FLAG basecamp assignments due --cache-dir type=string
+FLAG basecamp assignments due --count type=bool
+FLAG basecamp assignments due --help type=bool
+FLAG basecamp assignments due --hints type=bool
+FLAG basecamp assignments due --ids-only type=bool
+FLAG basecamp assignments due --in type=string
+FLAG basecamp assignments due --jq type=string
+FLAG basecamp assignments due --json type=bool
+FLAG basecamp assignments due --markdown type=bool
+FLAG basecamp assignments due --md type=bool
+FLAG basecamp assignments due --no-hints type=bool
+FLAG basecamp assignments due --no-stats type=bool
+FLAG basecamp assignments due --profile type=string
+FLAG basecamp assignments due --project type=string
+FLAG basecamp assignments due --quiet type=bool
+FLAG basecamp assignments due --stats type=bool
+FLAG basecamp assignments due --styled type=bool
+FLAG basecamp assignments due --todolist type=string
+FLAG basecamp assignments due --verbose type=count
+FLAG basecamp assignments list --account type=string
+FLAG basecamp assignments list --agent type=bool
+FLAG basecamp assignments list --cache-dir type=string
+FLAG basecamp assignments list --count type=bool
+FLAG basecamp assignments list --help type=bool
+FLAG basecamp assignments list --hints type=bool
+FLAG basecamp assignments list --ids-only type=bool
+FLAG basecamp assignments list --in type=string
+FLAG basecamp assignments list --jq type=string
+FLAG basecamp assignments list --json type=bool
+FLAG basecamp assignments list --markdown type=bool
+FLAG basecamp assignments list --md type=bool
+FLAG basecamp assignments list --no-hints type=bool
+FLAG basecamp assignments list --no-stats type=bool
+FLAG basecamp assignments list --profile type=string
+FLAG basecamp assignments list --project type=string
+FLAG basecamp assignments list --quiet type=bool
+FLAG basecamp assignments list --stats type=bool
+FLAG basecamp assignments list --styled type=bool
+FLAG basecamp assignments list --todolist type=string
+FLAG basecamp assignments list --verbose type=count
 FLAG basecamp attach --account type=string
 FLAG basecamp attach --agent type=bool
 FLAG basecamp attach --cache-dir type=string
@@ -8648,6 +8977,201 @@ FLAG basecamp forwards show --stats type=bool
 FLAG basecamp forwards show --styled type=bool
 FLAG basecamp forwards show --todolist type=string
 FLAG basecamp forwards show --verbose type=count
+FLAG basecamp gauges --account type=string
+FLAG basecamp gauges --agent type=bool
+FLAG basecamp gauges --cache-dir type=string
+FLAG basecamp gauges --count type=bool
+FLAG basecamp gauges --help type=bool
+FLAG basecamp gauges --hints type=bool
+FLAG basecamp gauges --ids-only type=bool
+FLAG basecamp gauges --in type=string
+FLAG basecamp gauges --jq type=string
+FLAG basecamp gauges --json type=bool
+FLAG basecamp gauges --markdown type=bool
+FLAG basecamp gauges --md type=bool
+FLAG basecamp gauges --no-hints type=bool
+FLAG basecamp gauges --no-stats type=bool
+FLAG basecamp gauges --profile type=string
+FLAG basecamp gauges --project type=string
+FLAG basecamp gauges --quiet type=bool
+FLAG basecamp gauges --stats type=bool
+FLAG basecamp gauges --styled type=bool
+FLAG basecamp gauges --todolist type=string
+FLAG basecamp gauges --verbose type=count
+FLAG basecamp gauges create --account type=string
+FLAG basecamp gauges create --agent type=bool
+FLAG basecamp gauges create --cache-dir type=string
+FLAG basecamp gauges create --color type=string
+FLAG basecamp gauges create --count type=bool
+FLAG basecamp gauges create --description type=string
+FLAG basecamp gauges create --help type=bool
+FLAG basecamp gauges create --hints type=bool
+FLAG basecamp gauges create --ids-only type=bool
+FLAG basecamp gauges create --in type=string
+FLAG basecamp gauges create --jq type=string
+FLAG basecamp gauges create --json type=bool
+FLAG basecamp gauges create --markdown type=bool
+FLAG basecamp gauges create --md type=bool
+FLAG basecamp gauges create --no-hints type=bool
+FLAG basecamp gauges create --no-stats type=bool
+FLAG basecamp gauges create --notify type=string
+FLAG basecamp gauges create --position type=int32
+FLAG basecamp gauges create --profile type=string
+FLAG basecamp gauges create --project type=string
+FLAG basecamp gauges create --quiet type=bool
+FLAG basecamp gauges create --stats type=bool
+FLAG basecamp gauges create --styled type=bool
+FLAG basecamp gauges create --subscriptions type=int64Slice
+FLAG basecamp gauges create --todolist type=string
+FLAG basecamp gauges create --verbose type=count
+FLAG basecamp gauges delete --account type=string
+FLAG basecamp gauges delete --agent type=bool
+FLAG basecamp gauges delete --cache-dir type=string
+FLAG basecamp gauges delete --count type=bool
+FLAG basecamp gauges delete --help type=bool
+FLAG basecamp gauges delete --hints type=bool
+FLAG basecamp gauges delete --ids-only type=bool
+FLAG basecamp gauges delete --in type=string
+FLAG basecamp gauges delete --jq type=string
+FLAG basecamp gauges delete --json type=bool
+FLAG basecamp gauges delete --markdown type=bool
+FLAG basecamp gauges delete --md type=bool
+FLAG basecamp gauges delete --no-hints type=bool
+FLAG basecamp gauges delete --no-stats type=bool
+FLAG basecamp gauges delete --profile type=string
+FLAG basecamp gauges delete --project type=string
+FLAG basecamp gauges delete --quiet type=bool
+FLAG basecamp gauges delete --stats type=bool
+FLAG basecamp gauges delete --styled type=bool
+FLAG basecamp gauges delete --todolist type=string
+FLAG basecamp gauges delete --verbose type=count
+FLAG basecamp gauges disable --account type=string
+FLAG basecamp gauges disable --agent type=bool
+FLAG basecamp gauges disable --cache-dir type=string
+FLAG basecamp gauges disable --count type=bool
+FLAG basecamp gauges disable --help type=bool
+FLAG basecamp gauges disable --hints type=bool
+FLAG basecamp gauges disable --ids-only type=bool
+FLAG basecamp gauges disable --in type=string
+FLAG basecamp gauges disable --jq type=string
+FLAG basecamp gauges disable --json type=bool
+FLAG basecamp gauges disable --markdown type=bool
+FLAG basecamp gauges disable --md type=bool
+FLAG basecamp gauges disable --no-hints type=bool
+FLAG basecamp gauges disable --no-stats type=bool
+FLAG basecamp gauges disable --profile type=string
+FLAG basecamp gauges disable --project type=string
+FLAG basecamp gauges disable --quiet type=bool
+FLAG basecamp gauges disable --stats type=bool
+FLAG basecamp gauges disable --styled type=bool
+FLAG basecamp gauges disable --todolist type=string
+FLAG basecamp gauges disable --verbose type=count
+FLAG basecamp gauges enable --account type=string
+FLAG basecamp gauges enable --agent type=bool
+FLAG basecamp gauges enable --cache-dir type=string
+FLAG basecamp gauges enable --count type=bool
+FLAG basecamp gauges enable --help type=bool
+FLAG basecamp gauges enable --hints type=bool
+FLAG basecamp gauges enable --ids-only type=bool
+FLAG basecamp gauges enable --in type=string
+FLAG basecamp gauges enable --jq type=string
+FLAG basecamp gauges enable --json type=bool
+FLAG basecamp gauges enable --markdown type=bool
+FLAG basecamp gauges enable --md type=bool
+FLAG basecamp gauges enable --no-hints type=bool
+FLAG basecamp gauges enable --no-stats type=bool
+FLAG basecamp gauges enable --profile type=string
+FLAG basecamp gauges enable --project type=string
+FLAG basecamp gauges enable --quiet type=bool
+FLAG basecamp gauges enable --stats type=bool
+FLAG basecamp gauges enable --styled type=bool
+FLAG basecamp gauges enable --todolist type=string
+FLAG basecamp gauges enable --verbose type=count
+FLAG basecamp gauges list --account type=string
+FLAG basecamp gauges list --agent type=bool
+FLAG basecamp gauges list --cache-dir type=string
+FLAG basecamp gauges list --count type=bool
+FLAG basecamp gauges list --help type=bool
+FLAG basecamp gauges list --hints type=bool
+FLAG basecamp gauges list --ids-only type=bool
+FLAG basecamp gauges list --in type=string
+FLAG basecamp gauges list --jq type=string
+FLAG basecamp gauges list --json type=bool
+FLAG basecamp gauges list --markdown type=bool
+FLAG basecamp gauges list --md type=bool
+FLAG basecamp gauges list --no-hints type=bool
+FLAG basecamp gauges list --no-stats type=bool
+FLAG basecamp gauges list --profile type=string
+FLAG basecamp gauges list --project type=string
+FLAG basecamp gauges list --quiet type=bool
+FLAG basecamp gauges list --stats type=bool
+FLAG basecamp gauges list --styled type=bool
+FLAG basecamp gauges list --todolist type=string
+FLAG basecamp gauges list --verbose type=count
+FLAG basecamp gauges needle --account type=string
+FLAG basecamp gauges needle --agent type=bool
+FLAG basecamp gauges needle --cache-dir type=string
+FLAG basecamp gauges needle --count type=bool
+FLAG basecamp gauges needle --help type=bool
+FLAG basecamp gauges needle --hints type=bool
+FLAG basecamp gauges needle --ids-only type=bool
+FLAG basecamp gauges needle --in type=string
+FLAG basecamp gauges needle --jq type=string
+FLAG basecamp gauges needle --json type=bool
+FLAG basecamp gauges needle --markdown type=bool
+FLAG basecamp gauges needle --md type=bool
+FLAG basecamp gauges needle --no-hints type=bool
+FLAG basecamp gauges needle --no-stats type=bool
+FLAG basecamp gauges needle --profile type=string
+FLAG basecamp gauges needle --project type=string
+FLAG basecamp gauges needle --quiet type=bool
+FLAG basecamp gauges needle --stats type=bool
+FLAG basecamp gauges needle --styled type=bool
+FLAG basecamp gauges needle --todolist type=string
+FLAG basecamp gauges needle --verbose type=count
+FLAG basecamp gauges needles --account type=string
+FLAG basecamp gauges needles --agent type=bool
+FLAG basecamp gauges needles --cache-dir type=string
+FLAG basecamp gauges needles --count type=bool
+FLAG basecamp gauges needles --help type=bool
+FLAG basecamp gauges needles --hints type=bool
+FLAG basecamp gauges needles --ids-only type=bool
+FLAG basecamp gauges needles --in type=string
+FLAG basecamp gauges needles --jq type=string
+FLAG basecamp gauges needles --json type=bool
+FLAG basecamp gauges needles --markdown type=bool
+FLAG basecamp gauges needles --md type=bool
+FLAG basecamp gauges needles --no-hints type=bool
+FLAG basecamp gauges needles --no-stats type=bool
+FLAG basecamp gauges needles --profile type=string
+FLAG basecamp gauges needles --project type=string
+FLAG basecamp gauges needles --quiet type=bool
+FLAG basecamp gauges needles --stats type=bool
+FLAG basecamp gauges needles --styled type=bool
+FLAG basecamp gauges needles --todolist type=string
+FLAG basecamp gauges needles --verbose type=count
+FLAG basecamp gauges update --account type=string
+FLAG basecamp gauges update --agent type=bool
+FLAG basecamp gauges update --cache-dir type=string
+FLAG basecamp gauges update --count type=bool
+FLAG basecamp gauges update --description type=string
+FLAG basecamp gauges update --help type=bool
+FLAG basecamp gauges update --hints type=bool
+FLAG basecamp gauges update --ids-only type=bool
+FLAG basecamp gauges update --in type=string
+FLAG basecamp gauges update --jq type=string
+FLAG basecamp gauges update --json type=bool
+FLAG basecamp gauges update --markdown type=bool
+FLAG basecamp gauges update --md type=bool
+FLAG basecamp gauges update --no-hints type=bool
+FLAG basecamp gauges update --no-stats type=bool
+FLAG basecamp gauges update --profile type=string
+FLAG basecamp gauges update --project type=string
+FLAG basecamp gauges update --quiet type=bool
+FLAG basecamp gauges update --stats type=bool
+FLAG basecamp gauges update --styled type=bool
+FLAG basecamp gauges update --todolist type=string
+FLAG basecamp gauges update --verbose type=count
 FLAG basecamp help --account type=string
 FLAG basecamp help --agent type=bool
 FLAG basecamp help --cache-dir type=string
@@ -9660,6 +10184,71 @@ FLAG basecamp msgs update --styled type=bool
 FLAG basecamp msgs update --title type=string
 FLAG basecamp msgs update --todolist type=string
 FLAG basecamp msgs update --verbose type=count
+FLAG basecamp notifications --account type=string
+FLAG basecamp notifications --agent type=bool
+FLAG basecamp notifications --cache-dir type=string
+FLAG basecamp notifications --count type=bool
+FLAG basecamp notifications --help type=bool
+FLAG basecamp notifications --hints type=bool
+FLAG basecamp notifications --ids-only type=bool
+FLAG basecamp notifications --in type=string
+FLAG basecamp notifications --jq type=string
+FLAG basecamp notifications --json type=bool
+FLAG basecamp notifications --markdown type=bool
+FLAG basecamp notifications --md type=bool
+FLAG basecamp notifications --no-hints type=bool
+FLAG basecamp notifications --no-stats type=bool
+FLAG basecamp notifications --profile type=string
+FLAG basecamp notifications --project type=string
+FLAG basecamp notifications --quiet type=bool
+FLAG basecamp notifications --stats type=bool
+FLAG basecamp notifications --styled type=bool
+FLAG basecamp notifications --todolist type=string
+FLAG basecamp notifications --verbose type=count
+FLAG basecamp notifications list --account type=string
+FLAG basecamp notifications list --agent type=bool
+FLAG basecamp notifications list --cache-dir type=string
+FLAG basecamp notifications list --count type=bool
+FLAG basecamp notifications list --help type=bool
+FLAG basecamp notifications list --hints type=bool
+FLAG basecamp notifications list --ids-only type=bool
+FLAG basecamp notifications list --in type=string
+FLAG basecamp notifications list --jq type=string
+FLAG basecamp notifications list --json type=bool
+FLAG basecamp notifications list --markdown type=bool
+FLAG basecamp notifications list --md type=bool
+FLAG basecamp notifications list --no-hints type=bool
+FLAG basecamp notifications list --no-stats type=bool
+FLAG basecamp notifications list --page type=int32
+FLAG basecamp notifications list --profile type=string
+FLAG basecamp notifications list --project type=string
+FLAG basecamp notifications list --quiet type=bool
+FLAG basecamp notifications list --stats type=bool
+FLAG basecamp notifications list --styled type=bool
+FLAG basecamp notifications list --todolist type=string
+FLAG basecamp notifications list --verbose type=count
+FLAG basecamp notifications read --account type=string
+FLAG basecamp notifications read --agent type=bool
+FLAG basecamp notifications read --cache-dir type=string
+FLAG basecamp notifications read --count type=bool
+FLAG basecamp notifications read --help type=bool
+FLAG basecamp notifications read --hints type=bool
+FLAG basecamp notifications read --ids-only type=bool
+FLAG basecamp notifications read --in type=string
+FLAG basecamp notifications read --jq type=string
+FLAG basecamp notifications read --json type=bool
+FLAG basecamp notifications read --markdown type=bool
+FLAG basecamp notifications read --md type=bool
+FLAG basecamp notifications read --no-hints type=bool
+FLAG basecamp notifications read --no-stats type=bool
+FLAG basecamp notifications read --page type=int32
+FLAG basecamp notifications read --profile type=string
+FLAG basecamp notifications read --project type=string
+FLAG basecamp notifications read --quiet type=bool
+FLAG basecamp notifications read --stats type=bool
+FLAG basecamp notifications read --styled type=bool
+FLAG basecamp notifications read --todolist type=string
+FLAG basecamp notifications read --verbose type=count
 FLAG basecamp people --account type=string
 FLAG basecamp people --agent type=bool
 FLAG basecamp people --cache-dir type=string
@@ -15487,9 +16076,19 @@ FLAG basecamp webhooks update --url type=string
 FLAG basecamp webhooks update --verbose type=count
 SUB basecamp account
 SUB basecamp account list
+SUB basecamp account logo
+SUB basecamp account logo remove
+SUB basecamp account logo upload
+SUB basecamp account show
+SUB basecamp account update
 SUB basecamp account use
 SUB basecamp accounts
 SUB basecamp accounts list
+SUB basecamp accounts logo
+SUB basecamp accounts logo remove
+SUB basecamp accounts logo upload
+SUB basecamp accounts show
+SUB basecamp accounts update
 SUB basecamp accounts use
 SUB basecamp api
 SUB basecamp api delete
@@ -15497,6 +16096,10 @@ SUB basecamp api get
 SUB basecamp api post
 SUB basecamp api put
 SUB basecamp assign
+SUB basecamp assignments
+SUB basecamp assignments completed
+SUB basecamp assignments due
+SUB basecamp assignments list
 SUB basecamp attach
 SUB basecamp attachments
 SUB basecamp attachments list
@@ -15803,6 +16406,15 @@ SUB basecamp forwards list
 SUB basecamp forwards replies
 SUB basecamp forwards reply
 SUB basecamp forwards show
+SUB basecamp gauges
+SUB basecamp gauges create
+SUB basecamp gauges delete
+SUB basecamp gauges disable
+SUB basecamp gauges enable
+SUB basecamp gauges list
+SUB basecamp gauges needle
+SUB basecamp gauges needles
+SUB basecamp gauges update
 SUB basecamp help
 SUB basecamp hillcharts
 SUB basecamp hillcharts show
@@ -15848,6 +16460,9 @@ SUB basecamp msgs show
 SUB basecamp msgs trash
 SUB basecamp msgs unpin
 SUB basecamp msgs update
+SUB basecamp notifications
+SUB basecamp notifications list
+SUB basecamp notifications read
 SUB basecamp people
 SUB basecamp people add
 SUB basecamp people list

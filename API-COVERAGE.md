@@ -6,15 +6,15 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 38 | 139 |
+| ✅ Implemented | 42 | 155 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **42** | **151** |
+| **Total (docs)** | **46** | **167** |
 
-**100% coverage of in-scope API** (139/139 endpoints)
+**100% coverage of in-scope API** (155/155 endpoints)
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
-**SDK version:** v0.6.0 — uniform pagination (Limit/Page) on all List methods; `types.FlexibleTime` and `types.FlexInt` for wire format handling.
+**SDK version:** v0.7.1 — adds gauges, my assignments, my notifications, and account management services. Fixes Person.Id deserialization and Account.Logo type mismatch.
 
 ## Coverage by Section
 
@@ -28,6 +28,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | - | show, track/untrack todolists |
+| gauges | 7 | `gauges` | ✅ | - | list, needles, needle, create, update, delete, enable/disable |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
 | message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
@@ -35,6 +36,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | campfires | 14 | `chat` | ✅ | - | list, messages, post, line show/delete. @mentions in content |
 | comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update. @mentions in content |
 | boosts | 6 | `boost`, `react` | ✅ | - | list (recording + event), show, create (recording + event), delete |
+| notifications | 2 | `notifications` | ✅ | - | list, mark as read |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | - | list, show, create, update, move |
@@ -43,6 +45,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | **People** |
 | people | 12 | `people`, `me` | ✅ | - | list, show, pingable, add, remove |
 | **Search & Recordings** |
+| my_assignments | 3 | `assignments` | ✅ | - | list (priorities/non-priorities), completed, due (with scope filter) |
 | search | 2 | `search` | ✅ | - | Full-text search |
 | recordings | 4 | `recordings` | ✅ | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
@@ -78,6 +81,8 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 | client_replies | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
 | **Chatbots** |
 | chatbots | 10 | - | ⏭️ | skip | Requires chatbot key, not OAuth (see notes) |
+| **Account** |
+| account | 4 | `accounts` | ✅ | - | show, update name, upload logo, remove logo |
 | **Lineup** |
 | lineup_markers | 4 | `lineup` | ✅ | - | list, create, update, delete markers |
 | **Reference Only** |

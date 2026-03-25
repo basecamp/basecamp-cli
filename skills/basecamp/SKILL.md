@@ -3,7 +3,8 @@ name: basecamp
 description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
-  subscriptions, lineup, and chat. Use for ANY Basecamp question or action.
+  subscriptions, lineup, chat, gauges, assignments, notifications, and accounts.
+  Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
   - basecamp
@@ -23,6 +24,10 @@ triggers:
   - basecamp timeline
   - basecamp template
   - basecamp webhook
+  - basecamp gauge
+  - basecamp assignment
+  - basecamp notification
+  - basecamp account
   # Common actions
   - link to basecamp
   - track in basecamp
@@ -54,8 +59,12 @@ triggers:
   - my schedule
   - my basecamp
   - assigned to me
+  - my assignments
+  - my notifications
   - overdue todos
   - upcoming events
+  - project gauge
+  - project progress
   # URLs
   - 3.basecamp.com
   - basecampapi.com
@@ -66,7 +75,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, and chat.
+Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, gauges, assignments, notifications, and accounts.
 
 ## Agent Invariants
 
@@ -87,7 +96,7 @@ Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule,
    - Inline images in descriptions work when attached via `--attach`, not when referenced by URL
    
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges.
 
 ### Output Modes
 
@@ -140,7 +149,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`.
 
 | Task | Command |
 |------|---------|
@@ -172,6 +181,15 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |
 | Download file | `basecamp files download <id> --in <project>` |
 | Download inline attachment | `basecamp files download "https://storage.3.basecamp.com/.../download/report.pdf"` |
+| My assignments | `basecamp assignments --json` (priorities + non-priorities) |
+| Overdue assignments | `basecamp assignments due overdue --json` |
+| Completed assignments | `basecamp assignments completed --json` |
+| Notifications | `basecamp notifications --json` |
+| Mark notification read | `basecamp notifications read <id> --json` |
+| Gauges (account-wide) | `basecamp gauges list --json` |
+| Gauge needles | `basecamp gauges needles --in <project> --json` |
+| Create needle | `basecamp gauges create --position 75 --color green --in <project> --json` |
+| Account details | `basecamp accounts show --json` |
 | Watch timeline | `basecamp timeline --watch` |
 
 ## URL Parsing
@@ -210,7 +228,10 @@ basecamp comment 123 "Reply" --in <project>
 Need to find something?
 ├── Know the type + project? → basecamp <type> list --in <project> --json
 │   (some groups have default list behavior; use --agent --help if unsure)
-├── My assigned work? → basecamp reports assigned --json (defaults to "me")
+├── My assigned work? → basecamp assignments --json (priorities + non-priorities)
+│   Or: basecamp reports assigned --json (traditional view, defaults to "me")
+├── My overdue assignments? → basecamp assignments due overdue --json
+├── My notifications? → basecamp notifications --json
 ├── Upcoming schedule? → basecamp reports schedule --json (cross-project)
 ├── Overdue across projects? → basecamp reports overdue --json
 ├── Browse by type cross-project? → basecamp recordings <type> --json
@@ -627,6 +648,63 @@ basecamp lineup delete <id>
 ```
 
 **Note:** Lineup markers are account-wide, not project-scoped.
+
+### Gauges
+
+Gauges track project progress with colored needles on a 0-100 scale.
+
+```bash
+basecamp gauges list --json                           # All gauges (account-wide)
+basecamp gauges needles --in <project> --json         # Needles for a project
+basecamp gauges needle <id> --json                    # Needle details
+basecamp gauges create --position 75 --color green --in <project>
+basecamp gauges create --position 50 --color yellow --description "Halfway" --in <project>
+basecamp gauges create --position 25 --notify custom --subscriptions 1,2 --in <project>
+basecamp gauges update <id> --description "Updated"
+basecamp gauges delete <id>
+basecamp gauges enable --in <project>                 # Enable gauge on project
+basecamp gauges disable --in <project>                # Disable gauge
+```
+
+**Colors:** green, yellow, red. **Notify:** everyone, working_on, custom (with `--subscriptions`).
+
+### Assignments
+
+View your assignments across all projects. Separate from `reports assigned` — provides structured priority grouping and due-date scoping.
+
+```bash
+basecamp assignments --json                           # All (priorities + non-priorities)
+basecamp assignments list --json                      # Same as bare
+basecamp assignments completed --json                 # Completed assignments
+basecamp assignments due overdue --json               # Overdue
+basecamp assignments due due_today --json             # Due today
+basecamp assignments due due_tomorrow --json          # Due tomorrow
+basecamp assignments due due_later_this_week --json   # Due later this week
+```
+
+**Scopes:** overdue, due_today, due_tomorrow, due_later_this_week, due_next_week, due_later.
+
+### Notifications
+
+```bash
+basecamp notifications --json                         # List (page 1)
+basecamp notifications list --page 2 --json           # Page 2
+basecamp notifications read <id> --json               # Mark as read
+basecamp notifications read <id> <id> --page 2 --json # Mark from page 2
+```
+
+**Note:** `read` resolves notification IDs from the specified page. Use `--page` to match the page you listed.
+
+### Accounts
+
+```bash
+basecamp accounts list --json                         # List authorized accounts
+basecamp accounts use <id>                            # Set default account
+basecamp accounts show --json                         # Account details, limits, subscription
+basecamp accounts update --name "New Name" --json     # Rename account
+basecamp accounts logo upload <file> --json           # Upload logo (PNG/JPEG/GIF/WebP/AVIF/HEIC, 5MB max)
+basecamp accounts logo remove --json                  # Remove logo
+```
 
 ### Chat
 
