@@ -22,12 +22,12 @@ func stubExecutablePathResolver(t *testing.T, path string, ok bool) {
 	t.Cleanup(func() { executablePathResolver = orig })
 }
 
-func stubScoopPrefixChecker(t *testing.T, check func(context.Context, string) bool) {
+func stubScoopPrefixResolver(t *testing.T, resolve func(context.Context, string) (string, bool)) {
 	t.Helper()
 
-	orig := scoopPrefixChecker
-	scoopPrefixChecker = check
-	t.Cleanup(func() { scoopPrefixChecker = orig })
+	orig := scoopPrefixResolver
+	scoopPrefixResolver = resolve
+	t.Cleanup(func() { scoopPrefixResolver = orig })
 }
 
 type upgradeCheckersStub struct {
@@ -337,8 +337,12 @@ func TestIsScoopUsesExecutablePathProvenance(t *testing.T) {
 
 func TestIsScoopDetectsRenamedShimViaPrefix(t *testing.T) {
 	stubExecutablePathResolver(t, "/Users/alice/scoop/shims/basecamp.exe", true)
-	stubScoopPrefixChecker(t, func(_ context.Context, app string) bool {
-		return app == scoopApp
+	stubScoopPrefixResolver(t, func(_ context.Context, app string) (string, bool) {
+		if app == scoopApp {
+			return "/users/alice/scoop/apps/basecamp-cli/current", true
+		}
+
+		return "", false
 	})
 
 	assert.True(t, isScoop(context.Background()))
@@ -354,10 +358,48 @@ func TestHasLegacyScoopUsesExecutablePathProvenance(t *testing.T) {
 
 func TestHasLegacyScoopDetectsLegacyShimViaPrefix(t *testing.T) {
 	stubExecutablePathResolver(t, "/Users/alice/scoop/shims/basecamp.exe", true)
-	stubScoopPrefixChecker(t, func(_ context.Context, app string) bool {
-		return app == legacyScoopApp
+	stubScoopPrefixResolver(t, func(_ context.Context, app string) (string, bool) {
+		if app == legacyScoopApp {
+			return "/users/alice/scoop/apps/basecamp/current", true
+		}
+
+		return "", false
 	})
 
+	assert.True(t, hasLegacyScoop(context.Background()))
+}
+
+func TestIsScoopShimIgnoresOppositeScopePrefix(t *testing.T) {
+	stubExecutablePathResolver(t, "c:/programdata/scoop/shims/basecamp.exe", true)
+	stubScoopPrefixResolver(t, func(_ context.Context, app string) (string, bool) {
+		switch app {
+		case scoopApp:
+			return "/users/alice/scoop/apps/basecamp-cli/current", true
+		case legacyScoopApp:
+			return "/programdata/scoop/apps/basecamp/current", true
+		default:
+			return "", false
+		}
+	})
+
+	assert.False(t, isScoop(context.Background()))
+	assert.True(t, hasLegacyScoop(context.Background()))
+}
+
+func TestHasLegacyScoopShimIgnoresOppositeScopePrefix(t *testing.T) {
+	stubExecutablePathResolver(t, "/users/alice/scoop/shims/basecamp.exe", true)
+	stubScoopPrefixResolver(t, func(_ context.Context, app string) (string, bool) {
+		switch app {
+		case scoopApp:
+			return "/programdata/scoop/apps/basecamp-cli/current", true
+		case legacyScoopApp:
+			return "/users/alice/scoop/apps/basecamp/current", true
+		default:
+			return "", false
+		}
+	})
+
+	assert.False(t, isScoop(context.Background()))
 	assert.True(t, hasLegacyScoop(context.Background()))
 }
 

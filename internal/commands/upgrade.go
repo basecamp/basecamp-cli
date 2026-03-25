@@ -34,7 +34,7 @@ const (
 var (
 	versionChecker          = fetchLatestVersion
 	executablePathResolver  = resolvedExecutablePath
-	scoopPrefixChecker      = hasScoopPrefix
+	scoopPrefixResolver     = resolveScoopPrefix
 	homebrewChecker         = isHomebrew
 	legacyHomebrewCasker    = hasLegacyHomebrewCask
 	homebrewUpgrader        = upgradeHomebrew
@@ -225,13 +225,17 @@ func detectScoopInstallSource(ctx context.Context) scoopInstallSource {
 		return scoopInstallSourceRenamed
 	case strings.Contains(exe, legacyScoopAppPath):
 		return scoopInstallSourceLegacy
-	case isScoopShimExecutable(exe) && scoopPrefixChecker(ctx, scoopApp):
-		return scoopInstallSourceRenamed
-	case isScoopShimExecutable(exe) && scoopPrefixChecker(ctx, legacyScoopApp):
-		return scoopInstallSourceLegacy
-	default:
-		return scoopInstallSourceUnknown
+	case isScoopShimExecutable(exe):
+		global := hasPathPrefix(exe, globalScoopRootPath)
+		if prefix, ok := scoopPrefixResolver(ctx, scoopApp); ok && scoopPrefixMatchesShimScope(prefix, global) {
+			return scoopInstallSourceRenamed
+		}
+		if prefix, ok := scoopPrefixResolver(ctx, legacyScoopApp); ok && scoopPrefixMatchesShimScope(prefix, global) {
+			return scoopInstallSourceLegacy
+		}
 	}
+
+	return scoopInstallSourceUnknown
 }
 
 func isScoopShimExecutable(exe string) bool {
@@ -243,15 +247,33 @@ func isScoopShimExecutable(exe string) bool {
 	return name == scoopCommandBaseName
 }
 
-func hasScoopPrefix(ctx context.Context, app string) bool {
+func resolveScoopPrefix(ctx context.Context, app string) (string, bool) {
 	switch app {
 	case scoopApp, legacyScoopApp:
 		// allowed
 	default:
-		return false
+		return "", false
 	}
 
-	return exec.CommandContext(ctx, "scoop", "prefix", app).Run() == nil //nolint:gosec // G204: app is validated against known constants above
+	out, err := exec.CommandContext(ctx, "scoop", "prefix", app).Output() //nolint:gosec // G204: app is validated against known constants above
+	if err != nil {
+		return "", false
+	}
+
+	prefix := strings.ToLower(filepath.ToSlash(strings.TrimSpace(string(out))))
+	if prefix == "" {
+		return "", false
+	}
+
+	return prefix, true
+}
+
+func scoopPrefixMatchesShimScope(prefix string, global bool) bool {
+	if global {
+		return hasPathPrefix(prefix, globalScoopRootPath)
+	}
+
+	return !hasPathPrefix(prefix, globalScoopRootPath)
 }
 
 func isGlobalScoopInstall(_ context.Context) bool {
