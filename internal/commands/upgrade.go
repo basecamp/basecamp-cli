@@ -260,7 +260,21 @@ func isGlobalScoopInstall(_ context.Context) bool {
 		return false
 	}
 
-	return strings.Contains(exe, globalScoopRootPath)
+	return hasPathPrefix(exe, globalScoopRootPath)
+}
+
+func hasPathPrefix(path string, prefix string) bool {
+	prefix = strings.TrimSuffix(prefix, "/")
+	path = stripWindowsVolume(path)
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
+
+func stripWindowsVolume(path string) string {
+	if len(path) >= 2 && path[1] == ':' {
+		return path[2:]
+	}
+
+	return path
 }
 
 func scoopGlobalFlag(global bool) string {

@@ -301,6 +301,32 @@ func TestUpgradeGlobalLegacyScoopMigrationInstructions(t *testing.T) {
 	assert.Contains(t, appBuf.String(), "migration_required")
 }
 
+func TestIsHomebrewUsesExecutablePathProvenance(t *testing.T) {
+	stubExecutablePathResolver(t, "/opt/homebrew/caskroom/basecamp-cli/1.2.3/basecamp", true)
+	assert.True(t, isHomebrew(context.Background()))
+
+	stubExecutablePathResolver(t, "/usr/local/bin/basecamp", true)
+	assert.False(t, isHomebrew(context.Background()))
+}
+
+func TestIsHomebrewReturnsFalseWhenExecutablePathUnavailable(t *testing.T) {
+	stubExecutablePathResolver(t, "", false)
+	assert.False(t, isHomebrew(context.Background()))
+}
+
+func TestHasLegacyHomebrewCaskUsesExecutablePathProvenance(t *testing.T) {
+	stubExecutablePathResolver(t, "/opt/homebrew/caskroom/basecamp/1.2.3/basecamp", true)
+	assert.True(t, hasLegacyHomebrewCask(context.Background()))
+
+	stubExecutablePathResolver(t, "/usr/local/bin/basecamp", true)
+	assert.False(t, hasLegacyHomebrewCask(context.Background()))
+}
+
+func TestHasLegacyHomebrewCaskReturnsFalseWhenExecutablePathUnavailable(t *testing.T) {
+	stubExecutablePathResolver(t, "", false)
+	assert.False(t, hasLegacyHomebrewCask(context.Background()))
+}
+
 func TestIsScoopUsesExecutablePathProvenance(t *testing.T) {
 	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp-cli/current/basecamp.exe", true)
 	assert.True(t, isScoop(context.Background()))
@@ -338,6 +364,9 @@ func TestHasLegacyScoopDetectsLegacyShimViaPrefix(t *testing.T) {
 func TestIsGlobalScoopInstallUsesExecutablePathProvenance(t *testing.T) {
 	stubExecutablePathResolver(t, "c:/programdata/scoop/apps/basecamp-cli/current/basecamp.exe", true)
 	assert.True(t, isGlobalScoopInstall(context.Background()))
+
+	stubExecutablePathResolver(t, "/users/alice/programdata/scoop/apps/basecamp-cli/current/basecamp.exe", true)
+	assert.False(t, isGlobalScoopInstall(context.Background()))
 
 	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp-cli/current/basecamp.exe", true)
 	assert.False(t, isGlobalScoopInstall(context.Background()))
