@@ -40,7 +40,7 @@ Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checks
 **Scoop (Windows):**
 ```bash
 scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
-scoop install basecamp-cli
+scoop install basecamp
 ```
 
 **Shell script:**
