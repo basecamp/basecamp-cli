@@ -1,0 +1,11 @@
+internal/commands/gauges.go
+  077fa23b5aaa4958 1-427
+e2e/smoke/smoke_gauges.bats
+  077fa23b5aaa4958 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "c1cc1ad884b3a3d22852b5a8f527bf92d3efcbd9",
+  "prompts": {}
+}
