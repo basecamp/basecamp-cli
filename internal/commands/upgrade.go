@@ -26,20 +26,22 @@ const (
 	scoopAppPath               = "/scoop/apps/basecamp-cli/"
 	legacyScoopAppPath         = "/scoop/apps/basecamp/"
 	scoopShimPath              = "/scoop/shims/"
+	globalScoopRootPath        = "/programdata/scoop/"
 	scoopCommandBaseName       = "basecamp"
 )
 
 // versionChecker and package manager helpers abstract external checks for testability.
 var (
-	versionChecker         = fetchLatestVersion
-	executablePathResolver = resolvedExecutablePath
-	scoopPrefixChecker     = hasScoopPrefix
-	homebrewChecker        = isHomebrew
-	legacyHomebrewCasker   = hasLegacyHomebrewCask
-	homebrewUpgrader       = upgradeHomebrew
-	scoopChecker           = isScoop
-	legacyScoopChecker     = hasLegacyScoop
-	scoopUpgrader          = upgradeScoop
+	versionChecker          = fetchLatestVersion
+	executablePathResolver  = resolvedExecutablePath
+	scoopPrefixChecker      = hasScoopPrefix
+	homebrewChecker         = isHomebrew
+	legacyHomebrewCasker    = hasLegacyHomebrewCask
+	homebrewUpgrader        = upgradeHomebrew
+	scoopChecker            = isScoop
+	legacyScoopChecker      = hasLegacyScoop
+	scoopGlobalScopeChecker = isGlobalScoopInstall
+	scoopUpgrader           = upgradeScoop
 )
 
 // NewUpgradeCmd creates the upgrade command.
@@ -100,8 +102,9 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	if scoopChecker(ctx) {
+		global := scoopGlobalScopeChecker(ctx)
 		fmt.Fprintln(w, "Upgrading via Scoop…")
-		if err := scoopUpgrader(ctx, w, cmd.ErrOrStderr()); err != nil {
+		if err := scoopUpgrader(ctx, global, w, cmd.ErrOrStderr()); err != nil {
 			return fmt.Errorf("scoop update failed for app %s: %w", scoopApp, err)
 		}
 		return app.OK(
@@ -128,10 +131,11 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	if legacyScoopChecker(ctx) {
+		global := scoopGlobalScopeChecker(ctx)
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "The CLI Scoop manifest has been renamed. To upgrade, run:")
-		fmt.Fprintf(w, "  scoop uninstall %s\n", legacyScoopApp)
-		fmt.Fprintf(w, "  scoop install %s\n", scoopApp)
+		fmt.Fprintf(w, "  scoop uninstall%s %s\n", scoopGlobalFlag(global), legacyScoopApp)
+		fmt.Fprintf(w, "  scoop install%s %s\n", scoopGlobalFlag(global), scoopApp)
 		return app.OK(
 			map[string]string{
 				"status":          "migration_required",
@@ -161,8 +165,14 @@ func upgradeHomebrew(ctx context.Context, stdout io.Writer, stderr io.Writer) er
 	return upgrade.Run()
 }
 
-func upgradeScoop(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
-	upgrade := exec.CommandContext(ctx, "scoop", "update", scoopApp)
+func upgradeScoop(ctx context.Context, global bool, stdout io.Writer, stderr io.Writer) error {
+	args := []string{"update"}
+	if global {
+		args = append(args, "-g")
+	}
+	args = append(args, scoopApp)
+
+	upgrade := exec.CommandContext(ctx, "scoop", args...)
 	upgrade.Stdout = stdout
 	upgrade.Stderr = stderr
 	return upgrade.Run()
@@ -242,6 +252,23 @@ func hasScoopPrefix(ctx context.Context, app string) bool {
 	}
 
 	return exec.CommandContext(ctx, "scoop", "prefix", app).Run() == nil //nolint:gosec // G204: app is validated against known constants above
+}
+
+func isGlobalScoopInstall(_ context.Context) bool {
+	exe, ok := executablePathResolver()
+	if !ok {
+		return false
+	}
+
+	return strings.Contains(exe, globalScoopRootPath)
+}
+
+func scoopGlobalFlag(global bool) string {
+	if global {
+		return " -g"
+	}
+
+	return ""
 }
 
 func resolvedExecutablePath() (string, bool) {

@@ -36,8 +36,9 @@ type upgradeCheckersStub struct {
 	hasLegacyCask   bool
 	isScoop         bool
 	hasLegacyScoop  bool
+	isGlobalScoop   bool
 	homebrewUpgrade func(context.Context, io.Writer, io.Writer) error
-	scoopUpgrade    func(context.Context, io.Writer, io.Writer) error
+	scoopUpgrade    func(context.Context, bool, io.Writer, io.Writer) error
 }
 
 // stubUpgradeCheckers overrides version and package manager helpers for tests.
@@ -71,10 +72,14 @@ func stubUpgradeCheckers(t *testing.T, stub upgradeCheckersStub) {
 	legacyScoopChecker = func(context.Context) bool { return stub.hasLegacyScoop }
 	t.Cleanup(func() { legacyScoopChecker = origLegacyScoop })
 
+	origGlobalScoop := scoopGlobalScopeChecker
+	scoopGlobalScopeChecker = func(context.Context) bool { return stub.isGlobalScoop }
+	t.Cleanup(func() { scoopGlobalScopeChecker = origGlobalScoop })
+
 	origSU := scoopUpgrader
 	scoopUpgrader = stub.scoopUpgrade
 	if scoopUpgrader == nil {
-		scoopUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+		scoopUpgrader = func(context.Context, bool, io.Writer, io.Writer) error { return nil }
 	}
 	t.Cleanup(func() { scoopUpgrader = origSU })
 }
@@ -255,6 +260,47 @@ func TestUpgradeLegacyScoopMigrationInstructions(t *testing.T) {
 	assert.Contains(t, appBuf.String(), "migration_required")
 }
 
+func TestUpgradeGlobalScoopUsesGlobalUpdate(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	var gotGlobal bool
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion: "1.3.0",
+		isScoop:       true,
+		isGlobalScoop: true,
+		scoopUpgrade: func(_ context.Context, global bool, _ io.Writer, _ io.Writer) error {
+			gotGlobal = global
+			return nil
+		},
+	})
+
+	_, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.True(t, gotGlobal)
+	assert.Contains(t, appBuf.String(), "upgraded")
+}
+
+func TestUpgradeGlobalLegacyScoopMigrationInstructions(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", hasLegacyScoop: true, isGlobalScoop: true})
+
+	cmdOut, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.Contains(t, cmdOut, "The CLI Scoop manifest has been renamed. To upgrade, run:")
+	assert.Contains(t, cmdOut, "  scoop uninstall -g basecamp\n")
+	assert.Contains(t, cmdOut, "  scoop install -g basecamp-cli\n")
+	assert.Contains(t, appBuf.String(), "migration_required")
+}
+
 func TestIsScoopUsesExecutablePathProvenance(t *testing.T) {
 	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp-cli/current/basecamp.exe", true)
 	assert.True(t, isScoop(context.Background()))
@@ -287,4 +333,12 @@ func TestHasLegacyScoopDetectsLegacyShimViaPrefix(t *testing.T) {
 	})
 
 	assert.True(t, hasLegacyScoop(context.Background()))
+}
+
+func TestIsGlobalScoopInstallUsesExecutablePathProvenance(t *testing.T) {
+	stubExecutablePathResolver(t, "c:/programdata/scoop/apps/basecamp-cli/current/basecamp.exe", true)
+	assert.True(t, isGlobalScoopInstall(context.Background()))
+
+	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp-cli/current/basecamp.exe", true)
+	assert.False(t, isGlobalScoopInstall(context.Background()))
 }
