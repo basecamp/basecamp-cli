@@ -348,6 +348,19 @@ func TestIsScoopDetectsRenamedShimViaPrefix(t *testing.T) {
 	assert.True(t, isScoop(context.Background()))
 }
 
+func TestIsScoopDetectsGlobalRenamedShimViaPrefix(t *testing.T) {
+	stubExecutablePathResolver(t, "c:/programdata/scoop/shims/basecamp.exe", true)
+	stubScoopPrefixResolver(t, func(_ context.Context, app string) (string, bool) {
+		if app == scoopApp {
+			return "/programdata/scoop/apps/basecamp-cli/current", true
+		}
+
+		return "", false
+	})
+
+	assert.True(t, isScoop(context.Background()))
+}
+
 func TestHasLegacyScoopUsesExecutablePathProvenance(t *testing.T) {
 	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp/current/basecamp.exe", true)
 	assert.True(t, hasLegacyScoop(context.Background()))

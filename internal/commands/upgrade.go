@@ -247,6 +247,9 @@ func isScoopShimExecutable(exe string) bool {
 	return name == scoopCommandBaseName
 }
 
+// resolveScoopPrefix returns the installed app root reported by `scoop prefix`.
+// Scoop already checks local installs first, then global installs, so there is
+// no separate scope flag to thread through here.
 func resolveScoopPrefix(ctx context.Context, app string) (string, bool) {
 	switch app {
 	case scoopApp, legacyScoopApp:
