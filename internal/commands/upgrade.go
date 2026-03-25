@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,16 +17,18 @@ import (
 )
 
 const (
-	homebrewCask       = "basecamp/tap/basecamp-cli"
-	legacyHomebrewCask = "basecamp/tap/basecamp"
-	homebrewCaskroom   = "/Caskroom/"
+	homebrewCask               = "basecamp/tap/basecamp-cli"
+	legacyHomebrewCask         = "basecamp/tap/basecamp"
+	homebrewCaskroomPath       = "/Caskroom/basecamp-cli/"
+	legacyHomebrewCaskroomPath = "/Caskroom/basecamp/"
 )
 
-// versionChecker and homebrew checkers abstract external checks for testability.
+// versionChecker and Homebrew helpers abstract external checks for testability.
 var (
 	versionChecker       = fetchLatestVersion
 	homebrewChecker      = isHomebrew
 	legacyHomebrewCasker = hasLegacyHomebrewCask
+	homebrewUpgrader     = upgradeHomebrew
 )
 
 // NewUpgradeCmd creates the upgrade command.
@@ -74,6 +77,17 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(w, "update available: %s\n", latest)
 
 	ctx := cmd.Context()
+	if homebrewChecker(ctx) {
+		fmt.Fprintln(w, "Upgrading via Homebrew…")
+		if err := homebrewUpgrader(ctx, w, cmd.ErrOrStderr()); err != nil {
+			return fmt.Errorf("brew upgrade failed for cask %s: %w", homebrewCask, err)
+		}
+		return app.OK(
+			map[string]string{"status": "upgraded", "from": current, "to": latest},
+			output.WithSummary(fmt.Sprintf("Upgraded %s → %s", current, latest)),
+		)
+	}
+
 	if legacyHomebrewCasker(ctx) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "The CLI cask has been renamed. To upgrade, run:")
@@ -91,20 +105,6 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	if homebrewChecker(ctx) {
-		fmt.Fprintln(w, "Upgrading via Homebrew…")
-		upgrade := exec.CommandContext(ctx, "brew", "upgrade", "--cask", homebrewCask)
-		upgrade.Stdout = w
-		upgrade.Stderr = cmd.ErrOrStderr()
-		if err := upgrade.Run(); err != nil {
-			return fmt.Errorf("brew upgrade failed for cask %s: %w", homebrewCask, err)
-		}
-		return app.OK(
-			map[string]string{"status": "upgraded", "from": current, "to": latest},
-			output.WithSummary(fmt.Sprintf("Upgraded %s → %s", current, latest)),
-		)
-	}
-
 	downloadURL := fmt.Sprintf("https://github.com/basecamp/basecamp-cli/releases/tag/v%s", latest)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Download the latest release from:\n")
@@ -115,36 +115,41 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	)
 }
 
-// isHomebrew returns true if the CLI appears to be installed via the renamed Homebrew cask.
-func isHomebrew(ctx context.Context) bool {
+func upgradeHomebrew(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
+	upgrade := exec.CommandContext(ctx, "brew", "upgrade", "--cask", homebrewCask)
+	upgrade.Stdout = stdout
+	upgrade.Stderr = stderr
+	return upgrade.Run()
+}
+
+// isHomebrew returns true if the running CLI binary appears to come from the renamed Homebrew cask.
+func isHomebrew(_ context.Context) bool {
+	exe, ok := resolvedExecutablePath()
+	if !ok {
+		return false
+	}
+
+	return strings.Contains(exe, homebrewCaskroomPath)
+}
+
+func hasLegacyHomebrewCask(_ context.Context) bool {
+	exe, ok := resolvedExecutablePath()
+	if !ok {
+		return false
+	}
+
+	return strings.Contains(exe, legacyHomebrewCaskroomPath)
+}
+
+func resolvedExecutablePath() (string, bool) {
 	exe, err := os.Executable()
-	if err == nil {
-		if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
-			exe = resolved
-		}
-		if strings.Contains(exe, homebrewCaskroom) {
-			return true
-		}
-	}
-
-	return homebrewHasCask(ctx, homebrewCask)
-}
-
-func hasLegacyHomebrewCask(ctx context.Context) bool {
-	return homebrewHasCask(ctx, legacyHomebrewCask)
-}
-
-func homebrewHasCask(ctx context.Context, cask string) bool {
-	switch cask {
-	case homebrewCask, legacyHomebrewCask:
-		// allowed
-	default:
-		return false
-	}
-
-	out, err := exec.CommandContext(ctx, "brew", "list", "--cask", cask).CombinedOutput() //nolint:gosec // G204: cask is validated against known constants above
 	if err != nil {
-		return false
+		return "", false
 	}
-	return strings.TrimSpace(string(out)) != ""
+
+	if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+		exe = resolved
+	}
+
+	return filepath.ToSlash(exe), true
 }

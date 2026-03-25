@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"io"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -13,7 +14,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
-// stubUpgradeCheckers overrides version and Homebrew detection for tests.
+// stubUpgradeCheckers overrides version and Homebrew helpers for tests.
 func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLegacyCask bool) {
 	t.Helper()
 
@@ -28,6 +29,10 @@ func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLeg
 	origLegacy := legacyHomebrewCasker
 	legacyHomebrewCasker = func(context.Context) bool { return hasLegacyCask }
 	t.Cleanup(func() { legacyHomebrewCasker = origLegacy })
+
+	origUpgrader := homebrewUpgrader
+	homebrewUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+	t.Cleanup(func() { homebrewUpgrader = origUpgrader })
 }
 
 // executeUpgradeCommand runs the upgrade command and returns the combined
@@ -97,7 +102,7 @@ func TestUpgradeSuppressesOlderLatestRelease(t *testing.T) {
 	version.Version = "0.4.1-0.20260313174735-243815fa23b2"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "0.4.0", false)
+	stubUpgradeCheckers(t, "0.4.0", false, false)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -140,6 +145,22 @@ func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	assert.Contains(t, buf.String(), "already up to date")
 }
 
+func TestUpgradePrefersRenamedHomebrewCaskOverLegacyMigration(t *testing.T) {
+	app, appBuf := setupPeopleTestApp(t)
+
+	orig := version.Version
+	version.Version = "1.2.3"
+	t.Cleanup(func() { version.Version = orig })
+
+	stubUpgradeCheckers(t, "1.3.0", true, true)
+
+	cmdOut, err := executeUpgradeCommand(t, app)
+	require.NoError(t, err)
+	assert.Contains(t, cmdOut, "Upgrading via Homebrew…")
+	assert.Contains(t, appBuf.String(), "upgraded")
+	assert.NotContains(t, appBuf.String(), "migration_required")
+}
+
 func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
 	app, appBuf := setupPeopleTestApp(t)
 
@@ -152,7 +173,7 @@ func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	assert.Contains(t, cmdOut, "The CLI cask has been renamed. To upgrade, run:")
-	assert.Contains(t, cmdOut, "brew uninstall --cask basecamp/tap/basecamp")
-	assert.Contains(t, cmdOut, "brew install --cask basecamp/tap/basecamp-cli")
+	assert.Contains(t, cmdOut, "  brew uninstall --cask basecamp/tap/basecamp\n")
+	assert.Contains(t, cmdOut, "  brew install --cask basecamp/tap/basecamp-cli\n")
 	assert.Contains(t, appBuf.String(), "migration_required")
 }
