@@ -1,0 +1,117 @@
+internal/commands/gauges.go
+  077fa23b5aaa4958 1-427
+e2e/smoke/smoke_notifications.bats
+  077fa23b5aaa4958 1-20
+e2e/smoke/smoke_gauges.bats
+  077fa23b5aaa4958 1-58
+internal/commands/assignments.go
+  077fa23b5aaa4958 1-20,22-163
+  642931d28818a3d7 21
+internal/commands/files_test.go
+  642931d28818a3d7 4-5,7,13,87-159
+internal/tui/workspace/data/mutations_card.go
+  077fa23b5aaa4958 67
+internal/richtext/richtext.go
+  57d6193e1685fb71 991,1025
+internal/richtext/richtext_test.go
+  57d6193e1685fb71 1423-1431
+internal/commands/show_test.go
+  642931d28818a3d7 6,679-774
+internal/commands/notifications.go
+  642931d28818a3d7 23
+e2e/smoke/smoke_assignments.bats
+  077fa23b5aaa4958 1-26
+internal/commands/todos_test.go
+  642931d28818a3d7 127-130,137-138
+internal/commands/commands.go
+  57d6193e1685fb71 101
+e2e/smoke/smoke_communication.bats
+  642931d28818a3d7 137-138
+internal/commands/todos.go
+  077fa23b5aaa4958 1705
+  57d6193e1685fb71 727-735,739-741,744-769,771-786,790,792,798-799
+  642931d28818a3d7 736-738,787-789,791,793-795,797
+internal/commands/messages.go
+  57d6193e1685fb71 194,196-197,199-201,203-204,206-209,211-234,242,244-246,248,250
+  642931d28818a3d7 235-241,243
+internal/commands/attachments.go
+  642931d28818a3d7 4,166-167,262,271-272,281-284,405,415,646,726,746,761-768,773-775,777,780
+  57d6193e1685fb71 14,29,32,191-192,264-267,269-270,277-279,285-286,291,307-308,310,313-319,323-326,331,588,595-598,604-605,610,613-630,632,636,644-645,647-648,656-659,663-664,668,676,748-758,784-787,790-792,805-823,880-901
+  d2c1db4a78c0783d 115,134-144,206,218-225,234-260,273-276,299-304,322,327-329,354,365-367,369-374,437,563-565,574-575,606,639,650,654,670,672-674,677,721-725,825-835,850-878
+internal/commands/files.go
+  57d6193e1685fb71 1000,1163,1165-1169,1189,1391
+  642931d28818a3d7 1170-1175,1177,1423-1431,1436,1484-1498,1504,1615-1616
+skills/basecamp/SKILL.md
+  57d6193e1685fb71 174-176,182,342,349,351-363,365-371,373,375-386,389,527
+  642931d28818a3d7 393-396
+internal/commands/cards.go
+  57d6193e1685fb71 267,269,271-272,274-276,278-279,281-284,286-293,296-302,331
+  642931d28818a3d7 303-329
+  077fa23b5aaa4958 822,933
+internal/commands/attachments_test.go
+  57d6193e1685fb71 185,191-192,202,210-306,308-321,324-328,330,332-333
+  642931d28818a3d7 4,186,194,198-199,207,470
+  d2c1db4a78c0783d 19,127-137,420-421,428,433,438-439,445
+internal/commands/show.go
+  57d6193e1685fb71 21,296,299,310,312,324
+  642931d28818a3d7 4,222-224,226-228,241-243,282-288,290-295,297-298,300-306,308-309,311,314-315,404-408,410-411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "b6aee2b9fe2ae123ee982f83c01c7b74a773998d",
+  "prompts": {
+    "077fa23b5aaa4958": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30edaebb-7272-4620-bcae-b26bfddb7216",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 0,
+      "accepted_lines": 697,
+      "overriden_lines": 0
+    },
+    "57d6193e1685fb71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ca92b76-2172-4b4b-bc45-0c20cd76b2c6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 451,
+      "overriden_lines": 0
+    },
+    "642931d28818a3d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f5b5890-478e-40d2-abe4-bf43b4cb306c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 4,
+      "accepted_lines": 348,
+      "overriden_lines": 0
+    },
+    "d2c1db4a78c0783d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e8e9d038-0e58-4d93-a0f6-ad2018c4dd5f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 3,
+      "accepted_lines": 151,
+      "overriden_lines": 0
+    }
+  }
+}
