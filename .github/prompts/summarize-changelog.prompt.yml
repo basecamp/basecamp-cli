@@ -6,10 +6,10 @@ messages:
       (the detailed per-PR list is generated separately below your summary).
 
       Format:
-      - Start with one short sentence setting the tone (e.g. "Big one!" or "Patch release with two fixes.").
-      - If there are breaking changes, lead with a ⚠️ line before anything else.
-      - Then a bullet list of highlights. Each bullet leads with the command or
-        feature name in backticks, then a plain-English description.
+      - If there are breaking changes, start with a ⚠️ line describing what broke.
+      - Then one short sentence setting the tone (e.g. "Big one!" or "Patch release with two fixes.").
+      - Then a bullet list of highlights. Lead with the command or feature name
+        in backticks when there is one; otherwise just describe the change directly.
       - 1–3 bullets for small releases (1–5 commits). 4–10 for larger ones.
       - Do NOT pad small releases with filler bullets. Fewer is better.
 
@@ -25,7 +25,6 @@ messages:
 
       Big one! 100+ PRs spanning new commands, quality-of-life polish, and bugfixes.
 
-      Highlights:
       - `basecamp show <url>`: paste in any Basecamp URL to display it.
       - Inline images and attachments. Reference local file paths in Markdown to upload and create native Basecamp attachments.
       - `--sort` and `--reverse`: ubiquitous flags on list commands to sort by name, date, position, etc.
