@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -774,6 +775,9 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 			if err != nil {
 				return output.ErrUsage("Invalid question ID")
 			}
+			if groupOn == "" {
+				groupOn = time.Now().Format("2006-01-02")
+			}
 
 			html := richtext.MarkdownToHTML(content)
 
@@ -825,7 +829,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22)")
+	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22; defaults to today)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd

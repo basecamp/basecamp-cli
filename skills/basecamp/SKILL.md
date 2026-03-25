@@ -533,7 +533,7 @@ basecamp checkins answers <question_id> --in <project>  # List answers
 basecamp checkins answer <id> --in <project>      # Answer details
 basecamp checkins question create "What did you work on?" --in <project>
 basecamp checkins question update <id> "New question" --frequency every_week
-basecamp checkins answer create <question-id> "My answer" --in <project>
+basecamp checkins answer create <question-id> "My answer" --in <project>  # Defaults to today
 basecamp checkins answer update <id> "Updated" --in <project>
 ```
 
@@ -758,6 +758,7 @@ cat ~/.config/basecamp/accounts.json              # Check available accounts
 - `basecamp comment <id> "Text"` (not a flag)
 - `basecamp webhooks create "https://..." --in <project>` (not `--url`)
 - `basecamp checkins answer create <question-id> "content"` (not `--question`)
+- `--date YYYY-MM-DD` is optional for `checkins answer create`; if omitted, it defaults to today
 
 **Missing argument errors (code: "usage"):**
 When a required positional argument is missing, the CLI returns a structured error naming
