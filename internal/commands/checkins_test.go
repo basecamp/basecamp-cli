@@ -62,6 +62,7 @@ func (m *mockCheckinsAnswerCreateTransport) RoundTrip(req *http.Request) (*http.
 }
 
 func TestCheckinsAnswerCreateDefaultsDateToToday(t *testing.T) {
+	expectedDate := time.Now().Format("2006-01-02")
 	transport := &mockCheckinsAnswerCreateTransport{}
 	app, _ := newTestAppWithTransport(t, transport)
 	app.Config.ProjectID = "123"
@@ -74,7 +75,7 @@ func TestCheckinsAnswerCreateDefaultsDateToToday(t *testing.T) {
 	require.NotNil(t, transport.recordedBody)
 	assert.Equal(t, "/99999/questions/456/answers.json", transport.recordedPath)
 	assert.Equal(t, "<p>hello world</p>", transport.recordedBody["content"])
-	assert.Equal(t, time.Now().Format("2006-01-02"), transport.recordedBody["group_on"])
+	assert.Equal(t, expectedDate, transport.recordedBody["group_on"])
 }
 
 func TestCheckinsAnswerCreatePreservesExplicitDate(t *testing.T) {

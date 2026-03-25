@@ -775,8 +775,9 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 			if err != nil {
 				return output.ErrUsage("Invalid question ID")
 			}
-			if groupOn == "" {
-				groupOn = time.Now().Format("2006-01-02")
+			effectiveGroupOn := groupOn
+			if effectiveGroupOn == "" {
+				effectiveGroupOn = time.Now().Format("2006-01-02")
 			}
 
 			html := richtext.MarkdownToHTML(content)
@@ -798,7 +799,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 
 			req := &basecamp.CreateAnswerRequest{
 				Content: html,
-				GroupOn: groupOn,
+				GroupOn: effectiveGroupOn,
 			}
 
 			answer, err := app.Account().Checkins().CreateAnswer(cmd.Context(), qID, req)
