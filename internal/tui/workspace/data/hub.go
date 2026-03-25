@@ -10,6 +10,8 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
+var hubNow = time.Now
+
 // Hub is the central data coordinator providing typed, realm-scoped pool access.
 //
 // Hub manages three realm tiers:
@@ -1160,7 +1162,10 @@ func (h *Hub) CreateCheckinAnswer(ctx context.Context, accountID string, project
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
-	_, err := client.Checkins().CreateAnswer(ctx, questionID, &basecamp.CreateAnswerRequest{Content: content})
+	_, err := client.Checkins().CreateAnswer(ctx, questionID, &basecamp.CreateAnswerRequest{
+		Content: content,
+		GroupOn: hubNow().Format("2006-01-02"),
+	})
 	return err
 }
 

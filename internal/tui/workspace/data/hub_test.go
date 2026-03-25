@@ -1,6 +1,11 @@
 package data
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +13,82 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type hubCheckinsTestTokenProvider struct{}
+
+func (hubCheckinsTestTokenProvider) AccessToken(_ context.Context) (string, error) {
+	return "test-token", nil
+}
+
+type mockHubCheckinsTransport struct {
+	recordedPath string
+	recordedBody map[string]any
+}
+
+func (m *mockHubCheckinsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/questions/456/answers.json"):
+		m.recordedPath = req.URL.Path
+		if req.Body != nil {
+			defer req.Body.Close()
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &m.recordedBody); err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Body: io.NopCloser(strings.NewReader(`{
+				"id": 789,
+				"content": "<p>hello world</p>",
+				"group_on": "2026-03-25",
+				"creator": {"name": "Rob Zolkos"},
+				"parent": {"id": 456, "title": "What did you work on today?", "type": "Question", "url": "https://example.test/questions/456", "app_url": "https://example.test/questions/456"},
+				"bucket": {"id": 123, "name": "Test Project", "type": "Project"},
+				"status": "active",
+				"type": "Question::Answer",
+				"title": "Answer"
+			}`)),
+			Header: header,
+		}, nil
+	default:
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"Not Found"}`)),
+			Header:     header,
+		}, nil
+	}
+}
+
+func TestHubCreateCheckinAnswerDefaultsDateToToday(t *testing.T) {
+	originalNow := hubNow
+	hubNow = func() time.Time {
+		return time.Date(2026, 3, 25, 9, 30, 0, 0, time.Local)
+	}
+	t.Cleanup(func() {
+		hubNow = originalNow
+	})
+
+	transport := &mockHubCheckinsTransport{}
+	sdk := basecamp.NewClient(&basecamp.Config{}, hubCheckinsTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(0),
+	)
+	h := NewHub(NewMultiStore(sdk), "")
+
+	err := h.CreateCheckinAnswer(context.Background(), "99999", 123, 456, "<p>hello world</p>")
+	require.NoError(t, err)
+	require.NotNil(t, transport.recordedBody)
+	assert.Equal(t, "/99999/questions/456/answers.json", transport.recordedPath)
+	assert.Equal(t, "<p>hello world</p>", transport.recordedBody["content"])
+	assert.Equal(t, "2026-03-25", transport.recordedBody["group_on"])
+}
 
 func TestHubNewHasGlobalRealm(t *testing.T) {
 	h := NewHub(nil, "")

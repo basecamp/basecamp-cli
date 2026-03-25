@@ -14,6 +14,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
+var checkinsNow = time.Now
+
 // NewCheckinsCmd creates the checkins command group.
 func NewCheckinsCmd() *cobra.Command {
 	var project string
@@ -777,7 +779,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 			}
 			effectiveGroupOn := groupOn
 			if effectiveGroupOn == "" {
-				effectiveGroupOn = time.Now().Format("2006-01-02")
+				effectiveGroupOn = checkinsNow().Format("2006-01-02")
 			}
 
 			html := richtext.MarkdownToHTML(content)
