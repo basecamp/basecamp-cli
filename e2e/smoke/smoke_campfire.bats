@@ -56,6 +56,13 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "campfire show shows room detail" {
+  run_smoke basecamp chat show --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
+
 @test "campfire upload uploads to campfire" {
   local tmpfile="$BATS_FILE_TMPDIR/smoke_campfire_upload.txt"
   echo "campfire upload test $(date +%s)" > "$tmpfile"
