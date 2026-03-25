@@ -152,3 +152,38 @@ load test_helper
   run basecamp schedule foobar
   # Command may show help or require project - just verify it runs
 }
+
+
+# reports schedule flag defaults
+
+@test "reports schedule --help shows default window in flag descriptions" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp reports schedule --help
+  assert_success
+  assert_output_contains "default: today"
+  assert_output_contains "default: +30"
+}
+
+@test "reports schedule without flags reaches API stage (not a usage error)" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # Both --start and --end have defaults, so the command should attempt the API
+  # call rather than fail with a usage/validation error. With a fake account it
+  # will fail at auth or network stage (exit non-zero) but must NOT print a
+  # usage hint about missing flags.
+  run basecamp reports schedule --json
+  assert_output_not_contains "required"
+  assert_output_not_contains "Usage:"
+}
+
+@test "reports schedule --start without --end reaches API stage" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp reports schedule --start today --json
+  assert_output_not_contains "required"
+  assert_output_not_contains "Usage:"
+}

@@ -261,8 +261,9 @@ func newReportsScheduleCmd() *cobra.Command {
 		Short: "View upcoming schedule entries",
 		Long: `View upcoming schedule entries and assignables within a date window.
 
-By default starts from today. Use --start and --end to specify a different range.
-Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD format.`,
+Defaults to a 30-day window starting today. Use --start and --end to specify a
+different range. Dates can be natural language (e.g., "today", "next week", "+7")
+or YYYY-MM-DD format.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -270,11 +271,14 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 				return err
 			}
 
-			// Parse dates if provided (dateparse handles natural language like "today", "+7")
-			// Unrecognized formats are normalized (trimmed/lowercased) and passed through for the API to validate
-			// Default start to today when omitted (API requires at least a start date)
+			// The API requires both window_starts_on and window_ends_on (params.require
+			// in DateParams concern; missing either returns HTTP 400). Apply defaults so
+			// the bare `basecamp reports schedule` invocation works out of the box.
 			if startDate == "" {
 				startDate = "today"
+			}
+			if endDate == "" {
+				endDate = "+30"
 			}
 			parsedStart := dateparse.Parse(startDate)
 			parsedEnd := dateparse.Parse(endDate)
@@ -333,8 +337,8 @@ Dates can be natural language (e.g., "today", "next week", "+7") or YYYY-MM-DD f
 		},
 	}
 
-	cmd.Flags().StringVar(&startDate, "start", "", "Start date (e.g., today, next week, 2024-01-15)")
-	cmd.Flags().StringVar(&endDate, "end", "", "End date (e.g., +30, eom, 2024-02-15)")
+	cmd.Flags().StringVar(&startDate, "start", "", `Start of window (default: today; e.g., "next week", "2024-01-15")`)
+	cmd.Flags().StringVar(&endDate, "end", "", `End of window (default: +30; e.g., "+30", "eom", "2024-02-15")`)
 
 	return cmd
 }
