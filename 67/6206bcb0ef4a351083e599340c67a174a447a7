@@ -1,0 +1,56 @@
+e2e/smoke/smoke_gauges.bats
+  077fa23b5aaa4958 1-58
+internal/commands/gauges.go
+  077fa23b5aaa4958 1-427
+internal/commands/assignments.go
+  077fa23b5aaa4958 1-162
+e2e/smoke/smoke_assignments.bats
+  077fa23b5aaa4958 1-26
+internal/commands/todos_test.go
+  24c888f8893e0a99 184-252
+internal/commands/notifications.go
+  24c888f8893e0a99 80-83,87
+internal/commands/cards.go
+  077fa23b5aaa4958 787,898
+internal/tui/workspace/data/mutations_card.go
+  077fa23b5aaa4958 67
+e2e/smoke/smoke_notifications.bats
+  077fa23b5aaa4958 1-20
+skills/basecamp/SKILL.md
+  24c888f8893e0a99 376
+internal/commands/todos.go
+  24c888f8893e0a99 1643-1646,1651-1653,1657-1662,1681-1682,1689-1743,1748-1754,1768
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "676206bcb0ef4a351083e599340c67a174a447a7",
+  "prompts": {
+    "077fa23b5aaa4958": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30edaebb-7272-4620-bcae-b26bfddb7216",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 0,
+      "accepted_lines": 696,
+      "overriden_lines": 0
+    },
+    "24c888f8893e0a99": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "129d777f-1883-4960-9268-c3be34217dde",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 1,
+      "accepted_lines": 153,
+      "overriden_lines": 0
+    }
+  }
+}
