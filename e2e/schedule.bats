@@ -7,7 +7,17 @@ start_reports_schedule_stub() {
   REPORTS_STUB_LOG="$TEST_TEMP_DIR/reports-schedule-stub.log"
   REPORTS_STUB_PORT_FILE="$TEST_TEMP_DIR/reports-schedule-stub.port"
 
-  python - <<'PY' "$REPORTS_STUB_PORT_FILE" "$REPORTS_STUB_LOG" &
+  local python_bin
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin=python3
+  elif command -v python >/dev/null 2>&1; then
+    python_bin=python
+  else
+    echo "Error: neither python3 nor python is available in PATH; cannot start reports schedule stub" >&2
+    return 1
+  fi
+
+  "$python_bin" - <<'PY' "$REPORTS_STUB_PORT_FILE" "$REPORTS_STUB_LOG" &
 import http.server
 import json
 import socketserver
@@ -58,6 +68,16 @@ stop_reports_schedule_stub() {
     wait "$REPORTS_STUB_PID" 2>/dev/null || true
     unset REPORTS_STUB_PID
   fi
+}
+
+reports_schedule_request_path() {
+  local request_path
+  request_path=$(grep '/reports/schedules/upcoming.json' "$REPORTS_STUB_LOG")
+  [[ -n "$request_path" ]]
+  local count
+  count=$(grep -c '/reports/schedules/upcoming.json' "$REPORTS_STUB_LOG")
+  [[ "$count" -eq 1 ]]
+  printf '%s\n' "$request_path"
 }
 
 
@@ -234,7 +254,7 @@ stop_reports_schedule_stub() {
   assert_success
   assert_json_value '.ok' 'true'
 
-  request_path=$(cat "$REPORTS_STUB_LOG")
+  request_path=$(reports_schedule_request_path)
   [[ "$request_path" == *"/99999/reports/schedules/upcoming.json?"* ]]
   [[ "$request_path" == *"window_starts_on="* ]]
   [[ "$request_path" == *"window_ends_on="* ]]
@@ -251,7 +271,7 @@ stop_reports_schedule_stub() {
   assert_success
   assert_json_value '.ok' 'true'
 
-  request_path=$(cat "$REPORTS_STUB_LOG")
+  request_path=$(reports_schedule_request_path)
   [[ "$request_path" == *"window_starts_on=2099-01-01"* ]]
   [[ "$request_path" == *"window_ends_on=2099-01-31"* ]]
 }
