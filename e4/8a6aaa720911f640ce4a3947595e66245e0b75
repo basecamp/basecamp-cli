@@ -1,0 +1,9 @@
+e2e/smoke/smoke_notifications.bats
+  077fa23b5aaa4958 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "e48a6aaa720911f640ce4a3947595e66245e0b75",
+  "prompts": {}
+}
