@@ -3,6 +3,63 @@
 
 load test_helper
 
+start_reports_schedule_stub() {
+  REPORTS_STUB_LOG="$TEST_TEMP_DIR/reports-schedule-stub.log"
+  REPORTS_STUB_PORT_FILE="$TEST_TEMP_DIR/reports-schedule-stub.port"
+
+  python - <<'PY' "$REPORTS_STUB_PORT_FILE" "$REPORTS_STUB_LOG" &
+import http.server
+import json
+import socketserver
+import sys
+
+port_file = sys.argv[1]
+log_file = sys.argv[2]
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(self.path + '\n')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            'schedule_entries': [],
+            'recurring_schedule_entry_occurrences': [],
+            'assignables': [],
+        }).encode())
+
+    def log_message(self, format, *args):
+        pass
+
+with socketserver.TCPServer(('127.0.0.1', 0), Handler) as server:
+    with open(port_file, 'w', encoding='utf-8') as f:
+        f.write(str(server.server_address[1]))
+    server.serve_forever()
+PY
+  REPORTS_STUB_PID=$!
+
+  for _ in $(seq 1 50); do
+    [[ -s "$REPORTS_STUB_PORT_FILE" ]] && break
+    sleep 0.1
+  done
+
+  if [[ ! -s "$REPORTS_STUB_PORT_FILE" ]]; then
+    echo "failed to start reports schedule stub" >&2
+    return 1
+  fi
+
+  export BASECAMP_BASE_URL="http://127.0.0.1:$(cat "$REPORTS_STUB_PORT_FILE")"
+}
+
+stop_reports_schedule_stub() {
+  if [[ -n "${REPORTS_STUB_PID:-}" ]]; then
+    kill "$REPORTS_STUB_PID" 2>/dev/null || true
+    wait "$REPORTS_STUB_PID" 2>/dev/null || true
+    unset REPORTS_STUB_PID
+  fi
+}
+
 
 # Flag parsing errors
 
@@ -166,24 +223,35 @@ load test_helper
   assert_output_contains "default: +30"
 }
 
-@test "reports schedule without flags reaches API stage (not a usage error)" {
+@test "reports schedule without flags sends default window to API" {
+  start_reports_schedule_stub
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  # Both --start and --end have defaults, so the command should attempt the API
-  # call rather than fail with a usage/validation error. With a fake account it
-  # will fail at auth or network stage (exit non-zero) but must NOT print a
-  # usage hint about missing flags.
   run basecamp reports schedule --json
-  assert_output_not_contains "required"
-  assert_output_not_contains "Usage:"
+  stop_reports_schedule_stub
+
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  request_path=$(cat "$REPORTS_STUB_LOG")
+  [[ "$request_path" == *"/99999/reports/schedules/upcoming.json?"* ]]
+  [[ "$request_path" == *"window_starts_on="* ]]
+  [[ "$request_path" == *"window_ends_on="* ]]
 }
 
-@test "reports schedule --start without --end reaches API stage" {
+@test "reports schedule --start without --end anchors default end to start" {
+  start_reports_schedule_stub
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp reports schedule --start today --json
-  assert_output_not_contains "required"
-  assert_output_not_contains "Usage:"
+  run basecamp reports schedule --start 2099-01-01 --json
+  stop_reports_schedule_stub
+
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  request_path=$(cat "$REPORTS_STUB_LOG")
+  [[ "$request_path" == *"window_starts_on=2099-01-01"* ]]
+  [[ "$request_path" == *"window_ends_on=2099-01-31"* ]]
 }
