@@ -1700,10 +1700,11 @@ Move to a different todolist in the same project:
 					project = app.Config.ProjectID
 				}
 
-				// Resolve project name to numeric ID before comparing
-				// against the numeric project ID from a list URL.
+				// Resolve project name to numeric ID only when needed:
+				// cross-project URL validation or todolist name resolution.
 				resolvedProject := project
-				if project != "" && !isNumeric(project) {
+				needsResolve := (todoProjectID != "" && listProjectID != "") || !isNumeric(listIDStr)
+				if needsResolve && project != "" && !isNumeric(project) {
 					rp, _, resolveErr := app.Names.ResolveProject(cmd.Context(), project)
 					if resolveErr != nil {
 						return resolveErr
