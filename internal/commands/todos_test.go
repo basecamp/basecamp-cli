@@ -250,6 +250,23 @@ func TestTodosPositionBareIDSkipsCrossProjectGuard(t *testing.T) {
 	assert.NotContains(t, err.Error(), "different project")
 }
 
+// TestTodosPositionRejectsNonTodolistURL tests that --list rejects URLs that
+// aren't todolist URLs (e.g. todo URLs, project URLs).
+func TestTodosPositionRejectsNonTodolistURL(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+
+	// A todo URL, not a todolist URL — should not silently use the todo ID
+	err := executeTodosCommand(cmd, app, "position",
+		"https://3.basecamp.com/99999/buckets/100/todos/789",
+		"--to", "1",
+		"--list", "https://3.basecamp.com/99999/buckets/100/todos/555",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "todolist URL")
+}
+
 // TestTodoShortcutRequiresContent tests that todo shortcut requires content.
 func TestTodoShortcutShowsHelpWithoutContent(t *testing.T) {
 	app, _ := setupTodosTestApp(t)

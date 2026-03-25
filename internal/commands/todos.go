@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // todosListFlags holds the flags for the todos list command.
@@ -1691,9 +1692,14 @@ Move to a different todolist in the same project:
 			if list != "" {
 				listIDStr, listProjectID := extractWithProject(list)
 
-				if listIDStr == "" {
-					return output.ErrUsage("Could not extract a todolist ID from that URL. " +
-						"Expected a todolist URL (.../todolists/<id>), or pass a todolist ID or name.")
+				// When --list is a URL, validate it's a todolist URL — not a
+				// todo, project, or collection URL that would silently extract
+				// the wrong ID.
+				if parsed := urlarg.Parse(list); parsed != nil {
+					if parsed.RecordingID == "" || parsed.Type != "todolists" || parsed.IsCollection {
+						return output.ErrUsage("Expected a todolist URL (.../todolists/<id>), " +
+							"or pass a todolist ID or name.")
+					}
 				}
 
 				// Build project context: todo URL > --in flag > config
