@@ -1,0 +1,71 @@
+internal/cli/root.go
+  077fa23b5aaa4958 317-319
+e2e/smoke/smoke_gauges.bats
+  077fa23b5aaa4958 1-58
+internal/commands/cards.go
+  077fa23b5aaa4958 787,898
+internal/commands/commands_test.go
+  077fa23b5aaa4958 119-121
+internal/commands/accounts.go
+  077fa23b5aaa4958 5-6,13,29-31,170-349
+internal/commands/gauges.go
+  077fa23b5aaa4958 1-413
+scripts/check-bare-groups.sh
+  077fa23b5aaa4958 18-21
+e2e/smoke/smoke_todos_write.bats
+  95d6e38edda520a4 99-145,147-173
+internal/commands/assignments.go
+  077fa23b5aaa4958 1-162
+internal/commands/notifications.go
+  077fa23b5aaa4958 1-186
+API-COVERAGE.md
+  077fa23b5aaa4958 9,11,13,17,31,39,48,84-85
+e2e/smoke/smoke_account.bats
+  077fa23b5aaa4958 55-77
+internal/tui/workspace/data/mutations_card.go
+  077fa23b5aaa4958 67
+e2e/smoke/smoke_assignments.bats
+  077fa23b5aaa4958 1-26
+internal/commands/commands.go
+  077fa23b5aaa4958 42,82,104,120
+e2e/smoke/smoke_notifications.bats
+  077fa23b5aaa4958 1-20
+internal/commands/todos.go
+  077fa23b5aaa4958 1804
+  95d6e38edda520a4 965-967,978-983,989-1001,1003-1007,1024-1025,1045-1052,1054,1056-1065,1067-1079,1081-1119,1121-1126,1128,1131-1172,1201-1203
+internal/commands/todos_test.go
+  95d6e38edda520a4 1368,1371,1522-1560,1562-1680
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "3c2f0301814a8799c7fb09473e4d55a20843e225",
+  "prompts": {
+    "077fa23b5aaa4958": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30edaebb-7272-4620-bcae-b26bfddb7216",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 0,
+      "accepted_lines": 1101,
+      "overriden_lines": 0
+    },
+    "95d6e38edda520a4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7cfd900-4ed9-410a-96dc-2858012c12fd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 51,
+      "total_deletions": 6,
+      "accepted_lines": 386,
+      "overriden_lines": 0
+    }
+  }
+}
