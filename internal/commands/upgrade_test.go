@@ -14,6 +14,14 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
+func stubExecutablePathResolver(t *testing.T, path string, ok bool) {
+	t.Helper()
+
+	orig := executablePathResolver
+	executablePathResolver = func() (string, bool) { return path, ok }
+	t.Cleanup(func() { executablePathResolver = orig })
+}
+
 // stubUpgradeCheckers overrides version and package manager helpers for tests.
 func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLegacyCask bool, isScoopInstall bool, hasLegacyScoopInstall bool) {
 	t.Helper()
@@ -221,4 +229,20 @@ func TestUpgradeLegacyScoopMigrationInstructions(t *testing.T) {
 	assert.Contains(t, cmdOut, "  scoop uninstall basecamp\n")
 	assert.Contains(t, cmdOut, "  scoop install basecamp-cli\n")
 	assert.Contains(t, appBuf.String(), "migration_required")
+}
+
+func TestIsScoopUsesExecutablePathProvenance(t *testing.T) {
+	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp-cli/current/basecamp.exe", true)
+	assert.True(t, isScoop(context.Background()))
+
+	stubExecutablePathResolver(t, "/Users/alice/bin/basecamp", true)
+	assert.False(t, isScoop(context.Background()))
+}
+
+func TestHasLegacyScoopUsesExecutablePathProvenance(t *testing.T) {
+	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp/current/basecamp.exe", true)
+	assert.True(t, hasLegacyScoop(context.Background()))
+
+	stubExecutablePathResolver(t, "/Users/alice/bin/basecamp", true)
+	assert.False(t, hasLegacyScoop(context.Background()))
 }

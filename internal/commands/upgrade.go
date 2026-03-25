@@ -29,13 +29,14 @@ const (
 
 // versionChecker and package manager helpers abstract external checks for testability.
 var (
-	versionChecker       = fetchLatestVersion
-	homebrewChecker      = isHomebrew
-	legacyHomebrewCasker = hasLegacyHomebrewCask
-	homebrewUpgrader     = upgradeHomebrew
-	scoopChecker         = isScoop
-	legacyScoopChecker   = hasLegacyScoop
-	scoopUpgrader        = upgradeScoop
+	versionChecker         = fetchLatestVersion
+	executablePathResolver = resolvedExecutablePath
+	homebrewChecker        = isHomebrew
+	legacyHomebrewCasker   = hasLegacyHomebrewCask
+	homebrewUpgrader       = upgradeHomebrew
+	scoopChecker           = isScoop
+	legacyScoopChecker     = hasLegacyScoop
+	scoopUpgrader          = upgradeScoop
 )
 
 // NewUpgradeCmd creates the upgrade command.
@@ -166,7 +167,7 @@ func upgradeScoop(ctx context.Context, stdout io.Writer, stderr io.Writer) error
 
 // isHomebrew returns true if the running CLI binary appears to come from the renamed Homebrew cask.
 func isHomebrew(_ context.Context) bool {
-	exe, ok := resolvedExecutablePath()
+	exe, ok := executablePathResolver()
 	if !ok {
 		return false
 	}
@@ -175,7 +176,7 @@ func isHomebrew(_ context.Context) bool {
 }
 
 func hasLegacyHomebrewCask(_ context.Context) bool {
-	exe, ok := resolvedExecutablePath()
+	exe, ok := executablePathResolver()
 	if !ok {
 		return false
 	}
@@ -183,24 +184,23 @@ func hasLegacyHomebrewCask(_ context.Context) bool {
 	return strings.Contains(exe, legacyHomebrewCaskroomPath)
 }
 
-// isScoop returns true if the running CLI binary appears to come from the renamed Scoop app,
-// or if Scoop reports the renamed app is installed.
-func isScoop(ctx context.Context) bool {
-	exe, ok := resolvedExecutablePath()
-	if ok && strings.Contains(exe, scoopAppPath) {
-		return true
+// isScoop returns true if the running CLI binary appears to come from the renamed Scoop app.
+func isScoop(_ context.Context) bool {
+	exe, ok := executablePathResolver()
+	if !ok {
+		return false
 	}
 
-	return scoopHasApp(ctx, scoopApp)
+	return strings.Contains(exe, scoopAppPath)
 }
 
-func hasLegacyScoop(ctx context.Context) bool {
-	exe, ok := resolvedExecutablePath()
-	if ok && strings.Contains(exe, legacyScoopAppPath) {
-		return true
+func hasLegacyScoop(_ context.Context) bool {
+	exe, ok := executablePathResolver()
+	if !ok {
+		return false
 	}
 
-	return scoopHasApp(ctx, legacyScoopApp)
+	return strings.Contains(exe, legacyScoopAppPath)
 }
 
 func resolvedExecutablePath() (string, bool) {
@@ -214,27 +214,4 @@ func resolvedExecutablePath() (string, bool) {
 	}
 
 	return strings.ToLower(filepath.ToSlash(exe)), true
-}
-
-func scoopHasApp(ctx context.Context, app string) bool {
-	switch app {
-	case scoopApp, legacyScoopApp:
-		// allowed
-	default:
-		return false
-	}
-
-	out, err := exec.CommandContext(ctx, "scoop", "list", app).CombinedOutput() //nolint:gosec // G204: app is validated against known constants above
-	if err != nil {
-		return false
-	}
-
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) > 0 && fields[0] == app {
-			return true
-		}
-	}
-
-	return false
 }
