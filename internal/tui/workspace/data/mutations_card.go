@@ -64,7 +64,7 @@ func (m CardMoveMutation) ApplyLocally(columns []CardColumnInfo) []CardColumnInf
 
 // ApplyRemotely calls the SDK to move the card.
 func (m CardMoveMutation) ApplyRemotely(ctx context.Context) error {
-	return m.Client.Cards().Move(ctx, m.CardID, m.TargetColumnID)
+	return m.Client.Cards().Move(ctx, m.CardID, m.TargetColumnID, nil)
 }
 
 // IsReflectedIn returns true when the card appears in the target column

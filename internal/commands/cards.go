@@ -784,7 +784,7 @@ You can pass either a card ID or a Basecamp URL:
 					Position: position,
 				})
 			} else {
-				err = app.Account().Cards().Move(cmd.Context(), cardID, columnID)
+				err = app.Account().Cards().Move(cmd.Context(), cardID, columnID, nil)
 			}
 			if err != nil {
 				return convertSDKError(err)
@@ -895,7 +895,7 @@ func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr
 		)
 	}
 
-	err := app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID)
+	err := app.Account().Cards().Move(cmd.Context(), cardID, column.OnHold.ID, nil)
 	if err != nil {
 		return convertSDKError(err)
 	}

@@ -1677,7 +1677,7 @@ You can pass either a todo ID or a Basecamp URL:
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position)
+			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}

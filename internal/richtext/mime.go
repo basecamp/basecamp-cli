@@ -29,6 +29,8 @@ var mimeByExt = map[string]string{
 	".jpeg": "image/jpeg",
 	".gif":  "image/gif",
 	".webp": "image/webp",
+	".avif": "image/avif",
+	".heic": "image/heic",
 	".svg":  "image/svg+xml",
 	".ico":  "image/x-icon",
 	".mp4":  "video/mp4",
