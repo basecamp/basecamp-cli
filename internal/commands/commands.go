@@ -39,6 +39,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update", "trash", "archive", "restore"}},
 				{Name: "todosets", Category: "core", Description: "Manage to-do set containers", Actions: []string{"list", "show"}},
 				{Name: "hillcharts", Category: "core", Description: "Manage hill charts", Actions: []string{"show", "track", "untrack"}},
+				{Name: "gauges", Category: "core", Description: "Manage gauges", Actions: []string{"list", "needles", "needle", "create", "update", "delete", "enable", "disable"}},
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position"}},
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "publish", "pin", "unpin", "trash", "archive", "restore"}},
 				{Name: "chat", Category: "core", Description: "Chat in real-time", Actions: []string{"list", "messages", "post", "upload", "line", "delete"}},
@@ -78,6 +79,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "checkins", Category: "scheduling", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
 				{Name: "timeline", Category: "scheduling", Description: "View activity timelines", Actions: []string{}},
 				{Name: "reports", Category: "scheduling", Description: "View reports", Actions: []string{"assignable", "assigned", "overdue", "schedule"}},
+				{Name: "assignments", Category: "scheduling", Description: "View my assignments", Actions: []string{"list", "completed", "due"}},
 			},
 		},
 		{
@@ -99,6 +101,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "update", "trash", "archive", "restore"}},
 				{Name: "attachments", Category: "communication", Description: "List attachments on items", Actions: []string{"list"}},
 				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
+				{Name: "notifications", Category: "communication", Description: "View and manage notifications", Actions: []string{"list", "read"}},
 			},
 		},
 		{
@@ -114,7 +117,7 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Auth & Config",
 			Commands: []CommandInfo{
-				{Name: "accounts", Category: "auth", Description: "Manage accounts", Actions: []string{"list", "use"}},
+				{Name: "accounts", Category: "auth", Description: "Manage accounts", Actions: []string{"list", "use", "show", "update", "logo"}},
 				{Name: "auth", Category: "auth", Description: "Authenticate with Basecamp", Actions: []string{"login", "logout", "status", "refresh"}},
 				{Name: "login", Category: "auth", Description: "Authenticate with Basecamp"},
 				{Name: "logout", Category: "auth", Description: "Remove stored credentials"},

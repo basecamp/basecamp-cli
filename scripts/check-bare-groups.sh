@@ -15,8 +15,10 @@ ALLOWLIST=(
   NewSearchCmd      # shortcut: performs search
   NewSetupCmd       # wizard entry point
   NewSkillCmd       # renders skill content
-  NewTimesheetCmd   # shortcut: shows report
-  NewURLCmd         # shortcut: opens URL
+  NewTimesheetCmd       # shortcut: shows report
+  NewURLCmd             # shortcut: opens URL
+  NewAssignmentsCmd     # shortcut: shows assignments
+  NewNotificationsCmd   # shortcut: lists notifications
 )
 
 is_allowed() {

@@ -52,3 +52,33 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+# --- Account management ---
+
+@test "accounts show returns account details" {
+  run_smoke basecamp accounts show --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "accounts update rejects bare invocation" {
+  run_smoke basecamp accounts update --json
+  assert_failure
+  assert_output_contains "No changes specified"
+}
+
+@test "accounts logo upload rejects invalid file" {
+  run_smoke basecamp accounts logo upload /dev/null --json
+  assert_failure
+}
+
+@test "accounts logo remove deletes logo" {
+  mark_unverifiable "Mutating test - logo removal not safe in smoke environment"
+  run_smoke basecamp accounts logo remove --json
+}
+
+# --- account alias (covered by accounts tests above) ---
+
+@test "account is out of scope" {
+  mark_out_of_scope "Alias for accounts — tested via canonical form"
+}
