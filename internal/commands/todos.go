@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // todosListFlags holds the flags for the todos list command.
@@ -1788,17 +1789,26 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 }
 
 func newTodosPositionCmd() *cobra.Command {
-	var position int
+	var (
+		position int
+		list     string
+	)
 
 	cmd := &cobra.Command{
 		Use:     "position <id|url>",
 		Aliases: []string{"move", "reorder"},
-		Short:   "Change todo position",
-		Long: `Reorder a todo within its todolist. Position is 1-based (1 = top).
+		Short:   "Change todo position or move between lists",
+		Long: `Reorder a todo within its todolist, or move it to a different list in the
+same project. Position is 1-based (1 = top).
 
 You can pass either a todo ID or a Basecamp URL:
   basecamp todos position 789 --to 1
-  basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1`,
+  basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1
+
+Move to a different todolist in the same project:
+  basecamp todos position 789 --to 1 --list "Sprint 1" --in myproject
+  basecamp todos position 789 --to 1 --list 321
+  basecamp todos position <todo-url> --to 1 --list <todolist-url>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>")
@@ -1817,21 +1827,97 @@ You can pass either a todo ID or a Basecamp URL:
 				return output.ErrUsage("--to is required (1 = top)")
 			}
 
-			// Extract ID from URL if provided
-			todoIDStr := extractID(args[0])
+			// Extract todo ID and project from URL if provided
+			todoIDStr, todoProjectID := extractWithProject(args[0])
 
 			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position, nil)
+			// Resolve destination todolist when --list is provided
+			var parentID *int64
+			if list != "" {
+				listIDStr, listProjectID := extractWithProject(list)
+
+				// When --list is a URL, validate it's a todolist URL — not a
+				// todo, project, or collection URL that would silently extract
+				// the wrong ID.
+				if parsed := urlarg.Parse(list); parsed != nil {
+					if parsed.RecordingID == "" || parsed.Type != "todolists" || parsed.IsCollection {
+						return output.ErrUsage("Expected a todolist URL (.../todolists/<id>), " +
+							"or pass a todolist ID or name.")
+					}
+				}
+
+				// Build project context: todo URL > --in flag > config
+				project := todoProjectID
+				if project == "" {
+					project = app.Flags.Project
+				}
+				if project == "" {
+					project = app.Config.ProjectID
+				}
+
+				// Resolve project name to numeric ID only when needed:
+				// cross-project URL validation or todolist name resolution.
+				resolvedProject := project
+				needsResolve := (todoProjectID != "" && listProjectID != "") || !isNumeric(listIDStr)
+				if needsResolve && project != "" && !isNumeric(project) {
+					rp, _, resolveErr := app.Names.ResolveProject(cmd.Context(), project)
+					if resolveErr != nil {
+						return resolveErr
+					}
+					resolvedProject = rp
+				}
+
+				// Cross-project moves are not supported by the reposition endpoint.
+				// Only enforce when the todo's project comes from its URL (high
+				// confidence). Config/flag project is a default context — it may
+				// not match where a bare-ID todo actually lives.
+				if todoProjectID != "" && listProjectID != "" && resolvedProject != listProjectID {
+					return output.ErrUsageHint(
+						"Cannot move a todo to a list in a different project.",
+						"Pass a todolist from the same project; cross-project moves are not supported.",
+					)
+				}
+
+				// Resolve todolist name to ID when not already numeric
+				if !isNumeric(listIDStr) {
+					if resolvedProject == "" {
+						return output.ErrUsage("--in is required to resolve todolist names")
+					}
+					resolved, resolveErr := resolveTodolistInTodoset(cmd, app, listIDStr, resolvedProject, "")
+					if resolveErr != nil {
+						return resolveErr
+					}
+					listIDStr = resolved
+				}
+
+				listID, parseErr := strconv.ParseInt(listIDStr, 10, 64)
+				if parseErr != nil {
+					return output.ErrUsage("Invalid todolist ID")
+				}
+				parentID = &listID
+			}
+
+			err = app.Account().Todos().Reposition(cmd.Context(), todoID, position, parentID)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(map[string]any{"repositioned": true, "position": position},
-				output.WithSummary(fmt.Sprintf("Moved todo #%d to position %d", todoID, position)),
+			summary := fmt.Sprintf("Moved todo #%d to position %d", todoID, position)
+			if parentID != nil {
+				summary = fmt.Sprintf("Moved todo #%d to list #%d at position %d", todoID, *parentID, position)
+			}
+
+			response := map[string]any{"repositioned": true, "position": position}
+			if parentID != nil {
+				response["todolist_id"] = *parentID
+			}
+
+			return app.OK(response,
+				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -1845,6 +1931,7 @@ You can pass either a todo ID or a Basecamp URL:
 
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
+	cmd.Flags().StringVarP(&list, "list", "l", "", "Destination todolist ID, name, or URL (move to a different list)")
 
 	return cmd
 }

@@ -184,6 +184,92 @@ func TestTodosPositionRequiresPosition(t *testing.T) {
 	assert.Equal(t, "--to is required (1 = top)", err.Error())
 }
 
+// TestTodosPositionRejectsCrossProjectListURL tests that --list with a URL from a
+// different project than the todo URL is rejected with a clear error.
+func TestTodosPositionRejectsCrossProjectListURL(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+
+	err := executeTodosCommand(cmd, app, "position",
+		"https://3.basecamp.com/99999/buckets/100/todos/789",
+		"--to", "1",
+		"--list", "https://3.basecamp.com/99999/buckets/200/todolists/321",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Cannot move a todo to a list in a different project")
+}
+
+// TestTodosPositionAcceptsSameProjectListURL tests that --list with a URL from the
+// same project as the todo URL passes the cross-project check (fails at network,
+// not at validation).
+func TestTodosPositionAcceptsSameProjectListURL(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+
+	err := executeTodosCommand(cmd, app, "position",
+		"https://3.basecamp.com/99999/buckets/100/todos/789",
+		"--to", "1",
+		"--list", "https://3.basecamp.com/99999/buckets/100/todolists/321",
+	)
+	// Should pass validation and fail at the SDK call (network disabled),
+	// not at the cross-project check.
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "different project")
+}
+
+// TestTodosPositionListNameRequiresProject tests that --list with a name (not numeric)
+// requires a project context via --in or config.
+func TestTodosPositionListNameRequiresProject(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+
+	err := executeTodosCommand(cmd, app, "position", "789",
+		"--to", "1",
+		"--list", "Sprint 1",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--in is required to resolve todolist names")
+}
+
+// TestTodosPositionBareIDSkipsCrossProjectGuard tests that the cross-project
+// guard does not fire when the todo is a bare ID. Config project is a default
+// context that may not match where the todo actually lives.
+func TestTodosPositionBareIDSkipsCrossProjectGuard(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+	app.Config.ProjectID = "100"
+
+	cmd := NewTodosCmd()
+
+	// Todo is bare ID (config project = "100"), list URL has project 200.
+	// Should NOT reject — bare ID means we don't know the todo's project.
+	err := executeTodosCommand(cmd, app, "position", "789",
+		"--to", "1",
+		"--list", "https://3.basecamp.com/99999/buckets/200/todolists/321",
+	)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "different project")
+}
+
+// TestTodosPositionRejectsNonTodolistURL tests that --list rejects URLs that
+// aren't todolist URLs (e.g. todo URLs, project URLs).
+func TestTodosPositionRejectsNonTodolistURL(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+
+	// A todo URL, not a todolist URL — should not silently use the todo ID
+	err := executeTodosCommand(cmd, app, "position",
+		"https://3.basecamp.com/99999/buckets/100/todos/789",
+		"--to", "1",
+		"--list", "https://3.basecamp.com/99999/buckets/100/todos/555",
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "todolist URL")
+}
+
 // TestTodoShortcutRequiresContent tests that todo shortcut requires content.
 func TestTodoShortcutShowsHelpWithoutContent(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
