@@ -677,13 +677,18 @@ You can pass either an entry ID or a Basecamp URL:
 				}
 			}
 
-			// Handle attachments when no description text provided
+			// Handle attachments when no description text provided —
+			// fetch the current description so we append rather than replace
 			if description == "" && len(attachFiles) > 0 {
 				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
 				if attachErr != nil {
 					return attachErr
 				}
-				req.Description = richtext.EmbedAttachments("", refs)
+				existing, fetchErr := app.Account().Schedules().GetEntry(cmd.Context(), entryIDInt)
+				if fetchErr != nil {
+					return convertSDKError(fetchErr)
+				}
+				req.Description = richtext.EmbedAttachments(existing.Description, refs)
 				hasChanges = true
 			}
 

@@ -425,7 +425,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 				outErr.Message = fmt.Sprintf("%s: %s", filePath, outErr.Message)
 				return outErr
 			}
-			return fmt.Errorf("%s: %w", filePath, err)
+			return fmt.Errorf("%s: %w", filePath, sdkErr)
 		}
 		uploadIDs = append(uploadIDs, uploadLine.ID)
 	}
