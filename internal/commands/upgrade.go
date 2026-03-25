@@ -25,12 +25,15 @@ const (
 	legacyScoopApp             = "basecamp"
 	scoopAppPath               = "/scoop/apps/basecamp-cli/"
 	legacyScoopAppPath         = "/scoop/apps/basecamp/"
+	scoopShimPath              = "/scoop/shims/"
+	scoopCommandBaseName       = "basecamp"
 )
 
 // versionChecker and package manager helpers abstract external checks for testability.
 var (
 	versionChecker         = fetchLatestVersion
 	executablePathResolver = resolvedExecutablePath
+	scoopPrefixChecker     = hasScoopPrefix
 	homebrewChecker        = isHomebrew
 	legacyHomebrewCasker   = hasLegacyHomebrewCask
 	homebrewUpgrader       = upgradeHomebrew
@@ -185,22 +188,60 @@ func hasLegacyHomebrewCask(_ context.Context) bool {
 }
 
 // isScoop returns true if the running CLI binary appears to come from the renamed Scoop app.
-func isScoop(_ context.Context) bool {
-	exe, ok := executablePathResolver()
-	if !ok {
-		return false
-	}
-
-	return strings.Contains(exe, scoopAppPath)
+func isScoop(ctx context.Context) bool {
+	return detectScoopInstallSource(ctx) == scoopInstallSourceRenamed
 }
 
-func hasLegacyScoop(_ context.Context) bool {
+func hasLegacyScoop(ctx context.Context) bool {
+	return detectScoopInstallSource(ctx) == scoopInstallSourceLegacy
+}
+
+type scoopInstallSource int
+
+const (
+	scoopInstallSourceUnknown scoopInstallSource = iota
+	scoopInstallSourceRenamed
+	scoopInstallSourceLegacy
+)
+
+func detectScoopInstallSource(ctx context.Context) scoopInstallSource {
 	exe, ok := executablePathResolver()
 	if !ok {
+		return scoopInstallSourceUnknown
+	}
+
+	switch {
+	case strings.Contains(exe, scoopAppPath):
+		return scoopInstallSourceRenamed
+	case strings.Contains(exe, legacyScoopAppPath):
+		return scoopInstallSourceLegacy
+	case isScoopShimExecutable(exe) && scoopPrefixChecker(ctx, scoopApp):
+		return scoopInstallSourceRenamed
+	case isScoopShimExecutable(exe) && scoopPrefixChecker(ctx, legacyScoopApp):
+		return scoopInstallSourceLegacy
+	default:
+		return scoopInstallSourceUnknown
+	}
+}
+
+func isScoopShimExecutable(exe string) bool {
+	if !strings.Contains(exe, scoopShimPath) {
 		return false
 	}
 
-	return strings.Contains(exe, legacyScoopAppPath)
+	name := strings.TrimSuffix(filepath.Base(exe), filepath.Ext(exe))
+	return name == scoopCommandBaseName
+}
+
+func hasScoopPrefix(ctx context.Context, app string) bool {
+	switch app {
+	case scoopApp, legacyScoopApp:
+		// allowed
+	default:
+		return false
+	}
+
+	return exec.CommandContext(ctx, "scoop", "prefix", app).Run() == nil //nolint:gosec // G204: app is validated against known constants above
 }
 
 func resolvedExecutablePath() (string, bool) {

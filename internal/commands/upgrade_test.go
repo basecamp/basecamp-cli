@@ -22,36 +22,60 @@ func stubExecutablePathResolver(t *testing.T, path string, ok bool) {
 	t.Cleanup(func() { executablePathResolver = orig })
 }
 
+func stubScoopPrefixChecker(t *testing.T, check func(context.Context, string) bool) {
+	t.Helper()
+
+	orig := scoopPrefixChecker
+	scoopPrefixChecker = check
+	t.Cleanup(func() { scoopPrefixChecker = orig })
+}
+
+type upgradeCheckersStub struct {
+	latestVersion   string
+	isBrew          bool
+	hasLegacyCask   bool
+	isScoop         bool
+	hasLegacyScoop  bool
+	homebrewUpgrade func(context.Context, io.Writer, io.Writer) error
+	scoopUpgrade    func(context.Context, io.Writer, io.Writer) error
+}
+
 // stubUpgradeCheckers overrides version and package manager helpers for tests.
-func stubUpgradeCheckers(t *testing.T, latestVersion string, isBrew bool, hasLegacyCask bool, isScoopInstall bool, hasLegacyScoopInstall bool) {
+func stubUpgradeCheckers(t *testing.T, stub upgradeCheckersStub) {
 	t.Helper()
 
 	origVC := versionChecker
-	versionChecker = func() (string, error) { return latestVersion, nil }
+	versionChecker = func() (string, error) { return stub.latestVersion, nil }
 	t.Cleanup(func() { versionChecker = origVC })
 
 	origHC := homebrewChecker
-	homebrewChecker = func(context.Context) bool { return isBrew }
+	homebrewChecker = func(context.Context) bool { return stub.isBrew }
 	t.Cleanup(func() { homebrewChecker = origHC })
 
 	origLegacy := legacyHomebrewCasker
-	legacyHomebrewCasker = func(context.Context) bool { return hasLegacyCask }
+	legacyHomebrewCasker = func(context.Context) bool { return stub.hasLegacyCask }
 	t.Cleanup(func() { legacyHomebrewCasker = origLegacy })
 
 	origHU := homebrewUpgrader
-	homebrewUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+	homebrewUpgrader = stub.homebrewUpgrade
+	if homebrewUpgrader == nil {
+		homebrewUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+	}
 	t.Cleanup(func() { homebrewUpgrader = origHU })
 
 	origSC := scoopChecker
-	scoopChecker = func(context.Context) bool { return isScoopInstall }
+	scoopChecker = func(context.Context) bool { return stub.isScoop }
 	t.Cleanup(func() { scoopChecker = origSC })
 
 	origLegacyScoop := legacyScoopChecker
-	legacyScoopChecker = func(context.Context) bool { return hasLegacyScoopInstall }
+	legacyScoopChecker = func(context.Context) bool { return stub.hasLegacyScoop }
 	t.Cleanup(func() { legacyScoopChecker = origLegacyScoop })
 
 	origSU := scoopUpgrader
-	scoopUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+	scoopUpgrader = stub.scoopUpgrade
+	if scoopUpgrader == nil {
+		scoopUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+	}
 	t.Cleanup(func() { scoopUpgrader = origSU })
 }
 
@@ -92,7 +116,7 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.2.3", false, false, false, false)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.2.3"})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -107,7 +131,7 @@ func TestUpgradeAvailable(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false, false, false, false)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0"})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -122,7 +146,7 @@ func TestUpgradeSuppressesOlderLatestRelease(t *testing.T) {
 	version.Version = "0.4.1-0.20260313174735-243815fa23b2"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "0.4.0", false, false, false, false)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "0.4.0"})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -139,7 +163,7 @@ func TestUpgradeOutputGoesToWriter(t *testing.T) {
 	version.Version = "1.0.0"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.0.0", false, false, false, false)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.0.0"})
 
 	cmd := NewUpgradeCmd()
 	cmd.SetArgs(nil)
@@ -172,7 +196,7 @@ func TestUpgradePrefersRenamedHomebrewCaskOverLegacyMigration(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", true, true, false, false)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true, hasLegacyCask: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -188,7 +212,7 @@ func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false, true, false, false)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", hasLegacyCask: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -205,7 +229,7 @@ func TestUpgradePrefersRenamedScoopAppOverLegacyMigration(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false, false, true, true)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isScoop: true, hasLegacyScoop: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -221,7 +245,7 @@ func TestUpgradeLegacyScoopMigrationInstructions(t *testing.T) {
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
-	stubUpgradeCheckers(t, "1.3.0", false, false, false, true)
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", hasLegacyScoop: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -239,10 +263,28 @@ func TestIsScoopUsesExecutablePathProvenance(t *testing.T) {
 	assert.False(t, isScoop(context.Background()))
 }
 
+func TestIsScoopDetectsRenamedShimViaPrefix(t *testing.T) {
+	stubExecutablePathResolver(t, "/Users/alice/scoop/shims/basecamp.exe", true)
+	stubScoopPrefixChecker(t, func(_ context.Context, app string) bool {
+		return app == scoopApp
+	})
+
+	assert.True(t, isScoop(context.Background()))
+}
+
 func TestHasLegacyScoopUsesExecutablePathProvenance(t *testing.T) {
 	stubExecutablePathResolver(t, "/Users/alice/scoop/apps/basecamp/current/basecamp.exe", true)
 	assert.True(t, hasLegacyScoop(context.Background()))
 
 	stubExecutablePathResolver(t, "/Users/alice/bin/basecamp", true)
 	assert.False(t, hasLegacyScoop(context.Background()))
+}
+
+func TestHasLegacyScoopDetectsLegacyShimViaPrefix(t *testing.T) {
+	stubExecutablePathResolver(t, "/Users/alice/scoop/shims/basecamp.exe", true)
+	stubScoopPrefixChecker(t, func(_ context.Context, app string) bool {
+		return app == legacyScoopApp
+	})
+
+	assert.True(t, hasLegacyScoop(context.Background()))
 }
