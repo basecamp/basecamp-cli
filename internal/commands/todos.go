@@ -1691,6 +1691,11 @@ Move to a different todolist in the same project:
 			if list != "" {
 				listIDStr, listProjectID := extractWithProject(list)
 
+				if listIDStr == "" {
+					return output.ErrUsage("Could not extract a todolist ID from that URL. " +
+						"Expected a todolist URL (.../todolists/<id>), or pass a todolist ID or name.")
+				}
+
 				// Build project context: todo URL > --in flag > config
 				project := todoProjectID
 				if project == "" {
