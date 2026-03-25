@@ -537,7 +537,7 @@ func normalizeShowType(recordType string) string {
 		return ""
 	case "questions":
 		return "checkin"
-	case "forwards":
+	case "forwards", "inbox_forwards":
 		return "forward"
 	case "uploads":
 		return "upload"
@@ -573,7 +573,7 @@ func typeToEndpoint(recordType, id string) string {
 		return fmt.Sprintf("/question_answers/%s.json", id)
 	case "checkin", "check-in", "check_in", "questions":
 		return fmt.Sprintf("/questions/%s.json", id)
-	case "forward", "forwards":
+	case "forward", "forwards", "inbox_forwards":
 		return fmt.Sprintf("/forwards/%s.json", id)
 	case "upload", "uploads":
 		return fmt.Sprintf("/uploads/%s.json", id)
