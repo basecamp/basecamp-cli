@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -252,6 +253,22 @@ Todos are grouped into categories:
 	}
 }
 
+func resolveReportsScheduleWindow(startDate, endDate string, now time.Time) (string, string) {
+	if startDate == "" {
+		startDate = "today"
+	}
+
+	parsedStart := dateparse.ParseFrom(startDate, now)
+	if endDate == "" {
+		if start, err := time.Parse("2006-01-02", parsedStart); err == nil {
+			return parsedStart, start.AddDate(0, 0, 30).Format("2006-01-02")
+		}
+		return parsedStart, dateparse.ParseFrom("+30", now)
+	}
+
+	return parsedStart, dateparse.ParseFrom(endDate, now)
+}
+
 func newReportsScheduleCmd() *cobra.Command {
 	var startDate string
 	var endDate string
@@ -274,14 +291,9 @@ or YYYY-MM-DD format.`,
 			// The API requires both window_starts_on and window_ends_on (params.require
 			// in DateParams concern; missing either returns HTTP 400). Apply defaults so
 			// the bare `basecamp reports schedule` invocation works out of the box.
-			if startDate == "" {
-				startDate = "today"
-			}
-			if endDate == "" {
-				endDate = "+30"
-			}
-			parsedStart := dateparse.Parse(startDate)
-			parsedEnd := dateparse.Parse(endDate)
+			// When only --start is provided, anchor the default end 30 days after the
+			// resolved start date rather than 30 days after today.
+			parsedStart, parsedEnd := resolveReportsScheduleWindow(startDate, endDate, time.Now())
 
 			result, err := app.Account().Reports().UpcomingSchedule(cmd.Context(), parsedStart, parsedEnd)
 			if err != nil {
