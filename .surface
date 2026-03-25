@@ -10,6 +10,7 @@ ARG basecamp assign 00 <id|url>...
 ARG basecamp assignments due 00 [scope]
 ARG basecamp attach 00 <file>
 ARG basecamp attach 01 [<file2]
+ARG basecamp attachments download 00 <id|url>
 ARG basecamp attachments list 00 <id|url>
 ARG basecamp bonfire layout load 00 <name>
 ARG basecamp bonfire layout save 00 <name>
@@ -447,6 +448,7 @@ CMD basecamp assignments due
 CMD basecamp assignments list
 CMD basecamp attach
 CMD basecamp attachments
+CMD basecamp attachments download
 CMD basecamp attachments list
 CMD basecamp auth
 CMD basecamp auth login
@@ -1676,6 +1678,31 @@ FLAG basecamp attachments --stats type=bool
 FLAG basecamp attachments --styled type=bool
 FLAG basecamp attachments --todolist type=string
 FLAG basecamp attachments --verbose type=count
+FLAG basecamp attachments download --account type=string
+FLAG basecamp attachments download --agent type=bool
+FLAG basecamp attachments download --cache-dir type=string
+FLAG basecamp attachments download --count type=bool
+FLAG basecamp attachments download --file type=string
+FLAG basecamp attachments download --help type=bool
+FLAG basecamp attachments download --hints type=bool
+FLAG basecamp attachments download --ids-only type=bool
+FLAG basecamp attachments download --in type=string
+FLAG basecamp attachments download --index type=int
+FLAG basecamp attachments download --jq type=string
+FLAG basecamp attachments download --json type=bool
+FLAG basecamp attachments download --markdown type=bool
+FLAG basecamp attachments download --md type=bool
+FLAG basecamp attachments download --no-hints type=bool
+FLAG basecamp attachments download --no-stats type=bool
+FLAG basecamp attachments download --out type=string
+FLAG basecamp attachments download --profile type=string
+FLAG basecamp attachments download --project type=string
+FLAG basecamp attachments download --quiet type=bool
+FLAG basecamp attachments download --stats type=bool
+FLAG basecamp attachments download --styled type=bool
+FLAG basecamp attachments download --todolist type=string
+FLAG basecamp attachments download --type type=string
+FLAG basecamp attachments download --verbose type=count
 FLAG basecamp attachments list --account type=string
 FLAG basecamp attachments list --agent type=bool
 FLAG basecamp attachments list --cache-dir type=string
@@ -2882,6 +2909,7 @@ FLAG basecamp cards show --agent type=bool
 FLAG basecamp cards show --cache-dir type=string
 FLAG basecamp cards show --card-table type=string
 FLAG basecamp cards show --count type=bool
+FLAG basecamp cards show --download-attachments type=string
 FLAG basecamp cards show --help type=bool
 FLAG basecamp cards show --hints type=bool
 FLAG basecamp cards show --ids-only type=bool
@@ -4890,6 +4918,7 @@ FLAG basecamp docs show --account type=string
 FLAG basecamp docs show --agent type=bool
 FLAG basecamp docs show --cache-dir type=string
 FLAG basecamp docs show --count type=bool
+FLAG basecamp docs show --download-attachments type=string
 FLAG basecamp docs show --folder type=string
 FLAG basecamp docs show --help type=bool
 FLAG basecamp docs show --hints type=bool
@@ -5789,6 +5818,7 @@ FLAG basecamp documents show --account type=string
 FLAG basecamp documents show --agent type=bool
 FLAG basecamp documents show --cache-dir type=string
 FLAG basecamp documents show --count type=bool
+FLAG basecamp documents show --download-attachments type=string
 FLAG basecamp documents show --folder type=string
 FLAG basecamp documents show --help type=bool
 FLAG basecamp documents show --hints type=bool
@@ -6712,6 +6742,7 @@ FLAG basecamp file show --account type=string
 FLAG basecamp file show --agent type=bool
 FLAG basecamp file show --cache-dir type=string
 FLAG basecamp file show --count type=bool
+FLAG basecamp file show --download-attachments type=string
 FLAG basecamp file show --folder type=string
 FLAG basecamp file show --help type=bool
 FLAG basecamp file show --hints type=bool
@@ -7590,6 +7621,7 @@ FLAG basecamp files show --account type=string
 FLAG basecamp files show --agent type=bool
 FLAG basecamp files show --cache-dir type=string
 FLAG basecamp files show --count type=bool
+FLAG basecamp files show --download-attachments type=string
 FLAG basecamp files show --folder type=string
 FLAG basecamp files show --help type=bool
 FLAG basecamp files show --hints type=bool
@@ -8468,6 +8500,7 @@ FLAG basecamp folders show --account type=string
 FLAG basecamp folders show --agent type=bool
 FLAG basecamp folders show --cache-dir type=string
 FLAG basecamp folders show --count type=bool
+FLAG basecamp folders show --download-attachments type=string
 FLAG basecamp folders show --folder type=string
 FLAG basecamp folders show --help type=bool
 FLAG basecamp folders show --hints type=bool
@@ -9692,6 +9725,7 @@ FLAG basecamp messages show --account type=string
 FLAG basecamp messages show --agent type=bool
 FLAG basecamp messages show --cache-dir type=string
 FLAG basecamp messages show --count type=bool
+FLAG basecamp messages show --download-attachments type=string
 FLAG basecamp messages show --help type=bool
 FLAG basecamp messages show --hints type=bool
 FLAG basecamp messages show --ids-only type=bool
@@ -10098,6 +10132,7 @@ FLAG basecamp msgs show --account type=string
 FLAG basecamp msgs show --agent type=bool
 FLAG basecamp msgs show --cache-dir type=string
 FLAG basecamp msgs show --count type=bool
+FLAG basecamp msgs show --download-attachments type=string
 FLAG basecamp msgs show --help type=bool
 FLAG basecamp msgs show --hints type=bool
 FLAG basecamp msgs show --ids-only type=bool
@@ -11515,6 +11550,7 @@ FLAG basecamp show --account type=string
 FLAG basecamp show --agent type=bool
 FLAG basecamp show --cache-dir type=string
 FLAG basecamp show --count type=bool
+FLAG basecamp show --download-attachments type=string
 FLAG basecamp show --help type=bool
 FLAG basecamp show --hints type=bool
 FLAG basecamp show --ids-only type=bool
@@ -13389,6 +13425,7 @@ FLAG basecamp todos show --account type=string
 FLAG basecamp todos show --agent type=bool
 FLAG basecamp todos show --cache-dir type=string
 FLAG basecamp todos show --count type=bool
+FLAG basecamp todos show --download-attachments type=string
 FLAG basecamp todos show --help type=bool
 FLAG basecamp todos show --hints type=bool
 FLAG basecamp todos show --ids-only type=bool
@@ -13973,6 +14010,7 @@ FLAG basecamp uploads show --account type=string
 FLAG basecamp uploads show --agent type=bool
 FLAG basecamp uploads show --cache-dir type=string
 FLAG basecamp uploads show --count type=bool
+FLAG basecamp uploads show --download-attachments type=string
 FLAG basecamp uploads show --folder type=string
 FLAG basecamp uploads show --help type=bool
 FLAG basecamp uploads show --hints type=bool
@@ -14542,6 +14580,7 @@ FLAG basecamp vault show --account type=string
 FLAG basecamp vault show --agent type=bool
 FLAG basecamp vault show --cache-dir type=string
 FLAG basecamp vault show --count type=bool
+FLAG basecamp vault show --download-attachments type=string
 FLAG basecamp vault show --folder type=string
 FLAG basecamp vault show --help type=bool
 FLAG basecamp vault show --hints type=bool
@@ -15420,6 +15459,7 @@ FLAG basecamp vaults show --account type=string
 FLAG basecamp vaults show --agent type=bool
 FLAG basecamp vaults show --cache-dir type=string
 FLAG basecamp vaults show --count type=bool
+FLAG basecamp vaults show --download-attachments type=string
 FLAG basecamp vaults show --folder type=string
 FLAG basecamp vaults show --help type=bool
 FLAG basecamp vaults show --hints type=bool
@@ -16102,6 +16142,7 @@ SUB basecamp assignments due
 SUB basecamp assignments list
 SUB basecamp attach
 SUB basecamp attachments
+SUB basecamp attachments download
 SUB basecamp attachments list
 SUB basecamp auth
 SUB basecamp auth login

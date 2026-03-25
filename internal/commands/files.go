@@ -997,6 +997,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 func newFilesShowCmd(project *string) *cobra.Command {
 	var itemType string
+	var dlDir *string
 
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
@@ -1150,14 +1151,42 @@ You can pass either an item ID or a Basecamp URL:
 				})
 			}
 
-			return app.OK(result,
+			opts := []output.ResponseOption{
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
-			)
+			}
+
+			data := result
+			if detectedType == "document" {
+				doc, ok := result.(*basecamp.Document)
+				if ok {
+					attachments := downloadableAttachments(richtext.ParseAttachments(doc.Content))
+					if len(attachments) > 0 {
+						dl := runDownloadAttachments(cmd, app, attachments, dlDir)
+						var dlResults []attachmentResult
+						if dl != nil {
+							dlResults = dl.Results
+						}
+						data = withAttachmentMeta(doc, "content", attachments, dlResults)
+						notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+							len(attachments), itemIDStr)
+						if dl != nil && dl.Notice != "" {
+							notice += "; " + dl.Notice
+						}
+						opts = append(opts,
+							output.WithNotice(notice),
+							output.WithBreadcrumbs(attachmentBreadcrumb(itemIDStr, len(attachments))),
+						)
+					}
+				}
+			}
+
+			return app.OK(data, opts...)
 		},
 	}
 
 	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document)")
+	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd
 }
@@ -1357,14 +1386,46 @@ You can pass either an upload ID, a Basecamp URL, or a storage URL:
   basecamp files download https://3.basecamp.com/123/buckets/456/uploads/789
   basecamp files download "https://storage.3.basecamp.com/123/blobs/abc/download/report.pdf"
   basecamp files download 789 --out ./downloads --in my-project
+  basecamp files download 789 --out - --in my-project  # stream to stdout
 
-Storage URLs (from inline attachments in rich text) are downloaded directly
-via the API. No --in flag is needed for storage URLs.`,
+Storage URLs (from attachments in rich text) are downloaded directly
+via the API. No --in flag is needed for storage URLs.
+
+Use --out - to stream the file to stdout (for piping to other commands).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Stdout streaming: --out -
+			if outDir == "-" {
+				if isStorageURL(args[0]) {
+					result, err := app.Account().DownloadURL(cmd.Context(), args[0])
+					if err != nil {
+						return convertSDKError(err)
+					}
+					defer result.Body.Close()
+					_, err = io.Copy(cmd.OutOrStdout(), result.Body)
+					return err
+				}
+				// Upload ID path — resolve project, then stream
+				uploadIDStr, urlProjectID := extractWithProject(args[0])
+				uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid upload ID")
+				}
+				if _, err := resolveDownloadProject(cmd, app, urlProjectID, *project); err != nil {
+					return err
+				}
+				result, err := app.Account().Uploads().Download(cmd.Context(), uploadID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				defer result.Body.Close()
+				_, err = io.Copy(cmd.OutOrStdout(), result.Body)
 				return err
 			}
 
@@ -1406,25 +1467,7 @@ via the API. No --in flag is needed for storage URLs.`,
 				return output.ErrUsage("Invalid upload ID")
 			}
 
-			// Resolve project - URL > flag > config, with interactive fallback
-			projectID := urlProjectID
-			if projectID == "" {
-				projectID = *project
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			resolvedProjectID, err := resolveDownloadProject(cmd, app, urlProjectID, *project)
 			if err != nil {
 				return err
 			}
@@ -1535,6 +1578,33 @@ func writeDownloadToFile(result *basecamp.DownloadResult, outDir, fallbackName s
 		return "", "", 0, fmt.Errorf("failed to write file: %w", err)
 	}
 	return filename, outputPath, written, nil
+}
+
+// resolveDownloadProject resolves a project ID for file download commands
+// using the standard precedence: URL-extracted > --project flag > global flag
+// > config > interactive fallback. Returns the resolved project ID.
+func resolveDownloadProject(cmd *cobra.Command, app *appctx.App, urlProjectID, flagProject string) (string, error) {
+	projectID := urlProjectID
+	if projectID == "" {
+		projectID = flagProject
+	}
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return "", err
+		}
+		projectID = app.Config.ProjectID
+	}
+	resolved, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 // isStorageURL returns true if the argument looks like a Basecamp storage blob URL.

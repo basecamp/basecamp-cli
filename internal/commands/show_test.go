@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -674,4 +675,100 @@ func TestAllValidRecordTypesHandledInSwitch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Attachment discovery tests ---
+
+func TestShowInjectsFieldScopedAttachments(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			return 200, `{
+				"id": 42,
+				"type": "Message",
+				"title": "Design review",
+				"content": "<p>See <bc-attachment url=\"https://example.com/a.png\" filename=\"a.png\"></bc-attachment></p>",
+				"description": "<p>Also <bc-attachment url=\"https://example.com/b.pdf\" filename=\"b.pdf\"></bc-attachment></p>"
+			}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"message", "42"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	out := buf.String()
+	// Field-scoped keys present
+	assert.Contains(t, out, "content_attachments")
+	assert.Contains(t, out, "description_attachments")
+	// Flat "attachments" key not injected (avoids collision with native API field)
+	assert.NotContains(t, out, `"attachments"`)
+	// Notice mentions download command
+	assert.Contains(t, out, "attachment(s)")
+}
+
+// TestShowPreservesNativeAttachmentsField verifies that when a recording
+// already has a native API "attachments" field (e.g. CampfireLine), the
+// show command preserves it untouched while adding field-scoped
+// content_attachments alongside it.
+func TestShowPreservesNativeAttachmentsField(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			// Simulate a CampfireLine-like record with both a native
+			// "attachments" array and inline bc-attachment tags in content.
+			return 200, `{
+				"id": 99,
+				"type": "Chat::Lines::Text",
+				"content": "<p>See <bc-attachment url=\"https://example.com/inline.png\" filename=\"inline.png\"></bc-attachment></p>",
+				"attachments": [{"sgid": "native-sgid", "filename": "native.pdf"}]
+			}`
+		},
+	}
+	app := showTestApp(t, transport)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"99"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	// Parse JSON envelope to inspect data keys directly
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	var data map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(envelope.Data, &data))
+
+	// Native "attachments" key preserved with original structure
+	native, ok := data["attachments"]
+	require.True(t, ok, "native 'attachments' key should be preserved")
+	var nativeAtts []map[string]string
+	require.NoError(t, json.Unmarshal(native, &nativeAtts))
+	require.Len(t, nativeAtts, 1)
+	assert.Equal(t, "native-sgid", nativeAtts[0]["sgid"])
+	assert.Equal(t, "native.pdf", nativeAtts[0]["filename"])
+
+	// Field-scoped collection added under its own key
+	scoped, ok := data["content_attachments"]
+	require.True(t, ok, "content_attachments key should be present")
+	var scopedAtts []map[string]string
+	require.NoError(t, json.Unmarshal(scoped, &scopedAtts))
+	require.Len(t, scopedAtts, 1)
+	assert.Equal(t, "inline.png", scopedAtts[0]["filename"])
 }

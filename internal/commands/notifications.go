@@ -20,6 +20,7 @@ func NewNotificationsCmd() *cobra.Command {
 
 Shows unread, read, and memory notifications. Use 'read' to mark
 notifications as read.`,
+		Args: cobra.NoArgs,
 		Annotations: map[string]string{
 			"agent_notes": "Account-wide notifications — no --in <project> needed.\n" +
 				"Returns unreads, reads, and memories sections.\n" +

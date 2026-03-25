@@ -724,54 +724,77 @@ func newTodosShowCmd() *cobra.Command {
 You can pass either a todo ID or a Basecamp URL:
   basecamp todos show 789
   basecamp todos show https://3.basecamp.com/123/buckets/456/todos/789`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
+		Args: cobra.ExactArgs(1),
+	}
+
+	dlDir := addDownloadAttachmentsFlag(cmd)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+
+		app := appctx.FromContext(cmd.Context())
+		if app == nil {
+			return fmt.Errorf("app not initialized")
+		}
+
+		if err := ensureAccount(cmd, app); err != nil {
+			return err
+		}
+
+		// Extract ID from URL if provided
+		todoIDStr := extractID(args[0])
+
+		todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid todo ID")
+		}
+
+		todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+
+		opts := []output.ResponseOption{
+			output.WithEntity("todo"),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "update",
+					Cmd:         fmt.Sprintf("basecamp todos update %d --title <title>", todoID),
+					Description: "Update this todo",
+				},
+				output.Breadcrumb{
+					Action:      "complete",
+					Cmd:         fmt.Sprintf("basecamp done %d", todoID),
+					Description: "Complete this todo",
+				},
+				output.Breadcrumb{
+					Action:      "comment",
+					Cmd:         fmt.Sprintf("basecamp comment %d <text>", todoID),
+					Description: "Add comment",
+				},
+			),
+		}
+
+		data := any(todo)
+		attachments := downloadableAttachments(richtext.ParseAttachments(todo.Description))
+		if len(attachments) > 0 {
+			dl := runDownloadAttachments(cmd, app, attachments, dlDir)
+			var dlResults []attachmentResult
+			if dl != nil {
+				dlResults = dl.Results
 			}
-
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
+			data = withAttachmentMeta(todo, "description", attachments, dlResults)
+			notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+				len(attachments), todoIDStr)
+			if dl != nil && dl.Notice != "" {
+				notice += "; " + dl.Notice
 			}
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Extract ID from URL if provided
-			todoIDStr := extractID(args[0])
-
-			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid todo ID")
-			}
-
-			todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			return app.OK(todo,
-				output.WithEntity("todo"),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp todos update %d --title <title>", todoID),
-						Description: "Update this todo",
-					},
-					output.Breadcrumb{
-						Action:      "complete",
-						Cmd:         fmt.Sprintf("basecamp done %d", todoID),
-						Description: "Complete this todo",
-					},
-					output.Breadcrumb{
-						Action:      "comment",
-						Cmd:         fmt.Sprintf("basecamp comment %d <text>", todoID),
-						Description: "Add comment",
-					},
-				),
+			opts = append(opts,
+				output.WithNotice(notice),
+				output.WithBreadcrumbs(attachmentBreadcrumb(todoIDStr, len(attachments))),
 			)
-		},
+		}
+
+		return app.OK(data, opts...)
 	}
 
 	return cmd
