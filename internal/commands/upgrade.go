@@ -226,7 +226,7 @@ func detectScoopInstallSource(ctx context.Context) scoopInstallSource {
 	case strings.Contains(exe, legacyScoopAppPath):
 		return scoopInstallSourceLegacy
 	case isScoopShimExecutable(exe):
-		global := hasPathPrefix(exe, globalScoopRootPath)
+		global := hasGlobalScoopPathPrefix(exe)
 		if prefix, ok := scoopPrefixResolver(ctx, scoopApp); ok && scoopPrefixMatchesShimScope(prefix, global) {
 			return scoopInstallSourceRenamed
 		}
@@ -270,10 +270,10 @@ func resolveScoopPrefix(ctx context.Context, app string) (string, bool) {
 
 func scoopPrefixMatchesShimScope(prefix string, global bool) bool {
 	if global {
-		return hasPathPrefix(prefix, globalScoopRootPath)
+		return hasGlobalScoopPathPrefix(prefix)
 	}
 
-	return !hasPathPrefix(prefix, globalScoopRootPath)
+	return !hasGlobalScoopPathPrefix(prefix)
 }
 
 func isGlobalScoopInstall(_ context.Context) bool {
@@ -282,11 +282,11 @@ func isGlobalScoopInstall(_ context.Context) bool {
 		return false
 	}
 
-	return hasPathPrefix(exe, globalScoopRootPath)
+	return hasGlobalScoopPathPrefix(exe)
 }
 
-func hasPathPrefix(path string, prefix string) bool {
-	prefix = strings.TrimSuffix(prefix, "/")
+func hasGlobalScoopPathPrefix(path string) bool {
+	prefix := strings.TrimSuffix(globalScoopRootPath, "/")
 	path = stripWindowsVolume(path)
 	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
