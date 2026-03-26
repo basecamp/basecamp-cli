@@ -1927,7 +1927,7 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				req.Assignees = assigneeIDs
+				req.AssigneeIDs = assigneeIDs
 			}
 
 			step, err := app.Account().CardSteps().Create(cmd.Context(), cardIDInt, req)
@@ -2012,7 +2012,7 @@ You can pass either a step ID or a Basecamp URL:
 				if err != nil {
 					return err
 				}
-				req.Assignees = assigneeIDs
+				req.AssigneeIDs = assigneeIDs
 			}
 
 			step, err := app.Account().CardSteps().Update(cmd.Context(), stepID, req)
