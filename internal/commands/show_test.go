@@ -400,6 +400,26 @@ func TestShowCommentsGracefulDegradation(t *testing.T) {
 	assert.Contains(t, stdout, `"comments_count": 2`)
 }
 
+func TestShowCommentsDiagnosticDoesNotAbsorbAttachmentNotice(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 2, "content": "<p>See <bc-attachment url=\"https://example.com/a.png\" filename=\"a.png\"></bc-attachment></p>"}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 500, `{"error":"boom"}`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	_, _, stderr, err := runShowCmdCapture(t, transport, output.FormatQuiet, "todo", "42")
+	require.NoError(t, err)
+	assert.Contains(t, stderr, "notice: 2 comments available, but fetching them failed")
+	assert.NotContains(t, stderr, "attachment(s)")
+}
+
 func TestShowCommentsMissingField(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {
@@ -437,8 +457,22 @@ func TestShowCommentsUsesCommentCountFallback(t *testing.T) {
 	require.Len(t, reqs, 2)
 	assert.Contains(t, reqs[0], "/card_tables/columns/42.json")
 	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
-	assert.Contains(t, stdout, `"summary": "Kanban::Column #42: In Progress (1 comment)"`)
-	assert.Contains(t, stdout, `"comments": [`)
+
+	var envelope struct {
+		Summary string          `json:"summary"`
+		Data    json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
+	assert.Equal(t, "Kanban::Column #42: In Progress (1 comment)", envelope.Summary)
+
+	var data map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(envelope.Data, &data))
+	comments, ok := data["comments"]
+	require.True(t, ok, "comments field should be present")
+
+	var decodedComments []map[string]any
+	require.NoError(t, json.Unmarshal(comments, &decodedComments))
+	require.Len(t, decodedComments, 1)
 }
 
 func TestShowCommentsAfterGenericRefetch(t *testing.T) {

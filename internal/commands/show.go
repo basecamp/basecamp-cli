@@ -319,8 +319,7 @@ You can also pass a Basecamp URL directly:
 			descAtts := downloadableAttachments(richtext.ParseAttachments(descStr))
 
 			resultData := any(data)
-			notice := commentsFetchNotice
-			noticeDiagnostic := commentsFetchNotice != ""
+			attachmentNotice := ""
 			total := len(contentAtts) + len(descAtts)
 			if total > 0 {
 				allAtts := append(contentAtts, descAtts...)
@@ -340,20 +339,17 @@ You can also pass a Basecamp URL directly:
 				}
 				resultData = data
 
-				attachmentNotice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s", total, id)
+				attachmentNotice = fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s", total, id)
 				if dl != nil && dl.Notice != "" {
 					attachmentNotice += "; " + dl.Notice
 				}
-				notice = joinNotices(notice, attachmentNotice)
 				opts = append(opts, output.WithBreadcrumbs(attachmentBreadcrumb(id, total)))
 			}
 
-			if notice != "" {
-				if noticeDiagnostic {
-					opts = append(opts, output.WithDiagnostic(notice))
-				} else {
-					opts = append(opts, output.WithNotice(notice))
-				}
+			if commentsFetchNotice != "" {
+				opts = append(opts, output.WithDiagnostic(commentsFetchNotice))
+			} else if attachmentNotice != "" {
+				opts = append(opts, output.WithNotice(attachmentNotice))
 			}
 
 			return app.OK(resultData, opts...)
@@ -510,14 +506,4 @@ func pluralizeComments(count int) string {
 
 func commentsFetchFailedNotice(count int, id string) string {
 	return fmt.Sprintf("%s available, but fetching them failed — view: basecamp comments list --all %s", pluralizeComments(count), id)
-}
-
-func joinNotices(parts ...string) string {
-	var nonEmpty []string
-	for _, part := range parts {
-		if part != "" {
-			nonEmpty = append(nonEmpty, part)
-		}
-	}
-	return strings.Join(nonEmpty, "; ")
 }
