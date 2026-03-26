@@ -75,15 +75,35 @@ else
   NIX_RC=0
   scripts/update-nix-flake.sh "${VERSION}" || NIX_RC=$?
   if [[ "$NIX_RC" -eq 0 ]]; then
-    git add nix/package.nix
-    git commit -m "Update nix flake for v${VERSION}"
-    git push origin main --quiet
-    LOCAL=$(git rev-parse HEAD)
-    info "Pushed nix flake update"
+    : # nix flake updated
   elif [[ "$NIX_RC" -eq 2 ]]; then
     echo "  nix flake: no changes needed"
   else
     die "scripts/update-nix-flake.sh failed (exit $NIX_RC)"
+  fi
+fi
+
+# --- Stamp plugin version ---
+info "Stamping plugin version"
+if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
+  echo "  (skipped — dry run)"
+else
+  scripts/stamp-plugin-version.sh "${VERSION}"
+fi
+
+# --- Commit release prep ---
+if [[ "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1" ]]; then
+  git add nix/package.nix .claude-plugin/plugin.json
+  if ! git diff --cached --quiet; then
+    STAGED=$(git diff --cached --name-only)
+    COMMIT_MSG="Update plugin version for v${VERSION}"
+    if echo "${STAGED}" | grep -q "nix/package.nix"; then
+      COMMIT_MSG="Update nix flake and plugin version for v${VERSION}"
+    fi
+    git commit -m "${COMMIT_MSG}"
+    git push origin main --quiet
+    LOCAL=$(git rev-parse HEAD)
+    info "Pushed release prep"
   fi
 fi
 
