@@ -370,9 +370,13 @@ You can also pass a Basecamp URL directly:
 				opts = append(opts, output.WithBreadcrumbs(attachmentBreadcrumb(id, total)))
 			}
 
+			notice := joinShowNotices(commentsNotice, attachmentNotice)
 			if commentsFetchNotice != "" {
-				opts = append(opts, output.WithDiagnostic(commentsFetchNotice))
-			} else if notice := joinShowNotices(commentsNotice, attachmentNotice); notice != "" {
+				// Keep degraded comment-fetch warnings on the diagnostic channel,
+				// but merge any attachment/download notice so it is not lost.
+				diagnostic := joinShowNotices(commentsFetchNotice, attachmentNotice)
+				opts = append(opts, output.WithDiagnostic(diagnostic))
+			} else if notice != "" {
 				opts = append(opts, output.WithNotice(notice))
 			}
 

@@ -534,7 +534,7 @@ func TestShowCommentsGracefulDegradation(t *testing.T) {
 	assert.Contains(t, stdout, `"comments_count": 2`)
 }
 
-func TestShowCommentsDiagnosticDoesNotAbsorbAttachmentNotice(t *testing.T) {
+func TestShowCommentsDiagnosticPreservesAttachmentNotice(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {
 			switch {
@@ -551,7 +551,7 @@ func TestShowCommentsDiagnosticDoesNotAbsorbAttachmentNotice(t *testing.T) {
 	_, _, stderr, err := runShowCmdCapture(t, transport, output.FormatQuiet, "todo", "42")
 	require.NoError(t, err)
 	assert.Contains(t, stderr, "notice: 2 comments available, but fetching them failed")
-	assert.NotContains(t, stderr, "attachment(s)")
+	assert.Contains(t, stderr, "1 attachment(s) — download: basecamp attachments download 42")
 }
 
 func TestShowCommentsMissingField(t *testing.T) {
