@@ -1,6 +1,6 @@
 {
   "name": "basecamp",
-  "version": "dev",
+  "version": "0.7.2",
   "description": "Basecamp integration for Claude Code. Create todos, track work, link code to projects.",
   "author": {
     "name": "37signals",
