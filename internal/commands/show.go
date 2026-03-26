@@ -22,6 +22,7 @@ import (
 func NewShowCmd() *cobra.Command {
 	var recordType string
 	var noComments bool
+	var allComments bool
 	var dlDir *string
 
 	cmd := &cobra.Command{
@@ -45,6 +46,10 @@ You can also pass a Basecamp URL directly:
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			if noComments && allComments {
+				return output.ErrUsage("--no-comments and --all-comments are mutually exclusive")
+			}
 
 			// Parse positional args: [type] <id|url>
 			var id string
@@ -255,17 +260,29 @@ You can also pass a Basecamp URL directly:
 
 			commentsCount, hasCommentsCount := recordingCommentsCount(data)
 			commentsFetchNotice := ""
+			commentsNotice := ""
 			if includeComments && hasCommentsCount && commentsCount > 0 {
 				recordingID, parseErr := strconv.ParseInt(id, 10, 64)
 				if parseErr == nil {
+					commentOpts := &basecamp.CommentListOptions{}
+					if allComments {
+						commentOpts.Limit = -1
+					}
 					commentsResult, commentsErr := app.Account().Comments().List(
 						cmd.Context(), recordingID,
-						&basecamp.CommentListOptions{Limit: -1},
+						commentOpts,
 					)
 					if commentsErr != nil {
 						commentsFetchNotice = commentsFetchFailedNotice(commentsCount, id)
 					} else {
 						data["comments"] = commentsResult.Comments
+						if !allComments {
+							totalComments := commentsCount
+							if commentsResult.Meta.TotalCount > totalComments {
+								totalComments = commentsResult.Meta.TotalCount
+							}
+							commentsNotice = commentsTruncationNotice(len(commentsResult.Comments), totalComments)
+						}
 					}
 				}
 			}
@@ -304,6 +321,13 @@ You can also pass a Basecamp URL directly:
 					Cmd:         fmt.Sprintf("basecamp comments list --all %s", id),
 					Description: "View all comments",
 				})
+				if commentsNotice != "" {
+					breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+						Action:      "all-comments",
+						Cmd:         fmt.Sprintf("basecamp show --all-comments %s", id),
+						Description: "Fetch all comments",
+					})
+				}
 			}
 
 			opts := []output.ResponseOption{
@@ -348,8 +372,8 @@ You can also pass a Basecamp URL directly:
 
 			if commentsFetchNotice != "" {
 				opts = append(opts, output.WithDiagnostic(commentsFetchNotice))
-			} else if attachmentNotice != "" {
-				opts = append(opts, output.WithNotice(attachmentNotice))
+			} else if notice := joinShowNotices(commentsNotice, attachmentNotice); notice != "" {
+				opts = append(opts, output.WithNotice(notice))
 			}
 
 			return app.OK(resultData, opts...)
@@ -358,6 +382,7 @@ You can also pass a Basecamp URL directly:
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Skip comment fetching")
+	cmd.Flags().BoolVar(&allComments, "all-comments", false, fmt.Sprintf("Fetch all comments instead of the default %d", basecamp.DefaultCommentLimit))
 	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd
@@ -502,6 +527,23 @@ func pluralizeComments(count int) string {
 		return "1 comment"
 	}
 	return fmt.Sprintf("%d comments", count)
+}
+
+func commentsTruncationNotice(count, total int) string {
+	if total <= 0 || count >= total {
+		return ""
+	}
+	return fmt.Sprintf("Showing %d of %d comments — use --all-comments for the full discussion", count, total)
+}
+
+func joinShowNotices(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	return strings.Join(filtered, "; ")
 }
 
 func commentsFetchFailedNotice(count int, id string) string {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -247,6 +249,7 @@ func runShowCmdCapture(t *testing.T, transport *showTrackingTransport, format ou
 
 type showJSONEnvelope struct {
 	Summary     string              `json:"summary"`
+	Notice      string              `json:"notice"`
 	Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
 	Data        json.RawMessage     `json:"data"`
 }
@@ -265,6 +268,19 @@ func decodeShowJSONDataMap(t *testing.T, data json.RawMessage) map[string]json.R
 	var decoded map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &decoded))
 	return decoded
+}
+
+func showCommentsJSON(count int) string {
+	var b strings.Builder
+	b.WriteString("[")
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"id": %d, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<p>Comment %d</p>", "creator": {"name": "Person %d"}}`, 9001+i, i+1, i+1)
+	}
+	b.WriteString("]")
+	return b.String()
 }
 
 // --- Generic recording refetch tests ---
@@ -403,6 +419,95 @@ func TestShowNoCommentsFlag(t *testing.T) {
 	data := decodeShowJSONDataMap(t, envelope.Data)
 	_, ok := data["comments"]
 	assert.False(t, ok, "comments field should be omitted when --no-comments is set")
+}
+
+func TestShowCommentsDefaultLimitAddsNotice(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 150}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, showCommentsJSON(100)
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "todo", "42")
+	require.NoError(t, err)
+	require.Len(t, reqs, 2)
+	assert.Contains(t, reqs[0], "/todos/42.json")
+	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
+
+	envelope := decodeShowJSONEnvelope(t, stdout)
+	assert.Equal(t, "Todo #42: Buy milk (150 comments)", envelope.Summary)
+	assert.Equal(t, "Showing 100 of 150 comments — use --all-comments for the full discussion", envelope.Notice)
+
+	data := decodeShowJSONDataMap(t, envelope.Data)
+	comments, ok := data["comments"]
+	require.True(t, ok, "comments field should be present")
+
+	var decodedComments []struct {
+		ID int `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(comments, &decodedComments))
+	require.Len(t, decodedComments, 100)
+}
+
+func TestShowAllCommentsFlagFetchesEntireDiscussion(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 150}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, showCommentsJSON(150)
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "todo", "42", "--all-comments")
+	require.NoError(t, err)
+	require.Len(t, reqs, 2)
+	assert.Contains(t, reqs[0], "/todos/42.json")
+	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
+
+	envelope := decodeShowJSONEnvelope(t, stdout)
+	assert.Equal(t, "Todo #42: Buy milk (150 comments)", envelope.Summary)
+	assert.Empty(t, envelope.Notice)
+
+	data := decodeShowJSONDataMap(t, envelope.Data)
+	comments, ok := data["comments"]
+	require.True(t, ok, "comments field should be present")
+
+	var decodedComments []struct {
+		ID int `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(comments, &decodedComments))
+	require.Len(t, decodedComments, 150)
+}
+
+func TestShowCommentFlagsMutuallyExclusive(t *testing.T) {
+	transport := &showTrackingTransport{}
+	app := showTestApp(t, transport)
+	cmd := NewShowCmd()
+	cmd.SetArgs([]string{"todo", "42", "--no-comments", "--all-comments"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, outErr.Message, "mutually exclusive")
+	assert.Empty(t, transport.getRequests())
 }
 
 func TestShowCommentsGracefulDegradation(t *testing.T) {
