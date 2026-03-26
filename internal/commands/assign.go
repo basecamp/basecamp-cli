@@ -645,7 +645,7 @@ func doAssignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID str
 	assigneeIDs = append(assigneeIDs, assigneeIDInt)
 
 	updated, err := app.Account().CardSteps().Update(cmd.Context(), stepID, &basecamp.UpdateStepRequest{
-		Assignees: assigneeIDs,
+		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
 		return nil, convertSDKError(err)
@@ -747,7 +747,7 @@ func doUnassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assig
 	assigneeIDs := removeID(existingAssigneeIDs(step.Assignees), assigneeIDInt)
 
 	updated, err := app.Account().CardSteps().Update(cmd.Context(), stepID, &basecamp.UpdateStepRequest{
-		Assignees: assigneeIDs,
+		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
 		return nil, convertSDKError(err)
