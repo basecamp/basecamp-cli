@@ -416,6 +416,31 @@ func TestShowCommentsMissingField(t *testing.T) {
 	assert.Contains(t, reqs[0], "/people/42.json")
 }
 
+func TestShowCommentsUsesCommentCountFallback(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/card_tables/columns/42.json"):
+				return 200, `{"id": 42, "type": "Kanban::Column", "title": "In Progress", "comment_count": 1}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, `[
+					{"id": 9001, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<p>Needs follow-up</p>", "creator": {"name": "Annie Bryan"}}
+				]`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "columns", "42")
+	require.NoError(t, err)
+	require.Len(t, reqs, 2)
+	assert.Contains(t, reqs[0], "/card_tables/columns/42.json")
+	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
+	assert.Contains(t, stdout, `"summary": "Kanban::Column #42: In Progress (1 comment)"`)
+	assert.Contains(t, stdout, `"comments": [`)
+}
+
 func TestShowCommentsAfterGenericRefetch(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {

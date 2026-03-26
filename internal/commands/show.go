@@ -476,7 +476,10 @@ func isValidRecordType(t string) bool {
 func recordingCommentsCount(data map[string]any) (int, bool) {
 	count, ok := data["comments_count"]
 	if !ok {
-		return 0, false
+		count, ok = data["comment_count"]
+		if !ok {
+			return 0, false
+		}
 	}
 
 	switch v := count.(type) {
