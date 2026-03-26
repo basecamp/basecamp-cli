@@ -21,7 +21,6 @@ import (
 // NewShowCmd creates the show command for viewing any recording.
 func NewShowCmd() *cobra.Command {
 	var recordType string
-	var comments bool
 	var noComments bool
 	var dlDir *string
 
@@ -130,13 +129,7 @@ You can also pass a Basecamp URL directly:
 				return err
 			}
 
-			includeComments := true
-			if cmd.Flags().Changed("comments") {
-				includeComments = comments
-			}
-			if cmd.Flags().Changed("no-comments") && noComments {
-				includeComments = false
-			}
+			includeComments := !noComments
 
 			// Determine endpoint based on type. Types without a dedicated
 			// shortcut endpoint go through /recordings/ and need a refetch
@@ -368,9 +361,7 @@ You can also pass a Basecamp URL directly:
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
-	cmd.Flags().BoolVar(&comments, "comments", false, "Include comments when available")
-	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Suppress comment fetching")
-	cmd.MarkFlagsMutuallyExclusive("comments", "no-comments")
+	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Skip comment fetching")
 	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd

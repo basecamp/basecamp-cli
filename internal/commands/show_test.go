@@ -376,14 +376,6 @@ func TestShowNoCommentsFlag(t *testing.T) {
 	assert.Contains(t, stdout, "(2 comments)")
 }
 
-func TestShowCommentsFlagMutualExclusion(t *testing.T) {
-	transport := &showTrackingTransport{}
-	reqs, err := runShowCmd(t, transport, "todo", "42", "--comments", "--no-comments")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "were all set")
-	assert.Empty(t, reqs)
-}
-
 func TestShowCommentsGracefulDegradation(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {

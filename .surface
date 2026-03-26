@@ -11549,7 +11549,6 @@ FLAG basecamp setup claude --verbose type=count
 FLAG basecamp show --account type=string
 FLAG basecamp show --agent type=bool
 FLAG basecamp show --cache-dir type=string
-FLAG basecamp show --comments type=bool
 FLAG basecamp show --count type=bool
 FLAG basecamp show --download-attachments type=string
 FLAG basecamp show --help type=bool
