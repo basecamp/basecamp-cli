@@ -245,6 +245,28 @@ func runShowCmdCapture(t *testing.T, transport *showTrackingTransport, format ou
 	return transport.getRequests(), stdout.String(), stderr.String(), err
 }
 
+type showJSONEnvelope struct {
+	Summary     string              `json:"summary"`
+	Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
+	Data        json.RawMessage     `json:"data"`
+}
+
+func decodeShowJSONEnvelope(t *testing.T, stdout string) showJSONEnvelope {
+	t.Helper()
+
+	var envelope showJSONEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
+	return envelope
+}
+
+func decodeShowJSONDataMap(t *testing.T, data json.RawMessage) map[string]json.RawMessage {
+	t.Helper()
+
+	var decoded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	return decoded
+}
+
 // --- Generic recording refetch tests ---
 
 func TestShowGenericRecordingRefetchesTypeEndpoint(t *testing.T) {
@@ -329,17 +351,19 @@ func TestShowIncludesCommentsWhenPresent(t *testing.T) {
 	assert.Contains(t, reqs[0], "/todos/42.json")
 	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
 
-	var envelope struct {
-		Summary     string              `json:"summary"`
-		Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
-		Data        json.RawMessage     `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
+	envelope := decodeShowJSONEnvelope(t, stdout)
 	assert.Equal(t, "Todo #42: Buy milk (2 comments)", envelope.Summary)
 
-	assert.Contains(t, string(envelope.Data), `"comments": [`)
-	assert.Contains(t, string(envelope.Data), `"id": 9001`)
-	assert.Contains(t, string(envelope.Data), `"id": 9002`)
+	data := decodeShowJSONDataMap(t, envelope.Data)
+	comments, ok := data["comments"]
+	require.True(t, ok, "comments field should be present")
+
+	var decodedComments []struct {
+		ID int `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(comments, &decodedComments))
+	require.Len(t, decodedComments, 2)
+	assert.Equal(t, []int{9001, 9002}, []int{decodedComments[0].ID, decodedComments[1].ID})
 }
 
 func TestShowNoCommentsWhenCountZero(t *testing.T) {
@@ -372,8 +396,13 @@ func TestShowNoCommentsFlag(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, reqs, 1)
 	assert.Contains(t, reqs[0], "/todos/42.json")
-	assert.NotContains(t, stdout, `"comments":`)
-	assert.Contains(t, stdout, "(2 comments)")
+
+	envelope := decodeShowJSONEnvelope(t, stdout)
+	assert.Equal(t, "Todo #42: Buy milk (2 comments)", envelope.Summary)
+
+	data := decodeShowJSONDataMap(t, envelope.Data)
+	_, ok := data["comments"]
+	assert.False(t, ok, "comments field should be omitted when --no-comments is set")
 }
 
 func TestShowCommentsGracefulDegradation(t *testing.T) {
@@ -499,8 +528,25 @@ func TestShowCommentsAfterGenericRefetch(t *testing.T) {
 	assert.Contains(t, reqs[0], "/recordings/42.json")
 	assert.Contains(t, reqs[1], "/todos/42.json")
 	assert.Contains(t, reqs[2], "/recordings/42/comments.json")
-	assert.Contains(t, stdout, "Rich todo")
-	assert.Contains(t, stdout, `"comments"`)
+
+	envelope := decodeShowJSONEnvelope(t, stdout)
+	assert.Equal(t, "Todo #42: Rich todo (2 comments)", envelope.Summary)
+
+	data := decodeShowJSONDataMap(t, envelope.Data)
+	title, ok := data["title"]
+	require.True(t, ok, "title field should be present")
+	var decodedTitle string
+	require.NoError(t, json.Unmarshal(title, &decodedTitle))
+	assert.Equal(t, "Rich todo", decodedTitle)
+
+	comments, ok := data["comments"]
+	require.True(t, ok, "comments field should be present")
+	var decodedComments []struct {
+		ID int `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(comments, &decodedComments))
+	require.Len(t, decodedComments, 1)
+	assert.Equal(t, 9001, decodedComments[0].ID)
 }
 
 func TestShowStyledRendersCommentsSection(t *testing.T) {
