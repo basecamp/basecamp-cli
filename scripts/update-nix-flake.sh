@@ -37,8 +37,9 @@ fi
 
 if [[ "$NEED_HASH" == "true" ]]; then
   if ! command -v docker &>/dev/null; then
-    echo "  WARNING: Docker unavailable — cannot recompute vendorHash"
-    echo "  Run 'make update-nix-hash' after installing Docker"
+    echo "ERROR: Docker unavailable — cannot recompute vendorHash"
+    echo "Install Docker or run 'make update-nix-hash' manually."
+    exit 1
   else
     echo "  go.mod changed — computing vendorHash via Docker..."
     # Pin image digest for supply-chain integrity. Update periodically:
@@ -47,6 +48,7 @@ if [[ "$NEED_HASH" == "true" ]]; then
     BUILD_OUTPUT=$(docker run --rm -v "$(pwd):/src:ro" "$NIX_IMAGE" bash -c '
       cp -a /src /build && cd /build
       rm -rf .git
+      git config --global --add safe.directory /build
       git init -q && git add -A && \
         GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@ci \
         GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@ci \
@@ -69,7 +71,9 @@ if [[ "$NEED_HASH" == "true" ]]; then
     elif echo "$BUILD_OUTPUT" | grep -q "building.*basecamp" ; then
       echo "  vendorHash: verified (build succeeded)"
     else
-      echo "  WARNING: Could not determine vendorHash — check Docker output"
+      echo "ERROR: Could not determine vendorHash from nix build output"
+      echo "$BUILD_OUTPUT" | tail -20
+      exit 1
     fi
   fi
 else
