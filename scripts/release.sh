@@ -67,6 +67,15 @@ if grep -q '^[[:space:]]*replace[[:space:]]' go.mod; then
   die "go.mod contains replace directives. Remove them before releasing."
 fi
 
+# --- Verify required tools ---
+if ! command -v jq >/dev/null 2>&1; then
+  die "jq is required but not found. Install with your package manager."
+fi
+
+# --- Run pre-flight checks ---
+info "Running release checks"
+make release-check
+
 # --- Update Nix flake ---
 info "Updating Nix flake"
 if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
@@ -117,10 +126,6 @@ if [[ "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1" ]]; then
     info "Pushed release prep"
   fi
 fi
-
-# --- Run pre-flight checks ---
-info "Running release checks"
-make release-check
 
 # --- Fetch tags to ensure we see remote state ---
 git fetch origin --tags --quiet
