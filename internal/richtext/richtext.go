@@ -58,24 +58,26 @@ var (
 
 // Pre-compiled regexes for HTMLToMarkdown inline elements
 var (
-	reHTMLStrong   = regexp.MustCompile(`(?i)<strong[^>]*>(.*?)</strong>`)
-	reHTMLB        = regexp.MustCompile(`(?i)<b[^>]*>(.*?)</b>`)
-	reHTMLEm       = regexp.MustCompile(`(?i)<em[^>]*>(.*?)</em>`)
-	reHTMLI        = regexp.MustCompile(`(?i)<i[^>]*>(.*?)</i>`)
-	reHTMLCode     = regexp.MustCompile(`(?i)<code[^>]*>(.*?)</code>`)
-	reHTMLLink     = regexp.MustCompile(`(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
-	reHTMLImgSA    = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?\s*>`)
-	reHTMLImgAS    = regexp.MustCompile(`(?i)<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*/?\s*>`)
-	reHTMLImgS     = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*/?\s*>`)
-	reHTMLDel      = regexp.MustCompile(`(?i)<del[^>]*>(.*?)</del>`)
-	reHTMLS        = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`)
-	reHTMLStrike   = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`)
-	reMention      = regexp.MustCompile(`(?i)<bc-attachment[^>]*content-type="application/vnd\.basecamp\.mention"[^>]*>([^<]*)</bc-attachment>`)
-	reAttachment   = regexp.MustCompile(`(?i)<bc-attachment[^>]*filename="([^"]*)"[^>]*/?\s*>`)
-	reAttachNoFile = regexp.MustCompile(`(?i)<bc-attachment[^>]*/?\s*>`)
-	reAttachClose  = regexp.MustCompile(`(?i)</bc-attachment>`)
-	reStripTags    = regexp.MustCompile(`<[^>]+>`)
-	reMultiNewline = regexp.MustCompile(`\n{3,}`)
+	reHTMLStrong        = regexp.MustCompile(`(?i)<strong[^>]*>(.*?)</strong>`)
+	reHTMLB             = regexp.MustCompile(`(?i)<b[^>]*>(.*?)</b>`)
+	reHTMLEm            = regexp.MustCompile(`(?i)<em[^>]*>(.*?)</em>`)
+	reHTMLI             = regexp.MustCompile(`(?i)<i[^>]*>(.*?)</i>`)
+	reHTMLCode          = regexp.MustCompile(`(?i)<code[^>]*>(.*?)</code>`)
+	reHTMLLink          = regexp.MustCompile(`(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
+	reHTMLImgSA         = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?\s*>`)
+	reHTMLImgAS         = regexp.MustCompile(`(?i)<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*/?\s*>`)
+	reHTMLImgS          = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*/?\s*>`)
+	reHTMLDel           = regexp.MustCompile(`(?i)<del[^>]*>(.*?)</del>`)
+	reHTMLS             = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`)
+	reHTMLStrike        = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`)
+	reMentionAttachment = regexp.MustCompile(`(?is)<bc-attachment[^>]*content-type="application/vnd\.basecamp\.mention"[^>]*>(.*?)</bc-attachment>`)
+	reMentionFigcaption = regexp.MustCompile(`(?is)<figcaption[^>]*>(.*?)</figcaption>`)
+	reMentionImgAlt     = regexp.MustCompile(`(?is)<img[^>]*alt="([^"]+)"[^>]*>`)
+	reAttachment        = regexp.MustCompile(`(?i)<bc-attachment[^>]*filename="([^"]*)"[^>]*/?\s*>`)
+	reAttachNoFile      = regexp.MustCompile(`(?i)<bc-attachment[^>]*/?\s*>`)
+	reAttachClose       = regexp.MustCompile(`(?i)</bc-attachment>`)
+	reStripTags         = regexp.MustCompile(`<[^>]+>`)
+	reMultiNewline      = regexp.MustCompile(`\n{3,}`)
 )
 
 // reMentionInput matches @Name or @First.Last in user input.
@@ -627,8 +629,33 @@ func HTMLToMarkdown(html string) string {
 	html = reHTMLS.ReplaceAllString(html, "~~$1~~")
 	html = reHTMLStrike.ReplaceAllString(html, "~~$1~~")
 
-	// @-mentions: extract inner text, render as bold (must fire before general attachment regex)
-	html = reMention.ReplaceAllString(html, "**$1**")
+	// @-mentions: extract display text, render as bold (must fire before general attachment regex)
+	html = reMentionAttachment.ReplaceAllStringFunc(html, func(s string) string {
+		inner := ""
+		if match := reMentionAttachment.FindStringSubmatch(s); len(match) >= 2 {
+			inner = match[1]
+		}
+
+		name := ""
+		if match := reMentionFigcaption.FindStringSubmatch(inner); len(match) >= 2 {
+			name = strings.TrimSpace(unescapeHTML(reStripTags.ReplaceAllString(match[1], "")))
+		}
+		if name == "" {
+			if match := reMentionImgAlt.FindStringSubmatch(inner); len(match) >= 2 {
+				name = strings.TrimSpace(unescapeHTML(match[1]))
+			}
+		}
+		if name == "" {
+			name = strings.TrimSpace(unescapeHTML(reStripTags.ReplaceAllString(inner, "")))
+		}
+		if name == "" {
+			name = "mention"
+		}
+		if !strings.HasPrefix(name, "@") {
+			name = "@" + name
+		}
+		return "**" + name + "**"
+	})
 
 	// Basecamp attachments: <bc-attachment ... filename="report.pdf"> → 📎 report.pdf
 	html = reAttachment.ReplaceAllString(html, "\n📎 $1\n")

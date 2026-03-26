@@ -750,7 +750,8 @@ basecamp search metadata --json                   # Available search scopes
 ### Generic Show
 
 ```bash
-basecamp show <type> <id> --in <project> --json   # Show any recording type
+basecamp show <type> <id> --in <project> --json                 # Show any recording type (includes comments by default when available)
+basecamp show <type> <id> --no-comments --in <project> --json   # Skip the extra comments fetch
 # Types: todo, todolist, message, comment, card, card-table, document (or omit <type> for generic lookup)
 ```
 

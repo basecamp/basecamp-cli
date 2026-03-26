@@ -1500,8 +1500,8 @@ func TestSkipObjectColumns(t *testing.T) {
 	// Should NOT contain skipped fields
 	skippedFields := []string{
 		"bucket", "creator", "url", "app_url",
-		"bookmark_url", "subscription_url", "comments_count",
-		"comments_url", "position", "inherits_status",
+		"bookmark_url", "subscription_url", "boosts_url", "completion_url",
+		"comment_count", "comments_count", "comments_url", "position", "inherits_status",
 	}
 	for _, field := range skippedFields {
 		// Check for both raw key and title-cased version
@@ -1514,13 +1514,55 @@ func TestSkipObjectColumnsMap(t *testing.T) {
 	expectedSkipped := []string{
 		"bucket", "creator", "parent", "dock", "inherits_status",
 		"url", "app_url", "bookmark_url", "subscription_url",
-		"comments_count", "comments_url", "position",
+		"boosts_url", "completion_url", "comment_count", "comments_count", "comments_url", "position",
 		"attachable_sgid", "personable_type", "recording_type",
 	}
 
 	for _, field := range expectedSkipped {
 		assert.True(t, skipObjectColumns[field], "skipObjectColumns should contain %q", field)
 	}
+}
+
+func TestGenericObjectStyledRendersAttachmentSections(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+
+	data := map[string]any{
+		"id": float64(123),
+		"content_attachments": []any{
+			map[string]any{"filename": "report.pdf", "content_type": "application/pdf"},
+			map[string]any{"filename": "photo.png", "content_type": "image/png"},
+		},
+	}
+
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "Content Attachments:")
+	assert.Contains(t, output, "report.pdf")
+	assert.Contains(t, output, "photo.png")
+	assert.NotContains(t, output, "map[")
+}
+
+func TestGenericObjectMarkdownRendersAttachmentSections(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+
+	data := map[string]any{
+		"id": float64(123),
+		"description_attachments": []any{
+			map[string]any{"filename": "report.pdf", "content_type": "application/pdf"},
+		},
+	}
+
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "### Description Attachments")
+	assert.Contains(t, output, "report.pdf")
+	assert.NotContains(t, output, "map[")
 }
 
 // =============================================================================

@@ -589,6 +589,9 @@ var skipObjectColumns = map[string]bool{
 	"app_url":          true,
 	"bookmark_url":     true,
 	"subscription_url": true,
+	"boosts_url":       true,
+	"completion_url":   true,
+	"comment_count":    true,
 	"comments_count":   true,
 	"comments_url":     true,
 	"position":         true,
@@ -597,12 +600,181 @@ var skipObjectColumns = map[string]bool{
 	"recording_type":   true,
 }
 
+func topLevelComments(data map[string]any) []map[string]any {
+	comments, ok := data["comments"]
+	if !ok {
+		return nil
+	}
+
+	switch v := comments.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		return toMapSlice(v)
+	}
+
+	normalized := NormalizeData(comments)
+	switch v := normalized.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		return toMapSlice(v)
+	default:
+		return nil
+	}
+}
+
+type attachmentSection struct {
+	title       string
+	attachments []map[string]any
+}
+
+func attachmentMaps(val any) []map[string]any {
+	switch v := val.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		return toMapSlice(v)
+	}
+
+	normalized := NormalizeData(val)
+	switch v := normalized.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		return toMapSlice(v)
+	default:
+		return nil
+	}
+}
+
+func topLevelAttachmentSections(data map[string]any) []attachmentSection {
+	keys := []string{"content_attachments", "description_attachments"}
+	var sections []attachmentSection
+	for _, key := range keys {
+		attachments := attachmentMaps(data[key])
+		if len(attachments) == 0 {
+			continue
+		}
+		sections = append(sections, attachmentSection{
+			title:       formatHeader(key),
+			attachments: attachments,
+		})
+	}
+	return sections
+}
+
+func attachmentDisplayName(att map[string]any) string {
+	for _, key := range []string{"filename", "caption", "path", "url", "sgid"} {
+		if value, ok := att[key].(string); ok && value != "" {
+			return ansi.Strip(value)
+		}
+	}
+	return "attachment"
+}
+
+func attachmentDisplayMeta(att map[string]any) string {
+	var parts []string
+	if contentType, ok := att["content_type"].(string); ok && contentType != "" {
+		parts = append(parts, contentType)
+	}
+	if filesize, ok := att["filesize"].(string); ok && filesize != "" {
+		parts = append(parts, filesize+" bytes")
+	}
+	if path, ok := att["path"].(string); ok && path != "" {
+		parts = append(parts, "saved to "+path)
+	}
+	if status, ok := att["download_status"].(string); ok && status != "" {
+		parts = append(parts, status)
+	}
+	if errText, ok := att["download_error"].(string); ok && errText != "" {
+		parts = append(parts, "error: "+errText)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func commentCreatorName(comment map[string]any) string {
+	if creator, ok := comment["creator"].(map[string]any); ok {
+		if name, ok := creator["name"].(string); ok && name != "" {
+			return ansi.Strip(name)
+		}
+	}
+	if name, ok := comment["creator_name"].(string); ok && name != "" {
+		return ansi.Strip(name)
+	}
+	return "Unknown"
+}
+
+func commentTimestamp(comment map[string]any) string {
+	return formatDateValue("created_at", comment["created_at"])
+}
+
+func commentBody(comment map[string]any) string {
+	content, _ := comment["content"].(string)
+	content = ansi.Strip(content)
+	if richtext.IsHTML(content) {
+		content = richtext.HTMLToMarkdown(content)
+	}
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	return strings.TrimSpace(content)
+}
+
+func (r *Renderer) renderCommentsSection(b *strings.Builder, comments []map[string]any) {
+	for i, comment := range comments {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+
+		author := commentCreatorName(comment)
+		timestamp := commentTimestamp(comment)
+		line := r.Data.Render("- " + author)
+		if timestamp != "" {
+			line += r.Muted.Render(" — " + timestamp)
+		}
+		b.WriteString(line + "\n")
+
+		body := commentBody(comment)
+		if body == "" {
+			continue
+		}
+		for _, bodyLine := range strings.Split(body, "\n") {
+			if bodyLine == "" {
+				b.WriteString("\n")
+				continue
+			}
+			b.WriteString(r.Data.Render("  " + bodyLine))
+			b.WriteString("\n")
+		}
+	}
+}
+
+func (r *Renderer) renderAttachmentSections(b *strings.Builder, sections []attachmentSection) {
+	for i, section := range sections {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(r.Header.Render(section.title + ":"))
+		b.WriteString("\n")
+		for _, attachment := range section.attachments {
+			line := r.Data.Render("- " + attachmentDisplayName(attachment))
+			if meta := attachmentDisplayMeta(attachment); meta != "" {
+				line += r.Muted.Render(" — " + meta)
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+}
+
 func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
+	comments := topLevelComments(data)
+	attachmentSections := topLevelAttachmentSections(data)
+
 	// Collect fields with priority ordering
 	var fields []renderField
 
 	for k := range data {
-		if skipObjectColumns[k] {
+		if k == "comments" || strings.HasSuffix(k, "_attachments") || skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects
@@ -625,7 +797,7 @@ func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 		return fields[i].key < fields[j].key
 	})
 
-	if len(fields) == 0 {
+	if len(fields) == 0 && len(attachmentSections) == 0 && len(comments) == 0 {
 		b.WriteString(r.Muted.Render("(no data)"))
 		b.WriteString("\n")
 		return
@@ -660,6 +832,22 @@ func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 			valueStyled = r.Data.Render(value)
 		}
 		b.WriteString(labelStyled + valueStyled + "\n")
+	}
+
+	if len(attachmentSections) > 0 {
+		if len(fields) > 0 {
+			b.WriteString("\n")
+		}
+		r.renderAttachmentSections(b, attachmentSections)
+	}
+
+	if len(comments) > 0 {
+		if len(fields) > 0 || len(attachmentSections) > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(r.Header.Render("Comments:"))
+		b.WriteString("\n")
+		r.renderCommentsSection(b, comments)
 	}
 }
 
@@ -763,16 +951,22 @@ func formatCell(val any) string {
 			case int, int64:
 				items = append(items, fmt.Sprintf("%d", elem))
 			case map[string]any:
-				// Try name → title → summary → id.
+				// Try attachment-style maps first, then generic record labels.
 				// summary is checked after title because schedule entries omit title
 				// from the calendar/reports API response and use summary as their
 				// display name (Schedule::Entry#title delegates to summary in bc3).
-				if name, ok := elem["name"].(string); ok && name != "" {
+				if filename, ok := elem["filename"].(string); ok && filename != "" {
+					items = append(items, ansi.Strip(filename))
+				} else if caption, ok := elem["caption"].(string); ok && caption != "" {
+					items = append(items, ansi.Strip(caption))
+				} else if name, ok := elem["name"].(string); ok && name != "" {
 					items = append(items, ansi.Strip(name))
 				} else if title, ok := elem["title"].(string); ok && title != "" {
 					items = append(items, ansi.Strip(title))
 				} else if summary, ok := elem["summary"].(string); ok && summary != "" {
 					items = append(items, ansi.Strip(summary))
+				} else if path, ok := elem["path"].(string); ok && path != "" {
+					items = append(items, ansi.Strip(path))
 				} else if id, ok := elem["id"]; ok {
 					items = append(items, fmt.Sprintf("%v", id))
 				}
@@ -1067,12 +1261,59 @@ func (r *MarkdownRenderer) detectColumns(data []map[string]any) []column {
 	return cols
 }
 
+func (r *MarkdownRenderer) renderCommentsSection(b *strings.Builder, comments []map[string]any) {
+	for i, comment := range comments {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+
+		line := "- **" + commentCreatorName(comment) + "**"
+		if timestamp := commentTimestamp(comment); timestamp != "" {
+			line += " — " + timestamp
+		}
+		b.WriteString(line + "\n")
+
+		body := commentBody(comment)
+		if body == "" {
+			continue
+		}
+
+		b.WriteString("\n")
+		for _, bodyLine := range strings.Split(body, "\n") {
+			if bodyLine == "" {
+				b.WriteString("\n")
+				continue
+			}
+			b.WriteString("  " + bodyLine + "\n")
+		}
+	}
+}
+
+func (r *MarkdownRenderer) renderAttachmentSections(b *strings.Builder, sections []attachmentSection) {
+	for i, section := range sections {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("### " + section.title + "\n\n")
+		for _, attachment := range section.attachments {
+			line := "- " + attachmentDisplayName(attachment)
+			if meta := attachmentDisplayMeta(attachment); meta != "" {
+				line += " — " + meta
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+}
+
 func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any) {
+	comments := topLevelComments(data)
+	attachmentSections := topLevelAttachmentSections(data)
+
 	// Collect fields with priority ordering (same as styled renderer)
 	var fields []renderField
 
 	for k := range data {
-		if skipObjectColumns[k] {
+		if k == "comments" || strings.HasSuffix(k, "_attachments") || skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects
@@ -1095,7 +1336,7 @@ func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any)
 		return fields[i].key < fields[j].key
 	})
 
-	if len(fields) == 0 {
+	if len(fields) == 0 && len(attachmentSections) == 0 && len(comments) == 0 {
 		b.WriteString("*No data*\n")
 		return
 	}
@@ -1104,6 +1345,21 @@ func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any)
 		label := formatHeader(f.key)
 		value := formatDetailValue(f.key, data[f.key])
 		b.WriteString("- **" + label + ":** " + value + "\n")
+	}
+
+	if len(attachmentSections) > 0 {
+		if len(fields) > 0 {
+			b.WriteString("\n")
+		}
+		r.renderAttachmentSections(b, attachmentSections)
+	}
+
+	if len(comments) > 0 {
+		if len(fields) > 0 || len(attachmentSections) > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("## Comments\n\n")
+		r.renderCommentsSection(b, comments)
 	}
 }
 

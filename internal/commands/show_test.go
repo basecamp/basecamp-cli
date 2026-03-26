@@ -166,6 +166,17 @@ func showTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 	}
 }
 
+func showTestAppWithOutput(t *testing.T, transport http.RoundTripper, format output.Format, writer, errWriter *bytes.Buffer) *appctx.App {
+	t.Helper()
+	app := showTestApp(t, transport)
+	app.Output = output.New(output.Options{
+		Format:    format,
+		Writer:    writer,
+		ErrWriter: errWriter,
+	})
+	return app
+}
+
 // showTrackingTransport records request paths and returns configurable responses.
 // By default it returns a generic success response. Set the responder field to
 // customize per-request response bodies.
@@ -217,6 +228,21 @@ func runShowCmd(t *testing.T, transport *showTrackingTransport, args ...string) 
 	cmd.SetErr(&bytes.Buffer{})
 	err := cmd.Execute()
 	return transport.getRequests(), err
+}
+
+func runShowCmdCapture(t *testing.T, transport *showTrackingTransport, format output.Format, args ...string) ([]string, string, string, error) {
+	t.Helper()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	app := showTestAppWithOutput(t, transport, format, stdout, stderr)
+	cmd := NewShowCmd()
+	cmd.SetArgs(args)
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	return transport.getRequests(), stdout.String(), stderr.String(), err
 }
 
 // --- Generic recording refetch tests ---
@@ -278,6 +304,226 @@ func TestShowGenericRecordingFallsBackOnRefetchError(t *testing.T) {
 	err := cmd.Execute()
 	require.NoError(t, err, "should succeed with sparse data when refetch fails")
 	assert.Contains(t, buf.String(), "sparse title")
+}
+
+func TestShowIncludesCommentsWhenPresent(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 2}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, `[
+					{"id": 9001, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<div>First <strong>comment</strong></div>", "creator": {"name": "Annie Bryan"}},
+					{"id": 9002, "status": "active", "type": "Comment", "created_at": "2026-03-26T11:00:00Z", "updated_at": "2026-03-26T11:00:00Z", "content": "<p>Second comment</p>", "creator": {"name": "Jason Fried"}}
+				]`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "todo", "42")
+	require.NoError(t, err)
+	require.Len(t, reqs, 2)
+	assert.Contains(t, reqs[0], "/todos/42.json")
+	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
+
+	var envelope struct {
+		Summary     string              `json:"summary"`
+		Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
+		Data        json.RawMessage     `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
+	assert.Equal(t, "Todo #42: Buy milk (2 comments)", envelope.Summary)
+
+	assert.Contains(t, string(envelope.Data), `"comments": [`)
+	assert.Contains(t, string(envelope.Data), `"id": 9001`)
+	assert.Contains(t, string(envelope.Data), `"id": 9002`)
+}
+
+func TestShowNoCommentsWhenCountZero(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/todos/42.json") {
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 0}`
+			}
+			return 200, `{}`
+		},
+	}
+
+	reqs, _, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "todo", "42")
+	require.NoError(t, err)
+	require.Len(t, reqs, 1)
+	assert.Contains(t, reqs[0], "/todos/42.json")
+}
+
+func TestShowNoCommentsFlag(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/todos/42.json") {
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 2}`
+			}
+			return 200, `{}`
+		},
+	}
+
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "todo", "42", "--no-comments")
+	require.NoError(t, err)
+	require.Len(t, reqs, 1)
+	assert.Contains(t, reqs[0], "/todos/42.json")
+	assert.NotContains(t, stdout, `"comments":`)
+	assert.Contains(t, stdout, "(2 comments)")
+}
+
+func TestShowCommentsFlagMutualExclusion(t *testing.T) {
+	transport := &showTrackingTransport{}
+	reqs, err := runShowCmd(t, transport, "todo", "42", "--comments", "--no-comments")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "were all set")
+	assert.Empty(t, reqs)
+}
+
+func TestShowCommentsGracefulDegradation(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 2}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 500, `{"error":"boom"}`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	reqs, stdout, stderr, err := runShowCmdCapture(t, transport, output.FormatQuiet, "todo", "42")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 2)
+	assert.Contains(t, reqs[0], "/todos/42.json")
+	assert.Contains(t, reqs[1], "/recordings/42/comments.json")
+	assert.Contains(t, stderr, "notice: 2 comments available, but fetching them failed")
+	assert.NotContains(t, stdout, `"comments"`)
+	assert.Contains(t, stdout, `"comments_count": 2`)
+}
+
+func TestShowCommentsMissingField(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/people/42.json") {
+				return 200, `{"id": 42, "type": "Person", "name": "Alice"}`
+			}
+			return 200, `{}`
+		},
+	}
+
+	reqs, _, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "people", "42")
+	require.NoError(t, err)
+	require.Len(t, reqs, 1)
+	assert.Contains(t, reqs[0], "/people/42.json")
+}
+
+func TestShowCommentsAfterGenericRefetch(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/recordings/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Sparse todo"}`
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Rich todo", "comments_count": 2}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, `[
+					{"id": 9001, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<p>First comment</p>", "creator": {"name": "Annie Bryan"}}
+				]`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "42")
+	require.NoError(t, err)
+	require.Len(t, reqs, 3)
+	assert.Contains(t, reqs[0], "/recordings/42.json")
+	assert.Contains(t, reqs[1], "/todos/42.json")
+	assert.Contains(t, reqs[2], "/recordings/42/comments.json")
+	assert.Contains(t, stdout, "Rich todo")
+	assert.Contains(t, stdout, `"comments"`)
+}
+
+func TestShowStyledRendersCommentsSection(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "content": "<p>Main body</p>", "comments_count": 2}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, `[
+					{"id": 9001, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<div>First <strong>comment</strong></div>", "creator": {"name": "Annie Bryan"}},
+					{"id": 9002, "status": "active", "type": "Comment", "created_at": "2026-03-26T11:00:00Z", "updated_at": "2026-03-26T11:00:00Z", "content": "<p>Second comment</p>", "creator": {"name": "Jason Fried"}}
+				]`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	_, stdout, _, err := runShowCmdCapture(t, transport, output.FormatStyled, "todo", "42")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Comments:")
+	assert.Contains(t, stdout, "Annie Bryan")
+	assert.Contains(t, stdout, "Jason Fried")
+	assert.Contains(t, stdout, "First")
+	assert.Contains(t, stdout, "Second comment")
+	assert.NotContains(t, stdout, "<div>")
+}
+
+func TestShowMarkdownRendersCommentsSection(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "content": "<p>Main body</p>", "comments_count": 1}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, `[
+					{"id": 9001, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<div>First <strong>comment</strong></div>", "creator": {"name": "Annie Bryan"}}
+				]`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	_, stdout, _, err := runShowCmdCapture(t, transport, output.FormatMarkdown, "todo", "42")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "## Comments")
+	assert.Contains(t, stdout, "**Annie Bryan**")
+	assert.Contains(t, stdout, "First")
+	assert.NotContains(t, stdout, "<div>")
+}
+
+func TestShowStyledNoRawCommentsFieldDump(t *testing.T) {
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			switch {
+			case strings.Contains(path, "/todos/42.json"):
+				return 200, `{"id": 42, "type": "Todo", "title": "Buy milk", "comments_count": 2}`
+			case strings.Contains(path, "/recordings/42/comments.json"):
+				return 200, `[
+					{"id": 9001, "status": "active", "type": "Comment", "created_at": "2026-03-26T10:00:00Z", "updated_at": "2026-03-26T10:00:00Z", "content": "<p>First comment</p>", "creator": {"name": "Annie Bryan"}},
+					{"id": 9002, "status": "active", "type": "Comment", "created_at": "2026-03-26T11:00:00Z", "updated_at": "2026-03-26T11:00:00Z", "content": "<p>Second comment</p>", "creator": {"name": "Jason Fried"}}
+				]`
+			default:
+				return 200, `{}`
+			}
+		},
+	}
+
+	_, stdout, _, err := runShowCmdCapture(t, transport, output.FormatStyled, "todo", "42")
+	require.NoError(t, err)
+	assert.NotContains(t, stdout, "9001, 9002")
+	assert.NotContains(t, stdout, "map[")
 }
 
 // --- URL type routing tests ---

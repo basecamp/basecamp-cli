@@ -758,6 +758,17 @@ func TestHTMLToMarkdown_Mention(t *testing.T) {
 	}
 }
 
+func TestHTMLToMarkdown_MentionFigureAttachment(t *testing.T) {
+	input := `<div><bc-attachment sgid="x" content-type="application/vnd.basecamp.mention"><figure><img alt="Rob Zolkos"><figcaption>Rob</figcaption></figure></bc-attachment>&nbsp;hello</div>`
+	result := HTMLToMarkdown(input)
+	if !strings.Contains(result, "**@Rob** hello") {
+		t.Errorf("figure mention not rendered cleanly\ngot: %q", result)
+	}
+	if strings.Contains(result, "📎 attachment") {
+		t.Errorf("figure mention should not render as generic attachment\ngot: %q", result)
+	}
+}
+
 func TestHTMLToMarkdown_AttachmentNoFilename(t *testing.T) {
 	input := `<bc-attachment sgid="BAh7" content-type="image/png"></bc-attachment>`
 	result := HTMLToMarkdown(input)
