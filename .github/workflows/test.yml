@@ -154,15 +154,19 @@ jobs:
       - name: Cache BATS
         id: cache-bats
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
-          path: /usr/local/libexec/bats-core
-          key: bats-1.11.0
+          path: ~/.local
+          key: bats-1.11.0-home
 
       - name: Install BATS
         if: steps.cache-bats.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
-          sudo /tmp/bats-core/install.sh /usr/local
+          /tmp/bats-core/install.sh ~/.local
+
+      - name: Add BATS to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run BATS integration tests
         run: make test-e2e
