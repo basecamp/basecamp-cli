@@ -96,9 +96,20 @@ if [[ "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1" ]]; then
   git add nix/package.nix .claude-plugin/plugin.json
   if ! git diff --cached --quiet; then
     STAGED=$(git diff --cached --name-only)
-    COMMIT_MSG="Update plugin version for v${VERSION}"
-    if echo "${STAGED}" | grep -q "nix/package.nix"; then
+    HAS_NIX=false
+    HAS_PLUGIN=false
+    if echo "${STAGED}" | grep -q "^nix/package\.nix$"; then
+      HAS_NIX=true
+    fi
+    if echo "${STAGED}" | grep -q "^\.claude-plugin/plugin\.json$"; then
+      HAS_PLUGIN=true
+    fi
+    if [[ "${HAS_NIX}" == "true" && "${HAS_PLUGIN}" == "true" ]]; then
       COMMIT_MSG="Update nix flake and plugin version for v${VERSION}"
+    elif [[ "${HAS_NIX}" == "true" ]]; then
+      COMMIT_MSG="Update nix flake for v${VERSION}"
+    else
+      COMMIT_MSG="Update plugin version for v${VERSION}"
     fi
     git commit -m "${COMMIT_MSG}"
     git push origin main --quiet
