@@ -47,10 +47,6 @@ You can also pass a Basecamp URL directly:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if noComments && allComments {
-				return output.ErrUsage("--no-comments and --all-comments are mutually exclusive")
-			}
-
 			// Parse positional args: [type] <id|url>
 			var id string
 			if len(args) == 1 {
@@ -264,7 +260,9 @@ You can also pass a Basecamp URL directly:
 			if includeComments && hasCommentsCount && commentsCount > 0 {
 				recordingID, parseErr := strconv.ParseInt(id, 10, 64)
 				if parseErr == nil {
-					commentOpts := &basecamp.CommentListOptions{}
+					commentOpts := &basecamp.CommentListOptions{
+						Limit: basecamp.DefaultCommentLimit,
+					}
 					if allComments {
 						commentOpts.Limit = -1
 					}
@@ -388,6 +386,7 @@ You can also pass a Basecamp URL directly:
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Skip comment fetching")
 	cmd.Flags().BoolVar(&allComments, "all-comments", false, fmt.Sprintf("Fetch all comments instead of the default %d", basecamp.DefaultCommentLimit))
 	dlDir = addDownloadAttachmentsFlag(cmd)
+	cmd.MarkFlagsMutuallyExclusive("no-comments", "all-comments")
 
 	return cmd
 }

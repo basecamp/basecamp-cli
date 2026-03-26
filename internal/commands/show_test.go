@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -503,10 +502,8 @@ func TestShowCommentFlagsMutuallyExclusive(t *testing.T) {
 
 	err := cmd.Execute()
 	require.Error(t, err)
-
-	var outErr *output.Error
-	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T: %v", err, err)
-	assert.Contains(t, outErr.Message, "mutually exclusive")
+	assert.Contains(t, err.Error(), "no-comments")
+	assert.Contains(t, err.Error(), "all-comments")
 	assert.Empty(t, transport.getRequests())
 }
 
