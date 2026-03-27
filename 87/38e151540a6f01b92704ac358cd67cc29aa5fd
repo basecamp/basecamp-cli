@@ -1,0 +1,23 @@
+RELEASING.md
+  e357e6421117b0ac 114-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "8738e151540a6f01b92704ac358cd67cc29aa5fd",
+  "prompts": {
+    "e357e6421117b0ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "99769036-ba74-40f1-b908-be4e8198f69e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
