@@ -225,6 +225,20 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
+      - name: Install quill for macOS signing
+        run: |
+          go install github.com/anchore/quill/cmd/quill@v0.7.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare signing credentials
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          umask 077
+          echo "$MACOS_SIGN_P12" | base64 -d > "$RUNNER_TEMP/codesign.p12"
+          echo "$MACOS_NOTARY_KEY" | base64 -d > "$RUNNER_TEMP/notary.p8"
+
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
         with:
@@ -237,18 +251,33 @@ jobs:
           CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ steps.sdk-token.outputs.token }}
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          QUILL_SIGN_P12: ${{ runner.temp }}/codesign.p12
+          QUILL_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
         run: |
           RELEASE_CHANGELOG=""
           if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
             RELEASE_CHANGELOG=$(cat "$CHANGELOG_FILE")
           fi
           export RELEASE_CHANGELOG
-          goreleaser release --clean
+          goreleaser release --clean --skip=notarize
+
+      - name: Notarize macOS binaries
+        env:
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+        run: |
+          for bin in dist/basecamp_darwin_*/basecamp; do
+            echo "Notarizing $bin..."
+            quill notarize "$bin" \
+              --notary-issuer "$MACOS_NOTARY_ISSUER_ID" \
+              --notary-key-id "$MACOS_NOTARY_KEY_ID" \
+              --notary-key "$RUNNER_TEMP/notary.p8" \
+              --wait
+          done
+
+      - name: Clean up signing credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/codesign.p12" "$RUNNER_TEMP/notary.p8"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -267,6 +296,59 @@ jobs:
           git config --global user.name "37signals"
           git config --global user.email "dev@37signals.com"
           scripts/publish-aur.sh "$VERSION"
+
+  macos-verify:
+    name: Verify macOS signing
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Download release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/verify
+          gh release download "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "basecamp_*_darwin_${{ matrix.arch }}.tar.gz" \
+            --dir /tmp/verify
+          tar -xzf /tmp/verify/basecamp_*_darwin_${{ matrix.arch }}.tar.gz -C /tmp/verify
+
+      - name: Verify TeamIdentifier
+        run: |
+          TEAM_ID=$(codesign -dv --verbose=4 /tmp/verify/basecamp 2>&1 | grep TeamIdentifier= | cut -d= -f2)
+          echo "TeamIdentifier (${{ matrix.arch }}): $TEAM_ID"
+          if [ "$TEAM_ID" != "2WNYUYRS7G" ]; then
+            echo "::error::TeamIdentifier mismatch (${{ matrix.arch }}): expected 2WNYUYRS7G, got $TEAM_ID"
+            exit 1
+          fi
+
+      - name: Verify hardened runtime
+        run: |
+          FLAGS=$(codesign -dv --verbose=4 /tmp/verify/basecamp 2>&1 | grep 'flags=' | head -1)
+          echo "Flags (${{ matrix.arch }}): $FLAGS"
+          if ! echo "$FLAGS" | grep -q 'runtime'; then
+            echo "::error::Hardened runtime flag not set (${{ matrix.arch }}): $FLAGS"
+            exit 1
+          fi
+
+      - name: Check notarization status
+        run: |
+          # Best-effort: notarization ticket propagation can lag, so this is
+          # telemetry, not a gate. TeamIdentifier and hardened runtime above
+          # are the hard assertions.
+          spctl -a -vvv -t install /tmp/verify/basecamp 2>&1 | tee /tmp/verify/spctl.out
+          if grep -q 'accepted\|Notarized Developer ID' /tmp/verify/spctl.out; then
+            echo "Notarization accepted for ${{ matrix.arch }}"
+          else
+            echo "::warning::Notarization not yet accepted for ${{ matrix.arch }} (ticket propagation may lag)"
+          fi
 
   nix-verify:
     name: Verify Nix flake

@@ -30,6 +30,10 @@ builds:
       - -X github.com/basecamp/basecamp-cli/internal/version.Version={{.Version}}
       - -X github.com/basecamp/basecamp-cli/internal/version.Commit={{.Commit}}
       - -X github.com/basecamp/basecamp-cli/internal/version.Date={{.Date}}
+    hooks:
+      post:
+        - cmd: scripts/sign-darwin.sh "{{ .Os }}" "{{ .Path }}"
+          output: true
 
 archives:
   - id: default
@@ -94,21 +98,13 @@ signs:
     artifacts: checksum
     output: true
 
-# Sign and notarize macOS binaries (cross-platform via embedded quill)
+# Signing handled by scripts/sign-darwin.sh via build hook using anchore/quill
+# CLI directly. The goreleaser/quill fork lacks the TeamIdentifier fix from
+# anchore/quill v0.7.0 (https://github.com/anchore/quill/issues/147).
+# Notarization runs as a separate workflow step after GoReleaser publishes.
 notarize:
   macos:
-    - enabled: '{{ and (ne .Env.MACOS_SIGN_P12 "") (ne .Env.MACOS_SIGN_PASSWORD "") (ne .Env.MACOS_NOTARY_KEY "") (ne .Env.MACOS_NOTARY_KEY_ID "") (ne .Env.MACOS_NOTARY_ISSUER_ID "") }}'
-      ids:
-        - basecamp
-      sign:
-        certificate: "{{.Env.MACOS_SIGN_P12}}"
-        password: "{{.Env.MACOS_SIGN_PASSWORD}}"
-      notarize:
-        issuer_id: "{{.Env.MACOS_NOTARY_ISSUER_ID}}"
-        key_id: "{{.Env.MACOS_NOTARY_KEY_ID}}"
-        key: "{{.Env.MACOS_NOTARY_KEY}}"
-        wait: true
-        timeout: 20m
+    - enabled: 'false'
 
 changelog:
   # Use GitHub's auto-generated release notes (categories configured in .github/release.yml)
