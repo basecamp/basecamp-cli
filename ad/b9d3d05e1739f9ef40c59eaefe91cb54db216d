@@ -1,0 +1,31 @@
+internal/output/output_test.go
+  8b11de8920af090f 1568-1613
+internal/commands/comments_embed.go
+  8b11de8920af090f 1-171
+internal/output/render.go
+  8b11de8920af090f 777,1316
+internal/commands/show.go
+  8b11de8920af090f 21,251-253,274-275,277-283,325,332
+internal/commands/comments_embed_test.go
+  8b11de8920af090f 1-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.21",
+  "base_commit_sha": "adb9d3d05e1739f9ef40c59eaefe91cb54db216d",
+  "prompts": {
+    "8b11de8920af090f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a923385a-5fc7-4413-9b42-ef17a60151b9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 314,
+      "total_deletions": 75,
+      "accepted_lines": 313,
+      "overriden_lines": 0
+    }
+  }
+}
