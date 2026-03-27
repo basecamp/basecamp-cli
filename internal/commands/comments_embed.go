@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -143,8 +144,11 @@ func withComments(data any, comments []basecamp.Comment) any {
 	if err != nil {
 		return data
 	}
+	// Decode with UseNumber to preserve integer precision (IDs > 2^53).
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
+	if err := dec.Decode(&m); err != nil {
 		return data
 	}
 	m["comments"] = comments
