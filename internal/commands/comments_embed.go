@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
