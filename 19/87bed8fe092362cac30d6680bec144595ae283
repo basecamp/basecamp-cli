@@ -1,0 +1,25 @@
+scripts/sign-darwin.sh
+  e357e6421117b0ac 1-42
+.goreleaser.yaml
+  e357e6421117b0ac 33-36,101-104,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "1987bed8fe092362cac30d6680bec144595ae283",
+  "prompts": {
+    "e357e6421117b0ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "99769036-ba74-40f1-b908-be4e8198f69e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 165,
+      "total_deletions": 32,
+      "accepted_lines": 152,
+      "overriden_lines": 0
+    }
+  }
+}
