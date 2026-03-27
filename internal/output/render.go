@@ -774,7 +774,7 @@ func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 	var fields []renderField
 
 	for k := range data {
-		if k == "comments" || strings.HasSuffix(k, "_attachments") || skipObjectColumns[k] {
+		if k == "comments" || k == "content_attachments" || k == "description_attachments" || skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects
@@ -1313,7 +1313,7 @@ func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any)
 	var fields []renderField
 
 	for k := range data {
-		if k == "comments" || strings.HasSuffix(k, "_attachments") || skipObjectColumns[k] {
+		if k == "comments" || k == "content_attachments" || k == "description_attachments" || skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects

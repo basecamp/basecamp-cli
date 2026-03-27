@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -21,8 +18,7 @@ import (
 // NewShowCmd creates the show command for viewing any recording.
 func NewShowCmd() *cobra.Command {
 	var recordType string
-	var noComments bool
-	var allComments bool
+	var cf *commentFlags
 	var dlDir *string
 
 	cmd := &cobra.Command{
@@ -129,8 +125,6 @@ You can also pass a Basecamp URL directly:
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			includeComments := !noComments
 
 			// Determine endpoint based on type. Types without a dedicated
 			// shortcut endpoint go through /recordings/ and need a refetch
@@ -254,35 +248,9 @@ You can also pass a Basecamp URL directly:
 				}
 			}
 
-			commentsCount, hasCommentsCount := recordingCommentsCount(data)
-			commentsFetchNotice := ""
-			commentsNotice := ""
-			if includeComments && hasCommentsCount && commentsCount > 0 {
-				recordingID, parseErr := strconv.ParseInt(id, 10, 64)
-				if parseErr == nil {
-					commentOpts := &basecamp.CommentListOptions{
-						Limit: basecamp.DefaultCommentLimit,
-					}
-					if allComments {
-						commentOpts.Limit = -1
-					}
-					commentsResult, commentsErr := app.Account().Comments().List(
-						cmd.Context(), recordingID,
-						commentOpts,
-					)
-					if commentsErr != nil {
-						commentsFetchNotice = commentsFetchFailedNotice(commentsCount, id)
-					} else {
-						data["comments"] = commentsResult.Comments
-						if !allComments {
-							totalComments := commentsCount
-							if commentsResult.Meta.TotalCount > totalComments {
-								totalComments = commentsResult.Meta.TotalCount
-							}
-							commentsNotice = commentsTruncationNotice(len(commentsResult.Comments), totalComments)
-						}
-					}
-				}
+			enrichment := fetchRecordingComments(cmd.Context(), app, id, data, cf)
+			if enrichment.Comments != nil {
+				data["comments"] = enrichment.Comments
 			}
 
 			// Extract title from various fields
@@ -303,30 +271,16 @@ You can also pass a Basecamp URL directly:
 			}
 
 			summary := fmt.Sprintf("%s #%s: %s", itemType, id, title)
-			if hasCommentsCount && commentsCount > 0 {
-				summary += fmt.Sprintf(" (%s)", pluralizeComments(commentsCount))
+			if enrichment.CountLabel != "" {
+				summary += fmt.Sprintf(" (%s)", enrichment.CountLabel)
 			}
-			breadcrumbs := []output.Breadcrumb{
-				{
-					Action:      "comment",
-					Cmd:         fmt.Sprintf("basecamp comment %s <text>", id),
-					Description: "Add comment",
-				},
-			}
-			if hasCommentsCount && commentsCount > 0 {
-				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
-					Action:      "comments",
-					Cmd:         fmt.Sprintf("basecamp comments list --all %s", id),
-					Description: "View all comments",
-				})
-				if commentsNotice != "" {
-					breadcrumbs = append(breadcrumbs, output.Breadcrumb{
-						Action:      "all-comments",
-						Cmd:         fmt.Sprintf("basecamp show --all-comments %s", id),
-						Description: "Fetch all comments",
-					})
-				}
-			}
+			breadcrumbs := make([]output.Breadcrumb, 0, 1+len(enrichment.Breadcrumbs))
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "comment",
+				Cmd:         fmt.Sprintf("basecamp comment %s <text>", id),
+				Description: "Add comment",
+			})
+			breadcrumbs = append(breadcrumbs, enrichment.Breadcrumbs...)
 
 			opts := []output.ResponseOption{
 				output.WithSummary(summary),
@@ -368,25 +322,15 @@ You can also pass a Basecamp URL directly:
 				opts = append(opts, output.WithBreadcrumbs(attachmentBreadcrumb(id, total)))
 			}
 
-			notice := joinShowNotices(commentsNotice, attachmentNotice)
-			if commentsFetchNotice != "" {
-				// Keep degraded comment-fetch warnings on the diagnostic channel,
-				// but merge any attachment/download notice so it is not lost.
-				diagnostic := joinShowNotices(commentsFetchNotice, attachmentNotice)
-				opts = append(opts, output.WithDiagnostic(diagnostic))
-			} else if notice != "" {
-				opts = append(opts, output.WithNotice(notice))
-			}
+			opts = append(opts, enrichment.applyNotices(attachmentNotice)...)
 
 			return app.OK(resultData, opts...)
 		},
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
-	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Skip comment fetching")
-	cmd.Flags().BoolVar(&allComments, "all-comments", false, fmt.Sprintf("Fetch all comments instead of the default %d", basecamp.DefaultCommentLimit))
+	cf = addCommentFlags(cmd)
 	dlDir = addDownloadAttachmentsFlag(cmd)
-	cmd.MarkFlagsMutuallyExclusive("no-comments", "all-comments")
 
 	return cmd
 }

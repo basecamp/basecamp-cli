@@ -1565,6 +1565,52 @@ func TestGenericObjectMarkdownRendersAttachmentSections(t *testing.T) {
 	assert.NotContains(t, output, "map[")
 }
 
+func TestStyledRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+
+	data := map[string]any{
+		"id":                        float64(1),
+		"previewable_attachments":   []any{map[string]any{"filename": "photo.jpg"}},
+		"content_attachments":       []any{map[string]any{"filename": "report.pdf"}},
+		"description_attachments":   []any{map[string]any{"filename": "notes.txt"}},
+		"custom_attachments_report": "some value",
+	}
+
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	// content_attachments and description_attachments are rendered as
+	// dedicated sections (not as raw fields).
+	assert.Contains(t, output, "Content Attachments:")
+	assert.Contains(t, output, "report.pdf")
+	assert.Contains(t, output, "Description Attachments:")
+	assert.Contains(t, output, "notes.txt")
+	// Unknown *_attachments fields must survive the filter — they are
+	// native API fields, not synthetic.
+	assert.Contains(t, output, "Custom Attachments Report")
+	assert.Contains(t, output, "some value")
+}
+
+func TestMarkdownRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+
+	data := map[string]any{
+		"id":                      float64(1),
+		"previewable_attachments": []any{map[string]any{"filename": "photo.jpg"}},
+		"content_attachments":     []any{map[string]any{"filename": "report.pdf"}},
+	}
+
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "### Content Attachments")
+	assert.Contains(t, output, "report.pdf")
+}
+
 // =============================================================================
 // Stats Rendering Tests
 // =============================================================================
