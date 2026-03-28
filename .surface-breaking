@@ -762,6 +762,3 @@ FLAG basecamp chat post --campfire type=string
 FLAG basecamp chat show --campfire type=string
 FLAG basecamp chat upload --campfire type=string
 
-FLAG basecamp comments show --all-comments type=bool
-FLAG basecamp comments show --comments type=bool
-FLAG basecamp comments show --no-comments type=bool
