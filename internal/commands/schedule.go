@@ -258,13 +258,16 @@ You can pass either an entry ID or a Basecamp URL:
   basecamp schedule show 789 --in my-project
   basecamp schedule show https://3.basecamp.com/123/buckets/456/schedule_entries/789`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-			return runScheduleEntryShow(cmd, app, args[0], *project, occurrenceDate)
-		},
+	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		app := appctx.FromContext(cmd.Context())
+		if err := ensureAccount(cmd, app); err != nil {
+			return err
+		}
+		return runScheduleEntryShow(cmd, app, args[0], *project, occurrenceDate, cf)
 	}
 
 	cmd.Flags().StringVar(&occurrenceDate, "date", "", "Access specific occurrence of recurring entry (YYYYMMDD)")
@@ -273,7 +276,7 @@ You can pass either an entry ID or a Basecamp URL:
 	return cmd
 }
 
-func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project, occurrenceDate string) error {
+func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project, occurrenceDate string, cf *commentFlags) error {
 	// Extract ID, project, and occurrence date from URL if provided.
 	// Uses Parse directly (instead of extractWithProject) to access the
 	// occurrence date that the URL encodes.
@@ -332,9 +335,10 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 			title = "Entry"
 		}
 
+		enrichment := fetchCommentsForRecording(cmd.Context(), app, entryID, cf)
 		summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-		return app.OK(entry,
+		opts := []output.ResponseOption{
 			output.WithSummary(summary),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
@@ -348,7 +352,15 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 					Description: "View all entries",
 				},
 			),
-		)
+		}
+
+		data := withComments(entry, enrichment.Comments)
+		opts = append(opts, enrichment.applyNotices("")...)
+		if len(enrichment.Breadcrumbs) > 0 {
+			opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
+		}
+
+		return app.OK(data, opts...)
 	}
 
 	entry, err := app.Account().Schedules().GetEntry(cmd.Context(), entryIDInt)
@@ -364,9 +376,10 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		title = "Entry"
 	}
 
+	enrichment := fetchCommentsForRecording(cmd.Context(), app, entryID, cf)
 	summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-	return app.OK(entry,
+	opts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -380,7 +393,15 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 				Description: "View all entries",
 			},
 		),
-	)
+	}
+
+	data := withComments(entry, enrichment.Comments)
+	opts = append(opts, enrichment.applyNotices("")...)
+	if len(enrichment.Breadcrumbs) > 0 {
+		opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
+	}
+
+	return app.OK(data, opts...)
 }
 
 func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {

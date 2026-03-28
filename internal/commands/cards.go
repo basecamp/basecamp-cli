@@ -267,6 +267,7 @@ You can pass either a card ID or a Basecamp URL:
 	}
 
 	dlDir := addDownloadAttachmentsFlag(cmd)
+	cf := addCommentFlags(cmd, false)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		app := appctx.FromContext(cmd.Context())
@@ -288,6 +289,8 @@ You can pass either a card ID or a Basecamp URL:
 			return convertSDKError(err)
 		}
 
+		enrichment := fetchCommentsForRecording(cmd.Context(), app, cardIDStr, cf)
+
 		opts := []output.ResponseOption{
 			output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
 			output.WithBreadcrumbs(
@@ -300,6 +303,7 @@ You can pass either a card ID or a Basecamp URL:
 		}
 
 		data := any(card)
+		attachmentNotice := ""
 		contentAtts := downloadableAttachments(richtext.ParseAttachments(card.Content))
 		descAtts := downloadableAttachments(richtext.ParseAttachments(card.Description))
 		total := len(contentAtts) + len(descAtts)
@@ -317,15 +321,20 @@ You can pass either a card ID or a Basecamp URL:
 			if len(descAtts) > 0 {
 				data = withAttachmentMeta(data, "description", descAtts, descDL)
 			}
-			notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+			attachmentNotice = fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
 				total, cardIDStr)
 			if dl != nil && dl.Notice != "" {
-				notice += "; " + dl.Notice
+				attachmentNotice += "; " + dl.Notice
 			}
 			opts = append(opts,
-				output.WithNotice(notice),
 				output.WithBreadcrumbs(attachmentBreadcrumb(cardIDStr, total)),
 			)
+		}
+
+		data = withComments(data, enrichment.Comments)
+		opts = append(opts, enrichment.applyNotices(attachmentNotice)...)
+		if len(enrichment.Breadcrumbs) > 0 {
+			opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
 		}
 
 		return app.OK(data, opts...)

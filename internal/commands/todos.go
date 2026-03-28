@@ -729,6 +729,7 @@ You can pass either a todo ID or a Basecamp URL:
 	}
 
 	dlDir := addDownloadAttachmentsFlag(cmd)
+	cf := addCommentFlags(cmd, false)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 
@@ -754,6 +755,8 @@ You can pass either a todo ID or a Basecamp URL:
 			return convertSDKError(err)
 		}
 
+		enrichment := fetchCommentsForRecording(cmd.Context(), app, todoIDStr, cf)
+
 		opts := []output.ResponseOption{
 			output.WithEntity("todo"),
 			output.WithBreadcrumbs(
@@ -776,6 +779,7 @@ You can pass either a todo ID or a Basecamp URL:
 		}
 
 		data := any(todo)
+		attachmentNotice := ""
 		attachments := downloadableAttachments(richtext.ParseAttachments(todo.Description))
 		if len(attachments) > 0 {
 			dl := runDownloadAttachments(cmd, app, attachments, dlDir)
@@ -784,15 +788,20 @@ You can pass either a todo ID or a Basecamp URL:
 				dlResults = dl.Results
 			}
 			data = withAttachmentMeta(todo, "description", attachments, dlResults)
-			notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+			attachmentNotice = fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
 				len(attachments), todoIDStr)
 			if dl != nil && dl.Notice != "" {
-				notice += "; " + dl.Notice
+				attachmentNotice += "; " + dl.Notice
 			}
 			opts = append(opts,
-				output.WithNotice(notice),
 				output.WithBreadcrumbs(attachmentBreadcrumb(todoIDStr, len(attachments))),
 			)
+		}
+
+		data = withComments(data, enrichment.Comments)
+		opts = append(opts, enrichment.applyNotices(attachmentNotice)...)
+		if len(enrichment.Breadcrumbs) > 0 {
+			opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
 		}
 
 		return app.OK(data, opts...)
