@@ -248,9 +248,13 @@ You can also pass a Basecamp URL directly:
 				}
 			}
 
-			enrichment := fetchRecordingComments(cmd.Context(), app, id, data, cf)
-			if enrichment.Comments != nil {
-				data["comments"] = enrichment.Comments
+			// Skip comment fetch for non-commentable types.
+			enrichment := &commentEnrichment{}
+			if isCommentableShowType(recordType, data) {
+				enrichment = fetchRecordingComments(cmd.Context(), app, id, data, cf)
+				if enrichment.Comments != nil {
+					data["comments"] = enrichment.Comments
+				}
 			}
 
 			// Extract title from various fields
@@ -329,7 +333,7 @@ You can also pass a Basecamp URL directly:
 	}
 
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Content type (e.g. todo, message, comment, card, document, vault, chat)")
-	cf = addCommentFlags(cmd)
+	cf = addCommentFlags(cmd, true)
 	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd
@@ -419,6 +423,28 @@ func parentRecordingID(data map[string]any) string {
 	default:
 		return ""
 	}
+}
+
+// isCommentableShowType returns true when the record type supports comments.
+// Checks the CLI type alias first; for generic lookups (empty recordType) falls
+// back to the API response's "type" field.
+func isCommentableShowType(recordType string, data map[string]any) bool {
+	// Non-commentable CLI type aliases.
+	switch recordType {
+	case "people", "boosts", "comment", "comments":
+		return false
+	}
+
+	// For generic lookups, check the API response type.
+	if recordType == "" || recordType == "recording" || recordType == "recordings" {
+		apiType, _ := data["type"].(string)
+		switch apiType {
+		case "Person", "Boost", "Comment":
+			return false
+		}
+	}
+
+	return true
 }
 
 // isValidRecordType checks if the given type is a valid recording type.

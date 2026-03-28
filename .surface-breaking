@@ -761,3 +761,4 @@ FLAG basecamp chat messages --campfire type=string
 FLAG basecamp chat post --campfire type=string
 FLAG basecamp chat show --campfire type=string
 FLAG basecamp chat upload --campfire type=string
+

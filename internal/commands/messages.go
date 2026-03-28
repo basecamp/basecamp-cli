@@ -192,6 +192,7 @@ You can pass either a message ID or a Basecamp URL:
 	}
 
 	dlDir := addDownloadAttachmentsFlag(cmd)
+	cf := addCommentFlags(cmd, false)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		app := appctx.FromContext(cmd.Context())
@@ -213,6 +214,8 @@ You can pass either a message ID or a Basecamp URL:
 			return convertSDKError(err)
 		}
 
+		enrichment := fetchCommentsForRecording(cmd.Context(), app, messageIDStr, cf)
+
 		opts := []output.ResponseOption{
 			output.WithSummary(fmt.Sprintf("Message: %s", message.Subject)),
 			output.WithEntity("message"),
@@ -226,6 +229,7 @@ You can pass either a message ID or a Basecamp URL:
 		}
 
 		data := any(message)
+		attachmentNotice := ""
 		attachments := downloadableAttachments(richtext.ParseAttachments(message.Content))
 		if len(attachments) > 0 {
 			dl := runDownloadAttachments(cmd, app, attachments, dlDir)
@@ -234,15 +238,20 @@ You can pass either a message ID or a Basecamp URL:
 				dlResults = dl.Results
 			}
 			data = withAttachmentMeta(message, "content", attachments, dlResults)
-			notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+			attachmentNotice = fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
 				len(attachments), messageIDStr)
 			if dl != nil && dl.Notice != "" {
-				notice += "; " + dl.Notice
+				attachmentNotice += "; " + dl.Notice
 			}
 			opts = append(opts,
-				output.WithNotice(notice),
 				output.WithBreadcrumbs(attachmentBreadcrumb(messageIDStr, len(attachments))),
 			)
+		}
+
+		data = withComments(data, enrichment.Comments)
+		opts = append(opts, enrichment.applyNotices(attachmentNotice)...)
+		if len(enrichment.Breadcrumbs) > 0 {
+			opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
 		}
 
 		return app.OK(data, opts...)

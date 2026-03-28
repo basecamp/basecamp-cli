@@ -998,6 +998,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 func newFilesShowCmd(project *string) *cobra.Command {
 	var itemType string
 	var dlDir *string
+	var cf *commentFlags
 
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
@@ -1151,12 +1152,15 @@ You can pass either an item ID or a Basecamp URL:
 				})
 			}
 
+			enrichment := fetchCommentsForRecording(cmd.Context(), app, itemIDStr, cf)
+
 			opts := []output.ResponseOption{
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
 			}
 
 			data := result
+			attachmentNotice := ""
 			if detectedType == "document" {
 				doc, ok := result.(*basecamp.Document)
 				if ok {
@@ -1168,17 +1172,22 @@ You can pass either an item ID or a Basecamp URL:
 							dlResults = dl.Results
 						}
 						data = withAttachmentMeta(doc, "content", attachments, dlResults)
-						notice := fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
+						attachmentNotice = fmt.Sprintf("%d attachment(s) — download: basecamp attachments download %s",
 							len(attachments), itemIDStr)
 						if dl != nil && dl.Notice != "" {
-							notice += "; " + dl.Notice
+							attachmentNotice += "; " + dl.Notice
 						}
 						opts = append(opts,
-							output.WithNotice(notice),
 							output.WithBreadcrumbs(attachmentBreadcrumb(itemIDStr, len(attachments))),
 						)
 					}
 				}
+			}
+
+			data = withComments(data, enrichment.Comments)
+			opts = append(opts, enrichment.applyNotices(attachmentNotice)...)
+			if len(enrichment.Breadcrumbs) > 0 {
+				opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
 			}
 
 			return app.OK(data, opts...)
@@ -1187,6 +1196,7 @@ You can pass either an item ID or a Basecamp URL:
 
 	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document)")
 	dlDir = addDownloadAttachmentsFlag(cmd)
+	cf = addCommentFlags(cmd, false)
 
 	return cmd
 }

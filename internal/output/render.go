@@ -624,6 +624,26 @@ func topLevelComments(data map[string]any) []map[string]any {
 	}
 }
 
+// isCommentsArray reports whether data["comments"] is an array type (including
+// empty arrays). Used to decide whether to suppress the raw field — non-array
+// comment values (string, int) from `basecamp api get` should render as fields.
+func isCommentsArray(data map[string]any) bool {
+	comments, ok := data["comments"]
+	if !ok {
+		return false
+	}
+	switch comments.(type) {
+	case []map[string]any, []any:
+		return true
+	}
+	normalized := NormalizeData(comments)
+	switch normalized.(type) {
+	case []map[string]any, []any:
+		return true
+	}
+	return false
+}
+
 type attachmentSection struct {
 	title       string
 	attachments []map[string]any
@@ -768,13 +788,14 @@ func (r *Renderer) renderAttachmentSections(b *strings.Builder, sections []attac
 
 func (r *Renderer) renderObject(b *strings.Builder, data map[string]any) {
 	comments := topLevelComments(data)
+	commentsIsArray := isCommentsArray(data)
 	attachmentSections := topLevelAttachmentSections(data)
 
 	// Collect fields with priority ordering
 	var fields []renderField
 
 	for k := range data {
-		if k == "comments" || k == "content_attachments" || k == "description_attachments" || skipObjectColumns[k] {
+		if (k == "comments" && commentsIsArray) || k == "content_attachments" || k == "description_attachments" || skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects
@@ -1307,13 +1328,14 @@ func (r *MarkdownRenderer) renderAttachmentSections(b *strings.Builder, sections
 
 func (r *MarkdownRenderer) renderObject(b *strings.Builder, data map[string]any) {
 	comments := topLevelComments(data)
+	commentsIsArray := isCommentsArray(data)
 	attachmentSections := topLevelAttachmentSections(data)
 
 	// Collect fields with priority ordering (same as styled renderer)
 	var fields []renderField
 
 	for k := range data {
-		if k == "comments" || k == "content_attachments" || k == "description_attachments" || skipObjectColumns[k] {
+		if (k == "comments" && commentsIsArray) || k == "content_attachments" || k == "description_attachments" || skipObjectColumns[k] {
 			continue
 		}
 		// Skip nested objects

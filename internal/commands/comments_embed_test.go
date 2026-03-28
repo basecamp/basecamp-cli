@@ -35,13 +35,28 @@ func TestWithCommentsNilIsNoOp(t *testing.T) {
 }
 
 func TestCommentFlagsShouldFetch(t *testing.T) {
-	t.Run("default", func(t *testing.T) {
+	t.Run("defaultOn true", func(t *testing.T) {
+		cf := &commentFlags{defaultOn: true}
+		assert.True(t, cf.shouldFetch())
+	})
+
+	t.Run("defaultOn false", func(t *testing.T) {
 		cf := &commentFlags{}
+		assert.False(t, cf.shouldFetch())
+	})
+
+	t.Run("comments flag", func(t *testing.T) {
+		cf := &commentFlags{comments: true}
 		assert.True(t, cf.shouldFetch())
 	})
 
 	t.Run("no-comments", func(t *testing.T) {
 		cf := &commentFlags{noComments: true}
+		assert.False(t, cf.shouldFetch())
+	})
+
+	t.Run("no-comments overrides defaultOn", func(t *testing.T) {
+		cf := &commentFlags{defaultOn: true, noComments: true}
 		assert.False(t, cf.shouldFetch())
 	})
 

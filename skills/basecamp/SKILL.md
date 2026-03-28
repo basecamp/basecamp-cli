@@ -750,10 +750,16 @@ basecamp search metadata --json                   # Available search scopes
 ### Generic Show
 
 ```bash
-basecamp show <type> <id> --in <project> --json                   # Show any recording type (includes up to 100 comments by default when available)
+basecamp show <type> <id> --in <project> --json                   # Show any recording type (includes up to 100 comments by default)
 basecamp show <type> <id> --all-comments --in <project> --json   # Fetch the full discussion when you need every comment
 basecamp show <type> <id> --no-comments --in <project> --json    # Skip the extra comments fetch
 # Types: todo, todolist, message, comment, card, card-table, document (or omit <type> for generic lookup)
+
+# Typed show commands also support --comments / --all-comments / --no-comments:
+basecamp todos show <id> --comments --json                        # Opt in to comments on typed show
+basecamp cards show <id> --all-comments --json                    # Fetch all comments on card
+basecamp messages show <id> --no-comments --json                  # Suppress comments
+# All commentable show commands: todos, messages, cards, files, todolists, schedule, checkins, forwards, chat
 ```
 
 ## Configuration

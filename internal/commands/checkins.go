@@ -153,13 +153,16 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		Use:   "question <id|url>",
 		Short: "Show or manage a question",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
-			}
-			return runCheckinsQuestionShow(cmd, *project, args[0])
-		},
+	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Show help when invoked with no arguments
+		if len(args) == 0 {
+			return missingArg(cmd, "<id|url>")
+		}
+		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
 	}
 
 	cmd.AddCommand(
@@ -172,7 +175,7 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 }
 
 func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show question details",
 		Long: `Display details of a check-in question.
@@ -181,13 +184,18 @@ You can pass either a question ID or a Basecamp URL:
   basecamp checkins question show 789 --in my-project
   basecamp checkins question show https://3.basecamp.com/123/buckets/456/questionnaires/questions/789`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCheckinsQuestionShow(cmd, *project, args[0])
-		},
 	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
+	}
+
+	return cmd
 }
 
-func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) error {
+func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, cf *commentFlags) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -230,9 +238,10 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 		return convertSDKError(err)
 	}
 
+	enrichment := fetchCommentsForRecording(cmd.Context(), app, questionIDStr, cf)
 	summary := fmt.Sprintf("%s (%d answers)", question.Title, question.AnswersCount)
 
-	return app.OK(question,
+	opts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -246,7 +255,15 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string) 
 				Description: "View all questions",
 			},
 		),
-	)
+	}
+
+	data := withComments(question, enrichment.Comments)
+	opts = append(opts, enrichment.applyNotices("")...)
+	if len(enrichment.Breadcrumbs) > 0 {
+		opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
+	}
+
+	return app.OK(data, opts...)
 }
 
 func newCheckinsQuestionCreateCmd(project *string) *cobra.Command {
@@ -620,13 +637,16 @@ func newCheckinsAnswerCmd(project *string) *cobra.Command {
 		Use:   "answer <id|url>",
 		Short: "Show or manage an answer",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
-			}
-			return runCheckinsAnswerShow(cmd, *project, args[0])
-		},
+	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Show help when invoked with no arguments
+		if len(args) == 0 {
+			return missingArg(cmd, "<id|url>")
+		}
+		return runCheckinsAnswerShow(cmd, *project, args[0], cf)
 	}
 
 	cmd.AddCommand(
@@ -639,7 +659,7 @@ func newCheckinsAnswerCmd(project *string) *cobra.Command {
 }
 
 func newCheckinsAnswerShowCmd(project *string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show answer details",
 		Long: `Display details of a check-in answer.
@@ -648,13 +668,18 @@ You can pass either an answer ID or a Basecamp URL:
   basecamp checkins answer show 789 --in my-project
   basecamp checkins answer show https://3.basecamp.com/123/buckets/456/question_answers/789`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCheckinsAnswerShow(cmd, *project, args[0])
-		},
 	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runCheckinsAnswerShow(cmd, *project, args[0], cf)
+	}
+
+	return cmd
 }
 
-func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) error {
+func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string, cf *commentFlags) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -705,6 +730,8 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 	if len(date) > 10 {
 		date = date[:10]
 	}
+
+	enrichment := fetchCommentsForRecording(cmd.Context(), app, answerIDStr, cf)
 	summary := fmt.Sprintf("Answer by %s on %s", author, date)
 
 	questionID := ""
@@ -712,7 +739,7 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 		questionID = strconv.FormatInt(answer.Parent.ID, 10)
 	}
 
-	return app.OK(answer,
+	opts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -726,7 +753,15 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string) erro
 				Description: "View all answers",
 			},
 		),
-	)
+	}
+
+	data := withComments(answer, enrichment.Comments)
+	opts = append(opts, enrichment.applyNotices("")...)
+	if len(enrichment.Breadcrumbs) > 0 {
+		opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
+	}
+
+	return app.OK(data, opts...)
 }
 
 func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
