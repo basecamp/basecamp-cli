@@ -1,0 +1,23 @@
+internal/commands/checkins.go
+  2f84edf89ef38796 156-165,640-649
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.21",
+  "base_commit_sha": "08fb5a87c1afcfc6349dc9f543ee52eb963decb5",
+  "prompts": {
+    "2f84edf89ef38796": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f9aeca1-bc9a-4756-a1c1-dea0f2d28a14",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    }
+  }
+}
