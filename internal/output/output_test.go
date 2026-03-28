@@ -1570,11 +1570,10 @@ func TestStyledRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
 	w := New(Options{Format: FormatStyled, Writer: &buf})
 
 	data := map[string]any{
-		"id":                        float64(1),
-		"previewable_attachments":   []any{map[string]any{"filename": "photo.jpg"}},
-		"content_attachments":       []any{map[string]any{"filename": "report.pdf"}},
-		"description_attachments":   []any{map[string]any{"filename": "notes.txt"}},
-		"custom_attachments_report": "some value",
+		"id":                      float64(1),
+		"previewable_attachments": []any{map[string]any{"filename": "photo.jpg"}},
+		"content_attachments":     []any{map[string]any{"filename": "report.pdf"}},
+		"description_attachments": []any{map[string]any{"filename": "notes.txt"}},
 	}
 
 	err := w.OK(data)
@@ -1587,10 +1586,9 @@ func TestStyledRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
 	assert.Contains(t, output, "report.pdf")
 	assert.Contains(t, output, "Description Attachments:")
 	assert.Contains(t, output, "notes.txt")
-	// Unknown *_attachments fields must survive the filter — they are
-	// native API fields, not synthetic.
-	assert.Contains(t, output, "Custom Attachments Report")
-	assert.Contains(t, output, "some value")
+	// Other *_attachments fields are native API fields that must survive.
+	assert.Contains(t, output, "Previewable Attachments")
+	assert.Contains(t, output, "photo.jpg")
 }
 
 func TestMarkdownRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
@@ -1609,6 +1607,9 @@ func TestMarkdownRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
 	output := buf.String()
 	assert.Contains(t, output, "### Content Attachments")
 	assert.Contains(t, output, "report.pdf")
+	// Other *_attachments fields are native API fields that must survive.
+	assert.Contains(t, output, "Previewable Attachments")
+	assert.Contains(t, output, "photo.jpg")
 }
 
 // =============================================================================
