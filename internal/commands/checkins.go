@@ -153,13 +153,16 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		Use:   "question <id|url>",
 		Short: "Show or manage a question",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
-			}
-			return runCheckinsQuestionShow(cmd, *project, args[0], &commentFlags{})
-		},
+	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Show help when invoked with no arguments
+		if len(args) == 0 {
+			return missingArg(cmd, "<id|url>")
+		}
+		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
 	}
 
 	cmd.AddCommand(
@@ -634,13 +637,16 @@ func newCheckinsAnswerCmd(project *string) *cobra.Command {
 		Use:   "answer <id|url>",
 		Short: "Show or manage an answer",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no arguments
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
-			}
-			return runCheckinsAnswerShow(cmd, *project, args[0], &commentFlags{})
-		},
+	}
+
+	cf := addCommentFlags(cmd, false)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Show help when invoked with no arguments
+		if len(args) == 0 {
+			return missingArg(cmd, "<id|url>")
+		}
+		return runCheckinsAnswerShow(cmd, *project, args[0], cf)
 	}
 
 	cmd.AddCommand(
