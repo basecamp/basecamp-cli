@@ -431,7 +431,7 @@ func parentRecordingID(data map[string]any) string {
 func isCommentableShowType(recordType string, data map[string]any) bool {
 	// Non-commentable CLI type aliases.
 	switch recordType {
-	case "people", "boosts":
+	case "people", "boosts", "comment", "comments":
 		return false
 	}
 
@@ -439,7 +439,7 @@ func isCommentableShowType(recordType string, data map[string]any) bool {
 	if recordType == "" || recordType == "recording" || recordType == "recordings" {
 		apiType, _ := data["type"].(string)
 		switch apiType {
-		case "Person", "Boost":
+		case "Person", "Boost", "Comment":
 			return false
 		}
 	}
