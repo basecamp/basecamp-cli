@@ -1565,7 +1565,7 @@ func TestGenericObjectMarkdownRendersAttachmentSections(t *testing.T) {
 	assert.NotContains(t, output, "map[")
 }
 
-func TestStyledRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
+func TestStyledRenderObjectPreservesNativeAttachmentFields(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatStyled, Writer: &buf})
 
@@ -1591,7 +1591,7 @@ func TestStyledRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
 	assert.Contains(t, output, "photo.jpg")
 }
 
-func TestMarkdownRenderObjectPreservesUnknownAttachmentFields(t *testing.T) {
+func TestMarkdownRenderObjectPreservesNativeAttachmentFields(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatMarkdown, Writer: &buf})
 
