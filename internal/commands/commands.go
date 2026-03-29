@@ -44,6 +44,9 @@ func CommandCategories() []CommandCategory {
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "publish", "pin", "unpin", "trash", "archive", "restore"}},
 				{Name: "chat", Category: "core", Description: "Chat in real-time", Actions: []string{"list", "messages", "post", "upload", "line", "delete"}},
 				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "columns", "steps", "trash", "archive", "restore"}},
+				{Name: "files", Category: "core", Description: "Manage files, documents, and folders", Actions: []string{"list", "show", "download", "update", "trash", "archive", "restore"}},
+				{Name: "checkins", Category: "core", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
+				{Name: "schedule", Category: "core", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},
 			},
 		},
 		{
@@ -65,7 +68,6 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Files & Docs",
 			Commands: []CommandInfo{
-				{Name: "files", Category: "files", Description: "Manage files, documents, and folders", Actions: []string{"list", "show", "download", "update", "trash", "archive", "restore"}},
 				{Name: "uploads", Category: "files", Description: "List and manage uploads", Actions: []string{"list", "show", "download", "update", "trash", "archive", "restore"}},
 				{Name: "vaults", Category: "files", Description: "Manage folders (vaults)", Actions: []string{"list", "show", "download", "update", "trash", "archive", "restore"}},
 				{Name: "docs", Category: "files", Description: "Manage documents", Actions: []string{"list", "show", "download", "update", "trash", "archive", "restore"}},
@@ -74,9 +76,7 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Scheduling & Time",
 			Commands: []CommandInfo{
-				{Name: "schedule", Category: "scheduling", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},
 				{Name: "timesheet", Category: "scheduling", Description: "Manage time tracking", Actions: []string{"report", "project", "item"}},
-				{Name: "checkins", Category: "scheduling", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
 				{Name: "timeline", Category: "scheduling", Description: "View activity timelines", Actions: []string{}},
 				{Name: "reports", Category: "scheduling", Description: "View reports", Actions: []string{"assignable", "assigned", "overdue", "schedule"}},
 				{Name: "assignments", Category: "scheduling", Description: "View my assignments", Actions: []string{"list", "completed", "due"}},
