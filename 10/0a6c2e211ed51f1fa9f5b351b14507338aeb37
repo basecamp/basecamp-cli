@@ -1,0 +1,31 @@
+internal/commands/show_test.go
+  29e6cd8313f4b465 139-168
+internal/commands/comments_embed_test.go
+  29e6cd8313f4b465 9-10,96-138
+internal/commands/todolists.go
+  29e6cd8313f4b465 236,238-239,254-255
+internal/commands/forwards.go
+  29e6cd8313f4b465 225,227-228,242-243
+internal/commands/cards.go
+  29e6cd8313f4b465 334-335
+internal/commands/schedule.go
+  29e6cd8313f4b465 339,342-343,357-358,377,380-381,395-396
+internal/commands/comments_embed.go
+  29e6cd8313f4b465 195-206
+internal/commands/checkins.go
+  29e6cd8313f4b465 242,245-246,260-261,732,740-741,755-756
+internal/commands/todos.go
+  29e6cd8313f4b465 801-802
+internal/commands/chat.go
+  29e6cd8313f4b465 704,707-708,724-725
+internal/commands/files.go
+  29e6cd8313f4b465 1187-1188
+internal/commands/messages.go
+  29e6cd8313f4b465 251-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.22",
+  "base_commit_sha": "100a6c2e211ed51f1fa9f5b351b14507338aeb37",
+  "prompts": {}
+}
