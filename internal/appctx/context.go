@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/resilience"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 // contextKey is a private type for context keys.
@@ -122,6 +123,7 @@ func NewApp(cfg *config.Config) *App {
 	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr},
 		basecamp.WithHooks(hooks),
 		basecamp.WithTransport(transport),
+		basecamp.WithUserAgent(version.UserAgent()+" "+basecamp.DefaultUserAgent),
 	)
 
 	// Create name resolver using SDK client and account ID

@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 func TestNewApp(t *testing.T) {
@@ -23,6 +27,24 @@ func TestNewApp(t *testing.T) {
 	assert.NotNil(t, app.SDK, "SDK client not initialized")
 	assert.NotNil(t, app.Names, "Names resolver not initialized")
 	assert.NotNil(t, app.Output, "Output writer not initialized")
+}
+
+func TestNewAppSetsCombinedUserAgent(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "test-token")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, version.UserAgent()+" "+basecamp.DefaultUserAgent, r.Header.Get("User-Agent"))
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"ok":true}`))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	app := NewApp(&config.Config{BaseURL: server.URL})
+
+	_, err := app.SDK.Get(context.Background(), "/test.json")
+	require.NoError(t, err)
 }
 
 func TestWithAppAndFromContext(t *testing.T) {
