@@ -1,0 +1,11 @@
+internal/output/envelope.go
+  29e6cd8313f4b465 549-560,606-612
+internal/output/output_test.go
+  29e6cd8313f4b465 3433-3546
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.22",
+  "base_commit_sha": "0e658c58e395ee775656fad547d706242a1be489",
+  "prompts": {}
+}
