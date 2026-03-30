@@ -239,9 +239,11 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, 
 	}
 
 	enrichment := fetchCommentsForRecording(cmd.Context(), app, questionIDStr, cf)
+	data, commentOpts := enrichment.apply(question, "")
 	summary := fmt.Sprintf("%s (%d answers)", question.Title, question.AnswersCount)
 
-	opts := []output.ResponseOption{
+	opts := make([]output.ResponseOption, 0, 2+len(commentOpts))
+	opts = append(opts,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -255,13 +257,8 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, 
 				Description: "View all questions",
 			},
 		),
-	}
-
-	data := withComments(question, enrichment.Comments)
-	opts = append(opts, enrichment.applyNotices("")...)
-	if len(enrichment.Breadcrumbs) > 0 {
-		opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-	}
+	)
+	opts = append(opts, commentOpts...)
 
 	return app.OK(data, opts...)
 }
@@ -732,6 +729,7 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string, cf *
 	}
 
 	enrichment := fetchCommentsForRecording(cmd.Context(), app, answerIDStr, cf)
+	data, commentOpts := enrichment.apply(answer, "")
 	summary := fmt.Sprintf("Answer by %s on %s", author, date)
 
 	questionID := ""
@@ -739,7 +737,8 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string, cf *
 		questionID = strconv.FormatInt(answer.Parent.ID, 10)
 	}
 
-	opts := []output.ResponseOption{
+	opts := make([]output.ResponseOption, 0, 2+len(commentOpts))
+	opts = append(opts,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -753,13 +752,8 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string, cf *
 				Description: "View all answers",
 			},
 		),
-	}
-
-	data := withComments(answer, enrichment.Comments)
-	opts = append(opts, enrichment.applyNotices("")...)
-	if len(enrichment.Breadcrumbs) > 0 {
-		opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-	}
+	)
+	opts = append(opts, commentOpts...)
 
 	return app.OK(data, opts...)
 }

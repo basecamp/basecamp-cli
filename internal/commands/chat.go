@@ -701,9 +701,11 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			enrichment := fetchCommentsForRecording(cmd.Context(), app, lineID, cf)
+			data, commentOpts := enrichment.apply(line, "")
 			summary := fmt.Sprintf("Line #%s by %s", lineID, creatorName)
 
-			opts := []output.ResponseOption{
+			opts := make([]output.ResponseOption, 0, 4+len(commentOpts))
+			opts = append(opts,
 				output.WithSummary(summary),
 				output.WithEntity("chat_line"),
 				output.WithDisplayData(chatLineDisplayData(line)),
@@ -719,13 +721,8 @@ You can pass either a line ID or a Basecamp line URL:
 						Description: "Back to messages",
 					},
 				),
-			}
-
-			data := withComments(line, enrichment.Comments)
-			opts = append(opts, enrichment.applyNotices("")...)
-			if len(enrichment.Breadcrumbs) > 0 {
-				opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-			}
+			)
+			opts = append(opts, commentOpts...)
 
 			return app.OK(data, opts...)
 		},

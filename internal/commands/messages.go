@@ -248,11 +248,8 @@ You can pass either a message ID or a Basecamp URL:
 			)
 		}
 
-		data = withComments(data, enrichment.Comments)
-		opts = append(opts, enrichment.applyNotices(attachmentNotice)...)
-		if len(enrichment.Breadcrumbs) > 0 {
-			opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-		}
+		data, extraOpts := enrichment.apply(data, attachmentNotice)
+		opts = append(opts, extraOpts...)
 
 		return app.OK(data, opts...)
 	}

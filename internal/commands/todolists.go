@@ -233,8 +233,10 @@ You can pass either a todolist ID or a Basecamp URL:
 			}
 
 			enrichment := fetchCommentsForRecording(cmd.Context(), app, todolistIDStr, cf)
+			data, commentOpts := enrichment.apply(todolist, "")
 
-			opts := []output.ResponseOption{
+			opts := make([]output.ResponseOption, 0, 3+len(commentOpts))
+			opts = append(opts,
 				output.WithEntity("todolist"),
 				output.WithSummary(fmt.Sprintf("Todolist: %s", todolist.Name)),
 				output.WithBreadcrumbs(
@@ -249,13 +251,8 @@ You can pass either a todolist ID or a Basecamp URL:
 						Description: "Add todo",
 					},
 				),
-			}
-
-			data := withComments(todolist, enrichment.Comments)
-			opts = append(opts, enrichment.applyNotices("")...)
-			if len(enrichment.Breadcrumbs) > 0 {
-				opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-			}
+			)
+			opts = append(opts, commentOpts...)
 
 			return app.OK(data, opts...)
 		},

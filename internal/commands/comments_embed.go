@@ -192,6 +192,18 @@ func withComments(data any, comments []basecamp.Comment) any {
 	return m
 }
 
+// apply merges comments into data and returns the enriched data plus response
+// options (notices + breadcrumbs). Every typed show command calls this instead
+// of inlining the withComments / applyNotices / breadcrumbs sequence.
+func (ce *commentEnrichment) apply(data any, attachmentNotice string) (any, []output.ResponseOption) {
+	data = withComments(data, ce.Comments)
+	opts := ce.applyNotices(attachmentNotice)
+	if len(ce.Breadcrumbs) > 0 {
+		opts = append(opts, output.WithBreadcrumbs(ce.Breadcrumbs...))
+	}
+	return data, opts
+}
+
 // applyNotices merges comment and attachment notices into response options.
 // Routes fetch-failure diagnostics to WithDiagnostic; normal notices to
 // WithNotice. attachmentNotice is folded in so it is never lost.

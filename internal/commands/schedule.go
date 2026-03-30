@@ -336,9 +336,11 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		}
 
 		enrichment := fetchCommentsForRecording(cmd.Context(), app, entryID, cf)
+		data, commentOpts := enrichment.apply(entry, "")
 		summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-		opts := []output.ResponseOption{
+		opts := make([]output.ResponseOption, 0, 2+len(commentOpts))
+		opts = append(opts,
 			output.WithSummary(summary),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
@@ -352,13 +354,8 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 					Description: "View all entries",
 				},
 			),
-		}
-
-		data := withComments(entry, enrichment.Comments)
-		opts = append(opts, enrichment.applyNotices("")...)
-		if len(enrichment.Breadcrumbs) > 0 {
-			opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-		}
+		)
+		opts = append(opts, commentOpts...)
 
 		return app.OK(data, opts...)
 	}
@@ -377,9 +374,11 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 	}
 
 	enrichment := fetchCommentsForRecording(cmd.Context(), app, entryID, cf)
+	data, commentOpts := enrichment.apply(entry, "")
 	summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
-	opts := []output.ResponseOption{
+	opts := make([]output.ResponseOption, 0, 2+len(commentOpts))
+	opts = append(opts,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -393,13 +392,8 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 				Description: "View all entries",
 			},
 		),
-	}
-
-	data := withComments(entry, enrichment.Comments)
-	opts = append(opts, enrichment.applyNotices("")...)
-	if len(enrichment.Breadcrumbs) > 0 {
-		opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-	}
+	)
+	opts = append(opts, commentOpts...)
 
 	return app.OK(data, opts...)
 }

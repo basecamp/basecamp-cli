@@ -136,6 +136,36 @@ func TestKnownURLPathTypesAreValid(t *testing.T) {
 	}
 }
 
+func TestIsCommentableShowType(t *testing.T) {
+	t.Run("non-commentable CLI aliases", func(t *testing.T) {
+		for _, alias := range []string{"people", "boosts", "comment", "comments"} {
+			assert.False(t, isCommentableShowType(alias, nil), alias)
+		}
+	})
+
+	t.Run("commentable CLI aliases", func(t *testing.T) {
+		for _, alias := range []string{"todo", "message", "card", ""} {
+			assert.True(t, isCommentableShowType(alias, map[string]any{}), alias)
+		}
+	})
+
+	t.Run("generic lookup with non-commentable API type", func(t *testing.T) {
+		for _, apiType := range []string{"Person", "Boost", "Comment"} {
+			data := map[string]any{"type": apiType}
+			assert.False(t, isCommentableShowType("", data), apiType)
+		}
+	})
+
+	t.Run("generic lookup with commentable API type", func(t *testing.T) {
+		data := map[string]any{"type": "Todo"}
+		assert.True(t, isCommentableShowType("", data))
+	})
+
+	t.Run("generic lookup with no type in data defaults commentable", func(t *testing.T) {
+		assert.True(t, isCommentableShowType("", map[string]any{}))
+	})
+}
+
 // --- Test helpers ---
 
 // showTestTokenProvider is a mock token provider for show tests.

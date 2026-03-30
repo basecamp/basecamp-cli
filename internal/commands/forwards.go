@@ -222,8 +222,10 @@ You can pass either a forward ID or a Basecamp URL:
 			}
 
 			enrichment := fetchCommentsForRecording(cmd.Context(), app, forwardIDStr, cf)
+			data, commentOpts := enrichment.apply(forward, "")
 
-			opts := []output.ResponseOption{
+			opts := make([]output.ResponseOption, 0, 2+len(commentOpts))
+			opts = append(opts,
 				output.WithSummary(subject),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -237,13 +239,8 @@ You can pass either a forward ID or a Basecamp URL:
 						Description: "List all forwards",
 					},
 				),
-			}
-
-			data := withComments(forward, enrichment.Comments)
-			opts = append(opts, enrichment.applyNotices("")...)
-			if len(enrichment.Breadcrumbs) > 0 {
-				opts = append(opts, output.WithBreadcrumbs(enrichment.Breadcrumbs...))
-			}
+			)
+			opts = append(opts, commentOpts...)
 
 			return app.OK(data, opts...)
 		},
