@@ -3430,6 +3430,121 @@ func TestChatLineDisplayData_JSONPreservesOriginal(t *testing.T) {
 }
 
 // =============================================================================
+// Entity Presenter + Comments Tests
+// =============================================================================
+
+func TestEntityPresenterRendersComments(t *testing.T) {
+	formats := []struct {
+		name   string
+		format Format
+	}{
+		{"styled", FormatStyled},
+		{"markdown", FormatMarkdown},
+	}
+
+	for _, f := range formats {
+		t.Run(f.name+"_plain_entity", func(t *testing.T) {
+			var buf bytes.Buffer
+			w := New(Options{Format: f.format, Writer: &buf})
+
+			data := map[string]any{
+				"id":        float64(42),
+				"content":   "Buy milk",
+				"completed": false,
+				"comments": []any{
+					map[string]any{
+						"id":      float64(9001),
+						"content": "Great idea",
+						"creator": map[string]any{"name": "Annie Bryan"},
+					},
+				},
+			}
+
+			err := w.OK(data, WithEntity("todo"))
+			require.NoError(t, err)
+
+			out := ansi.Strip(buf.String())
+			// Presenter artifact from todo.yaml schema
+			assert.Contains(t, out, "Status")
+			// Comment rendered after presenter
+			assert.Contains(t, out, "Annie Bryan")
+			assert.Contains(t, out, "Great idea")
+		})
+
+		t.Run(f.name+"_display_data_path", func(t *testing.T) {
+			var buf bytes.Buffer
+			w := New(Options{Format: f.format, Writer: &buf})
+
+			// Data has comments + raw content (the canonical source).
+			data := map[string]any{
+				"id":      float64(555),
+				"content": "<p>raw-server-html</p>",
+				"comments": []any{
+					map[string]any{
+						"id":      float64(8001),
+						"content": "Interesting point",
+						"creator": map[string]any{"name": "Jason Fried"},
+					},
+				},
+			}
+
+			// DisplayData has display-friendly content but NO comments.
+			displayData := map[string]any{
+				"id":         float64(555),
+				"content":    "display-friendly-text",
+				"created_at": "2024-01-01T00:00:00Z",
+			}
+
+			err := w.OK(data, WithEntity("chat_line"), WithDisplayData(displayData))
+			require.NoError(t, err)
+
+			out := ansi.Strip(buf.String())
+			// Display content is rendered (from DisplayData)
+			assert.Contains(t, out, "display-friendly-text")
+			// Raw content is NOT rendered (proves presenter used DisplayData)
+			assert.NotContains(t, out, "raw-server-html")
+			// Comment from Data still renders
+			assert.Contains(t, out, "Jason Fried")
+			assert.Contains(t, out, "Interesting point")
+		})
+	}
+}
+
+// =============================================================================
+// isCommentsArray Tests
+// =============================================================================
+
+func TestIsCommentsArray(t *testing.T) {
+	t.Run("key absent", func(t *testing.T) {
+		assert.False(t, isCommentsArray(map[string]any{"id": 1}))
+	})
+
+	t.Run("empty []any", func(t *testing.T) {
+		assert.True(t, isCommentsArray(map[string]any{"comments": []any{}}))
+	})
+
+	t.Run("populated []any", func(t *testing.T) {
+		assert.True(t, isCommentsArray(map[string]any{
+			"comments": []any{map[string]any{"id": 1}},
+		}))
+	})
+
+	t.Run("[]map[string]any", func(t *testing.T) {
+		assert.True(t, isCommentsArray(map[string]any{
+			"comments": []map[string]any{{"id": 1}},
+		}))
+	})
+
+	t.Run("string value", func(t *testing.T) {
+		assert.False(t, isCommentsArray(map[string]any{"comments": "some string"}))
+	})
+
+	t.Run("integer value", func(t *testing.T) {
+		assert.False(t, isCommentsArray(map[string]any{"comments": 42}))
+	})
+}
+
+// =============================================================================
 // PluralNoun Tests
 // =============================================================================
 

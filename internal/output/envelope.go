@@ -546,6 +546,18 @@ func (w *Writer) presentStyledEntity(resp *Response) bool {
 
 	out.WriteString(buf.String())
 
+	// Comments live on resp.Data, not on DisplayData (which may be set for
+	// chat_line etc.). The presenter only renders fields declared in YAML
+	// schemas, so comments must be appended separately.
+	if commentData, ok := NormalizeData(resp.Data).(map[string]any); ok {
+		if comments := topLevelComments(commentData); len(comments) > 0 {
+			out.WriteString("\n")
+			out.WriteString(r.Header.Render("Comments:"))
+			out.WriteString("\n")
+			r.renderCommentsSection(&out, comments)
+		}
+	}
+
 	if len(resp.Breadcrumbs) > 0 {
 		out.WriteString("\n")
 		r.renderBreadcrumbs(&out, resp.Breadcrumbs)
@@ -590,6 +602,14 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 	}
 
 	out.WriteString(buf.String())
+
+	// Comments live on resp.Data (see styled presenter comment above).
+	if commentData, ok := NormalizeData(resp.Data).(map[string]any); ok {
+		if comments := topLevelComments(commentData); len(comments) > 0 {
+			out.WriteString("\n## Comments\n\n")
+			mr.renderCommentsSection(&out, comments)
+		}
+	}
 
 	if len(resp.Breadcrumbs) > 0 {
 		out.WriteString("\n### Hints\n\n")
