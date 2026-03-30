@@ -1,0 +1,23 @@
+internal/output/envelope.go
+  29e6cd8313f4b465 549-560,606-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.22",
+  "base_commit_sha": "cb57023bb8c88bb437f6ba6834ac0ce4bcdb4a4e",
+  "prompts": {
+    "29e6cd8313f4b465": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3f7c011-41b4-4210-a077-2d9f70ab0db5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 208,
+      "overriden_lines": 0
+    }
+  }
+}
