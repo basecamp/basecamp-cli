@@ -421,7 +421,7 @@ func TestShowIncludesCommentsWhenPresent(t *testing.T) {
 	assert.Equal(t, []int{9001, 9002}, []int{decodedComments[0].ID, decodedComments[1].ID})
 }
 
-func TestShowNoCommentsWhenCountZero(t *testing.T) {
+func TestShowFetchesCommentsEvenWhenCountZero(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {
 			if strings.Contains(path, "/todos/42.json") {

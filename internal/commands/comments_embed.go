@@ -146,6 +146,14 @@ func fetchRecordingComments(
 		})
 	}
 
+	// When TotalCount was missing from the API response but the parent's
+	// comments_count indicates truncation, recompute the notice so the user
+	// sees a warning and the --all-comments breadcrumb is appended below.
+	if result.Notice == "" && !cf.allComments && hasCommentsCount && commentsCount > 0 &&
+		len(result.Comments) > 0 && len(result.Comments) < commentsCount {
+		result.Notice = commentsTruncationNotice(len(result.Comments), commentsCount)
+	}
+
 	// When fetch failed, enhance error with count from parent.
 	if result.FetchNotice != "" && hasCommentsCount && commentsCount > 0 {
 		result.FetchNotice = commentsFetchFailedNotice(commentsCount, id)
