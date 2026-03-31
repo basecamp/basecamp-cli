@@ -23,6 +23,15 @@ var (
 	olPattern = regexp.MustCompile(`^(\s*)\d+\.\s+(.*)$`)
 )
 
+// CommonMark §2.4: any ASCII punctuation may be backslash-escaped.
+// Exact set: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+//
+// We intentionally omit @ from the set: in Basecamp context \@ is the
+// idiomatic way to suppress a mention ping, so it must pass through
+// literally and not be unescaped into a bare @ that ResolveMentions
+// would convert into a <bc-attachment> mention.
+const commonMarkEscapablePunctuation = "!\"#$%&'()*+,-./:;<=>?[\\]^_`{|}~"
+
 // Pre-compiled regexes for convertInline (Markdown → HTML inline elements)
 var (
 	reCodeSpan      = regexp.MustCompile("`([^`]+)`")
@@ -34,6 +43,11 @@ var (
 	reImage         = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 	reLink          = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 	reStrikethrough = regexp.MustCompile(`~~([^~]+)~~`)
+
+	// Protect escaped backticks before code-span detection so \` does not start a code span.
+	reEscapedBacktick = regexp.MustCompile("\\\\`")
+	// Matches a backslash followed by any CommonMark-escapable ASCII punctuation character.
+	reBackslashEscape = regexp.MustCompile(`\\([` + regexp.QuoteMeta(commonMarkEscapablePunctuation) + `])`)
 )
 
 // Pre-compiled regexes for HTMLToMarkdown (HTML → Markdown block elements)
@@ -341,12 +355,19 @@ func MarkdownToHTML(md string) string {
 }
 
 // convertInline converts inline Markdown elements (bold, italic, links, code) to HTML.
-// Code spans are protected from further processing to preserve their literal content.
+// Code spans and backslash escapes are protected from further processing to preserve
+// their literal content.
 func convertInline(text string) string {
-	// Escape HTML entities first
-	text = escapeHTML(text)
+	// Protect escaped backticks before code-span detection so \` remains literal
+	// and cannot be interpreted as a code-span delimiter.
+	var escapedBackticks []string
+	text = reEscapedBacktick.ReplaceAllStringFunc(text, func(_ string) string {
+		idx := len(escapedBackticks)
+		escapedBackticks = append(escapedBackticks, "`")
+		return "\x00ESCBT" + strconv.Itoa(idx) + "\x00"
+	})
 
-	// Extract code spans and replace with placeholders to protect them
+	// Extract code spans — their content must be completely literal.
 	var codeSpans []string
 	text = reCodeSpan.ReplaceAllStringFunc(text, func(match string) string {
 		inner := reCodeSpan.FindStringSubmatch(match)
@@ -357,6 +378,21 @@ func convertInline(text string) string {
 		}
 		return match
 	})
+
+	// Process backslash escapes (CommonMark §2.4): a backslash before an ASCII
+	// punctuation character produces the literal character. We extract these into
+	// placeholders so they are not treated as Markdown delimiters and restore
+	// them afterward. We use attribute-safe escaping on restore because escaped
+	// punctuation can be captured inside href/src values before link/image HTML is built.
+	var escaped []string
+	text = reBackslashEscape.ReplaceAllStringFunc(text, func(match string) string {
+		idx := len(escaped)
+		escaped = append(escaped, match[1:]) // the punctuation character after the backslash
+		return "\x00ESC" + strconv.Itoa(idx) + "\x00"
+	})
+
+	// Escape HTML entities
+	text = escapeHTML(text)
 
 	// Bold with ** or __
 	text = reBoldStar.ReplaceAllString(text, "<strong>$1</strong>")
@@ -385,7 +421,8 @@ func convertInline(text string) string {
 		parts := reImage.FindStringSubmatch(match)
 		if len(parts) >= 3 {
 			alt := escapeAttr(parts[1])
-			src := escapeAttr(parts[2])
+			src := resolveDestinationEscapes(parts[2], escaped, escapedBackticks)
+			src = escapeAttr(src)
 			return `<img src="` + src + `" alt="` + alt + `">`
 		}
 		return match
@@ -396,7 +433,8 @@ func convertInline(text string) string {
 		parts := reLink.FindStringSubmatch(match)
 		if len(parts) >= 3 {
 			linkText := parts[1]
-			href := escapeAttr(parts[2])
+			href := resolveDestinationEscapes(parts[2], escaped, escapedBackticks)
+			href = escapeAttr(href)
 			return `<a href="` + href + `">` + linkText + `</a>`
 		}
 		return match
@@ -405,13 +443,43 @@ func convertInline(text string) string {
 	// Strikethrough ~~text~~
 	text = reStrikethrough.ReplaceAllString(text, "<del>$1</del>")
 
-	// Restore code spans
-	for i, code := range codeSpans {
-		placeholder := "\x00CODE" + strconv.Itoa(i) + "\x00"
-		text = strings.Replace(text, placeholder, "<code>"+code+"</code>", 1)
+	// Restore backslash-escaped characters in body text. Placeholders inside
+	// link/image destinations were already resolved with percent-encoding above.
+	escapedRendered := make([]string, len(escaped))
+	for i, ch := range escaped {
+		escapedRendered[i] = escapeAttr(ch)
 	}
+	text = restorePlaceholders(text, "ESC", escapedRendered)
+	text = restorePlaceholders(text, "ESCBT", escapedRenderedBackticks(escapedBackticks))
+
+	// Restore code spans (HTML-escape their content since extraction now
+	// happens before escapeHTML to allow backslash-escape processing).
+	codeRendered := make([]string, len(codeSpans))
+	for i, code := range codeSpans {
+		codeRendered[i] = "<code>" + escapeHTML(code) + "</code>"
+	}
+	text = restorePlaceholders(text, "CODE", codeRendered)
 
 	return text
+}
+
+func escapedRenderedBackticks(backticks []string) []string {
+	rendered := make([]string, len(backticks))
+	for i, bt := range backticks {
+		rendered[i] = escapeAttr(bt)
+	}
+	return rendered
+}
+
+func restorePlaceholders(text, prefix string, replacements []string) string {
+	if len(replacements) == 0 {
+		return text
+	}
+	pairs := make([]string, 0, len(replacements)*2)
+	for i, repl := range replacements {
+		pairs = append(pairs, "\x00"+prefix+strconv.Itoa(i)+"\x00", repl)
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
 }
 
 // escapeHTML escapes special HTML characters.
@@ -428,6 +496,51 @@ func escapeAttr(s string) string {
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	s = strings.ReplaceAll(s, "'", "&#39;")
 	return s
+}
+
+// percentEncodeChar percent-encodes a single byte for use in URL destinations.
+// Characters left literal match the destination-safe set derived from markdown-it:
+// !$&'()*+,-./:;=?@_~#
+// Everything else gets %XX hex encoding.
+func percentEncodeChar(ch byte) string {
+	switch {
+	case ch >= 'A' && ch <= 'Z', ch >= 'a' && ch <= 'z', ch >= '0' && ch <= '9':
+		return string(ch)
+	case ch == '!' || ch == '$' || ch == '&' || ch == '\'' ||
+		ch == '(' || ch == ')' || ch == '*' || ch == '+' ||
+		ch == ',' || ch == '-' || ch == '.' || ch == '/' ||
+		ch == ':' || ch == ';' || ch == '=' || ch == '?' ||
+		ch == '@' || ch == '_' || ch == '~' || ch == '#':
+		return string(ch)
+	default:
+		return fmt.Sprintf("%%%02X", ch)
+	}
+}
+
+// resolveDestinationEscapes restores ESC and ESCBT placeholders within a link/image
+// destination using percent-encoding instead of HTML entity escaping.
+func resolveDestinationEscapes(dest string, escaped []string, escapedBackticks []string) string {
+	for i, ch := range escaped {
+		placeholder := "\x00ESC" + strconv.Itoa(i) + "\x00"
+		if strings.Contains(dest, placeholder) {
+			var encoded strings.Builder
+			for j := range len(ch) {
+				encoded.WriteString(percentEncodeChar(ch[j]))
+			}
+			dest = strings.ReplaceAll(dest, placeholder, encoded.String())
+		}
+	}
+	for i, bt := range escapedBackticks {
+		placeholder := "\x00ESCBT" + strconv.Itoa(i) + "\x00"
+		if strings.Contains(dest, placeholder) {
+			var encoded strings.Builder
+			for j := range len(bt) {
+				encoded.WriteString(percentEncodeChar(bt[j]))
+			}
+			dest = strings.ReplaceAll(dest, placeholder, encoded.String())
+		}
+	}
+	return dest
 }
 
 // sanitizeLanguage sanitizes a code block language identifier to prevent attribute injection.
@@ -1007,7 +1120,21 @@ func IsHTML(s string) bool {
 	stripped := reFencedBlock.ReplaceAllString(s, "")
 	stripped = reCodeSpan.ReplaceAllString(stripped, "")
 
-	return reSafeTag.MatchString(stripped)
+	for _, match := range reSafeTag.FindAllStringIndex(stripped, -1) {
+		if !isEscapedAt(stripped, match[0]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isEscapedAt(s string, pos int) bool {
+	backslashes := 0
+	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 // ParsedAttachment holds metadata extracted from a <bc-attachment> tag in HTML content.

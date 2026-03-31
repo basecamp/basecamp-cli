@@ -224,6 +224,175 @@ func TestMarkdownToHTML(t *testing.T) {
 	}
 }
 
+func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "escaped exclamation mark",
+			input:    `Merged\! Great work`,
+			expected: "<p>Merged! Great work</p>",
+		},
+		{
+			name:     "escaped hash",
+			input:    `\# not a heading`,
+			expected: "<p># not a heading</p>",
+		},
+		{
+			name:     "escaped exclamation in heading",
+			input:    `# Done\!`,
+			expected: "<h1>Done!</h1>",
+		},
+		{
+			name:     "escaped asterisk in blockquote",
+			input:    `> \*literal\*`,
+			expected: "<blockquote>*literal*</blockquote>",
+		},
+		{
+			name:     "escaped plus in list item",
+			input:    `- c\+\+`,
+			expected: "<ul>\n<li>c++</li>\n</ul>",
+		},
+		{
+			name:     "escaped asterisk prevents italic",
+			input:    `use \*stars\* for emphasis`,
+			expected: "<p>use *stars* for emphasis</p>",
+		},
+		{
+			name:     "escaped backslash",
+			input:    `path\\to\\file`,
+			expected: "<p>path\\to\\file</p>",
+		},
+		{
+			name:     "escaped ampersand",
+			input:    `Tom \& Jerry`,
+			expected: "<p>Tom &amp; Jerry</p>",
+		},
+		{
+			name:     "escaped angle bracket",
+			input:    `use \< and \> carefully`,
+			expected: "<p>use &lt; and &gt; carefully</p>",
+		},
+		{
+			name:     "escaped period after number",
+			input:    `2025\. What a year`,
+			expected: "<p>2025. What a year</p>",
+		},
+		{
+			name:     "escaped double quotes in text",
+			input:    `Say \"hi\"`,
+			expected: "<p>Say &quot;hi&quot;</p>",
+		},
+		{
+			name:     "backslash before non-punctuation preserved",
+			input:    `hello\nworld`,
+			expected: "<p>hello\\nworld</p>",
+		},
+		{
+			name:     "escaped bracket prevents link",
+			input:    `\[not a link\](url)`,
+			expected: "<p>[not a link](url)</p>",
+		},
+		{
+			name:     "escaped quotes percent-encoded in link destination",
+			input:    `[x](https://example.com/?q=\"hi\")`,
+			expected: `<p><a href="https://example.com/?q=%22hi%22">x</a></p>`,
+		},
+		{
+			name:     "escaped percent in link destination",
+			input:    `[x](https://example.com/\%20)`,
+			expected: `<p><a href="https://example.com/%2520">x</a></p>`,
+		},
+		{
+			name:     "escaped backslash in link destination",
+			input:    `[x](https://example.com/\\path)`,
+			expected: `<p><a href="https://example.com/%5Cpath">x</a></p>`,
+		},
+		{
+			name:     "escaped angle bracket in link destination",
+			input:    `[x](https://example.com/\<tag)`,
+			expected: `<p><a href="https://example.com/%3Ctag">x</a></p>`,
+		},
+		{
+			name:     "escaped bracket in link destination",
+			input:    `[x](https://example.com/\[a)`,
+			expected: `<p><a href="https://example.com/%5Ba">x</a></p>`,
+		},
+		{
+			name:     "escaped percent in image src",
+			input:    `![alt](https://example.com/\%20.png)`,
+			expected: `<p><img src="https://example.com/%2520.png" alt="alt"></p>`,
+		},
+		{
+			name:     "literal-safe chars stay literal in link destination",
+			input:    `[x](https://example.com/\!\?)`,
+			expected: `<p><a href="https://example.com/!?">x</a></p>`,
+		},
+		{
+			name:     "escaped quote in link text stays entity-escaped",
+			input:    `[say \"hi\"](https://example.com/)`,
+			expected: `<p><a href="https://example.com/">say &quot;hi&quot;</a></p>`,
+		},
+		{
+			name:     "escaped quote in image alt stays entity-escaped",
+			input:    `![say \"hi\"](https://example.com/img.png)`,
+			expected: `<p><img src="https://example.com/img.png" alt="say &quot;hi&quot;"></p>`,
+		},
+		{
+			name:     "escaped backtick percent-encoded in link destination",
+			input:    "[x](https://example.com/\\`v)",
+			expected: `<p><a href="https://example.com/%60v">x</a></p>`,
+		},
+		{
+			name:     "backslash escapes inside inline context",
+			input:    `Say **hello\!** loudly`,
+			expected: "<p>Say <strong>hello!</strong> loudly</p>",
+		},
+		{
+			name:     "multiple escapes in one line",
+			input:    `\*bold\* and \!bang\!`,
+			expected: "<p>*bold* and !bang!</p>",
+		},
+		{
+			name:     "escaped backticks do not start code spans",
+			input:    "\\`code\\`",
+			expected: "<p>`code`</p>",
+		},
+		{
+			name:     "escaped tilde prevents strikethrough",
+			input:    `\~\~not deleted\~\~`,
+			expected: "<p>~~not deleted~~</p>",
+		},
+		{
+			name:     "backslash escape in code span preserved",
+			input:    "`\\!` stays literal",
+			expected: "<p><code>\\!</code> stays literal</p>",
+		},
+		{
+			name:     "escaped safe HTML tag is rendered as text",
+			input:    `\<div>hello\</div>`,
+			expected: "<p>&lt;div&gt;hello&lt;/div&gt;</p>",
+		},
+		{
+			name:     "escaped at sign is preserved to suppress mentions",
+			input:    `\@John hello`,
+			expected: `<p>\@John hello</p>`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestHTMLToMarkdown(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -562,6 +731,16 @@ func TestIsHTML(t *testing.T) {
 		{
 			name:     "mixed markdown with code span tag",
 			input:    "Check `<br>` and **bold** text",
+			expected: false,
+		},
+		{
+			name:     "escaped safe tag is not HTML",
+			input:    `\<div>hello\</div>`,
+			expected: false,
+		},
+		{
+			name:     "escaped bc-attachment tag is not HTML",
+			input:    `\<bc-attachment sgid="x">\</bc-attachment>`,
 			expected: false,
 		},
 	}
