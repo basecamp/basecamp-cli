@@ -330,6 +330,11 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			input:    `\<div>hello\</div>`,
 			expected: "<p>&lt;div&gt;hello&lt;/div&gt;</p>",
 		},
+		{
+			name:     "escaped at sign is preserved to suppress mentions",
+			input:    `\@John hello`,
+			expected: `<p>\@John hello</p>`,
+		},
 	}
 
 	for _, tt := range tests {

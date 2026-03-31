@@ -25,7 +25,12 @@ var (
 
 // CommonMark §2.4: any ASCII punctuation may be backslash-escaped.
 // Exact set: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
-const commonMarkEscapablePunctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+//
+// We intentionally omit @ from the set: in Basecamp context \@ is the
+// idiomatic way to suppress a mention ping, so it must pass through
+// literally and not be unescaped into a bare @ that ResolveMentions
+// would convert into a <bc-attachment> mention.
+const commonMarkEscapablePunctuation = "!\"#$%&'()*+,-./:;<=>?[\\]^_`{|}~"
 
 // Pre-compiled regexes for convertInline (Markdown → HTML inline elements)
 var (
