@@ -14,7 +14,7 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
-**SDK version:** v0.7.1 — adds gauges, my assignments, my notifications, and account management services. Fixes Person.Id deserialization and Account.Logo type mismatch.
+**SDK version:** v0.7.3 — maintenance bump: API date advanced to 2026-03-23, transitive dependency updates. No new services or methods.
 
 ## Coverage by Section
 
