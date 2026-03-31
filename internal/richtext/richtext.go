@@ -421,7 +421,8 @@ func convertInline(text string) string {
 		parts := reImage.FindStringSubmatch(match)
 		if len(parts) >= 3 {
 			alt := escapeAttr(parts[1])
-			src := escapeAttr(parts[2])
+			src := resolveDestinationEscapes(parts[2], escaped, escapedBackticks)
+			src = escapeAttr(src)
 			return `<img src="` + src + `" alt="` + alt + `">`
 		}
 		return match
@@ -432,7 +433,8 @@ func convertInline(text string) string {
 		parts := reLink.FindStringSubmatch(match)
 		if len(parts) >= 3 {
 			linkText := parts[1]
-			href := escapeAttr(parts[2])
+			href := resolveDestinationEscapes(parts[2], escaped, escapedBackticks)
+			href = escapeAttr(href)
 			return `<a href="` + href + `">` + linkText + `</a>`
 		}
 		return match
@@ -441,8 +443,8 @@ func convertInline(text string) string {
 	// Strikethrough ~~text~~
 	text = reStrikethrough.ReplaceAllString(text, "<del>$1</del>")
 
-	// Restore backslash-escaped characters. Use escapeAttr so restored quotes stay
-	// safe both in plain text and if a placeholder was captured inside href/src.
+	// Restore backslash-escaped characters in body text. Placeholders inside
+	// link/image destinations were already resolved with percent-encoding above.
 	escapedRendered := make([]string, len(escaped))
 	for i, ch := range escaped {
 		escapedRendered[i] = escapeAttr(ch)
@@ -494,6 +496,51 @@ func escapeAttr(s string) string {
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	s = strings.ReplaceAll(s, "'", "&#39;")
 	return s
+}
+
+// percentEncodeChar percent-encodes a single byte for use in URL destinations.
+// Characters left literal match the destination-safe set derived from markdown-it:
+// !$&'()*+,-./:;=?@_~#
+// Everything else gets %XX hex encoding.
+func percentEncodeChar(ch byte) string {
+	switch {
+	case ch >= 'A' && ch <= 'Z', ch >= 'a' && ch <= 'z', ch >= '0' && ch <= '9':
+		return string(ch)
+	case ch == '!' || ch == '$' || ch == '&' || ch == '\'' ||
+		ch == '(' || ch == ')' || ch == '*' || ch == '+' ||
+		ch == ',' || ch == '-' || ch == '.' || ch == '/' ||
+		ch == ':' || ch == ';' || ch == '=' || ch == '?' ||
+		ch == '@' || ch == '_' || ch == '~' || ch == '#':
+		return string(ch)
+	default:
+		return fmt.Sprintf("%%%02X", ch)
+	}
+}
+
+// resolveDestinationEscapes restores ESC and ESCBT placeholders within a link/image
+// destination using percent-encoding instead of HTML entity escaping.
+func resolveDestinationEscapes(dest string, escaped []string, escapedBackticks []string) string {
+	for i, ch := range escaped {
+		placeholder := "\x00ESC" + strconv.Itoa(i) + "\x00"
+		if strings.Contains(dest, placeholder) {
+			var encoded strings.Builder
+			for j := range len(ch) {
+				encoded.WriteString(percentEncodeChar(ch[j]))
+			}
+			dest = strings.ReplaceAll(dest, placeholder, encoded.String())
+		}
+	}
+	for i, bt := range escapedBackticks {
+		placeholder := "\x00ESCBT" + strconv.Itoa(i) + "\x00"
+		if strings.Contains(dest, placeholder) {
+			var encoded strings.Builder
+			for j := range len(bt) {
+				encoded.WriteString(percentEncodeChar(bt[j]))
+			}
+			dest = strings.ReplaceAll(dest, placeholder, encoded.String())
+		}
+	}
+	return dest
 }
 
 // sanitizeLanguage sanitizes a code block language identifier to prevent attribute injection.

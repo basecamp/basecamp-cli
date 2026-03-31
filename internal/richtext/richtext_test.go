@@ -296,9 +296,54 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			expected: "<p>[not a link](url)</p>",
 		},
 		{
-			name:     "escaped quotes stay safe inside link attributes",
+			name:     "escaped quotes percent-encoded in link destination",
 			input:    `[x](https://example.com/?q=\"hi\")`,
-			expected: "<p><a href=\"https://example.com/?q=&quot;hi&quot;\">x</a></p>",
+			expected: `<p><a href="https://example.com/?q=%22hi%22">x</a></p>`,
+		},
+		{
+			name:     "escaped percent in link destination",
+			input:    `[x](https://example.com/\%20)`,
+			expected: `<p><a href="https://example.com/%2520">x</a></p>`,
+		},
+		{
+			name:     "escaped backslash in link destination",
+			input:    `[x](https://example.com/\\path)`,
+			expected: `<p><a href="https://example.com/%5Cpath">x</a></p>`,
+		},
+		{
+			name:     "escaped angle bracket in link destination",
+			input:    `[x](https://example.com/\<tag)`,
+			expected: `<p><a href="https://example.com/%3Ctag">x</a></p>`,
+		},
+		{
+			name:     "escaped bracket in link destination",
+			input:    `[x](https://example.com/\[a)`,
+			expected: `<p><a href="https://example.com/%5Ba">x</a></p>`,
+		},
+		{
+			name:     "escaped percent in image src",
+			input:    `![alt](https://example.com/\%20.png)`,
+			expected: `<p><img src="https://example.com/%2520.png" alt="alt"></p>`,
+		},
+		{
+			name:     "literal-safe chars stay literal in link destination",
+			input:    `[x](https://example.com/\!\?)`,
+			expected: `<p><a href="https://example.com/!?">x</a></p>`,
+		},
+		{
+			name:     "escaped quote in link text stays entity-escaped",
+			input:    `[say \"hi\"](https://example.com/)`,
+			expected: `<p><a href="https://example.com/">say &quot;hi&quot;</a></p>`,
+		},
+		{
+			name:     "escaped quote in image alt stays entity-escaped",
+			input:    `![say \"hi\"](https://example.com/img.png)`,
+			expected: `<p><img src="https://example.com/img.png" alt="say &quot;hi&quot;"></p>`,
+		},
+		{
+			name:     "escaped backtick percent-encoded in link destination",
+			input:    "[x](https://example.com/\\`v)",
+			expected: `<p><a href="https://example.com/%60v">x</a></p>`,
 		},
 		{
 			name:     "backslash escapes inside inline context",
