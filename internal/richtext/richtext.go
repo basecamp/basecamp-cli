@@ -1068,7 +1068,21 @@ func IsHTML(s string) bool {
 	stripped := reFencedBlock.ReplaceAllString(s, "")
 	stripped = reCodeSpan.ReplaceAllString(stripped, "")
 
-	return reSafeTag.MatchString(stripped)
+	for _, match := range reSafeTag.FindAllStringIndex(stripped, -1) {
+		if !isEscapedAt(stripped, match[0]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isEscapedAt(s string, pos int) bool {
+	backslashes := 0
+	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 // ParsedAttachment holds metadata extracted from a <bc-attachment> tag in HTML content.

@@ -241,6 +241,21 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			expected: "<p># not a heading</p>",
 		},
 		{
+			name:     "escaped exclamation in heading",
+			input:    `# Done\!`,
+			expected: "<h1>Done!</h1>",
+		},
+		{
+			name:     "escaped asterisk in blockquote",
+			input:    `> \*literal\*`,
+			expected: "<blockquote>*literal*</blockquote>",
+		},
+		{
+			name:     "escaped plus in list item",
+			input:    `- c\+\+`,
+			expected: "<ul>\n<li>c++</li>\n</ul>",
+		},
+		{
 			name:     "escaped asterisk prevents italic",
 			input:    `use \*stars\* for emphasis`,
 			expected: "<p>use *stars* for emphasis</p>",
@@ -291,6 +306,11 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			expected: "<p>Say <strong>hello!</strong> loudly</p>",
 		},
 		{
+			name:     "multiple escapes in one line",
+			input:    `\*bold\* and \!bang\!`,
+			expected: "<p>*bold* and !bang!</p>",
+		},
+		{
 			name:     "escaped backticks do not start code spans",
 			input:    "\\`code\\`",
 			expected: "<p>`code`</p>",
@@ -304,6 +324,11 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			name:     "backslash escape in code span preserved",
 			input:    "`\\!` stays literal",
 			expected: "<p><code>\\!</code> stays literal</p>",
+		},
+		{
+			name:     "escaped safe HTML tag is rendered as text",
+			input:    `\<div>hello\</div>`,
+			expected: "<p>&lt;div&gt;hello&lt;/div&gt;</p>",
 		},
 	}
 
@@ -656,6 +681,16 @@ func TestIsHTML(t *testing.T) {
 		{
 			name:     "mixed markdown with code span tag",
 			input:    "Check `<br>` and **bold** text",
+			expected: false,
+		},
+		{
+			name:     "escaped safe tag is not HTML",
+			input:    `\<div>hello\</div>`,
+			expected: false,
+		},
+		{
+			name:     "escaped bc-attachment tag is not HTML",
+			input:    `\<bc-attachment sgid="x">\</bc-attachment>`,
 			expected: false,
 		},
 	}
