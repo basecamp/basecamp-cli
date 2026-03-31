@@ -224,6 +224,100 @@ func TestMarkdownToHTML(t *testing.T) {
 	}
 }
 
+func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "escaped exclamation mark",
+			input:    `Merged\! Great work`,
+			expected: "<p>Merged! Great work</p>",
+		},
+		{
+			name:     "escaped hash",
+			input:    `\# not a heading`,
+			expected: "<p># not a heading</p>",
+		},
+		{
+			name:     "escaped asterisk prevents italic",
+			input:    `use \*stars\* for emphasis`,
+			expected: "<p>use *stars* for emphasis</p>",
+		},
+		{
+			name:     "escaped backslash",
+			input:    `path\\to\\file`,
+			expected: "<p>path\\to\\file</p>",
+		},
+		{
+			name:     "escaped ampersand",
+			input:    `Tom \& Jerry`,
+			expected: "<p>Tom &amp; Jerry</p>",
+		},
+		{
+			name:     "escaped angle bracket",
+			input:    `use \< and \> carefully`,
+			expected: "<p>use &lt; and &gt; carefully</p>",
+		},
+		{
+			name:     "escaped period after number",
+			input:    `2025\. What a year`,
+			expected: "<p>2025. What a year</p>",
+		},
+		{
+			name:     "escaped double quotes in text",
+			input:    `Say \"hi\"`,
+			expected: "<p>Say &quot;hi&quot;</p>",
+		},
+		{
+			name:     "backslash before non-punctuation preserved",
+			input:    `hello\nworld`,
+			expected: "<p>hello\\nworld</p>",
+		},
+		{
+			name:     "escaped bracket prevents link",
+			input:    `\[not a link\](url)`,
+			expected: "<p>[not a link](url)</p>",
+		},
+		{
+			name:     "escaped quotes stay safe inside link attributes",
+			input:    `[x](https://example.com/?q=\"hi\")`,
+			expected: "<p><a href=\"https://example.com/?q=&quot;hi&quot;\">x</a></p>",
+		},
+		{
+			name:     "backslash escapes inside inline context",
+			input:    `Say **hello\!** loudly`,
+			expected: "<p>Say <strong>hello!</strong> loudly</p>",
+		},
+		{
+			name:     "escaped backticks do not start code spans",
+			input:    "\\`code\\`",
+			expected: "<p>`code`</p>",
+		},
+		{
+			name:     "escaped tilde prevents strikethrough",
+			input:    `\~\~not deleted\~\~`,
+			expected: "<p>~~not deleted~~</p>",
+		},
+		{
+			name:     "backslash escape in code span preserved",
+			input:    "`\\!` stays literal",
+			expected: "<p><code>\\!</code> stays literal</p>",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestHTMLToMarkdown(t *testing.T) {
 	tests := []struct {
 		name     string
