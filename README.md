@@ -9,8 +9,16 @@
 
 ## Quick Start
 
+**macOS / Linux / WSL2**
+
 ```bash
 curl -fsSL https://basecamp.com/install-cli | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
 
 That's it. You now have full access to Basecamp from your terminal.
@@ -44,7 +52,7 @@ scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
 scoop install basecamp-cli
 ```
 
-**Shell script:**
+**Shell script (macOS/Linux/WSL2):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```
