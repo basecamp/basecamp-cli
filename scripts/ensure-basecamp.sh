@@ -11,6 +11,7 @@ set -euo pipefail
 
 MIN_VERSION="${BASECAMP_MIN_VERSION:-0.1.0}"
 INSTALL_URL="https://github.com/basecamp/basecamp-cli"
+REPO="basecamp/basecamp-cli"
 BIN_DIR="${BASECAMP_BIN_DIR:-}"
 CURL_SCHANNEL_FALLBACK_FLAG=""
 CURL_LAST_ERROR=""
@@ -22,6 +23,8 @@ version_gte() {
   printf '%s\n%s\n' "$v2" "$v1" | sort -V | head -1 | grep -qx "$v2"
 }
 
+# NOTE: Keep the installer helper functions below in sync with scripts/install.sh.
+# These scripts stay self-contained on purpose so they can run without sourcing extra files.
 path_contains_dir() {
   local dir="$1"
   [[ ":$PATH:" == *":$dir:"* ]]
@@ -145,7 +148,7 @@ curl_run() {
 get_latest_version() {
   local url version api_json
 
-  if url=$(curl_run -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/basecamp/basecamp-cli/releases/latest"); then
+  if url=$(curl_run -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest"); then
     version="${url##*/}"
     version="${version#v}"
     if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -154,7 +157,7 @@ get_latest_version() {
     fi
   fi
 
-  if api_json=$(curl_run -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: basecamp-cli-installer' "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest"); then
+  if api_json=$(curl_run -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: basecamp-cli-installer' "https://api.github.com/repos/${REPO}/releases/latest"); then
     version="${api_json#*\"tag_name\":\"v}"
     version="${version%%\"*}"
     if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -190,7 +193,7 @@ install_basecamp() {
   fi
 
   archive_name="basecamp_${version}_${platform}.${ext}"
-  url="https://github.com/basecamp/basecamp-cli/releases/download/v${version}/${archive_name}"
+  url="https://github.com/${REPO}/releases/download/v${version}/${archive_name}"
 
   echo "Downloading basecamp v${version} for ${platform}..."
 

@@ -45,6 +45,8 @@ find_sha256_cmd() {
   fi
 }
 
+# NOTE: Keep the installer helper functions below in sync with scripts/ensure-basecamp.sh.
+# These scripts stay self-contained on purpose so they can run without sourcing extra files.
 path_contains_dir() {
   local dir="$1"
   [[ ":$PATH:" == *":$dir:"* ]]
@@ -171,7 +173,7 @@ get_latest_version() {
     fi
   fi
 
-  error "Could not determine latest version. ${CURL_LAST_ERROR:+curl said: ${CURL_LAST_ERROR}. }If you're on Windows, use Scoop or PowerShell, or try Git Bash's /usr/bin/curl."
+  error "Could not determine latest version. ${CURL_LAST_ERROR:+curl said: ${CURL_LAST_ERROR}. }If native Windows curl fails, try Scoop or PowerShell. If using Git Bash, try /usr/bin/curl instead."
 }
 
 verify_checksums() {
