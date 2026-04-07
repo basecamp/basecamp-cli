@@ -5,15 +5,18 @@
 #   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 #
 # Options (via environment):
-#   BASECAMP_BIN_DIR    Where to install binary (default: ~/.local/bin)
+#   BASECAMP_BIN_DIR    Where to install binary (default: ~/.local/bin, or ~/bin on Windows)
 #   BASECAMP_VERSION    Specific version to install (default: latest)
 #   BASECAMP_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
 
 set -euo pipefail
 
 REPO="basecamp/basecamp-cli"
-BIN_DIR="${BASECAMP_BIN_DIR:-$HOME/.local/bin}"
+BIN_DIR="${BASECAMP_BIN_DIR:-}"
 VERSION="${BASECAMP_VERSION:-}"
+CURL_SCHANNEL_FALLBACK_FLAG=""
+CURL_LAST_ERROR=""
+CURL_FALLBACK_NOTED=0
 
 # Color helpers — respect NO_COLOR (https://no-color.org)
 if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
@@ -42,6 +45,33 @@ find_sha256_cmd() {
   fi
 }
 
+# NOTE: Keep the installer helper functions below in sync with scripts/ensure-basecamp.sh.
+# These scripts stay self-contained on purpose so they can run without sourcing extra files.
+path_contains_dir() {
+  local dir="$1"
+  [[ ":$PATH:" == *":$dir:"* ]]
+}
+
+default_bin_dir() {
+  local platform="$1"
+
+  if path_contains_dir "$HOME/bin"; then
+    echo "$HOME/bin"
+    return 0
+  fi
+
+  if path_contains_dir "$HOME/.local/bin"; then
+    echo "$HOME/.local/bin"
+    return 0
+  fi
+
+  if [[ "$platform" == windows_* ]]; then
+    echo "$HOME/bin"
+  else
+    echo "$HOME/.local/bin"
+  fi
+}
+
 detect_platform() {
   local os arch
 
@@ -65,17 +95,85 @@ detect_platform() {
   echo "${os}_${arch}"
 }
 
+detect_curl_fallback() {
+  local version_output help_output
+
+  version_output=$(curl --version 2>/dev/null || true)
+  if [[ "$version_output" != *[Ss]channel* ]]; then
+    return 0
+  fi
+
+  help_output=$(curl --help all 2>/dev/null || true)
+  if [[ "$help_output" == *"--ssl-revoke-best-effort"* ]]; then
+    CURL_SCHANNEL_FALLBACK_FLAG="--ssl-revoke-best-effort"
+  elif [[ "$help_output" == *"--ssl-no-revoke"* ]]; then
+    CURL_SCHANNEL_FALLBACK_FLAG="--ssl-no-revoke"
+  fi
+}
+
+curl_run() {
+  local err_file status err
+  err_file=$(mktemp "${TMPDIR:-/tmp}/basecamp-curl.XXXXXX")
+
+  if curl "$@" 2>"$err_file"; then
+    rm -f "$err_file"
+    CURL_LAST_ERROR=""
+    return 0
+  else
+    status=$?
+  fi
+
+  err=$(<"$err_file")
+  rm -f "$err_file"
+
+  if [[ $status -ne 0 ]] && [[ -n "$CURL_SCHANNEL_FALLBACK_FLAG" ]] && [[ "$err" == *"CRYPT_E_NO_REVOCATION_CHECK"* ]]; then
+    if [[ $CURL_FALLBACK_NOTED -eq 0 ]]; then
+      echo "  $(bold "→") Windows certificate revocation checks are unavailable; retrying curl with ${CURL_SCHANNEL_FALLBACK_FLAG}" >&2
+      CURL_FALLBACK_NOTED=1
+    fi
+
+    err_file=$(mktemp "${TMPDIR:-/tmp}/basecamp-curl.XXXXXX")
+    if curl "$CURL_SCHANNEL_FALLBACK_FLAG" "$@" 2>"$err_file"; then
+      rm -f "$err_file"
+      CURL_LAST_ERROR=""
+      return 0
+    else
+      status=$?
+    fi
+
+    err=$(<"$err_file")
+    rm -f "$err_file"
+  fi
+
+  CURL_LAST_ERROR="$err"
+  return "$status"
+}
+
 get_latest_version() {
-  local url version
+  local url version api_json
+
   # Follow the releases/latest redirect to get the version from the final URL.
   # Avoids the GitHub API (no rate limiting) and grep/sed (better Windows compat).
-  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null) || true
-  version="${url##*/}"
-  version="${version#v}"
-  if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    error "Could not determine latest version (resolved '${version:-<empty>}' from '${url:-<no URL>}'). Check your network connection or repository tags."
+  if url=$(curl_run -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest"); then
+    version="${url##*/}"
+    version="${version#v}"
+    if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+      echo "$version"
+      return 0
+    fi
   fi
-  echo "$version"
+
+  # Fallback to the GitHub API if redirect parsing fails.
+  if api_json=$(curl_run -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: basecamp-cli-installer' "https://api.github.com/repos/${REPO}/releases/latest"); then
+    version="${api_json#*\"tag_name\":\"v}"
+    version="${version%%\"*}"
+    if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+      echo "$version"
+      return 0
+    fi
+  fi
+
+  error "Could not determine latest version. ${CURL_LAST_ERROR:+curl said: ${CURL_LAST_ERROR}. }If native Windows curl fails, try Scoop or PowerShell. If using Git Bash, try /usr/bin/curl instead."
 }
 
 verify_checksums() {
@@ -85,8 +183,8 @@ verify_checksums() {
   local base_url="https://github.com/${REPO}/releases/download/v${version}"
   step "Verifying checksums..."
 
-  if ! curl -fsSL "${base_url}/checksums.txt" -o "${tmp_dir}/checksums.txt"; then
-    error "Failed to download checksums.txt"
+  if ! curl_run -fsSL "${base_url}/checksums.txt" -o "${tmp_dir}/checksums.txt"; then
+    error "Failed to download checksums.txt${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
   fi
 
   # Verify SHA256 checksum of the downloaded archive
@@ -102,8 +200,8 @@ verify_checksums() {
   if command -v cosign &>/dev/null; then
     step "Verifying cosign signature..."
 
-    if ! curl -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
-      error "Failed to download checksums.txt.bundle"
+    if ! curl_run -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
+      error "Failed to download checksums.txt.bundle${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
     fi
 
     cosign verify-blob \
@@ -135,8 +233,8 @@ download_binary() {
 
   step "Downloading basecamp v${version} for ${platform}..."
 
-  if ! curl -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
-    error "Failed to download from $url"
+  if ! curl_run -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
+    error "Failed to download from $url${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
   fi
 
   # Verify integrity before extraction
@@ -305,6 +403,11 @@ main() {
 
   local platform version tmp_dir
   platform=$(detect_platform)
+  detect_curl_fallback
+
+  if [[ -z "$BIN_DIR" ]]; then
+    BIN_DIR=$(default_bin_dir "$platform")
+  fi
 
   if [[ -n "$VERSION" ]]; then
     version="$VERSION"
