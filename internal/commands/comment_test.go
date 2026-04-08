@@ -177,9 +177,9 @@ func TestCommentCreateMissingContentReturnsUsageBeforeAccountResolution(t *testi
 	app.Config.AccountID = ""
 	app.Flags.JSON = true
 
-	devNull, err := os.Open("/dev/null")
+	devNull, err := os.Open(os.DevNull)
 	if err != nil {
-		t.Skip("/dev/null not available")
+		t.Skip("dev null not available")
 	}
 
 	origStdin := os.Stdin
