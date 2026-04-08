@@ -334,15 +334,8 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 				}
 			}
 
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			if !edit && strings.TrimSpace(content) == "" {
-				stdinContent, hasPipedStdin, err := readPipedStdin()
-				if err != nil {
-					return err
-				}
+				stdinContent, hasPipedStdin := readPipedStdin()
 				if hasPipedStdin {
 					content = stdinContent
 				}
@@ -354,6 +347,10 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 					return output.ErrUsage("Comment content required")
 				}
 				return missingArg(cmd, "<content>")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Expand comma-separated IDs and extract from URLs

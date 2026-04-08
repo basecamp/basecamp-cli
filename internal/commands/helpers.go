@@ -80,20 +80,20 @@ func isMachineOutput(cmd *cobra.Command) bool {
 	return false
 }
 
-func readPipedStdin() (string, bool, error) {
+func readPipedStdin() (string, bool) {
 	fi, err := os.Stdin.Stat()
 	if err != nil {
-		return "", false, fmt.Errorf("failed to inspect stdin: %w", err)
+		return "", false
 	}
 	if (fi.Mode() & os.ModeCharDevice) != 0 {
-		return "", false, nil
+		return "", false
 	}
 
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return "", true, fmt.Errorf("failed to read stdin: %w", err)
+		return "", false
 	}
-	return string(data), true, nil
+	return string(data), true
 }
 
 // DockTool represents a tool in a project's dock.

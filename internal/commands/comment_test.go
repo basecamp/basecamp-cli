@@ -171,3 +171,44 @@ func TestCommentsCreateReadsContentFromStdin(t *testing.T) {
 	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
 	assert.Equal(t, "<p>hello from stdin</p>", body["content"])
 }
+
+func TestCommentCreateMissingContentReturnsUsageBeforeAccountResolution(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.AccountID = ""
+	app.Flags.JSON = true
+
+	devNull, err := os.Open("/dev/null")
+	if err != nil {
+		t.Skip("/dev/null not available")
+	}
+
+	origStdin := os.Stdin
+	os.Stdin = devNull
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		devNull.Close()
+	})
+
+	cmd := NewCommentCmd()
+	err = executeCommand(cmd, app, "123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "<content> required")
+	assert.NotContains(t, err.Error(), "account")
+}
+
+func TestReadPipedStdinIgnoresUnreadableStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	require.NoError(t, w.Close())
+
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+	})
+
+	content, hasPipedStdin := readPipedStdin()
+	assert.Empty(t, content)
+	assert.False(t, hasPipedStdin)
+}
