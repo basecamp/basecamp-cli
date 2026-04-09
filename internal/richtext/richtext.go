@@ -3,6 +3,7 @@
 package richtext
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"html"
@@ -15,40 +16,18 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
-// Pre-compiled regexes for MarkdownToHTML list detection
-var (
-	ulPattern = regexp.MustCompile(`^(\s*)[-*+]\s+(.*)$`)
-	olPattern = regexp.MustCompile(`^(\s*)\d+\.\s+(.*)$`)
-)
-
-// CommonMark §2.4: any ASCII punctuation may be backslash-escaped.
-// Exact set: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
-//
-// We intentionally omit @ from the set: in Basecamp context \@ is the
-// idiomatic way to suppress a mention ping, so it must pass through
-// literally and not be unescaped into a bare @ that ResolveMentions
-// would convert into a <bc-attachment> mention.
-const commonMarkEscapablePunctuation = "!\"#$%&'()*+,-./:;<=>?[\\]^_`{|}~"
-
-// Pre-compiled regexes for convertInline (Markdown → HTML inline elements)
-var (
-	reCodeSpan      = regexp.MustCompile("`([^`]+)`")
-	reBoldStar      = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	reBoldUnder     = regexp.MustCompile(`__([^_]+)__`)
-	reItalicStar    = regexp.MustCompile(`\*([^*]+)\*`)
-	reItalicUnder   = regexp.MustCompile(`(?:^|[^a-zA-Z0-9])_([^_]+)_(?:[^a-zA-Z0-9]|$)`)
-	reItalicInner   = regexp.MustCompile(`_([^_]+)_`)
-	reImage         = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
-	reLink          = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-	reStrikethrough = regexp.MustCompile(`~~([^~]+)~~`)
-
-	// Protect escaped backticks before code-span detection so \` does not start a code span.
-	reEscapedBacktick = regexp.MustCompile("\\\\`")
-	// Matches a backslash followed by any CommonMark-escapable ASCII punctuation character.
-	reBackslashEscape = regexp.MustCompile(`\\([` + regexp.QuoteMeta(commonMarkEscapablePunctuation) + `])`)
-)
+// Pre-compiled regexes for IsHTML detection (code span stripping)
+var reCodeSpan = regexp.MustCompile("`([^`]+)`")
 
 // Pre-compiled regexes for HTMLToMarkdown (HTML → Markdown block elements)
 var (
@@ -58,32 +37,34 @@ var (
 	reH4         = regexp.MustCompile(`(?i)<h4[^>]*>(.*?)</h4>`)
 	reH5         = regexp.MustCompile(`(?i)<h5[^>]*>(.*?)</h5>`)
 	reH6         = regexp.MustCompile(`(?i)<h6[^>]*>(.*?)</h6>`)
-	reBlockquote = regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`)
+	reBlockquote = regexp.MustCompile(`(?is)<blockquote[^>]*>(.*?)</blockquote>`)
 	reCodeBlock  = regexp.MustCompile(`(?is)<pre[^>]*><code[^>]*(?:class="language-([^"]*)")?[^>]*>(.*?)</code></pre>`)
 	reCodeLang   = regexp.MustCompile(`class="language-([^"]*)"`)
+	rePreLang    = regexp.MustCompile(`(?i)<pre[^>]*\s+language="([^"]*)"`)
 	reCodeInner  = regexp.MustCompile(`(?is)<code[^>]*>([\s\S]*?)</code>`)
-	reUL         = regexp.MustCompile(`(?is)<ul[^>]*>(.*?)</ul>`)
-	reOL         = regexp.MustCompile(`(?is)<ol[^>]*>(.*?)</ol>`)
-	reLI         = regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`)
-	reP          = regexp.MustCompile(`(?i)<p[^>]*>(.*?)</p>`)
-	reBR         = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
-	reHR         = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
+	// Tag-match patterns use (?:\s[^>]*)? to require whitespace or `>` after the
+	// tag name, preventing false matches against longer tag names with the same
+	// prefix (e.g. <p> vs <pre>, <b> vs <br>, <em> vs <embed>, <i> vs <img>,
+	// <s> vs <script>, <del> vs <details>, <a> vs <abbr>).
+	reP  = regexp.MustCompile(`(?is)<p(?:\s[^>]*)?>(.*?)</p>`)
+	reBR = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
+	reHR = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
 )
 
 // Pre-compiled regexes for HTMLToMarkdown inline elements
 var (
-	reHTMLStrong        = regexp.MustCompile(`(?i)<strong[^>]*>(.*?)</strong>`)
-	reHTMLB             = regexp.MustCompile(`(?i)<b[^>]*>(.*?)</b>`)
-	reHTMLEm            = regexp.MustCompile(`(?i)<em[^>]*>(.*?)</em>`)
-	reHTMLI             = regexp.MustCompile(`(?i)<i[^>]*>(.*?)</i>`)
-	reHTMLCode          = regexp.MustCompile(`(?i)<code[^>]*>(.*?)</code>`)
-	reHTMLLink          = regexp.MustCompile(`(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
-	reHTMLImgSA         = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?\s*>`)
-	reHTMLImgAS         = regexp.MustCompile(`(?i)<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*/?\s*>`)
-	reHTMLImgS          = regexp.MustCompile(`(?i)<img[^>]*src="([^"]*)"[^>]*/?\s*>`)
-	reHTMLDel           = regexp.MustCompile(`(?i)<del[^>]*>(.*?)</del>`)
-	reHTMLS             = regexp.MustCompile(`(?i)<s[^>]*>(.*?)</s>`)
-	reHTMLStrike        = regexp.MustCompile(`(?i)<strike[^>]*>(.*?)</strike>`)
+	reHTMLStrong        = regexp.MustCompile(`(?i)<strong(?:\s[^>]*)?>(.*?)</strong>`)
+	reHTMLB             = regexp.MustCompile(`(?i)<b(?:\s[^>]*)?>(.*?)</b>`)
+	reHTMLEm            = regexp.MustCompile(`(?i)<em(?:\s[^>]*)?>(.*?)</em>`)
+	reHTMLI             = regexp.MustCompile(`(?i)<i(?:\s[^>]*)?>(.*?)</i>`)
+	reHTMLCode          = regexp.MustCompile(`(?i)<code(?:\s[^>]*)?>(.*?)</code>`)
+	reHTMLLink          = regexp.MustCompile(`(?i)<a\s[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
+	reHTMLImgSA         = regexp.MustCompile(`(?i)<img\s[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?\s*>`)
+	reHTMLImgAS         = regexp.MustCompile(`(?i)<img\s[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*/?\s*>`)
+	reHTMLImgS          = regexp.MustCompile(`(?i)<img\s[^>]*src="([^"]*)"[^>]*/?\s*>`)
+	reHTMLDel           = regexp.MustCompile(`(?i)<del(?:\s[^>]*)?>(.*?)</del>`)
+	reHTMLS             = regexp.MustCompile(`(?i)<s(?:\s[^>]*)?>(.*?)</s>`)
+	reHTMLStrike        = regexp.MustCompile(`(?i)<strike(?:\s[^>]*)?>(.*?)</strike>`)
 	reMentionAttachment = regexp.MustCompile(`(?is)<bc-attachment[^>]*content-type="application/vnd\.basecamp\.mention"[^>]*>(.*?)</bc-attachment>`)
 	reMentionFigcaption = regexp.MustCompile(`(?is)<figcaption[^>]*>(.*?)</figcaption>`)
 	reMentionImgAlt     = regexp.MustCompile(`(?is)<img[^>]*alt="([^"]+)"[^>]*>`)
@@ -131,355 +112,257 @@ var reMarkdownPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^>\s`),
 }
 
+// mdConverter is the goldmark Markdown-to-HTML converter configured for Trix compatibility.
+var mdConverter = goldmark.New(
+	goldmark.WithExtensions(extension.Strikethrough),
+	goldmark.WithRendererOptions(gmhtml.WithUnsafe()),
+	goldmark.WithParserOptions(
+		parser.WithInlineParsers(
+			util.Prioritized(&escapedAtParser{}, 900),
+		),
+		parser.WithASTTransformers(
+			util.Prioritized(&trixTransformer{}, 100),
+		),
+	),
+	goldmark.WithRendererOptions(
+		renderer.WithNodeRenderers(
+			util.Prioritized(&trixRenderer{}, 500),
+		),
+	),
+)
+
+// TrixBreak is a custom block node that renders as <br>\n for Trix paragraph spacing.
+type TrixBreak struct{ ast.BaseBlock }
+
+// KindTrixBreak is the node kind for TrixBreak.
+var KindTrixBreak = ast.NewNodeKind("TrixBreak")
+
+func (n *TrixBreak) Kind() ast.NodeKind            { return KindTrixBreak }
+func (n *TrixBreak) Dump(source []byte, level int) { ast.DumpHelper(n, source, level, nil, nil) }
+
+// EscapedAt is a custom inline node that renders as literal \@.
+type EscapedAt struct{ ast.BaseInline }
+
+// KindEscapedAt is the node kind for EscapedAt.
+var KindEscapedAt = ast.NewNodeKind("EscapedAt")
+
+func (n *EscapedAt) Kind() ast.NodeKind            { return KindEscapedAt }
+func (n *EscapedAt) Dump(source []byte, level int) { ast.DumpHelper(n, source, level, nil, nil) }
+
+// escapedAtParser intercepts \@ before goldmark's standard backslash escape handling.
+type escapedAtParser struct{}
+
+func (p *escapedAtParser) Trigger() []byte { return []byte{'\\'} }
+
+func (p *escapedAtParser) Parse(_ ast.Node, block text.Reader, _ parser.Context) ast.Node {
+	line, _ := block.PeekLine()
+	if len(line) < 2 || line[0] != '\\' || line[1] != '@' {
+		return nil
+	}
+	block.Advance(2)
+	return &EscapedAt{}
+}
+
+// trixTransformer modifies the AST for Trix-compatible HTML output.
+type trixTransformer struct{}
+
+func (t *trixTransformer) Transform(node *ast.Document, reader text.Reader, pc parser.Context) {
+	// Phase 1: Force tight lists, convert soft breaks to hard in list items,
+	// and unwrap blockquote paragraphs
+	_ = ast.Walk(node, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch v := n.(type) {
+		case *ast.List:
+			v.IsTight = true
+			for li := v.FirstChild(); li != nil; li = li.NextSibling() {
+				replaceParagraphsWithTextBlocks(li)
+				convertSoftBreaksToHard(li)
+			}
+		case *ast.Blockquote:
+			replaceParagraphsWithTextBlocks(v)
+			convertSoftBreaksToHard(v)
+			insertBreaksBetweenTextBlocks(v)
+		}
+		return ast.WalkContinue, nil
+	})
+
+	// Phase 2: Insert TrixBreak nodes before blank-line-separated top-level blocks
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		if child.HasBlankPreviousLines() && child.PreviousSibling() != nil {
+			br := &TrixBreak{}
+			node.InsertBefore(node, child, br)
+		}
+	}
+}
+
+func replaceParagraphsWithTextBlocks(parent ast.Node) {
+	for child := parent.FirstChild(); child != nil; {
+		next := child.NextSibling()
+		if p, ok := child.(*ast.Paragraph); ok {
+			tb := ast.NewTextBlock()
+			for gc := p.FirstChild(); gc != nil; {
+				gnext := gc.NextSibling()
+				tb.AppendChild(tb, gc)
+				gc = gnext
+			}
+			tb.SetLines(p.Lines())
+			parent.ReplaceChild(parent, p, tb)
+		}
+		child = next
+	}
+}
+
+func convertSoftBreaksToHard(parent ast.Node) {
+	_ = ast.Walk(parent, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		if t, ok := n.(*ast.Text); ok && t.SoftLineBreak() {
+			t.SetSoftLineBreak(false)
+			t.SetHardLineBreak(true)
+		}
+		return ast.WalkContinue, nil
+	})
+}
+
+func insertBreaksBetweenTextBlocks(parent ast.Node) {
+	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
+		if _, ok := child.(*ast.TextBlock); ok {
+			if next := child.NextSibling(); next != nil {
+				if _, ok := next.(*ast.TextBlock); ok {
+					br := &TrixBreak{}
+					parent.InsertAfter(parent, child, br)
+				}
+			}
+		}
+	}
+}
+
+// trixRenderer provides custom rendering for Trix-compatible HTML output.
+type trixRenderer struct{}
+
+func (r *trixRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindRawHTML, r.renderRawHTML)
+	reg.Register(ast.KindHTMLBlock, r.renderHTMLBlock)
+	reg.Register(ast.KindBlockquote, r.renderBlockquote)
+	reg.Register(ast.KindFencedCodeBlock, r.renderFencedCodeBlock)
+	reg.Register(KindTrixBreak, r.renderTrixBreak)
+	reg.Register(KindEscapedAt, r.renderEscapedAt)
+}
+
+func (r *trixRenderer) renderBlockquote(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<blockquote>")
+	} else {
+		_, _ = w.WriteString("</blockquote>\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *trixRenderer) renderRawHTML(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	n, ok := node.(*ast.RawHTML)
+	if !ok {
+		return ast.WalkContinue, nil
+	}
+	for i := 0; i < n.Segments.Len(); i++ {
+		seg := n.Segments.At(i)
+		_, _ = w.Write(util.EscapeHTML(seg.Value(source)))
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *trixRenderer) renderHTMLBlock(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	n, ok := node.(*ast.HTMLBlock)
+	if !ok {
+		return ast.WalkContinue, nil
+	}
+	lines := n.Lines()
+	parts := make([]string, 0, lines.Len()+1)
+	for i := 0; i < lines.Len(); i++ {
+		seg := lines.At(i)
+		escaped := strings.TrimRight(string(util.EscapeHTML(seg.Value(source))), "\n")
+		parts = append(parts, escaped)
+	}
+	if n.HasClosure() {
+		escaped := strings.TrimRight(string(util.EscapeHTML(n.ClosureLine.Value(source))), "\n")
+		parts = append(parts, escaped)
+	}
+	_, _ = w.WriteString("<p>" + strings.Join(parts, " ") + "</p>\n")
+	return ast.WalkContinue, nil
+}
+
+// renderFencedCodeBlock emits <pre language="X"><code>...</code></pre> for syntax
+// highlighting in BC5. The SyntaxHighlightFilter looks for the language attribute
+// on <pre>, not class="language-X" on <code> (the CommonMark default).
+func (r *trixRenderer) renderFencedCodeBlock(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	n, ok := node.(*ast.FencedCodeBlock)
+	if !ok {
+		return ast.WalkContinue, nil
+	}
+	if entering {
+		if language := n.Language(source); language != nil {
+			_, _ = w.WriteString(`<pre language="`)
+			_, _ = w.Write(util.EscapeHTML(language))
+			_, _ = w.WriteString(`"><code>`)
+		} else {
+			_, _ = w.WriteString("<pre><code>")
+		}
+		lines := n.Lines()
+		for i := 0; i < lines.Len(); i++ {
+			line := lines.At(i)
+			_, _ = w.Write(util.EscapeHTML(line.Value(source)))
+		}
+	} else {
+		_, _ = w.WriteString("</code></pre>\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *trixRenderer) renderTrixBreak(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	_, _ = w.WriteString("<br>\n")
+	return ast.WalkContinue, nil
+}
+
+func (r *trixRenderer) renderEscapedAt(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	_, _ = w.WriteString(`\@`)
+	return ast.WalkContinue, nil
+}
+
 // MarkdownToHTML converts Markdown text to HTML suitable for Basecamp's rich text fields.
-// It handles common Markdown syntax: headings, bold, italic, links, lists, code blocks, and blockquotes.
+// It uses goldmark with custom AST transformations for Trix editor compatibility.
 // If the input already appears to be HTML, it is returned unchanged to preserve existing formatting.
 func MarkdownToHTML(md string) string {
 	if md == "" {
 		return ""
 	}
 
-	// If input is already HTML, return unchanged to preserve existing content
 	if IsHTML(md) {
 		return md
 	}
 
-	// Normalize line endings
 	md = strings.ReplaceAll(md, "\r\n", "\n")
 	md = strings.ReplaceAll(md, "\r", "\n")
 
-	var result strings.Builder
-	lines := strings.Split(md, "\n")
-
-	var inCodeBlock bool
-	var codeBlockLang string
-	var codeLines []string
-	var inList bool
-	var listItems []string
-	var listType string // "ul" or "ol"
-	var pendingBreak bool
-	var paraLines []string
-
-	flushPendingBreak := func() {
-		if pendingBreak {
-			result.WriteString("<br>\n")
-			pendingBreak = false
-		}
+	var buf bytes.Buffer
+	if err := mdConverter.Convert([]byte(md), &buf); err != nil {
+		return "<p>" + html.EscapeString(md) + "</p>"
 	}
 
-	flushParagraph := func() {
-		if len(paraLines) > 0 {
-			flushPendingBreak()
-			text := strings.Join(paraLines, " ")
-			result.WriteString("<p>" + convertInline(text) + "</p>\n")
-			paraLines = nil
-		}
-	}
-
-	flushList := func() {
-		if len(listItems) > 0 {
-			result.WriteString("<" + listType + ">\n")
-			for _, item := range listItems {
-				result.WriteString("<li>" + item + "</li>\n")
-			}
-			result.WriteString("</" + listType + ">\n")
-			listItems = nil
-			inList = false
-		}
-	}
-
-	for i := range lines {
-		line := lines[i]
-
-		// Handle code blocks
-		if after, ok := strings.CutPrefix(line, "```"); ok {
-			if inCodeBlock {
-				// End code block
-				code := strings.Join(codeLines, "\n")
-				code = escapeHTML(code)
-				if codeBlockLang != "" {
-					// Sanitize language to prevent attribute injection
-					safeLang := sanitizeLanguage(codeBlockLang)
-					result.WriteString("<pre><code class=\"language-" + safeLang + "\">" + code + "</code></pre>\n")
-				} else {
-					result.WriteString("<pre><code>" + code + "</code></pre>\n")
-				}
-				inCodeBlock = false
-				codeLines = nil
-				codeBlockLang = ""
-			} else {
-				// Start code block
-				flushParagraph()
-				flushList()
-				flushPendingBreak()
-				inCodeBlock = true
-				codeBlockLang = after
-			}
-			continue
-		}
-
-		if inCodeBlock {
-			codeLines = append(codeLines, line)
-			continue
-		}
-
-		// Check for list items (using precompiled regexes)
-		ulMatch := ulPattern.FindStringSubmatch(line)
-		olMatch := olPattern.FindStringSubmatch(line)
-
-		if ulMatch != nil {
-			flushParagraph()
-			if !inList || listType != "ul" {
-				flushList()
-				flushPendingBreak()
-				inList = true
-				listType = "ul"
-			}
-			pendingBreak = false // blank was between items, not after the list
-			listItems = append(listItems, convertInline(ulMatch[2]))
-			continue
-		}
-
-		if olMatch != nil {
-			flushParagraph()
-			if !inList || listType != "ol" {
-				flushList()
-				flushPendingBreak()
-				inList = true
-				listType = "ol"
-			}
-			pendingBreak = false // blank was between items, not after the list
-			listItems = append(listItems, convertInline(olMatch[2]))
-			continue
-		}
-
-		// Empty line - handle differently based on context
-		if strings.TrimSpace(line) == "" {
-			if inList {
-				// In a list: empty lines between items create spacing but don't break the list.
-				// Record pending break so content after the list gets proper separation.
-				pendingBreak = true
-				continue
-			}
-			// Not in a list: flush paragraph and record break
-			flushParagraph()
-			if result.Len() > 0 {
-				pendingBreak = true
-			}
-			continue
-		}
-
-		// Check for list continuation lines (indented text that continues previous list item)
-		if inList && len(listItems) > 0 {
-			// Check if line is indented (starts with spaces or tabs)
-			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-				// This is a continuation of the last list item
-				trimmedLine := strings.TrimSpace(line)
-				// Append to last list item with <br> separator
-				lastItemIndex := len(listItems) - 1
-				listItems[lastItemIndex] = listItems[lastItemIndex] + "<br>\n" + convertInline(trimmedLine)
-				pendingBreak = false // blank was before continuation, not after the list
-				continue
-			}
-		}
-
-		// Not a list item or continuation, flush any pending list
-		flushList()
-
-		// Headings
-		if strings.HasPrefix(line, "#") {
-			flushParagraph()
-			flushPendingBreak()
-		}
-		if after, ok := strings.CutPrefix(line, "######"); ok {
-			result.WriteString("<h6>" + convertInline(strings.TrimSpace(after)) + "</h6>\n")
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "#####"); ok {
-			result.WriteString("<h5>" + convertInline(strings.TrimSpace(after)) + "</h5>\n")
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "####"); ok {
-			result.WriteString("<h4>" + convertInline(strings.TrimSpace(after)) + "</h4>\n")
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "###"); ok {
-			result.WriteString("<h3>" + convertInline(strings.TrimSpace(after)) + "</h3>\n")
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "##"); ok {
-			result.WriteString("<h2>" + convertInline(strings.TrimSpace(after)) + "</h2>\n")
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "#"); ok {
-			result.WriteString("<h1>" + convertInline(strings.TrimSpace(after)) + "</h1>\n")
-			continue
-		}
-
-		// Blockquote
-		if strings.HasPrefix(line, ">") {
-			flushParagraph()
-			flushPendingBreak()
-		}
-		if after, ok := strings.CutPrefix(line, ">"); ok {
-			quote := strings.TrimSpace(after)
-			result.WriteString("<blockquote>" + convertInline(quote) + "</blockquote>\n")
-			continue
-		}
-
-		// Horizontal rule
-		trimmed := strings.TrimSpace(line)
-		if len(trimmed) >= 3 && (allChars(trimmed, '-') || allChars(trimmed, '*') || allChars(trimmed, '_')) {
-			flushParagraph()
-			flushPendingBreak()
-			result.WriteString("<hr>\n")
-			continue
-		}
-
-		// Accumulate paragraph lines
-		paraLines = append(paraLines, line)
-	}
-
-	// Flush any remaining paragraph or list
-	flushParagraph()
-	flushList()
-
-	// Handle unclosed code block
-	if inCodeBlock && len(codeLines) > 0 {
-		code := strings.Join(codeLines, "\n")
-		code = escapeHTML(code)
-		result.WriteString("<pre><code>" + code + "</code></pre>\n")
-	}
-
-	return strings.TrimSpace(result.String())
-}
-
-// convertInline converts inline Markdown elements (bold, italic, links, code) to HTML.
-// Code spans and backslash escapes are protected from further processing to preserve
-// their literal content.
-func convertInline(text string) string {
-	// Protect escaped backticks before code-span detection so \` remains literal
-	// and cannot be interpreted as a code-span delimiter.
-	var escapedBackticks []string
-	text = reEscapedBacktick.ReplaceAllStringFunc(text, func(_ string) string {
-		idx := len(escapedBackticks)
-		escapedBackticks = append(escapedBackticks, "`")
-		return "\x00ESCBT" + strconv.Itoa(idx) + "\x00"
-	})
-
-	// Extract code spans — their content must be completely literal.
-	var codeSpans []string
-	text = reCodeSpan.ReplaceAllStringFunc(text, func(match string) string {
-		inner := reCodeSpan.FindStringSubmatch(match)
-		if len(inner) >= 2 {
-			idx := len(codeSpans)
-			codeSpans = append(codeSpans, inner[1])
-			return "\x00CODE" + strconv.Itoa(idx) + "\x00"
-		}
-		return match
-	})
-
-	// Process backslash escapes (CommonMark §2.4): a backslash before an ASCII
-	// punctuation character produces the literal character. We extract these into
-	// placeholders so they are not treated as Markdown delimiters and restore
-	// them afterward. We use attribute-safe escaping on restore because escaped
-	// punctuation can be captured inside href/src values before link/image HTML is built.
-	var escaped []string
-	text = reBackslashEscape.ReplaceAllStringFunc(text, func(match string) string {
-		idx := len(escaped)
-		escaped = append(escaped, match[1:]) // the punctuation character after the backslash
-		return "\x00ESC" + strconv.Itoa(idx) + "\x00"
-	})
-
-	// Escape HTML entities
-	text = escapeHTML(text)
-
-	// Bold with ** or __
-	text = reBoldStar.ReplaceAllString(text, "<strong>$1</strong>")
-	text = reBoldUnder.ReplaceAllString(text, "<strong>$1</strong>")
-
-	// Italic with * or _ (but not inside words for _)
-	text = reItalicStar.ReplaceAllString(text, "<em>$1</em>")
-	text = reItalicUnder.ReplaceAllStringFunc(text, func(s string) string {
-		inner := reItalicInner.FindStringSubmatch(s)
-		if len(inner) >= 2 {
-			prefix := ""
-			suffix := ""
-			if len(s) > 0 && s[0] != '_' {
-				prefix = string(s[0])
-			}
-			if len(s) > 0 && s[len(s)-1] != '_' {
-				suffix = string(s[len(s)-1])
-			}
-			return prefix + "<em>" + inner[1] + "</em>" + suffix
-		}
-		return s
-	})
-
-	// Images ![alt](url) - MUST come before links since image syntax contains link syntax
-	text = reImage.ReplaceAllStringFunc(text, func(match string) string {
-		parts := reImage.FindStringSubmatch(match)
-		if len(parts) >= 3 {
-			alt := escapeAttr(parts[1])
-			src := resolveDestinationEscapes(parts[2], escaped, escapedBackticks)
-			src = escapeAttr(src)
-			return `<img src="` + src + `" alt="` + alt + `">`
-		}
-		return match
-	})
-
-	// Links [text](url)
-	text = reLink.ReplaceAllStringFunc(text, func(match string) string {
-		parts := reLink.FindStringSubmatch(match)
-		if len(parts) >= 3 {
-			linkText := parts[1]
-			href := resolveDestinationEscapes(parts[2], escaped, escapedBackticks)
-			href = escapeAttr(href)
-			return `<a href="` + href + `">` + linkText + `</a>`
-		}
-		return match
-	})
-
-	// Strikethrough ~~text~~
-	text = reStrikethrough.ReplaceAllString(text, "<del>$1</del>")
-
-	// Restore backslash-escaped characters in body text. Placeholders inside
-	// link/image destinations were already resolved with percent-encoding above.
-	escapedRendered := make([]string, len(escaped))
-	for i, ch := range escaped {
-		escapedRendered[i] = escapeAttr(ch)
-	}
-	text = restorePlaceholders(text, "ESC", escapedRendered)
-	text = restorePlaceholders(text, "ESCBT", escapedRenderedBackticks(escapedBackticks))
-
-	// Restore code spans (HTML-escape their content since extraction now
-	// happens before escapeHTML to allow backslash-escape processing).
-	codeRendered := make([]string, len(codeSpans))
-	for i, code := range codeSpans {
-		codeRendered[i] = "<code>" + escapeHTML(code) + "</code>"
-	}
-	text = restorePlaceholders(text, "CODE", codeRendered)
-
-	return text
-}
-
-func escapedRenderedBackticks(backticks []string) []string {
-	rendered := make([]string, len(backticks))
-	for i, bt := range backticks {
-		rendered[i] = escapeAttr(bt)
-	}
-	return rendered
-}
-
-func restorePlaceholders(text, prefix string, replacements []string) string {
-	if len(replacements) == 0 {
-		return text
-	}
-	pairs := make([]string, 0, len(replacements)*2)
-	for i, repl := range replacements {
-		pairs = append(pairs, "\x00"+prefix+strconv.Itoa(i)+"\x00", repl)
-	}
-	return strings.NewReplacer(pairs...).Replace(text)
+	return strings.TrimSpace(buf.String())
 }
 
 // escapeHTML escapes special HTML characters.
@@ -496,73 +379,6 @@ func escapeAttr(s string) string {
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	s = strings.ReplaceAll(s, "'", "&#39;")
 	return s
-}
-
-// percentEncodeChar percent-encodes a single byte for use in URL destinations.
-// Characters left literal match the destination-safe set derived from markdown-it:
-// !$&'()*+,-./:;=?@_~#
-// Everything else gets %XX hex encoding.
-func percentEncodeChar(ch byte) string {
-	switch {
-	case ch >= 'A' && ch <= 'Z', ch >= 'a' && ch <= 'z', ch >= '0' && ch <= '9':
-		return string(ch)
-	case ch == '!' || ch == '$' || ch == '&' || ch == '\'' ||
-		ch == '(' || ch == ')' || ch == '*' || ch == '+' ||
-		ch == ',' || ch == '-' || ch == '.' || ch == '/' ||
-		ch == ':' || ch == ';' || ch == '=' || ch == '?' ||
-		ch == '@' || ch == '_' || ch == '~' || ch == '#':
-		return string(ch)
-	default:
-		return fmt.Sprintf("%%%02X", ch)
-	}
-}
-
-// resolveDestinationEscapes restores ESC and ESCBT placeholders within a link/image
-// destination using percent-encoding instead of HTML entity escaping.
-func resolveDestinationEscapes(dest string, escaped []string, escapedBackticks []string) string {
-	for i, ch := range escaped {
-		placeholder := "\x00ESC" + strconv.Itoa(i) + "\x00"
-		if strings.Contains(dest, placeholder) {
-			var encoded strings.Builder
-			for j := range len(ch) {
-				encoded.WriteString(percentEncodeChar(ch[j]))
-			}
-			dest = strings.ReplaceAll(dest, placeholder, encoded.String())
-		}
-	}
-	for i, bt := range escapedBackticks {
-		placeholder := "\x00ESCBT" + strconv.Itoa(i) + "\x00"
-		if strings.Contains(dest, placeholder) {
-			var encoded strings.Builder
-			for j := range len(bt) {
-				encoded.WriteString(percentEncodeChar(bt[j]))
-			}
-			dest = strings.ReplaceAll(dest, placeholder, encoded.String())
-		}
-	}
-	return dest
-}
-
-// sanitizeLanguage sanitizes a code block language identifier to prevent attribute injection.
-// Only allows alphanumeric characters, hyphens, and underscores.
-func sanitizeLanguage(lang string) string {
-	var result strings.Builder
-	for _, r := range lang {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
-}
-
-// allChars returns true if the string consists entirely of the given character.
-func allChars(s string, c byte) bool {
-	for i := range len(s) {
-		if s[i] != c && s[i] != ' ' {
-			return false
-		}
-	}
-	return true
 }
 
 // glamourCache caches glamour renderers by width to avoid repeated construction.
@@ -647,66 +463,38 @@ func HTMLToMarkdown(html string) string {
 	html = reH5.ReplaceAllString(html, "##### $1\n\n")
 	html = reH6.ReplaceAllString(html, "###### $1\n\n")
 
-	// Blockquotes
-	html = reBlockquote.ReplaceAllStringFunc(html, func(s string) string {
+	// Blockquotes — convert inner block elements (lists, code, paragraphs) to
+	// Markdown first, then prefix each line with >. Loop handles nesting:
+	// the lazy regex matches outermost open → innermost close, so each pass
+	// converts one level and the next pass handles the enclosing level.
+	convertBlockquote := func(s string) string {
 		inner := reBlockquote.FindStringSubmatch(s)
 		if len(inner) >= 2 {
-			lines := strings.Split(strings.TrimSpace(inner[1]), "\n")
+			content := blockquoteInnerToMarkdown(inner[1])
+			lines := strings.Split(content, "\n")
 			result := make([]string, 0, len(lines))
 			for _, line := range lines {
-				result = append(result, "> "+strings.TrimSpace(line))
+				if line == "" {
+					result = append(result, ">")
+				} else {
+					result = append(result, "> "+line)
+				}
 			}
 			return strings.Join(result, "\n") + "\n\n"
 		}
 		return s
-	})
+	}
+	for reBlockquote.MatchString(html) {
+		html = reBlockquote.ReplaceAllStringFunc(html, convertBlockquote)
+	}
 
-	// Code blocks (use (?is) for case-insensitive and dotall mode to match multi-line content)
+	// Code blocks
 	html = reCodeBlock.ReplaceAllStringFunc(html, func(s string) string {
-		langMatch := reCodeLang.FindStringSubmatch(s)
-		lang := ""
-		if len(langMatch) >= 2 {
-			lang = langMatch[1]
-		}
-		codeMatch := reCodeInner.FindStringSubmatch(s)
-		if len(codeMatch) >= 2 {
-			code := unescapeHTML(codeMatch[1])
-			return "```" + lang + "\n" + code + "\n```\n\n"
-		}
-		return s
+		return convertCodeBlockHTML(s) + "\n\n"
 	})
 
-	// Unordered lists
-	html = reUL.ReplaceAllStringFunc(html, func(s string) string {
-		inner := reUL.FindStringSubmatch(s)
-		if len(inner) >= 2 {
-			items := reLI.FindAllStringSubmatch(inner[1], -1)
-			var result []string
-			for _, item := range items {
-				if len(item) >= 2 {
-					result = append(result, "- "+strings.TrimSpace(item[1]))
-				}
-			}
-			return strings.Join(result, "\n") + "\n\n"
-		}
-		return s
-	})
-
-	// Ordered lists
-	html = reOL.ReplaceAllStringFunc(html, func(s string) string {
-		inner := reOL.FindStringSubmatch(s)
-		if len(inner) >= 2 {
-			items := reLI.FindAllStringSubmatch(inner[1], -1)
-			var result []string
-			for i, item := range items {
-				if len(item) >= 2 {
-					result = append(result, strconv.Itoa(i+1)+". "+strings.TrimSpace(item[1]))
-				}
-			}
-			return strings.Join(result, "\n") + "\n\n"
-		}
-		return s
-	})
+	// Lists — use balanced-tag replacement to handle nesting correctly.
+	html = replaceBalancedListBlocks(html)
 
 	// Paragraphs
 	html = reP.ReplaceAllString(html, "$1\n\n")
@@ -788,6 +576,237 @@ func HTMLToMarkdown(html string) string {
 
 	return strings.TrimSpace(html)
 }
+
+// reBRLine matches a <br> tag followed by an optional newline, collapsing
+// the pair to a single \n. goldmark's hard-break output is <br>\n; Trix API
+// content may have standalone <br>.
+var reBRLine = regexp.MustCompile(`(?i)<br\s*/?\s*>\n?`)
+
+// formatListItem converts a list item's HTML content to Markdown, handling
+// <br> tags as indented continuation lines.
+func formatListItem(prefix, indent, content string) string {
+	content = strings.TrimSpace(content)
+	content = reBRLine.ReplaceAllString(content, "\n")
+	lines := strings.Split(content, "\n")
+	var parts []string
+	for i, line := range lines {
+		if i == 0 {
+			parts = append(parts, prefix+strings.TrimSpace(line))
+		} else {
+			// Preserve existing indentation from nested list conversion
+			parts = append(parts, indent+line)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// convertCodeBlockHTML converts a <pre><code>...</code></pre> match to Markdown.
+// Entities are left escaped so that later regex passes (reP, reStripTags) don't
+// corrupt code content like &lt;p&gt;. The global unescapeHTML at the end of
+// HTMLToMarkdown converts them.
+func convertCodeBlockHTML(s string) string {
+	lang := ""
+	// Prefer <pre language="X"> (Trix/BC5 format). Fall back to
+	// <code class="language-X"> for CommonMark-formatted content (e.g. legacy
+	// stored HTML or output from other markdown renderers).
+	if match := rePreLang.FindStringSubmatch(s); len(match) >= 2 {
+		lang = match[1]
+	} else if match := reCodeLang.FindStringSubmatch(s); len(match) >= 2 {
+		lang = match[1]
+	}
+	codeMatch := reCodeInner.FindStringSubmatch(s)
+	if len(codeMatch) >= 2 {
+		code := strings.TrimSuffix(codeMatch[1], "\n")
+		return "```" + lang + "\n" + code + "\n```"
+	}
+	return s
+}
+
+// reLIOpen matches an opening <li> tag (with optional attributes).
+// (?:\s[^>]*)? requires whitespace or `>` after `li` so tags like <link> don't
+// over-match and break extractListItems depth tracking.
+var reLIOpen = regexp.MustCompile(`(?i)<li(?:\s[^>]*)?>`)
+
+// hasPrefixFold checks if s starts with prefix using ASCII case-insensitive
+// comparison. Safe for HTML tag matching without ToLower index desync.
+func hasPrefixFold(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
+}
+
+// extractListItems extracts top-level <li> content by tracking nesting depth,
+// correctly handling nested <li> tags that trip up regex-based extraction.
+// Nested <ul>/<ol> inside items are recursively converted to Markdown.
+func extractListItems(html string) []string {
+	var items []string
+	i := 0
+	for {
+		// Find next top-level <li> opening tag (regex is case-insensitive)
+		loc := reLIOpen.FindStringIndex(html[i:])
+		if loc == nil {
+			break
+		}
+		contentStart := i + loc[1]
+
+		// Walk forward tracking <li> depth to find the matching </li>.
+		// Jump to next '<' to avoid quadratic byte-by-byte scanning.
+		depth := 1
+		j := contentStart
+		for j < len(html) && depth > 0 {
+			idx := strings.IndexByte(html[j:], '<')
+			if idx == -1 {
+				j = len(html)
+				break
+			}
+			j += idx
+			if hasPrefixFold(html[j:], "</li>") {
+				depth--
+				if depth == 0 {
+					content := html[contentStart:j]
+					content = replaceBalancedListBlocks(content)
+					items = append(items, content)
+					j += 5
+					break
+				}
+				j += 5
+			} else if loc := reLIOpen.FindStringIndex(html[j:]); loc != nil && loc[0] == 0 {
+				depth++
+				j += loc[1]
+			} else {
+				j++
+			}
+		}
+		i = j
+	}
+	return items
+}
+
+// reListOpen matches an opening <ul> or <ol> tag. (?:\s[^>]*)? requires
+// whitespace or `>` after the tag name so `<ultra>` or other long-prefix tags
+// don't trigger replaceBalancedListBlocks.
+var reListOpen = regexp.MustCompile(`(?i)<(ul|ol)(?:\s[^>]*)?>`)
+
+// replaceBalancedListBlocks finds top-level <ul>/<ol> blocks by tracking tag
+// depth and converts each to Markdown. Handles nesting correctly where regex
+// lazy/greedy matching cannot.
+func replaceBalancedListBlocks(html string) string {
+	var result strings.Builder
+	// Track last written byte to avoid materializing result.String() in the loop.
+	var lastByte byte
+	writeString := func(s string) {
+		if len(s) > 0 {
+			lastByte = s[len(s)-1]
+			result.WriteString(s)
+		}
+	}
+	writeByte := func(b byte) {
+		lastByte = b
+		result.WriteByte(b)
+	}
+
+	i := 0
+	for {
+		loc := reListOpen.FindStringSubmatchIndex(html[i:])
+		if loc == nil {
+			writeString(html[i:])
+			break
+		}
+		matchStart := i + loc[0]
+		tag := strings.ToLower(html[i+loc[2] : i+loc[3]]) // "ul" or "ol"
+		contentStart := i + loc[1]
+
+		writeString(html[i:matchStart])
+
+		depth := 1
+		j := contentStart
+		for j < len(html) && depth > 0 {
+			// Jump to next '<' to avoid quadratic byte-by-byte scanning
+			idx := strings.IndexByte(html[j:], '<')
+			if idx == -1 {
+				j = len(html)
+				break
+			}
+			j += idx
+			// Decrement for any list close tag (handles mixed <ul>/<ol> nesting)
+			if hasPrefixFold(html[j:], "</ul>") || hasPrefixFold(html[j:], "</ol>") {
+				closeLen := 5 // len("</ul>") == len("</ol>")
+				depth--
+				if depth == 0 {
+					inner := html[contentStart:j]
+					var md string
+					if tag == "ul" {
+						md = convertULInner(inner)
+					} else {
+						md = convertOLInner(inner)
+					}
+					if lastByte != 0 && lastByte != '\n' {
+						writeByte('\n')
+					}
+					writeString(md + "\n\n")
+					j += closeLen
+					break
+				}
+				j += closeLen
+			} else if loc := reListOpen.FindStringSubmatchIndex(html[j:]); loc != nil && loc[0] == 0 {
+				depth++
+				j += loc[1]
+			} else {
+				j++
+			}
+		}
+		if depth > 0 {
+			// Unclosed tag — write original text
+			writeString(html[matchStart:])
+			break
+		}
+		i = j
+	}
+	return result.String()
+}
+
+// convertULInner converts inner <ul> content (between <ul> and </ul>) to Markdown.
+func convertULInner(inner string) string {
+	items := extractListItems(inner)
+	result := make([]string, 0, len(items))
+	for _, content := range items {
+		result = append(result, formatListItem("- ", "  ", content))
+	}
+	return strings.Join(result, "\n")
+}
+
+// convertOLInner converts inner <ol> content (between <ol> and </ol>) to Markdown.
+func convertOLInner(inner string) string {
+	items := extractListItems(inner)
+	result := make([]string, 0, len(items))
+	for i, content := range items {
+		prefix := strconv.Itoa(i+1) + ". "
+		indent := strings.Repeat(" ", len(prefix))
+		result = append(result, formatListItem(prefix, indent, content))
+	}
+	return strings.Join(result, "\n")
+}
+
+// blockquoteInnerToMarkdown converts the inner HTML of a blockquote to Markdown,
+// handling nested block elements (lists, code blocks) before line-level operations.
+func blockquoteInnerToMarkdown(inner string) string {
+	content := strings.TrimSpace(inner)
+	content = reCodeBlock.ReplaceAllStringFunc(content, func(s string) string {
+		return convertCodeBlockHTML(s) + "\n\n"
+	})
+	content = replaceBalancedListBlocks(content)
+	// Replace </p> with double newline (paragraph break) to separate adjacent blocks,
+	// then strip <p> openers. Two passes so <p>para1</p><p>para2</p> produces
+	// "para1\n\npara2" (blank line = > separator) rather than "para1para2".
+	content = reClosingP.ReplaceAllString(content, "\n\n")
+	content = reOpeningP.ReplaceAllString(content, "")
+	content = reBRLine.ReplaceAllString(content, "\n")
+	content = reMultiNewline.ReplaceAllString(content, "\n\n")
+	return strings.TrimSpace(content)
+}
+
+var (
+	reOpeningP = regexp.MustCompile(`(?i)<p(?:\s[^>]*)?>`)
+	reClosingP = regexp.MustCompile(`(?i)</p>`)
+)
 
 // unescapeHTML converts HTML entities back to their characters.
 func unescapeHTML(s string) string {
@@ -934,7 +953,7 @@ func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, erro
 		switch scheme {
 		case "mention":
 			// Zero API calls — use value as SGID, link text as display name (caller-trusted).
-			// Unescape HTML because convertInline already escaped the link text (e.g. & → &amp;)
+			// Unescape HTML because goldmark already escaped the link text (e.g. & → &amp;)
 			// and MentionToHTML will re-escape — without this we'd double-encode.
 			name := unescapeHTML(strings.TrimPrefix(displayText, "@"))
 			tag = MentionToHTML(value, name)

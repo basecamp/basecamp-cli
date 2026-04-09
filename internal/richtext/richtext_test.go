@@ -80,7 +80,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "ordered list with trailing spaces and descriptions",
 			input:    "1. **Item** - [Link](url) (time)  \n   Description here\n\n2. **Next** - [Link](url)",
-			expected: "<ol>\n<li><strong>Item</strong> - <a href=\"url\">Link</a> (time)  <br>\nDescription here</li>\n<li><strong>Next</strong> - <a href=\"url\">Link</a></li>\n</ol>",
+			expected: "<ol>\n<li><strong>Item</strong> - <a href=\"url\">Link</a> (time)<br>\nDescription here</li>\n<li><strong>Next</strong> - <a href=\"url\">Link</a></li>\n</ol>",
 		},
 		{
 			name:     "list followed by blank line then paragraph",
@@ -88,9 +88,12 @@ func TestMarkdownToHTML(t *testing.T) {
 			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<br>\n<p>Following paragraph.</p>",
 		},
 		{
-			name:     "blank between list items does not leak break after list",
+			// CommonMark §5.4: "After" is a lazy continuation of the second list item.
+			// goldmark treats non-indented continuation lines as part of the list item,
+			// unlike our previous hand-rolled parser which ended the list.
+			name:     "lazy continuation stays in list item",
 			input:    "- One\n\n- Two\nAfter",
-			expected: "<ul>\n<li>One</li>\n<li>Two</li>\n</ul>\n<p>After</p>",
+			expected: "<ul>\n<li>One</li>\n<li>Two<br>\nAfter</li>\n</ul>",
 		},
 		{
 			name:     "blockquote",
@@ -100,12 +103,12 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "code block",
 			input:    "```go\nfunc main() {}\n```",
-			expected: `<pre><code class="language-go">func main() {}</code></pre>`,
+			expected: "<pre language=\"go\"><code>func main() {}\n</code></pre>",
 		},
 		{
 			name:     "code block without language",
 			input:    "```\nsome code\n```",
-			expected: "<pre><code>some code</code></pre>",
+			expected: "<pre><code>some code\n</code></pre>",
 		},
 		{
 			name:     "horizontal rule with dashes",
@@ -150,7 +153,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "consecutive lines join into one paragraph",
 			input:    "Line one\nLine two",
-			expected: "<p>Line one Line two</p>",
+			expected: "<p>Line one\nLine two</p>",
 		},
 		{
 			name:     "blank line before list",
@@ -160,7 +163,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "blank line before code block",
 			input:    "Intro\n\n```\ncode\n```",
-			expected: "<p>Intro</p>\n<br>\n<pre><code>code</code></pre>",
+			expected: "<p>Intro</p>\n<br>\n<pre><code>code\n</code></pre>",
 		},
 		{
 			name:     "leading blank lines ignored",
@@ -195,12 +198,13 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "code fence flushes accumulated paragraph",
 			input:    "Text\n```go\nx\n```",
-			expected: "<p>Text</p>\n<pre><code class=\"language-go\">x</code></pre>",
+			expected: "<p>Text</p>\n<pre language=\"go\"><code>x\n</code></pre>",
 		},
 		{
-			name:     "horizontal rule flushes accumulated paragraph",
+			// CommonMark: "Text\n---" is a setext heading (h2), not paragraph + hr
+			name:     "setext heading level 2",
 			input:    "Text\n---",
-			expected: "<p>Text</p>\n<hr>",
+			expected: "<h2>Text</h2>",
 		},
 		{
 			name:     "code span containing HTML tag is converted not passthrough",
@@ -210,7 +214,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "fenced code block containing HTML tags is converted",
 			input:    "intro\n\n```\n<div>hello</div>\n```",
-			expected: "<p>intro</p>\n<br>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;</code></pre>",
+			expected: "<p>intro</p>\n<br>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;\n</code></pre>",
 		},
 	}
 
@@ -301,9 +305,10 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			expected: `<p><a href="https://example.com/?q=%22hi%22">x</a></p>`,
 		},
 		{
+			// goldmark treats \% as literal % in URLs (CommonMark spec)
 			name:     "escaped percent in link destination",
 			input:    `[x](https://example.com/\%20)`,
-			expected: `<p><a href="https://example.com/%2520">x</a></p>`,
+			expected: `<p><a href="https://example.com/%20">x</a></p>`,
 		},
 		{
 			name:     "escaped backslash in link destination",
@@ -323,7 +328,7 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 		{
 			name:     "escaped percent in image src",
 			input:    `![alt](https://example.com/\%20.png)`,
-			expected: `<p><img src="https://example.com/%2520.png" alt="alt"></p>`,
+			expected: `<p><img src="https://example.com/%20.png" alt="alt"></p>`,
 		},
 		{
 			name:     "literal-safe chars stay literal in link destination",
@@ -388,6 +393,520 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 			result := MarkdownToHTML(tt.input)
 			if result != tt.expected {
 				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMarkdownToHTMLBackslashAtCounts(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single backslash at",
+			input:    `\@John`,
+			expected: `<p>\@John</p>`,
+		},
+		{
+			name:     "double backslash at",
+			input:    `\\@John`,
+			expected: `<p>\@John</p>`,
+		},
+		{
+			name:     "triple backslash at",
+			input:    `\\\@John`,
+			expected: `<p>\\@John</p>`,
+		},
+		{
+			name:     "quadruple backslash at",
+			input:    `\\\\@John`,
+			expected: `<p>\\@John</p>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMarkdownToHTMLMultiParagraphBlockquote(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single line",
+			input:    "> text",
+			expected: "<blockquote>text</blockquote>",
+		},
+		{
+			name:     "multiline",
+			input:    "> line1\n> line2",
+			expected: "<blockquote>line1<br>\nline2</blockquote>",
+		},
+		{
+			name:     "multi-paragraph",
+			input:    "> para1\n>\n> para2",
+			expected: "<blockquote>para1\n<br>\npara2</blockquote>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMarkdownToHTMLRawHTMLBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single-line script tag",
+			input:    "<script>alert(1)</script>",
+			expected: "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>",
+		},
+		{
+			name:     "multiline script tag",
+			input:    "<script>\nalert(1)\n</script>",
+			expected: "<p>&lt;script&gt; alert(1) &lt;/script&gt;</p>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// Tag-match regexes use (?:\s[^>]*)? to require whitespace or `>` after the
+// tag name. Without that, `<p[^>]*>` false-matches `<pre>`, `<b[^>]*>` matches
+// `<br>`, `<em[^>]*>` matches `<embed>`, etc. — leading to garbled output when
+// such tag prefixes coexist with their matching close tags elsewhere.
+func TestHTMLToMarkdownTagBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			// Without the boundary, <p[^>]*>.*?</p> would match
+			// "<pre>" ... "</p>" across the pre block.
+			name:     "p does not match pre",
+			input:    "<pre><code>keep</code></pre><p>tail</p>",
+			expected: "```\nkeep\n```\n\ntail",
+		},
+		{
+			// Without the boundary, <b[^>]*>.*?</b> would match
+			// "<br>" ... "</b>" eating the line break.
+			name:     "b does not match br",
+			input:    "text<br>and <b>bold</b>",
+			expected: "text\nand **bold**",
+		},
+		{
+			// Without the boundary, <em[^>]*>.*?</em> would match
+			// "<embed" ... "</em>".
+			name:     "em does not match embed",
+			input:    "<embed src=\"x\"><em>real</em>",
+			expected: "*real*",
+		},
+		{
+			// Without the boundary, <i[^>]*>.*?</i> would match
+			// "<img" ... "</i>".
+			name:     "i does not match img",
+			input:    "<img src=\"x.png\" alt=\"a\"> then <i>italic</i>",
+			expected: "![a](x.png) then *italic*",
+		},
+		{
+			// Without the boundary, <li[^>]*> would match <link>, breaking
+			// extractListItems depth tracking.
+			name:     "li does not match link",
+			input:    "<ul><link rel=\"x\"><li>Item</li></ul>",
+			expected: "- Item",
+		},
+		{
+			// Without the boundary, <(ul|ol)[^>]*> would match <ultra>,
+			// triggering replaceBalancedListBlocks on a non-list tag.
+			name:     "ul does not match ultra",
+			input:    "<ultra>text</ultra><ul><li>real</li></ul>",
+			expected: "text\n- real",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if result != tt.expected {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// BC5's SyntaxHighlightFilter converts <pre language="X"> into a Stimulus
+// controller that triggers Prism.js. The CommonMark convention
+// (<code class="language-X">) does not trigger highlighting.
+func TestMarkdownToHTMLCodeBlockSyntaxHighlight(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "language emits pre[language] not code[class]",
+			input:    "```ruby\ndef hello; end\n```",
+			expected: "<pre language=\"ruby\"><code>def hello; end\n</code></pre>",
+		},
+		{
+			name:     "language with hyphen",
+			input:    "```objective-c\nreturn nil;\n```",
+			expected: "<pre language=\"objective-c\"><code>return nil;\n</code></pre>",
+		},
+		{
+			name:     "no language omits attribute",
+			input:    "```\nplain\n```",
+			expected: "<pre><code>plain\n</code></pre>",
+		},
+		{
+			name:     "html content escaped",
+			input:    "```html\n<div>hi</div>\n```",
+			expected: "<pre language=\"html\"><code>&lt;div&gt;hi&lt;/div&gt;\n</code></pre>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// HTMLToMarkdown must recognize both the Trix/BC5 format (<pre language="X">)
+// and the legacy CommonMark format (<code class="language-X">) so round-trips
+// work for content stored in either form.
+func TestHTMLToMarkdownCodeBlockLanguageFormats(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "pre language attribute",
+			input:    `<pre language="go"><code>func main() {}</code></pre>`,
+			expected: "```go\nfunc main() {}\n```",
+		},
+		{
+			name:     "code class attribute (legacy)",
+			input:    `<pre><code class="language-go">func main() {}</code></pre>`,
+			expected: "```go\nfunc main() {}\n```",
+		},
+		{
+			name:     "pre language preferred over code class",
+			input:    `<pre language="ruby"><code class="language-go">x</code></pre>`,
+			expected: "```ruby\nx\n```",
+		},
+		{
+			// data-language must not match the pre-language pattern, since the
+			// code class carries the real language in syntax-highlighter output.
+			name:     "data-language does not shadow code class",
+			input:    `<pre data-language="text"><code class="language-go">x</code></pre>`,
+			expected: "```go\nx\n```",
+		},
+		{
+			name:     "data-language alone yields no language",
+			input:    `<pre data-language="text"><code>x</code></pre>`,
+			expected: "```\nx\n```",
+		},
+		{
+			name:     "no language",
+			input:    `<pre><code>plain</code></pre>`,
+			expected: "```\nplain\n```",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if result != tt.expected {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHTMLToMarkdownMultilineBlockquote(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single paragraph",
+			input:    "<blockquote>\n<p>text</p>\n</blockquote>",
+			expected: "> text",
+		},
+		{
+			name:     "adjacent paragraphs",
+			input:    "<blockquote><p>para1</p><p>para2</p></blockquote>",
+			expected: "> para1\n>\n> para2",
+		},
+		{
+			name:     "paragraph then list",
+			input:    "<blockquote><p>intro</p><ul><li>one</li><li>two</li></ul></blockquote>",
+			expected: "> intro\n>\n> - one\n> - two",
+		},
+		{
+			name:     "paragraph then code block",
+			input:    "<blockquote><p>intro</p><pre><code>code</code></pre></blockquote>",
+			expected: "> intro\n>\n> ```\n> code\n> ```",
+		},
+		{
+			name:     "code block then paragraph",
+			input:    "<blockquote><pre><code>code</code></pre><p>tail</p></blockquote>",
+			expected: "> ```\n> code\n> ```\n>\n> tail",
+		},
+		{
+			name:     "code block then nested blockquote",
+			input:    "<blockquote><pre><code>code</code></pre><blockquote>nested</blockquote></blockquote>",
+			expected: "> ```\n> code\n> ```\n>\n> > nested",
+		},
+		{
+			name:     "whitespace-separated paragraphs",
+			input:    "<blockquote>\n<p>para1</p>\n<p>para2</p>\n</blockquote>",
+			expected: "> para1\n>\n> para2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if result != tt.expected {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHTMLToMarkdownMultilineParagraph(t *testing.T) {
+	input := "<p>line1\nline2</p>"
+	result := HTMLToMarkdown(input)
+	if !strings.Contains(result, "line1") || !strings.Contains(result, "line2") {
+		t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nmissing content", input, result)
+	}
+}
+
+func TestHTMLToMarkdownCodeFenceNewline(t *testing.T) {
+	input := "<pre><code>func main() {}\n</code></pre>"
+	result := HTMLToMarkdown(input)
+	if strings.Contains(result, "\n\n```") {
+		t.Errorf("HTMLToMarkdown(%q) has extra blank line before closing fence\ngot: %q", input, result)
+	}
+	if !strings.Contains(result, "func main() {}") {
+		t.Errorf("HTMLToMarkdown(%q) missing code content\ngot: %q", input, result)
+	}
+}
+
+func TestHTMLToMarkdownCodePreservesHTMLEntities(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains string
+	}{
+		{
+			name:     "p tags in code block survive reP and reStripTags",
+			input:    "<pre><code>&lt;p&gt;\nhi\n&lt;/p&gt;\n</code></pre>",
+			contains: "<p>\nhi\n</p>",
+		},
+		{
+			name:     "div tags in code block survive reStripTags",
+			input:    "<pre><code>&lt;div&gt;hello&lt;/div&gt;</code></pre>",
+			contains: "<div>hello</div>",
+		},
+		{
+			name:     "p tags in blockquoted code block",
+			input:    "<blockquote><pre><code>&lt;p&gt;\nhi\n&lt;/p&gt;\n</code></pre></blockquote>",
+			contains: "<p>\n> hi\n> </p>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:     %q\nmissing: %q", tt.input, result, tt.contains)
+			}
+		})
+	}
+}
+
+func TestHTMLToMarkdownNestedLists(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "nested ul compact",
+			input:    "<ul><li>parent<ul><li>child</li></ul></li></ul>",
+			expected: "- parent\n  - child",
+		},
+		{
+			name:     "nested ul with whitespace",
+			input:    "<ul>\n<li>parent\n<ul>\n<li>child</li>\n</ul>\n</li>\n</ul>",
+			expected: "- parent\n  - child",
+		},
+		{
+			name:     "nested ol",
+			input:    "<ol><li>parent<ol><li>child</li></ol></li></ol>",
+			expected: "1. parent\n   1. child",
+		},
+		{
+			name:     "mixed nesting ul then ol",
+			input:    "<ul><li>parent<ol><li>child</li></ol></li></ul>",
+			expected: "- parent\n  1. child",
+		},
+		{
+			name:     "mixed nesting ol then ul",
+			input:    "<ol><li>parent<ul><li>child</li></ul></li></ol>",
+			expected: "1. parent\n   - child",
+		},
+		{
+			name:     "3-level nesting",
+			input:    "<ul><li>a<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>",
+			expected: "- a\n  - b\n    - c",
+		},
+		{
+			name:     "uppercase tags",
+			input:    "<UL><LI>one</LI><LI>two</LI></UL>",
+			expected: "- one\n- two",
+		},
+		{
+			name:     "nested blockquote",
+			input:    "<blockquote><blockquote>nested</blockquote></blockquote>",
+			expected: "> > nested",
+		},
+		{
+			name:     "sibling lists preserved",
+			input:    "<ul><li>a</li></ul><p>text</p><ul><li>b</li></ul>",
+			expected: "- a\n\ntext\n\n- b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if result != tt.expected {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEditLoopRoundTrip(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		expected string // exact expected round-trip output
+	}{
+		{
+			name:     "blockquote",
+			markdown: "> A quote",
+			expected: "> A quote",
+		},
+		{
+			name:     "multiline blockquote",
+			markdown: "> line1\n> line2",
+			expected: "> line1\n> line2",
+		},
+		{
+			name:     "multi-paragraph blockquote",
+			markdown: "> para1\n>\n> para2",
+			expected: "> para1\n>\n> para2",
+		},
+		{
+			name:     "unordered list",
+			markdown: "- One\n- Two\n- Three",
+			expected: "- One\n- Two\n- Three",
+		},
+		{
+			name:     "list with continuation",
+			markdown: "1. First\n   Desc\n\n2. Second\n   More",
+			expected: "1. First\n   Desc\n2. Second\n   More",
+		},
+		{
+			name:     "code fence",
+			markdown: "```go\nfunc main() {}\n```",
+			expected: "```go\nfunc main() {}\n```",
+		},
+		{
+			name:     "heading",
+			markdown: "# Title",
+			expected: "# Title",
+		},
+		{
+			name:     "quoted list",
+			markdown: "> - One\n>   Two",
+			expected: "> - One\n>   Two",
+		},
+		{
+			name:     "quoted code fence",
+			markdown: "> ```\n> code\n> ```",
+			expected: "> ```\n> code\n> ```",
+		},
+		{
+			name:     "quoted ordered list",
+			markdown: "> 1. First\n> 2. Second",
+			expected: "> 1. First\n> 2. Second",
+		},
+		{
+			name:     "nested unordered list",
+			markdown: "- parent\n  - child",
+			expected: "- parent\n  - child",
+		},
+		{
+			name:     "nested ordered list",
+			markdown: "1. parent\n   1. child",
+			expected: "1. parent\n   1. child",
+		},
+		{
+			name:     "nested blockquote",
+			markdown: "> > nested",
+			expected: "> > nested",
+		},
+		{
+			name:     "mixed content",
+			markdown: "# Title\n\nSome **bold** text.\n\n- Item 1\n- Item 2\n\n> A quote\n\n```\ncode\n```",
+			expected: "# Title\n\nSome **bold** text.\n\n- Item 1\n- Item 2\n\n> A quote\n\n```\ncode\n```",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			html := MarkdownToHTML(tt.markdown)
+			back := HTMLToMarkdown(html)
+			if back != tt.expected {
+				t.Errorf("round-trip mismatch\nmarkdown: %q\nhtml:     %q\ngot:      %q\nwant:     %q", tt.markdown, html, back, tt.expected)
 			}
 		})
 	}
