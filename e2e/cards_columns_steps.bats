@@ -4,55 +4,55 @@
 load test_helper
 
 
-# Card create tests
+# Cards create tests
 
-@test "card --help shows help with positional args" {
+@test "cards create --help shows help with positional args" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp card --help
+  run basecamp cards create --help
   assert_success
-  assert_output_contains "basecamp card"
+  assert_output_contains "basecamp cards create"
   assert_output_contains "<title>"
 }
 
-@test "card --content is not a valid flag" {
+@test "cards create --content is not a valid flag" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  # Content is now a positional arg, not a flag
-  run basecamp card "Test" --content
+  # Content is a positional arg, not a flag
+  run basecamp cards create "Test" --content
   assert_failure
   assert_output_contains "Unknown option"
 }
 
-@test "card with unknown option shows error" {
+@test "cards create with unknown option shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  # Title is now positional, not --title
-  run basecamp card "Test" --foo
+  # Title is positional, not --title
+  run basecamp cards create "Test" --foo
   assert_failure
   assert_output_contains "Unknown option: --foo"
 }
 
-@test "card without title shows error" {
+@test "cards create without title shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp card
+  run basecamp cards create
   assert_failure
   assert_json_value '.error' '<title> required'
   assert_json_value '.code' 'usage'
 }
 
-@test "card with whitespace-only title shows help" {
+@test "cards create with whitespace-only title shows help" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp card " "
+  run basecamp cards create " "
   assert_success
-  assert_output_contains "basecamp card"
+  assert_output_contains "basecamp cards create"
 }
 
 

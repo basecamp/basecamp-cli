@@ -12,7 +12,7 @@ setup_file() {
 @test "assign assigns a person to a todo" {
   # Create a fresh todo for assignment
   local todo_out
-  todo_out=$(basecamp todo "Assign target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo_out=$(basecamp todos create "Assign target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for assign test"
     return
   }
@@ -41,11 +41,11 @@ setup_file() {
 @test "assign handles multiple todos in one command" {
   # Create two fresh todos
   local todo1_out todo2_out
-  todo1_out=$(basecamp todo "Batch assign 1 $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo1_out=$(basecamp todos create "Batch assign 1 $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo 1 for batch assign test"
     return
   }
-  todo2_out=$(basecamp todo "Batch assign 2 $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo2_out=$(basecamp todos create "Batch assign 2 $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo 2 for batch assign test"
     return
   }

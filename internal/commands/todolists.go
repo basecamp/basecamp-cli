@@ -247,7 +247,7 @@ You can pass either a todolist ID or a Basecamp URL:
 					},
 					output.Breadcrumb{
 						Action:      "add_todo",
-						Cmd:         fmt.Sprintf("basecamp todo <content> --list %s", todolistIDStr),
+						Cmd:         fmt.Sprintf("basecamp todos create <content> --list %s", todolistIDStr),
 						Description: "Add todo",
 					},
 				),
@@ -344,7 +344,7 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "add_todo",
-						Cmd:         fmt.Sprintf("basecamp todo <content> --list %s", todolistIDStr),
+						Cmd:         fmt.Sprintf("basecamp todos create <content> --list %s", todolistIDStr),
 						Description: "Add todo",
 					},
 				),

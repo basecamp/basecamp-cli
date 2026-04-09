@@ -172,9 +172,9 @@ func TestRootLevelLeafCommandHelp(t *testing.T) {
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
-	cmd.AddCommand(commands.NewDoneCmd())
+	cmd.AddCommand(commands.NewMeCmd())
 	cmd.SetOut(&buf)
-	cmd.SetArgs([]string{"done", "--help"})
+	cmd.SetArgs([]string{"me", "--help"})
 	_ = cmd.Execute()
 
 	out := buf.String()
@@ -506,9 +506,9 @@ func TestAgentHelpIncludesArgs(t *testing.T) {
 
 	var buf bytes.Buffer
 	cmd := NewRootCmd()
-	cmd.AddCommand(commands.NewTodoCmd())
+	cmd.AddCommand(commands.NewTodosCmd())
 	cmd.SetOut(&buf)
-	cmd.SetArgs([]string{"todo", "--help", "--agent"})
+	cmd.SetArgs([]string{"todos", "create", "--help", "--agent"})
 	_ = cmd.Execute()
 
 	out := buf.String()

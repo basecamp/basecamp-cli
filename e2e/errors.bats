@@ -53,11 +53,11 @@ load test_helper
   assert_output_contains "Unknown option"
 }
 
-@test "comment without recording ID shows error" {
+@test "comments create without recording ID shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp comment
+  run basecamp comments create
   assert_failure
   assert_json_value '.error' '<id|url> required'
   assert_json_value '.code' 'usage'
@@ -152,11 +152,11 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
-@test "comment without content shows error" {
+@test "comments create without content shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp comment 123
+  run basecamp comments create 123
   assert_failure
   assert_json_value '.error' '<content> required'
   assert_json_value '.code' 'usage'
@@ -174,15 +174,6 @@ load test_helper
 
 
 # Whitespace-only content errors
-
-@test "todo with whitespace-only content shows help" {
-  create_credentials
-  create_global_config '{"account_id": 99999, "project_id": 123}'
-
-  run basecamp todo " "
-  assert_success
-  assert_output_contains "basecamp todo"
-}
 
 @test "todos create with whitespace-only content shows help" {
   create_credentials
@@ -211,20 +202,11 @@ load test_helper
   assert_output_contains "basecamp messages create"
 }
 
-@test "message with whitespace-only title shows help" {
+@test "comments create with whitespace-only content shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp message " "
-  assert_success
-  assert_output_contains "basecamp message"
-}
-
-@test "comment with whitespace-only content shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999, "project_id": 123}'
-
-  run basecamp comment 123 " "
+  run basecamp comments create 123 " "
   assert_failure
   assert_json_value '.error' '<content> required'
   assert_json_value '.code' 'usage'
@@ -321,7 +303,7 @@ load test_helper
 
   # Email assignees are valid input and passed to ResolvePerson
   # With a fake account, this will fail on API call (not input validation)
-  run basecamp todo "test" --assignee "john@example.com"
+  run basecamp todos create "test" --assignee "john@example.com"
   assert_failure
   # Should NOT fail with "Invalid assignee" - emails are valid
   assert_output_not_contains "Invalid assignee"
@@ -337,11 +319,11 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
-@test "reopen without id shows error" {
+@test "todos uncomplete without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp reopen
+  run basecamp todos uncomplete
   assert_failure
   assert_json_value '.error' '<id|url>... required'
   assert_json_value '.code' 'usage'
@@ -426,11 +408,11 @@ load test_helper
   assert_output_contains '"subcommands"'
 }
 
-@test "message without subject shows error" {
+@test "messages create without subject shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp message
+  run basecamp messages create
   assert_failure
   assert_json_value '.error' '<title> required'
   assert_json_value '.code' 'usage'

@@ -248,7 +248,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 func cardsListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
 	return []output.Breadcrumb{
-		{Action: "create", Cmd: fmt.Sprintf("basecamp card --title <title> --in %s", resolvedProjectID), Description: "Create card"},
+		{Action: "create", Cmd: fmt.Sprintf("basecamp cards create <title> --in %s", resolvedProjectID), Description: "Create card"},
 		{Action: "show", Cmd: "basecamp cards show <id>", Description: "Show card details"},
 		{Action: "archived", Cmd: fmt.Sprintf("basecamp recordings cards --status archived --in %s", resolvedProjectID), Description: "Browse archived cards"},
 	}
@@ -296,7 +296,7 @@ You can pass either a card ID or a Basecamp URL:
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "comment",
-					Cmd:         fmt.Sprintf("basecamp comment %s <text>", cardIDStr),
+					Cmd:         fmt.Sprintf("basecamp comments create %s <text>", cardIDStr),
 					Description: "Add comment",
 				},
 			),
@@ -1018,239 +1018,13 @@ func newCardsColumnsCmd(project, cardTable *string) *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "create",
-						Cmd:         fmt.Sprintf("basecamp card --title <title> --in %s --card-table %s --column <id>", resolvedProjectID, cardTableID),
+						Cmd:         fmt.Sprintf("basecamp cards create <title> --in %s --card-table %s --column <id>", resolvedProjectID, cardTableID),
 						Description: "Create card in column",
 					},
 				),
 			)
 		},
 	}
-	return cmd
-}
-
-// NewCardCmd creates the card command (shortcut for creating cards).
-func NewCardCmd() *cobra.Command {
-	var project string
-	var column string
-	var cardTable string
-	var assignee string
-	var attachFiles []string
-
-	cmd := &cobra.Command{
-		Use:   "card <title> [body]",
-		Short: "Create a new card",
-		Long:  "Create a card in a project's card table. Shortcut for 'basecamp cards create'.",
-		Example: `  basecamp card "My card" --in myproject
-  basecamp card --in myproject -- "--title with dashes"`,
-		Args: cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when invoked with no title
-			if len(args) == 0 {
-				return missingArg(cmd, "<title>")
-			}
-
-			title := args[0]
-			if strings.TrimSpace(title) == "" {
-				return cmd.Help()
-			}
-			var content string
-			if len(args) > 1 {
-				content = args[1]
-			}
-
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Column name (non-numeric) requires --card-table for resolution
-			// Numeric column IDs can be used directly without card table discovery
-			if column != "" && !isNumericID(column) && cardTable == "" {
-				return output.ErrUsage("--card-table is required when using --column with a name")
-			}
-
-			// Resolve project, with interactive fallback
-			projectID := project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			// If column is a numeric ID, use it directly without card table discovery
-			var columnID int64
-			var cardTableIDVal string
-			if column != "" && isNumericID(column) {
-				columnID, err = strconv.ParseInt(column, 10, 64)
-				if err != nil {
-					return output.ErrUsage("Invalid column ID")
-				}
-				cardTableIDVal = "" // Not needed for numeric column ID
-			} else {
-				// Need to discover card table and resolve column
-				cardTableIDVal, err = getCardTableID(cmd, app, resolvedProjectID, cardTable)
-				if err != nil {
-					return err
-				}
-
-				cardTableIDInt, err := strconv.ParseInt(cardTableIDVal, 10, 64)
-				if err != nil {
-					return output.ErrUsage("Invalid card table ID")
-				}
-
-				// Get card table with embedded columns (lists)
-				cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
-				if err != nil {
-					return convertSDKError(err)
-				}
-
-				// Find target column
-				if column != "" {
-					columnID = resolveColumn(cardTableData.Lists, column)
-					if columnID == 0 {
-						return output.ErrUsageHint(
-							fmt.Sprintf("Column '%s' not found", column),
-							"Use column ID or exact name",
-						)
-					}
-				} else {
-					// Use first column
-					if len(cardTableData.Lists) == 0 {
-						return output.ErrNotFound("columns", resolvedProjectID)
-					}
-					columnID = cardTableData.Lists[0].ID
-				}
-			}
-
-			// Pre-resolve assignee before side-effectful work (fail early on bad input)
-			var assigneeID int64
-			if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to") {
-				assigneeID, err = resolveAssigneeID(cmd.Context(), app, assignee)
-				if err != nil {
-					return err
-				}
-			}
-
-			// Convert content through rich text pipeline
-			var mentionNotice string
-			if content != "" {
-				content = richtext.MarkdownToHTML(content)
-				content, err = resolveLocalImages(cmd, app, content)
-				if err != nil {
-					return err
-				}
-				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, content)
-				if mentionErr != nil {
-					return mentionErr
-				}
-				content = mentionResult.HTML
-				mentionNotice = unresolvedMentionWarning(mentionResult.Unresolved)
-			}
-
-			// Upload explicit --attach files and embed
-			if len(attachFiles) > 0 {
-				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
-				if attachErr != nil {
-					return attachErr
-				}
-				content = richtext.EmbedAttachments(content, refs)
-			}
-
-			// Build request
-			req := &basecamp.CreateCardRequest{
-				Title:   title,
-				Content: content,
-			}
-
-			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			if assigneeID != 0 {
-				createdCardID := card.ID
-				card, err = app.Account().Cards().Update(cmd.Context(), createdCardID, &basecamp.UpdateCardRequest{
-					AssigneeIDs: []int64{assigneeID},
-				})
-				if err != nil {
-					sdkErr := convertSDKError(err)
-					var e *output.Error
-					if errors.As(sdkErr, &e) {
-						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", createdCardID, e.Message)
-						return e
-					}
-					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, sdkErr)
-				}
-			}
-
-			// Build breadcrumbs - only include --card-table when known
-			cardBreadcrumbs := []output.Breadcrumb{
-				{
-					Action:      "view",
-					Cmd:         fmt.Sprintf("basecamp cards show %d", card.ID),
-					Description: "View card",
-				},
-			}
-			if cardTableIDVal != "" {
-				cardBreadcrumbs = append(cardBreadcrumbs, output.Breadcrumb{
-					Action:      "move",
-					Cmd:         fmt.Sprintf("basecamp cards move %d --to <column> --card-table %s --in %s", card.ID, cardTableIDVal, resolvedProjectID),
-					Description: "Move card",
-				})
-			} else {
-				cardBreadcrumbs = append(cardBreadcrumbs, output.Breadcrumb{
-					Action:      "move",
-					Cmd:         fmt.Sprintf("basecamp cards move %d --to <column-id> --in %s", card.ID, resolvedProjectID),
-					Description: "Move card",
-				})
-			}
-			cardBreadcrumbs = append(cardBreadcrumbs, output.Breadcrumb{
-				Action:      "list",
-				Cmd:         fmt.Sprintf("basecamp cards --in %s", resolvedProjectID),
-				Description: "List cards",
-			})
-
-			respOpts := []output.ResponseOption{
-				output.WithSummary(fmt.Sprintf("Created card #%d", card.ID)),
-				output.WithBreadcrumbs(cardBreadcrumbs...),
-			}
-			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
-			}
-			return app.OK(card, respOpts...)
-		},
-	}
-
-	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
-	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
-	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
-	cmd.PersistentFlags().StringVar(&cardTable, "card-table", "", "Card table ID (required if project has multiple)")
-	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
-
-	cardCompleter := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("assignee", cardCompleter.PeopleNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("to", cardCompleter.PeopleNameCompletion())
-
-	cmd.AddCommand(
-		newCardsUpdateCmd(),
-		newCardsMoveCmd(&project, &cardTable),
-	)
-
 	return cmd
 }
 

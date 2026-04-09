@@ -29,9 +29,8 @@ Use 'basecamp boost show <boost-id>' to view a specific boost.
 Use 'basecamp boost create <id> "content"' to boost an item.
 Use 'basecamp boost delete <boost-id>' to remove a boost.
 
-Tip: In the TUI, press 'b' on any item to boost interactively.
-'basecamp react' is a shortcut for 'boost create'.`,
-		Annotations: map[string]string{"agent_notes": "Boosts are tiny messages of support (16 chars max), not just emoji\nbasecamp react is a shortcut for boost create\nIn TUI mode, press 'b' on any item to boost interactively"},
+Tip: In the TUI, press 'b' on any item to boost interactively.`,
+		Annotations: map[string]string{"agent_notes": "Boosts are tiny messages of support (16 chars max), not just emoji\nIn TUI mode, press 'b' on any item to boost interactively"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -379,48 +378,5 @@ You can pass either a boost ID or a Basecamp URL:
 			)
 		},
 	}
-	return cmd
-}
-
-// NewBoostShortcutCmd creates the boost shortcut command for quickly boosting a recording.
-func NewBoostShortcutCmd() *cobra.Command {
-	var project string
-	var recording string
-	var eventID string
-
-	cmd := &cobra.Command{
-		Use:   "react <content>",
-		Short: "Boost with a short note or emoji",
-		Long: `Boost an item with a short note or emoji (shortcut for boost create).
-
-Content as positional argument, --on for the item:
-  basecamp react "🎉" --on 789 --project my-project
-  basecamp react "👍" --on https://3.basecamp.com/123/buckets/456/todos/789
-
-Tip: In the TUI, press 'b' on any item to open the boost picker.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			content := args[0]
-
-			// Require a recording target
-			if recording == "" {
-				return output.ErrUsage("--on or --recording required")
-			}
-
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			return runBoostCreate(cmd, app, recording, project, content, eventID)
-		},
-	}
-
-	cmd.Flags().StringVarP(&recording, "on", "r", "", "ID or URL to react to")
-	cmd.Flags().StringVar(&recording, "recording", "", "ID or URL (alias for --on)")
-	cmd.Flags().StringVar(&eventID, "event", "", "Event ID (for event-specific boosts)")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
 	return cmd
 }

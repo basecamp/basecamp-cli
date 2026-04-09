@@ -318,9 +318,9 @@ func TestRenderTemplateInvalid(t *testing.T) {
 func TestRenderTemplateLargeID(t *testing.T) {
 	// JSON-decoded IDs are float64; large values must not use scientific notation
 	data := map[string]any{"id": float64(123456789)}
-	got := RenderTemplate("basecamp done {{.id}}", data)
-	if got != "basecamp done 123456789" {
-		t.Errorf("RenderTemplate(large ID) = %q, want %q", got, "basecamp done 123456789")
+	got := RenderTemplate("basecamp todos complete {{.id}}", data)
+	if got != "basecamp todos complete 123456789" {
+		t.Errorf("RenderTemplate(large ID) = %q, want %q", got, "basecamp todos complete 123456789")
 	}
 }
 
@@ -419,7 +419,7 @@ func TestRenderDetailTodo(t *testing.T) {
 	if !strings.Contains(out, "Mark done") {
 		t.Errorf("Output should contain 'Mark done' affordance, got:\n%s", out)
 	}
-	if !strings.Contains(out, "basecamp done 12345") {
+	if !strings.Contains(out, "basecamp todos complete 12345") {
 		t.Errorf("Output should contain rendered affordance command, got:\n%s", out)
 	}
 
@@ -945,7 +945,7 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	if !strings.Contains(out, "#### Hints") {
 		t.Errorf("Markdown detail should have '#### Hints', got:\n%s", out)
 	}
-	if !strings.Contains(out, "- `basecamp done 12345`") {
+	if !strings.Contains(out, "- `basecamp todos complete 12345`") {
 		t.Errorf("Markdown affordance should use backtick code, got:\n%s", out)
 	}
 

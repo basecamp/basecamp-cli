@@ -21,7 +21,7 @@ setup_file() {
 
   # Create a throwaway todo to trash
   local todo_out
-  todo_out=$(basecamp todo "Trash target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo_out=$(basecamp todos create "Trash target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for recordings trash test"
     return
   }
@@ -52,7 +52,7 @@ setup_file() {
 
   # Create a throwaway todo to archive
   local todo_out
-  todo_out=$(basecamp todo "Archive rec target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo_out=$(basecamp todos create "Archive rec target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for recordings archive test"
     return
   }
@@ -70,7 +70,7 @@ setup_file() {
 
   # Create a throwaway todo
   local todo_out
-  todo_out=$(basecamp todo "Visibility target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo_out=$(basecamp todos create "Visibility target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for recordings visibility test"
     return
   }

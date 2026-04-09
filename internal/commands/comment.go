@@ -118,7 +118,7 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
-				Cmd:         fmt.Sprintf("basecamp comment %s <text>", recordingID),
+				Cmd:         fmt.Sprintf("basecamp comments create %s <text>", recordingID),
 				Description: "Add comment",
 			},
 			output.Breadcrumb{
@@ -279,20 +279,6 @@ Use - as the content argument to read the updated content from stdin:
 	return cmd
 }
 
-// NewCommentCmd creates the 'comment' shortcut (alias for 'comments create').
-func NewCommentCmd() *cobra.Command {
-	var project string
-
-	cmd := newCommentsCreateCmd()
-	cmd.Use = "comment <id|url> <content>"
-	cmd.Short = "Add a comment (shortcut for 'comments create')"
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-
-	return cmd
-}
-
 func newCommentsCreateCmd() *cobra.Command {
 	var edit bool
 	var attachFiles []string
@@ -304,18 +290,18 @@ func newCommentsCreateCmd() *cobra.Command {
 
 The first argument is the item ID or URL to comment on.
 Comma-separated IDs add the same comment to multiple items:
-  basecamp comment 789 "Looks good!"
-  basecamp comment 789,012,345 "Looks good!"
-  basecamp comment https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"
+  basecamp comments create 789 "Looks good!"
+  basecamp comments create 789,012,345 "Looks good!"
+  basecamp comments create https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"
 
 Content can also be piped from stdin:
-  printf 'Looks good!' | basecamp comment 789
+  printf 'Looks good!' | basecamp comments create 789
 
 Content supports Markdown and @mentions (@Name or @First.Last):
-  basecamp comment 789 "Hey @Jane.Smith, **please review**"
+  basecamp comments create 789 "Hey @Jane.Smith, **please review**"
 
 Use - as the content argument to read content from stdin:
-  basecamp comment 789 - < body.md`,
+  basecamp comments create 789 - < body.md`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

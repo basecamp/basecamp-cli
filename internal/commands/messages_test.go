@@ -228,48 +228,11 @@ func TestMessagesPublishSendsActiveStatus(t *testing.T) {
 	assert.Equal(t, "active", body["status"])
 }
 
-// TestMessageShortcutShowsHelpWithoutTitle tests that help is shown when title is missing.
-func TestMessageShortcutShowsHelpWithoutTitle(t *testing.T) {
-	app, _ := setupMessagesTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewMessageCmd()
-
-	err := executeMessagesCommand(cmd, app)
-	assert.NoError(t, err)
-}
-
-// TestMessageShortcutRequiresProject tests that message command requires --project.
-func TestMessageShortcutRequiresProject(t *testing.T) {
-	app, _ := setupMessagesTestApp(t)
-	// No project in config
-
-	cmd := NewMessageCmd()
-
-	// Need to set title to bypass that validation
-	err := executeMessagesCommand(cmd, app, "Test")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "Project ID required", e.Message)
-}
-
 // TestMessagesHasMessageBoardFlag tests that --message-board flag is available.
 func TestMessagesHasMessageBoardFlag(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	flag := cmd.PersistentFlags().Lookup("message-board")
-	require.NotNil(t, flag, "expected --message-board flag to exist")
-
-	assert.Equal(t, "Message board ID (required if project has multiple)", flag.Usage)
-}
-
-// TestMessageShortcutHasMessageBoardFlag tests that message shortcut has --message-board flag.
-func TestMessageShortcutHasMessageBoardFlag(t *testing.T) {
-	cmd := NewMessageCmd()
-
-	flag := cmd.Flags().Lookup("message-board")
 	require.NotNil(t, flag, "expected --message-board flag to exist")
 
 	assert.Equal(t, "Message board ID (required if project has multiple)", flag.Usage)
@@ -308,17 +271,6 @@ func TestMessagesCreateHasSubscribeFlags(t *testing.T) {
 	require.NotNil(t, flag, "expected --no-subscribe flag on messages create")
 }
 
-// TestMessageShortcutHasSubscribeFlags tests that message shortcut has --subscribe and --no-subscribe flags.
-func TestMessageShortcutHasSubscribeFlags(t *testing.T) {
-	cmd := NewMessageCmd()
-
-	flag := cmd.Flags().Lookup("subscribe")
-	require.NotNil(t, flag, "expected --subscribe flag on message")
-
-	flag = cmd.Flags().Lookup("no-subscribe")
-	require.NotNil(t, flag, "expected --no-subscribe flag on message")
-}
-
 // TestMessagesCreateSubscribeMutualExclusion tests that --subscribe and --no-subscribe are mutually exclusive.
 func TestMessagesCreateSubscribeMutualExclusion(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
@@ -334,21 +286,6 @@ func TestMessagesCreateSubscribeMutualExclusion(t *testing.T) {
 	assert.Contains(t, e.Message, "mutually exclusive")
 }
 
-// TestMessageShortcutSubscribeMutualExclusion tests mutual exclusion on the message shortcut.
-func TestMessageShortcutSubscribeMutualExclusion(t *testing.T) {
-	app, _ := setupMessagesTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewMessageCmd()
-
-	err := executeMessagesCommand(cmd, app, "Test", "--subscribe", "me", "--no-subscribe")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Contains(t, e.Message, "mutually exclusive")
-}
-
 // TestMessagesCreateSubscribeEmptyIsError tests that --subscribe "" is rejected.
 func TestMessagesCreateSubscribeEmptyIsError(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
@@ -357,21 +294,6 @@ func TestMessagesCreateSubscribeEmptyIsError(t *testing.T) {
 	cmd := NewMessagesCmd()
 
 	err := executeMessagesCommand(cmd, app, "create", "Test", "--subscribe", "")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Contains(t, e.Message, "at least one person")
-}
-
-// TestMessageShortcutSubscribeEmptyIsError tests that --subscribe "" is rejected on the shortcut.
-func TestMessageShortcutSubscribeEmptyIsError(t *testing.T) {
-	app, _ := setupMessagesTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewMessageCmd()
-
-	err := executeMessagesCommand(cmd, app, "Test", "--subscribe", "")
 	require.Error(t, err)
 
 	var e *output.Error
