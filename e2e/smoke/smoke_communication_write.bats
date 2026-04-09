@@ -57,14 +57,6 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
-# --- React shortcut ---
-
-@test "react creates a boost via shortcut" {
-  run_smoke basecamp react "🎉" --on "$QA_TODO" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-}
-
 # --- Subscriptions (add/remove) ---
 
 @test "subscriptions add adds a subscriber" {

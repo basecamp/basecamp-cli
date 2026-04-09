@@ -9,10 +9,10 @@ setup_file() {
   ensure_cardtable || return 1
 }
 
-@test "card create creates a card (shortcut)" {
+@test "cards create creates a card" {
   [[ -n "${QA_CARDTABLE:-}" ]] || mark_unverifiable "No card table in project $QA_PROJECT"
 
-  run_smoke basecamp card "Smoke card $(date +%s)" \
+  run_smoke basecamp cards create "Smoke card $(date +%s)" \
     --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
@@ -21,7 +21,7 @@ setup_file() {
   echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/card_id"
 }
 
-@test "cards create creates a card (direct verb)" {
+@test "cards create creates a second card for archive tests" {
   [[ -n "${QA_CARDTABLE:-}" ]] || mark_unverifiable "No card table in project $QA_PROJECT"
 
   run_smoke basecamp cards create "Smoke direct card $(date +%s)" \
@@ -156,35 +156,7 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
-@test "card update updates a card (shortcut)" {
-  local id_file="$BATS_FILE_TMPDIR/card_id"
-  [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
-  local card_id
-  card_id=$(<"$id_file")
-
-  run_smoke basecamp card update "$card_id" \
-    --title "Updated shortcut $(date +%s)" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-}
-
-@test "card move moves a card (shortcut)" {
-  local card_file="$BATS_FILE_TMPDIR/card_id"
-  local col_file="$BATS_FILE_TMPDIR/column_id"
-  [[ -f "$card_file" ]] || mark_unverifiable "No card created in prior test"
-  [[ -f "$col_file" ]] || mark_unverifiable "No column discovered in prior test"
-  local card_id col_id
-  card_id=$(<"$card_file")
-  col_id=$(<"$col_file")
-  [[ -n "$col_id" ]] || mark_unverifiable "Column ID is empty"
-
-  run_smoke basecamp card move "$card_id" --to "$col_id" \
-    --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-}
-
-@test "cards update updates a card (direct verb)" {
+@test "cards update updates a card" {
   local id_file="$BATS_FILE_TMPDIR/card_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
   local card_id

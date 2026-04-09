@@ -1819,7 +1819,7 @@ func TestWithEntityMarkdownOutput(t *testing.T) {
 		WithEntity("todo"),
 		WithSummary("Todo details"),
 		WithBreadcrumbs(
-			Breadcrumb{Action: "done", Cmd: "basecamp done 12345", Description: "Mark done"},
+			Breadcrumb{Action: "done", Cmd: "basecamp todos complete 12345", Description: "Mark done"},
 		),
 	)
 	if err != nil {
@@ -1844,7 +1844,7 @@ func TestWithEntityMarkdownOutput(t *testing.T) {
 	}
 
 	// Breadcrumb should be a Markdown list item with backtick-quoted command
-	if !strings.Contains(output, "- `basecamp done 12345`") {
+	if !strings.Contains(output, "- `basecamp todos complete 12345`") {
 		t.Errorf("Markdown breadcrumb should use code formatting, got:\n%s", output)
 	}
 }
