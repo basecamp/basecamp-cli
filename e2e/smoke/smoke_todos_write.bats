@@ -9,18 +9,7 @@ setup_file() {
   ensure_todolist || return 1
 }
 
-@test "todo create creates a todo" {
-  run_smoke basecamp todo "Smoke test todo $(date +%s)" \
-    --list "$QA_TODOLIST" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-  assert_json_not_null '.data.id'
-
-  # Persist ID for subsequent tests (BATS runs each @test in a subshell)
-  echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/todo_id"
-}
-
-@test "todos create creates a todo (direct verb)" {
+@test "todos create creates a todo" {
   run_smoke basecamp todos create "Smoke direct todo $(date +%s)" \
     --list "$QA_TODOLIST" -p "$QA_PROJECT" --json
   assert_success
@@ -30,29 +19,7 @@ setup_file() {
   echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/direct_todo_id"
 }
 
-@test "todo complete marks todo done" {
-  local todo_id_file="$BATS_FILE_TMPDIR/todo_id"
-  [[ -f "$todo_id_file" ]] || mark_unverifiable "No todo created in prior test"
-  local todo_id
-  todo_id=$(<"$todo_id_file")
-
-  run_smoke basecamp done "$todo_id" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-}
-
-@test "todo reopen marks todo active" {
-  local todo_id_file="$BATS_FILE_TMPDIR/todo_id"
-  [[ -f "$todo_id_file" ]] || mark_unverifiable "No todo created in prior test"
-  local todo_id
-  todo_id=$(<"$todo_id_file")
-
-  run_smoke basecamp reopen "$todo_id" -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-}
-
-@test "todos complete marks todo done (direct verb)" {
+@test "todos complete marks todo done" {
   local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
   local todo_id
@@ -63,7 +30,7 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
-@test "todos uncomplete marks todo active (direct verb)" {
+@test "todos uncomplete marks todo active" {
   local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
   local todo_id
@@ -257,7 +224,7 @@ setup_file() {
 @test "todos archive archives a todo" {
   # Create a throwaway todo to archive
   local todo_out
-  todo_out=$(basecamp todo "Archive target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo_out=$(basecamp todos create "Archive target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for archive test"
     return
   }

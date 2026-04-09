@@ -88,13 +88,13 @@ relationships:
 
 affordances:
   - action: complete
-    cmd: "basecamp done {{.id}}"
+    cmd: "basecamp todos complete {{.id}}"
     label: "Mark done"
     when: "{{not .completed}}"
   - action: reopen
-    cmd: "basecamp reopen {{.id}}"
+    cmd: "basecamp todos uncomplete {{.id}}"
     label: "Reopen"
     when: "{{.completed}}"
   - action: comment
-    cmd: "basecamp comment {{.id}} <text>"
+    cmd: "basecamp comments create {{.id}} <text>"
     label: "Add comment"

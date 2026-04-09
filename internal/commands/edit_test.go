@@ -22,10 +22,18 @@ func runCmdWithFlagsAndArgs(newCmd func() *cobra.Command, flags map[string]strin
 	return cmd.RunE(cmd, args)
 }
 
+// messagesCreateCmdForTest builds a 'messages create' command closed over fresh
+// project/messageBoard pointers so it matches the func() *cobra.Command shape
+// expected by runCmdWithFlagsAndArgs.
+func messagesCreateCmdForTest() *cobra.Command {
+	var project, messageBoard string
+	return newMessagesCreateCmd(&project, &messageBoard)
+}
+
 // TestEditContentMutualExclusion verifies --edit and content cannot be combined.
 func TestEditContentMutualExclusion(t *testing.T) {
-	t.Run("comment --edit with positional content", func(t *testing.T) {
-		err := runCmdWithFlagsAndArgs(NewCommentCmd,
+	t.Run("comments create --edit with positional content", func(t *testing.T) {
+		err := runCmdWithFlagsAndArgs(newCommentsCreateCmd,
 			map[string]string{"edit": "true"},
 			[]string{"12345", "some text"},
 		)
@@ -37,8 +45,8 @@ func TestEditContentMutualExclusion(t *testing.T) {
 		}
 	})
 
-	t.Run("message --edit with positional body", func(t *testing.T) {
-		err := runCmdWithFlagsAndArgs(NewMessageCmd,
+	t.Run("messages create --edit with positional body", func(t *testing.T) {
+		err := runCmdWithFlagsAndArgs(messagesCreateCmdForTest,
 			map[string]string{"edit": "true"},
 			[]string{"Test", "some body"},
 		)
@@ -73,14 +81,14 @@ func TestEditRejectsPipedStdin(t *testing.T) {
 		args   []string
 	}{
 		{
-			name:   "comment --edit piped stdin",
-			newCmd: NewCommentCmd,
+			name:   "comments create --edit piped stdin",
+			newCmd: newCommentsCreateCmd,
 			flags:  map[string]string{"edit": "true"},
 			args:   []string{"12345"},
 		},
 		{
-			name:   "message --edit piped stdin",
-			newCmd: NewMessageCmd,
+			name:   "messages create --edit piped stdin",
+			newCmd: messagesCreateCmdForTest,
 			flags:  map[string]string{"edit": "true"},
 			args:   []string{"Test"},
 		},
@@ -121,7 +129,7 @@ func TestEditEmptyAborts(t *testing.T) {
 		devNull.Close()
 	})
 
-	err = runCmdWithFlagsAndArgs(NewCommentCmd, map[string]string{"edit": "true"}, []string{"12345"})
+	err = runCmdWithFlagsAndArgs(newCommentsCreateCmd, map[string]string{"edit": "true"}, []string{"12345"})
 	if err == nil {
 		t.Fatal("expected error for empty editor content, got nil")
 	}
@@ -139,7 +147,7 @@ func TestEditWithoutContentAllowed(t *testing.T) {
 	}
 	t.Setenv("EDITOR", script)
 
-	cmd := NewCommentCmd()
+	cmd := newCommentsCreateCmd()
 	cmd.SetContext(context.Background())
 	cmd.Flags().Set("edit", "true")
 

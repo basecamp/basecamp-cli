@@ -9,7 +9,6 @@ COMMANDS_DIR="internal/commands"
 
 # Commands allowed to have RunE + AddCommand (shortcuts, not groups)
 ALLOWLIST=(
-  NewCardCmd        # shortcut: creates a card
   NewCompletionCmd  # dispatches by shell arg
   NewRecordingsCmd  # shortcut: lists recordings
   NewSearchCmd      # shortcut: performs search
