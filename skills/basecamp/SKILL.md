@@ -10,12 +10,12 @@ triggers:
   - basecamp
   - /basecamp
   # Resource actions
-  - basecamp todo
+  - basecamp todos
   - basecamp project
-  - basecamp card
+  - basecamp cards
   - basecamp chat
   - basecamp campfire
-  - basecamp message
+  - basecamp messages
   - basecamp file
   - basecamp document
   - basecamp schedule
