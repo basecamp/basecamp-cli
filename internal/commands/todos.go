@@ -1164,7 +1164,29 @@ Clear a field by passing its --no- flag or an empty value:
 					return convertSDKError(err)
 				}
 			} else {
-				req := &basecamp.UpdateTodoRequest{}
+				// Fetch existing todo so we can preserve fields the user
+				// didn't change. The BC3 API clears fields by omission,
+				// so a partial PUT would wipe untouched fields.
+				existingTodo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+
+				req := &basecamp.UpdateTodoRequest{
+					Content:     existingTodo.Content,
+					Description: existingTodo.Description,
+					DueOn:       existingTodo.DueOn,
+					StartsOn:    existingTodo.StartsOn,
+				}
+				if len(existingTodo.Assignees) > 0 {
+					ids := make([]int64, len(existingTodo.Assignees))
+					for i, a := range existingTodo.Assignees {
+						ids[i] = a.ID
+					}
+					req.AssigneeIDs = ids
+				}
+
+				// Override with user-provided values.
 				if effectiveTitle != "" {
 					req.Content = effectiveTitle
 				}
