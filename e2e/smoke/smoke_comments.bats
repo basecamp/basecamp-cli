@@ -9,10 +9,10 @@ setup_file() {
   ensure_todolist || return 1
 }
 
-@test "comment on todo creates comment" {
+@test "comments create on todo creates comment" {
   # First create a todo to comment on
   local todo_out
-  todo_out=$(basecamp todo "Comment target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+  todo_out=$(basecamp todos create "Comment target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for comment test"
     return
   }
@@ -20,7 +20,7 @@ setup_file() {
   todo_id=$(echo "$todo_out" | jq -r '.data.id // empty')
   [[ -n "$todo_id" ]] || mark_unverifiable "No todo ID returned"
 
-  run_smoke basecamp comment "$todo_id" "Smoke comment $(date +%s)" -p "$QA_PROJECT" --json
+  run_smoke basecamp comments create "$todo_id" "Smoke comment $(date +%s)" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
 
@@ -52,7 +52,7 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
-@test "comments create creates a comment (direct verb)" {
+@test "comments create creates a second comment for archive tests" {
   local todo_file="$BATS_FILE_TMPDIR/comment_todo_id"
   [[ -f "$todo_file" ]] || mark_unverifiable "No todo created for comment test"
   local todo_id

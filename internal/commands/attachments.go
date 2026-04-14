@@ -159,7 +159,7 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	if resolvedType != "comment" && resolvedType != "comments" {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "comment",
-			Cmd:         fmt.Sprintf("basecamp comment %s <text>", id),
+			Cmd:         fmt.Sprintf("basecamp comments create %s <text>", id),
 			Description: "Add comment",
 		})
 	}

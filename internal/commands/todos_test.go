@@ -270,55 +270,6 @@ func TestTodosPositionRejectsNonTodolistURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "todolist URL")
 }
 
-// TestTodoShortcutRequiresContent tests that todo shortcut requires content.
-func TestTodoShortcutShowsHelpWithoutContent(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
-	app.Config.ProjectID = "123"
-	app.Config.TodolistID = "456"
-
-	cmd := NewTodoCmd()
-
-	err := executeTodosCommand(cmd, app)
-	require.NoError(t, err, "expected help output, not an error")
-}
-
-// TestTodoShortcutRequiresProject tests that todo shortcut requires project.
-func TestTodoShortcutRequiresProject(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
-	// No project in config
-
-	cmd := NewTodoCmd()
-
-	err := executeTodosCommand(cmd, app, "Test todo")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "Project ID required", e.Message)
-}
-
-// TestDoneShowsHelpWithoutID tests that done command shows help when no ID given.
-func TestDoneShowsHelpWithoutID(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewDoneCmd()
-
-	err := executeTodosCommand(cmd, app)
-	require.NoError(t, err, "expected help output, not an error")
-}
-
-// TestReopenShowsHelpWithoutID tests that reopen command shows help when no ID given.
-func TestReopenShowsHelpWithoutID(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewReopenCmd()
-
-	err := executeTodosCommand(cmd, app)
-	require.NoError(t, err, "expected help output, not an error")
-}
-
 // TestTodosSubcommands tests that all expected subcommands exist.
 func TestTodosSubcommands(t *testing.T) {
 	cmd := NewTodosCmd()
@@ -699,7 +650,7 @@ func setupTodos404App(t *testing.T) *appctx.App {
 func TestDoneAllFailReturnsError(t *testing.T) {
 	app := setupTodos404App(t)
 
-	cmd := NewDoneCmd()
+	cmd := newTodosCompleteCmd()
 	err := executeTodosCommand(cmd, app, "123", "456")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "123")
@@ -713,7 +664,7 @@ func TestDoneAllFailReturnsError(t *testing.T) {
 func TestReopenAllFailReturnsError(t *testing.T) {
 	app := setupTodos404App(t)
 
-	cmd := NewReopenCmd()
+	cmd := newTodosUncompleteCmd()
 	err := executeTodosCommand(cmd, app, "123", "456")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "123")
@@ -727,7 +678,7 @@ func TestReopenAllFailReturnsError(t *testing.T) {
 func TestDoneParseFailReturnsUsageError(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 
-	cmd := NewDoneCmd()
+	cmd := newTodosCompleteCmd()
 	// Non-numeric IDs trigger parse failures, not API errors
 	err := executeTodosCommand(cmd, app, "abc", "def")
 	require.Error(t, err)
@@ -819,7 +770,7 @@ func TestTodoCreateWithTodosetScopesListResolution(t *testing.T) {
 	transport := &scopedTodosetTransport{}
 	app := setupScopedTodosetApp(t, transport)
 
-	cmd := NewTodoCmd()
+	cmd := newTodosCreateCmd()
 	err := executeTodosCommand(cmd, app, "test todo", "--list", "Sprint 1", "--todoset", "100")
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), transport.createdOnTodolist)
@@ -830,7 +781,7 @@ func TestTodoCreateWithTodosetRejectsWrongList(t *testing.T) {
 	transport := &scopedTodosetTransport{}
 	app := setupScopedTodosetApp(t, transport)
 
-	cmd := NewTodoCmd()
+	cmd := newTodosCreateCmd()
 	err := executeTodosCommand(cmd, app, "test todo", "--list", "Sprint 1", "--todoset", "200")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Sprint 1")
@@ -842,7 +793,7 @@ func TestTodoCreateWithTodosetDisambiguatesDuplicateNames(t *testing.T) {
 	transport := &scopedTodosetTransport{}
 	app := setupScopedTodosetApp(t, transport)
 
-	cmd := NewTodoCmd()
+	cmd := newTodosCreateCmd()
 	err := executeTodosCommand(cmd, app, "test todo", "--list", "Backlog", "--todoset", "200")
 	require.NoError(t, err)
 	assert.Equal(t, int64(21), transport.createdOnTodolist)
@@ -865,7 +816,7 @@ func TestTodoCreateWithConfigTodolistAndTodosetScopes(t *testing.T) {
 	app := setupScopedTodosetApp(t, transport)
 	app.Config.TodolistID = "Backlog" // name, not numeric
 
-	cmd := NewTodoCmd()
+	cmd := newTodosCreateCmd()
 	err := executeTodosCommand(cmd, app, "test todo", "--todoset", "100")
 	require.NoError(t, err)
 	assert.Equal(t, int64(11), transport.createdOnTodolist,
@@ -953,7 +904,7 @@ func TestTodoScopedResolutionPaginates(t *testing.T) {
 		}),
 	}
 
-	cmd := NewTodoCmd()
+	cmd := newTodosCreateCmd()
 	err := executeTodosCommand(cmd, app, "test todo", "--in", "123", "--todoset", "300", "--list", "Deep Backlog")
 	require.NoError(t, err)
 	assert.Equal(t, int64(32), transport.createdOnTodolist,

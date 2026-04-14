@@ -10,12 +10,12 @@ triggers:
   - basecamp
   - /basecamp
   # Resource actions
-  - basecamp todo
+  - basecamp todos
   - basecamp project
-  - basecamp card
+  - basecamp cards
   - basecamp chat
   - basecamp campfire
-  - basecamp message
+  - basecamp messages
   - basecamp file
   - basecamp document
   - basecamp schedule
@@ -158,18 +158,18 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Assign todo | `basecamp assign <id> [id...] --to <person> --in <project> --json` |
 | Assign card | `basecamp assign <id> [id...] --card --to <person> --in <project> --json` |
 | Assign card step | `basecamp assign <id> [id...] --step --to <person> --in <project> --json` |
-| Create todo | `basecamp todo "Task" --in <project> --list <list> --json` |
+| Create todo | `basecamp todos create "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
-| Complete todo | `basecamp done <id> --json` |
+| Complete todo | `basecamp todos complete <id> --json` |
 | List cards | `basecamp cards list --in <project> --json` |
-| Create card | `basecamp card "Title" --in <project> --json` |
+| Create card | `basecamp cards create "Title" --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> [--position N] --in <project> --json` |
 | Move card to on-hold | `basecamp cards move <id> --on-hold --in <project> --json` |
-| Post message | `basecamp message "Title" "Body" --in <project> --json` |
-| Post with @mention | `basecamp message "Title" "Hey @First.Last, ..." --in <project> --json` |
-| Post silently | `basecamp message "Title" "Body" --no-subscribe --in <project> --json` |
+| Post message | `basecamp messages create "Title" "Body" --in <project> --json` |
+| Post with @mention | `basecamp messages create "Title" "Hey @First.Last, ..." --in <project> --json` |
+| Post silently | `basecamp messages create "Title" "Body" --no-subscribe --in <project> --json` |
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
-| Add comment | `basecamp comment <recording_id> "Text" --in <project> --json` |
+| Add comment | `basecamp comments create <recording_id> "Text" --in <project> --json` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
 | Download attachments | `basecamp attachments download <id> --out /tmp/` |
 | Show + download | `basecamp todos show <id> --download-attachments --json` |
@@ -216,7 +216,7 @@ Returns: `account_id`, `project_id`, `type`, `recording_id`, `comment_id` (from 
 # Comments are flat - reply to the parent recording_id, not the comment_id
 basecamp url parse "https://...messages/123#__recording_456" --json
 # Returns recording_id: 123 (parent), comment_id: 456 (fragment) - comment on 123, not 456
-basecamp comment 123 "Reply" --in <project>
+basecamp comments create 123 "Reply" --in <project>
 ```
 
 ## Decision Trees
@@ -248,7 +248,7 @@ Want to change something?
 ├── Have URL? → basecamp url parse "<url>" → use extracted IDs
 ├── Have ID? → basecamp <resource> update <id> --field value
 ├── Change status? → basecamp recordings trash|archive|restore <id>
-└── Complete todo? → basecamp done <id>
+└── Complete todo? → basecamp todos complete <id>
 ```
 
 ## Common Workflows
@@ -259,20 +259,20 @@ Want to change something?
 # Get commit info and comment on todo (use printf %q for safe quoting)
 COMMIT=$(git rev-parse --short HEAD)
 MSG=$(git log -1 --format=%s)
-basecamp comment <todo_id> "Commit $COMMIT: $(printf '%s' "$MSG")" --in <project>
+basecamp comments create <todo_id> "Commit $COMMIT: $(printf '%s' "$MSG")" --in <project>
 
 # Complete when done
-basecamp done <todo_id>
+basecamp todos complete <todo_id>
 ```
 
 ### Track PR in Basecamp
 
 ```bash
 # Create todo for PR work
-basecamp todo "Review PR #42" --in <project> --assignee me --due tomorrow
+basecamp todos create "Review PR #42" --in <project> --assignee me --due tomorrow
 
 # When merged
-basecamp done <todo_id>
+basecamp todos complete <todo_id>
 basecamp chat post "Merged PR #42" --in <project>
 ```
 
@@ -294,18 +294,18 @@ basecamp people pingable --jq '.data[] | select(.name == "Jane Smith")'
 # => {"id": 42000, "attachable_sgid": "BAh7CEkiCG...", "name": "Jane Smith"}
 
 # 2. Use SGID in Markdown mention syntax (zero API calls during post)
-basecamp comment 123 "Hey [@Jane Smith](mention:BAh7CEkiCG...), check this" --in <project>
+basecamp comments create 123 "Hey [@Jane Smith](mention:BAh7CEkiCG...), check this" --in <project>
 
 # Or use person ID (one lookup during post)
-basecamp comment 123 "Hey [@Jane Smith](person:42000), check this" --in <project>
+basecamp comments create 123 "Hey [@Jane Smith](person:42000), check this" --in <project>
 ```
 
 ### Mentioning people (interactive — may be ambiguous)
 
 ```bash
 # Fuzzy matching: use @First.Last to reduce ambiguity
-basecamp comment <id> "@Jane.Smith, please review this" --in <project>
-basecamp message "Update" "cc @Jane, @Alex" --in <project>
+basecamp comments create <id> "@Jane.Smith, please review this" --in <project>
+basecamp messages create "Update" "cc @Jane, @Alex" --in <project>
 basecamp chat post "@Jane, done!" --in <project>
 
 # Ambiguous names return an error with suggestions
@@ -414,9 +414,9 @@ basecamp todos list --assignee me --in <project>        # My todos
 basecamp todos list --overdue --in <project>            # Overdue only
 basecamp todos list --status completed --in <project>   # Completed
 basecamp todos list --list <todolist_id> --in <project> # In specific list
-basecamp todo "Task" --in <project> --list <list> --assignee me --due tomorrow
-basecamp done <id> [id...]                              # Complete (multiple OK)
-basecamp reopen <id>                                    # Uncomplete
+basecamp todos create "Task" --in <project> --list <list> --assignee me --due tomorrow
+basecamp todos complete <id> [id...]                    # Complete (multiple OK)
+basecamp todos uncomplete <id>                          # Reopen
 basecamp assign <id> [id...] --to <person> --in <project>       # Assign to-do (multiple OK)
 basecamp unassign <id> [id...] --from <person> --in <project>   # Remove to-do assignee (multiple OK)
 basecamp assign <id> [id...] --card --to <person> --in <project>   # Assign card
@@ -452,7 +452,7 @@ basecamp cards list --card-table <id> --in <project>  # Specific table (required
 basecamp cards list --column <id> --in <project>      # Cards in column
 basecamp cards columns --in <project> --json          # List columns (needs --card-table if multiple)
 basecamp cards show <id> --in <project>               # Card details
-basecamp card "Title" "<p>Body</p>" --in <project> --column <id>
+basecamp cards create "Title" "<p>Body</p>" --in <project> --column <id>
 basecamp cards update <id> --title "New" --due tomorrow --assignee me
 basecamp cards move <id> --to <column_id>             # Move to column (numeric ID)
 basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
@@ -491,8 +491,8 @@ basecamp cards column watch <id>                  # Subscribe to column
 ```bash
 basecamp messages list --in <project> --json  # List messages
 basecamp messages show <id> --in <project>    # Show message
-basecamp message "Title" "Body" --in <project>
-basecamp message "Draft" "WIP" --draft --in <project>  # Create draft
+basecamp messages create "Title" "Body" --in <project>
+basecamp messages create "Draft" "WIP" --draft --in <project>  # Create draft
 basecamp messages publish <id>               # Publish a draft
 basecamp messages update <id> --title "New" --body "Updated"
 basecamp messages pin <id> --in <project>     # Pin to top
@@ -504,16 +504,16 @@ basecamp messages unpin <id>                  # Unpin
 **Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards)
 
 ```bash
-basecamp message "Bot update" "Done" --no-subscribe --in <project>
-basecamp message "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
+basecamp messages create "Bot update" "Done" --no-subscribe --in <project>
+basecamp messages create "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
 ```
 
 ### Comments
 
 ```bash
 basecamp comments list <recording_id> --in <project> --json
-basecamp comment <recording_id> "Text" --in <project>
-basecamp comment <recording_id> "@Jane.Smith, looks good!" --in <project>  # With @mention
+basecamp comments create <recording_id> "Text" --in <project>
+basecamp comments create <recording_id> "@Jane.Smith, looks good!" --in <project>  # With @mention
 basecamp comments update <id> "Updated" --in <project>
 ```
 
@@ -846,11 +846,11 @@ cat ~/.config/basecamp/accounts.json              # Check available accounts
 ```
 
 **Required arguments are positional (not flags):**
-- `basecamp todo "Buy milk"` (not `--content`)
-- `basecamp card "New feature"` (not `--title`)
-- `basecamp message "Subject" "Body"` (not `--subject`)
+- `basecamp todos create "Buy milk"` (not `--content`)
+- `basecamp cards create "New feature"` (not `--title`)
+- `basecamp messages create "Subject" "Body"` (not `--subject`)
 - `basecamp chat post "Hello"` (not `--content`)
-- `basecamp comment <id> "Text"` (not a flag)
+- `basecamp comments create <id> "Text"` (not a flag)
 - `basecamp webhooks create "https://..." --in <project>` (not `--url`)
 - `basecamp checkins answer create <question-id> "content"` (not `--question`)
 - `--date YYYY-MM-DD` is optional for `checkins answer create`; if omitted, it defaults to today
@@ -860,9 +860,9 @@ When a required positional argument is missing, the CLI returns a structured err
 the specific argument. Use this for elicitation:
 
 ```bash
-$ basecamp todo --json
+$ basecamp todos create --json
 {"ok": false, "error": "<content> required", "code": "usage",
- "hint": "Usage: basecamp todo <content>"}
+ "hint": "Usage: basecamp todos create <content>"}
 
 $ basecamp comments create 123 --json
 {"ok": false, "error": "<content> required", "code": "usage", ...}

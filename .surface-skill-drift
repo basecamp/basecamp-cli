@@ -1,7 +1,6 @@
 # Known skill drift — skill references flags that don't exist on the surface command.
 # These are pre-existing mismatches, not regressions. Fix in SKILL.md when convenient.
 # Format: FLAG <command-path> <flag>
-FLAG basecamp comment --in
 FLAG basecamp comments list --in
 FLAG basecamp comments update --in
 FLAG basecamp people --in
@@ -11,6 +10,7 @@ FLAG basecamp show --in
 FLAG basecamp subscriptions --in
 FLAG basecamp subscriptions subscribe --in
 FLAG basecamp checkins answer create --question
-FLAG basecamp message --subject
-FLAG basecamp todo --content
+FLAG basecamp todos create --content
+FLAG basecamp cards create --title
+FLAG basecamp messages create --subject
 FLAG basecamp webhooks create --url

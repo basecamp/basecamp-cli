@@ -200,7 +200,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	examples := []string{
 		"$ basecamp projects",
 		"$ basecamp todos",
-		`$ basecamp todo "Write the proposal"`,
+		`$ basecamp todos create "Write the proposal"`,
 		`$ basecamp search "quarterly review"`,
 	}
 	for _, ex := range examples {

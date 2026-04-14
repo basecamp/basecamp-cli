@@ -34,15 +34,20 @@ Command groups (resource nouns like `todos`, `projects`, `todosets`) must not se
 `RunE` on the parent command. Bare invocation shows help — Cobra does this
 automatically when a command has subcommands and no `RunE`.
 
-Shortcut commands (`card`, `search`, `url`) are different: they perform an action
-directly and may also have subcommands. These are allowed to set `RunE`.
+Singular action shortcuts that shadowed a plural group noun (`card`, `todo`,
+`done`, `reopen`, `message`, `comment`, `react`) have been removed — always use
+the canonical `<group> <action>` form (`cards create`, `todos create`,
+`todos complete`, etc.). Introducing a new top-level verb that shadows an
+existing group noun is not allowed.
 
-`scripts/check-bare-groups.sh` enforces this in CI.
+Shortcut commands without a sibling plural group — `search`, `url`,
+`recordings`, `timesheet`, `assignments`, `notifications`, `setup`, `completion`
+— may have both `RunE` and subcommands. `scripts/check-bare-groups.sh` enforces
+this with an allowlist.
 
 ## File Organization
 
 One file per top-level command group in `internal/commands/`.
-Shortcut commands (e.g., `todo`, `done`, `comment`) live alongside their parent group.
 
 ## Import Ordering
 
