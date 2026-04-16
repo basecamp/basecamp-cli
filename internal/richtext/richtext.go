@@ -66,6 +66,8 @@ var (
 	reOL         = regexp.MustCompile(`(?is)<ol[^>]*>(.*?)</ol>`)
 	reLI         = regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`)
 	reP          = regexp.MustCompile(`(?i)<p[^>]*>(.*?)</p>`)
+	reDivEmpty   = regexp.MustCompile(`(?i)<div[^>]*>\s*<br\s*/?\s*>\s*</div>`)
+	reDiv        = regexp.MustCompile(`(?i)<div[^>]*>(.*?)</div>`)
 	reBR         = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
 	reHR         = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
 )
@@ -174,7 +176,7 @@ func MarkdownToHTML(md string) string {
 			for i, line := range paraLines {
 				converted[i] = convertInline(line)
 			}
-			text := strings.Join(converted, "<br>\n")
+			text := strings.Join(converted, "<br>")
 			result.WriteString("<div>" + text + "</div>\n")
 			paraLines = nil
 		}
@@ -714,6 +716,11 @@ func HTMLToMarkdown(html string) string {
 
 	// Paragraphs
 	html = reP.ReplaceAllString(html, "$1\n\n")
+
+	// Trix-style divs: empty <div><br></div> becomes a blank line,
+	// content divs become paragraphs (must replace empty divs first).
+	html = reDivEmpty.ReplaceAllString(html, "\n")
+	html = reDiv.ReplaceAllString(html, "$1\n\n")
 
 	// Line breaks
 	html = reBR.ReplaceAllString(html, "\n")

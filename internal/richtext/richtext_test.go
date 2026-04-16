@@ -150,7 +150,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "consecutive lines preserve line breaks",
 			input:    "Line one\nLine two",
-			expected: "<div>Line one<br>\nLine two</div>",
+			expected: "<div>Line one<br>Line two</div>",
 		},
 		{
 			name:     "blank line before list",
@@ -810,8 +810,17 @@ func TestRoundTrip(t *testing.T) {
 		input := "Line 1\nLine 2"
 		html := MarkdownToHTML(input)
 		back := HTMLToMarkdown(html)
-		if !strings.Contains(back, "Line 1") || !strings.Contains(back, "Line 2") {
-			t.Errorf("round-trip lost content\nhtml: %q\nback: %q", html, back)
+
+		line1Idx := strings.Index(back, "Line 1")
+		line2Idx := strings.Index(back, "Line 2")
+		if line1Idx == -1 || line2Idx == -1 || line1Idx >= line2Idx {
+			t.Errorf("round-trip did not preserve line order/content\nhtml: %q\nback: %q", html, back)
+			return
+		}
+
+		between := back[line1Idx+len("Line 1") : line2Idx]
+		if !strings.Contains(between, "\n") {
+			t.Errorf("round-trip did not preserve a line break between lines\nhtml: %q\nback: %q", html, back)
 		}
 	})
 }
