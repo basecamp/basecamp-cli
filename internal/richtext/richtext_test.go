@@ -20,7 +20,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "plain text",
 			input:    "Hello world",
-			expected: "<p>Hello world</p>",
+			expected: "<div>Hello world</div>",
 		},
 		{
 			name:     "h1 heading",
@@ -40,27 +40,27 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "bold with asterisks",
 			input:    "This is **bold** text",
-			expected: "<p>This is <strong>bold</strong> text</p>",
+			expected: "<div>This is <strong>bold</strong> text</div>",
 		},
 		{
 			name:     "bold with underscores",
 			input:    "This is __bold__ text",
-			expected: "<p>This is <strong>bold</strong> text</p>",
+			expected: "<div>This is <strong>bold</strong> text</div>",
 		},
 		{
 			name:     "italic with asterisk",
 			input:    "This is *italic* text",
-			expected: "<p>This is <em>italic</em> text</p>",
+			expected: "<div>This is <em>italic</em> text</div>",
 		},
 		{
 			name:     "inline code",
 			input:    "Use `code` here",
-			expected: "<p>Use <code>code</code> here</p>",
+			expected: "<div>Use <code>code</code> here</div>",
 		},
 		{
 			name:     "link",
 			input:    "Check [this link](https://example.com)",
-			expected: `<p>Check <a href="https://example.com">this link</a></p>`,
+			expected: `<div>Check <a href="https://example.com">this link</a></div>`,
 		},
 		{
 			name:     "unordered list",
@@ -85,12 +85,12 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "list followed by blank line then paragraph",
 			input:    "- Item 1\n- Item 2\n\nFollowing paragraph.",
-			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<br>\n<p>Following paragraph.</p>",
+			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<div><br></div>\n<div>Following paragraph.</div>",
 		},
 		{
 			name:     "blank between list items does not leak break after list",
 			input:    "- One\n\n- Two\nAfter",
-			expected: "<ul>\n<li>One</li>\n<li>Two</li>\n</ul>\n<p>After</p>",
+			expected: "<ul>\n<li>One</li>\n<li>Two</li>\n</ul>\n<div>After</div>",
 		},
 		{
 			name:     "blockquote",
@@ -120,97 +120,97 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "strikethrough",
 			input:    "This is ~~deleted~~ text",
-			expected: "<p>This is <del>deleted</del> text</p>",
+			expected: "<div>This is <del>deleted</del> text</div>",
 		},
 		{
 			name:     "mixed formatting",
 			input:    "# Title\n\nThis is **bold** and *italic* and `code`.",
-			expected: "<h1>Title</h1>\n<br>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
+			expected: "<h1>Title</h1>\n<div><br></div>\n<div>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</div>",
 		},
 		{
 			name:     "escapes HTML",
 			input:    "Use <script> tags",
-			expected: "<p>Use &lt;script&gt; tags</p>",
+			expected: "<div>Use &lt;script&gt; tags</div>",
 		},
 		{
 			name:     "escapes ampersand",
 			input:    "Tom & Jerry",
-			expected: "<p>Tom &amp; Jerry</p>",
+			expected: "<div>Tom &amp; Jerry</div>",
 		},
 		{
 			name:     "paragraph spacing with blank line",
 			input:    "First paragraph\n\nSecond paragraph",
-			expected: "<p>First paragraph</p>\n<br>\n<p>Second paragraph</p>",
+			expected: "<div>First paragraph</div>\n<div><br></div>\n<div>Second paragraph</div>",
 		},
 		{
 			name:     "multiple blank lines collapse to one break",
 			input:    "First\n\n\n\nSecond",
-			expected: "<p>First</p>\n<br>\n<p>Second</p>",
+			expected: "<div>First</div>\n<div><br></div>\n<div>Second</div>",
 		},
 		{
-			name:     "consecutive lines join into one paragraph",
+			name:     "consecutive lines preserve line breaks",
 			input:    "Line one\nLine two",
-			expected: "<p>Line one Line two</p>",
+			expected: "<div>Line one<br>Line two</div>",
 		},
 		{
 			name:     "blank line before list",
 			input:    "Intro\n\n- Item 1\n- Item 2",
-			expected: "<p>Intro</p>\n<br>\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>",
+			expected: "<div>Intro</div>\n<div><br></div>\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>",
 		},
 		{
 			name:     "blank line before code block",
 			input:    "Intro\n\n```\ncode\n```",
-			expected: "<p>Intro</p>\n<br>\n<pre><code>code</code></pre>",
+			expected: "<div>Intro</div>\n<div><br></div>\n<pre><code>code</code></pre>",
 		},
 		{
 			name:     "leading blank lines ignored",
 			input:    "\n\nHello",
-			expected: "<p>Hello</p>",
+			expected: "<div>Hello</div>",
 		},
 		{
 			name:     "blank line before blockquote",
 			input:    "Intro\n\n> A quote",
-			expected: "<p>Intro</p>\n<br>\n<blockquote>A quote</blockquote>",
+			expected: "<div>Intro</div>\n<div><br></div>\n<blockquote>A quote</blockquote>",
 		},
 		{
 			name:     "blank line before horizontal rule",
 			input:    "Intro\n\n---",
-			expected: "<p>Intro</p>\n<br>\n<hr>",
+			expected: "<div>Intro</div>\n<div><br></div>\n<hr>",
 		},
 		{
 			name:     "heading flushes accumulated paragraph",
 			input:    "Text\n# Heading",
-			expected: "<p>Text</p>\n<h1>Heading</h1>",
+			expected: "<div>Text</div>\n<h1>Heading</h1>",
 		},
 		{
 			name:     "list flushes accumulated paragraph",
 			input:    "Text\n- Item",
-			expected: "<p>Text</p>\n<ul>\n<li>Item</li>\n</ul>",
+			expected: "<div>Text</div>\n<ul>\n<li>Item</li>\n</ul>",
 		},
 		{
 			name:     "blockquote flushes accumulated paragraph",
 			input:    "Text\n> Quote",
-			expected: "<p>Text</p>\n<blockquote>Quote</blockquote>",
+			expected: "<div>Text</div>\n<blockquote>Quote</blockquote>",
 		},
 		{
 			name:     "code fence flushes accumulated paragraph",
 			input:    "Text\n```go\nx\n```",
-			expected: "<p>Text</p>\n<pre><code class=\"language-go\">x</code></pre>",
+			expected: "<div>Text</div>\n<pre><code class=\"language-go\">x</code></pre>",
 		},
 		{
 			name:     "horizontal rule flushes accumulated paragraph",
 			input:    "Text\n---",
-			expected: "<p>Text</p>\n<hr>",
+			expected: "<div>Text</div>\n<hr>",
 		},
 		{
 			name:     "code span containing HTML tag is converted not passthrough",
 			input:    "the `<div>` container",
-			expected: "<p>the <code>&lt;div&gt;</code> container</p>",
+			expected: "<div>the <code>&lt;div&gt;</code> container</div>",
 		},
 		{
 			name:     "fenced code block containing HTML tags is converted",
 			input:    "intro\n\n```\n<div>hello</div>\n```",
-			expected: "<p>intro</p>\n<br>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;</code></pre>",
+			expected: "<div>intro</div>\n<div><br></div>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;</code></pre>",
 		},
 	}
 
@@ -233,12 +233,12 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 		{
 			name:     "escaped exclamation mark",
 			input:    `Merged\! Great work`,
-			expected: "<p>Merged! Great work</p>",
+			expected: "<div>Merged! Great work</div>",
 		},
 		{
 			name:     "escaped hash",
 			input:    `\# not a heading`,
-			expected: "<p># not a heading</p>",
+			expected: "<div># not a heading</div>",
 		},
 		{
 			name:     "escaped exclamation in heading",
@@ -258,127 +258,127 @@ func TestMarkdownToHTMLBackslashEscapes(t *testing.T) {
 		{
 			name:     "escaped asterisk prevents italic",
 			input:    `use \*stars\* for emphasis`,
-			expected: "<p>use *stars* for emphasis</p>",
+			expected: "<div>use *stars* for emphasis</div>",
 		},
 		{
 			name:     "escaped backslash",
 			input:    `path\\to\\file`,
-			expected: "<p>path\\to\\file</p>",
+			expected: "<div>path\\to\\file</div>",
 		},
 		{
 			name:     "escaped ampersand",
 			input:    `Tom \& Jerry`,
-			expected: "<p>Tom &amp; Jerry</p>",
+			expected: "<div>Tom &amp; Jerry</div>",
 		},
 		{
 			name:     "escaped angle bracket",
 			input:    `use \< and \> carefully`,
-			expected: "<p>use &lt; and &gt; carefully</p>",
+			expected: "<div>use &lt; and &gt; carefully</div>",
 		},
 		{
 			name:     "escaped period after number",
 			input:    `2025\. What a year`,
-			expected: "<p>2025. What a year</p>",
+			expected: "<div>2025. What a year</div>",
 		},
 		{
 			name:     "escaped double quotes in text",
 			input:    `Say \"hi\"`,
-			expected: "<p>Say &quot;hi&quot;</p>",
+			expected: "<div>Say &quot;hi&quot;</div>",
 		},
 		{
 			name:     "backslash before non-punctuation preserved",
 			input:    `hello\nworld`,
-			expected: "<p>hello\\nworld</p>",
+			expected: "<div>hello\\nworld</div>",
 		},
 		{
 			name:     "escaped bracket prevents link",
 			input:    `\[not a link\](url)`,
-			expected: "<p>[not a link](url)</p>",
+			expected: "<div>[not a link](url)</div>",
 		},
 		{
 			name:     "escaped quotes percent-encoded in link destination",
 			input:    `[x](https://example.com/?q=\"hi\")`,
-			expected: `<p><a href="https://example.com/?q=%22hi%22">x</a></p>`,
+			expected: `<div><a href="https://example.com/?q=%22hi%22">x</a></div>`,
 		},
 		{
 			name:     "escaped percent in link destination",
 			input:    `[x](https://example.com/\%20)`,
-			expected: `<p><a href="https://example.com/%2520">x</a></p>`,
+			expected: `<div><a href="https://example.com/%2520">x</a></div>`,
 		},
 		{
 			name:     "escaped backslash in link destination",
 			input:    `[x](https://example.com/\\path)`,
-			expected: `<p><a href="https://example.com/%5Cpath">x</a></p>`,
+			expected: `<div><a href="https://example.com/%5Cpath">x</a></div>`,
 		},
 		{
 			name:     "escaped angle bracket in link destination",
 			input:    `[x](https://example.com/\<tag)`,
-			expected: `<p><a href="https://example.com/%3Ctag">x</a></p>`,
+			expected: `<div><a href="https://example.com/%3Ctag">x</a></div>`,
 		},
 		{
 			name:     "escaped bracket in link destination",
 			input:    `[x](https://example.com/\[a)`,
-			expected: `<p><a href="https://example.com/%5Ba">x</a></p>`,
+			expected: `<div><a href="https://example.com/%5Ba">x</a></div>`,
 		},
 		{
 			name:     "escaped percent in image src",
 			input:    `![alt](https://example.com/\%20.png)`,
-			expected: `<p><img src="https://example.com/%2520.png" alt="alt"></p>`,
+			expected: `<div><img src="https://example.com/%2520.png" alt="alt"></div>`,
 		},
 		{
 			name:     "literal-safe chars stay literal in link destination",
 			input:    `[x](https://example.com/\!\?)`,
-			expected: `<p><a href="https://example.com/!?">x</a></p>`,
+			expected: `<div><a href="https://example.com/!?">x</a></div>`,
 		},
 		{
 			name:     "escaped quote in link text stays entity-escaped",
 			input:    `[say \"hi\"](https://example.com/)`,
-			expected: `<p><a href="https://example.com/">say &quot;hi&quot;</a></p>`,
+			expected: `<div><a href="https://example.com/">say &quot;hi&quot;</a></div>`,
 		},
 		{
 			name:     "escaped quote in image alt stays entity-escaped",
 			input:    `![say \"hi\"](https://example.com/img.png)`,
-			expected: `<p><img src="https://example.com/img.png" alt="say &quot;hi&quot;"></p>`,
+			expected: `<div><img src="https://example.com/img.png" alt="say &quot;hi&quot;"></div>`,
 		},
 		{
 			name:     "escaped backtick percent-encoded in link destination",
 			input:    "[x](https://example.com/\\`v)",
-			expected: `<p><a href="https://example.com/%60v">x</a></p>`,
+			expected: `<div><a href="https://example.com/%60v">x</a></div>`,
 		},
 		{
 			name:     "backslash escapes inside inline context",
 			input:    `Say **hello\!** loudly`,
-			expected: "<p>Say <strong>hello!</strong> loudly</p>",
+			expected: "<div>Say <strong>hello!</strong> loudly</div>",
 		},
 		{
 			name:     "multiple escapes in one line",
 			input:    `\*bold\* and \!bang\!`,
-			expected: "<p>*bold* and !bang!</p>",
+			expected: "<div>*bold* and !bang!</div>",
 		},
 		{
 			name:     "escaped backticks do not start code spans",
 			input:    "\\`code\\`",
-			expected: "<p>`code`</p>",
+			expected: "<div>`code`</div>",
 		},
 		{
 			name:     "escaped tilde prevents strikethrough",
 			input:    `\~\~not deleted\~\~`,
-			expected: "<p>~~not deleted~~</p>",
+			expected: "<div>~~not deleted~~</div>",
 		},
 		{
 			name:     "backslash escape in code span preserved",
 			input:    "`\\!` stays literal",
-			expected: "<p><code>\\!</code> stays literal</p>",
+			expected: "<div><code>\\!</code> stays literal</div>",
 		},
 		{
 			name:     "escaped safe HTML tag is rendered as text",
 			input:    `\<div>hello\</div>`,
-			expected: "<p>&lt;div&gt;hello&lt;/div&gt;</p>",
+			expected: "<div>&lt;div&gt;hello&lt;/div&gt;</div>",
 		},
 		{
 			name:     "escaped at sign is preserved to suppress mentions",
 			input:    `\@John hello`,
-			expected: `<p>\@John hello</p>`,
+			expected: `<div>\@John hello</div>`,
 		},
 	}
 
@@ -805,16 +805,22 @@ func TestRoundTrip(t *testing.T) {
 		})
 	}
 
-	// Consecutive lines should round-trip through a single paragraph
-	t.Run("consecutive lines round-trip as single paragraph", func(t *testing.T) {
+	// Consecutive lines preserve line breaks in round-trip
+	t.Run("consecutive lines round-trip preserves both lines", func(t *testing.T) {
 		input := "Line 1\nLine 2"
 		html := MarkdownToHTML(input)
 		back := HTMLToMarkdown(html)
-		if strings.Contains(back, "\n\n") {
-			t.Errorf("round-trip produced two paragraphs, want one\nhtml: %q\nback: %q", html, back)
+
+		line1Idx := strings.Index(back, "Line 1")
+		line2Idx := strings.Index(back, "Line 2")
+		if line1Idx == -1 || line2Idx == -1 || line1Idx >= line2Idx {
+			t.Errorf("round-trip did not preserve line order/content\nhtml: %q\nback: %q", html, back)
+			return
 		}
-		if !strings.Contains(back, "Line 1") || !strings.Contains(back, "Line 2") {
-			t.Errorf("round-trip lost content\nhtml: %q\nback: %q", html, back)
+
+		between := back[line1Idx+len("Line 1") : line2Idx]
+		if !strings.Contains(between, "\n") {
+			t.Errorf("round-trip did not preserve a line break between lines\nhtml: %q\nback: %q", html, back)
 		}
 	})
 }
