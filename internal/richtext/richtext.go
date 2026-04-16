@@ -162,7 +162,7 @@ func MarkdownToHTML(md string) string {
 
 	flushPendingBreak := func() {
 		if pendingBreak {
-			result.WriteString("<br>\n")
+			result.WriteString("<div><br></div>\n")
 			pendingBreak = false
 		}
 	}
@@ -170,8 +170,12 @@ func MarkdownToHTML(md string) string {
 	flushParagraph := func() {
 		if len(paraLines) > 0 {
 			flushPendingBreak()
-			text := strings.Join(paraLines, " ")
-			result.WriteString("<p>" + convertInline(text) + "</p>\n")
+			converted := make([]string, len(paraLines))
+			for i, line := range paraLines {
+				converted[i] = convertInline(line)
+			}
+			text := strings.Join(converted, "<br>\n")
+			result.WriteString("<div>" + text + "</div>\n")
 			paraLines = nil
 		}
 	}
