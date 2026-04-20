@@ -1208,10 +1208,13 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 		Short: "Update a document, vault, or upload",
 		Long: `Update a document, vault, or upload.
 
+For documents, updating only --title or only --content preserves the untouched field.
+
 You can pass either an item ID or a Basecamp URL:
   basecamp files update 789 --title "new title" --in my-project
   basecamp files update 789 --content "new content" --in my-project`,
-		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because Basecamp API clears omitted fields on PUT."},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && itemType == "" {
 				return noChanges(cmd)
@@ -1269,12 +1272,10 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					docHTML := richtext.MarkdownToHTML(content)
-					docHTML, err = resolveLocalImages(cmd, app, docHTML)
+					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, title, content)
 					if err != nil {
-						return err
+						return convertSDKError(err)
 					}
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: docHTML}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -1304,14 +1305,12 @@ You can pass either an item ID or a Basecamp URL:
 				var firstErr error
 
 				// Try document first (most common update case)
-				_, err := app.Account().Documents().Get(cmd.Context(), itemID)
+				existingDoc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					docHTML := richtext.MarkdownToHTML(content)
-					docHTML, resolveErr := resolveLocalImages(cmd, app, docHTML)
-					if resolveErr != nil {
-						return resolveErr
+					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, title, content)
+					if buildErr != nil {
+						return convertSDKError(buildErr)
 					}
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: docHTML}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -1378,6 +1377,40 @@ You can pass either an item ID or a Basecamp URL:
 	cmd.Flags().StringVar(&itemType, "type", "", "Item type (vault, document, upload)")
 
 	return cmd
+}
+
+func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, title, content string) (*basecamp.UpdateDocumentRequest, error) {
+	// BC3 document updates are destructive PUTs: omitted title/content fields are
+	// replaced with empty values. Fetch and merge when the caller only updates
+	// one field so untouched content is preserved.
+	if existingDoc == nil && (title == "" || content == "") {
+		var err error
+		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req := &basecamp.UpdateDocumentRequest{}
+	if existingDoc != nil {
+		req.Title = existingDoc.Title
+		req.Content = existingDoc.Content
+	}
+
+	if title != "" {
+		req.Title = title
+	}
+	if content != "" {
+		docHTML := richtext.MarkdownToHTML(content)
+		var err error
+		docHTML, err = resolveLocalImages(cmd, app, docHTML)
+		if err != nil {
+			return nil, err
+		}
+		req.Content = docHTML
+	}
+
+	return req, nil
 }
 
 func newFilesDownloadCmd(project *string) *cobra.Command {

@@ -3,7 +3,11 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -156,4 +160,87 @@ func TestFilesDownloadStdoutStreamsUploadID(t *testing.T) {
 
 	assert.Equal(t, fileContent, stdout.String(),
 		"upload body should be streamed directly to stdout")
+}
+
+type mockFilesUpdateTransport struct {
+	capturedBody []byte
+	requests     []string
+}
+
+func (t *mockFilesUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests = append(t.requests, req.Method+" "+req.URL.Path)
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/documents/999"):
+		return &http.Response{
+			StatusCode: 200,
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":999,"title":"Existing title","content":"<div>Existing body</div>","status":"active","bucket":{"id":456,"name":"Test Project","type":"Project"}}`,
+			)),
+			Header: header,
+		}, nil
+	case req.Method == http.MethodPut && strings.Contains(req.URL.Path, "/documents/999"):
+		if req.Body != nil {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("reading request body: %w", err)
+			}
+			t.capturedBody = body
+			_ = req.Body.Close()
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":999,"title":"Updated title","content":"<div>Existing body</div>","status":"active","bucket":{"id":456,"name":"Test Project","type":"Project"}}`,
+			)),
+			Header: header,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+func TestFilesUpdateDocumentTitlePreservesExistingContent(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "Updated title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Updated title", body["title"])
+	assert.Equal(t, "<div>Existing body</div>", body["content"])
+}
+
+func TestFilesUpdateDocumentContentPreservesExistingTitle(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "Updated **body**")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Existing title", body["title"])
+	assert.Equal(t, "<p>Updated <strong>body</strong></p>", body["content"])
 }
