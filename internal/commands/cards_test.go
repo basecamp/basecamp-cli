@@ -1120,14 +1120,16 @@ func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
 }
 
 type mockCardsDoneTransport struct {
-	projectDock      string
-	initialCard      string
-	updatedCard      string
-	tables           map[string]string
-	cardGetCount     int
-	moveCalls        int
-	capturedMovePath string
-	capturedMoveBody []byte
+	projectDock       string
+	initialCard       string
+	updatedCard       string
+	columns           map[string]string
+	tables            map[string]string
+	cardGetCount      int
+	cardTableGetCount int
+	moveCalls         int
+	capturedMovePath  string
+	capturedMoveBody  []byte
 }
 
 func (t *mockCardsDoneTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -1161,9 +1163,16 @@ func (t *mockCardsDoneTransport) RoundTrip(req *http.Request) (*http.Response, e
 			body = t.updatedCard
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	case strings.Contains(req.URL.Path, "/card_tables/columns/"):
+		for id, body := range t.columns {
+			if strings.Contains(req.URL.Path, "/card_tables/columns/"+id) {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+			}
+		}
 	case strings.Contains(req.URL.Path, "/card_tables/"):
 		for id, body := range t.tables {
 			if strings.Contains(req.URL.Path, "/card_tables/"+id) {
+				t.cardTableGetCount++
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
 			}
 		}
@@ -1202,6 +1211,9 @@ func TestCardsDoneUsesParentColumnToResolveTable(t *testing.T) {
 		projectDock: `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board A"}, {"name": "kanban_board", "id": 666, "title": "Board B"}]}`,
 		initialCard: `{"id": 456, "title": "Test Card", "completed": false, "parent": {"id": 990, "title": "Doing", "type": "Kanban::Column"}, "bucket": {"id": 123, "name": "Test Project"}}`,
 		updatedCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 991, "title": "Done", "type": "Kanban::DoneColumn"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		columns: map[string]string{
+			"990": `{"id": 990, "title": "Doing", "type": "Kanban::Column", "parent": {"id": 666, "title": "Board B", "type": "Kanban::Board"}}`,
+		},
 		tables: map[string]string{
 			"555": `{"id": 555, "title": "Board A", "lists": [{"id": 777, "title": "Doing", "type": "Kanban::Column"}, {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
 			"666": `{"id": 666, "title": "Board B", "lists": [{"id": 990, "title": "Doing", "type": "Kanban::Column"}, {"id": 991, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
@@ -1219,13 +1231,14 @@ func TestCardsDoneUsesParentColumnToResolveTable(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
 	assert.Equal(t, float64(991), body["column_id"])
+	assert.Equal(t, 1, transport.cardTableGetCount)
 }
 
 func TestCardsDoneAlreadyCompletedSkipsMove(t *testing.T) {
 	transport := &mockCardsDoneTransport{
 		initialCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}}`,
 	}
-	app, _ := newTestAppWithTransport(t, transport)
+	app, buf := newTestAppWithTransport(t, transport)
 
 	project := ""
 	cardTable := ""
@@ -1234,6 +1247,23 @@ func TestCardsDoneAlreadyCompletedSkipsMove(t *testing.T) {
 	err := executeCommand(cmd, app, "456")
 	require.NoError(t, err)
 	assert.Equal(t, 0, transport.moveCalls)
+	assert.Contains(t, buf.String(), `"summary": "Card #456 is already in 'Done'"`)
+}
+
+func TestCardsDoneCompletedOutsideDoneUsesAccurateSummary(t *testing.T) {
+	transport := &mockCardsDoneTransport{
+		initialCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 777, "title": "Doing", "type": "Kanban::Column"}}`,
+	}
+	app, buf := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsDoneCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456")
+	require.NoError(t, err)
+	assert.Equal(t, 0, transport.moveCalls)
+	assert.Contains(t, buf.String(), `"summary": "Card #456 is already completed"`)
 }
 
 func TestCardsDoneWithoutDoneColumnErrors(t *testing.T) {
