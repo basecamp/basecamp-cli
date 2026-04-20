@@ -1344,6 +1344,9 @@ You can pass either an item ID or a Basecamp URL:
 					// Try vault
 					_, err = app.Account().Vaults().Get(cmd.Context(), itemID)
 					if err == nil {
+						if contentChanged {
+							return output.ErrUsage("detected a folder/vault; use --title to rename it")
+						}
 						req := &basecamp.UpdateVaultRequest{Title: title}
 						vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 						if err != nil {

@@ -313,3 +313,48 @@ func TestFilesUpdateVaultWithoutTitleShowsHelp(t *testing.T) {
 	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault")
 	assert.NoError(t, err)
 }
+
+type mockFilesAutodetectVaultTransport struct{}
+
+func (t *mockFilesAutodetectVaultTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/documents/999"):
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/vaults/999"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":999,"title":"Existing folder"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodPut:
+		return nil, fmt.Errorf("unexpected update request: %s", req.URL.Path)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+func TestFilesUpdateAutodetectVaultRejectsContentOnly(t *testing.T) {
+	app := showTestApp(t, &mockFilesAutodetectVaultTransport{})
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "desc")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "detected a folder/vault; use --title to rename it")
+}
