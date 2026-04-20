@@ -291,3 +291,25 @@ func TestFilesUpdateTypeWithoutChangesShowsHelp(t *testing.T) {
 	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document")
 	assert.NoError(t, err)
 }
+
+func TestFilesUpdateVaultRejectsContentFlag(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault", "--content", "desc")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "--content can only be used with --type document or upload")
+}
+
+func TestFilesUpdateVaultWithoutTitleShowsHelp(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault")
+	assert.NoError(t, err)
+}

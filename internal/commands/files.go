@@ -1218,8 +1218,28 @@ You can pass either an item ID or a Basecamp URL:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			titleChanged := cmd.Flags().Changed("title")
 			contentChanged := cmd.Flags().Changed("content")
-			if !titleChanged && !contentChanged {
-				return noChanges(cmd)
+			itemType = strings.ToLower(strings.TrimSpace(itemType))
+			switch itemType {
+			case "", "document", "doc":
+				if !titleChanged && !contentChanged {
+					return noChanges(cmd)
+				}
+			case "vault", "folder":
+				if contentChanged {
+					return output.ErrUsage("--content can only be used with --type document or upload")
+				}
+				if !titleChanged {
+					return noChanges(cmd)
+				}
+			case "upload", "file":
+				if !titleChanged && !contentChanged {
+					return noChanges(cmd)
+				}
+			default:
+				return output.ErrUsageHint(
+					fmt.Sprintf("Invalid type: %s", itemType),
+					"Use: vault, document, or upload",
+				)
 			}
 
 			app := appctx.FromContext(cmd.Context())
