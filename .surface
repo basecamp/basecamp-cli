@@ -48,6 +48,7 @@ ARG basecamp cards column update 00 <id|url>
 ARG basecamp cards column watch 00 <id|url>
 ARG basecamp cards create 00 <title>
 ARG basecamp cards create 01 [body]
+ARG basecamp cards done 00 <id|url>
 ARG basecamp cards move 00 <id|url>
 ARG basecamp cards mv 00 <id|url>
 ARG basecamp cards restore 00 <id|url>
@@ -498,6 +499,7 @@ CMD basecamp cards column update
 CMD basecamp cards column watch
 CMD basecamp cards columns
 CMD basecamp cards create
+CMD basecamp cards done
 CMD basecamp cards list
 CMD basecamp cards move
 CMD basecamp cards mv
@@ -2808,6 +2810,28 @@ FLAG basecamp cards create --styled type=bool
 FLAG basecamp cards create --to type=string
 FLAG basecamp cards create --todolist type=string
 FLAG basecamp cards create --verbose type=count
+FLAG basecamp cards done --account type=string
+FLAG basecamp cards done --agent type=bool
+FLAG basecamp cards done --cache-dir type=string
+FLAG basecamp cards done --card-table type=string
+FLAG basecamp cards done --count type=bool
+FLAG basecamp cards done --help type=bool
+FLAG basecamp cards done --hints type=bool
+FLAG basecamp cards done --ids-only type=bool
+FLAG basecamp cards done --in type=string
+FLAG basecamp cards done --jq type=string
+FLAG basecamp cards done --json type=bool
+FLAG basecamp cards done --markdown type=bool
+FLAG basecamp cards done --md type=bool
+FLAG basecamp cards done --no-hints type=bool
+FLAG basecamp cards done --no-stats type=bool
+FLAG basecamp cards done --profile type=string
+FLAG basecamp cards done --project type=string
+FLAG basecamp cards done --quiet type=bool
+FLAG basecamp cards done --stats type=bool
+FLAG basecamp cards done --styled type=bool
+FLAG basecamp cards done --todolist type=string
+FLAG basecamp cards done --verbose type=count
 FLAG basecamp cards list --account type=string
 FLAG basecamp cards list --agent type=bool
 FLAG basecamp cards list --all type=bool
@@ -16285,6 +16309,7 @@ SUB basecamp cards column update
 SUB basecamp cards column watch
 SUB basecamp cards columns
 SUB basecamp cards create
+SUB basecamp cards done
 SUB basecamp cards list
 SUB basecamp cards move
 SUB basecamp cards mv

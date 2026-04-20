@@ -70,6 +70,7 @@ basecamp projects list                # List projects
 basecamp todos list --in 12345        # Todos in a project
 basecamp todo "Fix bug" --in 12345    # Create todo
 basecamp done 67890                   # Complete todo
+basecamp cards done 67890 --in 12345  # Complete card (move to Done)
 basecamp search "authentication"      # Search across projects
 basecamp files list --in 12345        # List docs & files
 basecamp cards list --in 12345        # List cards (Kanban)

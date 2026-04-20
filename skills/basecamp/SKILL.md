@@ -163,6 +163,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Complete todo | `basecamp done <id> --json` |
 | List cards | `basecamp cards list --in <project> --json` |
 | Create card | `basecamp card "Title" --in <project> --json` |
+| Complete card | `basecamp cards done <id|url> --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> [--position N] --in <project> --json` |
 | Move card to on-hold | `basecamp cards move <id> --on-hold --in <project> --json` |
 | Post message | `basecamp message "Title" "Body" --in <project> --json` |
@@ -248,7 +249,8 @@ Want to change something?
 ├── Have URL? → basecamp url parse "<url>" → use extracted IDs
 ├── Have ID? → basecamp <resource> update <id> --field value
 ├── Change status? → basecamp recordings trash|archive|restore <id>
-└── Complete todo? → basecamp done <id>
+├── Complete todo? → basecamp done <id>
+└── Complete card? → basecamp cards done <id|url> --in <project>
 ```
 
 ## Common Workflows
@@ -317,6 +319,9 @@ basecamp chat post "@Jane, done!" --in <project>
 ```bash
 # List columns to get IDs
 basecamp cards columns --in <project> --json
+
+# Complete a card (moves it to the Done column automatically)
+basecamp cards done <card_id> --in <project>
 
 # Move card to column
 basecamp cards move <card_id> --to <column_id> --in <project>
@@ -454,6 +459,7 @@ basecamp cards columns --in <project> --json          # List columns (needs --ca
 basecamp cards show <id> --in <project>               # Card details
 basecamp card "Title" "<p>Body</p>" --in <project> --column <id>
 basecamp cards update <id> --title "New" --due tomorrow --assignee me
+basecamp cards done <id|url> --in <project>           # Move to the Done column automatically
 basecamp cards move <id> --to <column_id>             # Move to column (numeric ID)
 basecamp cards move <id> --to "Done" --card-table <table_id>  # Move by name (needs table)
 basecamp cards move <id> --to "Done" --position 1 --card-table <table_id>  # Move to position
