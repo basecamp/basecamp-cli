@@ -1119,6 +1119,21 @@ func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
 	}
 }
 
+func TestGetCardTableIDRejectsPartialNumericExplicitID(t *testing.T) {
+	transport := &mockCardMoveTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	_, err := getCardTableID(cmd, app, "123", "555abc")
+	require.Error(t, err)
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e)) {
+		assert.Equal(t, "Card table '555abc' not found", e.Message)
+	}
+}
+
 type mockCardsDoneTransport struct {
 	projectDock       string
 	initialCard       string
@@ -1234,6 +1249,31 @@ func TestCardsDoneUsesParentColumnToResolveTable(t *testing.T) {
 	assert.Equal(t, 1, transport.cardTableGetCount)
 }
 
+func TestCardsDoneUsesOnHoldParentToResolveTable(t *testing.T) {
+	transport := &mockCardsDoneTransport{
+		projectDock: `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board A"}, {"name": "kanban_board", "id": 666, "title": "Board B"}]}`,
+		initialCard: `{"id": 456, "title": "Test Card", "completed": false, "parent": {"id": 1990, "title": "On hold", "type": "Kanban::Column"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		updatedCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 991, "title": "Done", "type": "Kanban::DoneColumn"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		tables: map[string]string{
+			"555": `{"id": 555, "title": "Board A", "lists": [{"id": 777, "title": "Doing", "type": "Kanban::Column", "on_hold": {"id": 1777, "title": "On hold"}}, {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
+			"666": `{"id": 666, "title": "Board B", "lists": [{"id": 990, "title": "Doing", "type": "Kanban::Column", "on_hold": {"id": 1990, "title": "On hold"}}, {"id": 991, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsDoneCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456")
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
+	assert.Equal(t, float64(991), body["column_id"])
+	assert.Equal(t, 2, transport.cardTableGetCount)
+}
+
 func TestCardsDoneAlreadyCompletedSkipsMove(t *testing.T) {
 	transport := &mockCardsDoneTransport{
 		initialCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}}`,
@@ -1249,7 +1289,7 @@ func TestCardsDoneAlreadyCompletedSkipsMove(t *testing.T) {
 	assert.Equal(t, 0, transport.moveCalls)
 
 	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(buf.String()), &out))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 	assert.Equal(t, "Card #456 is already in 'Done'", out["summary"])
 }
 
@@ -1268,7 +1308,7 @@ func TestCardsDoneCompletedOutsideDoneUsesAccurateSummary(t *testing.T) {
 	assert.Equal(t, 0, transport.moveCalls)
 
 	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(buf.String()), &out))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 	assert.Equal(t, "Card #456 is already completed", out["summary"])
 }
 

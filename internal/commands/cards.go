@@ -999,7 +999,7 @@ func cardDoneBreadcrumbs(cardIDStr, projectID, cardTableID, doneColumn string) [
 	if cardTableID != "" {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "list",
-			Cmd:         fmt.Sprintf("basecamp cards --in %s --card-table %s --column %q", projectID, cardTableID, doneColumn),
+			Cmd:         fmt.Sprintf("basecamp cards list --in %s --card-table %s --column %q", projectID, cardTableID, doneColumn),
 			Description: "List cards in Done",
 		})
 	}
@@ -2362,8 +2362,8 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 	}
 
 	if explicitCardTableID != "" {
-		var idInt int64
-		if _, err := fmt.Sscanf(explicitCardTableID, "%d", &idInt); err == nil {
+		idInt, parseErr := strconv.ParseInt(explicitCardTableID, 10, 64)
+		if parseErr == nil {
 			for _, ct := range cardTables {
 				if ct.ID == idInt {
 					return explicitCardTableID, nil
