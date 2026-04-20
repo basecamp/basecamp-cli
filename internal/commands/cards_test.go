@@ -1247,7 +1247,10 @@ func TestCardsDoneAlreadyCompletedSkipsMove(t *testing.T) {
 	err := executeCommand(cmd, app, "456")
 	require.NoError(t, err)
 	assert.Equal(t, 0, transport.moveCalls)
-	assert.Contains(t, buf.String(), `"summary": "Card #456 is already in 'Done'"`)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal([]byte(buf.String()), &out))
+	assert.Equal(t, "Card #456 is already in 'Done'", out["summary"])
 }
 
 func TestCardsDoneCompletedOutsideDoneUsesAccurateSummary(t *testing.T) {
@@ -1263,7 +1266,10 @@ func TestCardsDoneCompletedOutsideDoneUsesAccurateSummary(t *testing.T) {
 	err := executeCommand(cmd, app, "456")
 	require.NoError(t, err)
 	assert.Equal(t, 0, transport.moveCalls)
-	assert.Contains(t, buf.String(), `"summary": "Card #456 is already completed"`)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal([]byte(buf.String()), &out))
+	assert.Equal(t, "Card #456 is already completed", out["summary"])
 }
 
 func TestCardsDoneWithoutDoneColumnErrors(t *testing.T) {
