@@ -906,9 +906,14 @@ You can pass either a card ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			if card.Parent != nil && card.Parent.Type == "Kanban::DoneColumn" || card.Completed {
+			alreadyInDone := card.Parent != nil && card.Parent.Type == "Kanban::DoneColumn"
+			if alreadyInDone || card.Completed {
+				summary := fmt.Sprintf("Card #%s is already in 'Done'", cardIDStr)
+				if !alreadyInDone && card.Completed {
+					summary = fmt.Sprintf("Card #%s is already completed", cardIDStr)
+				}
 				return app.OK(card,
-					output.WithSummary(fmt.Sprintf("Card #%s is already in 'Done'", cardIDStr)),
+					output.WithSummary(summary),
 					output.WithBreadcrumbs(output.Breadcrumb{
 						Action:      "view",
 						Cmd:         fmt.Sprintf("basecamp cards show %s", cardIDStr),
@@ -2190,15 +2195,22 @@ func resolveCardTableForCard(cmd *cobra.Command, app *appctx.App, projectID, exp
 	}
 
 	if explicitCardTableID != "" {
+		explicitID, parseErr := strconv.ParseInt(explicitCardTableID, 10, 64)
+		if parseErr != nil {
+			return "", nil, output.ErrUsageHint(
+				fmt.Sprintf("Card table '%s' not found", explicitCardTableID),
+				fmt.Sprintf("Available card tables: %s", formatCardTableIDs(cardTables)),
+			)
+		}
 		for _, ct := range cardTables {
-			if fmt.Sprintf("%d", ct.ID) != explicitCardTableID {
+			if ct.ID != explicitID {
 				continue
 			}
 			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), ct.ID)
 			if err != nil {
 				return "", nil, convertSDKError(err)
 			}
-			return explicitCardTableID, cardTableData, nil
+			return fmt.Sprintf("%d", ct.ID), cardTableData, nil
 		}
 		return "", nil, output.ErrUsageHint(
 			fmt.Sprintf("Card table '%s' not found", explicitCardTableID),
@@ -2216,6 +2228,18 @@ func resolveCardTableForCard(cmd *cobra.Command, app *appctx.App, projectID, exp
 
 	if card == nil || card.Parent == nil || card.Parent.ID == 0 {
 		return "", nil, ambiguousCardTablesError(cardTables)
+	}
+
+	if cardTableIDVal, ok := resolveCardTableIDFromParentColumn(cmd, app, cardTables, card.Parent.ID); ok {
+		cardTableIDInt, parseErr := strconv.ParseInt(cardTableIDVal, 10, 64)
+		if parseErr != nil {
+			return "", nil, output.ErrUsage("Invalid card table ID")
+		}
+		cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
+		if err != nil {
+			return "", nil, convertSDKError(err)
+		}
+		return cardTableIDVal, cardTableData, nil
 	}
 
 	var matchedID string
@@ -2239,6 +2263,19 @@ func resolveCardTableForCard(cmd *cobra.Command, app *appctx.App, projectID, exp
 	}
 
 	return matchedID, matchedTable, nil
+}
+
+func resolveCardTableIDFromParentColumn(cmd *cobra.Command, app *appctx.App, cardTables []projectCardTable, parentColumnID int64) (string, bool) {
+	column, err := app.Account().CardColumns().Get(cmd.Context(), parentColumnID)
+	if err != nil || column == nil || column.Parent == nil || column.Parent.ID == 0 {
+		return "", false
+	}
+	for _, ct := range cardTables {
+		if ct.ID == column.Parent.ID {
+			return fmt.Sprintf("%d", ct.ID), true
+		}
+	}
+	return "", false
 }
 
 func cardTableContainsColumn(columns []basecamp.CardColumn, columnID int64) bool {
