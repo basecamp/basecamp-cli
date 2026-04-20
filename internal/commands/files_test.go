@@ -244,3 +244,50 @@ func TestFilesUpdateDocumentContentPreservesExistingTitle(t *testing.T) {
 	assert.Equal(t, "Existing title", body["title"])
 	assert.Equal(t, "<p>Updated <strong>body</strong></p>", body["content"])
 }
+
+func TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, hasTitle := body["title"]
+	assert.False(t, hasTitle)
+	assert.Equal(t, "<div>Existing body</div>", body["content"])
+}
+
+func TestFilesUpdateDocumentEmptyContentClearsWhilePreservingTitle(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Existing title", body["title"])
+	_, hasContent := body["content"]
+	assert.False(t, hasContent)
+}
+
+func TestFilesUpdateTypeWithoutChangesShowsHelp(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document")
+	assert.NoError(t, err)
+}

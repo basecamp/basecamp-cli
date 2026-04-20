@@ -1216,7 +1216,9 @@ You can pass either an item ID or a Basecamp URL:
 		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because Basecamp API clears omitted fields on PUT."},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && itemType == "" {
+			titleChanged := cmd.Flags().Changed("title")
+			contentChanged := cmd.Flags().Changed("content")
+			if !titleChanged && !contentChanged {
 				return noChanges(cmd)
 			}
 
@@ -1272,7 +1274,7 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, title, content)
+					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, titleChanged, contentChanged, title, content)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1307,7 +1309,7 @@ You can pass either an item ID or a Basecamp URL:
 				// Try document first (most common update case)
 				existingDoc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, title, content)
+					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, titleChanged, contentChanged, title, content)
 					if buildErr != nil {
 						return convertSDKError(buildErr)
 					}
@@ -1379,11 +1381,12 @@ You can pass either an item ID or a Basecamp URL:
 	return cmd
 }
 
-func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, title, content string) (*basecamp.UpdateDocumentRequest, error) {
-	// BC3 document updates are destructive PUTs: omitted title/content fields are
-	// replaced with empty values. Fetch and merge when the caller only updates
-	// one field so untouched content is preserved.
-	if existingDoc == nil && (title == "" || content == "") {
+func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, titleChanged, contentChanged bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
+	// Basecamp document updates are destructive PUTs: omitted title/content
+	// fields are replaced with empty values. Fetch and merge when the caller
+	// updates only one field so the untouched field is preserved, while still
+	// allowing explicit clears via --title "" or --content "".
+	if existingDoc == nil && (!titleChanged || !contentChanged) {
 		var err error
 		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
 		if err != nil {
@@ -1397,10 +1400,14 @@ func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int6
 		req.Content = existingDoc.Content
 	}
 
-	if title != "" {
+	if titleChanged {
 		req.Title = title
 	}
-	if content != "" {
+	if contentChanged {
+		if content == "" {
+			req.Content = ""
+			return req, nil
+		}
 		docHTML := richtext.MarkdownToHTML(content)
 		var err error
 		docHTML, err = resolveLocalImages(cmd, app, docHTML)
