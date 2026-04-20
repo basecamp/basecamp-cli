@@ -43,7 +43,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position"}},
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "publish", "pin", "unpin", "trash", "archive", "restore"}},
 				{Name: "chat", Category: "core", Description: "Chat in real-time", Actions: []string{"list", "messages", "post", "upload", "line", "delete"}},
-				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "columns", "steps", "trash", "archive", "restore"}},
+				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "done", "columns", "steps", "trash", "archive", "restore"}},
 				{Name: "files", Category: "core", Description: "Manage files, documents, and folders", Actions: []string{"list", "show", "download", "update", "trash", "archive", "restore"}},
 				{Name: "checkins", Category: "core", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer"}},
 				{Name: "schedule", Category: "core", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},

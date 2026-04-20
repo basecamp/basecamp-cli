@@ -40,6 +40,7 @@ func NewCardsCmd() *cobra.Command {
 		newCardsCreateCmd(&project, &cardTable),
 		newCardsUpdateCmd(),
 		newCardsMoveCmd(&project, &cardTable),
+		newCardsDoneCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
 		newCardsStepsCmd(&project),
@@ -294,6 +295,11 @@ You can pass either a card ID or a Basecamp URL:
 		opts := []output.ResponseOption{
 			output.WithSummary(fmt.Sprintf("Card #%s: %s", cardIDStr, card.Title)),
 			output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "done",
+					Cmd:         fmt.Sprintf("basecamp cards done %s", cardIDStr),
+					Description: "Move card to Done",
+				},
 				output.Breadcrumb{
 					Action:      "comment",
 					Cmd:         fmt.Sprintf("basecamp comment %s <text>", cardIDStr),
@@ -870,6 +876,129 @@ You can pass either a card ID or a Basecamp URL:
 	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
 
 	return cmd
+}
+
+func newCardsDoneCmd(project, cardTable *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "done <id|url>",
+		Short: "Move a card to the Done column",
+		Long: `Move a card to the Done column in its card table.
+
+You can pass either a card ID or a Basecamp URL:
+  basecamp cards done 789 --in my-project
+  basecamp cards done https://3.basecamp.com/123/buckets/456/card_tables/cards/789`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			cardIDStr, urlProjectID := extractWithProject(args[0])
+			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
+			}
+
+			card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			if card.Parent != nil && card.Parent.Type == "Kanban::DoneColumn" || card.Completed {
+				return app.OK(card,
+					output.WithSummary(fmt.Sprintf("Card #%s is already in 'Done'", cardIDStr)),
+					output.WithBreadcrumbs(output.Breadcrumb{
+						Action:      "view",
+						Cmd:         fmt.Sprintf("basecamp cards show %s", cardIDStr),
+						Description: "View card",
+					}),
+				)
+			}
+
+			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
+			if projectID == "" && card.Bucket != nil && card.Bucket.ID != 0 {
+				projectID = fmt.Sprintf("%d", card.Bucket.ID)
+			}
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID == "" {
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
+			}
+
+			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+
+			cardTableIDVal, cardTableData, err := resolveCardTableForCard(cmd, app, resolvedProjectID, *cardTable, card)
+			if err != nil {
+				return err
+			}
+
+			doneColumn := findDoneColumn(cardTableData.Lists)
+			if doneColumn == nil {
+				return output.ErrUsageHint(
+					fmt.Sprintf("Card table '%s' does not have a Done column", cardTableData.Title),
+					fmt.Sprintf("Inspect available columns: basecamp cards columns --card-table %s --in %s", cardTableIDVal, resolvedProjectID),
+				)
+			}
+
+			if err := app.Account().Cards().Move(cmd.Context(), cardID, doneColumn.ID, nil); err != nil {
+				return convertSDKError(err)
+			}
+
+			updatedCard, err := app.Account().Cards().Get(cmd.Context(), cardID)
+			if err != nil {
+				result := map[string]any{
+					"id":        cardIDStr,
+					"status":    "completed",
+					"column":    doneColumn.Title,
+					"column_id": doneColumn.ID,
+				}
+				return app.OK(result,
+					output.WithSummary(fmt.Sprintf("Moved card #%s to '%s'", cardIDStr, doneColumn.Title)),
+					output.WithBreadcrumbs(cardDoneBreadcrumbs(cardIDStr, resolvedProjectID, cardTableIDVal, doneColumn.Title)...),
+				)
+			}
+
+			return app.OK(updatedCard,
+				output.WithSummary(fmt.Sprintf("Moved card #%s to '%s'", cardIDStr, doneColumn.Title)),
+				output.WithBreadcrumbs(cardDoneBreadcrumbs(cardIDStr, resolvedProjectID, cardTableIDVal, doneColumn.Title)...),
+			)
+		},
+	}
+
+	return cmd
+}
+
+func cardDoneBreadcrumbs(cardIDStr, projectID, cardTableID, doneColumn string) []output.Breadcrumb {
+	breadcrumbs := []output.Breadcrumb{
+		{
+			Action:      "view",
+			Cmd:         fmt.Sprintf("basecamp cards show %s --in %s", cardIDStr, projectID),
+			Description: "View card",
+		},
+	}
+	if cardTableID != "" {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "list",
+			Cmd:         fmt.Sprintf("basecamp cards --in %s --card-table %s --column %q", projectID, cardTableID, doneColumn),
+			Description: "List cards in Done",
+		})
+	}
+	return breadcrumbs
 }
 
 func moveCardOnHold(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr, projectID, targetColumn, cardTableFlag string) error {
@@ -2210,46 +2339,23 @@ You can pass either a step ID or a Basecamp URL:
 	return cmd
 }
 
+type projectCardTable struct {
+	ID    int64
+	Title string
+}
+
 // getCardTableID retrieves the card table ID from a project's dock.
 // If the project has multiple card tables and no explicit cardTableID is provided,
 // an error is returned with the available card table IDs.
 func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string) (string, error) {
-	path := fmt.Sprintf("/projects/%s.json", projectID)
-	resp, err := app.Account().Get(cmd.Context(), path)
+	cardTables, err := listProjectCardTables(cmd, app, projectID)
 	if err != nil {
-		return "", convertSDKError(err)
+		return "", err
 	}
-
-	var project struct {
-		Dock []struct {
-			Name  string `json:"name"`
-			ID    int64  `json:"id"`
-			Title string `json:"title"`
-		} `json:"dock"`
-	}
-	if err := resp.UnmarshalData(&project); err != nil {
-		return "", fmt.Errorf("failed to parse project: %w", err)
-	}
-
-	// Collect all card tables from dock
-	var cardTables []struct {
-		ID    int64
-		Title string
-	}
-	for _, item := range project.Dock {
-		if item.Name == "kanban_board" {
-			cardTables = append(cardTables, struct {
-				ID    int64
-				Title string
-			}{ID: item.ID, Title: item.Title})
-		}
-	}
-
 	if len(cardTables) == 0 {
 		return "", output.ErrNotFound("card table", projectID)
 	}
 
-	// If explicit card table ID provided, validate it exists
 	if explicitCardTableID != "" {
 		var idInt int64
 		if _, err := fmt.Sscanf(explicitCardTableID, "%d", &idInt); err == nil {
@@ -2265,12 +2371,124 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 		)
 	}
 
-	// Single card table - return it
 	if len(cardTables) == 1 {
 		return fmt.Sprintf("%d", cardTables[0].ID), nil
 	}
 
-	// Multiple card tables - error with available IDs
+	return "", ambiguousCardTablesError(cardTables)
+}
+
+func listProjectCardTables(cmd *cobra.Command, app *appctx.App, projectID string) ([]projectCardTable, error) {
+	path := fmt.Sprintf("/projects/%s.json", projectID)
+	resp, err := app.Account().Get(cmd.Context(), path)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+
+	var project struct {
+		Dock []struct {
+			Name  string `json:"name"`
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		} `json:"dock"`
+	}
+	if err := resp.UnmarshalData(&project); err != nil {
+		return nil, fmt.Errorf("failed to parse project: %w", err)
+	}
+
+	var cardTables []projectCardTable
+	for _, item := range project.Dock {
+		if item.Name == "kanban_board" {
+			cardTables = append(cardTables, projectCardTable{ID: item.ID, Title: item.Title})
+		}
+	}
+
+	return cardTables, nil
+}
+
+func resolveCardTableForCard(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string, card *basecamp.Card) (string, *basecamp.CardTable, error) {
+	cardTables, err := listProjectCardTables(cmd, app, projectID)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(cardTables) == 0 {
+		return "", nil, output.ErrNotFound("card table", projectID)
+	}
+
+	if explicitCardTableID != "" {
+		for _, ct := range cardTables {
+			if fmt.Sprintf("%d", ct.ID) != explicitCardTableID {
+				continue
+			}
+			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), ct.ID)
+			if err != nil {
+				return "", nil, convertSDKError(err)
+			}
+			return explicitCardTableID, cardTableData, nil
+		}
+		return "", nil, output.ErrUsageHint(
+			fmt.Sprintf("Card table '%s' not found", explicitCardTableID),
+			fmt.Sprintf("Available card tables: %s", formatCardTableIDs(cardTables)),
+		)
+	}
+
+	if len(cardTables) == 1 {
+		cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTables[0].ID)
+		if err != nil {
+			return "", nil, convertSDKError(err)
+		}
+		return fmt.Sprintf("%d", cardTables[0].ID), cardTableData, nil
+	}
+
+	if card == nil || card.Parent == nil || card.Parent.ID == 0 {
+		return "", nil, ambiguousCardTablesError(cardTables)
+	}
+
+	var matchedID string
+	var matchedTable *basecamp.CardTable
+	for _, ct := range cardTables {
+		cardTableData, err := app.Account().CardTables().Get(cmd.Context(), ct.ID)
+		if err != nil {
+			return "", nil, convertSDKError(err)
+		}
+		if !cardTableContainsColumn(cardTableData.Lists, card.Parent.ID) {
+			continue
+		}
+		if matchedTable != nil {
+			return "", nil, ambiguousCardTablesError(cardTables)
+		}
+		matchedID = fmt.Sprintf("%d", ct.ID)
+		matchedTable = cardTableData
+	}
+	if matchedTable == nil {
+		return "", nil, ambiguousCardTablesError(cardTables)
+	}
+
+	return matchedID, matchedTable, nil
+}
+
+func cardTableContainsColumn(columns []basecamp.CardColumn, columnID int64) bool {
+	for _, column := range columns {
+		if column.ID == columnID {
+			return true
+		}
+		if column.OnHold != nil && column.OnHold.ID == columnID {
+			return true
+		}
+	}
+	return false
+}
+
+func findDoneColumn(columns []basecamp.CardColumn) *basecamp.CardColumn {
+	for i := range columns {
+		if columns[i].Type == "Kanban::DoneColumn" {
+			return &columns[i]
+		}
+	}
+	return nil
+}
+
+func ambiguousCardTablesError(cardTables []projectCardTable) error {
 	lines := make([]string, 0, len(cardTables))
 	for _, ct := range cardTables {
 		title := ct.Title
@@ -2279,7 +2497,7 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 		}
 		lines = append(lines, fmt.Sprintf("  %d  %s", ct.ID, title))
 	}
-	return "", &output.Error{
+	return &output.Error{
 		Code:    output.CodeAmbiguous,
 		Message: "Multiple card tables found",
 		Hint:    fmt.Sprintf("Specify one with --card-table <id>:\n%s", strings.Join(lines, "\n")),
@@ -2287,10 +2505,7 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 }
 
 // formatCardTableIDs formats card table IDs for error messages.
-func formatCardTableIDs(cardTables []struct {
-	ID    int64
-	Title string
-}) string {
+func formatCardTableIDs(cardTables []projectCardTable) string {
 	ids := make([]string, len(cardTables))
 	for i, ct := range cardTables {
 		if ct.Title != "" {

@@ -724,38 +724,26 @@ func TestCardsColumnNameVariations(t *testing.T) {
 func TestFormatCardTableIDs(t *testing.T) {
 	tests := []struct {
 		name       string
-		cardTables []struct {
-			ID    int64
-			Title string
-		}
-		expected string
+		cardTables []projectCardTable
+		expected   string
 	}{
 		{
 			name: "single with title",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
+			cardTables: []projectCardTable{
 				{ID: 123, Title: "Sprint Board"},
 			},
 			expected: "[123 (Sprint Board)]",
 		},
 		{
 			name: "single without title",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
+			cardTables: []projectCardTable{
 				{ID: 456, Title: ""},
 			},
 			expected: "[456]",
 		},
 		{
 			name: "multiple with titles",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
+			cardTables: []projectCardTable{
 				{ID: 123, Title: "Sprint Board"},
 				{ID: 456, Title: "Backlog"},
 			},
@@ -763,10 +751,7 @@ func TestFormatCardTableIDs(t *testing.T) {
 		},
 		{
 			name: "mixed titles",
-			cardTables: []struct {
-				ID    int64
-				Title string
-			}{
+			cardTables: []projectCardTable{
 				{ID: 123, Title: "Sprint Board"},
 				{ID: 456, Title: ""},
 				{ID: 789, Title: "Archive"},
@@ -1131,6 +1116,147 @@ func TestCardsMovePositionNumericToMultiTableAmbiguous(t *testing.T) {
 		assert.Contains(t, e.Hint, "Specify one with --card-table <id>:")
 		assert.Contains(t, e.Hint, "  555  Board A")
 		assert.Contains(t, e.Hint, "  666  Board B")
+	}
+}
+
+type mockCardsDoneTransport struct {
+	projectDock      string
+	initialCard      string
+	updatedCard      string
+	tables           map[string]string
+	cardGetCount     int
+	moveCalls        int
+	capturedMovePath string
+	capturedMoveBody []byte
+}
+
+func (t *mockCardsDoneTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "POST" && strings.Contains(req.URL.Path, "/moves.json") {
+		t.moveCalls++
+		t.capturedMovePath = req.URL.Path
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedMoveBody = body
+			req.Body.Close()
+		}
+		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+	}
+
+	if req.Method != "GET" {
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+
+	switch {
+	case strings.HasSuffix(req.URL.Path, "/projects.json"):
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`[{"id": 123, "name": "Test Project"}]`)), Header: header}, nil
+	case strings.Contains(req.URL.Path, "/projects/123"):
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(t.projectDock)), Header: header}, nil
+	case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
+		t.cardGetCount++
+		body := t.initialCard
+		if t.cardGetCount > 1 && t.updatedCard != "" {
+			body = t.updatedCard
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	case strings.Contains(req.URL.Path, "/card_tables/"):
+		for id, body := range t.tables {
+			if strings.Contains(req.URL.Path, "/card_tables/"+id) {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("unexpected GET request: %s", req.URL.Path)
+}
+
+func TestCardsDoneMovesCardToDoneColumn(t *testing.T) {
+	transport := &mockCardsDoneTransport{
+		projectDock: `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"}]}`,
+		initialCard: `{"id": 456, "title": "Test Card", "completed": false, "parent": {"id": 777, "title": "Doing", "type": "Kanban::Column"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		updatedCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		tables: map[string]string{
+			"555": `{"id": 555, "title": "Board", "lists": [{"id": 777, "title": "Doing", "type": "Kanban::Column"}, {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsDoneCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456")
+	require.NoError(t, err)
+	assert.Equal(t, 1, transport.moveCalls)
+	assert.Contains(t, transport.capturedMovePath, "/card_tables/cards/456/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
+	assert.Equal(t, float64(888), body["column_id"])
+}
+
+func TestCardsDoneUsesParentColumnToResolveTable(t *testing.T) {
+	transport := &mockCardsDoneTransport{
+		projectDock: `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board A"}, {"name": "kanban_board", "id": 666, "title": "Board B"}]}`,
+		initialCard: `{"id": 456, "title": "Test Card", "completed": false, "parent": {"id": 990, "title": "Doing", "type": "Kanban::Column"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		updatedCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 991, "title": "Done", "type": "Kanban::DoneColumn"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		tables: map[string]string{
+			"555": `{"id": 555, "title": "Board A", "lists": [{"id": 777, "title": "Doing", "type": "Kanban::Column"}, {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
+			"666": `{"id": 666, "title": "Board B", "lists": [{"id": 990, "title": "Doing", "type": "Kanban::Column"}, {"id": 991, "title": "Done", "type": "Kanban::DoneColumn"}]}`,
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsDoneCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456")
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedMoveBody, &body))
+	assert.Equal(t, float64(991), body["column_id"])
+}
+
+func TestCardsDoneAlreadyCompletedSkipsMove(t *testing.T) {
+	transport := &mockCardsDoneTransport{
+		initialCard: `{"id": 456, "title": "Test Card", "completed": true, "parent": {"id": 888, "title": "Done", "type": "Kanban::DoneColumn"}}`,
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsDoneCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456")
+	require.NoError(t, err)
+	assert.Equal(t, 0, transport.moveCalls)
+}
+
+func TestCardsDoneWithoutDoneColumnErrors(t *testing.T) {
+	transport := &mockCardsDoneTransport{
+		projectDock: `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"}]}`,
+		initialCard: `{"id": 456, "title": "Test Card", "completed": false, "parent": {"id": 777, "title": "Doing", "type": "Kanban::Column"}, "bucket": {"id": 123, "name": "Test Project"}}`,
+		tables: map[string]string{
+			"555": `{"id": 555, "title": "Board", "lists": [{"id": 777, "title": "Doing", "type": "Kanban::Column"}]}`,
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsDoneCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456")
+	require.Error(t, err)
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "Card table 'Board' does not have a Done column", e.Message)
+		assert.Contains(t, e.Hint, "basecamp cards columns --card-table 555 --in 123")
 	}
 }
 
