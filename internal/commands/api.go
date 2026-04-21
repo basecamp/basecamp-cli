@@ -98,7 +98,7 @@ func newAPIPostCmd() *cobra.Command {
 
 			resp, err := app.Account().Post(cmd.Context(), path, body)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			summary := fmt.Sprintf("POST %s: %s", path, apiSummary(resp.Data))
@@ -147,7 +147,7 @@ func newAPIPutCmd() *cobra.Command {
 
 			resp, err := app.Account().Put(cmd.Context(), path, body)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			summary := fmt.Sprintf("PUT %s: %s", path, apiSummary(resp.Data))
@@ -179,7 +179,7 @@ func newAPIDeleteCmd() *cobra.Command {
 			path := parsePath(args[0])
 			resp, err := app.Account().Delete(cmd.Context(), path)
 			if err != nil {
-				return err
+				return convertSDKError(err)
 			}
 
 			summary := fmt.Sprintf("DELETE %s", path)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	clioutput "github.com/basecamp/cli/output"
 )
 
@@ -29,7 +30,30 @@ func ErrAPI(status int, msg string) *Error { return clioutput.ErrAPI(status, msg
 func ErrAmbiguous(resource string, matches []string) *Error {
 	return clioutput.ErrAmbiguous(resource, matches)
 }
-func AsError(err error) *Error { return clioutput.AsError(err) }
+
+func AsError(err error) *Error {
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
+		return &Error{
+			Code:       sdkErr.Code,
+			Message:    sdkErr.Message,
+			Hint:       sdkErr.Hint,
+			HTTPStatus: sdkErr.HTTPStatus,
+			Retryable:  sdkErr.Retryable,
+			Cause:      sdkErr,
+		}
+	}
+	return clioutput.AsError(err)
+}
+
+// RequestID returns the SDK request ID carried by err, if present.
+func RequestID(err error) string {
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
+		return sdkErr.RequestID
+	}
+	return ""
+}
 
 // App-specific error constructors with basecamp-cli hints.
 

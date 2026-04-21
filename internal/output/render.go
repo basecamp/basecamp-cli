@@ -189,6 +189,10 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 				}
 			}
 		}
+		if requestID := errorRequestID(resp); requestID != "" {
+			contentLines = append(contentLines, "")
+			contentLines = append(contentLines, r.Hint.Render("Request ID: "+requestID))
+		}
 
 		// Create bordered box with error color border
 		boxStyle := lipgloss.NewStyle().
@@ -208,10 +212,22 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 			b.WriteString("Hint: " + resp.Hint)
 			b.WriteString("\n")
 		}
+		if requestID := errorRequestID(resp); requestID != "" {
+			b.WriteString("Request ID: " + requestID)
+			b.WriteString("\n")
+		}
 	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func errorRequestID(resp *ErrorResponse) string {
+	if resp == nil || resp.Meta == nil {
+		return ""
+	}
+	requestID, _ := resp.Meta["request_id"].(string)
+	return requestID
 }
 
 // wrapText wraps text to fit within maxWidth, preserving words and newlines.
@@ -1163,6 +1179,9 @@ func (r *MarkdownRenderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 	b.WriteString("**Error:** " + resp.Error + "\n")
 	if resp.Hint != "" {
 		b.WriteString("\n*Hint: " + resp.Hint + "*\n")
+	}
+	if requestID := errorRequestID(resp); requestID != "" {
+		b.WriteString("\n*Request ID: " + requestID + "*\n")
 	}
 
 	_, err := io.WriteString(w, b.String())

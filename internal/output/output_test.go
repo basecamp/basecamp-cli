@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/observability"
 )
 
@@ -420,6 +422,30 @@ func TestWriterErr(t *testing.T) {
 
 	assert.False(t, resp.OK)
 	assert.Equal(t, CodeNotFound, resp.Code)
+}
+
+func TestWriterErrIncludesRequestIDMeta(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	err := w.Err(&basecamp.Error{
+		Code:       basecamp.CodeAPI,
+		Message:    "server error",
+		HTTPStatus: 500,
+		RequestID:  "req-cli-123",
+	})
+	require.NoError(t, err, "Err() failed")
+
+	var resp ErrorResponse
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp), "Failed to unmarshal output")
+
+	assert.False(t, resp.OK)
+	assert.Equal(t, CodeAPI, resp.Code)
+	require.NotNil(t, resp.Meta)
+	assert.Equal(t, "req-cli-123", resp.Meta["request_id"])
 }
 
 func TestWriterQuietFormat(t *testing.T) {
@@ -2211,6 +2237,44 @@ func TestWriterStyledErrorWithHint(t *testing.T) {
 	assert.Contains(t, output, "basecamp projects")
 	// Should have ANSI codes (styled output)
 	assert.Contains(t, output, "\x1b[", "Expected ANSI escape codes in styled output")
+}
+
+func TestWriterStyledErrorIncludesRequestID(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	writeErr := w.Err(&basecamp.Error{
+		Code:       basecamp.CodeAPI,
+		Message:    "server error",
+		HTTPStatus: 500,
+		RequestID:  "req-cli-123",
+	})
+	require.NoError(t, writeErr, "Err() failed")
+
+	output := buf.String()
+	assert.Contains(t, output, "Request ID: req-cli-123")
+}
+
+func TestWriterMarkdownErrorIncludesRequestID(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	writeErr := w.Err(&basecamp.Error{
+		Code:       basecamp.CodeAPI,
+		Message:    "server error",
+		HTTPStatus: 500,
+		RequestID:  "req-cli-123",
+	})
+	require.NoError(t, writeErr, "Err() failed")
+
+	output := buf.String()
+	assert.Contains(t, output, "Request ID: req-cli-123")
 }
 
 // =============================================================================

@@ -1,11 +1,15 @@
 package commands
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 func TestParsePath(t *testing.T) {
@@ -46,4 +50,23 @@ func TestAPIPathArgs(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "path required")
 	})
+}
+
+func TestConvertSDKErrorPreservesRequestID(t *testing.T) {
+	sdkErr := &basecamp.Error{
+		Code:       basecamp.CodeAPI,
+		Message:    "server error",
+		HTTPStatus: 500,
+		RequestID:  "req-cli-123",
+	}
+
+	err := convertSDKError(sdkErr)
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T", err)
+	assert.Equal(t, output.CodeAPI, outErr.Code)
+
+	var gotSDK *basecamp.Error
+	require.True(t, errors.As(err, &gotSDK), "expected wrapped *basecamp.Error, got %T", err)
+	assert.Equal(t, "req-cli-123", gotSDK.RequestID)
 }
