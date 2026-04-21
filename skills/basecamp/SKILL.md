@@ -562,6 +562,8 @@ basecamp checkins --in <project> --json           # Questionnaire info
 basecamp checkins questions --in <project>        # List questions
 basecamp checkins question <id> --in <project>    # Question details
 basecamp checkins answers <question_id> --in <project>  # List answers
+basecamp checkins answers <question_id> --by me --in <project>  # My answers only
+basecamp checkins answers <question_id> --by "Alice Smith" --in <project>  # Filter by person (name, email, or ID)
 basecamp checkins answer <id> --in <project>      # Answer details
 basecamp checkins question create "What did you work on?" --in <project>
 basecamp checkins question update <id> "New question" --frequency every_week
