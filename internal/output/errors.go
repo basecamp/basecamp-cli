@@ -34,9 +34,16 @@ func ErrAmbiguous(resource string, matches []string) *Error {
 func AsError(err error) *Error {
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
+		message := err.Error()
+		if sdkErr.Hint != "" {
+			message = strings.TrimSuffix(message, ": "+sdkErr.Hint)
+		}
+		if message == "" {
+			message = sdkErr.Message
+		}
 		return &Error{
 			Code:       sdkErr.Code,
-			Message:    sdkErr.Message,
+			Message:    message,
 			Hint:       sdkErr.Hint,
 			HTTPStatus: sdkErr.HTTPStatus,
 			Retryable:  sdkErr.Retryable,

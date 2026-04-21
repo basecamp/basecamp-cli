@@ -724,6 +724,7 @@ func convertSDKError(err error) error {
 			Hint:       sdkErr.Hint,
 			HTTPStatus: sdkErr.HTTPStatus,
 			Retryable:  sdkErr.Retryable,
+			Cause:      sdkErr,
 		}
 	}
 	return err
