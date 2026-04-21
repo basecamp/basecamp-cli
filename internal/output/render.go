@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -191,7 +192,9 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 		}
 		if requestID := errorRequestID(resp); requestID != "" {
 			contentLines = append(contentLines, "")
-			contentLines = append(contentLines, r.Hint.Render("Request ID: "+requestID))
+			for _, line := range wrappedRequestIDLines(requestID, maxWidth) {
+				contentLines = append(contentLines, r.Hint.Render(line))
+			}
 		}
 
 		// Create bordered box with error color border
@@ -213,8 +216,10 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 			b.WriteString("\n")
 		}
 		if requestID := errorRequestID(resp); requestID != "" {
-			b.WriteString("Request ID: " + requestID)
-			b.WriteString("\n")
+			for _, line := range wrappedRequestIDLines(requestID, r.width) {
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
 		}
 	}
 
@@ -228,6 +233,64 @@ func errorRequestID(resp *ErrorResponse) string {
 	}
 	requestID, _ := resp.Meta["request_id"].(string)
 	return requestID
+}
+
+func wrappedRequestIDLines(requestID string, width int) []string {
+	const prefix = "Request ID: "
+	sanitized := sanitizeRequestID(requestID)
+	if sanitized == "" {
+		return nil
+	}
+	wrapped := wrapText(sanitized, max(width-len(prefix), 1))
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i == 0 {
+			out = append(out, prefix+line)
+			continue
+		}
+		out = append(out, strings.Repeat(" ", len(prefix))+line)
+	}
+	return out
+}
+
+func sanitizeRequestID(requestID string) string {
+	requestID = ansi.Strip(requestID)
+	requestID = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		default:
+			return r
+		}
+	}, requestID)
+	return strings.Join(strings.Fields(requestID), " ")
+}
+
+func escapeMarkdownText(s string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\\`,
+		"`", "\\`",
+		"*", "\\*",
+		"_", "\\_",
+		"{", "\\{",
+		"}", "\\}",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"!", "\\!",
+		"|", "\\|",
+	)
+	return replacer.Replace(s)
 }
 
 // wrapText wraps text to fit within maxWidth, preserving words and newlines.
@@ -1180,8 +1243,8 @@ func (r *MarkdownRenderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 	if resp.Hint != "" {
 		b.WriteString("\n*Hint: " + resp.Hint + "*\n")
 	}
-	if requestID := errorRequestID(resp); requestID != "" {
-		b.WriteString("\n*Request ID: " + requestID + "*\n")
+	if requestID := sanitizeRequestID(errorRequestID(resp)); requestID != "" {
+		b.WriteString("\nRequest ID: " + escapeMarkdownText(requestID) + "\n")
 	}
 
 	_, err := io.WriteString(w, b.String())

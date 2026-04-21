@@ -158,7 +158,10 @@ func (w *Writer) Err(err error, opts ...ErrorResponseOption) error {
 		Hint:  e.Hint,
 	}
 	if requestID := RequestID(err); requestID != "" {
-		resp.Meta = map[string]any{"request_id": requestID}
+		if resp.Meta == nil {
+			resp.Meta = make(map[string]any)
+		}
+		resp.Meta["request_id"] = requestID
 	}
 	for _, opt := range opts {
 		opt(resp)

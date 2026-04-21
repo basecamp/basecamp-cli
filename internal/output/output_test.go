@@ -325,6 +325,23 @@ func TestAsErrorWithWrappedOutputError(t *testing.T) {
 	assert.Equal(t, CodeAuth, result.Code)
 }
 
+func TestAsErrorWithWrappedSDKErrorPreservesContext(t *testing.T) {
+	original := &basecamp.Error{
+		Code:       basecamp.CodeForbidden,
+		Message:    "access denied",
+		Hint:       "retry later",
+		HTTPStatus: 403,
+		RequestID:  "req-cli-123",
+	}
+	wrapped := fmt.Errorf("GET /projects.json: %w", original)
+
+	result := AsError(wrapped)
+	assert.Equal(t, CodeForbidden, result.Code)
+	assert.Equal(t, "GET /projects.json: access denied", result.Message)
+	assert.Equal(t, "retry later", result.Hint)
+	assert.Equal(t, original, result.Cause)
+}
+
 // Note: AsError(nil) panics because it calls err.Error() on nil.
 // This is expected behavior - callers should not pass nil to AsError.
 
@@ -2250,12 +2267,13 @@ func TestWriterStyledErrorIncludesRequestID(t *testing.T) {
 		Code:       basecamp.CodeAPI,
 		Message:    "server error",
 		HTTPStatus: 500,
-		RequestID:  "req-cli-123",
+		RequestID:  "req-cli-123\x1b[31m\nnext",
 	})
 	require.NoError(t, writeErr, "Err() failed")
 
-	output := buf.String()
-	assert.Contains(t, output, "Request ID: req-cli-123")
+	output := ansi.Strip(buf.String())
+	assert.Contains(t, output, "Request ID: req-cli-123 next")
+	assert.NotContains(t, output, "[31m")
 }
 
 func TestWriterMarkdownErrorIncludesRequestID(t *testing.T) {
@@ -2269,12 +2287,13 @@ func TestWriterMarkdownErrorIncludesRequestID(t *testing.T) {
 		Code:       basecamp.CodeAPI,
 		Message:    "server error",
 		HTTPStatus: 500,
-		RequestID:  "req-cli-123",
+		RequestID:  "req*cli`123\x1b[31m",
 	})
 	require.NoError(t, writeErr, "Err() failed")
 
 	output := buf.String()
-	assert.Contains(t, output, "Request ID: req-cli-123")
+	assert.Contains(t, output, "Request ID: req\\*cli\\`123")
+	assert.NotContains(t, output, "\x1b")
 }
 
 // =============================================================================
