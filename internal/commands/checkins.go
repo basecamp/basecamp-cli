@@ -603,9 +603,14 @@ Use --by to filter answers by a specific person (name, email, ID, or "me"):
 				opts.Page = page
 			}
 
+			trimmedBy := strings.TrimSpace(by)
+			if by != "" && trimmedBy == "" {
+				return output.ErrUsage("--by value cannot be blank")
+			}
+
 			var answers []basecamp.QuestionAnswer
-			if by != "" {
-				personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), by)
+			if trimmedBy != "" {
+				personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), trimmedBy)
 				if err != nil {
 					return err
 				}
