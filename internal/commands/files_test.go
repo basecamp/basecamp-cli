@@ -358,3 +358,86 @@ func TestFilesUpdateAutodetectVaultRejectsContentOnly(t *testing.T) {
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "detected a folder/vault; use --title to rename it")
 }
+
+func TestFilesUpdateTypedVaultEmptyTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault", "--title", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedUploadEmptyTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--title", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedUploadEmptyContentNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--content", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateAutodetectVaultEmptyTitleNoChanges(t *testing.T) {
+	app := showTestApp(t, &mockFilesAutodetectVaultTransport{})
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--title", "")
+	assert.NoError(t, err)
+}
+
+type mockFilesAutodetectUploadTransport struct{}
+
+func (t *mockFilesAutodetectUploadTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/documents/999"):
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/vaults/999"):
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/uploads/999"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":999,"filename":"report.pdf"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodPut:
+		return nil, fmt.Errorf("unexpected update request: %s", req.URL.Path)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+func TestFilesUpdateAutodetectUploadEmptyContentNoChanges(t *testing.T) {
+	app := showTestApp(t, &mockFilesAutodetectUploadTransport{})
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "")
+	assert.NoError(t, err)
+}

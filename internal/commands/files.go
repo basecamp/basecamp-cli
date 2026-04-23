@@ -1213,7 +1213,7 @@ For documents, updating only --title or only --content preserves the untouched f
 You can pass either an item ID or a Basecamp URL:
   basecamp files update 789 --title "new title" --in my-project
   basecamp files update 789 --content "new content" --in my-project`,
-		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because Basecamp API clears omitted fields on PUT."},
+		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because BC3 rebuilds documents from permitted params on PUT; explicit clears via --title \"\"/--content \"\" work because the SDK strips empty strings to absent fields, which the controller then nulls. Upload/vault updates do not clear by omission, so empty-valued flags are rejected CLI-side."},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			titleChanged := cmd.Flags().Changed("title")
@@ -1228,11 +1228,13 @@ You can pass either an item ID or a Basecamp URL:
 				if contentChanged {
 					return output.ErrUsage("--content can only be used with --type document or upload")
 				}
-				if !titleChanged {
+				if !titleChanged || title == "" {
 					return noChanges(cmd)
 				}
 			case "upload", "file":
-				if !titleChanged && !contentChanged {
+				hasTitle := titleChanged && title != ""
+				hasContent := contentChanged && content != ""
+				if !hasTitle && !hasContent {
 					return noChanges(cmd)
 				}
 			default:
@@ -1347,6 +1349,9 @@ You can pass either an item ID or a Basecamp URL:
 						if contentChanged {
 							return output.ErrUsage("detected a folder/vault; use --title to rename it")
 						}
+						if !titleChanged || title == "" {
+							return noChanges(cmd)
+						}
 						req := &basecamp.UpdateVaultRequest{Title: title}
 						vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 						if err != nil {
@@ -1358,6 +1363,11 @@ You can pass either an item ID or a Basecamp URL:
 						// Try upload
 						_, err = app.Account().Uploads().Get(cmd.Context(), itemID)
 						if err == nil {
+							hasTitle := titleChanged && title != ""
+							hasContent := contentChanged && content != ""
+							if !hasTitle && !hasContent {
+								return noChanges(cmd)
+							}
 							req := &basecamp.UpdateUploadRequest{Description: content}
 							if title != "" {
 								req.BaseName = title
@@ -1405,10 +1415,14 @@ You can pass either an item ID or a Basecamp URL:
 }
 
 func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, titleChanged, contentChanged bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
-	// Basecamp document updates are destructive PUTs: omitted title/content
-	// fields are replaced with empty values. Fetch and merge when the caller
-	// updates only one field so the untouched field is preserved, while still
-	// allowing explicit clears via --title "" or --content "".
+	// BC3 rebuilds documents from permitted params on PUT, so omitted
+	// title/content fields are replaced with empty values. Fetch and merge when
+	// the caller updates only one field so the untouched field is preserved.
+	//
+	// Explicit clears via --title "" or --content "" work by composition: the
+	// SDK strips empty strings to absent JSON fields, and the controller then
+	// nulls those absent fields during rebuild. The wire-shape assertion in
+	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
 	if existingDoc == nil && (!titleChanged || !contentChanged) {
 		var err error
 		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
