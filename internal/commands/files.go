@@ -1218,22 +1218,27 @@ You can pass either an item ID or a Basecamp URL:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			titleChanged := cmd.Flags().Changed("title")
 			contentChanged := cmd.Flags().Changed("content")
+			titleTrimmed := strings.TrimSpace(title)
+			contentTrimmed := strings.TrimSpace(content)
 			itemType = strings.ToLower(strings.TrimSpace(itemType))
 			switch itemType {
 			case "", "document", "doc":
-				if !titleChanged && !contentChanged {
+				// Explicit "" clears are valid for documents; whitespace-only is not.
+				hasTitle := titleChanged && (title == "" || titleTrimmed != "")
+				hasContent := contentChanged && (content == "" || contentTrimmed != "")
+				if !hasTitle && !hasContent {
 					return noChanges(cmd)
 				}
 			case "vault", "folder":
 				if contentChanged {
 					return output.ErrUsage("--content can only be used with --type document or upload")
 				}
-				if !titleChanged || title == "" {
+				if !titleChanged || titleTrimmed == "" {
 					return noChanges(cmd)
 				}
 			case "upload", "file":
-				hasTitle := titleChanged && title != ""
-				hasContent := contentChanged && content != ""
+				hasTitle := titleChanged && titleTrimmed != ""
+				hasContent := contentChanged && contentTrimmed != ""
 				if !hasTitle && !hasContent {
 					return noChanges(cmd)
 				}
@@ -1349,7 +1354,7 @@ You can pass either an item ID or a Basecamp URL:
 						if contentChanged {
 							return output.ErrUsage("detected a folder/vault; use --title to rename it")
 						}
-						if !titleChanged || title == "" {
+						if !titleChanged || titleTrimmed == "" {
 							return noChanges(cmd)
 						}
 						req := &basecamp.UpdateVaultRequest{Title: title}
@@ -1363,8 +1368,8 @@ You can pass either an item ID or a Basecamp URL:
 						// Try upload
 						_, err = app.Account().Uploads().Get(cmd.Context(), itemID)
 						if err == nil {
-							hasTitle := titleChanged && title != ""
-							hasContent := contentChanged && content != ""
+							hasTitle := titleChanged && titleTrimmed != ""
+							hasContent := contentChanged && contentTrimmed != ""
 							if !hasTitle && !hasContent {
 								return noChanges(cmd)
 							}

@@ -441,3 +441,30 @@ func TestFilesUpdateAutodetectUploadEmptyContentNoChanges(t *testing.T) {
 	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "")
 	assert.NoError(t, err)
 }
+
+func TestFilesUpdateTypedVaultWhitespaceTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault", "--title", "   ")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedUploadWhitespaceContentNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--content", "   ")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedDocumentWhitespaceTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "   ")
+	assert.NoError(t, err)
+}
