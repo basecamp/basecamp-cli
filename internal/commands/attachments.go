@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,11 +17,25 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
+
+// genericLookupTypeHint is the usage hint emitted when the generic
+// /recordings/<id>.json lookup cannot resolve the recording — either
+// because the endpoint returns 204 (some recording types) or 404 (cards,
+// and any other type whose recording is not addressable without bucket
+// scope). Callers need to specify --type (or pass a URL, from which the
+// type is parsed) so the typed endpoint can be used instead.
+//
+// Kept command-agnostic: fetchItemContent is shared by `attachments list`
+// and `attachments download`, so the hint must not tell a download caller
+// to re-run the list command (or vice versa).
+const genericLookupTypeHint = "Re-run with --type todo|todolist|message|comment|card|card-table|document|schedule-entry|checkin|answer|forward|upload, or pass a URL (which encodes the type)"
 
 // NewAttachmentsCmd creates the attachments command group.
 func NewAttachmentsCmd() *cobra.Command {
@@ -401,6 +416,20 @@ func isGenericType(recordType string) bool {
 	}
 }
 
+// shouldSuggestType reports whether the --type usage hint is appropriate
+// for the current recordType. It fires only when no explicit type was
+// provided. The "line"/"lines"/"replies" aliases route through the same
+// generic /recordings lookup for parent discovery, but the user *did*
+// pass --type — telling those callers to "specify --type" is misleading.
+func shouldSuggestType(recordType string) bool {
+	switch recordType {
+	case "", "recording", "recordings":
+		return true
+	default:
+		return false
+	}
+}
+
 // fetchItemContent retrieves the HTML content field from a Basecamp item.
 // Uses the same recording-type discovery pattern as show.go.
 func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string) (string, error) {
@@ -416,13 +445,29 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 
 	resp, err := app.Account().Get(cmd.Context(), endpoint)
 	if err != nil {
+		// The generic /recordings/<id>.json endpoint returns 404 for
+		// recording types that require bucket scope (e.g. Kanban::Card).
+		// Convert to the same usage hint the 204 branch below emits so
+		// the user is told to pass --type instead of seeing a bare
+		// "Resource not found". Only fires when no explicit type was
+		// provided — a 404 under --type line|replies means the ID is
+		// wrong, not that --type is missing.
+		if shouldSuggestType(recordType) {
+			var sdkErr *basecamp.Error
+			if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeNotFound {
+				return "", output.ErrUsageHint(
+					fmt.Sprintf("Item %s not found or type required", id),
+					genericLookupTypeHint,
+				)
+			}
+		}
 		return "", convertSDKError(err)
 	}
 	if resp.StatusCode == http.StatusNoContent {
-		if isGenericType(recordType) {
+		if shouldSuggestType(recordType) {
 			return "", output.ErrUsageHint(
 				fmt.Sprintf("Item %s not found or type required", id),
-				"Specify a type: basecamp attachments list <id> --type todo|todolist|message|comment|card|card-table|document|schedule-entry|checkin|answer|forward|upload",
+				genericLookupTypeHint,
 			)
 		}
 		return "", output.ErrNotFound("item", id)
