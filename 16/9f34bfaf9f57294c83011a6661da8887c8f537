@@ -1,0 +1,25 @@
+internal/commands/files.go
+  a7fc59184fb6009d 1221-1222,1226-1229,1236,1240-1241,1357,1371-1372
+internal/commands/files_test.go
+  a7fc59184fb6009d 444-470
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "169f34bfaf9f57294c83011a6661da8887c8f537",
+  "prompts": {
+    "a7fc59184fb6009d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77328771-d104-48e0-9483-ade2def62f1f",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 39,
+      "total_deletions": 7,
+      "accepted_lines": 39,
+      "overriden_lines": 0
+    }
+  }
+}
