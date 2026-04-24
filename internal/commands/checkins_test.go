@@ -84,7 +84,7 @@ func TestCheckinsAnswerCreateDefaultsDateToToday(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, transport.recordedBody)
 	assert.Equal(t, "/99999/questions/456/answers.json", transport.recordedPath)
-	assert.Equal(t, "<p>hello world</p>", transport.recordedBody["content"])
+	assert.Equal(t, "<div>hello world</div>", transport.recordedBody["content"])
 	assert.Equal(t, "2026-03-25", transport.recordedBody["group_on"])
 }
 
