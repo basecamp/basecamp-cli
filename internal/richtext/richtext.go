@@ -1248,9 +1248,16 @@ func (a *ParsedAttachment) DisplayName() string {
 }
 
 // DisplayURL returns the best available URL for the attachment.
+// Href is preferred because it points at the real blob download endpoint
+// (storage.3.basecamp.com/.../download/<filename>). URL points at the
+// preview endpoint (preview.3.basecamp.com/.../previews/full), which for
+// non-image content types returns a generic SVG file-type icon instead of
+// the real file. Every internal caller is a download path, so preferring
+// Href is correct; URL is retained as a fallback for the rare case where
+// an attachment has no downloadable blob (e.g. externally hosted images).
 func (a *ParsedAttachment) DisplayURL() string {
-	if a.URL != "" {
-		return a.URL
+	if a.Href != "" {
+		return a.Href
 	}
-	return a.Href
+	return a.URL
 }

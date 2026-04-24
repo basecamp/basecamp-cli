@@ -300,16 +300,16 @@ func TestWithAttachmentMeta(t *testing.T) {
 func TestAttachmentMeta(t *testing.T) {
 	t.Run("uses DisplayURL", func(t *testing.T) {
 		atts := []richtext.ParsedAttachment{
-			{URL: "https://example.com/a.png", Href: "https://example.com/a-href.png", Filename: "a.png", ContentType: "image/png", Filesize: "1024"},
-			{Href: "https://example.com/b.txt"},
+			{URL: "https://preview.example.com/a-preview", Href: "https://storage.example.com/download/a.png", Filename: "a.png", ContentType: "image/png", Filesize: "1024"},
+			{URL: "https://preview.example.com/b-preview"},
 		}
 		result := attachmentMeta(atts, nil)
 		assert.Len(t, result, 2)
 		assert.Equal(t, "a.png", result[0]["filename"])
 		assert.Equal(t, "image/png", result[0]["content_type"])
 		assert.Equal(t, "1024", result[0]["filesize"])
-		assert.Equal(t, "https://example.com/a.png", result[0]["url"])
-		assert.Equal(t, "https://example.com/b.txt", result[1]["url"])
+		assert.Equal(t, "https://storage.example.com/download/a.png", result[0]["url"])
+		assert.Equal(t, "https://preview.example.com/b-preview", result[1]["url"])
 		_, hasFilename := result[1]["filename"]
 		assert.False(t, hasFilename)
 	})
