@@ -404,7 +404,20 @@ basecamp projects list --json               # List all
 basecamp projects show <id> --json          # Show details
 basecamp projects create "Name" --json      # Create
 basecamp projects update <id> --name "New"  # Update
+basecamp projects trash <id>                # Move to trash (recoverable)
 ```
+
+**Archiving a project:** the CLI does not have a dedicated archive command, but the
+underlying status endpoint can be hit via raw API. Same path works for restoring
+to active or moving to trashed.
+
+```bash
+basecamp api put "projects/<id>/status/archived" -d '{}' --json   # Archive
+basecamp api put "projects/<id>/status/active" -d '{}' --json     # Unarchive
+basecamp api put "projects/<id>/status/trashed" -d '{}' --json    # Trash (same as `projects trash`)
+```
+
+Verify with `basecamp projects show <id> --jq '.data.status'`.
 
 ### Todos
 
