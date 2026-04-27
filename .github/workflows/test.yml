@@ -88,7 +88,7 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@71321a20a9ded102f6e9ce5718a2fcec2c4f70d8 # v0.5.2
+        uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3
         with:
           advanced-security: false
 
@@ -153,7 +153,7 @@ jobs:
 
       - name: Cache BATS
         id: cache-bats
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           path: ~/.local
@@ -231,7 +231,7 @@ jobs:
 
       - name: Set up Ruby
         if: steps.filter.outputs.skill == 'true'
-        uses: ruby/setup-ruby@e65c17d16e57e481586a6a5a0282698790062f92 # v1.300.0
+        uses: ruby/setup-ruby@7372622e62b60b3cb750dcd2b9e32c247ffec26a # v1.302.0
         with:
           ruby-version: '3.3'
 
@@ -286,7 +286,7 @@ jobs:
 
       - name: Download previous benchmark baseline
         if: steps.filter.outputs.bench == 'true'
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: benchmarks-baseline.txt
           key: benchmarks-baseline-${{ github.sha }}
@@ -320,7 +320,7 @@ jobs:
 
       - name: Cache benchmark baseline
         if: steps.filter.outputs.bench == 'true'
-        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: benchmarks-baseline.txt
           key: benchmarks-baseline-${{ github.sha }}
