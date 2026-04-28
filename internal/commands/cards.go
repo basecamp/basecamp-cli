@@ -1271,7 +1271,7 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 		newCardsColumnUnwatchCmd(),
 		newCardsColumnOnHoldCmd(),
 		newCardsColumnNoOnHoldCmd(),
-		newCardsColumnColorCmd(),
+		newCardsColumnColorCmd(project),
 	)
 
 	return cmd
@@ -1726,7 +1726,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnColorCmd() *cobra.Command {
+func newCardsColumnColorCmd(project *string) *cobra.Command {
 	var color string
 
 	cmd := &cobra.Command{
@@ -1750,14 +1750,43 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			col, err := app.Account().CardColumns().SetColor(cmd.Context(), columnID, color)
+			// Resolve project - use URL > flag > config, with interactive fallback.
+			// The color endpoint requires a bucket-scoped path (PUT /buckets/<id>/card_tables/columns/<id>/color.json).
+			projectID := *project
+			if projectID == "" && urlProjectID != "" {
+				projectID = urlProjectID
+			}
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID == "" {
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
+			}
+
+			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+
+			path := fmt.Sprintf("/buckets/%s/card_tables/columns/%d/color.json", resolvedProjectID, columnID)
+			if _, err := app.Account().Put(cmd.Context(), path, map[string]string{"color": color}); err != nil {
+				return convertSDKError(err)
+			}
+
+			col, err := app.Account().CardColumns().Get(cmd.Context(), columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
