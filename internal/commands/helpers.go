@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -77,6 +78,22 @@ func isMachineOutput(cmd *cobra.Command) bool {
 		}
 	}
 	return false
+}
+
+func readPipedStdin() (string, bool) {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return "", false
+	}
+	if (fi.Mode() & os.ModeCharDevice) != 0 {
+		return "", false
+	}
+
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 // DockTool represents a tool in a project's dock.
