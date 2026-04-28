@@ -47,8 +47,15 @@ var (
 	// prefix (e.g. <p> vs <pre>, <b> vs <br>, <em> vs <embed>, <i> vs <img>,
 	// <s> vs <script>, <del> vs <details>, <a> vs <abbr>).
 	reP  = regexp.MustCompile(`(?is)<p(?:\s[^>]*)?>(.*?)</p>`)
-	reBR = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
 	reHR = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
+
+	// Trix-native block shapes. Trix (the editor behind Basecamp) stores
+	// paragraphs as <div>...</div> and blank-line separators as
+	// <div><br></div>. HTMLToMarkdown needs to unwrap both so content
+	// typed in Basecamp round-trips cleanly, and so the CLI's own output
+	// (which MarkdownToHTML emits in the same shape) can be re-parsed.
+	reDivEmpty = regexp.MustCompile(`(?i)<div(?:\s[^>]*)?>\s*<br\s*/?\s*>\s*</div>`)
+	reDiv      = regexp.MustCompile(`(?is)<div(?:\s[^>]*)?>(.*?)</div>`)
 )
 
 // Pre-compiled regexes for HTMLToMarkdown inline elements
@@ -167,6 +174,16 @@ func (p *escapedAtParser) Parse(_ ast.Node, block text.Reader, _ parser.Context)
 type trixTransformer struct{}
 
 func (t *trixTransformer) Transform(node *ast.Document, reader text.Reader, pc parser.Context) {
+	// Phase 0: Convert soft line breaks to hard across the entire document.
+	// In Markdown `"Line 1\nLine 2"` (no blank line) is authored as a single
+	// paragraph with an intentional visible line break. goldmark's default
+	// renders the soft break as a literal newline, which browsers collapse
+	// to whitespace. Trix (the editor behind Basecamp) represents the same
+	// "single Enter" as <br> inside the paragraph's <div>, so emit <br>.
+	// convertSoftBreaksToHard is idempotent, so later per-list / per-blockquote
+	// re-invocations stay a no-op.
+	convertSoftBreaksToHard(node)
+
 	// Phase 1: Force tight lists, convert soft breaks to hard in list items,
 	// and unwrap blockquote paragraphs
 	_ = ast.Walk(node, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -244,12 +261,29 @@ func insertBreaksBetweenTextBlocks(parent ast.Node) {
 type trixRenderer struct{}
 
 func (r *trixRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindParagraph, r.renderParagraph)
 	reg.Register(ast.KindRawHTML, r.renderRawHTML)
 	reg.Register(ast.KindHTMLBlock, r.renderHTMLBlock)
 	reg.Register(ast.KindBlockquote, r.renderBlockquote)
 	reg.Register(ast.KindFencedCodeBlock, r.renderFencedCodeBlock)
 	reg.Register(KindTrixBreak, r.renderTrixBreak)
 	reg.Register(KindEscapedAt, r.renderEscapedAt)
+}
+
+// renderParagraph wraps top-level paragraphs in <div>...</div> instead of
+// goldmark's default <p>...</p>. Trix (the editor behind Basecamp's rich
+// text fields) uses <div> blocks natively; <p> blocks get rendered with
+// extra margins, producing double-spaced paragraphs in Basecamp.
+// Paragraphs inside lists and blockquotes are converted to TextBlocks by
+// trixTransformer before reaching the renderer, so this only fires for
+// top-level paragraphs.
+func (r *trixRenderer) renderParagraph(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<div>")
+	} else {
+		_, _ = w.WriteString("</div>\n")
+	}
+	return ast.WalkContinue, nil
 }
 
 func (r *trixRenderer) renderBlockquote(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -295,7 +329,7 @@ func (r *trixRenderer) renderHTMLBlock(w util.BufWriter, source []byte, node ast
 		escaped := strings.TrimRight(string(util.EscapeHTML(n.ClosureLine.Value(source))), "\n")
 		parts = append(parts, escaped)
 	}
-	_, _ = w.WriteString("<p>" + strings.Join(parts, " ") + "</p>\n")
+	_, _ = w.WriteString("<div>" + strings.Join(parts, " ") + "</div>\n")
 	return ast.WalkContinue, nil
 }
 
@@ -330,7 +364,10 @@ func (r *trixRenderer) renderTrixBreak(w util.BufWriter, _ []byte, _ ast.Node, e
 	if !entering {
 		return ast.WalkContinue, nil
 	}
-	_, _ = w.WriteString("<br>\n")
+	// <div><br></div> is Trix's native empty-line representation.
+	// A bare <br> between <p>/<div> blocks produces double spacing in
+	// Basecamp because the <br> comes in addition to the block margins.
+	_, _ = w.WriteString("<div><br></div>\n")
 	return ast.WalkContinue, nil
 }
 
@@ -359,7 +396,7 @@ func MarkdownToHTML(md string) string {
 
 	var buf bytes.Buffer
 	if err := mdConverter.Convert([]byte(md), &buf); err != nil {
-		return "<p>" + html.EscapeString(md) + "</p>"
+		return "<div>" + html.EscapeString(md) + "</div>"
 	}
 
 	return strings.TrimSpace(buf.String())
@@ -496,11 +533,20 @@ func HTMLToMarkdown(html string) string {
 	// Lists — use balanced-tag replacement to handle nesting correctly.
 	html = replaceBalancedListBlocks(html)
 
+	// Trix-native paragraphs: <div><br></div> is a blank-line separator,
+	// <div>...</div> is a paragraph. Handle before <p> so a document that
+	// mixes both (rare, but possible when Basecamp content is copied from
+	// a non-Trix source) degrades cleanly.
+	html = reDivEmpty.ReplaceAllString(html, "\n\n")
+	html = reDiv.ReplaceAllString(html, "$1\n\n")
+
 	// Paragraphs
 	html = reP.ReplaceAllString(html, "$1\n\n")
 
-	// Line breaks
-	html = reBR.ReplaceAllString(html, "\n")
+	// Line breaks. Use reBRLine so a trailing newline after <br> (goldmark's
+	// hard-break output is "<br>\n") collapses with the <br> to a single
+	// "\n" rather than "\n\n", which would be misread as a paragraph break.
+	html = reBRLine.ReplaceAllString(html, "\n")
 
 	// Horizontal rules
 	html = reHR.ReplaceAllString(html, "\n---\n\n")
@@ -793,19 +839,29 @@ func blockquoteInnerToMarkdown(inner string) string {
 		return convertCodeBlockHTML(s) + "\n\n"
 	})
 	content = replaceBalancedListBlocks(content)
-	// Replace </p> with double newline (paragraph break) to separate adjacent blocks,
-	// then strip <p> openers. Two passes so <p>para1</p><p>para2</p> produces
-	// "para1\n\npara2" (blank line = > separator) rather than "para1para2".
+	// Trix-native paragraph separator inside a blockquote: <div><br></div>
+	// between two <div> text blocks. Collapse to a single newline so the
+	// outer blockquote-line splitter sees it as a blank line (which gets
+	// the ">" prefix alone). Without this we produce multiple ">" lines.
+	content = reDivEmpty.ReplaceAllString(content, "\n")
+	// Replace </p> / </div> with double newline (paragraph break) to separate
+	// adjacent blocks, then strip <p> / <div> openers. Two passes so
+	// <p>para1</p><p>para2</p> produces "para1\n\npara2" (blank line =
+	// > separator) rather than "para1para2".
 	content = reClosingP.ReplaceAllString(content, "\n\n")
 	content = reOpeningP.ReplaceAllString(content, "")
+	content = reClosingDiv.ReplaceAllString(content, "\n\n")
+	content = reOpeningDiv.ReplaceAllString(content, "")
 	content = reBRLine.ReplaceAllString(content, "\n")
 	content = reMultiNewline.ReplaceAllString(content, "\n\n")
 	return strings.TrimSpace(content)
 }
 
 var (
-	reOpeningP = regexp.MustCompile(`(?i)<p(?:\s[^>]*)?>`)
-	reClosingP = regexp.MustCompile(`(?i)</p>`)
+	reOpeningP   = regexp.MustCompile(`(?i)<p(?:\s[^>]*)?>`)
+	reClosingP   = regexp.MustCompile(`(?i)</p>`)
+	reOpeningDiv = regexp.MustCompile(`(?i)<div(?:\s[^>]*)?>`)
+	reClosingDiv = regexp.MustCompile(`(?i)</div>`)
 )
 
 // unescapeHTML converts HTML entities back to their characters.
