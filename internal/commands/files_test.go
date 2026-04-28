@@ -468,3 +468,102 @@ func TestFilesUpdateTypedDocumentWhitespaceTitleNoChanges(t *testing.T) {
 	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "   ")
 	assert.NoError(t, err)
 }
+
+// TestFilesUpdateDocumentRealTitleWhitespaceContentPreservesExistingContent verifies
+// that a real --title paired with whitespace-only --content writes only the title
+// and preserves existing content (whitespace doesn't reach the wire).
+func TestFilesUpdateDocumentRealTitleWhitespaceContentPreservesExistingContent(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "Updated title", "--content", "   ")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Updated title", body["title"])
+	assert.Equal(t, "<div>Existing body</div>", body["content"])
+}
+
+// mockFilesUploadUpdateTransport supports typed --type upload PUTs; captures the body.
+type mockFilesUploadUpdateTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockFilesUploadUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodPut && strings.Contains(req.URL.Path, "/uploads/999"):
+		if req.Body != nil {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("reading request body: %w", err)
+			}
+			t.capturedBody = body
+			_ = req.Body.Close()
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":999,"filename":"report.pdf"}`)),
+			Header:     header,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+// TestFilesUpdateUploadRealTitleWhitespaceContentSendsOnlyBaseName verifies that a
+// real --title paired with whitespace-only --content sends only base_name on the
+// wire (no description), so whitespace doesn't overwrite the existing description.
+func TestFilesUpdateUploadRealTitleWhitespaceContentSendsOnlyBaseName(t *testing.T) {
+	transport := &mockFilesUploadUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--title", "report.pdf", "--content", "   ")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "report.pdf", body["base_name"])
+	_, hasDescription := body["description"]
+	assert.False(t, hasDescription, "description must not be sent for whitespace-only --content")
+}
+
+// TestFilesUpdateUploadWhitespaceTitleRealContentSendsOnlyDescription verifies the
+// inverse: whitespace --title paired with real --content sends only description.
+func TestFilesUpdateUploadWhitespaceTitleRealContentSendsOnlyDescription(t *testing.T) {
+	transport := &mockFilesUploadUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--title", "   ", "--content", "Quarterly report")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Quarterly report", body["description"])
+	_, hasBaseName := body["base_name"]
+	assert.False(t, hasBaseName, "base_name must not be sent for whitespace-only --title")
+}

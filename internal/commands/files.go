@@ -1220,26 +1220,28 @@ You can pass either an item ID or a Basecamp URL:
 			contentChanged := cmd.Flags().Changed("content")
 			titleTrimmed := strings.TrimSpace(title)
 			contentTrimmed := strings.TrimSpace(content)
+			// Effective-set booleans drive both the no-op gate and the request
+			// builders so whitespace-only values never reach the wire.
+			// Documents accept exact "" as an explicit clear; uploads/vaults do not.
+			docTitleSet := titleChanged && (title == "" || titleTrimmed != "")
+			docContentSet := contentChanged && (content == "" || contentTrimmed != "")
+			nonDocTitleSet := titleChanged && titleTrimmed != ""
+			nonDocContentSet := contentChanged && contentTrimmed != ""
 			itemType = strings.ToLower(strings.TrimSpace(itemType))
 			switch itemType {
 			case "", "document", "doc":
-				// Explicit "" clears are valid for documents; whitespace-only is not.
-				hasTitle := titleChanged && (title == "" || titleTrimmed != "")
-				hasContent := contentChanged && (content == "" || contentTrimmed != "")
-				if !hasTitle && !hasContent {
+				if !docTitleSet && !docContentSet {
 					return noChanges(cmd)
 				}
 			case "vault", "folder":
 				if contentChanged {
 					return output.ErrUsage("--content can only be used with --type document or upload")
 				}
-				if !titleChanged || titleTrimmed == "" {
+				if !nonDocTitleSet {
 					return noChanges(cmd)
 				}
 			case "upload", "file":
-				hasTitle := titleChanged && titleTrimmed != ""
-				hasContent := contentChanged && contentTrimmed != ""
-				if !hasTitle && !hasContent {
+				if !nonDocTitleSet && !nonDocContentSet {
 					return noChanges(cmd)
 				}
 			default:
@@ -1301,7 +1303,7 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, titleChanged, contentChanged, title, content)
+					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, docTitleSet, docContentSet, title, content)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1312,9 +1314,12 @@ You can pass either an item ID or a Basecamp URL:
 					result = doc
 					detectedType = "document"
 				case "upload", "file":
-					req := &basecamp.UpdateUploadRequest{Description: content}
-					if title != "" {
+					req := &basecamp.UpdateUploadRequest{}
+					if nonDocTitleSet {
 						req.BaseName = title
+					}
+					if nonDocContentSet {
+						req.Description = content
 					}
 					upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 					if err != nil {
@@ -1336,7 +1341,7 @@ You can pass either an item ID or a Basecamp URL:
 				// Try document first (most common update case)
 				existingDoc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, titleChanged, contentChanged, title, content)
+					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, docTitleSet, docContentSet, title, content)
 					if buildErr != nil {
 						return convertSDKError(buildErr)
 					}
@@ -1354,7 +1359,7 @@ You can pass either an item ID or a Basecamp URL:
 						if contentChanged {
 							return output.ErrUsage("detected a folder/vault; use --title to rename it")
 						}
-						if !titleChanged || titleTrimmed == "" {
+						if !nonDocTitleSet {
 							return noChanges(cmd)
 						}
 						req := &basecamp.UpdateVaultRequest{Title: title}
@@ -1368,14 +1373,15 @@ You can pass either an item ID or a Basecamp URL:
 						// Try upload
 						_, err = app.Account().Uploads().Get(cmd.Context(), itemID)
 						if err == nil {
-							hasTitle := titleChanged && titleTrimmed != ""
-							hasContent := contentChanged && contentTrimmed != ""
-							if !hasTitle && !hasContent {
+							if !nonDocTitleSet && !nonDocContentSet {
 								return noChanges(cmd)
 							}
-							req := &basecamp.UpdateUploadRequest{Description: content}
-							if title != "" {
+							req := &basecamp.UpdateUploadRequest{}
+							if nonDocTitleSet {
 								req.BaseName = title
+							}
+							if nonDocContentSet {
+								req.Description = content
 							}
 							upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 							if err != nil {
@@ -1419,7 +1425,7 @@ You can pass either an item ID or a Basecamp URL:
 	return cmd
 }
 
-func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, titleChanged, contentChanged bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
+func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
 	// BC3 rebuilds documents from permitted params on PUT, so omitted
 	// title/content fields are replaced with empty values. Fetch and merge when
 	// the caller updates only one field so the untouched field is preserved.
@@ -1428,7 +1434,12 @@ func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int6
 	// SDK strips empty strings to absent JSON fields, and the controller then
 	// nulls those absent fields during rebuild. The wire-shape assertion in
 	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
-	if existingDoc == nil && (!titleChanged || !contentChanged) {
+	//
+	// setTitle/setContent are caller-computed effective flags: they're true when
+	// the user provided either a non-whitespace value or an explicit empty
+	// string. Whitespace-only values arrive as setTitle=false/setContent=false
+	// so the existing field is preserved.
+	if existingDoc == nil && (!setTitle || !setContent) {
 		var err error
 		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
 		if err != nil {
@@ -1442,10 +1453,10 @@ func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int6
 		req.Content = existingDoc.Content
 	}
 
-	if titleChanged {
+	if setTitle {
 		req.Title = title
 	}
-	if contentChanged {
+	if setContent {
 		if content == "" {
 			req.Content = ""
 			return req, nil
