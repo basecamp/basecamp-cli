@@ -3,7 +3,11 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -156,4 +160,410 @@ func TestFilesDownloadStdoutStreamsUploadID(t *testing.T) {
 
 	assert.Equal(t, fileContent, stdout.String(),
 		"upload body should be streamed directly to stdout")
+}
+
+type mockFilesUpdateTransport struct {
+	capturedBody []byte
+	requests     []string
+}
+
+func (t *mockFilesUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests = append(t.requests, req.Method+" "+req.URL.Path)
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/documents/999"):
+		return &http.Response{
+			StatusCode: 200,
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":999,"title":"Existing title","content":"<div>Existing body</div>","status":"active","bucket":{"id":456,"name":"Test Project","type":"Project"}}`,
+			)),
+			Header: header,
+		}, nil
+	case req.Method == http.MethodPut && strings.Contains(req.URL.Path, "/documents/999"):
+		if req.Body != nil {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("reading request body: %w", err)
+			}
+			t.capturedBody = body
+			_ = req.Body.Close()
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":999,"title":"Updated title","content":"<div>Existing body</div>","status":"active","bucket":{"id":456,"name":"Test Project","type":"Project"}}`,
+			)),
+			Header: header,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+func TestFilesUpdateDocumentTitlePreservesExistingContent(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "Updated title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Updated title", body["title"])
+	assert.Equal(t, "<div>Existing body</div>", body["content"])
+}
+
+func TestFilesUpdateDocumentContentPreservesExistingTitle(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "Updated **body**")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Existing title", body["title"])
+	assert.Equal(t, "<p>Updated <strong>body</strong></p>", body["content"])
+}
+
+func TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, hasTitle := body["title"]
+	assert.False(t, hasTitle)
+	assert.Equal(t, "<div>Existing body</div>", body["content"])
+}
+
+func TestFilesUpdateDocumentEmptyContentClearsWhilePreservingTitle(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Existing title", body["title"])
+	_, hasContent := body["content"]
+	assert.False(t, hasContent)
+}
+
+func TestFilesUpdateTypeWithoutChangesShowsHelp(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateVaultRejectsContentFlag(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault", "--content", "desc")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "--content can only be used with --type document or upload")
+}
+
+func TestFilesUpdateVaultWithoutTitleShowsHelp(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault")
+	assert.NoError(t, err)
+}
+
+type mockFilesAutodetectVaultTransport struct{}
+
+func (t *mockFilesAutodetectVaultTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/documents/999"):
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/vaults/999"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":999,"title":"Existing folder"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodPut:
+		return nil, fmt.Errorf("unexpected update request: %s", req.URL.Path)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+func TestFilesUpdateAutodetectVaultRejectsContentOnly(t *testing.T) {
+	app := showTestApp(t, &mockFilesAutodetectVaultTransport{})
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "desc")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "detected a folder/vault; use --title to rename it")
+}
+
+func TestFilesUpdateTypedVaultEmptyTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault", "--title", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedUploadEmptyTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--title", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedUploadEmptyContentNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--content", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateAutodetectVaultEmptyTitleNoChanges(t *testing.T) {
+	app := showTestApp(t, &mockFilesAutodetectVaultTransport{})
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--title", "")
+	assert.NoError(t, err)
+}
+
+type mockFilesAutodetectUploadTransport struct{}
+
+func (t *mockFilesAutodetectUploadTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/documents/999"):
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/vaults/999"):
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/uploads/999"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":999,"filename":"report.pdf"}`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodPut:
+		return nil, fmt.Errorf("unexpected update request: %s", req.URL.Path)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+func TestFilesUpdateAutodetectUploadEmptyContentNoChanges(t *testing.T) {
+	app := showTestApp(t, &mockFilesAutodetectUploadTransport{})
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--content", "")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedVaultWhitespaceTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "vault", "--title", "   ")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedUploadWhitespaceContentNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--content", "   ")
+	assert.NoError(t, err)
+}
+
+func TestFilesUpdateTypedDocumentWhitespaceTitleNoChanges(t *testing.T) {
+	app, _ := setupMessagesTestApp(t)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "   ")
+	assert.NoError(t, err)
+}
+
+// TestFilesUpdateDocumentRealTitleWhitespaceContentPreservesExistingContent verifies
+// that a real --title paired with whitespace-only --content writes only the title
+// and preserves existing content (whitespace doesn't reach the wire).
+func TestFilesUpdateDocumentRealTitleWhitespaceContentPreservesExistingContent(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "Updated title", "--content", "   ")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Updated title", body["title"])
+	assert.Equal(t, "<div>Existing body</div>", body["content"])
+}
+
+// mockFilesUploadUpdateTransport supports typed --type upload PUTs; captures the body.
+type mockFilesUploadUpdateTransport struct {
+	capturedBody []byte
+}
+
+func (t *mockFilesUploadUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == http.MethodPut && strings.Contains(req.URL.Path, "/uploads/999"):
+		if req.Body != nil {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("reading request body: %w", err)
+			}
+			t.capturedBody = body
+			_ = req.Body.Close()
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":999,"filename":"report.pdf"}`)),
+			Header:     header,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+}
+
+// TestFilesUpdateUploadRealTitleWhitespaceContentSendsOnlyBaseName verifies that a
+// real --title paired with whitespace-only --content sends only base_name on the
+// wire (no description), so whitespace doesn't overwrite the existing description.
+func TestFilesUpdateUploadRealTitleWhitespaceContentSendsOnlyBaseName(t *testing.T) {
+	transport := &mockFilesUploadUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--title", "report.pdf", "--content", "   ")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "report.pdf", body["base_name"])
+	_, hasDescription := body["description"]
+	assert.False(t, hasDescription, "description must not be sent for whitespace-only --content")
+}
+
+// TestFilesUpdateUploadWhitespaceTitleRealContentSendsOnlyDescription verifies the
+// inverse: whitespace --title paired with real --content sends only description.
+func TestFilesUpdateUploadWhitespaceTitleRealContentSendsOnlyDescription(t *testing.T) {
+	transport := &mockFilesUploadUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "upload", "--title", "   ", "--content", "Quarterly report")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Quarterly report", body["description"])
+	_, hasBaseName := body["base_name"]
+	assert.False(t, hasBaseName, "base_name must not be sent for whitespace-only --title")
 }

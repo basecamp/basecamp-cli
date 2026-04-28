@@ -532,8 +532,12 @@ basecamp files folder create "Folder" --in <project>
 basecamp files doc create "Doc" "Body" --in <project>
 basecamp files doc create "Draft" --draft --in <project>
 basecamp files doc create "Notes" "..." --no-subscribe --in <project>
-basecamp files update <id> --title "New" --content "Updated"
+basecamp files update <document_id> --title "New" --content "Updated"
+basecamp files update <document_id> --title "New" --in <project>      # Preserves existing document content
+basecamp files update <document_id> --content "Updated" --in <project> # Preserves existing document title
 ```
+
+**Document update semantics:** `basecamp files update <document_id>` is safe for partial updates in the CLI: when you pass only `--title` or only `--content`, the CLI first fetches the current document and preserves the untouched field.
 
 **Subcommands:** `folders`, `uploads`, `documents` (each with pagination flags)
 

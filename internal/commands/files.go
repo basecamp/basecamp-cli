@@ -1208,13 +1208,47 @@ func newFilesUpdateCmd(project *string) *cobra.Command {
 		Short: "Update a document, vault, or upload",
 		Long: `Update a document, vault, or upload.
 
+For documents, updating only --title or only --content preserves the untouched field.
+
 You can pass either an item ID or a Basecamp URL:
   basecamp files update 789 --title "new title" --in my-project
   basecamp files update 789 --content "new content" --in my-project`,
-		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because BC3 rebuilds documents from permitted params on PUT; explicit clears via --title \"\"/--content \"\" work because the SDK strips empty strings to absent fields, which the controller then nulls. Upload/vault updates do not clear by omission, so empty-valued flags are rejected CLI-side."},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && itemType == "" {
-				return noChanges(cmd)
+			titleChanged := cmd.Flags().Changed("title")
+			contentChanged := cmd.Flags().Changed("content")
+			titleTrimmed := strings.TrimSpace(title)
+			contentTrimmed := strings.TrimSpace(content)
+			// Effective-set booleans drive both the no-op gate and the request
+			// builders so whitespace-only values never reach the wire.
+			// Documents accept exact "" as an explicit clear; uploads/vaults do not.
+			docTitleSet := titleChanged && (title == "" || titleTrimmed != "")
+			docContentSet := contentChanged && (content == "" || contentTrimmed != "")
+			nonDocTitleSet := titleChanged && titleTrimmed != ""
+			nonDocContentSet := contentChanged && contentTrimmed != ""
+			itemType = strings.ToLower(strings.TrimSpace(itemType))
+			switch itemType {
+			case "", "document", "doc":
+				if !docTitleSet && !docContentSet {
+					return noChanges(cmd)
+				}
+			case "vault", "folder":
+				if contentChanged {
+					return output.ErrUsage("--content can only be used with --type document or upload")
+				}
+				if !nonDocTitleSet {
+					return noChanges(cmd)
+				}
+			case "upload", "file":
+				if !nonDocTitleSet && !nonDocContentSet {
+					return noChanges(cmd)
+				}
+			default:
+				return output.ErrUsageHint(
+					fmt.Sprintf("Invalid type: %s", itemType),
+					"Use: vault, document, or upload",
+				)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -1269,12 +1303,10 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					docHTML := richtext.MarkdownToHTML(content)
-					docHTML, err = resolveLocalImages(cmd, app, docHTML)
+					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, docTitleSet, docContentSet, title, content)
 					if err != nil {
-						return err
+						return convertSDKError(err)
 					}
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: docHTML}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -1282,9 +1314,12 @@ You can pass either an item ID or a Basecamp URL:
 					result = doc
 					detectedType = "document"
 				case "upload", "file":
-					req := &basecamp.UpdateUploadRequest{Description: content}
-					if title != "" {
+					req := &basecamp.UpdateUploadRequest{}
+					if nonDocTitleSet {
 						req.BaseName = title
+					}
+					if nonDocContentSet {
+						req.Description = content
 					}
 					upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 					if err != nil {
@@ -1304,14 +1339,12 @@ You can pass either an item ID or a Basecamp URL:
 				var firstErr error
 
 				// Try document first (most common update case)
-				_, err := app.Account().Documents().Get(cmd.Context(), itemID)
+				existingDoc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					docHTML := richtext.MarkdownToHTML(content)
-					docHTML, resolveErr := resolveLocalImages(cmd, app, docHTML)
-					if resolveErr != nil {
-						return resolveErr
+					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, docTitleSet, docContentSet, title, content)
+					if buildErr != nil {
+						return convertSDKError(buildErr)
 					}
-					req := &basecamp.UpdateDocumentRequest{Title: title, Content: docHTML}
 					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -1323,6 +1356,12 @@ You can pass either an item ID or a Basecamp URL:
 					// Try vault
 					_, err = app.Account().Vaults().Get(cmd.Context(), itemID)
 					if err == nil {
+						if contentChanged {
+							return output.ErrUsage("detected a folder/vault; use --title to rename it")
+						}
+						if !nonDocTitleSet {
+							return noChanges(cmd)
+						}
 						req := &basecamp.UpdateVaultRequest{Title: title}
 						vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 						if err != nil {
@@ -1334,9 +1373,15 @@ You can pass either an item ID or a Basecamp URL:
 						// Try upload
 						_, err = app.Account().Uploads().Get(cmd.Context(), itemID)
 						if err == nil {
-							req := &basecamp.UpdateUploadRequest{Description: content}
-							if title != "" {
+							if !nonDocTitleSet && !nonDocContentSet {
+								return noChanges(cmd)
+							}
+							req := &basecamp.UpdateUploadRequest{}
+							if nonDocTitleSet {
 								req.BaseName = title
+							}
+							if nonDocContentSet {
+								req.Description = content
 							}
 							upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 							if err != nil {
@@ -1378,6 +1423,54 @@ You can pass either an item ID or a Basecamp URL:
 	cmd.Flags().StringVar(&itemType, "type", "", "Item type (vault, document, upload)")
 
 	return cmd
+}
+
+func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
+	// BC3 rebuilds documents from permitted params on PUT, so omitted
+	// title/content fields are replaced with empty values. Fetch and merge when
+	// the caller updates only one field so the untouched field is preserved.
+	//
+	// Explicit clears via --title "" or --content "" work by composition: the
+	// SDK strips empty strings to absent JSON fields, and the controller then
+	// nulls those absent fields during rebuild. The wire-shape assertion in
+	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
+	//
+	// setTitle/setContent are caller-computed effective flags: they're true when
+	// the user provided either a non-whitespace value or an explicit empty
+	// string. Whitespace-only values arrive as setTitle=false/setContent=false
+	// so the existing field is preserved.
+	if existingDoc == nil && (!setTitle || !setContent) {
+		var err error
+		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req := &basecamp.UpdateDocumentRequest{}
+	if existingDoc != nil {
+		req.Title = existingDoc.Title
+		req.Content = existingDoc.Content
+	}
+
+	if setTitle {
+		req.Title = title
+	}
+	if setContent {
+		if content == "" {
+			req.Content = ""
+			return req, nil
+		}
+		docHTML := richtext.MarkdownToHTML(content)
+		var err error
+		docHTML, err = resolveLocalImages(cmd, app, docHTML)
+		if err != nil {
+			return nil, err
+		}
+		req.Content = docHTML
+	}
+
+	return req, nil
 }
 
 func newFilesDownloadCmd(project *string) *cobra.Command {
