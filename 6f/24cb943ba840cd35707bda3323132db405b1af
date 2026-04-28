@@ -1,0 +1,59 @@
+internal/names/resolver_test.go
+  03c976043b477c62 620
+internal/version/sdk-provenance.json
+  03c976043b477c62 4-6
+internal/tui/workspace/data/hub.go
+  03c976043b477c62 566
+internal/commands/search_test.go
+  03c976043b477c62 86
+internal/commands/todos_test.go
+  03c976043b477c62 11,61,1195,1199-1201,1203-1205,1209-1210,1227-1241,1282,1290-1293,1296,1302-1306,1309,1317-1321,1330,1335-1446
+internal/tui/empty/messages.go
+  03c976043b477c62 43
+internal/commands/quickstart_test.go
+  03c976043b477c62 54
+internal/tui/workspace/data/hub_test.go
+  03c976043b477c62 81
+internal/commands/doctor_test.go
+  03c976043b477c62 348
+internal/completion/refresh_test.go
+  03c976043b477c62 38
+internal/commands/cards_test.go
+  03c976043b477c62 93
+internal/commands/recordings_test.go
+  03c976043b477c62 36
+skills/basecamp/SKILL.md
+  03c976043b477c62 431
+go.mod
+  03c976043b477c62 9,69,75,77
+internal/commands/messages_test.go
+  03c976043b477c62 59
+internal/commands/profile_test.go
+  03c976043b477c62 51
+internal/commands/todos.go
+  03c976043b477c62 272,317-321,380,390-409,430,448-450,467-469,490-492,526,551,613,659-660,663
+internal/tui/resolve/account_test.go
+  03c976043b477c62 58,102
+internal/commands/people_test.go
+  03c976043b477c62 63,173,365,483
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6f24cb943ba840cd35707bda3323132db405b1af",
+  "prompts": {
+    "03c976043b477c62": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "148740ae-f5c5-49c8-8db5-d6df2bf6d1ff",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 230,
+      "total_deletions": 75,
+      "accepted_lines": 227,
+      "overriden_lines": 0
+    }
+  }
+}
