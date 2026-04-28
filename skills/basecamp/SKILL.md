@@ -428,7 +428,7 @@ basecamp todos position <id> --to 1 --list <id|name|url> # Move to different lis
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 ```
 
-**Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/incomplete), `--overdue`, `--list`, `--due`, `--limit`, `--all`
+**Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/incomplete/archived/trashed), `--overdue`, `--list`, `--due`, `--limit`, `--all`
 
 ### Todolists
 

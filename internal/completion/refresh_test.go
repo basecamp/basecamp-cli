@@ -35,7 +35,7 @@ func newTestAccountClient(t *testing.T) *basecamp.AccountClient {
 	}
 	client := basecamp.NewClient(cfg, &mockTokenProvider{},
 		basecamp.WithTransport(noNetworkTransport{}),
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	return client.ForAccount("123")
 }

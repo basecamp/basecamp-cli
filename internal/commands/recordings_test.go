@@ -33,7 +33,7 @@ func setupRecordingsTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(todosNoNetworkTransport{}),
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 

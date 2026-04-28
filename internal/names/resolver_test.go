@@ -617,7 +617,7 @@ func TestResolverResolvePerson_Me_SDK(t *testing.T) {
 	sdkClient := basecamp.NewClient(
 		&basecamp.Config{BaseURL: server.URL},
 		testTokenProvider{},
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	r := NewResolver(sdkClient, nil, "99999")
 

@@ -56,7 +56,7 @@ func setupMessagesTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, &messagesTestTokenProvider{},
 		basecamp.WithTransport(messagesNoNetworkTransport{}),
-		basecamp.WithMaxRetries(0), // Disable retries for instant failure
+		basecamp.WithMaxRetries(1), // Disable retries for instant failure
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 

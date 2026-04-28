@@ -60,7 +60,7 @@ func setupPeopleTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
 		basecamp.WithTransport(peopleNoNetworkTransport{}),
-		basecamp.WithMaxRetries(0), // Disable retries for instant failure
+		basecamp.WithMaxRetries(1), // Disable retries for instant failure
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
@@ -170,7 +170,7 @@ func setupAuthenticatedTestApp(t *testing.T, accountID string, launchpadResponse
 	sdkCfg := &basecamp.Config{}
 	// Use default transport to allow HTTP requests to the mock server
 	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
@@ -362,7 +362,7 @@ func setupBC3TokenTestApp(t *testing.T, accountID string, bc3Response *basecamp.
 
 	sdkCfg := &basecamp.Config{BaseURL: server.URL}
 	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
@@ -480,7 +480,7 @@ func TestMeWithBC3TokenOverridingStaleLaunchpadCreds(t *testing.T) {
 
 	sdkCfg := &basecamp.Config{BaseURL: server.URL}
 	sdkClient := basecamp.NewClient(sdkCfg, &peopleTestTokenProvider{},
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
