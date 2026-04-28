@@ -46,7 +46,7 @@ jobs:
 
       - name: Cache BATS
         id: cache-bats
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.4 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           path: ~/.local
           key: bats-1.11.0-home
@@ -120,7 +120,7 @@ jobs:
         id: sdk-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: homebrew-tap
@@ -395,7 +395,7 @@ jobs:
         id: skills-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: skills
