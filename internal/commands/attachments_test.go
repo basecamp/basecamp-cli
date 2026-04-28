@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
@@ -300,16 +302,16 @@ func TestWithAttachmentMeta(t *testing.T) {
 func TestAttachmentMeta(t *testing.T) {
 	t.Run("uses DisplayURL", func(t *testing.T) {
 		atts := []richtext.ParsedAttachment{
-			{URL: "https://example.com/a.png", Href: "https://example.com/a-href.png", Filename: "a.png", ContentType: "image/png", Filesize: "1024"},
-			{Href: "https://example.com/b.txt"},
+			{URL: "https://preview.example.com/a-preview", Href: "https://storage.example.com/download/a.png", Filename: "a.png", ContentType: "image/png", Filesize: "1024"},
+			{URL: "https://preview.example.com/b-preview"},
 		}
 		result := attachmentMeta(atts, nil)
 		assert.Len(t, result, 2)
 		assert.Equal(t, "a.png", result[0]["filename"])
 		assert.Equal(t, "image/png", result[0]["content_type"])
 		assert.Equal(t, "1024", result[0]["filesize"])
-		assert.Equal(t, "https://example.com/a.png", result[0]["url"])
-		assert.Equal(t, "https://example.com/b.txt", result[1]["url"])
+		assert.Equal(t, "https://storage.example.com/download/a.png", result[0]["url"])
+		assert.Equal(t, "https://preview.example.com/b-preview", result[1]["url"])
 		_, hasFilename := result[1]["filename"]
 		assert.False(t, hasFilename)
 	})
@@ -508,4 +510,78 @@ func TestFetchItemContentRefetchesLineWithLargeParentID(t *testing.T) {
 	require.Len(t, reqs, 2, "expected 2 requests: /recordings/ then /chats/{largeParentId}/lines/")
 	assert.Contains(t, reqs[0], "/recordings/111.json")
 	assert.Contains(t, reqs[1], "/chats/"+largeID+"/lines/111.json")
+}
+
+// TestAttachmentsList404GenericPathSuggestsType verifies that when the
+// generic /recordings/<id>.json endpoint returns 404 and no --type is
+// provided, the CLI surfaces the "Specify a type" usage hint rather than
+// a bare "Resource not found". Cards are the concrete case: their
+// recording is only addressable via the bucket-scoped card_tables
+// endpoint, so the generic lookup returns 404.
+func TestAttachmentsList404GenericPathSuggestsType(t *testing.T) {
+	const cardID = "12345"
+
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/"+cardID) {
+				return 404, `{"error":"not found"}`
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+
+	cmd := NewAttachmentsCmd()
+	cmd.SetArgs([]string{"list", cardID})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, cardID)
+	assert.Contains(t, e.Message, "type required")
+	assert.Contains(t, e.Hint, "--type")
+	assert.Contains(t, e.Hint, "card")
+}
+
+// TestAttachmentsList404WithExplicitTypeDoesNotSuggestType verifies the
+// hint gate is narrow: when the user already passed --type line (or any
+// non-suggest-appropriate type that routes through the generic /recordings
+// lookup for parent discovery), a 404 must not produce the "Specify a
+// type" hint — they already did.
+func TestAttachmentsList404WithExplicitTypeDoesNotSuggestType(t *testing.T) {
+	const lineID = "12345"
+
+	transport := &showTrackingTransport{
+		responder: func(path string) (int, string) {
+			if strings.Contains(path, "/recordings/"+lineID) {
+				return 404, `{"error":"not found"}`
+			}
+			return 200, `{}`
+		},
+	}
+	app := showTestApp(t, transport)
+
+	cmd := NewAttachmentsCmd()
+	cmd.SetArgs([]string{"list", lineID, "--type", "line"})
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+
+	var e *output.Error
+	if errors.As(err, &e) {
+		assert.NotContains(t, e.Hint, "--type",
+			"line callers already provided --type; hint would be misleading")
+		assert.NotContains(t, e.Message, "type required",
+			"should not claim type is required when it was provided")
+	}
 }
