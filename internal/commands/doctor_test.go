@@ -345,7 +345,7 @@ func setupDoctorTestApp(t *testing.T, accountID string) (*appctx.App, *bytes.Buf
 
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, nil,
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 

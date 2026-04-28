@@ -51,7 +51,7 @@ func setupQuickstartTestApp(t *testing.T, accountID, projectID string) (*appctx.
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, &quickstartTestTokenProvider{},
 		basecamp.WithTransport(quickstartNoNetworkTransport{}),
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 

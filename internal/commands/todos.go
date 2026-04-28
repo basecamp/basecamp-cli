@@ -269,7 +269,7 @@ func newTodosListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
-	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, incomplete)")
+	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, incomplete, archived, trashed)")
 	cmd.Flags().BoolVar(&flags.completed, "completed", false, "Show completed todos (shorthand for --status completed)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
@@ -312,6 +312,11 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		if err := validateSortField(flags.sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
 			return err
 		}
+	}
+
+	sdkStatus, sdkCompleted, err := resolveStatusFilter(flags.status)
+	if err != nil {
+		return err
 	}
 
 	// Resolve account (enables interactive prompt if needed)
@@ -372,7 +377,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 
 	// If todolist is specified, list todos in that list
 	if todolist != "" {
-		return listTodosInList(cmd, app, project, todolist, flags.assignee, flags.status, flags.limit, flags.all, flags.sortField, flags.reverse)
+		return listTodosInList(cmd, app, project, todolist, flags.assignee, sdkStatus, sdkCompleted, flags.limit, flags.all, flags.sortField, flags.reverse)
 	}
 
 	// --page is not meaningful when aggregating across todolists
@@ -382,7 +387,26 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	}
 
 	// Otherwise, get all todos from project's todoset
-	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, flags.status, flags.overdue, flags.limit, flags.all, flags.sortField, flags.reverse)
+	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, sdkStatus, sdkCompleted, flags.overdue, flags.limit, flags.all, flags.sortField, flags.reverse)
+}
+
+// resolveStatusFilter maps the user-facing --status value to the SDK's
+// (Status, Completed) pair. Status is lifecycle-only ("archived", "trashed",
+// or empty); Completed handles the completion filter. The empty/"incomplete"
+// case lets the SDK apply its API default (incomplete todos only).
+func resolveStatusFilter(status string) (sdkStatus string, completed bool, err error) {
+	switch status {
+	case "", "incomplete":
+		// API default: incomplete only.
+	case "completed":
+		completed = true
+	case "archived", "trashed":
+		sdkStatus = status
+	default:
+		return "", false, output.ErrUsage(
+			fmt.Sprintf("unknown --status value %q (expected completed, incomplete, archived, or trashed)", status))
+	}
+	return sdkStatus, completed, nil
 }
 
 // fetchTodosIncludingGroups fetches all todos from a todolist, including
@@ -403,7 +427,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 // When failOnGroupError is true, any error fetching groups or their todos is
 // fatal. When false, group errors are silently skipped (suitable for cross-list
 // aggregation where partial results are acceptable).
-func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID int64, status string, limit int, failOnGroupError bool) (todos []basecamp.Todo, totalCount int, err error) {
+func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID int64, status string, completed bool, limit int, failOnGroupError bool) (todos []basecamp.Todo, totalCount int, err error) {
 	groupsResult, groupsErr := app.Account().TodolistGroups().List(ctx, todolistID, nil)
 	if groupsErr != nil {
 		if failOnGroupError {
@@ -421,6 +445,9 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 		if status != "" {
 			opts.Status = status
 		}
+		if completed {
+			opts.Completed = true
+		}
 		if limit != 0 {
 			opts.Limit = limit
 		}
@@ -436,6 +463,9 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	directOpts := &basecamp.TodoListOptions{Limit: -1}
 	if status != "" {
 		directOpts.Status = status
+	}
+	if completed {
+		directOpts.Completed = true
 	}
 	directResult, err := app.Account().Todos().List(ctx, todolistID, directOpts)
 	if err != nil {
@@ -456,6 +486,9 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	groupOpts := &basecamp.TodoListOptions{Limit: -1}
 	if status != "" {
 		groupOpts.Status = status
+	}
+	if completed {
+		groupOpts.Completed = true
 	}
 	for _, g := range groupsResult.Groups {
 		groupTodos, err := app.Account().Todos().List(ctx, g.ID, groupOpts)
@@ -490,7 +523,7 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	return result, totalCount, nil
 }
 
-func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, assignee, status string, limit int, all bool, sortField string, reverse bool) error {
+func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, assignee, sdkStatus string, sdkCompleted bool, limit int, all bool, sortField string, reverse bool) error {
 	resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 	if err != nil {
 		return err
@@ -515,14 +548,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 		sdkLimit = limit
 	}
 
-	// Normalize "incomplete" to "pending" for the SDK, which documents
-	// "completed" and "pending" as valid Status values.
-	sdkStatus := status
-	if sdkStatus == "incomplete" {
-		sdkStatus = "pending"
-	}
-
-	todos, totalCount, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, sdkStatus, sdkLimit, true)
+	todos, totalCount, err := fetchTodosIncludingGroups(cmd.Context(), app, todolistID, sdkStatus, sdkCompleted, sdkLimit, true)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -584,7 +610,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 	return app.OK(todos, respOpts...)
 }
 
-func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, status string, overdue bool, limit int, all bool, sortField string, reverse bool) error {
+func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, sdkStatus string, sdkCompleted bool, overdue bool, limit int, all bool, sortField string, reverse bool) error {
 	// Position is only meaningful within a single todolist — reject before
 	// the --all check so users get the right error message.
 	if sortField == "position" {
@@ -630,9 +656,11 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	}
 
 	// Aggregate todos from all todolists, including group-nested todos.
+	// The server applies the status/completed filter directly — no client-side
+	// status filter is needed (the API is the single source of truth).
 	var allTodos []basecamp.Todo
 	for _, tl := range todolistsResult.Todolists {
-		todos, _, err := fetchTodosIncludingGroups(cmd.Context(), app, tl.ID, "", sdkLimit, false)
+		todos, _, err := fetchTodosIncludingGroups(cmd.Context(), app, tl.ID, sdkStatus, sdkCompleted, sdkLimit, false)
 		if err != nil {
 			continue // Skip failed todolists
 		}
@@ -642,16 +670,6 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// Apply filters
 	var result []basecamp.Todo
 	for _, todo := range allTodos {
-		// Filter by status
-		if status != "" {
-			if status == "completed" && !todo.Completed {
-				continue
-			}
-			if (status == "incomplete" || status == "pending") && todo.Completed {
-				continue
-			}
-		}
-
 		// Filter by assignee (using resolved ID)
 		if assigneeID != 0 {
 			found := false

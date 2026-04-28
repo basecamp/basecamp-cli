@@ -563,7 +563,7 @@ func (h *Hub) CompletedTodos(projectID, todolistID int64) *Pool[[]TodoInfo] {
 	p := RealmPool(realm, key, func() *Pool[[]TodoInfo] {
 		return NewPool(key, PoolConfig{}, func(ctx context.Context) ([]TodoInfo, error) {
 			client := h.accountClient()
-			result, err := client.Todos().List(ctx, todolistID, &basecamp.TodoListOptions{Status: "completed"})
+			result, err := client.Todos().List(ctx, todolistID, &basecamp.TodoListOptions{Completed: true})
 			if err != nil {
 				return nil, err
 			}

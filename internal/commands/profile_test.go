@@ -48,7 +48,7 @@ func setupProfileTestApp(t *testing.T, cfg *config.Config) (*appctx.App, *bytes.
 	authMgr := auth.NewManager(cfg, nil)
 
 	sdkCfg := &basecamp.Config{}
-	sdkClient := basecamp.NewClient(sdkCfg, nil, basecamp.WithMaxRetries(0))
+	sdkClient := basecamp.NewClient(sdkCfg, nil, basecamp.WithMaxRetries(1))
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
 	app := &appctx.App{

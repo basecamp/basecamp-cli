@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func setupTodosTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(todosNoNetworkTransport{}),
-		basecamp.WithMaxRetries(0), // Disable retries for instant failure
+		basecamp.WithMaxRetries(1), // Disable retries for instant failure
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
@@ -1191,16 +1192,22 @@ func TestTodosListInListLimitPreservedCrossList(t *testing.T) {
 }
 
 // =============================================================================
-// --status incomplete alias tests
+// --status filter tests (lifecycle vs. completion)
 // =============================================================================
 
 // statusCapturingTransport serves a todolist with mixed-completion todos and
-// captures the status query parameter sent to the todos.json endpoint.
+// captures the query parameters of every /todos.json request, so tests can
+// assert on the exact status / completed pair sent for both single-list and
+// cross-list paths.
 type statusCapturingTransport struct {
-	capturedStatus string
+	todosRequests []url.Values // one entry per /todos.json request
+	todosCount    int          // count of /todos.json hits
+	totalCount    int          // count across every path the transport sees
 }
 
 func (s *statusCapturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.totalCount++
+
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
@@ -1217,10 +1224,21 @@ func (s *statusCapturingTransport) RoundTrip(req *http.Request) (*http.Response,
 	case strings.Contains(path, "/groups.json"):
 		body = `[]`
 	case strings.Contains(path, "/todos.json"):
-		s.capturedStatus = req.URL.Query().Get("status")
-		body = `[` +
-			`{"id": 1, "content": "Open task", "position": 1, "status": "active", "completed": false},` +
-			`{"id": 2, "content": "Done task", "position": 2, "status": "active", "completed": true}]`
+		query := req.URL.Query()
+		s.todosRequests = append(s.todosRequests, query)
+		s.todosCount++
+		// Simulate server-side filtering so client code can rely on the API
+		// as the single source of truth: completed=true returns only the
+		// completed task; the API default (no status, no completed) returns
+		// only the incomplete task; archived/trashed return empty (mock).
+		switch {
+		case query.Get("completed") == "true":
+			body = `[{"id": 2, "content": "Done task", "position": 2, "status": "active", "completed": true}]`
+		case query.Get("status") == "archived" || query.Get("status") == "trashed":
+			body = `[]`
+		default:
+			body = `[{"id": 1, "content": "Open task", "position": 1, "status": "active", "completed": false}]`
+		}
 	default:
 		body = `{}`
 	}
@@ -1261,7 +1279,7 @@ func setupStatusTestApp(t *testing.T, transport *statusCapturingTransport) (*app
 	}, buf
 }
 
-func TestTodosListStatusIncomplete_SingleList_NormalizesToPending(t *testing.T) {
+func TestTodosListStatusIncomplete_SingleList_SendsNoStatusParam(t *testing.T) {
 	transport := &statusCapturingTransport{}
 	app, _ := setupStatusTestApp(t, transport)
 
@@ -1269,23 +1287,26 @@ func TestTodosListStatusIncomplete_SingleList_NormalizesToPending(t *testing.T) 
 	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "incomplete")
 	require.NoError(t, err)
 
-	assert.Equal(t, "pending", transport.capturedStatus,
-		"--status incomplete should be normalized to 'pending' before reaching the SDK")
+	require.Len(t, transport.todosRequests, 1)
+	q := transport.todosRequests[0]
+	assert.Empty(t, q.Get("status"), "incomplete is the API default — no status param")
+	assert.Empty(t, q.Get("completed"), "incomplete must not set completed")
 }
 
-func TestTodosListStatusPending_SingleList_PassedThrough(t *testing.T) {
+func TestTodosListStatusPending_ReturnsErrUsage(t *testing.T) {
 	transport := &statusCapturingTransport{}
 	app, _ := setupStatusTestApp(t, transport)
 
 	cmd := NewTodosCmd()
 	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "pending")
-	require.NoError(t, err)
-
-	assert.Equal(t, "pending", transport.capturedStatus,
-		"--status pending should pass through unchanged")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code,
+		"--status pending should return ErrUsage")
+	assert.Equal(t, 0, transport.totalCount,
+		"validation should reject pending before any HTTP request")
 }
 
-func TestTodosListStatusIncomplete_CrossList_FiltersClientSide(t *testing.T) {
+func TestTodosListStatusIncomplete_CrossList_SendsNoStatusParam(t *testing.T) {
 	transport := &statusCapturingTransport{}
 	app, buf := setupStatusTestApp(t, transport)
 
@@ -1293,9 +1314,11 @@ func TestTodosListStatusIncomplete_CrossList_FiltersClientSide(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "list", "--status", "incomplete")
 	require.NoError(t, err)
 
-	// Cross-list path fetches todos without a status filter and filters client-side.
-	assert.Empty(t, transport.capturedStatus,
-		"cross-list path should not send status to the API")
+	require.NotEmpty(t, transport.todosRequests)
+	for i, q := range transport.todosRequests {
+		assert.Emptyf(t, q.Get("status"), "request %d sent unexpected status", i)
+		assert.Emptyf(t, q.Get("completed"), "request %d sent unexpected completed", i)
+	}
 
 	var resp struct {
 		Data []struct {
@@ -1304,9 +1327,123 @@ func TestTodosListStatusIncomplete_CrossList_FiltersClientSide(t *testing.T) {
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
-	require.Len(t, resp.Data, 1, "should filter out completed todos")
+	require.Len(t, resp.Data, 1, "server already filters to incomplete")
 	assert.Equal(t, int64(1), resp.Data[0].ID)
 	assert.False(t, resp.Data[0].Completed)
+}
+
+func TestTodosListCompleted_SingleList_SendsCompletedTrue(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--completed")
+	require.NoError(t, err)
+
+	require.Len(t, transport.todosRequests, 1)
+	q := transport.todosRequests[0]
+	assert.Equal(t, "true", q.Get("completed"))
+	assert.Empty(t, q.Get("status"))
+}
+
+func TestTodosListStatusCompleted_SingleList_SendsCompletedTrue(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "completed")
+	require.NoError(t, err)
+
+	require.Len(t, transport.todosRequests, 1)
+	q := transport.todosRequests[0]
+	assert.Equal(t, "true", q.Get("completed"))
+	assert.Empty(t, q.Get("status"))
+}
+
+func TestTodosListStatusArchived_SingleList_SendsStatusArchived(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "archived")
+	require.NoError(t, err)
+
+	require.Len(t, transport.todosRequests, 1)
+	q := transport.todosRequests[0]
+	assert.Equal(t, "archived", q.Get("status"))
+	assert.Empty(t, q.Get("completed"))
+}
+
+func TestTodosListStatusTrashed_SingleList_SendsStatusTrashed(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "trashed")
+	require.NoError(t, err)
+
+	require.Len(t, transport.todosRequests, 1)
+	q := transport.todosRequests[0]
+	assert.Equal(t, "trashed", q.Get("status"))
+	assert.Empty(t, q.Get("completed"))
+}
+
+func TestTodosListStatusBogus_ReturnsErrUsageWithoutHTTP(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--list", "500", "--status", "bogus")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code,
+		"bogus --status should return ErrUsage")
+	assert.Equal(t, 0, transport.totalCount,
+		"validation should reject bogus status before any HTTP request")
+}
+
+func TestTodosListStatusCompleted_CrossList_SendsCompletedTrue(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--status", "completed")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, transport.todosRequests)
+	for i, q := range transport.todosRequests {
+		assert.Equalf(t, "true", q.Get("completed"), "request %d missing completed=true", i)
+		assert.Emptyf(t, q.Get("status"), "request %d sent unexpected status", i)
+	}
+}
+
+func TestTodosListStatusArchived_CrossList_SendsStatusArchived(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--status", "archived")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, transport.todosRequests)
+	for i, q := range transport.todosRequests {
+		assert.Equalf(t, "archived", q.Get("status"), "request %d missing status=archived", i)
+		assert.Emptyf(t, q.Get("completed"), "request %d sent unexpected completed", i)
+	}
+}
+
+func TestTodosListStatusTrashed_CrossList_SendsStatusTrashed(t *testing.T) {
+	transport := &statusCapturingTransport{}
+	app, _ := setupStatusTestApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--status", "trashed")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, transport.todosRequests)
+	for i, q := range transport.todosRequests {
+		assert.Equalf(t, "trashed", q.Get("status"), "request %d missing status=trashed", i)
+		assert.Emptyf(t, q.Get("completed"), "request %d sent unexpected completed", i)
+	}
 }
 
 // =============================================================================

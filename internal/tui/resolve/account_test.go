@@ -55,7 +55,7 @@ func TestFetchAccounts_BC3Token(t *testing.T) {
 
 	sdkCfg := &basecamp.Config{BaseURL: server.URL}
 	sdkClient := basecamp.NewClient(sdkCfg, accountTestTokenProvider{token: "bc_at_resolver_test"},
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 
 	r := New(sdkClient, authMgr, cfg,
@@ -99,7 +99,7 @@ func TestFetchAccounts_LaunchpadToken(t *testing.T) {
 
 	sdkCfg := &basecamp.Config{}
 	sdkClient := basecamp.NewClient(sdkCfg, accountTestTokenProvider{token: "some-launchpad-token"},
-		basecamp.WithMaxRetries(0),
+		basecamp.WithMaxRetries(1),
 	)
 
 	r := New(sdkClient, authMgr, cfg,
