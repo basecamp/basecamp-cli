@@ -1,0 +1,23 @@
+scripts/install.ps1
+  482ee8b78b197960 41-69,105-129,177,225-226,238-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "9fccdbf3175425618c49c7973b47b0d02e789772",
+  "prompts": {
+    "482ee8b78b197960": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dba2cebe-9803-4f75-93a9-f96179c8bdb6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 117,
+      "overriden_lines": 0
+    }
+  }
+}
