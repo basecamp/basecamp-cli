@@ -38,6 +38,35 @@ function Get-PlatformArch {
 
 function Get-LatestVersion {
   Step 'Resolving latest release version...'
+
+  # Follow the releases/latest redirect first to avoid GitHub API rate limits.
+  # -MaximumRedirection 0 turns the expected 302 into a terminating error, so
+  # we read Location off the caught response. Headers.Location is Uri on
+  # PowerShell Core and string on Windows PowerShell 5.1, so coerce to string.
+  $location = $null
+  try {
+    $response = Invoke-WebRequest -MaximumRedirection 0 -UseBasicParsing `
+      -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } `
+      -Uri "https://github.com/$Repo/releases/latest" -ErrorAction Stop
+    $location = $response.Headers.Location
+  } catch {
+    if ($_.Exception.Response) {
+      $location = $_.Exception.Response.Headers.Location
+      if (-not $location) {
+        $location = $_.Exception.Response.Headers['Location']
+      }
+    }
+  }
+
+  if ($location) {
+    $tag = ([string]$location).TrimEnd('/').Split('/')[-1]
+    $candidate = $tag.TrimStart('v')
+    if ($candidate -match '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+      return $candidate
+    }
+  }
+
+  # Fall back to the GitHub API if the redirect path didn't yield a semver tag.
   $release = Invoke-RestMethod -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } -Uri "https://api.github.com/repos/$Repo/releases/latest"
   if (-not $release.tag_name) {
     Fail 'Could not determine latest release version from GitHub.'
@@ -71,6 +100,31 @@ function Verify-Checksum([string]$ChecksumsPath, [string]$ArchivePath, [string]$
   }
 
   Info 'Checksum verified'
+}
+
+function Verify-CosignSignature([string]$Version, [string]$BaseUrl, [string]$TmpDir) {
+  if (-not (Get-Command cosign -ErrorAction SilentlyContinue)) {
+    return
+  }
+
+  Step 'Verifying cosign signature...'
+
+  $bundlePath = Join-Path $TmpDir 'checksums.txt.bundle'
+  $checksumsPath = Join-Path $TmpDir 'checksums.txt'
+  Download-File -Url "$BaseUrl/checksums.txt.bundle" -Destination $bundlePath
+
+  # Native exits don't trigger ErrorActionPreference=Stop on Windows PowerShell 5.1,
+  # so check $LASTEXITCODE explicitly — otherwise a verify failure would false-green.
+  & cosign verify-blob `
+    --bundle $bundlePath `
+    --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v$Version" `
+    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' `
+    $checksumsPath
+  if ($LASTEXITCODE -ne 0) {
+    Fail 'Cosign signature verification failed'
+  }
+
+  Info 'Signature verified'
 }
 
 function Get-PathEntries {
@@ -120,7 +174,7 @@ function Ensure-UserPath([string]$Dir) {
     return
   }
 
-  $newPath = if ($userPath) { "$userPath;$Dir" } else { $Dir }
+  $newPath = if ($userPath) { "$Dir;$userPath" } else { $Dir }
   [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
   $env:Path = "$Dir;$env:Path"
   Info "Added $Dir to your user PATH"
@@ -168,6 +222,8 @@ function Main {
     Download-File -Url "$baseUrl/checksums.txt" -Destination $checksumsPath
     Verify-Checksum -ChecksumsPath $checksumsPath -ArchivePath $archivePath -ArchiveName $archiveName
 
+    Verify-CosignSignature -Version $resolvedVersion -BaseUrl $baseUrl -TmpDir $tmpDir
+
     Step 'Extracting...'
     Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
 
@@ -179,7 +235,13 @@ function Main {
     $installedBinary = Join-Path $BinDir 'basecamp.exe'
 
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-    Copy-Item -Force $binaryPath $installedBinary
+    # Windows holds an exclusive lock on running PE files; -Force doesn't help.
+    # Generic catch — typed catches miss ActionPreferenceStopException wrapping.
+    try {
+      Copy-Item -Force $binaryPath $installedBinary -ErrorAction Stop
+    } catch {
+      Fail "basecamp.exe is in use. Close any running 'basecamp' processes and re-run the installer. (Original error: $($_.Exception.Message))"
+    }
     Ensure-UserPath -Dir $BinDir
     Info "Installed basecamp to $installedBinary"
 
