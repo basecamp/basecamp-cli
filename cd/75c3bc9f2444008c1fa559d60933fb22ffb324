@@ -1,0 +1,29 @@
+install.md
+  482ee8b78b197960 21
+scripts/install.sh
+  482ee8b78b197960 117-120,124,142
+scripts/ensure-basecamp.sh
+  482ee8b78b197960 111-114,118,136
+scripts/install.ps1
+  482ee8b78b197960 70-72,81-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "cd75c3bc9f2444008c1fa559d60933fb22ffb324",
+  "prompts": {
+    "482ee8b78b197960": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dba2cebe-9803-4f75-93a9-f96179c8bdb6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 22,
+      "total_deletions": 7,
+      "accepted_lines": 22,
+      "overriden_lines": 0
+    }
+  }
+}
