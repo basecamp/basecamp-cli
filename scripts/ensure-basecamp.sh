@@ -231,6 +231,9 @@ install_basecamp() {
     echo "Add to your shell profile:"
     echo "  export PATH=\"$BIN_DIR:\$PATH\""
   fi
+
+  # Make the freshly installed binary visible to the in-script check_basecamp re-run.
+  export PATH="$BIN_DIR:$PATH"
 }
 
 main() {
