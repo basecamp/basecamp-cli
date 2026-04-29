@@ -11,12 +11,43 @@ set -euo pipefail
 
 MIN_VERSION="${BASECAMP_MIN_VERSION:-0.1.0}"
 INSTALL_URL="https://github.com/basecamp/basecamp-cli"
-BIN_DIR="${BASECAMP_BIN_DIR:-$HOME/.local/bin}"
+REPO="basecamp/basecamp-cli"
+BIN_DIR="${BASECAMP_BIN_DIR:-}"
+CURL_SCHANNEL_FALLBACK_FLAG=""
+CURL_LAST_ERROR=""
+CURL_FALLBACK_NOTED=0
 
 # Parse semver: returns 0 if $1 >= $2
 version_gte() {
   local v1="$1" v2="$2"
   printf '%s\n%s\n' "$v2" "$v1" | sort -V | head -1 | grep -qx "$v2"
+}
+
+# NOTE: Keep the installer helper functions below in sync with scripts/install.sh.
+# These scripts stay self-contained on purpose so they can run without sourcing extra files.
+path_contains_dir() {
+  local dir="$1"
+  [[ ":$PATH:" == *":$dir:"* ]]
+}
+
+default_bin_dir() {
+  local platform="$1"
+
+  if path_contains_dir "$HOME/bin"; then
+    echo "$HOME/bin"
+    return 0
+  fi
+
+  if path_contains_dir "$HOME/.local/bin"; then
+    echo "$HOME/.local/bin"
+    return 0
+  fi
+
+  if [[ "$platform" == windows_* ]]; then
+    echo "$HOME/bin"
+  else
+    echo "$HOME/.local/bin"
+  fi
 }
 
 check_basecamp() {
@@ -60,6 +91,93 @@ detect_platform() {
   echo "${os}_${arch}"
 }
 
+detect_curl_fallback() {
+  local version_output help_output
+
+  version_output=$(curl --version 2>/dev/null || true)
+  if [[ "$version_output" != *[Ss]channel* ]]; then
+    return 0
+  fi
+
+  help_output=$(curl --help all 2>/dev/null || true)
+  if [[ "$help_output" == *"--ssl-revoke-best-effort"* ]]; then
+    CURL_SCHANNEL_FALLBACK_FLAG="--ssl-revoke-best-effort"
+  elif [[ "$help_output" == *"--ssl-no-revoke"* ]]; then
+    CURL_SCHANNEL_FALLBACK_FLAG="--ssl-no-revoke"
+  fi
+}
+
+curl_run() {
+  # --show-error guarantees curl writes errors to stderr even if a future caller
+  # passes -s without -S. The Schannel revocation detection below depends on
+  # finding CRYPT_E_NO_REVOCATION_CHECK in stderr; without --show-error a -s
+  # caller would silently lose the fallback.
+  local err_file status err
+  err_file=$(mktemp "${TMPDIR:-/tmp}/basecamp-curl.XXXXXX")
+
+  if curl --show-error "$@" 2>"$err_file"; then
+    rm -f "$err_file"
+    CURL_LAST_ERROR=""
+    return 0
+  else
+    status=$?
+  fi
+
+  err=$(<"$err_file")
+  rm -f "$err_file"
+
+  if [[ $status -ne 0 ]] && [[ -n "$CURL_SCHANNEL_FALLBACK_FLAG" ]] && [[ "$err" == *"CRYPT_E_NO_REVOCATION_CHECK"* ]]; then
+    if [[ $CURL_FALLBACK_NOTED -eq 0 ]]; then
+      echo "Retrying curl with ${CURL_SCHANNEL_FALLBACK_FLAG} because Windows certificate revocation checks are unavailable..." >&2
+      CURL_FALLBACK_NOTED=1
+    fi
+
+    err_file=$(mktemp "${TMPDIR:-/tmp}/basecamp-curl.XXXXXX")
+    if curl --show-error "$CURL_SCHANNEL_FALLBACK_FLAG" "$@" 2>"$err_file"; then
+      rm -f "$err_file"
+      CURL_LAST_ERROR=""
+      return 0
+    else
+      status=$?
+    fi
+
+    err=$(<"$err_file")
+    rm -f "$err_file"
+  fi
+
+  CURL_LAST_ERROR="$err"
+  return "$status"
+}
+
+get_latest_version() {
+  local url version api_json
+
+  if url=$(curl_run -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest"); then
+    version="${url##*/}"
+    version="${version#v}"
+    if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+      echo "$version"
+      return 0
+    fi
+  fi
+
+  # Whitespace-tolerant regex so a future GitHub format change (pretty-print,
+  # extra spaces) doesn't silently break the fallback. Pure bash so no GNU-awk
+  # dependency.
+  if api_json=$(curl_run -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: basecamp-cli-installer' "https://api.github.com/repos/${REPO}/releases/latest"); then
+    if [[ $api_json =~ \"tag_name\"[[:space:]]*:[[:space:]]*\"v?([^\"]+)\" ]]; then
+      version="${BASH_REMATCH[1]}"
+      if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+        echo "$version"
+        return 0
+      fi
+    fi
+  fi
+
+  echo "Could not determine latest version${CURL_LAST_ERROR:+ ($CURL_LAST_ERROR)}" >&2
+  return 1
+}
+
 install_basecamp() {
   echo "Installing basecamp..."
 
@@ -67,15 +185,13 @@ install_basecamp() {
 
   # Get platform
   platform=$(detect_platform) || return 1
+  detect_curl_fallback
 
-  # Get latest version via redirect (avoids GitHub API rate limits and grep/sed on Windows)
-  url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/basecamp/basecamp-cli/releases/latest" 2>/dev/null) || true
-  version="${url##*/}"
-  version="${version#v}"
-  if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Could not determine latest version (resolved '${version:-<empty>}' from '${url:-<no URL>}')" >&2
-    return 1
+  if [[ -z "$BIN_DIR" ]]; then
+    BIN_DIR=$(default_bin_dir "$platform")
   fi
+
+  version=$(get_latest_version) || return 1
 
   # Determine archive extension
   if [[ "$platform" == windows_* ]]; then
@@ -85,15 +201,15 @@ install_basecamp() {
   fi
 
   archive_name="basecamp_${version}_${platform}.${ext}"
-  url="https://github.com/basecamp/basecamp-cli/releases/download/v${version}/${archive_name}"
+  url="https://github.com/${REPO}/releases/download/v${version}/${archive_name}"
 
   echo "Downloading basecamp v${version} for ${platform}..."
 
   tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap "rm -rf '${tmp_dir}'" EXIT
 
-  if ! curl -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
-    echo "Failed to download from $url" >&2
+  if ! curl_run -fsSL "$url" -o "${tmp_dir}/${archive_name}"; then
+    echo "Failed to download from $url${CURL_LAST_ERROR:+ ($CURL_LAST_ERROR)}" >&2
     return 1
   fi
 
@@ -121,8 +237,11 @@ install_basecamp() {
   if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo ""
     echo "Add to your shell profile:"
-    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo "  export PATH=\"$BIN_DIR:\$PATH\""
   fi
+
+  # Make the freshly installed binary visible to the in-script check_basecamp re-run.
+  export PATH="$BIN_DIR:$PATH"
 }
 
 main() {
@@ -146,7 +265,9 @@ Usage:
 
 Environment:
   BASECAMP_MIN_VERSION   Minimum required version (default: $MIN_VERSION)
-  BASECAMP_BIN_DIR       Binary directory (default: ~/.local/bin)
+  BASECAMP_BIN_DIR       Binary directory
+                         (default: ~/bin if on PATH, else ~/.local/bin if on PATH;
+                          otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 EOF
       ;;
     *)
