@@ -165,13 +165,16 @@ get_latest_version() {
     fi
   fi
 
-  # Fallback to the GitHub API if redirect parsing fails.
+  # Fallback to the GitHub API if redirect parsing fails. Whitespace-tolerant
+  # regex so a future GitHub format change (pretty-print, extra spaces) doesn't
+  # silently break the fallback. Pure bash so no GNU-awk dependency.
   if api_json=$(curl_run -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: basecamp-cli-installer' "https://api.github.com/repos/${REPO}/releases/latest"); then
-    version="${api_json#*\"tag_name\":\"v}"
-    version="${version%%\"*}"
-    if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-      echo "$version"
-      return 0
+    if [[ $api_json =~ \"tag_name\"[[:space:]]*:[[:space:]]*\"v?([^\"]+)\" ]]; then
+      version="${BASH_REMATCH[1]}"
+      if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+        echo "$version"
+        return 0
+      fi
     fi
   fi
 
