@@ -52,7 +52,7 @@ scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
 scoop install basecamp-cli
 ```
 
-**Shell script (macOS/Linux/WSL2):**
+**Shell script (macOS / Linux / WSL2 / Git Bash):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 ```

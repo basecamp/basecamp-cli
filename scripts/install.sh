@@ -5,7 +5,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.sh | bash
 #
 # Options (via environment):
-#   BASECAMP_BIN_DIR    Where to install binary (default: ~/.local/bin, or ~/bin on Windows)
+#   BASECAMP_BIN_DIR    Where to install binary
+#                       (default: ~/bin if on PATH, else ~/.local/bin if on PATH;
+#                        otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 #   BASECAMP_VERSION    Specific version to install (default: latest)
 #   BASECAMP_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
 

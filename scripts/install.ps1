@@ -240,7 +240,7 @@ function Main {
     try {
       Copy-Item -Force $binaryPath $installedBinary -ErrorAction Stop
     } catch {
-      Fail "basecamp.exe is in use. Close any running 'basecamp' processes and re-run the installer. (Original error: $($_.Exception.Message))"
+      Fail "Failed to install basecamp.exe. If it is in use, close any running 'basecamp' processes and re-run the installer. (Original error: $($_.Exception.Message))"
     }
     Ensure-UserPath -Dir $BinDir
     Info "Installed basecamp to $installedBinary"

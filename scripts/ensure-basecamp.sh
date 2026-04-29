@@ -257,7 +257,9 @@ Usage:
 
 Environment:
   BASECAMP_MIN_VERSION   Minimum required version (default: $MIN_VERSION)
-  BASECAMP_BIN_DIR       Binary directory (default: ~/.local/bin, or ~/bin on Windows)
+  BASECAMP_BIN_DIR       Binary directory
+                         (default: ~/bin if on PATH, else ~/.local/bin if on PATH;
+                          otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 EOF
       ;;
     *)
