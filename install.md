@@ -18,7 +18,7 @@ Install the Basecamp CLI and connect it to your AI agent. Execute all steps auto
 
 Run the matching command for your environment:
 
-**macOS / Linux / WSL / Git Bash**
+**macOS / Linux / WSL2 / Git Bash**
 ```bash
 curl -fsSL https://basecamp.com/install-cli | bash
 ```

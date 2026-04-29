@@ -108,10 +108,14 @@ detect_curl_fallback() {
 }
 
 curl_run() {
+  # --show-error guarantees curl writes errors to stderr even if a future caller
+  # passes -s without -S. The Schannel revocation detection below depends on
+  # finding CRYPT_E_NO_REVOCATION_CHECK in stderr; without --show-error a -s
+  # caller would silently lose the fallback.
   local err_file status err
   err_file=$(mktemp "${TMPDIR:-/tmp}/basecamp-curl.XXXXXX")
 
-  if curl "$@" 2>"$err_file"; then
+  if curl --show-error "$@" 2>"$err_file"; then
     rm -f "$err_file"
     CURL_LAST_ERROR=""
     return 0
@@ -129,7 +133,7 @@ curl_run() {
     fi
 
     err_file=$(mktemp "${TMPDIR:-/tmp}/basecamp-curl.XXXXXX")
-    if curl "$CURL_SCHANNEL_FALLBACK_FLAG" "$@" 2>"$err_file"; then
+    if curl --show-error "$CURL_SCHANNEL_FALLBACK_FLAG" "$@" 2>"$err_file"; then
       rm -f "$err_file"
       CURL_LAST_ERROR=""
       return 0

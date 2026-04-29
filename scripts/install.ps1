@@ -67,7 +67,9 @@ function Get-LatestVersion {
   }
 
   # Fall back to the GitHub API if the redirect path didn't yield a semver tag.
-  $release = Invoke-RestMethod -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } -Uri "https://api.github.com/repos/$Repo/releases/latest"
+  $release = Invoke-RestMethod -ErrorAction Stop `
+    -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } `
+    -Uri "https://api.github.com/repos/$Repo/releases/latest"
   if (-not $release.tag_name) {
     Fail 'Could not determine latest release version from GitHub.'
   }
@@ -76,7 +78,12 @@ function Get-LatestVersion {
 }
 
 function Download-File([string]$Url, [string]$Destination) {
-  Invoke-WebRequest -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } -Uri $Url -OutFile $Destination
+  # -UseBasicParsing avoids initializing IE's MSHTML parser on Windows
+  # PowerShell 5.1 — required on Server Core and locked-down installs.
+  # No-op on PowerShell 6+, where basic parsing is the only mode.
+  Invoke-WebRequest -UseBasicParsing -ErrorAction Stop `
+    -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } `
+    -Uri $Url -OutFile $Destination
 }
 
 function Verify-Checksum([string]$ChecksumsPath, [string]$ArchivePath, [string]$ArchiveName) {
