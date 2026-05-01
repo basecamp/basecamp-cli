@@ -1,2 +1,4 @@
 [tools]
 go = "1.26"
+# Keep in sync with .github/workflows/release.yml GoReleaser CLI version pin.
+goreleaser = "2.15.4"
