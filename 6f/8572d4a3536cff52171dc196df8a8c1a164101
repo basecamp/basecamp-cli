@@ -1,0 +1,29 @@
+.github/workflows/release.yml
+  fed28239e8531a5f 232-233,241-245,252
+.mise.toml
+  fed28239e8531a5f 3-4
+.goreleaser.yaml
+  fed28239e8531a5f 97,100-111
+RELEASING.md
+  fed28239e8531a5f 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6f8572d4a3536cff52171dc196df8a8c1a164101",
+  "prompts": {
+    "fed28239e8531a5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96cc1113-e948-4654-a3a8-78bf28c17d26",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 901,
+      "total_deletions": 118,
+      "accepted_lines": 25,
+      "overriden_lines": 0
+    }
+  }
+}
