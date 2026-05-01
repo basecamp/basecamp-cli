@@ -1,0 +1,23 @@
+.mise.toml
+  fed28239e8531a5f 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "682fc09cb93d1af562c77f876bcfaa81e3df4a5e",
+  "prompts": {
+    "fed28239e8531a5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96cc1113-e948-4654-a3a8-78bf28c17d26",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
