@@ -225,25 +225,12 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
-      - name: Install quill for macOS signing
-        run: |
-          go install github.com/anchore/quill/cmd/quill@v0.7.1
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Prepare signing credentials
-        env:
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-        run: |
-          umask 077
-          echo "$MACOS_SIGN_P12" | base64 -d > "$RUNNER_TEMP/codesign.p12"
-          echo "$MACOS_NOTARY_KEY" | base64 -d > "$RUNNER_TEMP/notary.p8"
-
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
         with:
           distribution: goreleaser
-          version: 'v2.14.1'
+          # Keep in sync with .mise.toml goreleaser version pin.
+          version: 'v2.15.4'
           install-only: true
 
       - name: Run GoReleaser
@@ -251,33 +238,18 @@ jobs:
           CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ steps.sdk-token.outputs.token }}
-          QUILL_SIGN_P12: ${{ runner.temp }}/codesign.p12
-          QUILL_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           RELEASE_CHANGELOG=""
           if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
             RELEASE_CHANGELOG=$(cat "$CHANGELOG_FILE")
           fi
           export RELEASE_CHANGELOG
-          goreleaser release --clean --skip=notarize
-
-      - name: Notarize macOS binaries
-        env:
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-        run: |
-          for bin in dist/basecamp_darwin_*/basecamp; do
-            echo "Notarizing $bin..."
-            quill notarize "$bin" \
-              --notary-issuer "$MACOS_NOTARY_ISSUER_ID" \
-              --notary-key-id "$MACOS_NOTARY_KEY_ID" \
-              --notary-key "$RUNNER_TEMP/notary.p8" \
-              --wait
-          done
-
-      - name: Clean up signing credentials
-        if: always()
-        run: rm -f "$RUNNER_TEMP/codesign.p12" "$RUNNER_TEMP/notary.p8"
+          goreleaser release --clean
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
