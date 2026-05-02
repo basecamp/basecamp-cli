@@ -1,0 +1,23 @@
+API-COVERAGE.md
+  53feff72cfb04032 17-18,23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6acda1d2ae22bc4bec74bfcea85105e1d4bc09a5",
+  "prompts": {
+    "53feff72cfb04032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb5cc151-5ea5-4f6f-8bb2-79cc67ad5e7d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 1,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
