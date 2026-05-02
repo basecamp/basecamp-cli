@@ -18,76 +18,78 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 ## Coverage by Section
 
-| Section | Endpoints | CLI Command | Status | Priority | Notes |
-|---------|-----------|-------------|--------|----------|-------|
+The **Since** column tracks when each endpoint became available: `BC4` for endpoints that shipped before Basecamp 5, `BC5` for additive BC5-only endpoints. The column is dropped post-BC4 decommission.
+
+| Section | Endpoints | CLI Command | Status | Since | Priority | Notes |
+|---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
-| projects | 9 | `projects` | ✅ | - | list, show, create, update, delete |
-| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | - | list, show, create, update, complete, uncomplete, position |
-| todolists | 8 | `todolists` | ✅ | - | list, show, create, update |
-| todosets | 3 | `todosets` | ✅ | - | Container for todolists, accessed via project dock |
-| todolist_groups | 8 | `todolistgroups` | ✅ | - | list, show, create, update, position |
+| projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
+| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position |
+| todolists | 8 | `todolists` | ✅ | BC4 | - | list, show, create, update |
+| todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock |
+| todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
 | **Hill Charts** |
-| hill_charts | 2 | `hillcharts` | ✅ | - | show, track/untrack todolists |
-| gauges | 7 | `gauges` | ✅ | - | list, needles, needle, create, update, delete, enable/disable |
+| hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
+| gauges | 7 | `gauges` | ✅ | BC4 | - | list, needles, needle, create, update, delete, enable/disable |
 | **Communication** |
-| messages | 10 | `messages`, `message` | ✅ | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
-| message_boards | 3 | `messageboards` | ✅ | - | Container, accessed via project dock |
-| message_types | 5 | `messagetypes` | ✅ | - | list, show, create, update, delete |
-| campfires | 14 | `chat` | ✅ | - | list, messages, post, line show/delete. @mentions in content |
-| comments | 8 | `comment`, `comments` | ✅ | - | list, show, create, update. @mentions in content |
-| boosts | 6 | `boost`, `react` | ✅ | - | list (recording + event), show, create (recording + event), delete |
-| notifications | 2 | `notifications` | ✅ | - | list, mark as read |
+| messages | 10 | `messages`, `message` | ✅ | BC4 | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
+| message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
+| message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete |
+| campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/delete. @mentions in content |
+| comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, create, update. @mentions in content |
+| boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete |
+| notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read |
 | **Cards (Kanban)** |
-| card_tables | 3 | `cards` | ✅ | - | Accessed via project dock |
-| card_table_cards | 9 | `cards` | ✅ | - | list, show, create, update, move |
-| card_table_columns | 11 | `cards columns` | ✅ | - | list columns |
-| card_table_steps | 4 | `cards steps` | ✅ | - | Workflow steps on cards |
+| card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
+| card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
+| card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns |
+| card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards |
 | **People** |
-| people | 12 | `people`, `me` | ✅ | - | list, show, pingable, add, remove |
+| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove |
 | **Search & Recordings** |
-| my_assignments | 3 | `assignments` | ✅ | - | list (priorities/non-priorities), completed, due (with scope filter) |
-| search | 2 | `search` | ✅ | - | Full-text search |
-| recordings | 4 | `recordings` | ✅ | - | Browse by type/status, trash/archive/restore |
+| my_assignments | 3 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter) |
+| search | 2 | `search` | ✅ | BC4 | - | Full-text search |
+| recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
-| uploads | 8 | `files`, `uploads` | ✅ | - | list, show |
-| vaults | 8 | `files`, `vaults` | ✅ | - | list, show, create |
-| documents | 8 | `files`, `docs` | ✅ | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe` |
-| attachments | 1 | `uploads`, `attachments` | ✅ | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
+| uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show |
+| vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
+| documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe` |
+| attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | **Schedule** |
-| schedules | 2 | `schedule` | ✅ | - | Schedule container + settings |
-| schedule_entries | 5 | `schedule` | ✅ | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
-| events | 1 | `events` | ✅ | - | Recording change audit trail |
+| schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |
+| schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
+| events | 1 | `events` | ✅ | BC4 | - | Recording change audit trail |
 | **Webhooks** |
-| webhooks | 7 | `webhooks` | ✅ | - | list, show, create, update, delete |
+| webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |
-| templates | 7 | `templates` | ✅ | - | list, show, create, update, delete, construct, construction |
+| templates | 7 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction |
 | **Time Tracking** |
-| timesheets | 6 | `timesheet` | ✅ | - | list, show, create, update, delete |
+| timesheets | 6 | `timesheet` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Subscriptions** |
-| subscriptions | 4 | `subscriptions` | ✅ | - | show, subscribe, unsubscribe, add/remove |
+| subscriptions | 4 | `subscriptions` | ✅ | BC4 | - | show, subscribe, unsubscribe, add/remove |
 | **Check-ins (Automatic)** |
-| questionnaires | 2 | `checkins` | ✅ | - | Container for check-in questions |
-| questions | 5 | `checkins` | ✅ | - | list, show, create, update |
-| question_answers | 4 | `checkins` | ✅ | - | list, show |
+| questionnaires | 2 | `checkins` | ✅ | BC4 | - | Container for check-in questions |
+| questions | 5 | `checkins` | ✅ | BC4 | - | list, show, create, update |
+| question_answers | 4 | `checkins` | ✅ | BC4 | - | list, show |
 | **Inbox (Email Forwards)** |
-| inboxes | 1 | `forwards` | ✅ | - | Inbox container |
-| forwards | 2 | `forwards` | ✅ | - | list, show |
-| inbox_replies | 2 | `forwards` | ✅ | - | list replies, show reply |
+| inboxes | 1 | `forwards` | ✅ | BC4 | - | Inbox container |
+| forwards | 2 | `forwards` | ✅ | BC4 | - | list, show |
+| inbox_replies | 2 | `forwards` | ✅ | BC4 | - | list replies, show reply |
 | **Clients** |
-| client_visibility | 1 | `recordings visibility` | ✅ | - | Toggle client visibility on recordings |
+| client_visibility | 1 | `recordings visibility` | ✅ | BC4 | - | Toggle client visibility on recordings |
 | **Client Portal (Legacy Clientside)** |
-| client_approvals | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
-| client_correspondences | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
-| client_replies | 6 | - | ⏭️ | skip | Legacy Clientside only (see notes) |
+| client_approvals | 6 | - | ⏭️ | BC4 | skip | Legacy Clientside only (see notes) |
+| client_correspondences | 6 | - | ⏭️ | BC4 | skip | Legacy Clientside only (see notes) |
+| client_replies | 6 | - | ⏭️ | BC4 | skip | Legacy Clientside only (see notes) |
 | **Chatbots** |
-| chatbots | 10 | - | ⏭️ | skip | Requires chatbot key, not OAuth (see notes) |
+| chatbots | 10 | - | ⏭️ | BC4 | skip | Requires chatbot key, not OAuth (see notes) |
 | **Account** |
-| account | 4 | `accounts` | ✅ | - | show, update name, upload logo, remove logo |
+| account | 4 | `accounts` | ✅ | BC4 | - | show, update name, upload logo, remove logo |
 | **Lineup** |
-| lineup_markers | 4 | `lineup` | ✅ | - | list, create, update, delete markers |
+| lineup_markers | 4 | `lineup` | ✅ | BC4 | - | list, create, update, delete markers |
 | **Reference Only** |
-| basecamps | 0 | - | - | - | Documentation reference, no endpoints |
-| rich_text | 0 | - | - | - | Documentation reference, no endpoints |
+| basecamps | 0 | - | - | - | - | Documentation reference, no endpoints |
+| rich_text | 0 | - | - | - | - | Documentation reference, no endpoints |
 
 ## Priority Guide
 
