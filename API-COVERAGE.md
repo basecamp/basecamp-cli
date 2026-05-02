@@ -14,11 +14,13 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
+> Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (46 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
+
 **SDK version:** v0.7.3 — maintenance bump: API date advanced to 2026-03-23, transitive dependency updates. No new services or methods.
 
 ## Coverage by Section
 
-The **Since** column tracks when each endpoint became available: `BC4` for endpoints that shipped before Basecamp 5, `BC5` for additive BC5-only endpoints. The column is dropped post-BC4 decommission.
+The **Since** column tags each row with the Basecamp version that introduced its section: `BC4` for sections that shipped before Basecamp 5, `BC5` for sections introduced in Basecamp 5. If a BC5 release adds endpoints to an existing BC4 section, split them into a new row tagged `BC5` rather than bumping the BC4 row's `Endpoints` count — that keeps the column unambiguous per row. Column dropped post-BC4 decommission.
 
 | Section | Endpoints | CLI Command | Status | Since | Priority | Notes |
 |---------|-----------|-------------|--------|-------|----------|-------|
