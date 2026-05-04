@@ -95,6 +95,15 @@ load test_helper
   assert_output_contains "ID required"
 }
 
+@test "chat update without args shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat update
+  assert_failure
+  assert_output_contains "required"
+}
+
 
 # Help flag
 

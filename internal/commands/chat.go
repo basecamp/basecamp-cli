@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,7 +16,28 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
+
+// chatLineURLRe captures the chat (campfire) ID and line ID from a Basecamp
+// chat-line URL. The host is locked to the public Basecamp 3 domains so a
+// look-alike URL on another host can't slip through.
+//
+//	https://3.basecamp.com/{account}/buckets/{bucket}/chats/{chatID}/lines/{lineID}
+//	https://3.basecamp.com/{account}/buckets/{bucket}/chats/{chatID}@{lineID}
+//	(also matches the `3.basecampapi.com` variant returned by the API)
+var chatLineURLRe = regexp.MustCompile(`^https?://3\.basecamp(?:api)?\.com/\d+/buckets/\d+/chats/(\d+)(?:/lines/|@)(\d+)`)
+
+// extractChatLineFromURL pulls the chat (campfire) ID from a chat-line URL
+// when present. Returns ("", "") if arg is not a chat-line URL — callers fall
+// back to --room and the project's default chat in that case.
+func extractChatLineFromURL(arg string) (chatID, lineID string) {
+	m := chatLineURLRe.FindStringSubmatch(arg)
+	if m == nil {
+		return "", ""
+	}
+	return m[1], m[2]
+}
 
 // NewChatCmd creates the chat command for real-time chat.
 func NewChatCmd() *cobra.Command {
@@ -44,6 +66,7 @@ Use 'basecamp chat post "message"' to post a message.`,
 		newChatPostCmd(&project, &chatID, &contentType),
 		newChatUploadCmd(&project, &chatID),
 		newChatLineShowCmd(&project, &chatID),
+		newChatLineUpdateCmd(&project, &chatID, &contentType),
 		newChatLineDeleteCmd(&project, &chatID),
 	)
 
@@ -729,6 +752,173 @@ You can pass either a line ID or a Basecamp line URL:
 	}
 
 	cf = addCommentFlags(cmd, false)
+
+	return cmd
+}
+
+func newChatLineUpdateCmd(project, chatID, contentType *string) *cobra.Command {
+	var content string
+
+	cmd := &cobra.Command{
+		Use:   "update <id|url> [content]",
+		Short: "Update an existing message",
+		Long: `Update the content of an existing chat message.
+
+You can pass either a line ID or a Basecamp line URL:
+  basecamp chat update 789 "edited message" --in my-project
+  basecamp chat update https://3.basecamp.com/123/buckets/456/chats/789/lines/111 --content "edited"
+
+By default, content is sent as plain text. Use --content-type text/html
+for rich text. @mentions resolve like 'chat post' and promote to text/html
+when present.`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			messageContent := content
+			if len(args) > 1 {
+				messageContent = args[1]
+			}
+
+			if strings.TrimSpace(messageContent) == "" {
+				return missingArg(cmd, "<content>")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Reject non-chat-line URLs up front. We accept either bare numeric IDs
+			// or chat-line URLs in either /chats/{c}/lines/{l} or /chats/{c}@{l} form.
+			// A pasted card/todo/message URL would otherwise be silently misinterpreted
+			// as a numeric line ID via extractWithProject.
+			urlChatID, urlLineID := extractChatLineFromURL(args[0])
+			lineID := args[0]
+			urlProjectID := ""
+			if urlChatID != "" {
+				lineID = urlLineID
+				_, urlProjectID = extractWithProject(args[0])
+			} else if urlarg.IsURL(args[0]) {
+				return output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
+			}
+
+			// URL-derived bucket wins over --in/--project: the URL is unambiguous
+			// about which project owns the line, while the flag may be stale from a
+			// previous command in the same shell.
+			projectID := urlProjectID
+			if projectID == "" {
+				projectID = *project
+			}
+			if projectID == "" {
+				projectID = app.Flags.Project
+			}
+			if projectID == "" {
+				projectID = app.Config.ProjectID
+			}
+			if projectID == "" {
+				if err := ensureProject(cmd, app); err != nil {
+					return err
+				}
+				projectID = app.Config.ProjectID
+			}
+
+			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+
+			// URL-derived chat ID wins over --room for the same reason: the URL is
+			// unambiguous about which campfire owns the line, while --room is a
+			// project-wide hint that may not match.
+			effectiveChatID := urlChatID
+			if effectiveChatID == "" {
+				effectiveChatID = *chatID
+			}
+			if effectiveChatID == "" {
+				effectiveChatID, err = getChatID(cmd, app, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+			}
+
+			chatIDInt, err := strconv.ParseInt(effectiveChatID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid chat room ID")
+			}
+			lineIDInt, err := strconv.ParseInt(lineID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid line ID")
+			}
+
+			// Resolve @mentions — same flow as chat post.
+			ct := *contentType
+			var mentionNotice string
+			if ct == "" || ct == "text/html" {
+				mentionInput := messageContent
+				if ct == "" {
+					mentionInput = richtext.MarkdownToHTML(messageContent)
+				}
+				result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionInput)
+				if resolveErr != nil {
+					return resolveErr
+				}
+				if result.HTML != mentionInput || len(result.Unresolved) > 0 {
+					messageContent = result.HTML
+					if ct == "" {
+						ct = "text/html"
+					}
+				}
+				mentionNotice = unresolvedMentionWarning(result.Unresolved)
+			}
+
+			var opts *basecamp.UpdateLineOptions
+			if ct != "" {
+				opts = &basecamp.UpdateLineOptions{ContentType: ct}
+			}
+			if err := app.Account().Campfires().UpdateLine(cmd.Context(), chatIDInt, lineIDInt, messageContent, opts); err != nil {
+				return convertSDKError(err)
+			}
+
+			// SDK PUT returns 204; re-fetch so the response carries the canonical
+			// post-update line. A failure here doesn't roll back the update — we
+			// surface it as a diagnostic rather than the command's exit code.
+			line, fetchErr := app.Account().Campfires().GetLine(cmd.Context(), chatIDInt, lineIDInt)
+
+			respOpts := []output.ResponseOption{
+				output.WithSummary(fmt.Sprintf("Updated line #%s", lineID)),
+				output.WithEntity("chat_line"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("basecamp chat line %s --room %s --in %s", lineID, effectiveChatID, resolvedProjectID),
+						Description: "View line",
+					},
+					output.Breadcrumb{
+						Action:      "messages",
+						Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", effectiveChatID, resolvedProjectID),
+						Description: "Back to messages",
+					},
+				),
+			}
+			if line != nil {
+				respOpts = append(respOpts, output.WithDisplayData(chatLineDisplayData(line)))
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
+			}
+			if fetchErr != nil {
+				respOpts = append(respOpts, output.WithDiagnostic(fmt.Sprintf("update succeeded; refetch failed: %v", fetchErr)))
+			}
+
+			if line == nil {
+				return app.OK(map[string]any{"updated": true, "id": lineID}, respOpts...)
+			}
+			return app.OK(line, respOpts...)
+		},
+	}
+
+	cmd.Flags().StringVar(&content, "content", "", "New message content")
+	cmd.Flags().StringVar(contentType, "content-type", "", "Content type (text/html for rich text)")
 
 	return cmd
 }
