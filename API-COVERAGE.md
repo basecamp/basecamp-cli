@@ -16,7 +16,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (46 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.7.3 — maintenance bump: API date advanced to 2026-03-23, transitive dependency updates. No new services or methods.
+**SDK version:** v0.7.3 + pending UpdateCampfireLine (basecamp/basecamp-sdk#295). On merge of the SDK PR + next tagged release, this header will move to that version and the temporary fork pin in `go.mod` will be dropped.
 
 ## Coverage by Section
 
@@ -37,7 +37,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | messages | 10 | `messages`, `message` | ✅ | BC4 | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
 | message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete |
-| campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/delete. @mentions in content |
+| campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/update/delete. @mentions in content |
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, create, update. @mentions in content |
 | boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read |

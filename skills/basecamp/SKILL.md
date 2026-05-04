@@ -729,6 +729,7 @@ basecamp chat messages --in <project> --json  # List messages
 basecamp chat post "Hello!" --in <project>
 basecamp chat post "@Jane.Smith, check this" --in <project>  # With @mention (auto text/html)
 basecamp chat line <line_id> --in <project>   # Show line
+basecamp chat update <line_id> "edited content" --in <project>  # Edit existing message in place
 basecamp chat delete <line_id> --in <project> --force # Delete line (permanent, not trashable)
 ```
 
