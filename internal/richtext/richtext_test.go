@@ -2200,8 +2200,9 @@ func TestParsedAttachmentDisplayURL(t *testing.T) {
 		att      ParsedAttachment
 		expected string
 	}{
-		{"URL wins", ParsedAttachment{URL: "https://a.com", Href: "https://b.com"}, "https://a.com"},
-		{"href fallback", ParsedAttachment{Href: "https://b.com"}, "https://b.com"},
+		{"Href wins over preview URL", ParsedAttachment{URL: "https://preview.example.com/icon", Href: "https://storage.example.com/download/file.csv"}, "https://storage.example.com/download/file.csv"},
+		{"URL fallback when Href missing", ParsedAttachment{URL: "https://preview.example.com/icon"}, "https://preview.example.com/icon"},
+		{"Href only", ParsedAttachment{Href: "https://storage.example.com/download/file.csv"}, "https://storage.example.com/download/file.csv"},
 		{"empty", ParsedAttachment{}, ""},
 	}
 	for _, tt := range tests {
