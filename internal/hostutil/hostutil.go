@@ -55,6 +55,52 @@ func IsLocalhost(host string) bool {
 	return false
 }
 
+// trustedBasecampHosts are the production Basecamp 3 hosts the CLI trusts when
+// resolving a pasted resource URL: the web host and the API host returned in
+// API payloads.
+var trustedBasecampHosts = map[string]bool{
+	"3.basecamp.com":    true,
+	"3.basecampapi.com": true,
+}
+
+// IsTrustedBasecampHost reports whether rawURL points at a host the CLI trusts
+// for resolving Basecamp resource URLs. Trusted hosts are the production
+// Basecamp 3 domains, any localhost host (covers *.localhost dev domains), and
+// the host of the configured base URL (covers custom/staging deployments and
+// http://3.basecamp.localhost:3001-style local dev). Everything else is
+// rejected so a look-alike URL on an attacker-controlled host — which the
+// host-agnostic URL router would otherwise parse — cannot be trusted into a
+// mutating request. cfgBaseURL may be empty.
+func IsTrustedBasecampHost(rawURL, cfgBaseURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	// Only pasted web/API URLs are trusted. Requiring an http(s) scheme keeps
+	// non-web schemes (ftp://…) and protocol-relative references (//host/…) —
+	// which url.Parse still resolves to a trusted host — from being accepted.
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	// Hostnames are case-insensitive, so normalize before comparing against the
+	// trusted set and the configured host (whose keys/values are lower-case).
+	host := strings.ToLower(u.Hostname())
+	if IsLocalhost(strings.ToLower(u.Host)) {
+		return true
+	}
+	if trustedBasecampHosts[host] {
+		return true
+	}
+	if cfgBaseURL != "" {
+		if cu, err := url.Parse(cfgBaseURL); err == nil {
+			if ch := strings.ToLower(cu.Hostname()); ch != "" && ch == host {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RequireSecureURL returns an error if the URL uses http:// for a non-localhost host.
 // Localhost (127.0.0.1, ::1, *.localhost) is exempt for local development.
 func RequireSecureURL(rawURL string) error {

@@ -2520,3 +2520,29 @@ func TestMentionInHTMLBlock_FullPipeline(t *testing.T) {
 		t.Errorf("chip does not carry the supplied SGID: %q", res.HTML)
 	}
 }
+
+func TestPlainToHTML(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"plain text", "hello world", "hello world"},
+		{"escapes HTML special chars", "<strong>x</strong> & y", "&lt;strong&gt;x&lt;/strong&gt; &amp; y"},
+		{"preserves line breaks as <br>", "line1\nline2", "line1<br>line2"},
+		{"collapses CRLF to a single break", "line1\r\nline2", "line1<br>line2"},
+		{"normalizes bare CR", "line1\rline2", "line1<br>line2"},
+		{"leaves @mentions literal", "ping @Jane.Smith now", "ping @Jane.Smith now"},
+		{"escapes then breaks multiline markup", "<b>a</b>\n<i>b</i>", "&lt;b&gt;a&lt;/b&gt;<br>&lt;i&gt;b&lt;/i&gt;"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PlainToHTML(tt.input)
+			if got != tt.want {
+				t.Errorf("PlainToHTML(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

@@ -95,6 +95,19 @@ load test_helper
   assert_output_contains "ID required"
 }
 
+@test "chat update without args shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat update
+  assert_failure
+  # Command-specific arg name (JSON-escapes < > to < >, so match the
+  # inner "id|url"), and never the generic "Todo ID(s) required" that root.go
+  # would rewrite a Cobra arg-count error into.
+  assert_output_contains "id|url"
+  assert_output_not_contains "Todo ID(s)"
+}
+
 
 # Help flag
 

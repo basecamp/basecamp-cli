@@ -24,6 +24,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // chatTestTokenProvider is a mock token provider for tests.
@@ -1093,6 +1094,401 @@ func TestChatPostAgentModeWarningOnStderr(t *testing.T) {
 }
 
 // TestChatDeleteReturnsDeletedPayload verifies that delete returns {"deleted": true, "id": "..."}.
+// mockChatUpdateTransport handles resolver GETs, the PUT update, and the
+// follow-up GET that UpdateLine performs to re-fetch the line. It also serves
+// pingable people for mention-resolution tests.
+type mockChatUpdateTransport struct {
+	capturedMethod string
+	capturedPath   string
+	capturedBody   []byte
+}
+
+func (t *mockChatUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/"):
+			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
+		case strings.Contains(req.URL.Path, "/circles/people.json") || strings.Contains(req.URL.Path, "/people/pingable.json"):
+			body = `[{"id": 42000, "name": "Jane Smith", "email_address": "jane@example.com", "attachable_sgid": "sgid-jane"}]`
+		case strings.Contains(req.URL.Path, "/lines/"):
+			body = `{"id": 111, "content": "Edited!", "type": "Chat::Lines::Text", "creator": {"id": 1, "name": "Tester"}}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	if req.Method == "PUT" {
+		t.capturedMethod = req.Method
+		t.capturedPath = req.URL.Path
+		if req.Body != nil {
+			t.capturedBody, _ = io.ReadAll(req.Body)
+			req.Body.Close()
+		}
+		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+	}
+
+	return nil, errors.New("unexpected request")
+}
+
+func TestChatUpdateSendsPutAndReturnsLine(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, buf := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "Edited!")
+	require.NoError(t, err)
+
+	assert.Equal(t, "PUT", transport.capturedMethod)
+	assert.Contains(t, transport.capturedPath, "/lines/111")
+
+	var requestBody map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &requestBody))
+	// Default mode converts Markdown to HTML unconditionally (edits always render
+	// as rich text), so the wire content is the converted HTML, not the raw input.
+	assert.Equal(t, richtext.MarkdownToHTML("Edited!"), requestBody["content"])
+	_, hasContentType := requestBody["content_type"]
+	assert.False(t, hasContentType, "content_type is never sent on the wire — the SDK PUT carries only content")
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	data, ok := envelope["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(111), data["id"])
+}
+
+// TestChatUpdateConvertsMarkdownWithoutMention is the F1 regression: plain
+// Markdown with no @mention must still be converted to HTML. The earlier
+// implementation only assigned the converted HTML when mention resolution
+// changed the string, so "**bold**" with no mention was sent raw to an
+// endpoint that always renders rich text.
+func TestChatUpdateConvertsMarkdownWithoutMention(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "**bold**")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var requestBody map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &requestBody))
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "<strong>bold</strong>",
+		"markdown must be converted to HTML even without a mention")
+}
+
+// TestChatUpdateMentionPromotesToHTML verifies that an @mention in content
+// auto-promotes to text/html and resolves to a bc-attachment tag, mirroring
+// chat post behavior.
+func TestChatUpdateMentionPromotesToHTML(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "Hey @Jane.Smith, see this")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var requestBody map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &requestBody))
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "bc-attachment",
+		"content should contain bc-attachment mention tag")
+}
+
+// TestChatUpdatePlainTextOptOut verifies that --content-type text/plain
+// bypasses mention resolution and sends content as-is.
+func TestChatUpdatePlainTextOptOut(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "Hey @Jane.Smith", "--content-type", "text/plain")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var requestBody map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &requestBody))
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+	assert.NotContains(t, content, "bc-attachment",
+		"content should not contain bc-attachment when content-type is text/plain")
+	assert.Contains(t, content, "@Jane.Smith",
+		"@mention should be left as literal text")
+}
+
+// TestChatUpdatePlainTextSerializesLiterally is the F2 literal case: text/plain
+// serializes via richtext.PlainToHTML, so HTML-special characters are escaped
+// (rendered as typed, not interpreted) and line breaks are preserved as <br>.
+func TestChatUpdatePlainTextSerializesLiterally(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "<strong>x</strong>\nline2", "--content-type", "text/plain")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var requestBody map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &requestBody))
+
+	content, ok := requestBody["content"].(string)
+	require.True(t, ok)
+	assert.Contains(t, content, "&lt;strong&gt;x&lt;/strong&gt;",
+		"HTML-special characters should be escaped, not interpreted as markup")
+	assert.Contains(t, content, "<br>",
+		"line breaks should be preserved as <br>")
+	assert.NotContains(t, content, "bc-attachment",
+		"text/plain skips mention resolution")
+}
+
+// TestChatUpdateRejectsUnknownContentType is the F2 validation case: an
+// unsupported --content-type fails fast with a usage error and issues no
+// request (replacing the content-type validation lost when UpdateLineOptions
+// was dropped).
+func TestChatUpdateRejectsUnknownContentType(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "x", "--content-type", "application/json")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, transport.capturedMethod, "no request should be issued for an invalid content-type")
+}
+
+// TestChatUpdateExtractsChatIDFromURL verifies that pasting a chat-line URL
+// targets the chat referenced by the URL rather than falling back to --room or
+// the project's default chat — important for projects with multiple campfires.
+func TestChatUpdateExtractsChatIDFromURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app,
+		"update",
+		"https://3.basecamp.com/99999/buckets/123/chats/456@111",
+		"Edited via URL")
+	require.NoError(t, err)
+
+	// PUT should target /chats/456/lines/111 — the chat ID came from the URL,
+	// not from --room or the dock default (789).
+	assert.Equal(t, "PUT", transport.capturedMethod)
+	assert.Contains(t, transport.capturedPath, "/chats/456/lines/111")
+}
+
+// TestChatUpdateRejectsAccountMismatch verifies a chat-line URL whose account
+// differs from the configured account is refused rather than silently edited in
+// the configured account.
+func TestChatUpdateRejectsAccountMismatch(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport) // configured account is 99999
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app,
+		"update",
+		"https://3.basecamp.com/88888/buckets/123/chats/456@111",
+		"Edited via URL")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, transport.capturedMethod, "no request should be issued on account mismatch")
+}
+
+// TestChatUpdateRejectsCollectionURL verifies a room's line-collection URL
+// (/chats/{c}/lines, no line ID) is refused rather than misread as line {c} —
+// it parses as Type "lines" with IsCollection set and the campfire ID in
+// RecordingID.
+func TestChatUpdateRejectsCollectionURL(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport) // configured account is 99999
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app,
+		"update",
+		"https://3.basecamp.com/99999/buckets/123/chats/789/lines",
+		"Edited via URL")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, transport.capturedMethod, "no request should be issued for a collection URL")
+}
+
+// TestChatUpdateRejectsUntrustedHost verifies a chat-line URL on an
+// attacker-controlled host is refused even though the host-agnostic router
+// would otherwise parse it.
+func TestChatUpdateRejectsUntrustedHost(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app,
+		"update",
+		"https://evil.example/99999/buckets/123/chats/456/lines/111",
+		"Edited via URL")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, transport.capturedMethod, "no request should be issued for an untrusted host")
+}
+
+// TestChatUpdateWithRoomNoProject verifies that supplying --room with no
+// default/flag project edits directly — project resolution (which would fail
+// non-interactively or prompt uselessly) is skipped because the PUT only needs
+// the chat and line IDs.
+func TestChatUpdateWithRoomNoProject(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999"} // deliberately no ProjectID
+
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &chatTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	authMgr := auth.NewManager(cfg, nil)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "fix", "--room", "789")
+	require.NoError(t, err)
+
+	assert.Equal(t, "PUT", transport.capturedMethod)
+	assert.Contains(t, transport.capturedPath, "/chats/789/lines/111")
+}
+
+// mockChatUpdateProjectFailTransport serves the PUT and the line re-fetch but
+// fails project resolution (GET /projects...), simulating a stale/inaccessible
+// saved default project.
+type mockChatUpdateProjectFailTransport struct {
+	capturedMethod string
+	capturedPath   string
+}
+
+func (t *mockChatUpdateProjectFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		if strings.Contains(req.URL.Path, "/projects") {
+			return &http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader(`{"error":"boom"}`)), Header: header}, nil
+		}
+		if strings.Contains(req.URL.Path, "/lines/") {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id": 111, "content": "Edited!", "type": "Chat::Lines::Text", "creator": {"id": 1, "name": "Tester"}}`)), Header: header}, nil
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`)), Header: header}, nil
+	}
+	if req.Method == "PUT" {
+		t.capturedMethod = req.Method
+		t.capturedPath = req.URL.Path
+		if req.Body != nil {
+			io.ReadAll(req.Body)
+			req.Body.Close()
+		}
+		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+	}
+	return nil, errors.New("unexpected request")
+}
+
+// TestChatUpdateRoomStaleDefaultProjectStillEdits verifies that when --room is
+// supplied, a stale/unreachable saved default project does not fail the edit:
+// project resolution (breadcrumb-only) happens best-effort after the PUT.
+func TestChatUpdateRoomStaleDefaultProjectStillEdits(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateProjectFailTransport{}
+	app, _ := newChatDeleteTestApp(transport) // config has ProjectID "123"
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "fix", "--room", "789")
+	require.NoError(t, err, "a stale/unreachable default project must not fail the edit path")
+
+	assert.Equal(t, "PUT", transport.capturedMethod)
+	assert.Contains(t, transport.capturedPath, "/chats/789/lines/111")
+}
+
+// TestChatUpdateRejectsMissingIDArg verifies that invoking update with no args
+// returns a purpose-specific usage error (not Cobra's generic arg error, which
+// root.go would rewrite into a misleading "Todo ID(s) required").
+func TestChatUpdateRejectsMissingIDArg(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+	app.Flags.Agent = true // structured usage error instead of help text
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "<id|url>")
+	assert.Empty(t, transport.capturedMethod, "no request should be issued when the id/url arg is missing")
+}
+
+func TestChatUpdateRejectsEmptyContent(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockChatUpdateTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+	app.Flags.Agent = true // forces structured ErrUsageHint instead of help text
+
+	cmd := NewChatCmd()
+	err := executeChatCommand(cmd, app, "update", "111", "")
+	require.Error(t, err)
+	assert.Empty(t, transport.capturedMethod, "no PUT should be issued when content is empty")
+}
+
 func TestChatDeleteReturnsDeletedPayload(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 

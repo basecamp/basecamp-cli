@@ -93,6 +93,7 @@ func TestParse(t *testing.T) {
 				ProjectID:   "456",
 				Type:        "lines",
 				RecordingID: "111",
+				CampfireID:  "789",
 			},
 		},
 		{
@@ -103,6 +104,34 @@ func TestParse(t *testing.T) {
 				ProjectID:   "456",
 				Type:        "lines",
 				RecordingID: "111",
+				CampfireID:  "789",
+			},
+		},
+		{
+			name:  "chat line URL with query string keeps clean line ID",
+			input: "https://3.basecamp.com/123/buckets/456/chats/789/lines/111?foo=bar",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "lines",
+				RecordingID: "111",
+				CampfireID:  "789",
+			},
+		},
+		{
+			// The router captures the whole final segment rather than truncating
+			// at the first non-digit, so "111junk" surfaces verbatim instead of
+			// silently resolving to line 111 — the boundary bug the old chat-line
+			// regex had. The malformed segment also skews Type away from "lines",
+			// so the command's Type=="lines" guard rejects it before any request.
+			name:  "chat line URL with trailing junk on line ID is not truncated",
+			input: "https://3.basecamp.com/123/buckets/456/chats/789/lines/111junk",
+			want: &Parsed{
+				AccountID:   "123",
+				ProjectID:   "456",
+				Type:        "111junk",
+				RecordingID: "111junk",
+				CampfireID:  "789",
 			},
 		},
 		{
@@ -177,6 +206,7 @@ func TestParse(t *testing.T) {
 				ProjectID:    "456",
 				Type:         "lines",
 				RecordingID:  "789",
+				CampfireID:   "789",
 				IsCollection: true,
 			},
 		},
@@ -249,6 +279,9 @@ func TestParse(t *testing.T) {
 			}
 			if got.RecordingID != tt.want.RecordingID {
 				t.Errorf("RecordingID = %q, want %q", got.RecordingID, tt.want.RecordingID)
+			}
+			if got.CampfireID != tt.want.CampfireID {
+				t.Errorf("CampfireID = %q, want %q", got.CampfireID, tt.want.CampfireID)
 			}
 			if got.CommentID != tt.want.CommentID {
 				t.Errorf("CommentID = %q, want %q", got.CommentID, tt.want.CommentID)
