@@ -86,6 +86,18 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "cards done moves a card to done" {
+  local card_file="$BATS_FILE_TMPDIR/direct_card_id"
+  [[ -f "$card_file" ]] || mark_unverifiable "No card created in prior test"
+  local card_id
+  card_id=$(<"$card_file")
+
+  run_smoke basecamp cards done "$card_id" \
+    --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "cards step create creates a step on a card" {
   local id_file="$BATS_FILE_TMPDIR/card_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
