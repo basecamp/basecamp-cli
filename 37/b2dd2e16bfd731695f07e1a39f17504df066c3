@@ -1,0 +1,28 @@
+internal/commands/cards.go
+  a2478f56149e051b 1272-1274,1655,1672,1674,1677,1683,1690,1707,1709,1712,1718,1725,1748,1750,1753,1759,1769-1805
+internal/commands/cards_test.go
+  a2478f56149e051b 130-131
+internal/version/sdk-provenance.json
+  a2478f56149e051b 4-6,10
+go.mod
+  a2478f56149e051b 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "37b2dd2e16bfd731695f07e1a39f17504df066c3",
+  "prompts": {
+    "a2478f56149e051b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3768d9b4-493f-4c98-82ff-f6f1e061eafd",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "total_additions": 144,
+      "total_deletions": 40,
+      "accepted_lines": 64,
+      "overriden_lines": 0
+    }
+  }
+}
