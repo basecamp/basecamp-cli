@@ -528,6 +528,7 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var by string
 
 	cmd := &cobra.Command{
 		Use:   "answers <question_id|url>",
@@ -536,7 +537,11 @@ func newCheckinsAnswersCmd(project *string) *cobra.Command {
 
 You can pass either a question ID or a Basecamp URL:
   basecamp checkins answers 789 --in my-project
-  basecamp checkins answers https://3.basecamp.com/123/buckets/456/questions/789`,
+  basecamp checkins answers https://3.basecamp.com/123/buckets/456/questions/789
+
+Use --by to filter answers by a specific person (name, email, ID, or "me"):
+  basecamp checkins answers 789 --by me --in my-project
+  basecamp checkins answers 789 --by "Alice Smith" --in my-project`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -598,11 +603,33 @@ You can pass either a question ID or a Basecamp URL:
 				opts.Page = page
 			}
 
-			answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), questionID, opts)
-			if err != nil {
-				return convertSDKError(err)
+			trimmedBy := strings.TrimSpace(by)
+			if by != "" && trimmedBy == "" {
+				return output.ErrUsage("--by value cannot be blank")
 			}
-			answers := answersResult.Answers
+
+			var answers []basecamp.QuestionAnswer
+			if trimmedBy != "" {
+				personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), trimmedBy)
+				if err != nil {
+					return err
+				}
+				personID, err := strconv.ParseInt(personIDStr, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid person ID")
+				}
+				answersResult, err := app.Account().Checkins().ListAnswersByUser(cmd.Context(), questionID, personID, opts)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				answers = answersResult.Answers
+			} else {
+				answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), questionID, opts)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				answers = answersResult.Answers
+			}
 
 			return app.OK(answers,
 				output.WithSummary(fmt.Sprintf("%d answers", len(answers))),
@@ -625,6 +652,7 @@ You can pass either a question ID or a Basecamp URL:
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all answers (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&by, "by", "", "Filter answers by person (name, email, ID, or \"me\")")
 
 	return cmd
 }
