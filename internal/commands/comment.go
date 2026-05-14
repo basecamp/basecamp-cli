@@ -322,6 +322,10 @@ Use - as the content argument to read content from stdin:
 			// First arg is always the recording ID(s)
 			recordingArg := args[0]
 
+			if edit && len(args) > 1 {
+				return output.ErrUsage("cannot combine --edit and positional content")
+			}
+
 			var content string
 			if len(args) > 1 {
 				var err error
@@ -329,10 +333,6 @@ Use - as the content argument to read content from stdin:
 				if err != nil {
 					return err
 				}
-			}
-
-			if edit && content != "" {
-				return output.ErrUsage("cannot combine --edit and positional content")
 			}
 			if edit {
 				fi, err := os.Stdin.Stat()
