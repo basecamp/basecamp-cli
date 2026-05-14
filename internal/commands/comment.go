@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -198,13 +199,21 @@ func newCommentsUpdateCmd() *cobra.Command {
 
 You can pass either a comment ID or a Basecamp URL:
   basecamp comments update 789 "new text"
-  basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 "new text"`,
+  basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 "new text"
+
+Use - as the content argument to read the updated content from stdin:
+  basecamp comments update 789 - < body.md`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>")
 			}
 			if len(args) < 2 {
 				return missingArg(cmd, "<content>")
+			}
+
+			content, err := contentArgOrStdin(cmd, args[1:])
+			if err != nil {
+				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -215,8 +224,6 @@ You can pass either a comment ID or a Basecamp URL:
 			// Extract comment ID from URL if provided
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
 			commentIDStr, _ := extractCommentWithProject(args[0])
-
-			content := strings.Join(args[1:], " ")
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
 			if err != nil {
@@ -299,7 +306,10 @@ Comma-separated IDs add the same comment to multiple items:
   basecamp comment https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"
 
 Content supports Markdown and @mentions (@Name or @First.Last):
-  basecamp comment 789 "Hey @Jane.Smith, **please review**"`,
+  basecamp comment 789 "Hey @Jane.Smith, **please review**"
+
+Use - as the content argument to read content from stdin:
+  basecamp comment 789 - < body.md`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -314,7 +324,11 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 
 			var content string
 			if len(args) > 1 {
-				content = strings.Join(args[1:], " ")
+				var err error
+				content, err = contentArgOrStdin(cmd, args[1:])
+				if err != nil {
+					return err
+				}
 			}
 
 			if edit && content != "" {
@@ -478,4 +492,15 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	return cmd
+}
+
+func contentArgOrStdin(cmd *cobra.Command, args []string) (string, error) {
+	if len(args) == 1 && args[0] == "-" {
+		b, err := io.ReadAll(cmd.InOrStdin())
+		if err != nil {
+			return "", output.ErrUsage(fmt.Sprintf("failed to read content from stdin: %v", err))
+		}
+		return string(b), nil
+	}
+	return strings.Join(args, " "), nil
 }
