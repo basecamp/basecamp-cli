@@ -37,6 +37,19 @@ func TestEditContentMutualExclusion(t *testing.T) {
 		}
 	})
 
+	t.Run("comment --edit with dash content", func(t *testing.T) {
+		err := runCmdWithFlagsAndArgs(NewCommentCmd,
+			map[string]string{"edit": "true"},
+			[]string{"12345", "-"},
+		)
+		if err == nil {
+			t.Fatal("expected error for --edit + dash content, got nil")
+		}
+		if !strings.Contains(err.Error(), "cannot combine") {
+			t.Errorf("error = %q, want 'cannot combine' message", err)
+		}
+	})
+
 	t.Run("message --edit with positional body", func(t *testing.T) {
 		err := runCmdWithFlagsAndArgs(NewMessageCmd,
 			map[string]string{"edit": "true"},
