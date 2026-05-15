@@ -1947,6 +1947,53 @@ func TestTodosUpdateClearPreservesAssignees(t *testing.T) {
 	assert.Equal(t, float64(42), ids[0])
 }
 
+func TestTodosUpdateDueDatePreservesExistingFields(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--due", "2026-04-12")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody, "expected PUT body but got none")
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	// The new due date is applied.
+	assert.Equal(t, "2026-04-12", body["due_on"])
+
+	// BC3 API clears fields by omission, so untouched fields from the
+	// existing todo must be preserved in the request body.
+	assert.Equal(t, "Test todo", body["content"])
+	assert.Equal(t, "Existing desc", body["description"])
+	assert.Equal(t, "2026-03-25", body["starts_on"])
+
+	ids, ok := body["assignee_ids"].([]any)
+	require.True(t, ok, "assignee_ids must be preserved")
+	require.Len(t, ids, 1)
+	assert.Equal(t, float64(42), ids[0])
+}
+
+func TestTodosUpdateTitlePreservesExistingFields(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "New title")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "New title", body["content"])
+	assert.Equal(t, "Existing desc", body["description"])
+	assert.Equal(t, "2026-04-01", body["due_on"])
+	assert.Equal(t, "2026-03-25", body["starts_on"])
+}
+
 // =============================================================================
 // --assignee filtering tests (single-list path)
 // =============================================================================
