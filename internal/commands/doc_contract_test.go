@@ -23,12 +23,12 @@ func TestDocContractArgs(t *testing.T) {
 		path     string
 		wantArgs []string // arg names in positional order; nil = no args
 	}{
-		{"basecamp todo", []string{"content"}},
-		{"basecamp done", []string{"id|url"}},
-		{"basecamp reopen", []string{"id|url"}},
-		{"basecamp card", []string{"title", "body"}},
-		{"basecamp comment", []string{"id|url", "content"}},
-		{"basecamp message", []string{"title", "body"}},
+		{"basecamp todos create", []string{"content"}},
+		{"basecamp todos complete", []string{"id|url"}},
+		{"basecamp todos uncomplete", []string{"id|url"}},
+		{"basecamp cards create", []string{"title", "body"}},
+		{"basecamp comments create", []string{"id|url", "content"}},
+		{"basecamp messages create", []string{"title", "body"}},
 		{"basecamp show", []string{"type", "id|url"}},
 		{"basecamp search", []string{"query"}},
 		{"basecamp assign", []string{"id|url"}},

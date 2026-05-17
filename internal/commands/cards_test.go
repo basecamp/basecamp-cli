@@ -528,18 +528,6 @@ func (t *mockOnHoldNamedColumnTransport) RoundTrip(req *http.Request) (*http.Res
 	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 }
 
-// TestCardShortcutShowsHelpWithoutTitle tests that help is shown when --title is missing.
-func TestCardShortcutShowsHelpWithoutTitle(t *testing.T) {
-	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewCardCmd()
-
-	// No --title flag — shows help
-	err := executeCommand(cmd, app)
-	assert.NoError(t, err)
-}
-
 // TestCardsColumnsRequiresProject tests that Project ID required for columns listing.
 func TestCardsColumnsRequiresProject(t *testing.T) {
 	app, _ := setupTestApp(t)
@@ -858,22 +846,6 @@ func TestCardsMoveRequiresCardID(t *testing.T) {
 // Card Shortcut Command Tests
 // =============================================================================
 
-// TestCardShortcutRequiresProject tests that project is required for card shortcut.
-func TestCardShortcutRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
-	// No project in config
-
-	cmd := NewCardCmd()
-
-	err := executeCommand(cmd, app, "TestCard")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
-}
-
 // TestCardsListBreadcrumbs tests the cardsListBreadcrumbs helper.
 func TestCardsListBreadcrumbs(t *testing.T) {
 	breadcrumbs := cardsListBreadcrumbs("123")
@@ -1160,24 +1132,6 @@ func TestCardsCreateDashSeparatorTitle(t *testing.T) {
 	}
 }
 
-// TestCardShortcutDashSeparatorTitle verifies the same for the card shortcut.
-func TestCardShortcutDashSeparatorTitle(t *testing.T) {
-	app, _ := setupTestApp(t)
-
-	cmd := NewCardCmd()
-
-	err := executeCommand(cmd, app, "--in", "123", "--", "--some-title")
-
-	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "unknown flag")
-	assert.NotContains(t, err.Error(), "unknown shorthand")
-
-	var e *output.Error
-	if errors.As(err, &e) {
-		assert.NotEqual(t, "Project ID required", e.Message)
-	}
-}
-
 // TestCardsCreateFlagsAfterTitle guards the flags-anywhere behavior:
 // flags placed after the positional title must still be parsed.
 func TestCardsCreateFlagsAfterTitle(t *testing.T) {
@@ -1188,24 +1142,6 @@ func TestCardsCreateFlagsAfterTitle(t *testing.T) {
 	cmd := NewCardsCmd()
 
 	err := executeCommand(cmd, app, "create", "Normal title", "--in", "123")
-
-	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "unknown flag")
-	assert.NotContains(t, err.Error(), "unknown shorthand")
-
-	var e *output.Error
-	if errors.As(err, &e) {
-		assert.NotEqual(t, "Project ID required", e.Message)
-	}
-}
-
-// TestCardShortcutFlagsAfterTitle guards the same for the card shortcut.
-func TestCardShortcutFlagsAfterTitle(t *testing.T) {
-	app, _ := setupTestApp(t)
-
-	cmd := NewCardCmd()
-
-	err := executeCommand(cmd, app, "Normal title", "--in", "123")
 
 	require.NotNil(t, err)
 	assert.NotContains(t, err.Error(), "unknown flag")
@@ -1334,24 +1270,6 @@ func TestCardsUpdateContentIsHTML(t *testing.T) {
 	assert.Contains(t, content, "<strong>bold</strong>")
 }
 
-func TestCardShortcutContentIsHTML(t *testing.T) {
-	transport := &mockCardCreateTransport{}
-	app := setupCardsMockApp(t, transport)
-
-	cmd := NewCardCmd()
-	err := executeCommand(cmd, app, "Title", "**bold** text", "--column", "12345")
-	require.NoError(t, err)
-	require.NotEmpty(t, transport.capturedBody)
-
-	var body map[string]any
-	err = json.Unmarshal(transport.capturedBody, &body)
-	require.NoError(t, err)
-
-	content, ok := body["content"].(string)
-	require.True(t, ok)
-	assert.Contains(t, content, "<strong>bold</strong>")
-}
-
 func TestCardsCreateLocalImageErrors(t *testing.T) {
 	transport := &mockCardCreateTransport{}
 	app := setupCardsMockApp(t, transport)
@@ -1405,16 +1323,6 @@ func TestCardsCreateHasAssigneeFlag(t *testing.T) {
 
 	toFlag := cmd.Flags().Lookup("to")
 	require.NotNil(t, toFlag, "expected --to flag on cards create")
-}
-
-func TestCardShortcutHasAssigneeFlag(t *testing.T) {
-	cmd := NewCardCmd()
-
-	flag := cmd.Flags().Lookup("assignee")
-	require.NotNil(t, flag, "expected --assignee flag on card shortcut")
-
-	toFlag := cmd.Flags().Lookup("to")
-	require.NotNil(t, toFlag, "expected --to flag on card shortcut")
 }
 
 // mockCardAssignTransport handles resolver API calls with people endpoint,

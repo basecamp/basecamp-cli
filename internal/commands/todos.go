@@ -43,7 +43,7 @@ func NewTodosCmd() *cobra.Command {
 		Use:         "todos",
 		Short:       "Manage todos",
 		Long:        "List, show, create, and manage Basecamp todos.",
-		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other content types\nbasecamp done accepts multiple IDs: basecamp done 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue"},
+		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other content types\nbasecamp todos complete accepts multiple IDs: basecamp todos complete 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue"},
 	}
 
 	cmd.AddCommand(
@@ -59,195 +59,6 @@ func NewTodosCmd() *cobra.Command {
 		newRecordableArchiveCmd("todo"),
 		newRecordableRestoreCmd("todo"),
 	)
-
-	return cmd
-}
-
-// NewDoneCmd creates the 'done' command as an alias for 'todos complete'.
-func NewDoneCmd() *cobra.Command {
-	return newDoneCmd()
-}
-
-// NewReopenCmd creates the 'reopen' command as an alias for 'todos uncomplete'.
-func NewReopenCmd() *cobra.Command {
-	return newReopenCmd()
-}
-
-// NewTodoCmd creates the 'todo' command as a shortcut for 'todos create'.
-func NewTodoCmd() *cobra.Command {
-	var project string
-	var todolist string
-	var todoset string
-	var assignee string
-	var due string
-	var description string
-	var attachFiles []string
-
-	cmd := &cobra.Command{
-		Use:   "todo <content>",
-		Short: "Create a new todo (shortcut for 'todos create')",
-		Long:  "Create a new todo in a project. Shortcut for 'basecamp todos create'.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-			if app == nil {
-				return fmt.Errorf("app not initialized")
-			}
-
-			// Show help when invoked with no content
-			if len(args) == 0 {
-				return missingArg(cmd, "<content>")
-			}
-			content := strings.Join(args, " ")
-			if strings.TrimSpace(content) == "" {
-				return cmd.Help()
-			}
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Use project from flag or config, with interactive fallback
-			if project == "" {
-				project = app.Flags.Project
-			}
-			if project == "" {
-				project = app.Config.ProjectID
-			}
-			if project == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				project = app.Config.ProjectID
-			}
-
-			// Resolve project name to ID
-			resolvedProject, _, err := app.Names.ResolveProject(cmd.Context(), project)
-			if err != nil {
-				return err
-			}
-			project = resolvedProject
-
-			// Use todolist from flag, config, or interactive prompt
-			if todolist == "" {
-				todolist = app.Flags.Todolist
-			}
-			if todolist == "" {
-				todolist = app.Config.TodolistID
-			}
-			// If still no todolist, try interactive selection (todoset-scoped)
-			if todolist == "" {
-				selectedTodolist, err := ensureTodolist(cmd, app, project, todoset)
-				if err != nil {
-					return err
-				}
-				todolist = selectedTodolist
-			}
-
-			if todolist == "" {
-				return output.ErrUsage("--list is required (no default todolist found)")
-			}
-
-			// Resolve todolist name to ID, scoped to --todoset when provided
-			resolvedTodolist, err := resolveTodolistInTodoset(cmd, app, todolist, project, todoset)
-			if err != nil {
-				return err
-			}
-
-			// Build SDK request
-			// Content is plain text (todo title) - do not wrap in HTML
-			req := &basecamp.CreateTodoRequest{
-				Content: content,
-			}
-
-			// Process description with Markdown + attachments
-			if description != "" || len(attachFiles) > 0 {
-				descHTML := richtext.MarkdownToHTML(description)
-
-				// Resolve inline images
-				descHTML, descErr := resolveLocalImages(cmd, app, descHTML)
-				if descErr != nil {
-					return descErr
-				}
-
-				// Upload explicit --attach files and embed
-				if len(attachFiles) > 0 {
-					refs, attachErr := uploadAttachments(cmd, app, attachFiles)
-					if attachErr != nil {
-						return attachErr
-					}
-					descHTML = richtext.EmbedAttachments(descHTML, refs)
-				}
-
-				req.Description = descHTML
-			}
-
-			if due != "" {
-				// Parse natural language date
-				parsedDue := dateparse.Parse(due)
-				if parsedDue != "" {
-					req.DueOn = parsedDue
-				}
-			}
-			if assignee != "" {
-				// Resolve assignee name to ID
-				assigneeID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
-				if err != nil {
-					return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
-				}
-				assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
-				req.AssigneeIDs = []int64{assigneeIDInt}
-			}
-
-			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid todolist ID")
-			}
-
-			todo, err := app.Account().Todos().Create(cmd.Context(), todolistID, req)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			return app.OK(todo,
-				output.WithEntity("todo"),
-				output.WithSummary(fmt.Sprintf("Created todo #%d", todo.ID)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "view",
-						Cmd:         fmt.Sprintf("basecamp todos show %d", todo.ID),
-						Description: "View todo",
-					},
-					output.Breadcrumb{
-						Action:      "complete",
-						Cmd:         fmt.Sprintf("basecamp done %d", todo.ID),
-						Description: "Complete todo",
-					},
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp todos --in %s", project),
-						Description: "List todos",
-					},
-				),
-			)
-		},
-	}
-
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.Flags().StringVarP(&todolist, "list", "l", "", "Todolist ID")
-	cmd.Flags().StringVarP(&todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
-	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
-	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date")
-	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
-	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
-
-	// Register tab completion for flags
-	completer := completion.NewCompleter(nil)
-	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
-	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 
 	return cmd
 }
@@ -592,12 +403,12 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         fmt.Sprintf("basecamp todo <content> --list %s", resolvedTodolist),
+				Cmd:         fmt.Sprintf("basecamp todos create <content> --list %s", resolvedTodolist),
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
 				Action:      "complete",
-				Cmd:         "basecamp done <id>",
+				Cmd:         "basecamp todos complete <id>",
 				Description: "Complete a todo",
 			},
 		),
@@ -712,12 +523,12 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "create",
-				Cmd:         "basecamp todo <content> --list <list>",
+				Cmd:         "basecamp todos create <content> --list <list>",
 				Description: "Create a todo",
 			},
 			output.Breadcrumb{
 				Action:      "complete",
-				Cmd:         "basecamp done <id>",
+				Cmd:         "basecamp todos complete <id>",
 				Description: "Complete a todo",
 			},
 			output.Breadcrumb{
@@ -785,12 +596,12 @@ You can pass either a todo ID or a Basecamp URL:
 				},
 				output.Breadcrumb{
 					Action:      "complete",
-					Cmd:         fmt.Sprintf("basecamp done %d", todoID),
+					Cmd:         fmt.Sprintf("basecamp todos complete %d", todoID),
 					Description: "Complete this todo",
 				},
 				output.Breadcrumb{
 					Action:      "comment",
-					Cmd:         fmt.Sprintf("basecamp comment %d <text>", todoID),
+					Cmd:         fmt.Sprintf("basecamp comments create %d <text>", todoID),
 					Description: "Add comment",
 				},
 			),
@@ -970,7 +781,7 @@ func newTodosCreateCmd() *cobra.Command {
 					},
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("basecamp done %d", todo.ID),
+						Cmd:         fmt.Sprintf("basecamp todos complete %d", todo.ID),
 						Description: "Complete todo",
 					},
 					output.Breadcrumb{
@@ -1232,7 +1043,7 @@ Clear a field by passing its --no- flag or an empty value:
 					},
 					output.Breadcrumb{
 						Action:      "complete",
-						Cmd:         fmt.Sprintf("basecamp done %s", todoIDStr),
+						Cmd:         fmt.Sprintf("basecamp todos complete %s", todoIDStr),
 						Description: "Complete todo",
 					},
 				),
@@ -1270,28 +1081,6 @@ You can pass todo IDs, Basecamp URLs, or comma-separated IDs:
   basecamp todos complete 789 012 345
   basecamp todos complete 789,012,345
   basecamp todos complete https://3.basecamp.com/123/buckets/456/todos/789`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>...")
-			}
-			return completeTodos(cmd, args)
-		},
-	}
-
-	return cmd
-}
-
-func newDoneCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "done <id|url>...",
-		Short: "Complete todo(s)",
-		Long: `Mark one or more todos as completed.
-
-You can pass todo IDs, Basecamp URLs, or comma-separated IDs:
-  basecamp done 789
-  basecamp done 789 012 345
-  basecamp done 789,012,345
-  basecamp done https://3.basecamp.com/123/buckets/456/todos/789`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>...")
@@ -1372,12 +1161,12 @@ func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 	breadcrumbs := []output.Breadcrumb{
 		{
 			Action:      "reopen",
-			Cmd:         fmt.Sprintf("basecamp reopen %s", extractedIDs[0]),
+			Cmd:         fmt.Sprintf("basecamp todos uncomplete %s", extractedIDs[0]),
 			Description: "Reopen todo",
 		},
 	}
 
-	// Return single todo directly (like basecamp todo does), list for multiple
+	// Return single todo directly (like basecamp todos create does), list for multiple
 	if len(completedTodos) == 1 {
 		return app.OK(completedTodos[0],
 			output.WithEntity("todo"),
@@ -1702,28 +1491,6 @@ func getTodosForSweep(cmd *cobra.Command, app *appctx.App, project, todosetFlag,
 	return result, nil
 }
 
-func newReopenCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "reopen <id|url>...",
-		Short: "Reopen todo(s)",
-		Long: `Reopen one or more completed todos.
-
-You can pass todo IDs, Basecamp URLs, or comma-separated IDs:
-  basecamp reopen 789
-  basecamp reopen 789 012 345
-  basecamp reopen 789,012,345
-  basecamp reopen https://3.basecamp.com/123/buckets/456/todos/789`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>...")
-			}
-			return reopenTodos(cmd, args)
-		},
-	}
-
-	return cmd
-}
-
 func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 	app := appctx.FromContext(cmd.Context())
 	if app == nil {
@@ -1792,7 +1559,7 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 	breadcrumbs := []output.Breadcrumb{
 		{
 			Action:      "complete",
-			Cmd:         fmt.Sprintf("basecamp done %s", extractedIDs[0]),
+			Cmd:         fmt.Sprintf("basecamp todos complete %s", extractedIDs[0]),
 			Description: "Complete todo",
 		},
 	}

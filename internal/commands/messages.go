@@ -174,7 +174,7 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 func messagesListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
 	return []output.Breadcrumb{
 		{Action: "show", Cmd: "basecamp messages show <id>", Description: "Show message details"},
-		{Action: "post", Cmd: fmt.Sprintf("basecamp message <title> --in %s", resolvedProjectID), Description: "Post new message"},
+		{Action: "post", Cmd: fmt.Sprintf("basecamp messages create <title> --in %s", resolvedProjectID), Description: "Post new message"},
 		{Action: "archived", Cmd: fmt.Sprintf("basecamp recordings messages --status archived --in %s", resolvedProjectID), Description: "Browse archived messages"},
 	}
 }
@@ -222,7 +222,7 @@ You can pass either a message ID or a Basecamp URL:
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "comment",
-					Cmd:         fmt.Sprintf("basecamp comment %s <text>", messageIDStr),
+					Cmd:         fmt.Sprintf("basecamp comments create %s <text>", messageIDStr),
 					Description: "Add comment",
 				},
 			),
@@ -656,179 +656,6 @@ You can pass either a message ID or a Basecamp URL:
 			)
 		},
 	}
-	return cmd
-}
-
-// NewMessageCmd creates the message command (shortcut for creating messages).
-func NewMessageCmd() *cobra.Command {
-	var edit bool
-	var project string
-	var messageBoard string
-	var draft bool
-	var subscribe string
-	var noSubscribe bool
-	var attachFiles []string
-
-	cmd := &cobra.Command{
-		Use:   "message <title> [body]",
-		Short: "Post a new message",
-		Long: `Post a message to a project's message board. Shortcut for 'basecamp messages create'.
-
-Most projects have a single message board. If a project has multiple,
-use --message-board <id> to specify which one.
-
-Content supports Markdown and @mentions (@Name or @First.Last):
-  basecamp message "Title" "Hey @Jane.Smith, **check this out**"`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			// Show help when invoked with no title
-			if len(args) == 0 {
-				return missingArg(cmd, "<title>")
-			}
-			title := args[0]
-			if strings.TrimSpace(title) == "" {
-				return cmd.Help()
-			}
-
-			// Body from second positional arg or --editor
-			var body string
-			if len(args) > 1 {
-				body = args[1]
-			}
-
-			// Validate user input first, before checking account
-			if edit && body != "" {
-				return output.ErrUsage("cannot combine --edit and body argument")
-			}
-			if edit {
-				fi, err := os.Stdin.Stat()
-				if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
-					return output.ErrUsage("cannot use --edit when stdin is not a terminal")
-				}
-				var editorErr error
-				body, editorErr = editor.Open("")
-				if editorErr != nil {
-					return output.ErrUsage(editorErr.Error())
-				}
-			}
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			// Resolve subscription flags before project (fail fast on bad input)
-			subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
-			if err != nil {
-				return err
-			}
-
-			// Resolve project, with interactive fallback
-			projectID := project
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
-			// Get message board ID from project dock
-			messageBoardIDStr, err := getMessageBoardID(cmd, app, resolvedProjectID, messageBoard)
-			if err != nil {
-				return err
-			}
-
-			boardID, err := strconv.ParseInt(messageBoardIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid message board ID")
-			}
-
-			// Build SDK request
-			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richtext.MarkdownToHTML(body)
-
-			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
-			html, err = resolveLocalImages(cmd, app, html)
-			if err != nil {
-				return err
-			}
-
-			// Resolve @mentions
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
-			if err != nil {
-				return err
-			}
-			html = mentionResult.HTML
-			mentionNotice := unresolvedMentionWarning(mentionResult.Unresolved)
-
-			// Upload explicit --attach files and embed
-			if len(attachFiles) > 0 {
-				refs, attachErr := uploadAttachments(cmd, app, attachFiles)
-				if attachErr != nil {
-					return attachErr
-				}
-				html = richtext.EmbedAttachments(html, refs)
-			}
-
-			req := &basecamp.CreateMessageRequest{
-				Subject:       title,
-				Content:       html,
-				Subscriptions: subs,
-			}
-			if draft {
-				req.Status = "drafted"
-			} else {
-				req.Status = "active"
-			}
-
-			message, err := app.Account().Messages().Create(cmd.Context(), boardID, req)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			respOpts := []output.ResponseOption{
-				output.WithSummary(fmt.Sprintf("Posted message #%d", message.ID)),
-				output.WithEntity("message"),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "view",
-						Cmd:         fmt.Sprintf("basecamp show message %d --in %s", message.ID, resolvedProjectID),
-						Description: "View message",
-					},
-					output.Breadcrumb{
-						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp messages --in %s", resolvedProjectID),
-						Description: "List messages",
-					},
-				),
-			}
-			if mentionNotice != "" {
-				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
-			}
-			return app.OK(message, respOpts...)
-		},
-	}
-
-	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose message body")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
-	cmd.Flags().StringVar(&messageBoard, "message-board", "", "Message board ID (required if project has multiple)")
-	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft (don't publish)")
-	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
-	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
-	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
-
 	return cmd
 }
 

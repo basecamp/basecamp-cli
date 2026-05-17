@@ -281,7 +281,7 @@ You can also pass a Basecamp URL directly:
 			breadcrumbs := make([]output.Breadcrumb, 0, 1+len(enrichment.Breadcrumbs))
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "comment",
-				Cmd:         fmt.Sprintf("basecamp comment %s <text>", id),
+				Cmd:         fmt.Sprintf("basecamp comments create %s <text>", id),
 				Description: "Add comment",
 			})
 			breadcrumbs = append(breadcrumbs, enrichment.Breadcrumbs...)

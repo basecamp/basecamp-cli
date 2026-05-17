@@ -74,15 +74,15 @@ go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ## Usage
 
 ```bash
-basecamp projects list                # List projects
-basecamp todos list --in 12345        # Todos in a project
-basecamp todo "Fix bug" --in 12345    # Create todo
-basecamp done 67890                   # Complete todo
-basecamp search "authentication"      # Search across projects
-basecamp files list --in 12345        # List docs & files
-basecamp cards list --in 12345        # List cards (Kanban)
-basecamp chat post "Hello" --in 12345      # Post to chat
-basecamp comment 67890 "@Jane.Smith, done!"    # Comment with @mention
+basecamp projects list                            # List projects
+basecamp todos list --in 12345                    # Todos in a project
+basecamp todos create "Fix bug" --in 12345        # Create todo
+basecamp todos complete 67890                     # Complete todo
+basecamp search "authentication"                  # Search across projects
+basecamp files list --in 12345                    # List docs & files
+basecamp cards list --in 12345                    # List cards (Kanban)
+basecamp chat post "Hello" --in 12345             # Post to chat
+basecamp comments create 67890 "@Jane.Smith, done!"    # Comment with @mention
 ```
 
 ### Output Formats

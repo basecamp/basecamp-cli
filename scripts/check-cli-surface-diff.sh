@@ -17,8 +17,8 @@ fi
 
 # Filter out acknowledged removals
 if [ -f "$ALLOWLIST" ]; then
-  UNACKED=$(LC_ALL=C comm -23 <(echo "$REMOVED" | sort) <(sort "$ALLOWLIST") || true)
-  ACKED=$(LC_ALL=C comm -12 <(echo "$REMOVED" | sort) <(sort "$ALLOWLIST") || true)
+  UNACKED=$(LC_ALL=C comm -23 <(echo "$REMOVED" | LC_ALL=C sort) <(LC_ALL=C sort "$ALLOWLIST") || true)
+  ACKED=$(LC_ALL=C comm -12 <(echo "$REMOVED" | LC_ALL=C sort) <(LC_ALL=C sort "$ALLOWLIST") || true)
   if [ -n "$ACKED" ]; then
     echo "Acknowledged breaking changes:"
     echo "$ACKED" | sed 's/^/  /'
