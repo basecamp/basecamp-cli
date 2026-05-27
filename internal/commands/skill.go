@@ -19,6 +19,9 @@ import (
 
 const skillFilename = "SKILL.md"
 const installedVersionFile = ".installed-version"
+const primarySkillName = "basecamp"
+
+var embeddedSkillNames = []string{primarySkillName, "basecamp-import"}
 
 // skillLocation represents a predefined skill installation target.
 type skillLocation struct {
@@ -39,8 +42,8 @@ var skillLocations = []skillLocation{
 func NewSkillCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill",
-		Short: "Manage the embedded agent skill file",
-		Long:  "Print or install the SKILL.md embedded in this binary.",
+		Short: "Manage the embedded agent skill files",
+		Long:  "Print the main embedded SKILL.md or install the embedded Basecamp skill bundle.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var app *appctx.App
 			if ctx := cmd.Context(); ctx != nil {
@@ -71,8 +74,8 @@ func NewSkillCmd() *cobra.Command {
 func newSkillInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install the basecamp agent skill",
-		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/basecamp/ and creates a symlink in ~/.claude/skills/basecamp (if Claude Code is detected).",
+		Short: "Install the Basecamp agent skills",
+		Long:  "Copies the embedded Basecamp skills to ~/.agents/skills/ and creates Claude Code symlinks when Claude Code is detected.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -82,7 +85,8 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 
 			result := map[string]any{
-				"skill_path": skillPath,
+				"skill_path":  skillPath,
+				"skill_paths": canonicalSkillFiles(),
 			}
 
 			// Only create the Claude symlink if Claude is actually installed
@@ -97,44 +101,92 @@ func newSkillInstallCmd() *cobra.Command {
 				}
 			}
 
-			summary := "Basecamp skill installed"
+			summary := "Basecamp skills installed"
 			if app != nil {
 				return app.OK(result, output.WithSummary(summary))
 			}
 			// Fallback if app context not available (shouldn't happen in practice)
-			fmt.Fprintf(cmd.OutOrStdout(), "Installed skill to %s\n", skillPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Installed skills to %s\n", strings.Join(canonicalSkillFiles(), ", "))
 			return nil
 		},
 	}
 }
 
-// installSkillFiles writes the embedded SKILL.md to ~/.agents/skills/basecamp/
-// and returns the path to the installed file.
+// installSkillFiles writes the embedded skill bundle to ~/.agents/skills/
+// and returns the main Basecamp skill path.
 func installSkillFiles() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
 
-	skillDir := filepath.Join(home, ".agents", "skills", "basecamp")
-	skillFile := filepath.Join(skillDir, skillFilename)
+	root := filepath.Join(home, ".agents", "skills")
+	if _, err := installSkillBundle(root); err != nil {
+		return "", err
+	}
+	return skillFilePath(root, primarySkillName), nil
+}
 
-	data, err := skills.FS.ReadFile("basecamp/SKILL.md")
+func canonicalSkillFiles() []string {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("reading embedded skill: %w", err)
+		return nil
+	}
+	root := filepath.Join(home, ".agents", "skills")
+	paths := make([]string, 0, len(embeddedSkillNames))
+	for _, name := range embeddedSkillNames {
+		paths = append(paths, skillFilePath(root, name))
+	}
+	return paths
+}
+
+func installSkillBundle(root string) ([]string, error) {
+	paths := make([]string, 0, len(embeddedSkillNames))
+	for _, name := range embeddedSkillNames {
+		path, err := installEmbeddedSkill(root, name)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+func installEmbeddedSkill(root, name string) (string, error) {
+	data, err := embeddedSkillData(name)
+	if err != nil {
+		return "", err
 	}
 
+	skillDir := filepath.Join(root, name)
+	skillFile := filepath.Join(skillDir, skillFilename)
 	if err := os.MkdirAll(skillDir, 0o755); err != nil { //nolint:gosec // G301: Skill files are not secrets
-		return "", fmt.Errorf("creating skill directory: %w", err)
+		return "", fmt.Errorf("creating %s skill directory: %w", name, err)
 	}
 	if err := os.WriteFile(skillFile, data, 0o644); err != nil { //nolint:gosec // G306: Skill files are not secrets
-		return "", fmt.Errorf("writing skill file: %w", err)
+		return "", fmt.Errorf("writing %s skill file: %w", name, err)
 	}
 
-	// Best-effort: stamp installed version
+	// Best-effort: stamp installed version.
 	_ = os.WriteFile(filepath.Join(skillDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
 
 	return skillFile, nil
+}
+
+func embeddedSkillData(name string) ([]byte, error) {
+	data, err := skills.FS.ReadFile(name + "/" + skillFilename)
+	if err != nil {
+		return nil, fmt.Errorf("reading embedded %s skill: %w", name, err)
+	}
+	return data, nil
+}
+
+func skillFilePath(root, name string) string {
+	return filepath.Join(root, name, skillFilename)
+}
+
+func skillRootForFile(path string) string {
+	return filepath.Dir(filepath.Dir(path))
 }
 
 // runSkillWizard runs the interactive skill installation wizard.
@@ -159,7 +211,7 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 		Label: "Other (custom path)",
 	})
 
-	selectedPath, err := tui.Select("  Where would you like to install the Basecamp skill?", options)
+	selectedPath, err := tui.Select("  Where would you like to install the Basecamp skills?", options)
 	if err != nil {
 		fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
 		return nil //nolint:nilerr // user canceled prompt
@@ -190,9 +242,9 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 	}
 
 	// Read embedded skill
-	data, readErr := skills.FS.ReadFile("basecamp/SKILL.md")
+	data, readErr := embeddedSkillData(primarySkillName)
 	if readErr != nil {
-		return fmt.Errorf("reading embedded skill: %w", readErr)
+		return readErr
 	}
 
 	// Write to selected location
@@ -204,28 +256,27 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 		return fmt.Errorf("writing skill file: %w", writeErr)
 	}
 
-	// Also write to canonical location
 	result := map[string]any{"skill_path": expandedPath}
-	home, homeErr := os.UserHomeDir()
-	if homeErr == nil {
-		canonicalDir := filepath.Join(home, ".agents", "skills", "basecamp")
-		canonicalFile := filepath.Join(canonicalDir, skillFilename)
-		if canonicalFile != expandedPath {
-			if mkErr := os.MkdirAll(canonicalDir, 0o755); mkErr != nil { //nolint:gosec // G301: Skill files are not secrets
-				result["notice"] = fmt.Sprintf("could not write to %s: %v", canonicalFile, mkErr)
-			} else if wErr := os.WriteFile(canonicalFile, data, 0o644); wErr != nil { //nolint:gosec // G306: Skill files are not secrets
-				result["notice"] = fmt.Sprintf("could not write to %s: %v", canonicalFile, wErr)
-			}
+	if filepath.Base(filepath.Dir(expandedPath)) == primarySkillName && filepath.Base(expandedPath) == skillFilename {
+		root := skillRootForFile(expandedPath)
+		if paths, bundleErr := installSkillBundle(root); bundleErr == nil {
+			result["skill_paths"] = paths
+		} else {
+			result["notice"] = fmt.Sprintf("could not write companion skills to %s: %v", root, bundleErr)
 		}
-		// Best-effort: stamp installed version in canonical location
-		_ = os.WriteFile(filepath.Join(canonicalDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
+	}
+
+	if _, canonicalErr := installSkillFiles(); canonicalErr != nil {
+		result["notice"] = fmt.Sprintf("could not write canonical skills: %v", canonicalErr)
+	} else {
+		result["canonical_skill_paths"] = canonicalSkillFiles()
 	}
 
 	return app.OK(result,
-		output.WithSummary(fmt.Sprintf("Basecamp skill installed → %s", expandedPath)))
+		output.WithSummary(fmt.Sprintf("Basecamp skills installed → %s", expandedPath)))
 }
 
-// normalizeSkillPath appends basecamp/SKILL.md to directory paths.
+// normalizeSkillPath appends basecamp/SKILL.md to directory paths for the main skill.
 // Explicit file paths (any .md) are left as-is.
 func normalizeSkillPath(path string) string {
 	path = strings.TrimSpace(path)
@@ -272,36 +323,38 @@ func codexGlobalSkillPath() string {
 	return filepath.Join(codexHome, "skills", "basecamp", skillFilename)
 }
 
-// linkSkillToClaude creates a symlink at ~/.claude/skills/basecamp pointing to
-// the baseline skill directory. Returns (symlinkPath, notice, error).
+// linkSkillToClaude connects the installed Basecamp skill bundle to Claude Code.
+// Returns the main symlink path, an optional notice, and any error.
 func linkSkillToClaude() (string, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", "", fmt.Errorf("getting home directory: %w", err)
 	}
 
-	skillDir := filepath.Join(home, ".agents", "skills", "basecamp")
+	agentsRoot := filepath.Join(home, ".agents", "skills")
 	symlinkDir := filepath.Join(home, ".claude", "skills")
-	symlinkPath := filepath.Join(symlinkDir, "basecamp")
-
 	if err := os.MkdirAll(symlinkDir, 0o755); err != nil { //nolint:gosec // G301: Skill files are not secrets
 		return "", "", fmt.Errorf("creating symlink directory: %w", err)
 	}
 
-	// Remove existing entry at symlink path (idempotent)
-	_ = os.Remove(symlinkPath)
+	notices := []string{}
+	for _, name := range embeddedSkillNames {
+		skillDir := filepath.Join(agentsRoot, name)
+		symlinkPath := filepath.Join(symlinkDir, name)
 
-	symlinkTarget := filepath.Join("..", "..", ".agents", "skills", "basecamp")
-	notice := ""
-	if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
-		// Fallback: copy skill files directly
-		notice = fmt.Sprintf("symlink failed (%v), copied files instead", err)
-		if copyErr := copySkillFiles(skillDir, symlinkPath); copyErr != nil {
-			return "", "", fmt.Errorf("creating symlink: %w (copy fallback also failed: %w)", err, copyErr)
+		// Remove existing entry at symlink path.
+		_ = os.Remove(symlinkPath)
+
+		symlinkTarget := filepath.Join("..", "..", ".agents", "skills", name)
+		if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
+			notices = append(notices, fmt.Sprintf("%s symlink failed (%v), copied files instead", name, err))
+			if copyErr := copySkillFiles(skillDir, symlinkPath); copyErr != nil {
+				return "", "", fmt.Errorf("creating %s symlink: %w (copy fallback also failed: %w)", name, err, copyErr)
+			}
 		}
 	}
 
-	return symlinkPath, notice, nil
+	return filepath.Join(symlinkDir, primarySkillName), strings.Join(notices, "; "), nil
 }
 
 // installedSkillVersion reads the .installed-version file from the baseline
@@ -352,11 +405,6 @@ func RefreshSkillsIfVersionChanged() bool {
 }
 
 func refreshAllInstalledSkills() bool {
-	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
-	if err != nil {
-		return false
-	}
-
 	updated := 0
 	failed := 0
 	for _, loc := range skillLocations {
@@ -373,49 +421,42 @@ func refreshAllInstalledSkills() bool {
 			continue
 		}
 
-		if writeErr := os.WriteFile(expanded, embedded, 0o644); writeErr == nil { //nolint:gosec // G306: Skill files are not secrets
-			updated++
-		} else {
+		if _, err := installSkillBundle(skillRootForFile(expanded)); err != nil {
 			failed++
+			continue
 		}
-	}
-
-	// Stamp installed version in the baseline directory only on full success.
-	if failed == 0 && updated > 0 {
-		if home, err := os.UserHomeDir(); err == nil {
-			baselineDir := filepath.Join(home, ".agents", "skills", "basecamp")
-			_ = os.WriteFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
-		}
+		updated++
 	}
 
 	return updated > 0 && failed == 0
 }
 
-// repairClaudeSkillLink repairs a broken symlink at ~/.claude/skills/basecamp.
-// If the path is a directory (copy fallback), the file refresh already handled it.
+// repairClaudeSkillLink keeps Claude Code skill symlinks pointed at the installed bundle.
+// Directory copies are refreshed in place by the file refresh path.
 func repairClaudeSkillLink() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
 
-	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
-	info, err := os.Lstat(symlinkPath)
-	if err != nil {
-		return // doesn't exist, nothing to repair
-	}
+	for _, name := range embeddedSkillNames {
+		symlinkPath := filepath.Join(home, ".claude", "skills", name)
+		info, err := os.Lstat(symlinkPath)
+		if err != nil {
+			continue
+		}
 
-	if info.Mode()&os.ModeSymlink == 0 {
-		return // not a symlink (directory copy fallback), file refresh handled it
-	}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
 
-	// It's a symlink — check if the target is reachable
-	if _, statErr := os.Stat(symlinkPath); statErr == nil {
-		return // symlink is healthy
-	}
+		if _, statErr := os.Stat(symlinkPath); statErr == nil {
+			continue
+		}
 
-	// Broken symlink — repair it
-	_, _, _ = linkSkillToClaude()
+		_, _, _ = linkSkillToClaude()
+		return
+	}
 }
 
 func copySkillFiles(src, dst string) error {
