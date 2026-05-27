@@ -1,0 +1,13 @@
+matter_id,matter,counterparty,responsible,status,effective_date,renewal,clause_notes,risk
+M-2026-014,Master services agreement,Brightwave Inc,counsel@example.com,active,2026-01-15,2027-01-15,"Auto-renews unless notice given 60 days prior, see section 12",medium
+M-2026-015,NDA,Cobalt Labs,Renata Voss,signed,2026-03-01,,Mutual confidentiality; 3 year term,low
+M-2026-016,Vendor contract,Pinnacle Supply,counsel@example.com,review,2026-05-20,2027-05-20,"Liability cap at fees paid, indemnity is one-sided in their favor",high
+M-2026-017,Lease amendment,Harbor Realty,Renata Voss,active,2026-02-10,2029-02-10,"Rent escalates 3% annually, option to extend two years",medium
+M-2026-018,Licensing deal,Nova Media,counsel@example.com,negotiation,2026-06-01,2028-06-01,"Royalty 8% of net, audit rights included, territory limited to NA",high
+M-2026-019,Employment offer,Internal,hr@example.org,signed,2026-04-12,,Standard at-will; includes IP assignment,low
+M-2026-020,Settlement,Greystone LLC,Renata Voss,active,2026-05-05,,"Confidential terms, payment in 3 installments, release of all claims",medium
+M-2026-021,SaaS subscription,DataPeak,counsel@example.com,active,2026-01-01,2027-01-01,"SLA 99.9%, data deletion within 30 days of termination",low
+M-2026-022,Partnership MOU,Lumen Group,Renata Voss,draft,2026-06-15,,"Non-binding, sets framework for joint venture",medium
+M-2026-023,IP transfer,Acme Co,counsel@example.com,negotiation,2026-05-22,,"Assignment of all patents, warranty of clear title required",high
+M-2026-024,Consulting agreement,Forge Advisors,hr@example.org,signed,2026-03-20,2026-09-20,"Day rate, 30 day termination for convenience",low
+M-2026-025,Distribution contract,Orchard Foods,Renata Voss,review,2026-06-10,2027-06-10,"Exclusive in region, minimum order quantities apply, force majeure broad",high

@@ -1,0 +1,15 @@
+work_order,asset,location,reported_by,priority,status,scheduled,photo_url,resolution,warranty_until,meter_reading
+WO-2026-0001,Boiler Unit 3,Basement,facilities@example.com,high,open,2026-05-24,https://example.com/photos/wo0001.jpg,,2027-01-10,4821
+WO-2026-0002,Elevator A,Lobby,Tom Lin,critical,in progress,2026-05-22,https://example.com/photos/wo0002.jpg,"Technician on site, replacing the control board",2026-09-30,
+WO-2026-0003,Parking gate,Garage,facilities@example.com,medium,open,2026-05-28,https://example.com/photos/wo0003.jpg,,2026-12-01,10233
+WO-2026-0004,HVAC rooftop,Roof,Tom Lin,high,closed,2026-05-15,https://example.com/photos/wo0004.jpg,"Replaced belt and filter, tested airflow, all nominal",2027-03-22,8742
+WO-2026-0005,Water heater,Floor 2,facilities@example.com,low,open,2026-06-02,,,2026-08-15,
+WO-2026-0006,Loading dock door,Warehouse,Tom Lin,medium,in progress,2026-05-23,https://example.com/photos/wo0006.jpg,"Sensor misaligned,
+realigning and recalibrating",2026-11-05,3019
+WO-2026-0007,Fire alarm panel,Stairwell B,facilities@example.com,critical,open,2026-05-22,https://example.com/photos/wo0007.jpg,,2027-06-30,
+WO-2026-0008,Kitchen exhaust,Cafeteria,Tom Lin,high,closed,2026-05-10,https://example.com/photos/wo0008.jpg,"Deep cleaned ducts, removed grease buildup",2026-10-12,5567
+WO-2026-0009,Backup generator,Basement,facilities@example.com,high,open,2026-05-30,,,2027-02-28,9981
+WO-2026-0010,Lobby doors,Lobby,Tom Lin,low,in progress,2026-05-25,https://example.com/photos/wo0010.jpg,"Hinge squeak, lubricated and adjusted",2026-07-19,
+WO-2026-0011,Cooling tower,Roof,facilities@example.com,medium,open,2026-06-04,https://example.com/photos/wo0011.jpg,,2027-04-01,2240
+WO-2026-0012,Sump pump,Basement,Tom Lin,critical,closed,2026-05-12,https://example.com/photos/wo0012.jpg,"Pump failed, swapped unit, tested float switch",2026-12-20,6612
+WO-2026-0013,Window seals,Floor 5,facilities@example.com,low,open,2026-06-10,,,2026-09-09,

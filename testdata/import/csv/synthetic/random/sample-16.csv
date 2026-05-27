@@ -1,0 +1,14 @@
+task_id,activity,program,coordinator,volunteers,shift_date,hours,status,notes
+1,Food bank sorting,Hunger Relief,coord@example.org,"Dana Reyes, Sam Lee, Mia Cho",2026-05-24,4,scheduled,"Sort donations by type, check expiry dates"
+2,Park cleanup,Green Spaces,Bea Nolan,"Tom Park, Liz Hale",2026-05-25,3,scheduled,"Bring gloves and bags, meet at the north gate"
+3,Tutoring session,Youth Mentoring,coord@example.org,"Raj Patel",2026-05-22,2,confirmed,"Math focus, grade 7 students"
+4,Soup kitchen,Hunger Relief,Bea Nolan,"Dana Reyes, Omar Diaz, Nina Holt",2026-05-23,5,confirmed,"Serving line 11am-2pm, kitchen prep before"
+5,Shelter intake,Housing Support,coord@example.org,"Sam Lee",2026-05-26,4,scheduled,Help new residents with paperwork
+6,Beach cleanup,Green Spaces,Bea Nolan,"Mia Cho, Tom Park, Liz Hale, Raj Patel",2026-05-30,3,scheduled,"Coastal stretch, recycling separated on site"
+7,Senior visits,Community Care,coord@example.org,"Nina Holt",2026-05-22,2,confirmed,"Companionship visits, 4 residents"
+8,Clothing drive,Housing Support,Bea Nolan,"Dana Reyes, Omar Diaz",2026-05-28,4,scheduled,"Sort and fold, label by size"
+9,Reading hour,Youth Mentoring,coord@example.org,"Liz Hale, Mia Cho",2026-05-27,1,confirmed,"Library room B, picture books"
+10,Garden build,Green Spaces,Bea Nolan,"Tom Park, Raj Patel",2026-06-01,6,scheduled,"Build raised beds, soil delivery at 9am"
+11,Meal delivery,Hunger Relief,coord@example.org,"Sam Lee, Nina Holt",2026-05-24,3,confirmed,"Route covers 12 homes, hot meals"
+12,Fundraiser setup,Community Care,Bea Nolan,"Dana Reyes",2026-05-29,2,scheduled,"Set up tables and signage, gala prep"
+13,Phone bank,Community Care,coord@example.org,"Omar Diaz, Liz Hale",2026-05-31,3,scheduled,"Call script provided, log responses"

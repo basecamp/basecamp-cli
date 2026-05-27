@@ -1,0 +1,82 @@
+Summary,Issue key,Issue id,Issue Type,Status,Project key,Project name,Project type,Project lead,Project lead id,Project description,Priority,Resolution,Assignee,Assignee Id,Reporter,Reporter Id,Creator,Creator Id,Created,Updated,Last Viewed,Resolved,Due date,Votes,Description,Environment,Watchers,Watchers Id,Original estimate,Remaining Estimate,Time Spent,Work Ratio,Σ Original Estimate,Σ Remaining Estimate,Σ Time Spent,Security Level,Inward issue link (Defect),Inward issue link (Defect),Outward issue link (Test),Attachment,Attachment,Attachment,Attachment,Attachment,Custom field (Actual end),Custom field (Actual start),Custom field (Begin Date),Custom field (Change reason),Custom field (Change risk),Custom field (Change type),Custom field (Development),Custom field (End Date),Custom field (Epic Link),Epic Link Summary,Custom field (Impact),Custom field (Issue color),Custom field (Locked forms),Custom field (Open forms),Custom field (Rank),Custom field (Request Type),Custom field (Revision),Sprint,Custom field (Start date),Custom field (Story point estimate),Custom field (Submitted forms),Custom field (Target end),Custom field (Target start),Custom field (Team),Custom field (Total forms),Custom field ([CHART] Date of First Response),Parent,Parent summary,Status Category,Status Category Changed
+QR code placed in the incorrect location on the site,T2-22,10058,Bug,To Do,T2,Test 2.0,software,Person 21,account-id-3,,Medium,,Person 21,account-id-3,Person 21,account-id-3,Person 21,account-id-3,27/Feb/24 10:01 PM,27/Feb/24 10:10 PM,29/Feb/24 2:02 PM,,,0,"The QR code is placed in the incorrect location on the registration subpage. It overlaps the video positioned below.
+
+h2. Steps for reproduction:
+
+# Visit [https://www.hsbc.co.uk/|https://www.hsbc.co.uk/|smart-link] 
+# Click on *Menu* on the top left corner
+# Click on *Register*
+
+h2. Actual result:
+
+The QR code seems to be moved below so it overlaps the video.
+
+h2. Anticipated result:
+
+The QR code should be placed above the video and beside the ‘Download the app’ options.
+
+h2. Screenshot:
+
+!Screenshot 2024-02-27 at 14.11.10.png|width=454,height=615!","iPad mini,  iPadOS, Chrome Version 122.0.6261.69 (Official Build) (x86_64)",Person 21,account-id-3,,,,,,,,,,,T2-10,27/Feb/24 10:01 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-27 at 14.11.10.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10013,,,,,,,,,,,,,T2-16,Comprehensive Testing and Security Enhancements,,,,,0|i000fb:,,,T2 Sprint 1,,,,,,,,,10052,Comprehensive Testing and Security Enhancements,To Do,27/Feb/24 10:01 PM
+On-Screen reader does not read aloud the Menu ,T2-21,10057,Bug,To Do,T2,Test 2.0,software,Person 21,account-id-3,,Medium,,Person 21,account-id-3,Person 21,account-id-3,Person 21,account-id-3,27/Feb/24 1:56 PM,27/Feb/24 10:07 PM,27/Feb/24 10:09 PM,,,0,"When hovering over the menu on the upper-left corner of the Accessibility subpage, the on-screen reader (VoiceOver) does not recognise the options and does not read aloud their titles.
+
+h2. Steps for reproduction:
+
+# Visit [https://www.hsbc.co.uk/|https://www.hsbc.co.uk/|smart-link] 
+# Scroll down the main page and click on *Accessibility* (located in the footer)
+# Using Tab key choose any option from the upper-left corner *Personal |  Business | Corporate*
+
+h2. Actual result:
+
+The on-screen reader (VoiceOver) does not recognise the options and does not read aloud their titles.
+
+h2. Anticipated result:
+
+The on-screen reader (VoiceOver) should read aloud each option from the menu.
+
+h2. Screenshots:
+
+!Screenshot 2024-02-27 at 13.46.15.png|width=605,height=392!
+
+h2. Other attachments:
+
+Chrome *>* DevTools *>* Lighthouse report
+
+!Screenshot 2024-02-26 at 14.36.30.png|width=741,height=869!
+
+!Screenshot 2024-02-26 at 14.36.53.png|width=749,height=1042!
+
+!Screenshot 2024-02-26 at 14.37.09.png|width=723,height=1046!
+
+!Screenshot 2024-02-26 at 14.37.27.png|width=738,height=1038!
+
+
+
+h2. ",Opera 107 on macOS Sonoma 14.3.1 (23D60),Person 21,account-id-3,,,,,,,,,,,,27/Feb/24 1:56 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-26 at 14.36.30.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10009,27/Feb/24 1:56 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-26 at 14.36.53.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10010,27/Feb/24 1:56 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-26 at 14.37.09.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10012,27/Feb/24 1:56 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-26 at 14.37.27.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10011,27/Feb/24 1:56 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-27 at 13.46.15.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10008,,,,,,,,,T2-16,Comprehensive Testing and Security Enhancements,,,,,0|i000f3:,,,T2 Sprint 1,,,,,,,,,10052,Comprehensive Testing and Security Enhancements,To Do,27/Feb/24 1:56 PM
+The heading on Accessibility subpage does not work,T2-18,10054,Bug,To Do,T2,Test 2.0,software,Person 21,account-id-3,,Medium,,Person 21,account-id-3,Person 21,account-id-3,Person 21,account-id-3,25/Feb/24 10:31 PM,28/Feb/24 1:10 PM,28/Feb/24 1:08 PM,,,0,"There is no response when clicking on the heading *‘Deaf, hearing or speech impairment’.* The user is not redirected to the dedicated subpage.
+
+h2. Steps for reproduction:
+
+# Visit [https://www.hsbc.co.uk/|https://www.hsbc.co.uk/|smart-link]
+# Scroll down the main page and click on *Accessibility* (located in the footer)
+# Hover over *Deaf, hearing or speech impairment* and click the heading
+
+h2. Actual result:
+
+Nothing happens. The reference does not work and user stays on the page.
+
+h2. Anticipated result:
+
+The user should be redirected to the dedicated subpage
+
+h2. Screenshot:
+
+!AccessibiityBug_T2-18.jpg|width=1556,height=1150!
+
+h2. Console log:
+
+!Screenshot 2024-02-25 at 22.38.30.png|width=1166,height=391!
+
+
+
+h2. ",MacOS Ventura Version 13.6.3 (22G436) Safari Version 16.6 (18615.3.12.11.2),Person 21,account-id-3,,,,,,,,,T2-10,T2-17,T2-10,28/Feb/24 1:10 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;AccessibiityBug_T2-18 (a037e9fd-3f73-4ab0-b1be-189de8f7156a).jpg;https://paulahum.atlassian.net/rest/api/3/attachment/content/10014,25/Feb/24 10:41 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;AccessibiityBug_T2-18.jpg;https://paulahum.atlassian.net/rest/api/3/attachment/content/10007,25/Feb/24 10:41 PM;557058:44b53122-faab-4556-9c81-aaf60855f89a;Screenshot 2024-02-25 at 22.38.30.png;https://paulahum.atlassian.net/rest/api/3/attachment/content/10006,,,,,,,,,,,T2-16,Comprehensive Testing and Security Enhancements,,,,,0|i000ef:,,,T2 Sprint 1,,,,,,,,,10052,Comprehensive Testing and Security Enhancements,To Do,25/Feb/24 10:31 PM

@@ -1,0 +1,3 @@
+Issue Type,Issue key,Issue id,Summary,Project name,Created,Labels,Labels,Description,Actual Result,Expected Result,Preconditions,Priority,Severity,Sprint,Status,Parent summary
+Task,BCJ-1,10001,Draft launch checklist,Basecamp Jira Import,01/Jan/26 9:00 AM,launch,planning,Create the launch checklist before kickoff.,"","","",Medium,"","",To Do,""
+Bug,BCJ-2,10002,Fix signup error,Basecamp Jira Import,03/Jan/26 11:15 AM,bug,signup,Signup form returns a generic error.,"","","",High,"","",In Progress,""

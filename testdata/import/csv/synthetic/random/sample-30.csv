@@ -1,0 +1,14 @@
+item_no,agenda_item,committee,owner,owner,status,resolution_ref,depends_on,due,minutes_link
+1,Approve prior minutes,governance,chair@example.org,Helen Voss,approved,RES-2026-01,,2026-05-22,https://example.org/minutes/2026-05-22
+2,Q1 financial review,finance,treasurer@example.com,Marco Reyes,in review,RES-2026-02,1,2026-05-22,https://example.org/minutes/2026-05-22
+3,Annual budget approval,finance,treasurer@example.com,Marco Reyes,pending,RES-2026-03,2,2026-06-15,https://example.org/minutes/2026-06-15
+4,Bylaw amendment,governance,chair@example.org,Helen Voss,tabled,RES-2026-04,,2026-06-15,https://example.org/minutes/2026-06-15
+5,New board member vote,nominating,secretary@example.org,Dana Pike,scheduled,RES-2026-05,1,2026-06-15,https://example.org/minutes/2026-06-15
+6,Audit committee report,audit,auditor@example.com,Helen Voss,in review,RES-2026-06,2,2026-06-15,https://example.org/minutes/2026-06-15
+7,Strategic plan update,strategy,chair@example.org,Marco Reyes,in progress,RES-2026-07,,2026-07-20,https://example.org/minutes/2026-07-20
+8,Executive compensation,compensation,secretary@example.org,Dana Pike,pending,RES-2026-08,6,2026-07-20,https://example.org/minutes/2026-07-20
+9,Fundraising goals,development,treasurer@example.com,Helen Voss,approved,RES-2026-09,3,2026-05-22,https://example.org/minutes/2026-05-22
+10,Risk assessment,audit,auditor@example.com,Marco Reyes,in review,RES-2026-10,6,2026-07-20,https://example.org/minutes/2026-07-20
+11,Policy on conflicts,governance,chair@example.org,Dana Pike,pending,RES-2026-11,4,2026-07-20,https://example.org/minutes/2026-07-20
+12,Set next meeting date,governance,secretary@example.org,Helen Voss,approved,RES-2026-12,,2026-05-22,https://example.org/minutes/2026-05-22
+13,Adjourn,governance,chair@example.org,Dana Pike,approved,RES-2026-13,12,2026-05-22,https://example.org/minutes/2026-05-22

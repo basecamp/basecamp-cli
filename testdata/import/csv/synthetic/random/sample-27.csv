@@ -1,0 +1,15 @@
+bed,zone,zone,plant,task,phase,status,planted,sun,water_freq
+Bed 1,north,vegetable,Tomatoes,Stake plants,growing,active,2026-04-15,full,daily
+Bed 1,north,vegetable,Basil,Pinch tops,growing,active,2026-04-20,full,daily
+Bed 2,south,herb,Rosemary,,established,active,2025-09-10,full,weekly
+Bed 2,south,herb,Thyme,Trim back,established,active,2025-09-10,full,weekly
+Bed 3,east,flower,Marigolds,Deadhead,blooming,active,2026-04-01,partial,every 2 days
+Bed 3,east,flower,Zinnias,Sow seeds,seeding,planned,,full,every 2 days
+Bed 4,west,vegetable,Lettuce,Harvest,mature,active,2026-03-20,partial,daily
+Bed 4,west,vegetable,Spinach,Harvest,mature,active,2026-03-20,partial,daily
+Bed 5,north,vegetable,Peppers,Fertilize,growing,active,2026-04-25,full,every 2 days
+Bed 5,north,vegetable,Cucumbers,Add trellis,growing,active,2026-04-25,full,daily
+Bed 6,south,fruit,Strawberries,Net against birds,fruiting,active,2025-10-05,full,every 2 days
+Bed 7,east,flower,Sunflowers,Sow seeds,seeding,planned,,full,every 3 days
+Bed 8,west,herb,Mint,Contain spread,established,active,2025-08-15,partial,every 2 days
+Bed 8,west,herb,Cilantro,Resow,bolted,needs attention,2026-03-10,partial,daily

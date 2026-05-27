@@ -1,0 +1,14 @@
+code;line_item;category;owner;amount;currency;status;due;gl_account;cost_center
+FIN-001;Office rent;facilities;dana@example.com;4,500.00;USD;approved;01-May-2026;6000;CC-FAC
+FIN-002;Cloud hosting;infrastructure;sre@example.org;1,280.50;USD;approved;05-May-2026;6100;CC-ENG
+FIN-003;Team offsite;people;hr@example.com;3,200.00;USD;pending;15-Jun-2026;6200;CC-HR
+FIN-004;Marketing ads;marketing;Rae Donovan;7,800.00;USD;approved;10-May-2026;6300;CC-MKT
+FIN-005;Legal retainer;legal;counsel@example.org;2,500.00;USD;approved;01-May-2026;6400;CC-LEG
+FIN-006;New laptops;infrastructure;sre@example.org;9,600.00;USD;pending;20-May-2026;6100;CC-ENG
+FIN-007;Conference travel;people;hr@example.com;1,450.75;USD;rejected;22-May-2026;6200;CC-HR
+FIN-008;Software licenses;infrastructure;Rae Donovan;3,900.00;USD;approved;01-Jun-2026;6100;CC-ENG
+FIN-009;Catering;facilities;dana@example.com;620.00;USD;approved;18-May-2026;6000;CC-FAC
+FIN-010;Recruiting fees;people;hr@example.com;12,000.00;EUR;pending;30-Jun-2026;6200;CC-HR
+FIN-011;Print materials;marketing;Rae Donovan;480.25;USD;approved;12-May-2026;6300;CC-MKT
+FIN-012;Insurance premium;legal;counsel@example.org;5,100.00;USD;approved;01-Jul-2026;6400;CC-LEG
+FIN-013;Equipment repair;facilities;dana@example.com;340.00;USD;pending;25-May-2026;6000;CC-FAC

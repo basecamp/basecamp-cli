@@ -1,0 +1,14 @@
+box;item;room;destination_room;status;state;date;done_by
+101;Books;office;study;packed;sealed;2026-05-20;Alex
+102;Winter coats;bedroom;bedroom;packed;labeled;2026-05-21;Jordan
+103;Kitchenware;kitchen;kitchen;in progress;open;2026-05-22;Casey
+104;Photo albums;living room;study;packed;sealed;2026-05-19;Alex
+105;Tools;garage;garage;not started;empty;;Jordan
+106;Bedding;bedroom;guest room;packed;labeled;2026-05-21;Casey
+107;Dishes;kitchen;kitchen;in progress;open;2026-05-22;Alex
+108;Electronics;office;study;packed;sealed;2026-05-20;Jordan
+109;Toys;living room;kids room;not started;empty;;Casey
+110;Bathroom supplies;bathroom;bathroom;packed;labeled;2026-05-21;Alex
+111;Pantry goods;kitchen;kitchen;in progress;open;2026-05-22;Jordan
+112;Artwork;living room;living room;not started;empty;;Casey
+113;Office supplies;office;study;packed;sealed;2026-05-20;Alex

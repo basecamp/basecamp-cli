@@ -1,0 +1,15 @@
+trip,item,category,status,when,booked,confirmation,cost,notes
+Portugal,Flights,transport,done,2026-07-01,yes,AB12CD,820,Window seats
+Portugal,Hotel Lisbon,lodging,done,Jul 2026,yes,HTL-99201,640,3 nights
+Portugal,Rental car,transport,researching,in 3 days,no,,,Compare agencies
+Portugal,Day trip Sintra,activity,planned,2026-07-04,no,,,
+Portugal,Travel insurance,admin,todo,next week,no,,45,
+Portugal,Lisbon food tour,activity,planned,Jul 2026,no,,60,Book ahead
+Japan,Flights,transport,researching,Sep 2026,no,,,Flexible dates
+Japan,JR Pass,transport,todo,next month,no,,280,7-day pass
+Japan,Hotel Tokyo,lodging,planned,2026-09-10,no,,,Near station
+Japan,Visa check,admin,done,this week,yes,,0,Not required
+Japan,Kyoto ryokan,lodging,researching,Sep 2026,no,,,Traditional inn
+Weekend Trip,Cabin booking,lodging,done,next weekend,yes,CBN-4471,210,Pet friendly
+Weekend Trip,Groceries,supplies,todo,in 2 days,no,,80,
+Weekend Trip,Hiking permits,activity,planned,next weekend,no,,15,

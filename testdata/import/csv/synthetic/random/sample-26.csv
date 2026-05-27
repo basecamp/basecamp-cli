@@ -1,0 +1,14 @@
+epic_id,initiative,theme,owner,target,status,depends_on,spec_url,updated_at
+EPIC-01,Self-serve onboarding,Growth,pm@example.com,Q3 2026,in progress,,https://example.com/specs/epic-01,2026-05-22T14:30:00Z
+EPIC-02,Billing revamp,Monetization,Rae Donovan,Q4 2026,planned,EPIC-01,https://example.com/specs/epic-02,2026-05-20T09:15:00Z
+EPIC-03,Mobile app v2,Platform,pm@example.com,Q3 2026,in progress,,https://example.com/specs/epic-03,2026-05-21T17:45:00Z
+EPIC-04,Enterprise SSO,Security,security@example.org,Q4 2026,planned,EPIC-02,https://example.com/specs/epic-04,2026-05-19T11:00:00Z
+EPIC-05,Analytics dashboard,Insights,Rae Donovan,Q3 2026,in progress,EPIC-01,https://example.com/specs/epic-05,2026-05-22T08:20:00Z
+EPIC-06,API v3,Platform,pm@example.com,Q1 2027,planned,EPIC-03,https://example.com/specs/epic-06,2026-05-18T13:30:00Z
+EPIC-07,Notification center,Engagement,Rae Donovan,Q3 2026,shipped,,https://example.com/specs/epic-07,2026-05-10T16:00:00Z
+EPIC-08,Audit logging,Security,security@example.org,Q4 2026,planned,EPIC-04,https://example.com/specs/epic-08,2026-05-17T10:45:00Z
+EPIC-09,Localization,Growth,pm@example.com,Q1 2027,backlog,,https://example.com/specs/epic-09,2026-05-15T12:00:00Z
+EPIC-10,Performance overhaul,Platform,Rae Donovan,Q3 2026,in progress,EPIC-06,https://example.com/specs/epic-10,2026-05-22T15:10:00Z
+EPIC-11,Referral program,Growth,pm@example.com,Q4 2026,planned,EPIC-01,https://example.com/specs/epic-11,2026-05-16T14:25:00Z
+EPIC-12,Data export,Insights,Rae Donovan,Q3 2026,shipped,EPIC-05,https://example.com/specs/epic-12,2026-05-12T09:50:00Z
+EPIC-13,Role-based access,Security,security@example.org,Q4 2026,backlog,EPIC-04,https://example.com/specs/epic-13,2026-05-14T18:05:00Z

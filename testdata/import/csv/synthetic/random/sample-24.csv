@@ -1,0 +1,15 @@
+property,unit,unit,manager,tenant,status,issue,reported,rent,lease_end,note
+Maple Court,4A,residential,mgr@example.com,Jordan Pike,occupied,Dishwasher leak,2026-05-20,1450,2026-12-31,Tenant since 2024
+Maple Court,4B,residential,mgr@example.com,leah@example.org,occupied,,2026-05-01,1500,2027-03-15,Renewed last month
+Maple Court,4C,residential,Rosa Mendez,,vacant,Repaint needed,2026-05-10,0,,Listing next week
+Oak Plaza,201,commercial,mgr@example.com,Brightwave Inc,occupied,HVAC noise,2026-05-18,3200,2028-06-30,Long-term lease
+Oak Plaza,202,commercial,Rosa Mendez,Cobalt Labs,occupied,,2026-04-15,2900,2027-09-30,
+Oak Plaza,203,commercial,mgr@example.com,,vacant,,2026-05-05,0,,Build-out in progress
+Birch Lane,1,residential,Rosa Mendez,Sam Whitfield,occupied,Window won't close,2026-05-21,1200,2026-08-31,Lease ending soon
+Birch Lane,2,residential,mgr@example.com,nina@example.com,occupied,,2026-05-12,1250,2027-01-31,Quiet tenant
+Birch Lane,3,residential,Rosa Mendez,Omar Diaz,occupied,Heater out,2026-05-22,1180,2026-11-30,Urgent repair needed
+Cedar Tower,15F,residential,mgr@example.com,,vacant,Carpet replacement,2026-05-08,0,,Showing Saturday
+Cedar Tower,16F,residential,Rosa Mendez,grace@example.org,occupied,,2026-05-03,2100,2027-05-31,Premium unit
+Cedar Tower,17F,residential,mgr@example.com,Theo Vance,occupied,Garbage disposal jam,2026-05-19,2050,2026-10-31,
+Pine Court,A,residential,Rosa Mendez,Lila Frost,occupied,,2026-04-28,1350,2027-02-28,Pays early
+Pine Court,B,residential,mgr@example.com,,vacant,Plumbing inspection,2026-05-15,0,,Inspection scheduled

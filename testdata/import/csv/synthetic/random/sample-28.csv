@@ -1,0 +1,20 @@
+ticket,subject,channel,customer,agent,priority,status,opened,link,thread
+T-100234,Cannot reset password,email,fiona@example.org,agent1@example.com,high,open,2026-05-22,https://example.com/support/100234,"Customer: I can't reset my password.
+Agent: Can you confirm the email on file?
+Customer: yes it's the one I'm writing from"
+T-100235,Billed twice,chat,Greg Holloway,Nadia Improta,urgent,open,2026-05-22,https://example.com/support/100235,"Customer: I was charged twice this month, please refund one"
+T-100236,Feature request,email,helena@example.com,agent1@example.com,low,open,2026-05-21,https://example.com/support/100236,"Customer: Would love a dark mode, any plans?"
+T-100237,App crashes on startup,phone,Ivan Petrov,Nadia Improta,high,in progress,2026-05-20,https://example.com/support/100237,"Customer reports crash on launch, Android 14.
+Agent: collected logs, escalated to engineering"
+T-100238,How to export data,chat,jade@example.org,agent1@example.com,normal,resolved,2026-05-19,https://example.com/support/100238,"Customer: where is the export button? Agent: Settings > Data > Export"
+T-100239,Wrong shipping address,email,Karl Mendes,Nadia Improta,high,open,2026-05-22,https://example.com/support/100239,"Customer: my order is going to my old address, can you update it?"
+T-100240,Login email not arriving,chat,lara@example.com,agent1@example.com,high,in progress,2026-05-21,https://example.com/support/100240,"Customer: no magic link emails. Agent: checking spam filters, whitelisting our domain"
+T-100241,Discount code invalid,email,Mo Farah,Nadia Improta,normal,resolved,2026-05-18,https://example.com/support/100241,"Customer: SAVE20 doesn't work. Agent: code expired, issued a new one"
+T-100242,Account deletion request,email,nora@example.org,agent1@example.com,normal,open,2026-05-22,https://example.com/support/100242,"Customer: please delete my account and all data"
+T-100243,Slow loading,chat,Owen Park,Nadia Improta,low,open,2026-05-22,https://example.com/support/100243,"Customer: the dashboard is really slow today"
+T-100244,Cannot upload file,phone,Petra Voss,agent1@example.com,high,in progress,2026-05-21,https://example.com/support/100244,"Customer: uploads fail at 50%.
+Agent: asked for file size and type, awaiting reply"
+T-100245,Subscription cancel,email,Quinn Lee,Nadia Improta,normal,resolved,2026-05-17,https://example.com/support/100245,"Customer: cancel my plan. Agent: cancelled, confirmed end date"
+T-100246,Two-factor not working,chat,rita@example.com,agent1@example.com,urgent,open,2026-05-22,https://example.com/support/100246,"Customer: codes are rejected. Agent: checking time sync on device"
+T-100247,Refund status,email,Sven Holm,Nadia Improta,normal,open,2026-05-20,https://example.com/support/100247,"Customer: when will my refund arrive? Agent: 5-7 business days from the 18th"
+T-100248,Typo in invoice,email,tara@example.org,agent1@example.com,low,resolved,2026-05-16,https://example.com/support/100248,"Customer: company name misspelled. Agent: corrected and reissued"

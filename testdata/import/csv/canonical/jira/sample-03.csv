@@ -1,0 +1,231 @@
+Issue Type,Issue key,Issue id,Summary,Project name,Created,Labels,Labels,Description,Actual Result,Expected Result,Preconditions,Priority,Severity,Sprint,Status,Parent summary
+Bug,DEPI-38,10431,"Contact Form Fails to Submit â€” No Response on Clicking ""Send message""",DEPI-Automated-Testing-Final-Project,5/9/2025 18:57,,,"*Steps to Reproduce*:
+
+# Open the contact form
+# Fill in all required fields with valid data
+# Click the ""Send message"" button",,,,Medium (P2),Major / High,SCRUM Sprint 1,,
+Bug,DEPI-35,10396,Tracking orders page doesn't work,DEPI-Automated-Testing-Final-Project,5/8/2025 17:43,,,Tracking orders page doesnâ€™t work,,,,Medium (P2),Major / High,SCRUM Sprint 1,,
+Bug,DEPI-34,10365,Unable to Complete Checkout â€“ No Payment Methods Available,DEPI-Automated-Testing-Final-Project,5/3/2025 11:57,Checkout,,"When attempting to complete a purchase using an existing billing address, the system fails to display any available payment methods. As a result, the user cannot proceed with the order. A warning message is shown, stating:
+
+{quote}â€œâš  Warning: No Payment options are available. Please contact us for assistance!â€{quote}
+
+This issue prevents the user from completing the checkout process entirely.",,,,Critical (P0),Critical,,,Testing My Profile Features
+Bug,DEPI-32,10339,"When clicking ""Apple"" under the ""Laptops"" category in the Mega Menu, the dropdown displays unrelated items.",DEPI-Automated-Testing-Final-Project,4/4/2025 7:10,,,"When clicking ""Apple"" under the ""Laptops"" category in the Mega Menu, the dropdown displays unrelated items (e.g., watches) instead of Apple laptops.
+
+Steps to Reproduce
+1-Go to â€œâ€œ[https://ecommerce-playground.lambdatest.io/index.php?route=common/home|https://ecommerce-playground.lambdatest.io/index.php?route=common/home|smart-link]  
+
+2-Hover over â€œMega menuâ€œ in the navigation bar
+
+3-Go to the down left and under â€œlaptopâ€œ click on Apple
+
+Expected Result
+Clicking ""Apple"" under ""Laptops"" should display Apple products
+
+Actual Result
+
+IncorrectÂ ItemsÂ displayed",,,,High (P1)	,Major / High,SCRUM Sprint 2,,
+Bug,DEPI-31,10336,Missing content in the homepage,DEPI-Automated-Testing-Final-Project,4/3/2025 20:35,Navigation,,"unexpected large white space on the homepage that appears to be a layout or content rendering issue.
+
+
+*Steps to reproduce*
+1-Go to â€œ[https://ecommerce-playground.lambdatest.io/index.php?route=common/home|https://ecommerce-playground.lambdatest.io/index.php?route=common/home|smart-link] â€œ
+2-Scroll down 
+3-observe the white layout space
+
+*Expected Results*
+Content should be displayed in the white area
+*Actual Results*
+
+Large white space appears due to failed content loading",,,,High (P1)	,Critical,SCRUM Sprint 2,,
+Bug,DEPI-30,10335,"The ""TOP PRODUCTS"" section in the homepage is displaying the same product (""IMac"" priced at $170.00) four times consecutively",DEPI-Automated-Testing-Final-Project,4/3/2025 20:16,Navigation,,"
+*Steps to Reproduce*
+
+1- Go to â€œ[https://ecommerce-playground.lambdatest.io/index.php?route=common/home|https://ecommerce-playground.lambdatest.io/index.php?route=common/home|smart-link] â€œ
+
+2-Scroll down until you see â€œTop Productsâ€œ section 
+
+*Expected Behavior*
+Top Products section should display different items 
+
+*Actual Behavior*
+
+The same iMac product is displayed four times in identical format.",,,,Medium (P2),Major / High,SCRUM Sprint 2,,
+Bug,DEPI-29,10334,Mega menu function doesn't work. ,DEPI-Automated-Testing-Final-Project,4/3/2025 18:05,,,"The mega menu is not functioning as expected, it doesnâ€™t provide correct product.",,,,Medium (P2),Major / High,SCRUM Sprint 2,,
+bug,DEPI-28,10333,"Incorrect Result for ""Color"" Option",DEPI-Automated-Testing-Final-Project,4/3/2025 17:56,,,"When the user selects ""Shop by Category"" and chooses a color, the website provides incorrect results, and some colors cannot be selected.",,,,Medium (P2),Major / High,SCRUM Sprint 2,,
+Epic,DEPI-22,10298,Header Navigation Menu,DEPI-Automated-Testing-Final-Project,4/2/2025 9:45,Navigation,,"This Epic covers the implementation, styling, and functionality of the main navigation links in the header.",,,,,,,,
+Epic,DEPI-20,10265,Implement and Test Advanced Filtering Functionality,DEPI-Automated-Testing-Final-Project,3/19/2025 14:51,Filteration,,"As a user, I want to filter search results effectively so that I can quickly find relevant products or content based on specific criteria such as categories, price range, ratings, and other attributes.
+
+*Acceptance Criteria:*
+
+# Users should be able to search for items using keywords.
+# Users should be able to categorize search results based on predefined categories.
+# Users should be able to apply filters such as price range, ratings, and availability.
+# Filters should dynamically update search results in real-time or upon submission.
+# Removing applied filters should update results accordingly.
+# If no results match the selected filters, an appropriate message should be displayed.
+
+*Linked Test Cases:*
+
+* *Search Functionality* â€“ Ensures users can search for products or content.
+* *Categorization of Search Results* â€“ Validates that search results can be sorted by predefined categories.
+* *Filters Functionality* â€“ Tests the application and removal of filters to refine search results.",,,,,,,,
+Epic,DEPI-2,10001,Testing My Profile Features,DEPI-Automated-Testing-Final-Project,2/10/2025 14:38,authentication,security,"This epic covers the test cases for all features related to the *My Profile* section, ensuring they function correctly, securely, and efficiently across different scenarios.
+
+*Scope:*
+
+h4. *1. Register â†’* {color:#36b37e}*Done by Omar*{color}
+
+* Verify new users can successfully create an account with valid details.
+* Ensure validation errors appear for missing or incorrect input fields.
+* Check that account activation (if required) is working properly.
+* Confirm duplicate accounts cannot be created with the same email.
+
+h4. *2. Forgotten Password*
+
+* Verify users can request a password reset via email.
+* Check email notifications are sent with the correct reset link.
+* Ensure reset links expire after a defined time.
+* Validate users can successfully update their password.
+
+h4. *3. My Account*
+
+* Verify users can view and update personal details.
+* Ensure changes are correctly saved and reflected.
+* Validate session management (e.g., auto-logout after inactivity).
+* Check access restrictions for unauthorized users.
+
+h4. *4. Address Book*
+
+* Verify users can add, edit, and delete addresses.
+* Ensure validation rules apply (e.g., valid postal code format).
+* Check the default address selection works as expected.
+* Test API responses and database updates.
+
+h4. *5. Wish List*
+
+* Verify users can add/remove items to their wish list.
+* Ensure wish list items persist after logout and login.
+* Check UI functionality for sorting and managing wish list items.
+
+h4. *6. Order History*
+
+* Validate users can view past orders with correct details.
+* Ensure filtering and sorting options work properly.
+* Verify invoice downloads and order status updates.
+
+h4. *7. Downloads*
+
+* Check digital purchases appear in the downloads section.
+* Verify download limits and expiration rules.
+* Ensure secure access to purchased files.
+
+h4. *8. Recurring Payments*
+
+* Test adding, modifying, and removing payment methods.
+* Verify recurring payments process correctly.
+* Ensure security measures (e.g., encryption, tokenization) are in place.
+
+h4. *9. Reward Points*
+
+* Validate points calculation and redemption rules.
+* Ensure correct points are awarded based on transactions.
+* Check for unauthorized point modifications.
+
+h4. *10. Returns*
+
+* Verify users can request returns for eligible products.
+* Ensure return policies and reasons are displayed correctly.
+* Check email notifications and status tracking for return requests.
+
+h4. *11. Transactions*
+
+* Validate transaction history displays correctly.
+* Check details such as payment method, amount, and status.
+* Ensure refund transactions appear correctly.
+
+h4. *12. Newsletter*
+
+* Verify users can subscribe/unsubscribe from newsletters.
+* Ensure email preferences update correctly.
+* Check confirmation emails are sent for subscription changes.
+
+h3. *Acceptance Criteria:*
+
+âœ… All test cases pass successfully.
+âœ… No security or access control issues exist.
+âœ… UI and API functionalities work as expected.
+âœ… Performance and usability criteria are met.",,,,,,,,
+Test Case,DEPI-37,10429,Contact Website Owner via Contact Form,DEPI-Automated-Testing-Final-Project,5/9/2025 18:53,Contact,,"*As a* user *I want to* fill in my name, email, subject, and message in a contact form *So that* I can send a message to the website owner or support team",Nothing happend after clicking Send Message,"A success message appears (e.g., ""Message sent successfully""), or the user is informed of successful submission in some way.",The user is on the Contact page of the website,,,SCRUM Sprint 2,Failed,Header Navigation Menu
+Test Case,DEPI-36,10398,Users can track there orders,DEPI-Automated-Testing-Final-Project,5/8/2025 17:45,,,"As a user, I want to track my orders",the page requested cannot be found.,the site provides the user where is the product.,* The user must have a registered account.,,,SCRUM Sprint 1,Failed,
+Test Case,DEPI-33,10363,Checkout Product with Existing Address,DEPI-Automated-Testing-Final-Project,5/3/2025 11:53,Checkout,,"As a registered user, I want to choose a payment method during checkout so that I can complete my purchase.","No payment methods are displayed. A warning message appears stating:
+
+{quote}â€œNo Payment options are available. Please contact us for assistance!â€{quote}
+
+Additionally, the checkout process cannot continue.","The system should display available payment options, allowing the user to select one and proceed with placing the order.","* User is logged in.
+* At least one product is added to the shopping cart.
+
+* The user has a saved billing address in their account.",,,SCRUM Sprint 2,Failed,Testing My Profile Features
+Test Case,DEPI-27,10332,Smooth Navigation for AddOns Dropdown Menu,DEPI-Automated-Testing-Final-Project,4/3/2025 17:21,AddOns,,,work as expected.,"* The dropdown should expand *instantly* when the user interacts with it.
+* The menu should remain open *until a selection is made* or the user clicks outside.
+* Clicking on an option should *immediately load* the relevant page.
+* The navigation should be *smooth and responsive*, ensuring a seamless experience.
+* If an option requires installation or purchase, the system should *prompt the user* with confirmation.",No Preconditions,,,SCRUM Sprint 2,Succeeded ,Header Navigation Menu
+Test Case,DEPI-26,10331,Efficient Product Browsing via Mega Menu,DEPI-Automated-Testing-Final-Project,4/3/2025 17:16,MegaMenu,,"As an *online shopper*, I want to quickly navigate through different product categories using a *mega menu*, so that I can efficiently find and purchase the items I need without unnecessary clicks.",The whole mega menu function doesnâ€™t works.,"* The mega menu should provide a *smooth, intuitive* navigation experience.
+* Users should *quickly find* the product categories and subcategories.
+* The transition from the menu to product pages should be *fast and seamless*.
+* The website should maintain a *consistent and responsive* layout for all device sizes.",No Preconditions,,,SCRUM Sprint 2,Failed,Header Navigation Menu
+Test Case,DEPI-25,10330,Allow the user to access the Blog,DEPI-Automated-Testing-Final-Project,4/3/2025 17:11,Blog,,"As a user, I want to surf the Blog page to be up to date with the latest activities and news.",Everything works as designed,The user can access all the blog page content from any place on the website.,No Preconditions,,,,,Header Navigation Menu
+Test Case,DEPI-24,10300,"Verify the ""Special"" link is visible and clickable",DEPI-Automated-Testing-Final-Project,4/2/2025 9:52,,,"*As a* user, I want to see the ""Special"" link with a ""Hot"" badge so that I am aware of special offers or features.","Everything works as expected but there is no â€œSpecial productsâ€
+â€ {color:#4c9aff}*There are no special offer products to list.* {color}â€","The user is redirected to the Special page without errors. 
+The ""Special"" page loads correctly, and the ""Hot"" badge is visible.",User is on any page of the website.,,,SCRUM Sprint 2,Succeeded ,Header Navigation Menu
+Test Case,DEPI-23,10299,"Verify the ""Home"" link redirects to the homepage",DEPI-Automated-Testing-Final-Project,4/2/2025 9:49,Home,,"*As a* user, I want to click on the ""Home"" link so that I am redirected to the homepage.",everything works as expected,The user is redirected to the homepage without errors.,User is on any page of the website.,,,SCRUM Sprint 2,Succeeded ,Header Navigation Menu
+Test Case,DEPI-21,10297,Allow users to filter the products,DEPI-Automated-Testing-Final-Project,4/2/2025 8:21,Filteration,,"As a user, I want to filter items on the platform so that I can refine my search and find products that meet my specific criteria.","Option ""Color (e.g., Red, Blue, Black)"" gives the user the wrong result.","* The filtered results should match the selected criteria.
+* The user should be able to refine results by adding/removing filters.
+* If no items match the selected filters, a proper message should be displayed.",None,,,SCRUM Sprint 2,Failed,Implement and Test Advanced Filtering Functionality
+Test Case,DEPI-19,10264,Allow Users to Search for Items on the Platform,DEPI-Automated-Testing-Final-Project,3/19/2025 14:44,Search,,"As a user, I want to search for items on the platform so that I can quickly find the products or content I am looking for.",Everything works as expected,"* The search results display relevant items matching the query.
+* The user can navigate to the desired item's page by clicking on a result.
+* If no results are found, a ""No results found"" message is displayed with possible suggestions.",,,,SCRUM Sprint 2,Succeeded ,Implement and Test Advanced Filtering Functionality
+Test Case,DEPI-18,10237, Verify the Compare Feature for Products,DEPI-Automated-Testing-Final-Project,3/18/2025 15:29,Compare,,"As a user, I want to compare multiple products side by side so that I can make an informed purchase decision based on their specifications, pricing, and other attributes.","Passed, but the comparison feature can work with only one product. The maximum number of products for comparison is four (4).","* Selected products appear in the comparison list.
+* Product details are displayed correctly.
+* Users can add/remove products as intended.
+* Feature restrictions (if any) are enforced.","* The user is logged in (optional if guest users can compare).
+* At least two products are available for comparison.",,,SCRUM Sprint 2,Succeeded ,Implement and Test Advanced Filtering Functionality
+Test Case,DEPI-16,10235,Allow Users to Logout from the Platform,DEPI-Automated-Testing-Final-Project,3/18/2025 13:20,authentication,Logout,"As a user, I want to log out of my account to ensure security.",Everything works as expected,* The user is successfully logged out and redirected to the login page.,* The user must be logged into their account.,,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-15,10234,Allow Users to Subscribe to the Newsletter,DEPI-Automated-Testing-Final-Project,3/18/2025 13:18,NewsLetter,,"As a user, I want to subscribe to the newsletter to receive updates and promotions.",Everything works as expected.,* The user is successfully subscribed to the newsletter and receives a confirmation message/email.,"* The user must have an active email address.
+
+* The newsletter subscription option must be available.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-14,10233,Allow Users to View Transaction History,DEPI-Automated-Testing-Final-Project,3/18/2025 13:16,Transactions,,"As a user, I want to view my transaction history to keep track of my purchases and payments.",Everything works as expected.,"The user can view transaction details, including the date, amount, and payment method.","* The user must have an account.
+
+* The user must have completed at least one transaction.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-13,10232,Allow Users to Return Purchased Items,DEPI-Automated-Testing-Final-Project,3/18/2025 13:15,Returns,,"As a user, I want to return an item I purchased so that I can receive a refund or a replacement.",works as expected.,"The return request is successfully submitted, and the user receives a confirmation message.","* The user must have a registered account.
+* The user must have an eligible item for return.
+* The returns policy must be active.",,,SCRUM Sprint 1,Succeeded ,Testing My Profile Features
+Test Case,DEPI-12,10231,Allow users to Access their reward points,DEPI-Automated-Testing-Final-Project,3/18/2025 13:10,RewardPoints,,"As a user, I want to check my Rewards points with their dates and description.",work as expected,"The Rewards points dashboard should display the userâ€™s reward points with the date on which the points been added, the description and the number of the reward points.",* The user must have an existing registered account.,,,SCRUM Sprint 1,Succeeded ,Testing My Profile Features
+Test Case,DEPI-11,10167,Allow Users to View and Redeem Reward Points,DEPI-Automated-Testing-Final-Project,3/6/2025 14:19,,,"As a user, I want to track and redeem my reward points.",â€œReward pointsâ€œ page display the total number of reward points â€œYour total number of reward points is: *0*â€œ,* The points are correctly displayed and redeemed successfully.,"* The user must be logged in.
+* The reward points system must be enabled.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-10,10166,Allow Users to Manage Their Recurring Payments,DEPI-Automated-Testing-Final-Project,3/6/2025 14:18,,,"As a user, I want to manage my recurring payments.",â€œRecurring Payementâ€œ page show â€œNo results! â€œMessage.,The subscription is modified or canceled successfully.,"* The user must be logged in.
+* The user must have an active subscription.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-9,10165,Allow Users to Access Their Downloads,DEPI-Automated-Testing-Final-Project,3/6/2025 14:15,,,"As a user, I want to access my purchased digital downloads.",everything worked as expected.,The file is downloaded successfully.,"* The user must be logged in.
+* The user must have purchased downloadable items.",,,SCRUM Sprint 1,Succeeded ,Testing My Profile Features
+Test Case,DEPI-8,10136,Allow Users to View Their Order History,DEPI-Automated-Testing-Final-Project,3/4/2025 17:32,,,"As a user, I want to view my past orders.",Everything works as designed,The order details are displayed correctly.,"* The user must be logged in.
+* The ""Order History"" section must be accessible.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-7,10135,Allow Users to Manage Their Wish List,DEPI-Automated-Testing-Final-Project,3/4/2025 17:30,WishList,,"As a user, I want to add, view, and remove products from my wish list.",Everything works as designed,The product is added/removed successfully.,"* The user must be logged in.
+* The ""Wish List"" feature must be enabled.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-6,10134,Allow Users to Manage Their Address Book,DEPI-Automated-Testing-Final-Project,3/4/2025 17:27,AddressBook,,"As a user, I want to add, edit, and delete addresses in my address book.",Everything works as designed,"The address is added, updated, or deleted successfully.","* The user must be logged in.
+* The ""Address Book"" section must be accessible.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-5,10133,Allow Users to Manage Their Account Information,DEPI-Automated-Testing-Final-Project,3/4/2025 17:25,MyAccount,,"As a user, I want to access and update my account details.",Everything works as designed,"The updated information is saved, and a success message is displayed.","* The user must be logged in.
+* The ""My Account"" page must be accessible.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-4,10132,Allow Users to Reset Forgotten Password,DEPI-Automated-Testing-Final-Project,3/4/2025 17:21,Login,password,"As a user, I want to reset my password if I forget it, so I can regain access to my account.",Everything worked as designed,"A confirmation message is displayed, and the user can log in with the new password.","* The user must have an existing registered account.
+* The ""Forgot Password"" page must be accessible.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-3,10099,Allow users to Register into the platform,DEPI-Automated-Testing-Final-Project,2/21/2025 14:45,authentication,Register,"As a new user, I want to register for an account using my email and password so that I can access the platform.",Everything worked as designed,"
+
+* The user account is successfully created.
+* The user is redirected to the dashboard/homepage or a confirmation page","
+
+* The user must not have an existing registered account with the same email.
+* The registration page must be accessible.",,,SCRUM Sprint 1,,Testing My Profile Features
+Test Case,DEPI-1,10000,Allow users to Login into  the platform,DEPI-Automated-Testing-Final-Project,2/10/2025 14:33,Login,MyAccount,"As a user, I want to login into my account using my email and password to access the platform.
+
+h4. ",Everything works as designed,The user is successfully logged in and redirected to the dashboard/homepage.,"* The user must have an existing registered account.
+* The login page must be accessible.",,,SCRUM Sprint 1,,Testing My Profile Features

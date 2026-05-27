@@ -1,0 +1,15 @@
+asset_tag,device,location,owner,status,last_service,next_service,manual_url,serial,firmware,tag,tag
+AST-0001,Dell Latitude 7440,Desk 12,maya@example.com,active,2026-03-10,2026-09-10,https://example.com/manuals/latitude7440,SN-4471299,1.8.2,laptop,issued
+AST-0002,HP LaserJet Pro,Print room,it@example.org,active,2026-04-01,2026-10-01,https://example.com/manuals/hplaserjet,SN-9920184,3.1.0,printer,shared
+AST-0003,Cisco Switch 2960,Server closet,it@example.org,active,2026-02-15,2026-08-15,https://example.com/manuals/cisco2960,SN-1100765,15.2.7,network,rack
+AST-0004,MacBook Pro 14,Desk 5,Tom Lin,active,2026-05-01,2026-11-01,https://example.com/manuals/mbp14,SN-7781043,14.4.1,laptop,issued
+AST-0005,Logitech Webcam,Meeting Room A,it@example.org,active,2026-01-20,2026-07-20,https://example.com/manuals/logiwebcam,SN-3349821,2.0.5,peripheral,shared
+AST-0006,APC UPS 1500,Server closet,it@example.org,maintenance,2026-04-22,2026-05-30,https://example.com/manuals/apcups,SN-5567120,6.2.1,power,rack
+AST-0007,Dell Monitor U2723,Desk 12,maya@example.com,active,2026-03-10,2026-09-10,https://example.com/manuals/u2723,SN-8812047,1.0.3,monitor,issued
+AST-0008,iPad Air,Reception,Tom Lin,active,2026-02-28,2026-08-28,https://example.com/manuals/ipadair,SN-2204918,17.5.0,tablet,shared
+AST-0009,Ubiquiti AP,Ceiling F2,it@example.org,active,2026-01-10,2026-07-10,https://example.com/manuals/ubiquiti,SN-6690332,6.6.55,network,ceiling
+AST-0010,HP EliteDesk,Desk 8,maya@example.com,retired,2025-11-05,,https://example.com/manuals/elitedesk,SN-4471001,2.4.0,desktop,disposed
+AST-0011,Brother Scanner,Print room,it@example.org,active,2026-03-30,2026-09-30,https://example.com/manuals/brother,SN-1192847,1.5.2,scanner,shared
+AST-0012,Lenovo ThinkPad,Desk 3,Tom Lin,active,2026-05-05,2026-11-05,https://example.com/manuals/thinkpad,SN-7723910,1.9.0,laptop,issued
+AST-0013,Polycom Phone,Meeting Room B,it@example.org,maintenance,2026-04-18,2026-05-28,https://example.com/manuals/polycom,SN-3301847,4.0.12,phone,room
+AST-0014,Synology NAS,Server closet,it@example.org,active,2026-02-01,2026-08-01,https://example.com/manuals/synology,SN-9981023,7.2.1,storage,rack

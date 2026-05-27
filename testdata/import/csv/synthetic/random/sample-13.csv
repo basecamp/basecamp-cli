@@ -1,0 +1,16 @@
+candidate_id,name,role,stage,recruiter,interview_date,score,resume_url,source,notes,visa_status
+c-7f21a9,Avery Sloane,Backend Engineer,onsite,recruiter@example.com,2026-05-26,4.2,https://example.com/resumes/c-7f21a9.pdf,LinkedIn,"Strong systems background, asked about on-call expectations",citizen
+c-3b88de,Jordan Mei,Product Designer,screen,Kim Park,2026-05-24,3.8,https://example.com/resumes/c-3b88de.pdf,Referral,"Great portfolio, references the Nimbus project",needs sponsorship
+c-90c4f1,Sam Idris,Data Scientist,offer,recruiter@example.com,2026-05-20,4.6,https://example.com/resumes/c-90c4f1.pdf,Job board,"Negotiating comp, wants remote",citizen
+c-12ee07,Priya Raman,Backend Engineer,applied,Kim Park,,,https://example.com/resumes/c-12ee07.pdf,LinkedIn,,unknown
+c-558a2b,Leo Tran,Frontend Engineer,onsite,recruiter@example.com,2026-05-27,4.0,https://example.com/resumes/c-558a2b.pdf,Referral,"Solid React skills,
+some hesitation on testing practices",permanent resident
+c-7d0119,Maya Cole,Engineering Manager,screen,Kim Park,2026-05-23,3.9,https://example.com/resumes/c-7d0119.pdf,Recruiter outreach,"Led team of 8, asked about growth path",citizen
+c-2a6f3c,Tom Becker,QA Engineer,rejected,recruiter@example.com,2026-05-15,2.7,https://example.com/resumes/c-2a6f3c.pdf,Job board,"Not enough automation experience for the role",citizen
+c-44b9e0,Rae Donovan,Product Manager,offer,Kim Park,2026-05-19,4.5,https://example.com/resumes/c-44b9e0.pdf,Referral,"Strong, multiple competing offers, move fast",citizen
+c-6e1c88,Nina Holt,DevOps Engineer,onsite,recruiter@example.com,2026-05-28,4.1,https://example.com/resumes/c-6e1c88.pdf,LinkedIn,"Kubernetes depth, asked about team size",needs sponsorship
+c-91f7a2,Omar Diaz,Backend Engineer,applied,Kim Park,,,https://example.com/resumes/c-91f7a2.pdf,Job board,,unknown
+c-08bd45,Hana Sato,UX Researcher,hired,recruiter@example.com,2026-05-10,4.7,https://example.com/resumes/c-08bd45.pdf,Referral,"Accepted offer, starts in June",permanent resident
+c-3cc910,Wes Carter,Frontend Engineer,screen,Kim Park,2026-05-25,3.5,https://example.com/resumes/c-3cc910.pdf,LinkedIn,"Junior, eager, needs mentorship",citizen
+c-77a0e3,Lila Frost,Data Engineer,rejected,recruiter@example.com,2026-05-12,3.0,https://example.com/resumes/c-77a0e3.pdf,Job board,"Skills mismatch, more analyst than engineer",citizen
+c-5519bf,Theo Vance,Security Engineer,onsite,Kim Park,2026-05-29,4.3,https://example.com/resumes/c-5519bf.pdf,Recruiter outreach,"Pentesting background, strong references",needs sponsorship

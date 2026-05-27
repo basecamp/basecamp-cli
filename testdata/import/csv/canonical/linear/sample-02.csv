@@ -1,0 +1,236 @@
+ID,Team,Title,Description,Status,Estimate,Priority,Project ID,Project,Creator,Assignee,Labels,Cycle Number,Cycle Name,Cycle Start,Cycle End,Created,Updated,Started,Triaged,Completed,Canceled,Archived,Due Date,Parent issue,Initiatives,Project Milestone ID,Project Milestone,SLA Status,Roadmaps
+IN-10,Nordic-app,License,"Add licence to the nordic app due to the public repo on example.com
+
+[https://example.com/repo](https://example.com/repo)",Done,,High,,,user11@example.com,user11@example.com,Improvement,,,,,Tue May 14 2024 08:53:33 GMT+0000 (GMT),Thu May 23 2024 16:06:19 GMT+0000 (GMT),,,Thu May 23 2024 16:06:19 GMT+0000 (GMT),,,,,,,,
+IN-11,Nordic-app,Eslint,"1) ✅ configure eslint
+
+2) ✅ configure lint-staged
+
+4) ✅ add ""type"": ""module"" to package.json
+
+6) ✅ update eslint packages
+
+7) ✅ update prettier
+
+8) ✅ configure .eslintignore [https://example.com/repo](https://example.com/repo)
+
+9) ✅ change .eslintrc and .lintstagedrc.json into eslint.config.js and lintstagedrc.config.js
+
+10) ✅ fix eslint in vscode
+
+11) ✅ fix prettier in vscode
+
+12) ✅ remove ""cypress"" from exclude and fix the issue
+
+13) ✅ fix eslint errors (npm run lint)
+
+14) ✅ fix ts errors (tsc)
+
+15) ✅ fix line ""// '\\.s?css$': 'identity-obj-proxy',"" in jest.config.ts
+
+16) ✅ test styles with ""vanilla extract"" package
+
+17) ✅ vscode not see the tsconfig (""typescript.tsdk"": ""node_modules/typescript/lib"" - in settings.json)
+
+96) ✅ do the [IN-13](https://linear.app/nordic-app/issue/IN-13/npm-run-init) task
+
+97) ✅ do the [IN-14](https://linear.app/nordic-app/issue/IN-14/configure-postcss) task
+
+98)✅ do the [IN-10](https://linear.app/nordic-app/issue/IN-10/license) task
+
+99) ✅ and after that push to github repo the nordic app
+
+[https://example.com/repo](https://example.com/repo)",Done,,High,,,user11@example.com,user11@example.com,Build,,,,,Tue May 14 2024 08:55:10 GMT+0000 (GMT),Thu May 23 2024 16:41:11 GMT+0000 (GMT),Tue May 14 2024 17:10:40 GMT+0000 (GMT),,Thu May 23 2024 16:41:11 GMT+0000 (GMT),,,,,,,,
+IN-13,Nordic-app,npm run init,Check the command for bug-free,Done,,High,,,user11@example.com,user11@example.com,,,,,,Tue May 14 2024 16:55:13 GMT+0000 (GMT),Thu May 23 2024 15:09:28 GMT+0000 (GMT),Thu May 23 2024 15:09:18 GMT+0000 (GMT),,Thu May 23 2024 15:09:28 GMT+0000 (GMT),,,,,,,,
+IN-14,Nordic-app,configure postcss,Need to configure the postcss.config.js file,Done,,High,,,user11@example.com,user11@example.com,,,,,,Tue May 14 2024 17:10:26 GMT+0000 (GMT),Thu May 23 2024 15:12:12 GMT+0000 (GMT),,,Thu May 23 2024 15:12:12 GMT+0000 (GMT),,,,,,,,
+IN-15,Nordic-app,Readme,"Need to fill the README.md file
+
+99) add thanks for the design templates to the company which share it free + link",Todo,,High,,,user11@example.com,user11@example.com,,,,,,Tue May 14 2024 17:16:29 GMT+0000 (GMT),Mon Jun 17 2024 09:01:39 GMT+0000 (GMT),,,,,,,,,,,
+IN-16,Nordic-app,Migrate to prettier flat config,.prettierrc > prettier.config.js,Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 10:02:19 GMT+0000 (GMT),Thu May 23 2024 10:02:19 GMT+0000 (GMT),,,,,,,,,,,
+IN-17,Nordic-app,Ideas how to organize test file structure,"// ""tests/config/\*\*/\*.js"",
+
+// ""tests/format/\*\*/format.test.js"",
+
+// ""tests/integration/\*\*/\*.js"",
+
+// ""tests/unit/\*\*/\*.js"",
+
+// ""tests/dts/unit/\*\*/\*.js"",
+
+// ""scripts/release/**tests**/\*\*/\*.spec.js"",",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 10:15:06 GMT+0000 (GMT),Thu May 23 2024 10:15:06 GMT+0000 (GMT),,,,,,,,,,,
+IN-18,Nordic-app,NORDIC TODO (Backlog list),"\## Roadmap (I need a production-ready nextjs project to use in the future)
+
+---
+
+1. (done) create todo list
+2. (done) add pages
+3. (done) add i18n
+4. add A/B testing
+5. nextAuth or lucia auth or something else
+6. add icons
+7. use feature-sliced design
+8. (done) configure rtl + jest + cypress
+9. write unit + integration + e2e tests
+10. user-friendly UI (loaders+skeleton, useTransition, useDefferedValue, theme switcher, language switcher, toast component)
+11. optimization (lazy + suspense)
+12. eslint rule for react dependencies (eslint-plugin-react-hooks)
+13. web vitals
+14.css variables for styling and theming
+
+## Tech stack
+
+---
+
+0. REDUX OR ZUSTAND OR XSTATE OR ANY ElSE [https://www.youtube.com/watch?v=JaM2rExmmqs](https://www.youtube.com/watch?v=JaM2rExmmqs)
+1. redux toolkit + redux code splitting [https://redux.js.org/usage/code-splitting#using-a-reducer-manager](https://redux.js.org/usage/code-splitting#using-a-reducer-manager)
+2. redux saga
+3. ?redux persist (indexedDB) - check maybe this boilerplate is ready on github vercel
+4. ??? \\\_\\\_\\\_ rxjs
+5. reselect + rereselect
+6. ??? \\\_\\\_\\\_ axios
+7. (done) react hook form + zod
+8. (done) i18n
+9. (done) typescript
+10. react query + fetch + AbortController
+11. (done) jest/vitest + react testing library + playwright/cypress
+12. ui components with snapshot tests OR radix ui (+ customize CSS styles (with hover,active,focus states) for one of radix component to work out how to use ready-made component, but with custom styles) OR shadcn OR nextui
+13. ??? \\\_\\\_\\\_ styled components OR emotion OR vanilla-extract (zero-runtime css-in-js) or stylexjs by facebook - [https://vanilla-extract.style/](https://vanilla-extract.style/)
+14. (done) prettier
+15. prettier replace with biome ([https://biomejs.dev/](https://biomejs.dev/))
+16. (done) eslint
+17. husky
+18. docker - [https://mentorcruise.com/blog/how-to-dockerize-a-react-app-and-deploy-it-easily/](https://mentorcruise.com/blog/how-to-dockerize-a-react-app-and-deploy-it-easily/)
+19. makefile
+20. (done) nextjs
+21. github actions - [https://example.com/repo](https://example.com/repo)
+22. chrome dev tools
+23. immer
+24. [https://realworld-docs.netlify.app/docs/specs/frontend-specs/api](https://realworld-docs.netlify.app/docs/specs/frontend-specs/api)
+25. sentry
+26. websockets
+27. browserlist
+28. - turn on ""isolatedModules"" for encapsulating the TYPES for components like (export type { ArticleTypes } from './Article.types')
+29. PWA - [https://www.youtube.com/playlist?list=PLNYkxOF6rcIB2xHBZ7opgc2Mv009X87Hh](https://www.youtube.com/playlist?list=PLNYkxOF6rcIB2xHBZ7opgc2Mv009X87Hh)
+30. indexedDB
+31. monorepo
+32. graphql + apollo/relay
+33. json server or mswjs for mock data
+34.vite or tsup for ui components library
+
+
+# Wix boilerplate
+
+1. styling
+2. tdd (jest + rtl + cypress)
+3. icons? and images
+4. file structure (FSD)
+
+# Resources:
+
+---
+
+0. [https://photos.google.com/search/\_m8_Favorites/photo/AF1QipOMA25IfcphLcrFQUkouLYabhG2EyPwzuNBptpL](https://photos.google.com/search/\_m8_Favorites/photo/AF1QipOMA25IfcphLcrFQUkouLYabhG2EyPwzuNBptpL?authuser=0)
+1. [https://example.com/repo](https://example.com/repo)
+2. [https://demos.themeselection.com/sneat-bootstrap-html-admin-template/html/vertical-menu-template/dashboards-analytics.html](https://demos.themeselection.com/sneat-bootstrap-html-admin-template/html/vertical-menu-template/dashboards-analytics.html)",Backlog,,Low,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 12:01:56 GMT+0000 (GMT),Wed Jul 10 2024 16:19:31 GMT+0000 (GMT),,,,,,,,,,,
+IN-19,Nordic-app,Configure styles,"1) add mixin for media queries
+2) globalStyle.css.ts and global.css refactor and merge",Todo,,High,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 13:47:32 GMT+0000 (GMT),Sun Jun 16 2024 21:06:58 GMT+0000 (GMT),,,,,,,,,,,
+IN-20,Nordic-app,Fix deprecation package for eslint flat config,eslint-plugin-deprecation - [https://www.npmjs.com/package/eslint-plugin-deprecation](https://www.npmjs.com/package/eslint-plugin-deprecation),Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 14:54:46 GMT+0000 (GMT),Thu May 23 2024 14:54:46 GMT+0000 (GMT),,,,,,,,,,,
+IN-21,Nordic-app,Configure theming,"1) add cookie for choosen theme
+2) move to the env variable or to the middlewar variable with DEFAULT_THEME=""dark"" and re-use it everywhere (layout.tsx, middleware, Theme component etc)
+3) css tokens",Todo,,Urgent,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 16:08:02 GMT+0000 (GMT),Tue Jul 02 2024 12:01:23 GMT+0000 (GMT),,,,,,,,,,,
+IN-22,Nordic-app,Improve i18n,"1) ✅ move [getDictionary.ts](https://example.com/repo) file to helpers or something else
+2) ✅ check how to split json files OR multiple translation files per locale nextjs OR namespaces - [https://example.com/repo](https://example.com/repo)
+3) ✅ how to do interpolation in nextjs i18n, like t('validation', {value: 100});?????
+4) ✅ maybe better to choose 3d-party library for i18n instead of relying nextjs i18n (withTranslation hoc, useTranslation hook)
+5) ✅ create fabric/decorator/orHowItCanBeCalled for i18n to encapsulate the i18n api and simplify future refactoring/migrations to another libraries
+6) ✅ remove old libraries footprients from project which used to implement i18n
+7) ✅ update middleware and remove redundant packages from project middleware
+9) ✅ remove comments from client.ts and server.ts
+10) ✅ try to fix ""generateStaticParams"" in layout.tsx
+11) add redirect to default lang if user type unexisted locale in URL
+12) ✅ cookie settings/getting by user selecting lang on website
+13) cookie for theme switcher fix
+14) ✅ commit all and then migrate into next-intl - [https://next-intl-docs.vercel.app/docs/getting-started](https://next-intl-docs.vercel.app/docs/getting-started)
+15) ✅ client hooks (useFormatter, useLocale) put to production build, but server helpers (getLocale etc) not put to production build
+16) ✅ finalize the matcher to have a right redirects, e.g. localhost:3000/fr/login > localhost:3000/login
+17) ✅ fix error on login page, look the screen in telegram
+18) ✅ fix 'localhost:3000/' because we get 404 instead of home page with eng lang
+18) close the i18n task after [IN-31](https://linear.app/nordic-app/issue/IN-31/add-errortsx-and-global-errortsx-pages)",Done,,High,,,user11@example.com,user11@example.com,,,,,,Thu May 23 2024 16:40:39 GMT+0000 (GMT),Sat Jun 22 2024 17:01:01 GMT+0000 (GMT),Mon May 27 2024 18:46:19 GMT+0000 (GMT),,Sat Jun 22 2024 17:01:01 GMT+0000 (GMT),,,,,,,,
+IN-23,Nordic-app,VS code autocomplete for test writing,"1) create jsconfig.json and add jest configuration for autocomplete
+
+{
+
+    ""typeAcquisition"": {
+
+        ""include"": \[""jest""\]
+
+    }
+
+}",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Sat May 25 2024 12:31:50 GMT+0000 (GMT),Sat May 25 2024 12:31:50 GMT+0000 (GMT),,,,,,,,,,,
+IN-24,Nordic-app,Write TDD tests,"1) from ""red"" >""green"" > ""refactor"", means ""write a failing test first red then you write some code to get it passing green then go back and optimize or refactor the code""",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Sat May 25 2024 12:41:58 GMT+0000 (GMT),Sat May 25 2024 12:41:58 GMT+0000 (GMT),,,,,,,,,,,
+IN-25,Nordic-app,Configure service worker (SW) and webworker,"1) sw - [https://example.com/repo](https://example.com/repo)
+2) ww - [https://example.com/repo](https://example.com/repo)",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Sat May 25 2024 21:30:09 GMT+0000 (GMT),Sat May 25 2024 21:30:09 GMT+0000 (GMT),,,,,,,,,,,
+IN-26,Nordic-app,LocaleSwitcher component,"1) TDD
+2) semantic html (select fron radix-ui)
+3) styles
+4) optimization",Todo,,Medium,,,user11@example.com,user11@example.com,,,,,,Mon May 27 2024 18:43:24 GMT+0000 (GMT),Mon May 27 2024 18:43:24 GMT+0000 (GMT),,,,,,,,,,,
+IN-27,Nordic-app,ErrorBoundary component,"1) ErrorBoundary component add
+2) error.tsx component add to app directory",Done,,Medium,,,user11@example.com,user11@example.com,,,,,,Tue May 28 2024 10:48:29 GMT+0000 (GMT),Sat Jun 15 2024 18:51:01 GMT+0000 (GMT),,,Sat Jun 15 2024 18:51:01 GMT+0000 (GMT),,,,,,,,
+IN-28,Nordic-app,Code splitting,"Make a component-based code splitting (apply it to search dropdown, etc)",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Tue May 28 2024 12:35:15 GMT+0000 (GMT),Tue May 28 2024 12:35:15 GMT+0000 (GMT),,,,,,,,,,,
+IN-29,Nordic-app,add fallback loader to LocaleProvider component,"1) create loader or skeleton
+2) test for SSR SEO impact loading.tsx file and customize the design if everything is fine",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Tue May 28 2024 18:04:48 GMT+0000 (GMT),Sat Jun 15 2024 19:46:26 GMT+0000 (GMT),,,,,,,,,,,
+IN-30,Nordic-app,Create file structure for routes,"1) add all pages which planned to create (profile, dashboard etc)
+2) in file config.ts add all created routes to generate the sitemap.xml",Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Wed May 29 2024 17:32:05 GMT+0000 (GMT),Wed May 29 2024 17:32:05 GMT+0000 (GMT),,,,,,,,,,,
+IN-31,Nordic-app,Add error.tsx and global-error.tsx pages,"1) add styles to global-error.tsx
+2) add styles to error.ts instead of ErrorBoundary component
+3) finish info in metadata (manifest, theme etc)
+4) not-found.tsx redesign (maybe convert from 'use-client' to server) and make it the same design as error.tsx and error.ts",Todo,,High,,,user11@example.com,user11@example.com,,,,,,Fri May 31 2024 19:09:03 GMT+0000 (GMT),Fri Jun 21 2024 20:11:49 GMT+0000 (GMT),,,,,,,,,,,
+IN-32,Nordic-app,Add test for i18n routing,[https://example.com/repo](https://example.com/repo),Todo,,Low,,,user11@example.com,user11@example.com,,,,,,Sat Jun 01 2024 11:42:21 GMT+0000 (GMT),Sat Jun 01 2024 11:42:21 GMT+0000 (GMT),,,,,,,,,,,
+IN-33,Nordic-app,template.ts,[https://nextjs.org/docs/app/api-reference/file-conventions/template](https://nextjs.org/docs/app/api-reference/file-conventions/template),Done,,Low,,,user11@example.com,user11@example.com,,,,,,Wed Jun 12 2024 20:05:12 GMT+0000 (GMT),Sat Jun 15 2024 18:51:48 GMT+0000 (GMT),,,Sat Jun 15 2024 18:51:48 GMT+0000 (GMT),,,,,,,,
+IN-34,Nordic-app,Web Vitals,[https://nextjs.org/learn-pages-router/seo/web-performance](https://nextjs.org/learn-pages-router/seo/web-performance),Todo,,Medium,,,user11@example.com,user11@example.com,,,,,,Sat Jun 15 2024 18:52:21 GMT+0000 (GMT),Sat Jun 15 2024 18:52:21 GMT+0000 (GMT),,,,,,,,,,,
+IN-35,Nordic-app,Auth,1) read more about 'next-auth' package and search alternatives,Todo,,Medium,,,user11@example.com,user11@example.com,,,,,,Mon Jun 17 2024 21:11:57 GMT+0000 (GMT),Mon Jun 17 2024 21:11:57 GMT+0000 (GMT),,,,,,,,,,,
+IN-36,Nordic-app,Add api.ts wrapper,It needs to be created to work with API requests,Todo,,High,,,user11@example.com,user11@example.com,,,,,,Sat Jun 22 2024 19:22:20 GMT+0000 (GMT),Sat Jun 22 2024 19:22:20 GMT+0000 (GMT),,,,,,,,,,,
+IN-37,Nordic-app,Monorepo,"Configure NX monorepo
+
+1) [✅](https://emojipedia.org/check-mark-button) fix error ""Cannot use import statement outside a module""
+2) add ui components library
+3) [✅](https://emojipedia.org/check-mark-button) configure showcase project for landings
+4) decide what to do with 'e2e' directories in 'apps' and configure e2e tests
+5) [✅](https://emojipedia.org/check-mark-button) return next.config.js to next.config.mjs
+6) migrate from jest to vitest
+7) when run command ""nx storybook ui"" need to fix an error ""The CJS build of Vite's Node API is deprecated. See [https://vitejs.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated](https://vitejs.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated) for more details.""
+8) configure husky and linter (lint-stage)
+9) pre-push hook edit (npm run test:unit)
+10) replace json-server with msw ([https://www.npmjs.com/package/msw](https://www.npmjs.com/package/msw)) or nextjs api routes
+11) remove all ""deprecated\_"" files
+12) [✅](https://emojipedia.org/check-mark-button) check what dependencies can move into devDepencies
+13) [✅](https://emojipedia.org/check-mark-button) fix command ""nx dev dashboard --verbose""
+14) [✅](https://emojipedia.org/check-mark-button) fix error ""install command is deprecated"" in console for husky install
+15) [✅](https://emojipedia.org/check-mark-button) '.vscode/\*' dir remove from git index and check all other directories and files to remove irrelevant from git index
+16) configure aliases for all projects, not only for dashboard (in tsconfig.json) - ""@/*"": \[""apps/dashboard/src/*""\],
+17) fix warning for 'nx lint ui --verbose' - ""Pages directory cannot be found at /Users/andriihrynenko/Information/2_Areas/Code/Sandbox/pet_projects/nordic/libs/ui/pages or /Users/andriihrynenko/Information/2_Areas/Code/Sandbox/pet_projects/nordic/libs/ui/src/pages. If using a custom path, please configure with the `no-html-link-for-pages` rule in your eslint config file.""
+18) fix error for command 'nx lint dashboard --versobe'
+19) [✅](https://emojipedia.org/check-mark-button) check file and key-values in file 'tsconfig.spec.json' (like ""module"": ""commonjs"")
+20) add package.json file to all project with meta data
+21) add readme with all commands for monorepo
+22) [✅](https://emojipedia.org/check-mark-button) configure vite build for ui library
+23) configure project.json files in every project
+24) duplicated keys of tsconfig.json (of every project) remove because they are used in tsconfig.base.json
+25) convert from tsc to swc using command 'nx g swc mylib' - [https://nx.dev/nx-api/js/generators/convert-to-swc](https://nx.dev/nx-api/js/generators/convert-to-swc)
+26) work out how works releases in nx monorepo (**nx release version) -** [https://nx.dev/nx-api/js/generators/release-version](https://nx.dev/nx-api/js/generators/release-version)
+27) fix command 'nx test ui --verbose'
+28) add the same license to all projects or only in root
+29) partial run the monorepo (**Run Tasks on Projects Affected by a PR**) - [https://nx.dev/features/run-tasks](https://nx.dev/features/run-tasks)
+30) replace cypress with playwright
+31) remove footprints (jest) after migrating into vitest
+32) when I run ""nx test dashboard"" test running for all apps and libs. need to isolate running tests only for project which is in command ""nx test dashboard""
+33) generate ci flow (npx nx generate ci-workflow --ci=github) - [https://nx.dev/getting-started/tutorials/react-monorepo-tutorial#generate-a-ci-workflow](https://nx.dev/getting-started/tutorials/react-monorepo-tutorial#generate-a-ci-workflow)
+
+Resources:
+
+* [https://nx.dev/concepts/decisions/dependency-management](https://nx.dev/concepts/decisions/dependency-management)
+* [https://medium.com/@sargashte118/setup-next-js-and-react-project-in-nx-monorepo-21391b42a8f6](https://medium.com/@sargashte118/setup-next-js-and-react-project-in-nx-monorepo-21391b42a8f6)
+* [https://example.com/repo](https://example.com/repo)
+* [https://example.com/repo](https://example.com/repo)",In Progress,,Urgent,,,user11@example.com,user11@example.com,,,,,,Tue Jul 02 2024 12:01:09 GMT+0000 (GMT),Fri Jul 12 2024 18:43:10 GMT+0000 (GMT),Tue Jul 02 2024 12:01:09 GMT+0000 (GMT),,,,,,,,,,
+IN-38,Nordic-app,Zustand,"1) replace redux with Zustand
+2) configure file structure for state manager",Todo,,Urgent,,,user11@example.com,user11@example.com,,,,,,Tue Jul 02 2024 12:02:14 GMT+0000 (GMT),Tue Jul 02 2024 12:02:14 GMT+0000 (GMT),,,,,,,,,,,

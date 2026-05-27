@@ -1,0 +1,14 @@
+deal_id,account,owner,stage,amount,close_ts,next_step,depends_on,probability
+D-5001,Brightwave Inc,jordan@example.com,proposal,48000,1716336000,Send revised quote,,0.6
+D-5002,Cobalt Labs,Riya Shah,negotiation,120000,1717545600,Legal review of MSA,D-5001,0.75
+D-5003,Pinnacle Supply,jordan@example.com,qualified,22000,1718755200,Schedule demo,,0.3
+D-5004,Nova Media,Riya Shah,closed won,87000,1715731200,Kickoff call,,1.0
+D-5005,Lumen Group,marco@example.org,proposal,64000,1719360000,Pricing approval,D-5002,0.55
+D-5006,Harbor Realty,jordan@example.com,prospecting,15000,1721347200,Discovery call,,0.15
+D-5007,DataPeak,Riya Shah,negotiation,150000,1717113600,Finalize terms,D-5004,0.8
+D-5008,Forge Advisors,marco@example.org,closed lost,40000,1714521600,Follow up next quarter,,0.0
+D-5009,Greystone LLC,jordan@example.com,qualified,33000,1720137600,Send case studies,,0.35
+D-5010,Orchard Foods,Riya Shah,proposal,72000,1718323200,Address security questions,D-5007,0.65
+D-5011,Quartz Bank,marco@example.org,prospecting,200000,1722556800,Identify champion,,0.1
+D-5012,Vela Partners,jordan@example.com,negotiation,95000,1716940800,Contract redlines,D-5005,0.7
+D-5013,Sol Energy,Riya Shah,closed won,58000,1715126400,Onboarding handoff,,1.0
