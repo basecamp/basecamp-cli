@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "record_id": { "column_index": 0, "column_name": "source_id" },
+  "title": { "column_index": 1, "column_name": "task" },
+  "description": { "column_index": 2, "column_name": "details" },
+  "todolist": { "column_index": 3, "column_name": "phase" },
+  "status": { "column_index": 4, "column_name": "state" },
+  "assignees": {
+    "column_index": 5,
+    "column_name": "owner",
+    "mapping_policy": "leave_unassigned_when_ambiguous"
+  },
+  "due_on": { "column_index": 6, "column_name": "due" },
+  "attachment_urls": [{ "column_index": 7, "column_name": "reference" }],
+  "custom_fields": "all_unmapped_columns"
+}

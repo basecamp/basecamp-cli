@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "mode": "new_project",
+  "project_name": "Board Export Import Demo",
+  "todolist_strategy": "create_from_column"
+}

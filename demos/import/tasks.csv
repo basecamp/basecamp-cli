@@ -1,0 +1,4 @@
+source_id,task,details,phase,state,owner,due,reference,impact
+IMP-001,Confirm launch checklist,"Review launch checklist with support and sales leads.",Launch Prep,Todo,alex@example.com,2026-06-01,https://example.com/launch/checklist,High
+IMP-002,Draft customer announcement,"Write a concise announcement for customers and internal teams.",Communications,In Progress,jamie@example.com,2026-06-03,https://example.com/docs/announcement,Medium
+IMP-003,Schedule post-launch review,"Book a 30-minute review after the launch window closes.",Follow-up,Waiting,Riley Chen,2026-06-10,,Low
