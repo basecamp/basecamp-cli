@@ -210,6 +210,7 @@ ARG basecamp gauges update 00 <id>
 ARG basecamp help 00 [command]
 ARG basecamp hillcharts track 00 <todolist-ids>
 ARG basecamp hillcharts untrack 00 <todolist-ids>
+ARG basecamp import inspect 00 <csv-path>
 ARG basecamp lineup create 00 <name>
 ARG basecamp lineup create 01 <date>
 ARG basecamp lineup delete 00 <id|url>
@@ -767,6 +768,15 @@ CMD basecamp hillcharts
 CMD basecamp hillcharts show
 CMD basecamp hillcharts track
 CMD basecamp hillcharts untrack
+CMD basecamp import
+CMD basecamp import compile
+CMD basecamp import execute
+CMD basecamp import followup
+CMD basecamp import inspect
+CMD basecamp import plan
+CMD basecamp import preflight
+CMD basecamp import repair
+CMD basecamp import status
 CMD basecamp lineup
 CMD basecamp lineup create
 CMD basecamp lineup delete
@@ -9370,6 +9380,212 @@ FLAG basecamp hillcharts untrack --styled type=bool
 FLAG basecamp hillcharts untrack --todolist type=string
 FLAG basecamp hillcharts untrack --todoset type=string
 FLAG basecamp hillcharts untrack --verbose type=count
+FLAG basecamp import --account type=string
+FLAG basecamp import --agent type=bool
+FLAG basecamp import --cache-dir type=string
+FLAG basecamp import --count type=bool
+FLAG basecamp import --help type=bool
+FLAG basecamp import --hints type=bool
+FLAG basecamp import --ids-only type=bool
+FLAG basecamp import --in type=string
+FLAG basecamp import --jq type=string
+FLAG basecamp import --json type=bool
+FLAG basecamp import --markdown type=bool
+FLAG basecamp import --md type=bool
+FLAG basecamp import --no-hints type=bool
+FLAG basecamp import --no-stats type=bool
+FLAG basecamp import --profile type=string
+FLAG basecamp import --project type=string
+FLAG basecamp import --quiet type=bool
+FLAG basecamp import --stats type=bool
+FLAG basecamp import --styled type=bool
+FLAG basecamp import --todolist type=string
+FLAG basecamp import --verbose type=count
+FLAG basecamp import compile --account type=string
+FLAG basecamp import compile --agent type=bool
+FLAG basecamp import compile --cache-dir type=string
+FLAG basecamp import compile --count type=bool
+FLAG basecamp import compile --destination type=string
+FLAG basecamp import compile --help type=bool
+FLAG basecamp import compile --hints type=bool
+FLAG basecamp import compile --ids-only type=bool
+FLAG basecamp import compile --in type=string
+FLAG basecamp import compile --inspection type=string
+FLAG basecamp import compile --jq type=string
+FLAG basecamp import compile --json type=bool
+FLAG basecamp import compile --mapping type=string
+FLAG basecamp import compile --markdown type=bool
+FLAG basecamp import compile --md type=bool
+FLAG basecamp import compile --no-hints type=bool
+FLAG basecamp import compile --no-stats type=bool
+FLAG basecamp import compile --out type=string
+FLAG basecamp import compile --profile type=string
+FLAG basecamp import compile --project type=string
+FLAG basecamp import compile --quiet type=bool
+FLAG basecamp import compile --stats type=bool
+FLAG basecamp import compile --styled type=bool
+FLAG basecamp import compile --todolist type=string
+FLAG basecamp import compile --verbose type=count
+FLAG basecamp import execute --account type=string
+FLAG basecamp import execute --agent type=bool
+FLAG basecamp import execute --approved type=bool
+FLAG basecamp import execute --artifact type=string
+FLAG basecamp import execute --cache-dir type=string
+FLAG basecamp import execute --count type=bool
+FLAG basecamp import execute --help type=bool
+FLAG basecamp import execute --hints type=bool
+FLAG basecamp import execute --ids-only type=bool
+FLAG basecamp import execute --in type=string
+FLAG basecamp import execute --jq type=string
+FLAG basecamp import execute --json type=bool
+FLAG basecamp import execute --markdown type=bool
+FLAG basecamp import execute --md type=bool
+FLAG basecamp import execute --no-hints type=bool
+FLAG basecamp import execute --no-stats type=bool
+FLAG basecamp import execute --profile type=string
+FLAG basecamp import execute --project type=string
+FLAG basecamp import execute --quiet type=bool
+FLAG basecamp import execute --stats type=bool
+FLAG basecamp import execute --styled type=bool
+FLAG basecamp import execute --todolist type=string
+FLAG basecamp import execute --verbose type=count
+FLAG basecamp import followup --account type=string
+FLAG basecamp import followup --agent type=bool
+FLAG basecamp import followup --artifact type=string
+FLAG basecamp import followup --cache-dir type=string
+FLAG basecamp import followup --count type=bool
+FLAG basecamp import followup --help type=bool
+FLAG basecamp import followup --hints type=bool
+FLAG basecamp import followup --ids-only type=bool
+FLAG basecamp import followup --in type=string
+FLAG basecamp import followup --jq type=string
+FLAG basecamp import followup --json type=bool
+FLAG basecamp import followup --markdown type=bool
+FLAG basecamp import followup --md type=bool
+FLAG basecamp import followup --no-hints type=bool
+FLAG basecamp import followup --no-stats type=bool
+FLAG basecamp import followup --out type=string
+FLAG basecamp import followup --profile type=string
+FLAG basecamp import followup --project type=string
+FLAG basecamp import followup --quiet type=bool
+FLAG basecamp import followup --reviewed type=bool
+FLAG basecamp import followup --stats type=bool
+FLAG basecamp import followup --styled type=bool
+FLAG basecamp import followup --todolist type=string
+FLAG basecamp import followup --verbose type=count
+FLAG basecamp import inspect --account type=string
+FLAG basecamp import inspect --agent type=bool
+FLAG basecamp import inspect --cache-dir type=string
+FLAG basecamp import inspect --count type=bool
+FLAG basecamp import inspect --help type=bool
+FLAG basecamp import inspect --hints type=bool
+FLAG basecamp import inspect --ids-only type=bool
+FLAG basecamp import inspect --in type=string
+FLAG basecamp import inspect --jq type=string
+FLAG basecamp import inspect --json type=bool
+FLAG basecamp import inspect --markdown type=bool
+FLAG basecamp import inspect --md type=bool
+FLAG basecamp import inspect --no-hints type=bool
+FLAG basecamp import inspect --no-stats type=bool
+FLAG basecamp import inspect --profile type=string
+FLAG basecamp import inspect --project type=string
+FLAG basecamp import inspect --quiet type=bool
+FLAG basecamp import inspect --sample-size type=int
+FLAG basecamp import inspect --stats type=bool
+FLAG basecamp import inspect --styled type=bool
+FLAG basecamp import inspect --todolist type=string
+FLAG basecamp import inspect --verbose type=count
+FLAG basecamp import plan --account type=string
+FLAG basecamp import plan --agent type=bool
+FLAG basecamp import plan --artifact type=string
+FLAG basecamp import plan --cache-dir type=string
+FLAG basecamp import plan --count type=bool
+FLAG basecamp import plan --destination type=string
+FLAG basecamp import plan --help type=bool
+FLAG basecamp import plan --hints type=bool
+FLAG basecamp import plan --ids-only type=bool
+FLAG basecamp import plan --in type=string
+FLAG basecamp import plan --inspection type=string
+FLAG basecamp import plan --jq type=string
+FLAG basecamp import plan --json type=bool
+FLAG basecamp import plan --mapping type=string
+FLAG basecamp import plan --markdown type=bool
+FLAG basecamp import plan --md type=bool
+FLAG basecamp import plan --no-hints type=bool
+FLAG basecamp import plan --no-stats type=bool
+FLAG basecamp import plan --profile type=string
+FLAG basecamp import plan --project type=string
+FLAG basecamp import plan --quiet type=bool
+FLAG basecamp import plan --stats type=bool
+FLAG basecamp import plan --styled type=bool
+FLAG basecamp import plan --todolist type=string
+FLAG basecamp import plan --verbose type=count
+FLAG basecamp import preflight --account type=string
+FLAG basecamp import preflight --agent type=bool
+FLAG basecamp import preflight --artifact type=string
+FLAG basecamp import preflight --cache-dir type=string
+FLAG basecamp import preflight --count type=bool
+FLAG basecamp import preflight --help type=bool
+FLAG basecamp import preflight --hints type=bool
+FLAG basecamp import preflight --ids-only type=bool
+FLAG basecamp import preflight --in type=string
+FLAG basecamp import preflight --jq type=string
+FLAG basecamp import preflight --json type=bool
+FLAG basecamp import preflight --markdown type=bool
+FLAG basecamp import preflight --md type=bool
+FLAG basecamp import preflight --no-hints type=bool
+FLAG basecamp import preflight --no-stats type=bool
+FLAG basecamp import preflight --profile type=string
+FLAG basecamp import preflight --project type=string
+FLAG basecamp import preflight --quiet type=bool
+FLAG basecamp import preflight --stats type=bool
+FLAG basecamp import preflight --styled type=bool
+FLAG basecamp import preflight --todolist type=string
+FLAG basecamp import preflight --verbose type=count
+FLAG basecamp import repair --account type=string
+FLAG basecamp import repair --agent type=bool
+FLAG basecamp import repair --artifact type=string
+FLAG basecamp import repair --cache-dir type=string
+FLAG basecamp import repair --count type=bool
+FLAG basecamp import repair --help type=bool
+FLAG basecamp import repair --hints type=bool
+FLAG basecamp import repair --ids-only type=bool
+FLAG basecamp import repair --in type=string
+FLAG basecamp import repair --jq type=string
+FLAG basecamp import repair --json type=bool
+FLAG basecamp import repair --markdown type=bool
+FLAG basecamp import repair --md type=bool
+FLAG basecamp import repair --no-hints type=bool
+FLAG basecamp import repair --no-stats type=bool
+FLAG basecamp import repair --profile type=string
+FLAG basecamp import repair --project type=string
+FLAG basecamp import repair --quiet type=bool
+FLAG basecamp import repair --stats type=bool
+FLAG basecamp import repair --styled type=bool
+FLAG basecamp import repair --todolist type=string
+FLAG basecamp import repair --verbose type=count
+FLAG basecamp import status --account type=string
+FLAG basecamp import status --agent type=bool
+FLAG basecamp import status --artifact type=string
+FLAG basecamp import status --cache-dir type=string
+FLAG basecamp import status --count type=bool
+FLAG basecamp import status --help type=bool
+FLAG basecamp import status --hints type=bool
+FLAG basecamp import status --ids-only type=bool
+FLAG basecamp import status --in type=string
+FLAG basecamp import status --jq type=string
+FLAG basecamp import status --json type=bool
+FLAG basecamp import status --markdown type=bool
+FLAG basecamp import status --md type=bool
+FLAG basecamp import status --no-hints type=bool
+FLAG basecamp import status --no-stats type=bool
+FLAG basecamp import status --profile type=string
+FLAG basecamp import status --project type=string
+FLAG basecamp import status --quiet type=bool
+FLAG basecamp import status --stats type=bool
+FLAG basecamp import status --styled type=bool
+FLAG basecamp import status --todolist type=string
+FLAG basecamp import status --verbose type=count
 FLAG basecamp lineup --account type=string
 FLAG basecamp lineup --agent type=bool
 FLAG basecamp lineup --cache-dir type=string
@@ -16554,6 +16770,15 @@ SUB basecamp hillcharts
 SUB basecamp hillcharts show
 SUB basecamp hillcharts track
 SUB basecamp hillcharts untrack
+SUB basecamp import
+SUB basecamp import compile
+SUB basecamp import execute
+SUB basecamp import followup
+SUB basecamp import inspect
+SUB basecamp import plan
+SUB basecamp import preflight
+SUB basecamp import repair
+SUB basecamp import status
 SUB basecamp lineup
 SUB basecamp lineup create
 SUB basecamp lineup delete

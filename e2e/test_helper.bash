@@ -42,6 +42,9 @@ setup() {
 }
 
 teardown() {
+  # Allow test files to define teardown_extra for per-test cleanup.
+  if type -t teardown_extra &>/dev/null; then teardown_extra; fi
+
   # Restore original environment
   export HOME="$_ORIG_HOME"
   cd "$_ORIG_PWD"
