@@ -24,6 +24,32 @@ func newTestCmd() *cobra.Command {
 	return cmd
 }
 
+func TestSanitizeCompletionDesc(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"C0 control SOH stripped", "a\x01b", "ab"},
+		{"C0 control US stripped", "a\x1fb", "ab"},
+		{"DEL stripped", "a\x7fb", "ab"},
+		{"C1 control 0x80 stripped", "a\u0080b", "ab"},
+		{"C1 control 0x9f stripped", "a\u009fb", "ab"},
+		{"valid accented rune passes through", "café", "café"},
+		{"valid emoji rune passes through", "party🎉", "party🎉"},
+		{"full ANSI escape sequence stripped whole", "\x1b[31mred\x1b[0m", "red"},
+		{"internal double space preserved", "a  b", "a  b"},
+		{"newline dropped", "a\nb", "ab"},
+		{"tab dropped", "a\tb", "ab"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sanitizeCompletionDesc(tt.in))
+		})
+	}
+}
+
 func TestRankProjects(t *testing.T) {
 	now := time.Now()
 	projects := []CachedProject{
@@ -335,4 +361,77 @@ func TestCompleterAccountEmptyCache(t *testing.T) {
 	completions, directive := fn(newTestCmd(), nil, "")
 	assert.Len(t, completions, 0, "expected no completions with empty cache")
 	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive, "expected NoFileComp directive")
+}
+
+func TestHasControlChars(t *testing.T) {
+	assert.False(t, hasControlChars("Normal Name"))
+	assert.False(t, hasControlChars("café party🎉"))
+	assert.False(t, hasControlChars("Double  Space"), "internal double space is benign, not a control char")
+	assert.True(t, hasControlChars("Evil\x1b[31m"), "ESC (C0)")
+	assert.True(t, hasControlChars("\x1b[31mred\x1b[0m"), "full ANSI SGR escape sequence")
+	assert.True(t, hasControlChars("Evil\u009b31m"), "CSI (C1)")
+	assert.True(t, hasControlChars("Evil\x9bRaw"), "raw C1 byte (invalid UTF-8)")
+	assert.True(t, hasControlChars("Evil\x7f"), "DEL")
+}
+
+// Name-valued completions can't sanitize the value (resolution matches the
+// exact name string), so candidates whose names carry control characters —
+// ESC (C0) or CSI (C1) sequences that could inject into the user's terminal
+// via the completion machinery — must be skipped entirely.
+func TestProjectNameCompletionSkipsControlCharNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewStore(tmpDir)
+
+	require.NoError(t, store.UpdateProjects([]CachedProject{
+		{ID: 1, Name: "Good Project"},
+		{ID: 2, Name: "Evil\x1b]0;pwned\x07Project"},
+		{ID: 3, Name: "Evil\u009b31mProject"},
+	}))
+
+	fn := newTestCompleter(tmpDir).ProjectNameCompletion()
+	completions, _ := fn(newTestCmd(), nil, "")
+
+	require.Len(t, completions, 1)
+	assert.Equal(t, "Good Project", completions[0])
+}
+
+func TestPeopleNameCompletionSkipsControlCharNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewStore(tmpDir)
+
+	require.NoError(t, store.UpdatePeople([]CachedPerson{
+		{ID: 1, Name: "Alice Smith"},
+		{ID: 2, Name: "Bob\x1b[2JJones"},
+		{ID: 3, Name: "Carol\u009b31mWilliams"},
+	}))
+
+	fn := newTestCompleter(tmpDir).PeopleNameCompletion()
+	completions, _ := fn(newTestCmd(), nil, "a")
+
+	// "a" matches Alice and the malicious C-a-rol name; only Alice survives
+	// the control-char skip ("me" doesn't match "a", Bob doesn't contain "a").
+	require.Len(t, completions, 1)
+	assert.Equal(t, "Alice Smith", completions[0])
+}
+
+func TestProfileCompletionSkipsControlCharNames(t *testing.T) {
+	// Profiles load from config files; isolate global config and make sure
+	// no repo/local config is reachable from CWD.
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Chdir(t.TempDir())
+
+	require.NoError(t, os.MkdirAll(filepath.Join(configHome, "basecamp"), 0o700))
+	cfgJSON := `{"profiles":{` +
+		`"good":{"base_url":"https://good.example.com"},` +
+		`"evil\u001b[31m":{"base_url":"https://evil.example.com"},` +
+		`"evil\u009bcsi":{"base_url":"https://evil2.example.com"}}}`
+	require.NoError(t, os.WriteFile(
+		filepath.Join(configHome, "basecamp", "config.json"), []byte(cfgJSON), 0o600))
+
+	fn := newTestCompleter(t.TempDir()).ProfileCompletion()
+	completions, _ := fn(newTestCmd(), nil, "")
+
+	require.Len(t, completions, 1)
+	assert.Equal(t, "good\thttps://good.example.com", completions[0])
 }

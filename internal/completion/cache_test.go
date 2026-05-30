@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
 func TestStore_SaveAndLoad(t *testing.T) {
@@ -433,4 +435,81 @@ func TestStore_AccountsPreservedOnOtherUpdates(t *testing.T) {
 	loaded, err = store.Load()
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(loaded.Accounts))
+}
+
+// setupCompletionRepo builds a hermetic repo layout for loadConfigForCompletion
+// tests: an isolated XDG_CONFIG_HOME (global config + trust store), a repo root
+// containing .git (directory or worktree-style file) and .basecamp/config.json
+// with a "repoprofile" profile, and CWD set to a subdirectory so the repo config
+// is only reachable via the .git walk-up (not as a local config). Returns the
+// repo config path.
+func setupCompletionRepo(t *testing.T, gitAsFile bool) string {
+	t.Helper()
+
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	repoDir := t.TempDir()
+	gitPath := filepath.Join(repoDir, ".git")
+	if gitAsFile {
+		require.NoError(t, os.WriteFile(gitPath, []byte("gitdir: /elsewhere/worktrees/x\n"), 0o600))
+	} else {
+		require.NoError(t, os.Mkdir(gitPath, 0o755))
+	}
+
+	require.NoError(t, os.Mkdir(filepath.Join(repoDir, ".basecamp"), 0o755))
+	cfgPath := filepath.Join(repoDir, ".basecamp", "config.json")
+	cfgJSON := `{"profiles":{"repoprofile":{"base_url":"https://repo.example.com"}}}`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgJSON), 0o600))
+
+	subDir := filepath.Join(repoDir, "sub")
+	require.NoError(t, os.Mkdir(subDir, 0o755))
+	t.Chdir(subDir)
+
+	return cfgPath
+}
+
+// trustConfigPath marks path as trusted in the same trust store that
+// loadConfigForCompletion consults (trusted-configs.json under the global
+// config dir, here redirected via XDG_CONFIG_HOME).
+func trustConfigPath(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, config.NewTrustStore(config.GlobalConfigDir()).Trust(path))
+}
+
+func TestLoadConfigForCompletion_TrustedRepoConfig(t *testing.T) {
+	cfgPath := setupCompletionRepo(t, false)
+	trustConfigPath(t, cfgPath)
+
+	cfg := loadConfigForCompletion()
+
+	require.Contains(t, cfg.Profiles, "repoprofile")
+	assert.Equal(t, "https://repo.example.com", cfg.Profiles["repoprofile"].BaseURL)
+}
+
+func TestLoadConfigForCompletion_UntrustedRepoConfig(t *testing.T) {
+	setupCompletionRepo(t, false)
+
+	cfg := loadConfigForCompletion()
+
+	assert.NotContains(t, cfg.Profiles, "repoprofile")
+}
+
+func TestLoadConfigForCompletion_GitFileWorktreeMarker(t *testing.T) {
+	// .git as a file (worktree/submodule marker) must anchor the repo root
+	// the same as a .git directory.
+	cfgPath := setupCompletionRepo(t, true)
+	trustConfigPath(t, cfgPath)
+
+	cfg := loadConfigForCompletion()
+
+	require.Contains(t, cfg.Profiles, "repoprofile")
+	assert.Equal(t, "https://repo.example.com", cfg.Profiles["repoprofile"].BaseURL)
+}
+
+func TestLoadConfigForCompletion_UntrustedGitFileWorktreeMarker(t *testing.T) {
+	setupCompletionRepo(t, true)
+
+	cfg := loadConfigForCompletion()
+
+	assert.NotContains(t, cfg.Profiles, "repoprofile")
 }
