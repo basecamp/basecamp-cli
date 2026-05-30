@@ -130,6 +130,7 @@ func writeUpdateCache(latestVersion string) {
 		return
 	}
 	dir := filepath.Dir(updateCachePath())
-	_ = os.MkdirAll(dir, 0o755)                      //nolint:gosec // G301: config dir
+	// 0o700: GlobalConfigDir can hold credentials.json; keep it owner-only.
+	_ = os.MkdirAll(dir, 0o700)
 	_ = os.WriteFile(updateCachePath(), data, 0o644) //nolint:gosec // G306: not a secret
 }

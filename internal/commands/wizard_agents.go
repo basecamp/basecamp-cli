@@ -321,7 +321,20 @@ func removeStaleClaudePlugins(ctx context.Context, claudePath string, plugins []
 	for _, p := range plugins {
 		if len(p.Scopes) > 0 {
 			anyRemoved := false
+			// allScopesInvalid stays true only when no scope ever passed
+			// validPluginScope (i.e. no scoped uninstall was even attempted).
+			// We must NOT fall back to an unscoped removal just because a
+			// scoped uninstall failed at runtime — that would wrongly strip
+			// every-scope install when the targeted ones merely errored.
+			allScopesInvalid := true
 			for _, scope := range p.Scopes {
+				// scope comes from installed_plugins.json (not first-party).
+				// Whitelist it so a "-"-leading value can't inject a flag into
+				// the uninstall argv.
+				if !validPluginScope(scope) {
+					continue
+				}
+				allScopesInvalid = false
 				c := exec.CommandContext(ctx, claudePath, "plugin", "uninstall", p.Key, "--scope", scope) //nolint:gosec // G204: claudePath from FindClaudeBinary
 				if err := c.Run(); err == nil {
 					anyRemoved = true
@@ -333,6 +346,21 @@ func removeStaleClaudePlugins(ctx context.Context, claudePath string, plugins []
 			}
 			if anyRemoved {
 				removed = append(removed, p.Key)
+			} else if allScopesInvalid {
+				// Every scope was invalid (none passed validPluginScope), so no
+				// scoped uninstall was attempted. Fall back to the unscoped retry
+				// removal so the plugin isn't silently left installed.
+				n := 0
+				for i := 0; i < 10; i++ {
+					c := exec.CommandContext(ctx, claudePath, "plugin", "uninstall", p.Key) //nolint:gosec // G204: claudePath from FindClaudeBinary
+					if err := c.Run(); err != nil {
+						break
+					}
+					n++
+				}
+				if n > 0 {
+					removed = append(removed, p.Key)
+				}
 			}
 		} else {
 			n := 0
@@ -349,6 +377,24 @@ func removeStaleClaudePlugins(ctx context.Context, claudePath string, plugins []
 		}
 	}
 	return removed, scopes
+}
+
+// validPluginScope reports whether scope is one of Claude's accepted plugin
+// scopes. Used to gate untrusted scope values from installed_plugins.json
+// before they reach `claude plugin uninstall --scope <scope>`.
+//
+// `claude plugin uninstall --scope` only accepts user/project/local, so a
+// "global"-scoped entry is invalid here: leaving it valid would make a scoped
+// uninstall fail silently while suppressing the unscoped fallback, stranding
+// the plugin. Treating "global" as invalid keeps allScopesInvalid true so the
+// unscoped fallback removes it.
+func validPluginScope(scope string) bool {
+	switch scope {
+	case "user", "project", "local":
+		return true
+	default:
+		return false
+	}
 }
 
 // claudeManualInstallHint returns the two-line manual install instructions.

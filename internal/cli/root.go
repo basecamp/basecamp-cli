@@ -44,6 +44,33 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
+			// Tighten global config dir perms: an older CLI version (or the
+			// skill/update bootstrap) may have created it world-listable at
+			// 0755, yet it can hold credentials.json. Best-effort, runs before
+			// anything writes into the dir.
+			//
+			// Lstat first and only chmod a real directory: os.Chmod follows
+			// symlinks, and GlobalConfigDir() can fall back to TempDir(), so a
+			// local attacker could plant a symlink there and redirect the chmod.
+			if cfgDir := config.GlobalConfigDir(); cfgDir != "" {
+				// Skip the chmod when any ancestor of cfgDir is world- or
+				// group-writable (or can't be stat'd): a local user with write
+				// access to any path component could swap a component for a symlink
+				// between our Lstat and Chmod, making the pair racy (Lstat→Chmod
+				// TOCTOU). Checking only the immediate parent is insufficient — a
+				// world-writable ancestor higher up (e.g. /shared above a 0755
+				// /shared/.config) lets the same substitution win the race. Group
+				// members with write access can win it too, so guard on 0o022 (group
+				// + world write), not just the world-writable bit. This covers both
+				// the os.TempDir() fallback and XDG_CONFIG_HOME=/tmp. We only harden
+				// the dir when no ancestor is attacker-writable.
+				if !hasWritableAncestor(cfgDir) {
+					if fi, lstatErr := os.Lstat(cfgDir); lstatErr == nil && fi.IsDir() && fi.Mode()&os.ModeSymlink == 0 {
+						_ = os.Chmod(cfgDir, 0o700) //nolint:gosec // G302: 0700 is correct for a directory (needs the execute bit) that can hold credentials.json
+					}
+				}
+			}
+
 			// Start background update check early so it runs during command execution
 			updateCheck = commands.StartUpdateCheck()
 
@@ -268,6 +295,61 @@ func NewRootCmd() *cobra.Command {
 	})
 
 	return cmd
+}
+
+// hasWritableChain reports whether any ancestor of path (its parent up to the
+// filesystem root) is group- or world-writable, owned by a foreign non-root user
+// with the owner-write bit set, or cannot be stat'd. Each ancestor directory is
+// stat'd directly, so a world-writable dir that merely contains a symlink
+// component (e.g. /tmp holding /tmp/link) is still caught. The foreign-owner
+// check catches an ancestor owned by a DIFFERENT non-root local user (e.g. mode
+// 0755 owned by another account): its owner can still substitute a path component
+// and win the race even though no group/world-write bit is set. Root-owned and
+// self-owned ancestors are trusted.
+func hasWritableChain(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		fi, err := os.Stat(dir)
+		if err != nil || fi.Mode()&0o022 != 0 || isForeignOwnerWritable(fi) {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // reached root
+			return false
+		}
+		dir = parent
+	}
+}
+
+// hasWritableAncestor reports whether the best-effort chmod of path would be unsafe:
+// the path is non-absolute, or any ancestor of EITHER the original (lexical) path OR
+// the symlink-resolved real path is group- or world-writable, owned by a foreign
+// non-root user with the owner-write bit set, or can't be stat'd. Such an ancestor
+// lets another user substitute a path component and win the Lstat->Chmod TOCTOU
+// race, so the chmod is skipped in that case. The foreign-owner case covers an
+// ancestor that is not group/world-writable yet is owned by a DIFFERENT non-root
+// local account whose owner-write bit lets that owner perform the substitution.
+//
+// Both chains must be clean. Walking only the resolved chain misses a writable dir
+// that holds a symlink component: EvalSymlinks jumps to the symlink target and skips
+// the writable dir entirely (e.g. XDG_CONFIG_HOME=/tmp/link pointing into a private
+// 0755 tree leaves the world-writable /tmp unexamined), which a local user can swap
+// between our Lstat and Chmod. Walking only the lexical chain misses a writable real
+// ancestor reached through a symlinked component. A relative path can't be reasoned
+// about reliably (its real ancestry depends on cwd), and an unresolvable/missing
+// component means EvalSymlinks fails; both are treated conservatively as unsafe.
+func hasWritableAncestor(path string) bool {
+	if !filepath.IsAbs(path) {
+		return true // can't reason about a relative config dir; treat as unsafe
+	}
+	if hasWritableChain(path) { // lexical ancestors of the original path
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return true // unresolvable/missing component => be conservative
+	}
+	return hasWritableChain(resolved) // ancestors of the real path
 }
 
 // Execute runs the root command.
