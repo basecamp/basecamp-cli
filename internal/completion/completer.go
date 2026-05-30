@@ -91,7 +91,7 @@ func (c *Completer) ProjectCompletion() cobra.CompletionFunc {
 				// Use ID as completion value with name as description
 				completion := cobra.CompletionWithDesc(
 					fmt.Sprintf("%d", p.ID),
-					p.Name,
+					sanitizeCompletionDesc(p.Name),
 				)
 				completions = append(completions, completion)
 			}
@@ -164,7 +164,7 @@ func (c *Completer) PeopleCompletion() cobra.CompletionFunc {
 				}
 				completion := cobra.CompletionWithDesc(
 					fmt.Sprintf("%d", p.ID),
-					desc,
+					sanitizeCompletionDesc(desc),
 				)
 				completions = append(completions, completion)
 			}
@@ -237,7 +237,7 @@ func (c *Completer) AccountCompletion() cobra.CompletionFunc {
 				strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Use ID as completion value with name as description
-				completions = append(completions, cobra.CompletionWithDesc(idStr, a.Name))
+				completions = append(completions, cobra.CompletionWithDesc(idStr, sanitizeCompletionDesc(a.Name)))
 			}
 		}
 
@@ -270,12 +270,25 @@ func (c *Completer) ProfileCompletion() cobra.CompletionFunc {
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Use name as completion value with base URL as description
-				completions = append(completions, cobra.CompletionWithDesc(p.Name, p.BaseURL))
+				completions = append(completions, cobra.CompletionWithDesc(p.Name, sanitizeCompletionDesc(p.BaseURL)))
 			}
 		}
 
 		return completions, cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+// sanitizeCompletionDesc drops control characters (including ESC) from a
+// completion description. Descriptions can carry API- or config-controlled
+// strings (project/person/account names, profile base_url) which the shell
+// renders to the terminal; stripping control bytes prevents terminal injection.
+func sanitizeCompletionDesc(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // rankProjects returns projects sorted by priority:

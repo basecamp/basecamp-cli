@@ -98,7 +98,13 @@ func NewRootCmd() *cobra.Command {
 					return err
 				}
 				// Re-apply env and flag overrides (they take precedence over profile values)
-				config.LoadFromEnv(cfg)
+				if err := config.LoadFromEnv(cfg); err != nil {
+					if bareRoot {
+						initBareRootApp(cfg)
+						return nil
+					}
+					return err
+				}
 				config.ApplyOverrides(cfg, config.FlagOverrides{
 					Account:  flags.Account,
 					Project:  flags.Project,
@@ -125,6 +131,24 @@ func NewRootCmd() *cobra.Command {
 						source = "unknown"
 					}
 					return fmt.Errorf("base_url (%s): %w\nFix with: basecamp config unset base_url", source, err)
+				}
+
+				// Validate the LLM endpoint. The config-file accept path already
+				// rejects non-http(s)/hostless values, but env- and profile-sourced
+				// endpoints reach here unchecked, so re-validate the scheme/host
+				// and enforce HTTPS (credential-gated) so an http:// non-localhost
+				// endpoint can't leak llm_api_key in cleartext. Empty endpoint is a
+				// no-op. Same config-subcommand skip.
+				if err := validateLLMEndpoint(cfg.LLMEndpoint, cfg.LLMProvider, cfg.LLMAPIKey); err != nil {
+					if bareRoot {
+						initBareRootApp(cfg)
+						return nil
+					}
+					source := cfg.Sources["llm_endpoint"]
+					if source == "" {
+						source = "unknown"
+					}
+					return fmt.Errorf("llm_endpoint (%s): %w\nFix with: basecamp config unset llm_endpoint", source, err)
 				}
 			}
 
@@ -526,6 +550,37 @@ func promptForProfile(cfg *config.Config) (string, error) {
 	}
 
 	return selected.ID, nil
+}
+
+// validateLLMEndpoint rejects non-http(s)/hostless endpoints always, and requires
+// HTTPS for a non-localhost endpoint only when a credential could be transmitted.
+//
+// RequireSecureURL only blocks http:// for non-localhost — it would let file://,
+// ssh:// etc. through — so the IsHTTPURL scheme/host check stays unconditional.
+//
+// The HTTPS/credential gate is skipped for credential-less providers ("ollama",
+// "apple", "none", "disabled"): they never transmit llm_api_key, so a remote http:// endpoint
+// (e.g. a LAN Ollama) is allowed even when a global key exists for a different
+// provider. For credentialed/ambiguous providers ("openai", "anthropic", "auto",
+// or "") the gate applies — an http:// non-localhost endpoint is rejected when an
+// llm_api_key is present, since the secret would otherwise leak in cleartext.
+// Without a key there is no secret to leak. An empty endpoint is a no-op.
+func validateLLMEndpoint(endpoint, provider, apiKey string) error {
+	if endpoint == "" {
+		return nil
+	}
+	if !config.IsHTTPURL(endpoint) {
+		return fmt.Errorf("must be an http:// or https:// URL with a host")
+	}
+	switch provider {
+	case "ollama", "apple", "none", "disabled":
+		// Credential-less providers never send the key; skip the HTTPS gate.
+		return nil
+	}
+	if apiKey != "" {
+		return hostutil.RequireSecureURL(endpoint)
+	}
+	return nil
 }
 
 // isConfigCmd returns true if cmd is "config" or any of its subcommands.
