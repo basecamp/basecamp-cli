@@ -337,10 +337,39 @@ func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 	stderr := string(buf[:n])
 	absPath := filepath.Join(tmpDir, ".basecamp", "config.json")
 
-	assert.Contains(t, stderr, "authority key")
+	assert.Contains(t, stderr, `"base_url"`)
 	assert.Contains(t, stderr, "requires trust")
 	assert.Contains(t, stderr, absPath, "warning must include the exact config path")
 	assert.Contains(t, stderr, "'"+absPath+"'", "path must be single-quoted for shell safety")
+}
+
+// TestConfigSet_GatedNonAuthorityKeyWarns verifies the trust warning also fires
+// for the cache/LLM keys gated on load (cache_dir, llm_model, …), so a local
+// `config set` doesn't silently produce a value that's ignored next run.
+func TestConfigSet_GatedNonAuthorityKeyWarns(t *testing.T) {
+	app, _ := setupConfigTestApp(t)
+
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+	require.NoError(t, os.MkdirAll(".basecamp", 0755))
+
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	err := executeConfigCommand(app, "set", "cache_dir", "/tmp/somewhere")
+	require.NoError(t, err)
+
+	w.Close()
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	stderr := string(buf[:n])
+	assert.Contains(t, stderr, `"cache_dir"`)
+	assert.Contains(t, stderr, "requires trust")
 }
 
 // --- Config project tests ---

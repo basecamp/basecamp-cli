@@ -24,6 +24,28 @@ func newTestCmd() *cobra.Command {
 	return cmd
 }
 
+func TestSanitizeCompletionDesc(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"C0 control SOH stripped", "a\x01b", "ab"},
+		{"C0 control US stripped", "a\x1fb", "ab"},
+		{"DEL stripped", "a\x7fb", "ab"},
+		{"C1 control 0x80 stripped", "a\u0080b", "ab"},
+		{"C1 control 0x9f stripped", "a\u009fb", "ab"},
+		{"valid accented rune passes through", "café", "café"},
+		{"valid emoji rune passes through", "party🎉", "party🎉"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sanitizeCompletionDesc(tt.in))
+		})
+	}
+}
+
 func TestRankProjects(t *testing.T) {
 	now := time.Now()
 	projects := []CachedProject{

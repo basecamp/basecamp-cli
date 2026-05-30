@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
 // CachedProject holds project data for tab completion.
@@ -366,13 +368,21 @@ func loadConfigForCompletion() *configForCompletion {
 		loadProfilesFromFile(cfg, globalPath)
 	}
 
+	// profiles is an authority key (it can redirect authenticated traffic), so
+	// repo/local configs must be explicitly trusted before their profiles feed
+	// completion — mirroring config.loadFromFile's trust gating. System/global
+	// configs above are trusted by location.
+	trust := config.LoadTrustStore(config.GlobalConfigDir())
+
 	// Repo config (walk up to find .git, then .basecamp/config.json)
 	if dir, err := os.Getwd(); err == nil {
 		for {
 			gitPath := filepath.Join(dir, ".git")
 			if fi, err := os.Stat(gitPath); err == nil && fi.IsDir() {
 				repoConfig := filepath.Join(dir, ".basecamp", "config.json")
-				loadProfilesFromFile(cfg, repoConfig)
+				if trust != nil && trust.IsTrusted(repoConfig) {
+					loadProfilesFromFile(cfg, repoConfig)
+				}
 				break
 			}
 			parent := filepath.Dir(dir)
@@ -385,7 +395,9 @@ func loadConfigForCompletion() *configForCompletion {
 
 	// Local config
 	localPath := filepath.Join(".basecamp", "config.json")
-	loadProfilesFromFile(cfg, localPath)
+	if trust != nil && trust.IsTrusted(localPath) {
+		loadProfilesFromFile(cfg, localPath)
+	}
 
 	return cfg
 }

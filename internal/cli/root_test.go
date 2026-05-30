@@ -14,6 +14,51 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
+// TestLLMEndpointValidation exercises the production validateLLMEndpoint helper
+// in root.go: the scheme/host check is unconditional, while the HTTPS gate is
+// only enforced for credentialed/ambiguous providers when a key is present.
+// Credential-less providers (ollama, apple, none) never send the key, so a
+// remote http endpoint is allowed even when a key exists for a different provider.
+func TestLLMEndpointValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		provider string
+		apiKey   string
+		wantOK   bool
+	}{
+		{"file scheme rejected", "file:///etc/passwd", "", "", false},
+		{"ssh scheme rejected", "ssh://host", "", "", false},
+		{"hostless https rejected", "https:example.com", "", "", false},
+		{"http remote with credential rejected", "http://remote-host:1234", "", "secret", false},
+		{"http remote without credential accepted", "http://remote-host:1234", "", "", true},
+		{"https remote accepted", "https://remote-host", "", "", true},
+		{"https remote with credential accepted", "https://remote-host", "", "secret", true},
+		{"localhost with credential accepted", "http://localhost:11434", "", "secret", true},
+		{"empty endpoint no-op", "", "", "", true},
+		{"empty endpoint with key no-op", "", "", "secret", true},
+		// Credential-less provider: remote http allowed even with a stray key.
+		{"ollama remote http with key accepted", "http://192.168.1.10:11434", "ollama", "secret", true},
+		// Credentialed/ambiguous providers: key still gates remote http.
+		{"openai remote http with key rejected", "http://remote:1234", "openai", "secret", false},
+		{"auto remote http with key rejected", "http://remote:1234", "auto", "secret", false},
+		{"anthropic remote http with key rejected", "http://remote:1234", "anthropic", "secret", false},
+		// Unconditional scheme check fires before the credential-less exemption.
+		{"ollama file scheme rejected", "file:///etc/passwd", "ollama", "secret", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLLMEndpoint(tt.endpoint, tt.provider, tt.apiKey)
+			if tt.wantOK {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
 func TestResolvePreferences(t *testing.T) {
 	boolPtr := func(b bool) *bool { return &b }
 	intPtr := func(i int) *int { return &i }
