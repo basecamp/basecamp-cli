@@ -2,6 +2,7 @@ package presenter
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +132,84 @@ func TestFormatDockTitleFallsBackToName(t *testing.T) {
 	want := "1  todoset"
 	if got != want {
 		t.Errorf("formatDock(title fallback) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatDockStripsANSIFromTitleAndName(t *testing.T) {
+	dock := []any{
+		map[string]any{
+			"title":   "\x1b]8;;http://evil.example\x07To-dos\x1b]8;;\x07",
+			"name":    "\x1b[31mtodoset\x1b[0m",
+			"enabled": true,
+			"id":      float64(1),
+		},
+	}
+
+	got := formatDock(dock)
+	want := "1  To-dos (todoset)"
+	if got != want {
+		t.Errorf("formatDock(ANSI in title/name) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatDockTitleFallbackStripsANSIFromName(t *testing.T) {
+	dock := []any{
+		map[string]any{
+			"name":    "\x1b[31mtodoset\x1b[0m",
+			"enabled": true,
+			"id":      float64(1),
+		},
+	}
+
+	got := formatDock(dock)
+	want := "1  todoset"
+	if got != want {
+		t.Errorf("formatDock(ANSI in name fallback) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatPeopleStripsANSI(t *testing.T) {
+	people := []any{
+		map[string]any{"name": "\x1b[31mAlice\x1b[0m"},
+		map[string]any{"name": "Bob"},
+	}
+
+	got := formatPeople(people)
+	want := "Alice, Bob"
+	if got != want {
+		t.Errorf("formatPeople(ANSI names) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatDateStripsANSIFromUnparseableInput(t *testing.T) {
+	locale := NewLocale("")
+	for _, in := range []string{"not-a-date\x1b[31mX", "\x1b]0;pwn\x07bad"} {
+		got := formatDate(in, locale)
+		if strings.ContainsRune(got, 0x1b) {
+			t.Errorf("formatDate(%q) = %q, want no escape byte", in, got)
+		}
+	}
+}
+
+func TestFormatRelativeTimeStripsANSIFromUnparseableInput(t *testing.T) {
+	locale := NewLocale("")
+	for _, in := range []string{"not-a-date\x1b[31mX", "\x1b]0;pwn\x07bad"} {
+		got := formatRelativeTime(in, locale)
+		if strings.ContainsRune(got, 0x1b) {
+			t.Errorf("formatRelativeTime(%q) = %q, want no escape byte", in, got)
+		}
+	}
+}
+
+func TestFormatPeopleDropsAllEscapeName(t *testing.T) {
+	people := []any{
+		map[string]any{"name": "Alice"},
+		map[string]any{"name": "\x1b[0m\x1b]8;;\x07"},
+	}
+
+	got := formatPeople(people)
+	want := "Alice"
+	if got != want {
+		t.Errorf("formatPeople(all-escape name dropped) = %q, want %q", got, want)
 	}
 }

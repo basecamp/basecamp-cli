@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -335,6 +336,8 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 	b.WriteString("\n")
 
 	// Find max command width for alignment
+	// RenderTemplate strips terminal escapes from the interpolated, API-controlled
+	// command (centralized in template.go).
 	maxCmd := 0
 	renderedCmds := make([]string, len(visible))
 	for i, a := range visible {
@@ -548,7 +551,11 @@ func renderTaskListMarkdown(w io.Writer, schema *EntitySchema, data []map[string
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			heading := g.name
+			// Group headings come from a raw API string (e.g. bucket.name via
+			// extractDotPath) that never passes through formatText. Strip
+			// terminal escapes before the empty-check so an all-escape-sequence
+			// name falls back to "Other" instead of emitting a blank "## ".
+			heading := ansi.Strip(g.name)
 			if heading == "" {
 				heading = "Other"
 			}
@@ -559,7 +566,11 @@ func renderTaskListMarkdown(w io.Writer, schema *EntitySchema, data []map[string
 		}
 	}
 
-	_, err := io.WriteString(w, b.String())
+	// Defense-in-depth: this is the literal-markdown chokepoint. Output is plain
+	// generated markdown that never legitimately carries ANSI escape bytes
+	// (styling lives on the separate lipgloss path), so a final strip closes any
+	// future API-controlled sink without harming legitimate content.
+	_, err := io.WriteString(w, ansi.Strip(b.String()))
 	return err
 }
 
@@ -645,7 +656,9 @@ func extractPeopleNames(val any) []string {
 	for _, item := range arr {
 		if m, ok := item.(map[string]any); ok {
 			if name, ok := m["name"].(string); ok && name != "" {
-				names = append(names, name)
+				if s := ansi.Strip(name); s != "" {
+					names = append(names, s)
+				}
 			}
 		}
 	}
