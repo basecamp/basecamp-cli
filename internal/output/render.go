@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -113,15 +112,17 @@ func terminalInfo(w io.Writer) (width int, isTTY bool) {
 func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	var b strings.Builder
 
-	// Summary line
+	// Summary line. SanitizeTerminal guards against terminal injection from
+	// API-controlled summary/notice content (defense-in-depth: also sanitized
+	// at the WithSummary/WithNotice source).
 	if resp.Summary != "" {
-		b.WriteString(r.Summary.Render(resp.Summary))
+		b.WriteString(r.Summary.Render(richtext.SanitizeTerminal(resp.Summary)))
 		b.WriteString("\n")
 	}
 
 	// Notice (e.g., truncation warning)
 	if resp.Notice != "" {
-		b.WriteString(r.Hint.Render(resp.Notice))
+		b.WriteString(r.Hint.Render(richtext.SanitizeTerminal(resp.Notice)))
 		b.WriteString("\n")
 	}
 
@@ -258,18 +259,26 @@ func wrappedRequestIDLines(requestID string, width int) []string {
 }
 
 func sanitizeRequestID(requestID string) string {
-	requestID = ansi.Strip(requestID)
-	requestID = strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n' || r == '\r' || r == '\t':
-			return ' '
-		case unicode.IsControl(r):
-			return -1
-		default:
-			return r
-		}
-	}, requestID)
+	// SanitizeTerminal strips escape sequences plus C0/C1/DEL controls,
+	// keeping only newline and tab, which Fields then collapses to spaces.
+	requestID = richtext.SanitizeTerminal(requestID)
 	return strings.Join(strings.Fields(requestID), " ")
+}
+
+// sanitizeRichText prepares an API-controlled rich-text string for terminal
+// rendering: carriage returns are normalized to newlines (SanitizeTerminal
+// would otherwise delete them, joining adjacent words), HTML is converted to
+// markdown, and the result is stripped of escape sequences and control
+// characters. Sanitization runs after the HTML conversion because entity
+// decoding (e.g. &#x9b;) can reintroduce C1 controls that were not present
+// in the raw input.
+func sanitizeRichText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	if richtext.IsHTML(s) {
+		s = richtext.HTMLToMarkdown(s)
+	}
+	return richtext.SanitizeTerminal(s)
 }
 
 func escapeMarkdownText(s string) string {
@@ -390,7 +399,7 @@ func (r *Renderer) renderData(b *strings.Builder, data any) {
 		}
 
 	case string:
-		b.WriteString(r.Data.Render(ansi.Strip(d)))
+		b.WriteString(r.Data.Render(richtext.SanitizeTerminal(d)))
 		b.WriteString("\n")
 
 	case nil:
@@ -399,7 +408,7 @@ func (r *Renderer) renderData(b *strings.Builder, data any) {
 
 	default:
 		// Fallback: format as string
-		b.WriteString(r.Data.Render(ansi.Strip(fmt.Sprintf("%v", data))))
+		b.WriteString(r.Data.Render(richtext.SanitizeTerminal(fmt.Sprintf("%v", data))))
 		b.WriteString("\n")
 	}
 }
@@ -766,7 +775,7 @@ func topLevelAttachmentSections(data map[string]any) []attachmentSection {
 func attachmentDisplayName(att map[string]any) string {
 	for _, key := range []string{"filename", "caption", "path", "url", "sgid"} {
 		if value, ok := att[key].(string); ok && value != "" {
-			return ansi.Strip(value)
+			return richtext.SanitizeTerminal(value)
 		}
 	}
 	return "attachment"
@@ -795,11 +804,11 @@ func attachmentDisplayMeta(att map[string]any) string {
 func commentCreatorName(comment map[string]any) string {
 	if creator, ok := comment["creator"].(map[string]any); ok {
 		if name, ok := creator["name"].(string); ok && name != "" {
-			return ansi.Strip(name)
+			return richtext.SanitizeTerminal(name)
 		}
 	}
 	if name, ok := comment["creator_name"].(string); ok && name != "" {
-		return ansi.Strip(name)
+		return richtext.SanitizeTerminal(name)
 	}
 	return "Unknown"
 }
@@ -810,13 +819,7 @@ func commentTimestamp(comment map[string]any) string {
 
 func commentBody(comment map[string]any) string {
 	content, _ := comment["content"].(string)
-	content = ansi.Strip(content)
-	if richtext.IsHTML(content) {
-		content = richtext.HTMLToMarkdown(content)
-	}
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-	return strings.TrimSpace(content)
+	return strings.TrimSpace(sanitizeRichText(content))
 }
 
 func (r *Renderer) renderCommentsSection(b *strings.Builder, comments []map[string]any) {
@@ -999,10 +1002,7 @@ func formatCell(val any) string {
 	case nil:
 		return ""
 	case string:
-		v = ansi.Strip(v)
-		if richtext.IsHTML(v) {
-			v = richtext.HTMLToMarkdown(v)
-		}
+		v = sanitizeRichText(v)
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
@@ -1035,7 +1035,7 @@ func formatCell(val any) string {
 		for _, item := range v {
 			switch elem := item.(type) {
 			case string:
-				s := ansi.Strip(elem)
+				s := richtext.SanitizeTerminal(elem)
 				if strings.ContainsAny(s, "\n\r") {
 					s = strings.Join(strings.Fields(s), " ")
 				}
@@ -1056,27 +1056,27 @@ func formatCell(val any) string {
 				// from the calendar/reports API response and use summary as their
 				// display name (Schedule::Entry#title delegates to summary in bc3).
 				if filename, ok := elem["filename"].(string); ok && filename != "" {
-					items = append(items, ansi.Strip(filename))
+					items = append(items, richtext.SanitizeTerminal(filename))
 				} else if caption, ok := elem["caption"].(string); ok && caption != "" {
-					items = append(items, ansi.Strip(caption))
+					items = append(items, richtext.SanitizeTerminal(caption))
 				} else if name, ok := elem["name"].(string); ok && name != "" {
-					items = append(items, ansi.Strip(name))
+					items = append(items, richtext.SanitizeTerminal(name))
 				} else if title, ok := elem["title"].(string); ok && title != "" {
-					items = append(items, ansi.Strip(title))
+					items = append(items, richtext.SanitizeTerminal(title))
 				} else if summary, ok := elem["summary"].(string); ok && summary != "" {
-					items = append(items, ansi.Strip(summary))
+					items = append(items, richtext.SanitizeTerminal(summary))
 				} else if path, ok := elem["path"].(string); ok && path != "" {
-					items = append(items, ansi.Strip(path))
+					items = append(items, richtext.SanitizeTerminal(path))
 				} else if id, ok := elem["id"]; ok {
 					items = append(items, fmt.Sprintf("%v", id))
 				}
 			default:
-				items = append(items, ansi.Strip(fmt.Sprintf("%v", item)))
+				items = append(items, richtext.SanitizeTerminal(fmt.Sprintf("%v", item)))
 			}
 		}
 		return strings.Join(items, ", ")
 	default:
-		return ansi.Strip(fmt.Sprintf("%v", v))
+		return richtext.SanitizeTerminal(fmt.Sprintf("%v", v))
 	}
 }
 
@@ -1103,10 +1103,7 @@ func formatDetailValue(key string, val any) string {
 	case nil:
 		return ""
 	case string:
-		v = ansi.Strip(v)
-		if richtext.IsHTML(v) {
-			v = richtext.HTMLToMarkdown(v)
-		}
+		v = sanitizeRichText(v)
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
@@ -1195,14 +1192,15 @@ func NewMarkdownRenderer(w io.Writer) *MarkdownRenderer {
 func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 	var b strings.Builder
 
-	// Summary as heading
+	// Summary as heading. SanitizeTerminal guards against terminal injection
+	// (defense-in-depth; also sanitized at the WithSummary/WithNotice source).
 	if resp.Summary != "" {
-		b.WriteString("## " + resp.Summary + "\n")
+		b.WriteString("## " + richtext.SanitizeTerminal(resp.Summary) + "\n")
 	}
 
 	// Notice (e.g., truncation warning)
 	if resp.Notice != "" {
-		b.WriteString("*" + resp.Notice + "*\n")
+		b.WriteString("*" + richtext.SanitizeTerminal(resp.Notice) + "*\n")
 	}
 
 	if resp.Summary != "" || resp.Notice != "" {
@@ -1275,13 +1273,13 @@ func (r *MarkdownRenderer) renderData(b *strings.Builder, data any) {
 		}
 
 	case string:
-		b.WriteString(ansi.Strip(d) + "\n")
+		b.WriteString(richtext.SanitizeTerminal(d) + "\n")
 
 	case nil:
 		b.WriteString("*No data*\n")
 
 	default:
-		fmt.Fprintf(b, "%v\n", ansi.Strip(fmt.Sprintf("%v", data)))
+		fmt.Fprintf(b, "%v\n", richtext.SanitizeTerminal(fmt.Sprintf("%v", data)))
 	}
 }
 

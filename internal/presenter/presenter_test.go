@@ -1617,6 +1617,158 @@ func TestRenderTaskItemCommaInAssigneeName(t *testing.T) {
 	}
 }
 
+func TestExtractPeopleNamesStripsANSI(t *testing.T) {
+	// Person names come from the API and must not carry ESC/OSC sequences
+	// into terminal output via the markdown task-list path.
+	val := []any{
+		map[string]any{"name": "\x1b]0;pwn\x07Bob"},
+		map[string]any{"name": "\x1b[31mAlice"},
+	}
+	names := extractPeopleNames(val)
+	if len(names) != 2 {
+		t.Fatalf("Expected 2 names, got %d: %v", len(names), names)
+	}
+	if names[0] != "Bob" {
+		t.Errorf("names[0] = %q, want %q", names[0], "Bob")
+	}
+	if names[1] != "Alice" {
+		t.Errorf("names[1] = %q, want %q", names[1], "Alice")
+	}
+	for _, n := range names {
+		if strings.ContainsRune(n, '\x1b') {
+			t.Errorf("name %q still contains an escape sequence", n)
+		}
+	}
+}
+
+func TestRenderTaskItemStripsANSIInAssigneeName(t *testing.T) {
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content":   "Review PR",
+			"completed": false,
+			"due_on":    "",
+			"assignees": []any{map[string]any{"name": "\x1b]0;pwn\x07Bob"}},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.ContainsRune(out, '\x1b') {
+		t.Errorf("Markdown task-list output should not contain escape sequences, got:\n%q", out)
+	}
+	if !strings.Contains(out, "@Bob") {
+		t.Errorf("Should render stripped assignee name '@Bob', got:\n%s", out)
+	}
+}
+
+func TestRenderListMarkdownStripsANSIInGroupHeading(t *testing.T) {
+	// Group headings come from a raw API string (bucket.name) and must not
+	// carry ESC/OSC sequences into the markdown task-list output.
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content": "Fix bug", "completed": false, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "\x1b]0;pwn\x07Project Alpha"},
+		},
+		{
+			"content": "Write docs", "completed": true, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "\x1b[31mProject Beta"},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, ""); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.ContainsRune(out, '\x1b') {
+		t.Errorf("Markdown group heading should not contain escape sequences, got:\n%q", out)
+	}
+	if !strings.Contains(out, "## Project Alpha") {
+		t.Errorf("Should render stripped heading '## Project Alpha', got:\n%s", out)
+	}
+	if !strings.Contains(out, "## Project Beta") {
+		t.Errorf("Should render stripped heading '## Project Beta', got:\n%s", out)
+	}
+}
+
+func TestRenderListMarkdownGroupHeadingAllEscapeFallsBackToOther(t *testing.T) {
+	// A group name that is entirely ESC/OSC sequences strips to "". The
+	// empty-check must run AFTER ansi.Strip so it falls back to "Other"
+	// instead of emitting a blank "## " heading.
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content": "Fix bug", "completed": false, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "\x1b]0;pwn\x07\x1b[31m\x1b[2J"},
+		},
+		{
+			"content": "Write docs", "completed": true, "due_on": "", "assignees": []any{},
+			"bucket": map[string]any{"name": "Real Project"},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, "bucket.name"); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.ContainsRune(out, '\x1b') {
+		t.Errorf("Markdown group heading should not contain escape sequences, got:\n%q", out)
+	}
+	if !strings.Contains(out, "## Other") {
+		t.Errorf("All-escape group name should render under '## Other', got:\n%s", out)
+	}
+	if strings.Contains(out, "## \n") {
+		t.Errorf("Should not emit a blank '## ' heading, got:\n%q", out)
+	}
+}
+
+func TestRenderListMarkdownChokepointStripsANSI(t *testing.T) {
+	// Defense-in-depth: an escape injected into any API field on the literal
+	// markdown path must be absent from the final rendered markdown.
+	schema := LookupByName("todo")
+	if schema == nil {
+		t.Fatal("Expected todo schema")
+	}
+
+	data := []map[string]any{
+		{
+			"content": "Innocuous \x1b]8;;http://evil\x07title", "completed": false, "due_on": "",
+			"assignees": []any{map[string]any{"name": "\x1b[31mMallory"}},
+			"bucket":    map[string]any{"name": "\x1b[2JGroup"},
+		},
+	}
+
+	var buf strings.Builder
+	if err := RenderListMarkdown(&buf, schema, data, enUS, "bucket.name"); err != nil {
+		t.Fatalf("RenderListMarkdown failed: %v", err)
+	}
+
+	if strings.ContainsRune(buf.String(), '\x1b') {
+		t.Errorf("Final markdown must contain no escape bytes, got:\n%q", buf.String())
+	}
+}
+
 // =============================================================================
 // HTML → Markdown Conversion Tests
 // =============================================================================
@@ -1728,6 +1880,30 @@ func TestRenderHeadlineHTMLPreservesLiteralAsterisks(t *testing.T) {
 	// Literal ** that aren't bold pairs should be preserved
 	if got != "2**10 = 1024" {
 		t.Errorf("RenderHeadline = %q, want %q", got, "2**10 = 1024")
+	}
+}
+
+func TestRenderHeadlineHTMLStripsEscape(t *testing.T) {
+	schema := &EntitySchema{
+		Identity: Identity{Label: "content"},
+	}
+	// An ESC embedded in the HTML content must not survive into the rendered
+	// headline: it is stripped before reaching the styled (Primary.Render) sink.
+	data := map[string]any{
+		"content": "<p>danger\x1b[31mred\x1b[0m</p>",
+	}
+	got := RenderHeadline(schema, data)
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("RenderHeadline must strip ESC from HTML content, got: %q", got)
+	}
+}
+
+func TestFormatTextHTMLStripsEscape(t *testing.T) {
+	// An ESC embedded in HTML content must not survive HTMLToMarkdown into the
+	// returned string, which can reach a styled/markdown sink.
+	got := formatText("<p>danger\x1b[31mred\x1b[0m</p>")
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("formatText must strip ESC from HTML content, got: %q", got)
 	}
 }
 

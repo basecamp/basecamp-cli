@@ -18,6 +18,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewTimelineCmd creates the timeline command for viewing activity feeds.
@@ -395,19 +396,26 @@ func formatEvent(e basecamp.TimelineEvent) string {
 		timeStr = "--:--"
 	}
 
+	// API-controlled fields are sanitized before rendering: rune truncation
+	// preserves escape bytes, and the alt-screen watch TUI would otherwise
+	// execute embedded OSC/ANSI sequences (terminal injection).
+	// Strip before the empty check so a name that's only escape sequences
+	// still falls back to the placeholder rather than rendering blank.
 	creatorName := "Someone"
-	if e.Creator != nil && e.Creator.Name != "" {
-		creatorName = e.Creator.Name
+	if e.Creator != nil {
+		if name := richtext.SanitizeTerminal(e.Creator.Name); name != "" {
+			creatorName = name
+		}
 	}
 
-	action := e.Action
+	action := richtext.SanitizeTerminal(e.Action)
 	if action == "" {
 		action = "updated"
 	}
 
-	title := e.Title
+	title := richtext.SanitizeTerminal(e.Title)
 	if title == "" {
-		title = e.SummaryExcerpt
+		title = richtext.SanitizeTerminal(e.SummaryExcerpt)
 	}
 	// Truncate at rune boundary for proper Unicode handling
 	if len([]rune(title)) > 40 {
@@ -507,7 +515,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if err != nil {
 			return output.ErrUsage("Invalid person ID")
 		}
-		description = fmt.Sprintf("activity for %s", personName)
+		description = fmt.Sprintf("activity for %s", richtext.SanitizeTerminal(personName))
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			result, err := app.Account().Timeline().PersonProgress(ctx, personID, opts)
 			if err != nil {
@@ -525,7 +533,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if err != nil {
 			return output.ErrUsage("Invalid project ID")
 		}
-		description = fmt.Sprintf("activity in %s", projectName)
+		description = fmt.Sprintf("activity in %s", richtext.SanitizeTerminal(projectName))
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			r, err := app.Account().Timeline().ProjectTimeline(ctx, projectIDInt, opts)
 			if err != nil {

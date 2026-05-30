@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -591,6 +592,26 @@ func TestWriterIDsFormat(t *testing.T) {
 
 	output := buf.String()
 	assert.Equal(t, "123\n456\n", output)
+}
+
+// TestWriterIDsFormatStripsANSI verifies that string id values (an
+// API-controlled raw print sink) are sanitized of terminal escape sequences.
+func TestWriterIDsFormatStripsANSI(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatIDs,
+		Writer: &buf,
+	})
+
+	data := []map[string]any{
+		{"id": "\x1b]0;evil\x07abc-123"},
+		{"id": "\x1b[31m456\x1b[0m"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "abc-123\n456\n", buf.String())
+	assert.NotContains(t, buf.String(), "\x1b")
 }
 
 func TestWriterCountFormat(t *testing.T) {
@@ -2341,6 +2362,21 @@ func TestFormatCellStripsANSIEscapes(t *testing.T) {
 			input:    "\x1b[1;31mred bold\x1b[0m",
 			expected: "red bold",
 		},
+		{
+			name:     "C1 CSI survives ansi.Strip but not SanitizeTerminal",
+			input:    string(rune(0x9b)) + "31mred" + string(rune(0x9b)) + "0m", // U+009B
+			expected: "31mred0m",
+		},
+		{
+			name:     "C1 OSC with BEL terminator",
+			input:    string(rune(0x9d)) + "0;evil\adone", // U+009D
+			expected: "0;evildone",
+		},
+		{
+			name:     "DEL character",
+			input:    "De\x7fleted",
+			expected: "Deleted",
+		},
 	}
 
 	for _, tt := range tests {
@@ -2349,6 +2385,65 @@ func TestFormatCellStripsANSIEscapes(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestWriterStyledTableStripsC1Controls verifies that the styled table
+// renderer strips UTF-8-encoded C1 controls and DEL from API-controlled data.
+// ansi.Strip alone leaves these intact, and C1-honoring terminals execute
+// them directly (e.g. `api get` rendering a hostile record title).
+func TestWriterStyledTableStripsC1Controls(t *testing.T) {
+	c1CSI := string(rune(0x9b)) // U+009B CSI
+	c1OSC := string(rune(0x9d)) // U+009D OSC
+
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+
+	data := []map[string]any{
+		{"id": 1, "title": c1CSI + "31mRed alert" + c1CSI + "0m"},
+		{"id": 2, "title": c1OSC + "0;evil\aDe\x7fleted"},
+	}
+	require.NoError(t, w.OK(data))
+
+	out := buf.String()
+	assert.Contains(t, out, "Red alert")
+	assert.Contains(t, out, "Deleted")
+	assert.NotContains(t, out, c1CSI)
+	assert.NotContains(t, out, c1OSC)
+	assert.NotContains(t, out, "\x7f")
+	assert.NotContains(t, out, "\a")
+}
+
+// TestWriterStyledStringDataStripsC1Controls covers renderData's string and
+// detail-object paths: C1 controls and DEL in string payloads and object
+// values must not reach the terminal.
+func TestWriterStyledStringDataStripsC1Controls(t *testing.T) {
+	c1CSI := string(rune(0x9b)) // U+009B CSI
+
+	t.Run("string data", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Format: FormatStyled, Writer: &buf})
+		require.NoError(t, w.OK(c1CSI+"31mplain string"+c1CSI+"0m"))
+
+		out := buf.String()
+		assert.Contains(t, out, "plain string")
+		assert.NotContains(t, out, c1CSI)
+	})
+
+	t.Run("detail object", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Format: FormatStyled, Writer: &buf})
+		require.NoError(t, w.OK(map[string]any{
+			"id":    1,
+			"title": c1CSI + "31mdetail value" + c1CSI + "0m",
+			"note":  "De\x7fleted",
+		}))
+
+		out := buf.String()
+		assert.Contains(t, out, "detail value")
+		assert.Contains(t, out, "Deleted")
+		assert.NotContains(t, out, c1CSI)
+		assert.NotContains(t, out, "\x7f")
+	})
 }
 
 // =============================================================================
@@ -3146,6 +3241,160 @@ func TestWriterJQFilterStringOutput(t *testing.T) {
 	assert.Equal(t, "Buy milk\nShip feature", lines)
 }
 
+// forceTTY makes isTTY report true for the duration of the test, simulating a
+// terminal-attached writer for in-memory buffers. jq output sanitization is
+// TTY-gated, so tests exercising the sanitizing path must opt in.
+func forceTTY(t *testing.T) {
+	t.Helper()
+	orig := isTTY
+	isTTY = func(io.Writer) bool { return true }
+	t.Cleanup(func() { isTTY = orig })
+}
+
+// TestWriterJQFilterStringStripsANSIOnTTY verifies that jq string results are
+// sanitized of terminal escape sequences before printing to a TTY. Unlike
+// JSON output (which escapes control bytes), string results print raw, so
+// --jq selecting an API-controlled string must not emit OSC/CSI sequences to
+// the terminal.
+func TestWriterJQFilterStringStripsANSIOnTTY(t *testing.T) {
+	forceTTY(t)
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data[].title",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "\x1b]0;evil\x07Set title"},
+		{"id": 2, "title": "\x1b[31mRed alert\x1b[0m"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Set title\nRed alert", strings.TrimSpace(buf.String()))
+	assert.NotContains(t, buf.String(), "\x1b")
+}
+
+// TestWriterJQFilterStringStripsC1ControlsOnTTY verifies that UTF-8-encoded
+// Unicode C1 controls (which survive ansi.Strip but execute on C1-honoring
+// terminals) and DEL are stripped from jq string results printed to a TTY.
+func TestWriterJQFilterStringStripsC1ControlsOnTTY(t *testing.T) {
+	forceTTY(t)
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data[].title",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "\u009b31mRed alert\u009b0m"}, // U+009B CSI
+		{"id": 2, "title": "\u009d0;evil\aSet title"},    // U+009D OSC, BEL-terminated
+		{"id": 3, "title": "De\u007fleted"},              // DEL
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "31mRed alert0m\n0;evilSet title\nDeleted", strings.TrimSpace(buf.String()))
+	assert.NotContains(t, buf.String(), "\u009b")
+	assert.NotContains(t, buf.String(), "\u009d")
+	assert.NotContains(t, buf.String(), "\u007f")
+	assert.NotContains(t, buf.String(), "\a")
+}
+
+// TestWriterJQFilterCompoundStripsC1Controls verifies that compound jq
+// results (arrays/objects) printed to a TTY are sanitized before marshaling.
+// Go's JSON encoder escapes C0 controls but emits UTF-8-encoded C1 controls
+// (U+0080–U+009F) raw, so string leaves and map keys must be stripped before
+// they reach the terminal.
+func TestWriterJQFilterCompoundStripsC1Controls(t *testing.T) {
+	forceTTY(t)
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data",
+	})
+
+	data := []map[string]any{
+		{"id": 1, "title": "\u009b31mRed alert\u009b0m"},                   // U+009B CSI in value
+		{"id": 2, "ti\u009dtle": "nested", "note": "\u009cclean"},          // U+009D OSC in key, U+009C ST in value
+		{"id": 3, "nested": map[string]any{"deep": "\u0090payload\u009c"}}, // C1 in nested object
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	out := buf.String()
+	// Raw C1 bytes must not survive (U+009B is 0xC2 0x9B in UTF-8, etc.)
+	assert.NotContains(t, out, "\u009b")
+	assert.NotContains(t, out, "\u009c")
+	assert.NotContains(t, out, "\u009d")
+	assert.NotContains(t, out, "\u0090")
+
+	// Legitimate content survives with structure intact.
+	var result []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result, 3)
+	assert.Equal(t, "31mRed alert0m", result[0]["title"])
+	assert.Equal(t, "nested", result[1]["title"], "sanitized map key")
+	assert.Equal(t, "clean", result[1]["note"])
+	nested, ok := result[2]["nested"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "payload", nested["deep"])
+}
+
+// TestWriterJQFilterStringVerbatimWhenPiped verifies that jq string results
+// written to a non-TTY sink (pipes, files, the default in tests) preserve
+// every byte verbatim: non-TTY output is the machine-consumption contract
+// (matching writeJSON), and sanitizing would silently corrupt data fidelity.
+func TestWriterJQFilterStringVerbatimWhenPiped(t *testing.T) {
+	var buf bytes.Buffer // bytes.Buffer is not a TTY
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data[].title",
+	})
+
+	c1CSI := string(rune(0x9b)) // U+009B, UTF-8-encoded C1 CSI
+	data := []map[string]any{
+		{"id": 1, "title": "\x1b[31mRed alert\x1b[0m"},            // ESC-prefixed CSI
+		{"id": 2, "title": c1CSI + "31mStill red" + c1CSI + "0m"}, // C1 CSI
+		{"id": 3, "title": "De\x7fleted"},                         // DEL
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t,
+		"\x1b[31mRed alert\x1b[0m\n"+c1CSI+"31mStill red"+c1CSI+"0m\nDe\x7fleted",
+		strings.TrimSpace(buf.String()))
+}
+
+// TestWriterJQFilterCompoundVerbatimWhenPiped verifies that compound jq
+// results written to a non-TTY sink are marshaled without sanitization —
+// string leaves and map keys keep their original bytes.
+func TestWriterJQFilterCompoundVerbatimWhenPiped(t *testing.T) {
+	var buf bytes.Buffer // bytes.Buffer is not a TTY
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data",
+	})
+
+	c1CSI := string(rune(0x9b)) // U+009B, UTF-8-encoded C1 CSI
+	data := []map[string]any{
+		{"id": 1, "title": c1CSI + "31mRed alert" + c1CSI + "0m"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	var result []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result, 1)
+	assert.Equal(t, c1CSI+"31mRed alert"+c1CSI+"0m", result[0]["title"],
+		"C1 bytes must round-trip through --jq when piped")
+}
+
 func TestWriterJQFilterSelect(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{
@@ -3647,4 +3896,63 @@ func TestPluralNoun(t *testing.T) {
 	for _, tt := range tests {
 		assert.Equal(t, tt.expected, PluralNoun(tt.input), "PluralNoun(%q)", tt.input)
 	}
+}
+
+// TestWithSummaryStripsANSI verifies that API-controlled summary/notice content
+// is sanitized of terminal escape sequences at the source, preventing terminal
+// injection in every styled/markdown sink.
+func TestWithSummaryStripsANSI(t *testing.T) {
+	// OSC 8 hyperlink + CSI color sequence wrapping a hostile payload.
+	payload := "\x1b]8;;http://evil\x07click\x1b]8;;\x07\x1b[31mpwn\x1b[0m"
+
+	t.Run("WithSummary", func(t *testing.T) {
+		r := &Response{}
+		WithSummary(payload)(r)
+		assert.Equal(t, ansi.Strip(payload), r.Summary)
+		assert.NotContains(t, r.Summary, "\x1b")
+	})
+
+	t.Run("WithNotice", func(t *testing.T) {
+		r := &Response{}
+		WithNotice(payload)(r)
+		assert.Equal(t, ansi.Strip(payload), r.Notice)
+		assert.NotContains(t, r.Notice, "\x1b")
+		assert.False(t, r.noticeDiagnostic)
+	})
+
+	t.Run("WithDiagnostic", func(t *testing.T) {
+		r := &Response{}
+		WithDiagnostic(payload)(r)
+		assert.Equal(t, ansi.Strip(payload), r.Notice)
+		assert.NotContains(t, r.Notice, "\x1b")
+		assert.True(t, r.noticeDiagnostic)
+	})
+}
+
+// TestWithSummaryStripsC1Controls verifies that UTF-8-encoded Unicode C1
+// controls (U+0080-U+009F) and DEL are stripped too: they survive ansi.Strip
+// but are executed directly by C1-honoring terminals.
+func TestWithSummaryStripsC1Controls(t *testing.T) {
+	// C1 CSI color + C1 OSC title-set + DEL wrapping a hostile payload.
+	payload := "\u009b31mpwn\u009b0m \u009d0;evil\a pe\u007fek"
+	want := "31mpwn0m 0;evil peek"
+
+	t.Run("WithSummary", func(t *testing.T) {
+		r := &Response{}
+		WithSummary(payload)(r)
+		assert.Equal(t, want, r.Summary)
+	})
+
+	t.Run("WithNotice", func(t *testing.T) {
+		r := &Response{}
+		WithNotice(payload)(r)
+		assert.Equal(t, want, r.Notice)
+	})
+
+	t.Run("WithDiagnostic", func(t *testing.T) {
+		r := &Response{}
+		WithDiagnostic(payload)(r)
+		assert.Equal(t, want, r.Notice)
+		assert.True(t, r.noticeDiagnostic)
+	})
 }

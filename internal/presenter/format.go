@@ -52,6 +52,9 @@ func formatDate(val any, locale Locale) string {
 	if !ok || str == "" {
 		return ""
 	}
+	// Strip terminal escape sequences up front so a timestamp with embedded
+	// escapes still parses, and the fallback below is already sanitized.
+	str = richtext.SanitizeTerminal(str)
 
 	// Try ISO8601 full timestamp
 	if t, err := time.Parse(time.RFC3339, str); err == nil {
@@ -71,6 +74,9 @@ func formatRelativeTime(val any, locale Locale) string {
 	if !ok || str == "" {
 		return ""
 	}
+	// Strip terminal escape sequences up front so a timestamp with embedded
+	// escapes still parses, and the fallback below is already sanitized.
+	str = richtext.SanitizeTerminal(str)
 
 	t, err := time.Parse(time.RFC3339, str)
 	if err != nil {
@@ -129,7 +135,9 @@ func formatPeople(val any) string {
 	for _, item := range arr {
 		if m, ok := item.(map[string]any); ok {
 			if name, ok := m["name"].(string); ok {
-				names = append(names, name)
+				if stripped := richtext.SanitizeTerminal(name); stripped != "" {
+					names = append(names, stripped)
+				}
 			}
 		}
 	}
@@ -168,7 +176,9 @@ func parseDockItems(val any) []dockItem {
 	result := make([]dockItem, len(items))
 	for i, m := range items {
 		title, _ := m["title"].(string)
+		title = richtext.SanitizeTerminal(title)
 		name, _ := m["name"].(string)
+		name = richtext.SanitizeTerminal(name)
 		if title == "" {
 			title = name
 		}
@@ -263,7 +273,7 @@ func dockPosition(m map[string]any) int {
 func formatPerson(val any) string {
 	if m, ok := val.(map[string]any); ok {
 		if name, ok := m["name"].(string); ok {
-			return name
+			return richtext.SanitizeTerminal(name)
 		}
 	}
 	return ""
@@ -295,8 +305,14 @@ func formatText(val any) string {
 	case nil:
 		return ""
 	case string:
+		// Strip terminal escape sequences from API-controlled strings before
+		// they reach a styled/markdown sink (terminal injection defense).
+		v = richtext.SanitizeTerminal(v)
 		if richtext.IsHTML(v) {
-			return richtext.HTMLToMarkdown(v)
+			// Defense-in-depth: strip the generated markdown too before it can
+			// reach a styled/markdown sink. The input is already stripped above
+			// and HTMLToMarkdown never emits ESC, so this is belt-and-suspenders.
+			return richtext.SanitizeTerminal(richtext.HTMLToMarkdown(v))
 		}
 		return v
 	case bool:

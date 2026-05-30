@@ -34,7 +34,11 @@ func RenderTemplate(tmpl string, data map[string]any) string {
 	if err := t.Execute(&buf, sanitizeNumericValues(data)); err != nil {
 		return "<template error>"
 	}
-	return buf.String()
+	// Strip terminal escape sequences: templates interpolate API-controlled
+	// data (names, subjects, content) and the result reaches lipgloss.Render
+	// via headlines and affordance commands. Centralizing here covers every
+	// RenderTemplate caller (terminal-injection defense).
+	return richtext.SanitizeTerminal(buf.String())
 }
 
 // EvalCondition evaluates a template condition (from affordance "when" field).
@@ -73,9 +77,15 @@ func sanitizeNumericValues(data map[string]any) map[string]any {
 // or an outer **...** wrapper), so nested markers would produce visual noise
 // like ****word****.
 func RenderHeadline(schema *EntitySchema, data map[string]any) string {
-	raw := renderHeadlineRaw(schema, data)
+	// Strip here too: the identity-label fallback in renderHeadlineRaw formats
+	// a raw data value without going through RenderTemplate.
+	raw := richtext.SanitizeTerminal(renderHeadlineRaw(schema, data))
 	if richtext.IsHTML(raw) {
-		md := singleLine(richtext.HTMLToMarkdown(raw))
+		// Strip again on the generated markdown: defense-in-depth before this
+		// reaches the styled (styles.Primary.Render) sink. Generated markdown
+		// never legitimately contains ESC, and the styled path applies its own
+		// color escapes after RenderHeadline returns, so colors are preserved.
+		md := richtext.SanitizeTerminal(singleLine(richtext.HTMLToMarkdown(raw)))
 		return reBoldWrap.ReplaceAllString(md, "$1")
 	}
 	return raw
