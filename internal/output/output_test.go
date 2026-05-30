@@ -3565,3 +3565,34 @@ func TestPluralNoun(t *testing.T) {
 		assert.Equal(t, tt.expected, PluralNoun(tt.input), "PluralNoun(%q)", tt.input)
 	}
 }
+
+// TestWithSummaryStripsANSI verifies that API-controlled summary/notice content
+// is sanitized of terminal escape sequences at the source, preventing terminal
+// injection in every styled/markdown sink.
+func TestWithSummaryStripsANSI(t *testing.T) {
+	// OSC 8 hyperlink + CSI color sequence wrapping a hostile payload.
+	payload := "\x1b]8;;http://evil\x07click\x1b]8;;\x07\x1b[31mpwn\x1b[0m"
+
+	t.Run("WithSummary", func(t *testing.T) {
+		r := &Response{}
+		WithSummary(payload)(r)
+		assert.Equal(t, ansi.Strip(payload), r.Summary)
+		assert.NotContains(t, r.Summary, "\x1b")
+	})
+
+	t.Run("WithNotice", func(t *testing.T) {
+		r := &Response{}
+		WithNotice(payload)(r)
+		assert.Equal(t, ansi.Strip(payload), r.Notice)
+		assert.NotContains(t, r.Notice, "\x1b")
+		assert.False(t, r.noticeDiagnostic)
+	})
+
+	t.Run("WithDiagnostic", func(t *testing.T) {
+		r := &Response{}
+		WithDiagnostic(payload)(r)
+		assert.Equal(t, ansi.Strip(payload), r.Notice)
+		assert.NotContains(t, r.Notice, "\x1b")
+		assert.True(t, r.noticeDiagnostic)
+	})
+}

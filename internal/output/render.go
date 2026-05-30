@@ -112,15 +112,17 @@ func terminalInfo(w io.Writer) (width int, isTTY bool) {
 func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	var b strings.Builder
 
-	// Summary line
+	// Summary line. ansi.Strip guards against terminal injection from
+	// API-controlled summary/notice content (defense-in-depth: also stripped
+	// at the WithSummary/WithNotice source).
 	if resp.Summary != "" {
-		b.WriteString(r.Summary.Render(resp.Summary))
+		b.WriteString(r.Summary.Render(ansi.Strip(resp.Summary)))
 		b.WriteString("\n")
 	}
 
 	// Notice (e.g., truncation warning)
 	if resp.Notice != "" {
-		b.WriteString(r.Hint.Render(resp.Notice))
+		b.WriteString(r.Hint.Render(ansi.Strip(resp.Notice)))
 		b.WriteString("\n")
 	}
 
@@ -1116,14 +1118,15 @@ func NewMarkdownRenderer(w io.Writer) *MarkdownRenderer {
 func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 	var b strings.Builder
 
-	// Summary as heading
+	// Summary as heading. ansi.Strip guards against terminal injection
+	// (defense-in-depth; also stripped at the WithSummary/WithNotice source).
 	if resp.Summary != "" {
-		b.WriteString("## " + resp.Summary + "\n")
+		b.WriteString("## " + ansi.Strip(resp.Summary) + "\n")
 	}
 
 	// Notice (e.g., truncation warning)
 	if resp.Notice != "" {
-		b.WriteString("*" + resp.Notice + "*\n")
+		b.WriteString("*" + ansi.Strip(resp.Notice) + "*\n")
 	}
 
 	if resp.Summary != "" || resp.Notice != "" {

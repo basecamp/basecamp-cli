@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/itchyny/gojq"
 
 	clioutput "github.com/basecamp/cli/output"
@@ -421,14 +422,18 @@ func (w *Writer) writeLiteralMarkdown(v any) error {
 type ResponseOption func(*Response)
 
 // WithSummary adds a summary to the response.
+// Summaries frequently interpolate API-controlled strings (project/person/
+// entity names), so ANSI/OSC escape sequences are stripped at the source to
+// prevent terminal injection in every styled/markdown sink.
 func WithSummary(s string) ResponseOption {
-	return func(r *Response) { r.Summary = s }
+	return func(r *Response) { r.Summary = ansi.Strip(s) }
 }
 
 // WithNotice adds an informational notice to the response.
 // Use this for non-error messages like truncation warnings.
+// Like WithSummary, the value is ANSI-stripped at the source.
 func WithNotice(s string) ResponseOption {
-	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = false }
+	return func(r *Response) { r.Notice = ansi.Strip(s); r.noticeDiagnostic = false }
 }
 
 // WithDiagnostic sets a notice that is also emitted to stderr in quiet mode.
@@ -436,7 +441,7 @@ func WithNotice(s string) ResponseOption {
 // automation consumers need to detect. Truncation and other informational
 // notices should use WithNotice instead.
 func WithDiagnostic(s string) ResponseOption {
-	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = true }
+	return func(r *Response) { r.Notice = ansi.Strip(s); r.noticeDiagnostic = true }
 }
 
 // WithBreadcrumbs adds breadcrumbs to the response.
@@ -530,13 +535,16 @@ func (w *Writer) presentStyledEntity(resp *Response) bool {
 	var out strings.Builder
 	r := NewRenderer(w.opts.Writer, true)
 
+	// ansi.Strip defends against terminal injection from API-controlled
+	// summary/notice content (already stripped at the WithSummary/WithNotice
+	// source; repeated here as defense-in-depth at the render sink).
 	if resp.Summary != "" {
-		out.WriteString(r.Summary.Render(resp.Summary))
+		out.WriteString(r.Summary.Render(ansi.Strip(resp.Summary)))
 		out.WriteString("\n")
 	}
 
 	if resp.Notice != "" {
-		out.WriteString(r.Hint.Render(resp.Notice))
+		out.WriteString(r.Hint.Render(ansi.Strip(resp.Notice)))
 		out.WriteString("\n")
 	}
 
@@ -589,12 +597,13 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 	var out strings.Builder
 	mr := NewMarkdownRenderer(w.opts.Writer)
 
+	// Defense-in-depth ANSI stripping (see presentStyledEntity).
 	if resp.Summary != "" {
-		out.WriteString("## " + resp.Summary + "\n")
+		out.WriteString("## " + ansi.Strip(resp.Summary) + "\n")
 	}
 
 	if resp.Notice != "" {
-		out.WriteString("*" + resp.Notice + "*\n")
+		out.WriteString("*" + ansi.Strip(resp.Notice) + "*\n")
 	}
 
 	if resp.Summary != "" || resp.Notice != "" {

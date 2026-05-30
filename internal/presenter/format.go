@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
@@ -61,7 +63,7 @@ func formatDate(val any, locale Locale) string {
 	if t, err := time.Parse("2006-01-02", str); err == nil {
 		return locale.FormatDate(t)
 	}
-	return str
+	return ansi.Strip(str)
 }
 
 // formatRelativeTime formats a timestamp as relative time (e.g. "2 hours ago").
@@ -77,7 +79,7 @@ func formatRelativeTime(val any, locale Locale) string {
 		// Try date-only
 		t, err = time.Parse("2006-01-02", str)
 		if err != nil {
-			return str
+			return ansi.Strip(str)
 		}
 	}
 
@@ -129,7 +131,9 @@ func formatPeople(val any) string {
 	for _, item := range arr {
 		if m, ok := item.(map[string]any); ok {
 			if name, ok := m["name"].(string); ok {
-				names = append(names, name)
+				if stripped := ansi.Strip(name); stripped != "" {
+					names = append(names, stripped)
+				}
 			}
 		}
 	}
@@ -168,7 +172,9 @@ func parseDockItems(val any) []dockItem {
 	result := make([]dockItem, len(items))
 	for i, m := range items {
 		title, _ := m["title"].(string)
+		title = ansi.Strip(title)
 		name, _ := m["name"].(string)
+		name = ansi.Strip(name)
 		if title == "" {
 			title = name
 		}
@@ -263,7 +269,7 @@ func dockPosition(m map[string]any) int {
 func formatPerson(val any) string {
 	if m, ok := val.(map[string]any); ok {
 		if name, ok := m["name"].(string); ok {
-			return name
+			return ansi.Strip(name)
 		}
 	}
 	return ""
@@ -295,8 +301,14 @@ func formatText(val any) string {
 	case nil:
 		return ""
 	case string:
+		// Strip terminal escape sequences from API-controlled strings before
+		// they reach a styled/markdown sink (terminal injection defense).
+		v = ansi.Strip(v)
 		if richtext.IsHTML(v) {
-			return richtext.HTMLToMarkdown(v)
+			// Defense-in-depth: strip the generated markdown too before it can
+			// reach a styled/markdown sink. The input is already stripped above
+			// and HTMLToMarkdown never emits ESC, so this is belt-and-suspenders.
+			return ansi.Strip(richtext.HTMLToMarkdown(v))
 		}
 		return v
 	case bool:
