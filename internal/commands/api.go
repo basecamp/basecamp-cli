@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -47,7 +48,10 @@ func newAPIGetCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL, app.Config.AccountID)
+			if err != nil {
+				return err
+			}
 			resp, err := app.Account().Get(cmd.Context(), path)
 			if err != nil {
 				return convertSDKError(err)
@@ -85,7 +89,10 @@ func newAPIPostCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL, app.Config.AccountID)
+			if err != nil {
+				return err
+			}
 
 			// Parse JSON data
 			var body any
@@ -134,7 +141,10 @@ func newAPIPutCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL, app.Config.AccountID)
+			if err != nil {
+				return err
+			}
 
 			// Parse JSON data
 			var body any
@@ -176,7 +186,10 @@ func newAPIDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL, app.Config.AccountID)
+			if err != nil {
+				return err
+			}
 			resp, err := app.Account().Delete(cmd.Context(), path)
 			if err != nil {
 				return convertSDKError(err)
@@ -201,20 +214,92 @@ func apiPathArgs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parsePath extracts and normalizes the API path.
-// Handles full URLs and relative paths. The leading slash is stripped because
-// the SDK's accountPath and buildURL both add one — keeping it here would
-// double-slash and, on Windows, MSYS/Git Bash converts /path to C:\...\path.
-func parsePath(input string) string {
-	urlPattern := regexp.MustCompile(`^https?://[^/]+/[0-9]+(/.*)`)
-	if matches := urlPattern.FindStringSubmatch(input); len(matches) > 1 {
-		return matches[1]
+// accountSegmentPattern matches a leading /<account-id> segment in an API
+// path so it can be dropped — the SDK re-prefixes the configured account. The
+// trailing path is optional so a bare "/<account-id>" (no further segments)
+// also matches, leaving m[2] empty.
+var accountSegmentPattern = regexp.MustCompile(`^/([0-9]+)(/.*)?$`)
+
+// parsePath normalizes the user-supplied API path against the configured base
+// URL. It accepts relative paths ("projects.json", "/projects.json") and
+// absolute Basecamp URLs whose host matches baseURL — from which the path is
+// extracted and a leading /<account-id> segment dropped (the SDK re-prefixes
+// the configured account). Absolute URLs on ANY other host are rejected so the
+// bearer token is never attached to a request bound for a foreign host.
+//
+// A leading account segment must match the configured accountID: the SDK
+// re-prefixes the configured account, so silently stripping a foreign account
+// id would retarget the request (including DELETEs) at the wrong account.
+// When accountID is empty (no configured account to compare against), the
+// segment is stripped as before.
+//
+// All leading slashes and a mixed-case scheme are normalized first so neither
+// "//https://evil/…" nor "HTTPS://evil/…" can smuggle an absolute URL past the
+// host check (URL schemes are case-insensitive per RFC 3986 §3.1).
+func parsePath(input, baseURL, accountID string) (string, error) {
+	candidate := strings.TrimLeft(input, "/")
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		u, err := url.Parse(candidate)
+		if err != nil || u.Host == "" {
+			return "", output.ErrUsage("invalid API URL: " + input)
+		}
+		base, baseErr := url.Parse(baseURL)
+		if baseErr != nil || base.Host == "" || !sameHostPort(u, base) {
+			return "", output.ErrUsage("API path must be relative or a Basecamp URL on the configured host; refusing to send credentials to " + input)
+		}
+		// Same host: use the path (+ query), dropping a leading /<account-id>
+		// — but only when it matches the configured account.
+		path := u.EscapedPath()
+		if m := accountSegmentPattern.FindStringSubmatch(path); m != nil {
+			if accountID != "" && m[1] != accountID {
+				return "", output.ErrUsage(fmt.Sprintf("URL is for account %s; refusing to retarget to configured account %s", m[1], accountID))
+			}
+			// A bare "/<account-id>" leaves m[2] empty; the request targets the
+			// account root, so normalize to "/" rather than an empty path.
+			if path = m[2]; path == "" {
+				path = "/"
+			}
+		}
+		// A same-host URL with no path at all (e.g. "https://host" or a
+		// query-only "https://host?foo=bar") leaves path empty since the
+		// account-segment pattern can't match ""; normalize to the root.
+		if path == "" {
+			path = "/"
+		}
+		if u.RawQuery != "" {
+			path += "?" + u.RawQuery
+		}
+		return path, nil
 	}
 
-	// Strip leading slash — the SDK prefixes the account path.
-	input = strings.TrimPrefix(input, "/")
+	// Relative path — return without leading slashes; the SDK prefixes the
+	// account path (keeping one here would double-slash and, on Windows,
+	// MSYS/Git Bash converts /path to C:\...\path).
+	return candidate, nil
+}
 
-	return input
+// sameHostPort reports whether u and base address the same host: hostnames
+// compared case-insensitively, ports compared after normalizing an omitted
+// port to the scheme default. A matching hostname on a different port is
+// still a different origin and must not receive credentials.
+func sameHostPort(u, base *url.URL) bool {
+	if !strings.EqualFold(u.Hostname(), base.Hostname()) {
+		return false
+	}
+	return effectivePort(u) == effectivePort(base)
+}
+
+// effectivePort returns the URL's explicit port, or the scheme's default
+// (80 for http, 443 for https) when omitted.
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(u.Scheme, "http") {
+		return "80"
+	}
+	return "443"
 }
 
 // apiSummary generates a summary from the API response.
