@@ -44,6 +44,24 @@ func NewRootCmd() *cobra.Command {
 				return nil
 			}
 
+			// Tighten global config dir perms: an older CLI version (or the
+			// skill/update bootstrap) may have created it world-listable at
+			// 0755, yet it can hold credentials.json. Best-effort, runs before
+			// anything writes into the dir. On Unix, hardenConfigDir walks the
+			// path component-by-component with openat(O_NOFOLLOW), fstat-vetting
+			// each ancestor (rejecting symlink/rename swaps and writable or
+			// foreign-owned ancestors), then tightens the target via fchmodat on
+			// the vetted parent fd — so no swap can redirect the chmod. On
+			// non-Unix platforms (harden_other.go) it's a no-op, since the Unix
+			// permission model doesn't apply.
+			// Only harden an absolute path: a relative XDG_CONFIG_HOME would
+			// resolve against the cwd, so chmod'ing it would surprise-tighten
+			// an arbitrary cwd-relative dir. Treat non-absolute as unsafe and
+			// skip it (matching the pre-rewrite hasWritableAncestor guard).
+			if cfgDir := config.GlobalConfigDir(); cfgDir != "" && filepath.IsAbs(cfgDir) {
+				hardenConfigDir(cfgDir)
+			}
+
 			// Start background update check early so it runs during command execution
 			updateCheck = commands.StartUpdateCheck()
 
