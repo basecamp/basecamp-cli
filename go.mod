@@ -2,6 +2,8 @@ module github.com/basecamp/basecamp-cli
 
 go 1.26
 
+toolchain go1.26.3
+
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.6
@@ -72,7 +74,7 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
 )
