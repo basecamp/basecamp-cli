@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -57,6 +59,174 @@ func TestLLMEndpointValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHasWritableAncestor exercises the TOCTOU guard that gates the best-effort
+// chmod of the global config dir in PersistentPreRunE. The chmod is skipped when
+// any ancestor — not just the immediate parent — is group/world-writable, since a
+// writable ancestor anywhere up the path lets an attacker substitute a path
+// component and win the Lstat->Chmod race.
+//
+// hasWritableAncestor walks the filesystem all the way to root, so a clean
+// ("proceeds") case needs a base whose entire ancestry is non-writable. t.TempDir()
+// lives under a world-writable /tmp (1777), which would always trip the guard, so
+// the tree is built under the user's home dir instead and the proceeds assertion is
+// skipped on environments whose HOME itself sits under a writable ancestor.
+//
+// The helper walks BOTH the lexical ancestor chain of the original path AND the
+// chain of the symlink-resolved real path; either chain being writable is unsafe.
+// EvalSymlinks requires the path to exist, so cfgDir leaves are created (not just
+// their parents) in these cases. It also treats relative and unresolvable paths as
+// unsafe.
+func TestHasWritableAncestor(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	// base is a freshly created, 0755 dir under HOME; only its ancestry (HOME and
+	// above) plus whatever we loosen below can be writable.
+	base, err := os.MkdirTemp(home, "hwa-test-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	require.NoError(t, os.Chmod(base, 0o755))
+
+	t.Run("relative path => unsafe", func(t *testing.T) {
+		// A relative config dir can't be reasoned about (real ancestry depends on
+		// cwd), so it must be treated as unsafe regardless of the filesystem.
+		assert.True(t, hasWritableAncestor(filepath.Join("foo", "basecamp")))
+	})
+
+	t.Run("non-writable ancestors => chmod proceeds", func(t *testing.T) {
+		if hasWritableAncestor(base) {
+			t.Skip("HOME has a writable ancestor; cannot demonstrate the proceeds case here")
+		}
+		grandparent := filepath.Join(base, "ok-gp")
+		parent := filepath.Join(grandparent, "parent")
+		cfgDir := filepath.Join(parent, "basecamp")
+		require.NoError(t, os.MkdirAll(cfgDir, 0o755))
+
+		assert.False(t, hasWritableAncestor(cfgDir))
+	})
+
+	t.Run("writable immediate parent => chmod skipped", func(t *testing.T) {
+		parent := filepath.Join(base, "wp-parent")
+		cfgDir := filepath.Join(parent, "basecamp")
+		require.NoError(t, os.MkdirAll(cfgDir, 0o755))
+		require.NoError(t, os.Chmod(parent, 0o777))
+
+		assert.True(t, hasWritableAncestor(cfgDir))
+	})
+
+	t.Run("non-writable parent but writable grandparent => chmod skipped", func(t *testing.T) {
+		grandparent := filepath.Join(base, "wgp-gp")
+		parent := filepath.Join(grandparent, "parent")
+		cfgDir := filepath.Join(parent, "basecamp")
+		require.NoError(t, os.MkdirAll(cfgDir, 0o755))
+		// Loosen the grandparent only; the immediate parent stays 0755.
+		require.NoError(t, os.Chmod(grandparent, 0o777))
+
+		assert.True(t, hasWritableAncestor(cfgDir))
+	})
+
+	t.Run("symlink into writable real ancestor => chmod skipped", func(t *testing.T) {
+		if hasWritableAncestor(base) {
+			t.Skip("HOME has a writable ancestor; cannot isolate the symlinked-ancestor case here")
+		}
+		// Real target lives under a world-writable ancestor (writable/real-cfg),
+		// but the lexical path to the symlink (safe/link) has only non-writable
+		// ancestors. Lexical walking would miss the writable ancestor; symlink
+		// resolution must catch it.
+		writable := filepath.Join(base, "writable")
+		realCfg := filepath.Join(writable, "real-cfg")
+		require.NoError(t, os.MkdirAll(realCfg, 0o755))
+		require.NoError(t, os.Chmod(writable, 0o777))
+
+		safe := filepath.Join(base, "safe")
+		require.NoError(t, os.MkdirAll(safe, 0o755))
+		link := filepath.Join(safe, "link")
+		if err := os.Symlink(realCfg, link); err != nil {
+			t.Skipf("symlinks unavailable in this environment: %v", err)
+		}
+
+		assert.True(t, hasWritableAncestor(link))
+	})
+
+	t.Run("symlink whose lexical parent is writable but target tree is private => chmod skipped", func(t *testing.T) {
+		if hasWritableAncestor(base) {
+			t.Skip("HOME has a writable ancestor; cannot isolate the writable-symlink-parent case here")
+		}
+		// The dual to the prior case: here the symlink's TARGET tree is entirely
+		// private (0755) but the world-writable dir holding the symlink is in the
+		// LEXICAL chain only — EvalSymlinks jumps to the target and skips it, so a
+		// resolved-only walk returns "safe". A local user with write access to the
+		// writable dir can swap the symlink between our Lstat and Chmod, so the
+		// lexical chain must catch it.
+		realTree := filepath.Join(base, "private-real", "sub")
+		require.NoError(t, os.MkdirAll(realTree, 0o755))
+
+		writable := filepath.Join(base, "world-writable")
+		require.NoError(t, os.MkdirAll(writable, 0o755))
+		require.NoError(t, os.Chmod(writable, 0o777))
+		link := filepath.Join(writable, "link")
+		if err := os.Symlink(realTree, link); err != nil {
+			t.Skipf("symlinks unavailable in this environment: %v", err)
+		}
+
+		// link/leaf resolves into the private tree, but its lexical parent chain
+		// runs through the world-writable dir.
+		assert.True(t, hasWritableAncestor(filepath.Join(link, "leaf")))
+	})
+}
+
+// TestIsForeignOwnerWritable exercises the foreign-owner half of the TOCTOU guard
+// directly. The helper only flags ancestors owned by a DIFFERENT non-root user
+// that still carry the owner-write bit; root-owned and self-owned dirs are trusted
+// regardless of their owner-write bit. Most cases run as any user; the genuine
+// "true" case requires chown'ing to a foreign uid, which only root can do, so it is
+// skipped otherwise.
+func TestIsForeignOwnerWritable(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	base, err := os.MkdirTemp(home, "ifow-test-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+
+	t.Run("self-owned 0700 => false", func(t *testing.T) {
+		dir := filepath.Join(base, "self-0700")
+		require.NoError(t, os.Mkdir(dir, 0o700))
+		fi, err := os.Stat(dir)
+		require.NoError(t, err)
+		assert.False(t, isForeignOwnerWritable(fi))
+	})
+
+	t.Run("self-owned 0755 => false (uid==self; group/world bits handled elsewhere)", func(t *testing.T) {
+		dir := filepath.Join(base, "self-0755")
+		require.NoError(t, os.Mkdir(dir, 0o755))
+		require.NoError(t, os.Chmod(dir, 0o755))
+		fi, err := os.Stat(dir)
+		require.NoError(t, err)
+		// Owned by us, so the foreign-owner check is false even with the
+		// owner-write bit set; group/world-writability is a separate concern
+		// handled by hasWritableChain, not this helper.
+		assert.False(t, isForeignOwnerWritable(fi))
+	})
+
+	t.Run("foreign non-root owner with owner-write => true", func(t *testing.T) {
+		// A genuine foreign-owned, owner-writable dir can only be produced by
+		// chown'ing to another uid, which requires root. Skip otherwise.
+		if os.Geteuid() != 0 {
+			t.Skip("need root to chown a dir to a foreign uid")
+		}
+		dir := filepath.Join(base, "foreign-0755")
+		require.NoError(t, os.Mkdir(dir, 0o755))
+		// Chown to a non-root, non-self uid (nobody-ish). Skip if it fails.
+		const foreignUID = 65534 // conventionally "nobody"
+		if err := os.Chown(dir, foreignUID, foreignUID); err != nil {
+			t.Skipf("cannot chown to foreign uid %d: %v", foreignUID, err)
+		}
+		fi, err := os.Stat(dir)
+		require.NoError(t, err)
+		assert.True(t, isForeignOwnerWritable(fi))
+	})
 }
 
 func TestResolvePreferences(t *testing.T) {
