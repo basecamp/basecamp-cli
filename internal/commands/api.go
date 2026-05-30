@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -47,7 +48,10 @@ func newAPIGetCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL)
+			if err != nil {
+				return err
+			}
 			resp, err := app.Account().Get(cmd.Context(), path)
 			if err != nil {
 				return convertSDKError(err)
@@ -85,7 +89,10 @@ func newAPIPostCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL)
+			if err != nil {
+				return err
+			}
 
 			// Parse JSON data
 			var body any
@@ -134,7 +141,10 @@ func newAPIPutCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL)
+			if err != nil {
+				return err
+			}
 
 			// Parse JSON data
 			var body any
@@ -176,7 +186,10 @@ func newAPIDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			path := parsePath(args[0])
+			path, err := parsePath(args[0], app.Config.BaseURL)
+			if err != nil {
+				return err
+			}
 			resp, err := app.Account().Delete(cmd.Context(), path)
 			if err != nil {
 				return err
@@ -201,20 +214,47 @@ func apiPathArgs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parsePath extracts and normalizes the API path.
-// Handles full URLs and relative paths. The leading slash is stripped because
-// the SDK's accountPath and buildURL both add one — keeping it here would
-// double-slash and, on Windows, MSYS/Git Bash converts /path to C:\...\path.
-func parsePath(input string) string {
-	urlPattern := regexp.MustCompile(`^https?://[^/]+/[0-9]+(/.*)`)
-	if matches := urlPattern.FindStringSubmatch(input); len(matches) > 1 {
-		return matches[1]
+// accountSegmentPattern matches a leading /<account-id>/ segment in an API
+// path so it can be dropped — the SDK re-prefixes the configured account.
+var accountSegmentPattern = regexp.MustCompile(`^/[0-9]+(/.*)$`)
+
+// parsePath normalizes the user-supplied API path against the configured base
+// URL. It accepts relative paths ("projects.json", "/projects.json") and
+// absolute Basecamp URLs whose host matches baseURL — from which the path is
+// extracted and a leading /<account-id> segment dropped (the SDK re-prefixes
+// the configured account). Absolute URLs on ANY other host are rejected so the
+// bearer token is never attached to a request bound for a foreign host.
+//
+// A stray leading slash and a mixed-case scheme are normalized first so neither
+// "/https://evil/…" nor "HTTPS://evil/…" can smuggle an absolute URL past the
+// host check (URL schemes are case-insensitive per RFC 3986 §3.1).
+func parsePath(input, baseURL string) (string, error) {
+	candidate := strings.TrimPrefix(input, "/")
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		u, err := url.Parse(candidate)
+		if err != nil || u.Host == "" {
+			return "", output.ErrUsage("invalid API URL: " + input)
+		}
+		base, baseErr := url.Parse(baseURL)
+		if baseErr != nil || base.Host == "" || !strings.EqualFold(u.Host, base.Host) {
+			return "", output.ErrUsage("API path must be relative or a Basecamp URL on the configured host; refusing to send credentials to " + input)
+		}
+		// Same host: use the path (+ query), dropping a leading /<account-id>.
+		path := u.EscapedPath()
+		if m := accountSegmentPattern.FindStringSubmatch(path); m != nil {
+			path = m[1]
+		}
+		if u.RawQuery != "" {
+			path += "?" + u.RawQuery
+		}
+		return path, nil
 	}
 
-	// Strip leading slash — the SDK prefixes the account path.
-	input = strings.TrimPrefix(input, "/")
-
-	return input
+	// Relative path — return without the leading slash; the SDK prefixes the
+	// account path (keeping it here would double-slash and, on Windows,
+	// MSYS/Git Bash converts /path to C:\...\path).
+	return candidate, nil
 }
 
 // apiSummary generates a summary from the API response.
