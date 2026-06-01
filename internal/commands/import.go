@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -36,14 +37,92 @@ func NewImportCmd() *cobra.Command {
 }
 
 type importWriteClient struct {
-	cmd       *cobra.Command
-	app       *appctx.App
-	todosetID string
+	cmd         *cobra.Command
+	app         *appctx.App
+	todosetID   string
+	cardTableID string
 }
 
 type importPreflightClient struct {
 	cmd *cobra.Command
 	app *appctx.App
+}
+
+func (c *importPreflightClient) CardTableID(ctx context.Context, projectID int64) (int64, error) {
+	resolvedID, err := importCardTableID(ctx, c.app, strconv.FormatInt(projectID, 10))
+	if err != nil {
+		return 0, err
+	}
+	cardTableID, err := strconv.ParseInt(resolvedID, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Invalid card table ID")
+	}
+	return cardTableID, nil
+}
+
+func importCardTableID(ctx context.Context, app *appctx.App, projectID string) (string, error) {
+	path := fmt.Sprintf("/projects/%s.json", projectID)
+	resp, err := app.Account().Get(ctx, path)
+	if err != nil {
+		return "", convertSDKError(err)
+	}
+	var project struct {
+		Dock []struct {
+			Name  string `json:"name"`
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		} `json:"dock"`
+	}
+	if err := resp.UnmarshalData(&project); err != nil {
+		return "", fmt.Errorf("failed to parse project: %w", err)
+	}
+	var cardTables []struct {
+		ID    int64
+		Title string
+	}
+	for _, item := range project.Dock {
+		if item.Name == "kanban_board" || item.Name == "card_table" {
+			cardTables = append(cardTables, struct {
+				ID    int64
+				Title string
+			}{ID: item.ID, Title: item.Title})
+		}
+	}
+	if len(cardTables) == 0 {
+		return "", output.ErrNotFound("card table", projectID)
+	}
+	if len(cardTables) == 1 {
+		return fmt.Sprintf("%d", cardTables[0].ID), nil
+	}
+	lines := make([]string, 0, len(cardTables))
+	for _, table := range cardTables {
+		lines = append(lines, fmt.Sprintf("  %d  %s", table.ID, table.Title))
+	}
+	return "", &output.Error{Code: output.CodeAmbiguous, Message: "Multiple card tables found", Hint: fmt.Sprintf("Specify card_table_id in destination.json:\n%s", strings.Join(lines, "\n"))}
+}
+
+func (c *importPreflightClient) ExistingCardColumns(ctx context.Context, cardTableID int64) ([]importer.ExistingCardColumn, error) {
+	cardTable, err := c.app.Account().CardTables().Get(ctx, cardTableID)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	out := make([]importer.ExistingCardColumn, 0, len(cardTable.Lists))
+	for _, column := range cardTable.Lists {
+		out = append(out, importer.ExistingCardColumn{ID: column.ID, Name: column.Title})
+	}
+	return out, nil
+}
+
+func (c *importPreflightClient) ExistingCards(ctx context.Context, columnID int64) ([]importer.ExistingCard, error) {
+	result, err := c.app.Account().Cards().List(ctx, columnID, &basecamp.CardListOptions{Limit: -1})
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	out := make([]importer.ExistingCard, 0, len(result.Cards))
+	for _, card := range result.Cards {
+		out = append(out, importer.ExistingCard{ID: card.ID, Title: card.Title})
+	}
+	return out, nil
 }
 
 func (c *importPreflightClient) ExistingTodos(ctx context.Context, todolistID int64) ([]importer.ExistingTodo, error) {
@@ -111,6 +190,37 @@ func (c *importWriteClient) CreateTodolist(ctx context.Context, projectID int64,
 		return 0, convertSDKError(err)
 	}
 	return todolist.ID, nil
+}
+
+func (c *importWriteClient) CardTableID(ctx context.Context, projectID int64) (int64, error) {
+	if c.cardTableID == "" {
+		resolvedID, err := importCardTableID(ctx, c.app, strconv.FormatInt(projectID, 10))
+		if err != nil {
+			return 0, err
+		}
+		c.cardTableID = resolvedID
+	}
+	cardTableID, err := strconv.ParseInt(c.cardTableID, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Invalid card table ID")
+	}
+	return cardTableID, nil
+}
+
+func (c *importWriteClient) CreateCardColumn(ctx context.Context, cardTableID int64, name string) (int64, error) {
+	column, err := c.app.Account().CardColumns().Create(ctx, cardTableID, &basecamp.CreateColumnRequest{Title: name})
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+	return column.ID, nil
+}
+
+func (c *importWriteClient) CreateCard(ctx context.Context, columnID int64, card importer.ExecutableCard) (int64, error) {
+	created, err := c.app.Account().Cards().Create(ctx, columnID, &basecamp.CreateCardRequest{Title: card.Title, Content: card.Content})
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+	return created.ID, nil
 }
 
 func (c *importWriteClient) CreateTodo(ctx context.Context, todolistID int64, todo importer.ExecutableTodo) (int64, error) {
@@ -205,7 +315,7 @@ func newImportFollowupCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), result.Status)
 				return nil
 			}
-			return app.OK(result, output.WithSummary(fmt.Sprintf("Compiled follow-up artifact with %d pending todos", result.Manifest.Counts.Todos)))
+			return app.OK(result, output.WithSummary(importCompileSummary("Compiled follow-up artifact", result.Manifest.Counts)))
 		},
 	}
 
@@ -278,7 +388,7 @@ func newImportExecuteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.OK(result, output.WithSummary(fmt.Sprintf("Imported %d todos", result.Created.Todos)))
+			return app.OK(result, output.WithSummary(importExecuteSummary(result.Created)))
 		},
 	}
 
@@ -333,7 +443,7 @@ func newImportCompileCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), result.Status)
 				return nil
 			}
-			return app.OK(result, output.WithSummary(fmt.Sprintf("Compiled import artifact with %d todos", result.Manifest.Counts.Todos)))
+			return app.OK(result, output.WithSummary(importCompileSummary("Compiled import artifact", result.Manifest.Counts)))
 		},
 	}
 
@@ -398,7 +508,7 @@ func newImportPlanCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), plan.Status)
 				return nil
 			}
-			return app.OK(plan, output.WithSummary(fmt.Sprintf("Planned %d todos", plan.Counts.Todos)))
+			return app.OK(plan, output.WithSummary(importPlanSummary(plan.Counts)))
 		},
 	}
 
@@ -407,6 +517,27 @@ func newImportPlanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&mappingPath, "mapping", "", "Confirmed mapping JSON file")
 	cmd.Flags().StringVar(&destinationPath, "destination", "", "Destination JSON file")
 	return cmd
+}
+
+func importCompileSummary(prefix string, counts importer.PlanCounts) string {
+	if counts.Cards > 0 || counts.CardColumns > 0 {
+		return fmt.Sprintf("%s with %d cards", prefix, counts.Cards)
+	}
+	return fmt.Sprintf("%s with %d todos", prefix, counts.Todos)
+}
+
+func importPlanSummary(counts importer.PlanCounts) string {
+	if counts.Cards > 0 || counts.CardColumns > 0 {
+		return fmt.Sprintf("Planned %d cards", counts.Cards)
+	}
+	return fmt.Sprintf("Planned %d todos", counts.Todos)
+}
+
+func importExecuteSummary(counts importer.ExecuteCounts) string {
+	if counts.Cards > 0 || counts.CardColumns > 0 {
+		return fmt.Sprintf("Imported %d cards", counts.Cards)
+	}
+	return fmt.Sprintf("Imported %d todos", counts.Todos)
 }
 
 func newImportInspectCmd() *cobra.Command {

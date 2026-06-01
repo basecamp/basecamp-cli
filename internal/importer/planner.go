@@ -11,6 +11,11 @@ import (
 
 const planSchemaVersion = 1
 
+const (
+	resourceTypeTodos = "todos"
+	resourceTypeCards = "cards"
+)
+
 // MappingConfig records user-confirmed CSV-to-Basecamp mapping choices.
 type MappingConfig struct {
 	SchemaVersion  int         `json:"schema_version"`
@@ -18,6 +23,7 @@ type MappingConfig struct {
 	Title          *ColumnRef  `json:"title,omitempty"`
 	Description    *ColumnRef  `json:"description,omitempty"`
 	Todolist       *ColumnRef  `json:"todolist,omitempty"`
+	Column         *ColumnRef  `json:"column,omitempty"`
 	Status         *ColumnRef  `json:"status,omitempty"`
 	Assignees      *ColumnRef  `json:"assignees,omitempty"`
 	DueOn          *ColumnRef  `json:"due_on,omitempty"`
@@ -37,12 +43,17 @@ type ColumnRef struct {
 // DestinationConfig records the Basecamp destination choices for a plan.
 type DestinationConfig struct {
 	SchemaVersion    int    `json:"schema_version"`
+	ResourceType     string `json:"resource_type,omitempty"`
 	Mode             string `json:"mode"`
 	ProjectID        string `json:"project_id,omitempty"`
 	ProjectName      string `json:"project_name,omitempty"`
 	TodolistStrategy string `json:"todolist_strategy,omitempty"`
 	TodolistID       string `json:"todolist_id,omitempty"`
 	TodolistName     string `json:"todolist_name,omitempty"`
+	CardTableID      string `json:"card_table_id,omitempty"`
+	ColumnStrategy   string `json:"column_strategy,omitempty"`
+	ColumnID         string `json:"column_id,omitempty"`
+	ColumnName       string `json:"column_name,omitempty"`
 }
 
 // Plan describes the deterministic dry-run generated from confirmed mappings.
@@ -61,9 +72,11 @@ type Plan struct {
 
 // PlanCounts summarizes planned write operations.
 type PlanCounts struct {
-	Projects  int `json:"projects"`
-	Todolists int `json:"todolists"`
-	Todos     int `json:"todos"`
+	Projects    int `json:"projects"`
+	Todolists   int `json:"todolists"`
+	Todos       int `json:"todos"`
+	CardColumns int `json:"card_columns,omitempty"`
+	Cards       int `json:"cards,omitempty"`
 }
 
 // PlannedOperation is one Basecamp write that can be executed after approval.
@@ -75,6 +88,9 @@ type PlannedOperation struct {
 	ProjectName    string            `json:"project_name,omitempty"`
 	TodolistID     string            `json:"todolist_id,omitempty"`
 	TodolistName   string            `json:"todolist_name,omitempty"`
+	CardTableID    string            `json:"card_table_id,omitempty"`
+	ColumnID       string            `json:"column_id,omitempty"`
+	ColumnName     string            `json:"column_name,omitempty"`
 	Title          string            `json:"title,omitempty"`
 	Description    string            `json:"description,omitempty"`
 	Status         string            `json:"status,omitempty"`
@@ -131,17 +147,27 @@ func PlanImport(inspection *Inspection, mapping *MappingConfig, destination *Des
 		Questions:         make([]MappingQuestion, 0),
 	}
 
+	resourceType, err := destinationResourceType(destination)
+	if err != nil {
+		return nil, err
+	}
+	plan.Destination.ResourceType = resourceType
+
 	if mapping.Title == nil {
 		plan.RequiresUserInput = true
-		plan.Questions = append(plan.Questions, MappingQuestion{ID: "confirm_title_column", Prompt: "Which column should become the Basecamp todo title?", Choices: candidateIndexes(inspection.RoleCandidates["title"])})
+		plan.Questions = append(plan.Questions, MappingQuestion{ID: "confirm_title_column", Prompt: fmt.Sprintf("Which column should become the Basecamp %s title?", resourceSingular(resourceType)), Choices: candidateIndexes(inspection.RoleCandidates["title"])})
 	}
 	if destination.Mode == "" {
 		plan.RequiresUserInput = true
-		plan.Questions = append(plan.Questions, MappingQuestion{ID: "confirm_destination", Prompt: "Which Basecamp project should receive the imported todos?"})
+		plan.Questions = append(plan.Questions, MappingQuestion{ID: "confirm_destination", Prompt: fmt.Sprintf("Which Basecamp project should receive the imported %s?", resourceType)})
 	}
-	if destination.TodolistStrategy == "create_from_column" && mapping.Todolist == nil {
+	if resourceType == resourceTypeTodos && destination.TodolistStrategy == "create_from_column" && mapping.Todolist == nil {
 		plan.RequiresUserInput = true
 		plan.Questions = append(plan.Questions, MappingQuestion{ID: "confirm_todolist_column", Prompt: "Which column should group todos into Basecamp todolists?", Choices: candidateIndexes(inspection.RoleCandidates["todolist"])})
+	}
+	if resourceType == resourceTypeCards && destination.ColumnStrategy == "create_from_column" && cardColumnMapping(mapping) == nil {
+		plan.RequiresUserInput = true
+		plan.Questions = append(plan.Questions, MappingQuestion{ID: "confirm_card_column", Prompt: "Which column should group cards into Basecamp card table columns?", Choices: candidateIndexes(inspection.RoleCandidates["todolist"])})
 	}
 	if assigneeNeedsPolicy(rows, mapping) {
 		plan.RequiresUserInput = true
@@ -170,12 +196,22 @@ func PlanImport(inspection *Inspection, mapping *MappingConfig, destination *Des
 		return nil, fmt.Errorf("unsupported destination mode %q", destination.Mode)
 	}
 
-	listNames := plannedTodolistNames(rows, mapping, destination)
-	if shouldCreateTodolists(destination) {
-		for _, name := range listNames {
-			operations = append(operations, PlannedOperation{Op: "create_todolist", ProjectID: destination.ProjectID, ProjectName: destination.ProjectName, TodolistName: name})
+	if resourceType == resourceTypeTodos {
+		listNames := plannedTodolistNames(rows, mapping, destination)
+		if shouldCreateTodolists(destination) {
+			for _, name := range listNames {
+				operations = append(operations, PlannedOperation{Op: "create_todolist", ProjectID: destination.ProjectID, ProjectName: destination.ProjectName, TodolistName: name})
+			}
+			plan.Counts.Todolists = len(listNames)
 		}
-		plan.Counts.Todolists = len(listNames)
+	} else {
+		columnNames := plannedCardColumnNames(rows, mapping, destination)
+		if shouldCreateCardColumns(destination) {
+			for _, name := range columnNames {
+				operations = append(operations, PlannedOperation{Op: "create_card_column", ProjectID: destination.ProjectID, ProjectName: destination.ProjectName, CardTableID: destination.CardTableID, ColumnName: name})
+			}
+			plan.Counts.CardColumns = len(columnNames)
+		}
 	}
 
 	dueOnValues, err := normalizedDueOnValues(rows, mapping)
@@ -191,14 +227,21 @@ func PlanImport(inspection *Inspection, mapping *MappingConfig, destination *Des
 			plan.Warnings = append(plan.Warnings, ImportWarning{Code: "blank_title", Columns: []int{mapping.Title.ColumnIndex}, Message: fmt.Sprintf("Source row %d has a blank title and will be skipped by execution.", rowIndex+1)})
 		}
 
+		opName := "create_todo"
+		if resourceType == resourceTypeCards {
+			opName = "create_card"
+		}
 		op := PlannedOperation{
-			Op:             "create_todo",
+			Op:             opName,
 			SourceRow:      rowIndex + 1,
 			SourceRecordID: mappedValue(row, mapping.RecordID),
 			ProjectID:      destination.ProjectID,
 			ProjectName:    destination.ProjectName,
 			TodolistID:     destination.TodolistID,
 			TodolistName:   todolistNameForRow(row, mapping, destination),
+			CardTableID:    destination.CardTableID,
+			ColumnID:       destination.ColumnID,
+			ColumnName:     cardColumnNameForRow(row, mapping, destination),
 			Title:          title,
 			Description:    mappedValue(row, mapping.Description),
 			Status:         mappedValue(row, mapping.Status),
@@ -209,7 +252,11 @@ func PlanImport(inspection *Inspection, mapping *MappingConfig, destination *Des
 			CustomFields:   customFieldsForRow(row, inspection.Columns, mapped, duplicateColumns, mapping.CustomFields),
 		}
 		operations = append(operations, op)
-		plan.Counts.Todos++
+		if resourceType == resourceTypeCards {
+			plan.Counts.Cards++
+		} else {
+			plan.Counts.Todos++
+		}
 	}
 
 	plan.Operations = operations
@@ -283,6 +330,7 @@ func validateMappingIndexes(inspection *Inspection, mapping *MappingConfig) erro
 		{"title", mapping.Title},
 		{"description", mapping.Description},
 		{"todolist", mapping.Todolist},
+		{"column", mapping.Column},
 		{"status", mapping.Status},
 		{"assignees", mapping.Assignees},
 		{"due_on", mapping.DueOn},
@@ -338,6 +386,26 @@ func assigneeNeedsPolicy(rows [][]string, mapping *MappingConfig) bool {
 	return false
 }
 
+func destinationResourceType(destination *DestinationConfig) (string, error) {
+	resourceType := strings.TrimSpace(destination.ResourceType)
+	if resourceType == "" {
+		return resourceTypeTodos, nil
+	}
+	switch resourceType {
+	case resourceTypeTodos, resourceTypeCards:
+		return resourceType, nil
+	default:
+		return "", fmt.Errorf("unsupported destination resource_type %q", resourceType)
+	}
+}
+
+func resourceSingular(resourceType string) string {
+	if resourceType == resourceTypeCards {
+		return "card"
+	}
+	return "todo"
+}
+
 func plannedTodolistNames(rows [][]string, mapping *MappingConfig, destination *DestinationConfig) []string {
 	if destination.TodolistStrategy == "existing_todolist" {
 		return nil
@@ -368,6 +436,62 @@ func shouldCreateTodolists(destination *DestinationConfig) bool {
 	return destination.TodolistStrategy == "" || destination.TodolistStrategy == "single_todolist" || destination.TodolistStrategy == "create_from_column"
 }
 
+func plannedCardColumnNames(rows [][]string, mapping *MappingConfig, destination *DestinationConfig) []string {
+	if destination.ColumnStrategy == "existing_column" {
+		return nil
+	}
+	columnRef := cardColumnMapping(mapping)
+	if destination.ColumnStrategy == "single_column" || columnRef == nil {
+		name := strings.TrimSpace(destination.ColumnName)
+		if name == "" {
+			name = "Imported cards"
+		}
+		return []string{name}
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, row := range rows {
+		name := strings.TrimSpace(valueAt(row, columnRef.ColumnIndex))
+		if name == "" {
+			name = "Imported cards"
+		}
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func shouldCreateCardColumns(destination *DestinationConfig) bool {
+	return destination.ColumnStrategy == "" || destination.ColumnStrategy == "single_column" || destination.ColumnStrategy == "create_from_column"
+}
+
+func cardColumnMapping(mapping *MappingConfig) *ColumnRef {
+	if mapping.Column != nil {
+		return mapping.Column
+	}
+	return mapping.Todolist
+}
+
+func cardColumnNameForRow(row []string, mapping *MappingConfig, destination *DestinationConfig) string {
+	if destination.ColumnStrategy == "existing_column" {
+		return destination.ColumnName
+	}
+	columnRef := cardColumnMapping(mapping)
+	if destination.ColumnStrategy == "single_column" || columnRef == nil {
+		if strings.TrimSpace(destination.ColumnName) != "" {
+			return strings.TrimSpace(destination.ColumnName)
+		}
+		return "Imported cards"
+	}
+	value := strings.TrimSpace(valueAt(row, columnRef.ColumnIndex))
+	if value == "" {
+		return "Imported cards"
+	}
+	return value
+}
+
 func todolistNameForRow(row []string, mapping *MappingConfig, destination *DestinationConfig) string {
 	if destination.TodolistStrategy == "existing_todolist" {
 		return destination.TodolistName
@@ -396,6 +520,7 @@ func mappedColumnIndexes(mapping *MappingConfig) map[int]struct{} {
 	add(mapping.Title)
 	add(mapping.Description)
 	add(mapping.Todolist)
+	add(mapping.Column)
 	add(mapping.Status)
 	add(mapping.Assignees)
 	add(mapping.DueOn)
@@ -512,6 +637,8 @@ func renderDryRunMarkdown(plan *Plan) string {
 	fmt.Fprintf(&b, "- Projects: %d\n", plan.Counts.Projects)
 	fmt.Fprintf(&b, "- Todolists: %d\n", plan.Counts.Todolists)
 	fmt.Fprintf(&b, "- Todos: %d\n", plan.Counts.Todos)
+	fmt.Fprintf(&b, "- Card columns: %d\n", plan.Counts.CardColumns)
+	fmt.Fprintf(&b, "- Cards: %d\n", plan.Counts.Cards)
 
 	if len(plan.Operations) > 0 {
 		b.WriteString("\n## Operations\n\n")
@@ -521,10 +648,18 @@ func renderDryRunMarkdown(plan *Plan) string {
 				fmt.Fprintf(&b, "- Create project: %s\n", op.ProjectName)
 			case "create_todolist":
 				fmt.Fprintf(&b, "- Create todolist: %s\n", op.TodolistName)
+			case "create_card_column":
+				fmt.Fprintf(&b, "- Create card column: %s\n", op.ColumnName)
 			case "create_todo":
 				fmt.Fprintf(&b, "- Row %d: create todo %q", op.SourceRow, op.Title)
 				if op.TodolistName != "" {
 					fmt.Fprintf(&b, " in %q", op.TodolistName)
+				}
+				b.WriteString("\n")
+			case "create_card":
+				fmt.Fprintf(&b, "- Row %d: create card %q", op.SourceRow, op.Title)
+				if op.ColumnName != "" {
+					fmt.Fprintf(&b, " in %q", op.ColumnName)
 				}
 				b.WriteString("\n")
 			}

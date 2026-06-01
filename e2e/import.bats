@@ -22,7 +22,9 @@ from http.server import BaseHTTPRequestHandler
 request_log = os.environ["IMPORT_MOCK_REQUEST_LOG"]
 fail_todo_title = os.environ.get("IMPORT_MOCK_FAIL_TODO_TITLE", "")
 list_ids = {"Home": 901, "Events": 902}
+column_ids = {"Home": 801, "Events": 802}
 next_todo_id = 1000
+next_card_id = 2000
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -59,7 +61,10 @@ class Handler(BaseHTTPRequestHandler):
             self._write_json(200, {
                 "id": 12345,
                 "name": "Import Project",
-                "dock": [{"id": 777, "name": "todoset", "title": "To-dos", "enabled": True}],
+                "dock": [
+                    {"id": 777, "name": "todoset", "title": "To-dos", "enabled": True},
+                    {"id": 888, "name": "card_table", "title": "Card Table", "enabled": True}
+                ],
             })
             return
         if self.path == "/99999/todosets/777/todolists.json":
@@ -68,10 +73,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/99999/todolists/") and self.path.endswith("/todos.json"):
             self._write_json(200, [])
             return
+        if self.path == "/99999/card_tables/888":
+            self._write_json(200, {"id": 888, "title": "Card Table", "lists": []})
+            return
+        if self.path.startswith("/99999/card_tables/lists/") and self.path.endswith("/cards.json"):
+            self._write_json(200, [])
+            return
         self._write_json(500, {"error": "unexpected GET", "path": self.path})
 
     def do_POST(self):
-        global next_todo_id
+        global next_todo_id, next_card_id
         body, raw = self._read_body()
         self._record(body if body is not None else raw)
         if self.path == "/99999/todosets/777/todolists.json":
@@ -89,6 +100,39 @@ class Handler(BaseHTTPRequestHandler):
                 "visible_to_clients": False,
                 "bucket": {"id": 12345, "name": "Import Project", "type": "Project"},
                 "parent": {"id": 777, "title": "To-dos", "type": "Todoset", "url": "", "app_url": ""},
+                "creator": {"id": 1, "name": "Tester"}
+            })
+            return
+        if self.path == "/99999/card_tables/888/columns.json":
+            title = (body or {}).get("title", "")
+            column_id = column_ids.get(title, 899)
+            self._write_json(201, {
+                "id": column_id,
+                "status": "active",
+                "title": title,
+                "type": "KanbanColumn",
+                "url": f"https://3.basecampapi.com/99999/card_tables/columns/{column_id}",
+                "app_url": f"https://3.basecamp.com/99999/buckets/12345/card_tables/888/columns/{column_id}",
+                "cards_count": 0,
+                "comment_count": 0,
+                "bucket": {"id": 12345, "name": "Import Project", "type": "Project"},
+                "parent": {"id": 888, "title": "Card Table", "type": "CardTable", "url": "", "app_url": ""},
+                "creator": {"id": 1, "name": "Tester"}
+            })
+            return
+        if self.path.startswith("/99999/card_tables/lists/") and self.path.endswith("/cards.json"):
+            next_card_id += 1
+            title = (body or {}).get("title", "")
+            self._write_json(201, {
+                "id": next_card_id,
+                "status": "active",
+                "title": title,
+                "content": (body or {}).get("content", ""),
+                "type": "Card",
+                "url": f"https://3.basecampapi.com/99999/card_tables/cards/{next_card_id}",
+                "app_url": f"https://3.basecamp.com/99999/buckets/12345/card_tables/cards/{next_card_id}",
+                "bucket": {"id": 12345, "name": "Import Project", "type": "Project"},
+                "parent": {"id": 801, "title": "Column", "type": "KanbanColumn", "url": "", "app_url": ""},
                 "creator": {"id": 1, "name": "Tester"}
             })
             return
@@ -179,6 +223,19 @@ write_destination_json() {
   "mode": "existing_project",
   "project_id": "12345",
   "todolist_strategy": "create_from_column"
+}
+JSON
+}
+
+write_card_destination_json() {
+  cat > destination.json <<'JSON'
+{
+  "schema_version": 1,
+  "resource_type": "cards",
+  "mode": "existing_project",
+  "project_id": "12345",
+  "card_table_id": "888",
+  "column_strategy": "create_from_column"
 }
 JSON
 }
@@ -314,6 +371,46 @@ configure_import_mock_basecamp() {
   export BASECAMP_BASE_URL="http://127.0.0.1:${IMPORT_MOCK_PORT}"
   export BASECAMP_ACCOUNT_ID="99999"
   export BASECAMP_TOKEN="test-token"
+}
+
+@test "import execute creates card columns and cards against replay server" {
+  write_import_csv
+  write_mapping_json
+  write_card_destination_json
+
+  run basecamp import inspect tasks.csv --json --sample-size 2
+  assert_success
+  echo "$output" > inspection.json
+
+  run basecamp import compile --inspection inspection.json --mapping mapping.json --destination destination.json --out basecamp-import --json
+  assert_success
+  is_valid_json
+  assert_json_value ".data.manifest.counts.cards" "2"
+  assert_json_value ".data.manifest.counts.card_columns" "2"
+  [[ -f basecamp-import/cards.csv ]]
+
+  run basecamp import plan --artifact basecamp-import --json
+  assert_success
+  assert_json_value ".data.counts.cards" "2"
+  assert_output_contains "Row 1: create card \\\"Buy paint\\\""
+
+  start_import_mock
+  configure_import_mock_basecamp
+
+  run basecamp import preflight --artifact basecamp-import --json
+  assert_success
+  is_valid_json
+  assert_json_value ".data.status" "passed"
+
+  run basecamp import execute --artifact basecamp-import --approved --json
+  assert_success
+  is_valid_json
+  assert_json_value ".data.created.card_columns" "2"
+  assert_json_value ".data.created.cards" "2"
+
+  jq -e 'select(.method == "POST" and .path == "/99999/card_tables/888/columns.json" and .body.title == "Home")' "$IMPORT_MOCK_REQUEST_LOG" >/dev/null
+  jq -e 'select(.method == "POST" and .path == "/99999/card_tables/lists/801/cards.json" and .body.title == "Buy paint" and (.body.content | contains("Get blue, low VOC")))' "$IMPORT_MOCK_REQUEST_LOG" >/dev/null
+  jq -e 'select(.method == "POST" and .path == "/99999/card_tables/lists/802/cards.json" and .body.title == "Book venue")' "$IMPORT_MOCK_REQUEST_LOG" >/dev/null
 }
 
 @test "import execute creates todolists and todos against replay server" {

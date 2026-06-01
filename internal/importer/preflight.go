@@ -12,6 +12,9 @@ import (
 type ArtifactPreflightClient interface {
 	ExistingTodolists(ctx context.Context, projectID int64) ([]ExistingTodolist, error)
 	ExistingTodos(ctx context.Context, todolistID int64) ([]ExistingTodo, error)
+	CardTableID(ctx context.Context, projectID int64) (int64, error)
+	ExistingCardColumns(ctx context.Context, cardTableID int64) ([]ExistingCardColumn, error)
+	ExistingCards(ctx context.Context, columnID int64) ([]ExistingCard, error)
 }
 
 // ExistingTodolist describes a Basecamp todolist considered during preflight.
@@ -26,13 +29,27 @@ type ExistingTodo struct {
 	Title string `json:"title"`
 }
 
+// ExistingCardColumn describes a Basecamp card table column considered during preflight.
+type ExistingCardColumn struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// ExistingCard describes a Basecamp card considered during preflight.
+type ExistingCard struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+}
+
 // PreflightResult reports readiness checks for an import artifact.
 type PreflightResult struct {
-	SchemaVersion  int                 `json:"schema_version"`
-	Status         string              `json:"status"`
-	Checks         []PreflightCheck    `json:"checks"`
-	Collisions     []TodolistCollision `json:"collisions,omitempty"`
-	TodoCollisions []TodoCollision     `json:"todo_collisions,omitempty"`
+	SchemaVersion    int                 `json:"schema_version"`
+	Status           string              `json:"status"`
+	Checks           []PreflightCheck    `json:"checks"`
+	Collisions       []TodolistCollision `json:"collisions,omitempty"`
+	TodoCollisions   []TodoCollision     `json:"todo_collisions,omitempty"`
+	ColumnCollisions []TodolistCollision `json:"column_collisions,omitempty"`
+	CardCollisions   []TodoCollision     `json:"card_collisions,omitempty"`
 }
 
 // PreflightCheck reports one artifact readiness check.
@@ -76,6 +93,22 @@ func PreflightArtifact(ctx context.Context, artifactDir string, client ArtifactP
 		return nil, fmt.Errorf("import preflight requires a read client")
 	}
 
+	resourceType, err := destinationResourceType(&manifest.Destination)
+	if err != nil {
+		return nil, err
+	}
+	if resourceType == resourceTypeCards {
+		if err := checkPreflightCardColumnCollisions(ctx, result, manifest, rows, client); err != nil {
+			return nil, err
+		}
+		if result.Status == "blocked" {
+			return result, nil
+		}
+		if err := checkPreflightCardCollisions(ctx, result, manifest, rows, client); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
 	if err := checkPreflightTodolistCollisions(ctx, result, manifest, rows, client); err != nil {
 		return nil, err
 	}
@@ -160,6 +193,109 @@ func checkPreflightTodoCollisions(ctx context.Context, result *PreflightResult, 
 	return nil
 }
 
+func checkPreflightCardColumnCollisions(ctx context.Context, result *PreflightResult, manifest *ImportArtifactManifest, rows []artifactTodoRow, client ArtifactPreflightClient) error {
+	if manifest.Destination.Mode != "existing_project" || !shouldCreateCardColumns(&manifest.Destination) {
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_column_name_collisions", Status: "passed", Message: "Artifact execution does not create card columns in an existing project."})
+		return nil
+	}
+	plannedNames := artifactCardColumnNames(rows)
+	if len(plannedNames) == 0 {
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_column_name_collisions", Status: "passed", Message: "Artifact execution does not create card columns."})
+		return nil
+	}
+	cardTableID, issue := preflightCardTableID(ctx, manifest, client)
+	if issue != "" {
+		result.Status = "blocked"
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_column_name_collisions", Status: "blocked", Message: issue})
+		return nil
+	}
+	existing, err := client.ExistingCardColumns(ctx, cardTableID)
+	if err != nil {
+		return err
+	}
+	collisions := cardColumnCollisions(plannedNames, existing)
+	if len(collisions) > 0 {
+		result.Status = "blocked"
+		result.ColumnCollisions = collisions
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_column_name_collisions", Status: "blocked", Message: fmt.Sprintf("%d planned card column name(s) already exist in the destination card table.", len(collisions))})
+		return nil
+	}
+	result.Checks = append(result.Checks, PreflightCheck{Name: "card_column_name_collisions", Status: "passed", Message: fmt.Sprintf("Checked %d planned card column name(s) against existing Basecamp card columns.", len(plannedNames))})
+	return nil
+}
+
+func checkPreflightCardCollisions(ctx context.Context, result *PreflightResult, manifest *ImportArtifactManifest, rows []artifactTodoRow, client ArtifactPreflightClient) error {
+	if manifest.Destination.Mode != "existing_project" || manifest.Destination.ColumnStrategy != "existing_column" {
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_title_collisions", Status: "passed", Message: "Artifact execution does not add cards to an existing card column."})
+		return nil
+	}
+	targets, targetIssue := cardCollisionTargets(manifest, rows)
+	if targetIssue != "" {
+		result.Status = "blocked"
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_title_collisions", Status: "blocked", Message: targetIssue})
+		return nil
+	}
+	allCollisions := make([]TodoCollision, 0)
+	checked := 0
+	for columnID, targetRows := range targets {
+		existing, err := client.ExistingCards(ctx, columnID)
+		if err != nil {
+			return err
+		}
+		allCollisions = append(allCollisions, cardCollisions(targetRows, columnID, existing)...)
+		checked += len(targetRows)
+	}
+	if len(allCollisions) > 0 {
+		result.Status = "blocked"
+		result.CardCollisions = allCollisions
+		result.Checks = append(result.Checks, PreflightCheck{Name: "card_title_collisions", Status: "blocked", Message: fmt.Sprintf("%d planned card title(s) already exist in destination columns.", len(allCollisions))})
+		return nil
+	}
+	result.Checks = append(result.Checks, PreflightCheck{Name: "card_title_collisions", Status: "passed", Message: fmt.Sprintf("Checked %d planned card title(s) against existing Basecamp cards.", checked)})
+	return nil
+}
+
+func preflightCardTableID(ctx context.Context, manifest *ImportArtifactManifest, client ArtifactPreflightClient) (int64, string) {
+	cardTableID, err := parseOptionalInt64(manifest.Destination.CardTableID)
+	if err != nil {
+		return 0, fmt.Sprintf("invalid destination card_table_id: %v", err)
+	}
+	if cardTableID != 0 {
+		return cardTableID, ""
+	}
+	projectID, err := parseOptionalInt64(manifest.Destination.ProjectID)
+	if err != nil {
+		return 0, fmt.Sprintf("invalid destination project_id: %v", err)
+	}
+	if projectID == 0 {
+		return 0, "artifact destination project_id or card_table_id is required to check card column collisions"
+	}
+	cardTableID, err = client.CardTableID(ctx, projectID)
+	if err != nil {
+		return 0, err.Error()
+	}
+	return cardTableID, ""
+}
+
+func cardCollisionTargets(manifest *ImportArtifactManifest, rows []artifactTodoRow) (map[int64][]artifactTodoRow, string) {
+	manifestID, err := parseOptionalInt64(manifest.Destination.ColumnID)
+	if err != nil {
+		return nil, fmt.Sprintf("invalid destination column_id: %v", err)
+	}
+	targets := make(map[int64][]artifactTodoRow)
+	for _, row := range rows {
+		id := row.TodolistID
+		if id == 0 {
+			id = manifestID
+		}
+		if id == 0 {
+			return nil, "artifact destination column_id is required to check card title collisions"
+		}
+		targets[id] = append(targets[id], row)
+	}
+	return targets, ""
+}
+
 func todoCollisionTargets(manifest *ImportArtifactManifest, rows []artifactTodoRow) (map[int64][]artifactTodoRow, string) {
 	manifestID, err := parseOptionalInt64(manifest.Destination.TodolistID)
 	if err != nil {
@@ -211,6 +347,36 @@ func todoCollisions(rows []artifactTodoRow, todolistID int64, existing []Existin
 	return collisions
 }
 
+func cardCollisions(rows []artifactTodoRow, columnID int64, existing []ExistingCard) []TodoCollision {
+	byTitle := make(map[string]ExistingCard)
+	for _, card := range existing {
+		title := strings.TrimSpace(card.Title)
+		if title == "" {
+			continue
+		}
+		byTitle[strings.ToLower(title)] = ExistingCard{ID: card.ID, Title: title}
+	}
+	collisions := make([]TodoCollision, 0)
+	for _, row := range rows {
+		title := strings.TrimSpace(row.Title)
+		if title == "" {
+			continue
+		}
+		if existing, ok := byTitle[strings.ToLower(title)]; ok {
+			collisions = append(collisions, TodoCollision{SourceRow: row.SourceRow, Title: title, TodolistID: columnID, ExistingID: existing.ID})
+		}
+	}
+	return collisions
+}
+
+func cardColumnCollisions(plannedNames []string, existing []ExistingCardColumn) []TodolistCollision {
+	converted := make([]ExistingTodolist, 0, len(existing))
+	for _, column := range existing {
+		converted = append(converted, ExistingTodolist(column))
+	}
+	return todolistCollisions(plannedNames, converted)
+}
+
 func todolistCollisions(plannedNames []string, existing []ExistingTodolist) []TodolistCollision {
 	byName := make(map[string]ExistingTodolist)
 	for _, list := range existing {
@@ -249,6 +415,12 @@ func (r *PreflightResult) BlockedMessage() string {
 	}
 	for _, collision := range r.TodoCollisions {
 		messages = append(messages, fmt.Sprintf("Todo %q from source row %d already exists with ID %d.", collision.Title, collision.SourceRow, collision.ExistingID))
+	}
+	for _, collision := range r.ColumnCollisions {
+		messages = append(messages, fmt.Sprintf("Card column %q already exists with ID %d.", collision.Name, collision.ExistingID))
+	}
+	for _, collision := range r.CardCollisions {
+		messages = append(messages, fmt.Sprintf("Card %q from source row %d already exists with ID %d.", collision.Title, collision.SourceRow, collision.ExistingID))
 	}
 	return strings.Join(messages, " ")
 }

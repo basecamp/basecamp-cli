@@ -10,6 +10,7 @@ type RepairResult struct {
 	CompletedOperations []ExecutionLedgerOperation `json:"completed_operations,omitempty"`
 	FailedOperations    []ExecutionLedgerOperation `json:"failed_operations,omitempty"`
 	PendingTodos        []RepairPendingTodo        `json:"pending_todos,omitempty"`
+	PendingCards        []RepairPendingTodo        `json:"pending_cards,omitempty"`
 	Guidance            []string                   `json:"guidance"`
 }
 
@@ -23,7 +24,7 @@ type RepairPendingTodo struct {
 
 // RepairArtifact reads local artifact and execution files and summarizes recovery state.
 func RepairArtifact(artifactDir string) (*RepairResult, error) {
-	_, rows, err := readArtifact(artifactDir)
+	manifest, rows, err := readArtifact(artifactDir)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +51,15 @@ func RepairArtifact(artifactDir string) (*RepairResult, error) {
 	result.ExecutionStatus = ledger.Status
 	result.Created = ledger.Created
 	result.CompletedOperations, result.FailedOperations = splitLedgerOperations(ledger.Operations)
-	result.PendingTodos = pendingTodosForRepair(rows, ledger.Operations)
+	resourceType, err := destinationResourceType(&manifest.Destination)
+	if err != nil {
+		return nil, err
+	}
+	if resourceType == resourceTypeCards {
+		result.PendingCards = pendingRecordsForRepair(rows, ledger.Operations, "create_card")
+	} else {
+		result.PendingTodos = pendingRecordsForRepair(rows, ledger.Operations, "create_todo")
+	}
 
 	switch ledger.Status {
 	case "completed":
@@ -84,10 +93,10 @@ func splitLedgerOperations(operations []ExecutionLedgerOperation) ([]ExecutionLe
 	return completed, failed
 }
 
-func pendingTodosForRepair(rows []artifactTodoRow, operations []ExecutionLedgerOperation) []RepairPendingTodo {
+func pendingRecordsForRepair(rows []artifactTodoRow, operations []ExecutionLedgerOperation, operationName string) []RepairPendingTodo {
 	completedRows := make(map[int]struct{})
 	for _, op := range operations {
-		if op.Op == "create_todo" && op.Status == "completed" && op.SourceRow != 0 {
+		if op.Op == operationName && op.Status == "completed" && op.SourceRow != 0 {
 			completedRows[op.SourceRow] = struct{}{}
 		}
 	}

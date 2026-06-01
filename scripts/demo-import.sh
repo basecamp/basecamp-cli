@@ -78,7 +78,7 @@ if [[ -n "$repair_artifact" ]]; then
   echo ""
   echo "== Repair review =="
   basecamp import repair --artifact "$repair_artifact" --json |
-    jq '{ok, status: .data.status, created: .data.created, completed_operations: (.data.completed_operations | length), failed_operations: .data.failed_operations, pending_todos: .data.pending_todos, guidance: .data.guidance}'
+    jq '{ok, status: .data.status, created: .data.created, completed_operations: (.data.completed_operations | length), failed_operations: .data.failed_operations, pending_todos: .data.pending_todos, pending_cards: .data.pending_cards, guidance: .data.guidance}'
 
   if [[ -z "$followup_out" ]]; then
     echo ""
@@ -96,7 +96,7 @@ if [[ -n "$repair_artifact" ]]; then
   echo ""
   echo "== Creating follow-up artifact =="
   basecamp import followup --artifact "$repair_artifact" --out "$followup_out" --reviewed --json |
-    jq '{ok, status: .data.status, artifact_path: .data.artifact_path, counts: .data.manifest.counts, pending_todos: .data.pending_todos, guidance: .data.guidance}'
+    jq '{ok, status: .data.status, artifact_path: .data.artifact_path, counts: .data.manifest.counts, pending_todos: .data.pending_todos, pending_cards: .data.pending_cards, guidance: .data.guidance}'
 
   echo ""
   echo "== Planning follow-up artifact =="
@@ -164,7 +164,7 @@ echo ""
 echo "== Preflight artifact =="
 preflight_json="$workdir/preflight.json"
 basecamp import preflight --artifact "$out" --json > "$preflight_json"
-jq '{ok, status: .data.status, checks: .data.checks, collisions: .data.collisions, todo_collisions: .data.todo_collisions}' "$preflight_json"
+jq '{ok, status: .data.status, checks: .data.checks, collisions: .data.collisions, todo_collisions: .data.todo_collisions, column_collisions: .data.column_collisions, card_collisions: .data.card_collisions}' "$preflight_json"
 preflight_status="$(jq -r '.data.status' "$preflight_json")"
 if [[ "$preflight_status" != "passed" ]]; then
   echo "Preflight did not pass. Resolve blockers before execution." >&2

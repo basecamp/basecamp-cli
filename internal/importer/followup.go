@@ -19,7 +19,8 @@ type FollowupArtifactResult struct {
 	Status        string                 `json:"status"`
 	ArtifactPath  string                 `json:"artifact_path"`
 	Manifest      ImportArtifactManifest `json:"manifest"`
-	PendingTodos  []RepairPendingTodo    `json:"pending_todos"`
+	PendingTodos  []RepairPendingTodo    `json:"pending_todos,omitempty"`
+	PendingCards  []RepairPendingTodo    `json:"pending_cards,omitempty"`
 	Guidance      []string               `json:"guidance"`
 }
 
@@ -51,59 +52,82 @@ func CreateFollowupArtifact(artifactDir, outDir string, opts FollowupOptions) (*
 	if repair.Status != "review_required" {
 		return nil, fmt.Errorf("follow-up artifact requires repair status review_required, got %q", repair.Status)
 	}
-	if len(repair.PendingTodos) == 0 {
-		return nil, fmt.Errorf("follow-up artifact has no pending todos")
+	resourceType, err := destinationResourceType(&manifest.Destination)
+	if err != nil {
+		return nil, err
+	}
+	pendingRecords := repair.PendingTodos
+	if resourceType == resourceTypeCards {
+		pendingRecords = repair.PendingCards
+	}
+	if len(pendingRecords) == 0 {
+		return nil, fmt.Errorf("follow-up artifact has no pending %s", resourceType)
 	}
 
 	projectID, projectName, err := followupProject(manifest, repair.CompletedOperations)
 	if err != nil {
 		return nil, err
 	}
-	listIDs := followupTodolistIDs(repair.CompletedOperations)
-	completedTodoRows := completedTodoSourceRows(repair.CompletedOperations)
+	groupIDs := followupGroupIDs(resourceType, repair.CompletedOperations)
+	completedRows := completedSourceRows(resourceType, repair.CompletedOperations)
 
-	pendingRows := make([]artifactTodoRow, 0, len(repair.PendingTodos))
-	pendingSummaries := make([]RepairPendingTodo, 0, len(repair.PendingTodos))
+	pendingRows := make([]artifactTodoRow, 0, len(pendingRecords))
+	pendingSummaries := make([]RepairPendingTodo, 0, len(pendingRecords))
 	for _, row := range rows {
-		if _, completed := completedTodoRows[row.SourceRow]; completed {
+		if _, completed := completedRows[row.SourceRow]; completed {
 			continue
 		}
-		resolvedListID := row.TodolistID
-		listName := strings.TrimSpace(row.TodolistName)
-		if listName == "" {
-			listName = "Imported todos"
+		resolvedGroupID := row.TodolistID
+		groupName := strings.TrimSpace(row.TodolistName)
+		if groupName == "" {
+			groupName = "Imported todos"
+			if resourceType == resourceTypeCards {
+				groupName = "Imported cards"
+			}
 		}
-		if resolvedListID == 0 {
-			resolvedListID = listIDs[listName]
+		if resolvedGroupID == 0 {
+			resolvedGroupID = groupIDs[groupName]
 		}
-		if resolvedListID == 0 {
-			return nil, fmt.Errorf("source row %d cannot be added to follow-up artifact because todolist %q has no created ID in execution.json", row.SourceRow, listName)
+		if resolvedGroupID == 0 {
+			return nil, fmt.Errorf("source row %d cannot be added to follow-up artifact because %q has no created ID in execution.json", row.SourceRow, groupName)
 		}
 		row.ProjectID = projectID
 		row.ProjectName = projectName
-		row.TodolistID = resolvedListID
-		row.TodolistName = listName
+		row.TodolistID = resolvedGroupID
+		row.TodolistName = groupName
 		pendingRows = append(pendingRows, row)
-		pendingSummaries = append(pendingSummaries, RepairPendingTodo{SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, Title: row.Title, TodolistName: listName})
+		pendingSummaries = append(pendingSummaries, RepairPendingTodo{SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, Title: row.Title, TodolistName: groupName})
 	}
 	if len(pendingRows) == 0 {
 		return nil, fmt.Errorf("follow-up artifact has no pending rows")
 	}
 
-	firstTodolistID := formatOptionalInt64(pendingRows[0].TodolistID)
+	firstGroupID := formatOptionalInt64(pendingRows[0].TodolistID)
 	followupDestination := manifest.Destination
 	followupDestination.Mode = "existing_project"
 	followupDestination.ProjectID = projectID
 	followupDestination.ProjectName = projectName
-	followupDestination.TodolistStrategy = "existing_todolist"
-	followupDestination.TodolistID = firstTodolistID
-	followupDestination.TodolistName = pendingRows[0].TodolistName
+	if resourceType == resourceTypeCards {
+		followupDestination.ColumnStrategy = "existing_column"
+		followupDestination.ColumnID = firstGroupID
+		followupDestination.ColumnName = pendingRows[0].TodolistName
+	} else {
+		followupDestination.TodolistStrategy = "existing_todolist"
+		followupDestination.TodolistID = firstGroupID
+		followupDestination.TodolistName = pendingRows[0].TodolistName
+	}
 
+	followupCounts := PlanCounts{Todos: len(pendingRows)}
+	followupFiles := ArtifactFiles{Todos: artifactTodosFileName}
+	if resourceType == resourceTypeCards {
+		followupCounts = PlanCounts{Cards: len(pendingRows)}
+		followupFiles = ArtifactFiles{Cards: artifactCardsFileName}
+	}
 	followupManifest := *manifest
 	followupManifest.Status = "compiled"
 	followupManifest.Destination = followupDestination
-	followupManifest.Counts = PlanCounts{Todos: len(pendingRows)}
-	followupManifest.Files = ArtifactFiles{Todos: artifactTodosFileName}
+	followupManifest.Counts = followupCounts
+	followupManifest.Files = followupFiles
 
 	if err := writeArtifact(outDir, followupManifest, pendingRows); err != nil {
 		return nil, err
@@ -113,7 +137,8 @@ func CreateFollowupArtifact(artifactDir, outDir string, opts FollowupOptions) (*
 		Status:        "compiled",
 		ArtifactPath:  outDir,
 		Manifest:      followupManifest,
-		PendingTodos:  pendingSummaries,
+		PendingTodos:  pendingSummariesFor(resourceTypeTodos, resourceType, pendingSummaries),
+		PendingCards:  pendingSummariesFor(resourceTypeCards, resourceType, pendingSummaries),
 		Guidance: []string{
 			"Review the follow-up artifact plan before preflight and execution.",
 			"The source artifact remains closed and must not be rerun.",
@@ -134,6 +159,44 @@ func followupProject(manifest *ImportArtifactManifest, operations []ExecutionLed
 		}
 	}
 	return "", "", fmt.Errorf("new_project follow-up requires a completed create_project operation in execution.json")
+}
+
+func pendingSummariesFor(want, got string, summaries []RepairPendingTodo) []RepairPendingTodo {
+	if want != got {
+		return nil
+	}
+	return summaries
+}
+
+func followupGroupIDs(resourceType string, operations []ExecutionLedgerOperation) map[string]int64 {
+	if resourceType == resourceTypeCards {
+		out := make(map[string]int64)
+		for _, op := range operations {
+			if op.Op != "create_card_column" || op.Status != "completed" {
+				continue
+			}
+			name := strings.TrimSpace(op.ColumnName)
+			if name == "" {
+				name = "Imported cards"
+			}
+			id := op.CreatedID
+			if id == 0 {
+				id = op.ColumnID
+			}
+			if id != 0 {
+				out[name] = id
+			}
+		}
+		return out
+	}
+	return followupTodolistIDs(operations)
+}
+
+func completedSourceRows(resourceType string, operations []ExecutionLedgerOperation) map[int]struct{} {
+	if resourceType == resourceTypeCards {
+		return completedRowsForOperation(operations, "create_card")
+	}
+	return completedTodoSourceRows(operations)
 }
 
 func followupTodolistIDs(operations []ExecutionLedgerOperation) map[string]int64 {
@@ -158,9 +221,13 @@ func followupTodolistIDs(operations []ExecutionLedgerOperation) map[string]int64
 }
 
 func completedTodoSourceRows(operations []ExecutionLedgerOperation) map[int]struct{} {
+	return completedRowsForOperation(operations, "create_todo")
+}
+
+func completedRowsForOperation(operations []ExecutionLedgerOperation, operationName string) map[int]struct{} {
 	out := make(map[int]struct{})
 	for _, op := range operations {
-		if op.Op == "create_todo" && op.Status == "completed" && op.SourceRow != 0 {
+		if op.Op == operationName && op.Status == "completed" && op.SourceRow != 0 {
 			out[op.SourceRow] = struct{}{}
 		}
 	}

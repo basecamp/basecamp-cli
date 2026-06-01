@@ -14,9 +14,9 @@ Simple spreadsheet-style demo:
 Board-export-shaped demo:
 
 - `board-export.csv` — realistic Trello-shaped board export fixture
-- `board-export.mapping.json` — confirmed column mapping for `board-export.csv`
-- `board-export.destination.example.json` — example destination config for an existing project
-- `board-export.destination-new-project.example.json` — destination config that creates a new demo project
+- `board-export.mapping.json` — confirmed card column mapping for `board-export.csv`
+- `board-export.destination.example.json` — example card destination config for an existing project
+- `board-export.destination-new-project.example.json` — card destination config that creates a new demo project
 
 The board-export demo shows the importer handling a service-style export generically. It does not rely on a Trello-specific parser or source mode.
 
@@ -38,7 +38,7 @@ scripts/demo-import.sh \
 
 ```bash
 cp demos/import/board-export.destination.example.json /tmp/board-destination.json
-# Edit /tmp/board-destination.json and set project_id to your demo project.
+# Edit /tmp/board-destination.json and set project_id/card_table_id to your demo project and card table.
 # Or use demos/import/board-export.destination-new-project.example.json to create a new demo project during execution.
 
 scripts/demo-import.sh \
@@ -74,7 +74,7 @@ scripts/demo-import.sh \
   --repair-artifact /tmp/basecamp-board-import-demo
 ```
 
-The repair review summarizes completed operations, failed operations, pending todos, and guidance.
+The repair review summarizes completed operations, failed operations, pending todos or cards, and guidance.
 
 After reviewing Basecamp state and the repair summary, create a fresh follow-up artifact for pending rows:
 

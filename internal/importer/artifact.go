@@ -13,6 +13,7 @@ const (
 	artifactFormat        = "basecamp-import-csv-v1"
 	artifactManifestName  = "import.json"
 	artifactTodosFileName = "todos.csv"
+	artifactCardsFileName = "cards.csv"
 )
 
 var artifactTodoHeader = []string{
@@ -25,6 +26,26 @@ var artifactTodoHeader = []string{
 	"todolist_name",
 	"title",
 	"description",
+	"due_on",
+	"assignee_emails",
+	"assignee_names",
+	"status",
+	"attachment_urls_json",
+	"comments_json",
+	"custom_fields_json",
+}
+
+var artifactCardHeader = []string{
+	"source_path",
+	"source_row",
+	"source_record_id",
+	"project_id",
+	"project_name",
+	"card_table_id",
+	"column_id",
+	"column_name",
+	"title",
+	"content",
 	"due_on",
 	"assignee_emails",
 	"assignee_names",
@@ -48,7 +69,8 @@ type ImportArtifactManifest struct {
 
 // ArtifactFiles names the files that belong to an import artifact.
 type ArtifactFiles struct {
-	Todos string `json:"todos"`
+	Todos string `json:"todos,omitempty"`
+	Cards string `json:"cards,omitempty"`
 }
 
 // CompileArtifactResult reports the artifact written by CompileArtifact.
@@ -65,6 +87,7 @@ type artifactTodoRow struct {
 	SourceRecordID string            `json:"source_record_id"`
 	ProjectID      string            `json:"project_id"`
 	ProjectName    string            `json:"project_name"`
+	CardTableID    int64             `json:"card_table_id,omitempty"`
 	TodolistID     int64             `json:"todolist_id"`
 	TodolistName   string            `json:"todolist_name"`
 	Title          string            `json:"title"`
@@ -91,18 +114,41 @@ func CompileArtifact(inspection *Inspection, mapping *MappingConfig, destination
 		return nil, fmt.Errorf("import artifact requires confirmed mapping and destination choices")
 	}
 
-	rows := make([]artifactTodoRow, 0, plan.Counts.Todos)
+	resourceType, err := destinationResourceType(&plan.Destination)
+	if err != nil {
+		return nil, err
+	}
+	rowCap := plan.Counts.Todos
+	if resourceType == resourceTypeCards {
+		rowCap = plan.Counts.Cards
+	}
+	rows := make([]artifactTodoRow, 0, rowCap)
 	for _, op := range plan.Operations {
-		if op.Op != "create_todo" {
+		if resourceType == resourceTypeTodos && op.Op != "create_todo" {
+			continue
+		}
+		if resourceType == resourceTypeCards && op.Op != "create_card" {
 			continue
 		}
 		if strings.TrimSpace(op.Title) == "" {
 			return nil, fmt.Errorf("source row %d has a blank title", op.SourceRow)
 		}
 		emails, names := splitAssignees(op.Assignees)
-		todolistID, err := parseOptionalInt64(op.TodolistID)
+		groupID := op.TodolistID
+		if resourceType == resourceTypeCards {
+			groupID = op.ColumnID
+		}
+		parsedGroupID, err := parseOptionalInt64(groupID)
 		if err != nil {
-			return nil, fmt.Errorf("source row %d has invalid todolist_id: %w", op.SourceRow, err)
+			return nil, fmt.Errorf("source row %d has invalid destination group id: %w", op.SourceRow, err)
+		}
+		cardTableID, err := parseOptionalInt64(op.CardTableID)
+		if err != nil {
+			return nil, fmt.Errorf("source row %d has invalid card_table_id: %w", op.SourceRow, err)
+		}
+		groupName := op.TodolistName
+		if resourceType == resourceTypeCards {
+			groupName = op.ColumnName
 		}
 		rows = append(rows, artifactTodoRow{
 			SourcePath:     inspection.ExportPath,
@@ -110,8 +156,9 @@ func CompileArtifact(inspection *Inspection, mapping *MappingConfig, destination
 			SourceRecordID: op.SourceRecordID,
 			ProjectID:      op.ProjectID,
 			ProjectName:    op.ProjectName,
-			TodolistID:     todolistID,
-			TodolistName:   op.TodolistName,
+			CardTableID:    cardTableID,
+			TodolistID:     parsedGroupID,
+			TodolistName:   groupName,
 			Title:          op.Title,
 			Description:    op.Description,
 			DueOn:          op.DueOn,
@@ -124,6 +171,10 @@ func CompileArtifact(inspection *Inspection, mapping *MappingConfig, destination
 		})
 	}
 
+	files := ArtifactFiles{Todos: artifactTodosFileName}
+	if resourceType == resourceTypeCards {
+		files = ArtifactFiles{Cards: artifactCardsFileName}
+	}
 	manifest := ImportArtifactManifest{
 		SchemaVersion:     planSchemaVersion,
 		Status:            "compiled",
@@ -132,7 +183,7 @@ func CompileArtifact(inspection *Inspection, mapping *MappingConfig, destination
 		SourceFingerprint: inspection.Fingerprint,
 		Destination:       *destination,
 		Counts:            plan.Counts,
-		Files:             ArtifactFiles{Todos: artifactTodosFileName},
+		Files:             files,
 	}
 	if err := writeArtifact(outDir, manifest, rows); err != nil {
 		return nil, err
@@ -157,17 +208,26 @@ func PlanFromArtifact(artifactDir string) (*Plan, error) {
 		Questions:         []MappingQuestion{},
 	}
 
-	operations := make([]PlannedOperation, 0, len(rows)+manifest.Counts.Todolists+manifest.Counts.Projects)
+	resourceType, err := destinationResourceType(&manifest.Destination)
+	if err != nil {
+		return nil, err
+	}
+	operations := make([]PlannedOperation, 0, len(rows)+manifest.Counts.Todolists+manifest.Counts.CardColumns+manifest.Counts.Projects)
 	if manifest.Destination.Mode == "new_project" {
 		operations = append(operations, PlannedOperation{Op: "create_project", ProjectName: manifest.Destination.ProjectName})
 	}
-	if shouldCreateTodolists(&manifest.Destination) {
+	if resourceType == resourceTypeTodos && shouldCreateTodolists(&manifest.Destination) {
 		for _, name := range artifactTodolistNames(rows) {
 			operations = append(operations, PlannedOperation{Op: "create_todolist", ProjectID: manifest.Destination.ProjectID, ProjectName: manifest.Destination.ProjectName, TodolistName: name})
 		}
 	}
+	if resourceType == resourceTypeCards && shouldCreateCardColumns(&manifest.Destination) {
+		for _, name := range artifactCardColumnNames(rows) {
+			operations = append(operations, PlannedOperation{Op: "create_card_column", ProjectID: manifest.Destination.ProjectID, ProjectName: manifest.Destination.ProjectName, CardTableID: manifest.Destination.CardTableID, ColumnName: name})
+		}
+	}
 	for _, row := range rows {
-		operations = append(operations, PlannedOperation{
+		op := PlannedOperation{
 			Op:             "create_todo",
 			SourceRow:      row.SourceRow,
 			SourceRecordID: row.SourceRecordID,
@@ -183,7 +243,16 @@ func PlanFromArtifact(artifactDir string) (*Plan, error) {
 			AttachmentURLs: row.AttachmentURLs,
 			Comments:       row.Comments,
 			CustomFields:   row.CustomFields,
-		})
+		}
+		if resourceType == resourceTypeCards {
+			op.Op = "create_card"
+			op.CardTableID = formatOptionalInt64(row.CardTableID)
+			op.ColumnID = formatOptionalInt64(row.TodolistID)
+			op.ColumnName = row.TodolistName
+			op.TodolistID = ""
+			op.TodolistName = ""
+		}
+		operations = append(operations, op)
 	}
 	plan.Operations = operations
 	plan.DryRunMarkdown = renderDryRunMarkdown(plan)
@@ -201,6 +270,23 @@ func readArtifact(artifactDir string) (*ImportArtifactManifest, []artifactTodoRo
 	}
 	if manifest.ArtifactFormat != artifactFormat {
 		return nil, nil, fmt.Errorf("unsupported artifact format %q", manifest.ArtifactFormat)
+	}
+	resourceType, err := destinationResourceType(&manifest.Destination)
+	if err != nil {
+		return nil, nil, err
+	}
+	if resourceType == resourceTypeCards {
+		if manifest.Files.Cards == "" {
+			return nil, nil, fmt.Errorf("artifact cards file is required")
+		}
+		rows, err := readArtifactCards(filepath.Join(artifactDir, manifest.Files.Cards))
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(rows) != manifest.Counts.Cards {
+			return nil, nil, fmt.Errorf("artifact card count %d does not match manifest count %d", len(rows), manifest.Counts.Cards)
+		}
+		return &manifest, rows, nil
 	}
 	if manifest.Files.Todos == "" {
 		return nil, nil, fmt.Errorf("artifact todos file is required")
@@ -227,7 +313,13 @@ func writeArtifact(outDir string, manifest ImportArtifactManifest, rows []artifa
 	if err := os.WriteFile(filepath.Join(outDir, artifactManifestName), manifestData, 0o644); err != nil { //nolint:gosec // G306: Import artifact manifests are not secrets
 		return fmt.Errorf("write artifact manifest: %w", err)
 	}
-	if err := writeArtifactTodos(filepath.Join(outDir, artifactTodosFileName), rows); err != nil {
+	if manifest.Files.Cards != "" {
+		if err := writeArtifactCards(filepath.Join(outDir, manifest.Files.Cards), rows); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := writeArtifactTodos(filepath.Join(outDir, manifest.Files.Todos), rows); err != nil {
 		return err
 	}
 	return nil
@@ -256,6 +348,33 @@ func writeArtifactTodos(path string, rows []artifactTodoRow) error {
 	writer.Flush()
 	if err := writer.Error(); err != nil {
 		return fmt.Errorf("write artifact todos: %w", err)
+	}
+	return nil
+}
+
+func writeArtifactCards(path string, rows []artifactTodoRow) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("write artifact cards: %w", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	if err := writer.Write(artifactCardHeader); err != nil {
+		return fmt.Errorf("write artifact cards header: %w", err)
+	}
+	for _, row := range rows {
+		record, err := row.toCardCSVRecord()
+		if err != nil {
+			return err
+		}
+		if err := writer.Write(record); err != nil {
+			return fmt.Errorf("write artifact cards row: %w", err)
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("write artifact cards: %w", err)
 	}
 	return nil
 }
@@ -293,6 +412,39 @@ func readArtifactTodos(path string) ([]artifactTodoRow, error) {
 	return rows, nil
 }
 
+func readArtifactCards(path string) ([]artifactTodoRow, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read artifact cards: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = len(artifactCardHeader)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("parse artifact cards: %w", err)
+	}
+	if len(records) == 0 {
+		return nil, fmt.Errorf("artifact cards file is empty")
+	}
+	if strings.Join(records[0], "\x00") != strings.Join(artifactCardHeader, "\x00") {
+		return nil, fmt.Errorf("artifact cards header does not match Basecamp import CSV v1")
+	}
+	rows := make([]artifactTodoRow, 0, len(records)-1)
+	for i, record := range records[1:] {
+		row, err := artifactCardRowFromCSVRecord(record)
+		if err != nil {
+			return nil, fmt.Errorf("artifact cards row %d: %w", i+1, err)
+		}
+		if strings.TrimSpace(row.Title) == "" {
+			return nil, fmt.Errorf("artifact cards row %d has a blank title", i+1)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
 func (r artifactTodoRow) toCSVRecord() ([]string, error) {
 	attachments, err := encodeJSONStringSlice(r.AttachmentURLs)
 	if err != nil {
@@ -312,6 +464,40 @@ func (r artifactTodoRow) toCSVRecord() ([]string, error) {
 		r.SourceRecordID,
 		r.ProjectID,
 		r.ProjectName,
+		formatOptionalInt64(r.TodolistID),
+		r.TodolistName,
+		r.Title,
+		r.Description,
+		r.DueOn,
+		strings.Join(r.AssigneeEmails, ";"),
+		strings.Join(r.AssigneeNames, ";"),
+		r.Status,
+		attachments,
+		comments,
+		customFields,
+	}, nil
+}
+
+func (r artifactTodoRow) toCardCSVRecord() ([]string, error) {
+	attachments, err := encodeJSONStringSlice(r.AttachmentURLs)
+	if err != nil {
+		return nil, err
+	}
+	comments, err := encodeJSONStringSlice(r.Comments)
+	if err != nil {
+		return nil, err
+	}
+	customFields, err := encodeJSONStringMap(r.CustomFields)
+	if err != nil {
+		return nil, err
+	}
+	return []string{
+		r.SourcePath,
+		fmt.Sprintf("%d", r.SourceRow),
+		r.SourceRecordID,
+		r.ProjectID,
+		r.ProjectName,
+		formatOptionalInt64(r.CardTableID),
 		formatOptionalInt64(r.TodolistID),
 		r.TodolistName,
 		r.Title,
@@ -359,6 +545,43 @@ func artifactTodoRowFromCSVRecord(record []string) (artifactTodoRow, error) {
 	return row, nil
 }
 
+func artifactCardRowFromCSVRecord(record []string) (artifactTodoRow, error) {
+	var row artifactTodoRow
+	row.SourcePath = record[0]
+	if _, err := fmt.Sscanf(record[1], "%d", &row.SourceRow); err != nil {
+		return row, fmt.Errorf("invalid source_row %q", record[1])
+	}
+	row.SourceRecordID = record[2]
+	row.ProjectID = record[3]
+	row.ProjectName = record[4]
+	var err error
+	row.CardTableID, err = parseOptionalInt64(record[5])
+	if err != nil {
+		return row, fmt.Errorf("invalid card_table_id %q", record[5])
+	}
+	row.TodolistID, err = parseOptionalInt64(record[6])
+	if err != nil {
+		return row, fmt.Errorf("invalid column_id %q", record[6])
+	}
+	row.TodolistName = record[7]
+	row.Title = record[8]
+	row.Description = record[9]
+	row.DueOn = record[10]
+	row.AssigneeEmails = splitSemicolonList(record[11])
+	row.AssigneeNames = splitSemicolonList(record[12])
+	row.Status = record[13]
+	if err := decodeJSONStringSlice(record[14], &row.AttachmentURLs); err != nil {
+		return row, fmt.Errorf("invalid attachment_urls_json: %w", err)
+	}
+	if err := decodeJSONStringSlice(record[15], &row.Comments); err != nil {
+		return row, fmt.Errorf("invalid comments_json: %w", err)
+	}
+	if err := decodeJSONStringMap(record[16], &row.CustomFields); err != nil {
+		return row, fmt.Errorf("invalid custom_fields_json: %w", err)
+	}
+	return row, nil
+}
+
 func splitAssignees(values []string) ([]string, []string) {
 	emails := make([]string, 0)
 	names := make([]string, 0)
@@ -383,6 +606,23 @@ func artifactTodolistNames(rows []artifactTodoRow) []string {
 		name := strings.TrimSpace(row.TodolistName)
 		if name == "" {
 			name = "Imported todos"
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+func artifactCardColumnNames(rows []artifactTodoRow) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, row := range rows {
+		name := strings.TrimSpace(row.TodolistName)
+		if name == "" {
+			name = "Imported cards"
 		}
 		if _, ok := seen[name]; ok {
 			continue

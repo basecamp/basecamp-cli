@@ -18,7 +18,7 @@ argument-hint: "[csv path or import action]"
 
 # Basecamp CSV Import
 
-Use this skill to turn CSV exports from spreadsheets, task apps, and internal tools into validated Basecamp todos.
+Use this skill to turn CSV exports from spreadsheets, task apps, and internal tools into validated Basecamp todos or cards.
 
 The import pipeline is deterministic:
 
@@ -80,7 +80,7 @@ The inspection can return no obvious title candidate. That is safe: ask the user
 
 ### 3. Confirm mappings with the user
 
-Create `mapping.json` from confirmed answers. At minimum, `title` is required.
+Ask whether the CSV rows should become Basecamp todos or Basecamp cards. Create `mapping.json` from confirmed answers. At minimum, `title` is required.
 
 Example:
 
@@ -106,9 +106,10 @@ Example:
 Mapping guidance:
 
 - `record_id`: stable source ID, if available.
-- `title`: required todo title.
+- `title`: required todo or card title.
 - `description`: long notes/body/content.
-- `todolist`: grouping column such as list, section, phase, stream, room, area, or project.
+- `todolist`: grouping column for todo imports, such as list, section, phase, stream, room, area, or project.
+- `column`: grouping column for card imports. The importer also accepts `todolist` as the grouping mapping for card imports.
 - `status`: source status preserved as metadata.
 - `assignees`: emails or names preserved as metadata unless Basecamp person IDs are available in a later workflow.
 - `due_on`: due/deadline column. Compile normalizes deterministic date values to `YYYY-MM-DD`. For ambiguous slash dates such as `06/01/2026`, add `"date_order": "mdy"` or `"date_order": "dmy"` after confirming the source convention with the user.
@@ -143,6 +144,34 @@ Existing project and existing todolist:
 }
 ```
 
+Existing project with cards created in card table columns from a CSV column:
+
+```json
+{
+  "schema_version": 1,
+  "resource_type": "cards",
+  "mode": "existing_project",
+  "project_id": "12345",
+  "card_table_id": "67890",
+  "column_strategy": "create_from_column"
+}
+```
+
+Existing project and existing card table column:
+
+```json
+{
+  "schema_version": 1,
+  "resource_type": "cards",
+  "mode": "existing_project",
+  "project_id": "12345",
+  "card_table_id": "67890",
+  "column_strategy": "existing_column",
+  "column_id": "24680",
+  "column_name": "To do"
+}
+```
+
 New project:
 
 ```json
@@ -170,7 +199,11 @@ The artifact contains:
 ```text
 basecamp-import/
 ├── import.json
-└── todos.csv
+└── todos.csv     # todo imports
+
+basecamp-import/
+├── import.json
+└── cards.csv     # card imports
 ```
 
 The artifact format is `basecamp-import-csv-v1`. Treat it as the durable checkpoint for the import.
@@ -199,7 +232,7 @@ For failed or partial executions, run the local repair review:
 basecamp import repair --artifact basecamp-import/ --json
 ```
 
-Use `completed_operations`, `failed_operations`, and `pending_todos` to explain what needs manual review before a fresh follow-up artifact is created.
+Use `completed_operations`, `failed_operations`, `pending_todos`, and `pending_cards` to explain what needs manual review before a fresh follow-up artifact is created.
 
 After the user confirms they reviewed Basecamp state and the repair summary, create a fresh follow-up artifact for pending rows:
 
@@ -215,7 +248,7 @@ Plan and preflight the follow-up artifact before execution. Do not remove `execu
 basecamp import preflight --artifact basecamp-import/ --json
 ```
 
-If preflight returns `status: "blocked"`, resolve the reported blocker before execution. Todolist name collisions mean the destination project already has a todolist with a name the artifact plans to create. Todo title collisions mean an existing destination todolist already contains a todo with a title the artifact plans to import.
+If preflight returns `status: "blocked"`, resolve the reported blocker before execution. Todolist or card column name collisions mean the destination project already has a group with a name the artifact plans to create. Todo or card title collisions mean an existing destination group already contains a record with a title the artifact plans to import.
 
 Then ask:
 
@@ -236,6 +269,8 @@ Summarize:
 - `created.projects`
 - `created.todolists`
 - `created.todos`
+- `created.card_columns`
+- `created.cards`
 - `skipped`
 
 Skipped assignees mean the source assignee values were preserved as metadata but not assigned natively.

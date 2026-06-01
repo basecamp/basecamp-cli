@@ -23,6 +23,9 @@ type ArtifactWriteClient interface {
 	CreateProject(ctx context.Context, name string) (int64, error)
 	CreateTodolist(ctx context.Context, projectID int64, name string) (int64, error)
 	CreateTodo(ctx context.Context, todolistID int64, todo ExecutableTodo) (int64, error)
+	CardTableID(ctx context.Context, projectID int64) (int64, error)
+	CreateCardColumn(ctx context.Context, cardTableID int64, name string) (int64, error)
+	CreateCard(ctx context.Context, columnID int64, card ExecutableCard) (int64, error)
 }
 
 // ExecutableTodo is the normalized todo payload sent to Basecamp.
@@ -30,6 +33,12 @@ type ExecutableTodo struct {
 	Title       string
 	Description string
 	DueOn       string
+}
+
+// ExecutableCard is the normalized card payload sent to Basecamp.
+type ExecutableCard struct {
+	Title   string
+	Content string
 }
 
 // ExecuteResult reports records created from a validated import artifact.
@@ -43,9 +52,11 @@ type ExecuteResult struct {
 
 // ExecuteCounts counts records created by artifact execution.
 type ExecuteCounts struct {
-	Projects  int `json:"projects"`
-	Todolists int `json:"todolists"`
-	Todos     int `json:"todos"`
+	Projects    int `json:"projects"`
+	Todolists   int `json:"todolists"`
+	Todos       int `json:"todos"`
+	CardColumns int `json:"card_columns,omitempty"`
+	Cards       int `json:"cards,omitempty"`
 }
 
 // ExecuteSkipped reports artifact data that was preserved but not written as a native Basecamp field.
@@ -79,6 +90,9 @@ type ExecutionLedgerOperation struct {
 	ProjectName    string `json:"project_name,omitempty"`
 	TodolistID     int64  `json:"todolist_id,omitempty"`
 	TodolistName   string `json:"todolist_name,omitempty"`
+	CardTableID    int64  `json:"card_table_id,omitempty"`
+	ColumnID       int64  `json:"column_id,omitempty"`
+	ColumnName     string `json:"column_name,omitempty"`
 	Title          string `json:"title,omitempty"`
 	CreatedID      int64  `json:"created_id,omitempty"`
 	At             string `json:"at"`
@@ -115,11 +129,32 @@ func ExecuteArtifact(ctx context.Context, artifactDir string, client ArtifactWri
 		return nil, err
 	}
 
-	listIDs, err := executeArtifactTodolists(ctx, artifactDir, client, projectID, manifest, rows, ledger, result)
+	resourceType, err := destinationResourceType(&manifest.Destination)
 	if err != nil {
 		return nil, err
 	}
+	if resourceType == resourceTypeCards {
+		if err := executeArtifactCards(ctx, artifactDir, client, projectID, manifest, rows, ledger, result); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := executeArtifactTodos(ctx, artifactDir, client, projectID, manifest, rows, ledger, result); err != nil {
+			return nil, err
+		}
+	}
+	if err := finishArtifactExecution(artifactDir, ledger, "completed", result, nil); err != nil {
+		ledgerFinalized = true
+		return nil, err
+	}
+	ledgerFinalized = true
+	return result, nil
+}
 
+func executeArtifactTodos(ctx context.Context, artifactDir string, client ArtifactWriteClient, projectID int64, manifest *ImportArtifactManifest, rows []artifactTodoRow, ledger *ExecutionLedger, result *ExecuteResult) error {
+	listIDs, err := executeArtifactTodolists(ctx, artifactDir, client, projectID, manifest, rows, ledger, result)
+	if err != nil {
+		return err
+	}
 	for _, row := range rows {
 		listName := row.TodolistName
 		if strings.TrimSpace(listName) == "" {
@@ -130,7 +165,7 @@ func ExecuteArtifact(ctx context.Context, artifactDir string, client ArtifactWri
 			todolistID = listIDs[listName]
 		}
 		if todolistID == 0 {
-			return nil, fmt.Errorf("source row %d has no executable todolist", row.SourceRow)
+			return fmt.Errorf("source row %d has no executable todolist", row.SourceRow)
 		}
 		if len(row.AssigneeEmails) > 0 || len(row.AssigneeNames) > 0 {
 			result.Skipped = append(result.Skipped, ExecuteSkipped{SourceRow: row.SourceRow, Field: "assignees", Reason: "artifact does not contain Basecamp person IDs"})
@@ -141,21 +176,54 @@ func ExecuteArtifact(ctx context.Context, artifactDir string, client ArtifactWri
 			err := fmt.Errorf("create todo from source row %d: %w", row.SourceRow, createErr)
 			appendExecutionLedgerOperation(ledger, ExecutionLedgerOperation{Op: "create_todo", Status: "failed", SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, ProjectID: projectID, TodolistID: todolistID, TodolistName: listName, Title: row.Title, Error: err.Error()})
 			_ = writeExecutionLedger(filepath.Join(artifactDir, artifactExecutionFileName), ledger)
-			return nil, err
+			return err
 		}
 		result.Created.Todos++
 		ledger.Created.Todos = result.Created.Todos
 		appendExecutionLedgerOperation(ledger, ExecutionLedgerOperation{Op: "create_todo", Status: "completed", SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, ProjectID: projectID, TodolistID: todolistID, TodolistName: listName, Title: row.Title, CreatedID: createdID})
 		if err := writeExecutionLedger(filepath.Join(artifactDir, artifactExecutionFileName), ledger); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	if err := finishArtifactExecution(artifactDir, ledger, "completed", result, nil); err != nil {
-		ledgerFinalized = true
-		return nil, err
+	return nil
+}
+
+func executeArtifactCards(ctx context.Context, artifactDir string, client ArtifactWriteClient, projectID int64, manifest *ImportArtifactManifest, rows []artifactTodoRow, ledger *ExecutionLedger, result *ExecuteResult) error {
+	columnIDs, cardTableID, err := executeArtifactCardColumns(ctx, artifactDir, client, projectID, manifest, rows, ledger, result)
+	if err != nil {
+		return err
 	}
-	ledgerFinalized = true
-	return result, nil
+	for _, row := range rows {
+		columnName := row.TodolistName
+		if strings.TrimSpace(columnName) == "" {
+			columnName = "Imported cards"
+		}
+		columnID := row.TodolistID
+		if columnID == 0 {
+			columnID = columnIDs[columnName]
+		}
+		if columnID == 0 {
+			return fmt.Errorf("source row %d has no executable card column", row.SourceRow)
+		}
+		if len(row.AssigneeEmails) > 0 || len(row.AssigneeNames) > 0 {
+			result.Skipped = append(result.Skipped, ExecuteSkipped{SourceRow: row.SourceRow, Field: "assignees", Reason: "artifact does not contain Basecamp person IDs"})
+		}
+		card := ExecutableCard{Title: row.Title, Content: executionDescription(row)}
+		createdID, createErr := client.CreateCard(ctx, columnID, card)
+		if createErr != nil {
+			err := fmt.Errorf("create card from source row %d: %w", row.SourceRow, createErr)
+			appendExecutionLedgerOperation(ledger, ExecutionLedgerOperation{Op: "create_card", Status: "failed", SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, ProjectID: projectID, CardTableID: cardTableID, ColumnID: columnID, ColumnName: columnName, Title: row.Title, Error: err.Error()})
+			_ = writeExecutionLedger(filepath.Join(artifactDir, artifactExecutionFileName), ledger)
+			return err
+		}
+		result.Created.Cards++
+		ledger.Created.Cards = result.Created.Cards
+		appendExecutionLedgerOperation(ledger, ExecutionLedgerOperation{Op: "create_card", Status: "completed", SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, ProjectID: projectID, CardTableID: cardTableID, ColumnID: columnID, ColumnName: columnName, Title: row.Title, CreatedID: createdID})
+		if err := writeExecutionLedger(filepath.Join(artifactDir, artifactExecutionFileName), ledger); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func executeArtifactProject(ctx context.Context, artifactDir string, client ArtifactWriteClient, manifest *ImportArtifactManifest, ledger *ExecutionLedger, result *ExecuteResult) (int64, error) {
@@ -214,6 +282,49 @@ func executeArtifactTodolists(ctx context.Context, artifactDir string, client Ar
 		}
 	}
 	return listIDs, nil
+}
+
+func executeArtifactCardColumns(ctx context.Context, artifactDir string, client ArtifactWriteClient, projectID int64, manifest *ImportArtifactManifest, rows []artifactTodoRow, ledger *ExecutionLedger, result *ExecuteResult) (map[string]int64, int64, error) {
+	cardTableID, err := parseOptionalInt64(manifest.Destination.CardTableID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid destination card_table_id: %w", err)
+	}
+	if cardTableID == 0 {
+		cardTableID, err = client.CardTableID(ctx, projectID)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	columnIDs := make(map[string]int64)
+	if manifest.Destination.ColumnStrategy == "existing_column" {
+		id, err := parseOptionalInt64(manifest.Destination.ColumnID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid destination column_id: %w", err)
+		}
+		if id == 0 {
+			return nil, 0, fmt.Errorf("artifact destination column_id is required for card execution")
+		}
+		columnIDs[manifest.Destination.ColumnName] = id
+		columnIDs["Imported cards"] = id
+		return columnIDs, cardTableID, nil
+	}
+	for _, name := range artifactCardColumnNames(rows) {
+		id, createErr := client.CreateCardColumn(ctx, cardTableID, name)
+		if createErr != nil {
+			err := fmt.Errorf("create card column %q: %w", name, createErr)
+			appendExecutionLedgerOperation(ledger, ExecutionLedgerOperation{Op: "create_card_column", Status: "failed", ProjectID: projectID, CardTableID: cardTableID, ColumnName: name, Error: err.Error()})
+			_ = writeExecutionLedger(filepath.Join(artifactDir, artifactExecutionFileName), ledger)
+			return nil, 0, err
+		}
+		columnIDs[name] = id
+		result.Created.CardColumns++
+		ledger.Created.CardColumns = result.Created.CardColumns
+		appendExecutionLedgerOperation(ledger, ExecutionLedgerOperation{Op: "create_card_column", Status: "completed", ProjectID: projectID, CardTableID: cardTableID, ColumnID: id, ColumnName: name, CreatedID: id})
+		if err := writeExecutionLedger(filepath.Join(artifactDir, artifactExecutionFileName), ledger); err != nil {
+			return nil, 0, err
+		}
+	}
+	return columnIDs, cardTableID, nil
 }
 
 func appendExecutionLedgerOperation(ledger *ExecutionLedger, op ExecutionLedgerOperation) {

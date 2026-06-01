@@ -13,6 +13,8 @@ type fakeWriteClient struct {
 	projects     []string
 	todolists    []fakeCreatedTodolist
 	todos        []fakeCreatedTodo
+	cardColumns  []fakeCreatedCardColumn
+	cards        []fakeCreatedCard
 	failTodoRows map[string]error
 }
 
@@ -26,6 +28,18 @@ type fakeCreatedTodo struct {
 	TodolistID int64
 	Todo       ExecutableTodo
 	ID         int64
+}
+
+type fakeCreatedCardColumn struct {
+	CardTableID int64
+	Name        string
+	ID          int64
+}
+
+type fakeCreatedCard struct {
+	ColumnID int64
+	Card     ExecutableCard
+	ID       int64
 }
 
 func (f *fakeWriteClient) CreateProject(ctx context.Context, name string) (int64, error) {
@@ -47,6 +61,22 @@ func (f *fakeWriteClient) CreateTodo(ctx context.Context, todolistID int64, todo
 	}
 	id := f.next()
 	f.todos = append(f.todos, fakeCreatedTodo{TodolistID: todolistID, Todo: todo, ID: id})
+	return id, nil
+}
+
+func (f *fakeWriteClient) CardTableID(ctx context.Context, projectID int64) (int64, error) {
+	return 888, nil
+}
+
+func (f *fakeWriteClient) CreateCardColumn(ctx context.Context, cardTableID int64, name string) (int64, error) {
+	id := f.next()
+	f.cardColumns = append(f.cardColumns, fakeCreatedCardColumn{CardTableID: cardTableID, Name: name, ID: id})
+	return id, nil
+}
+
+func (f *fakeWriteClient) CreateCard(ctx context.Context, columnID int64, card ExecutableCard) (int64, error) {
+	id := f.next()
+	f.cards = append(f.cards, fakeCreatedCard{ColumnID: columnID, Card: card, ID: id})
 	return id, nil
 }
 
@@ -89,6 +119,29 @@ func TestExecuteArtifactCreatesTodolistsAndTodos(t *testing.T) {
 	}
 	if client.todos[0].TodolistID != client.todolists[0].ID {
 		t.Fatalf("first todo todolist ID = %d, want %d", client.todos[0].TodolistID, client.todolists[0].ID)
+	}
+}
+
+func TestExecuteArtifactCreatesCardColumnsAndCards(t *testing.T) {
+	outDir := compileSimpleExecutionArtifact(t, &DestinationConfig{SchemaVersion: planSchemaVersion, ResourceType: resourceTypeCards, Mode: "existing_project", ProjectID: "123", CardTableID: "888", ColumnStrategy: "create_from_column"})
+	client := &fakeWriteClient{}
+
+	result, err := ExecuteArtifact(context.Background(), outDir, client, ExecuteOptions{Approved: true})
+	if err != nil {
+		t.Fatalf("ExecuteArtifact() error = %v", err)
+	}
+	if result.Created.CardColumns != 2 || result.Created.Cards != 2 {
+		t.Fatalf("created = %+v", result.Created)
+	}
+	if len(client.cardColumns) != 2 || client.cardColumns[0].Name != "Backlog" || len(client.cards) != 2 || client.cards[0].Card.Title != "First" {
+		t.Fatalf("client = %+v", client)
+	}
+	var ledger ExecutionLedger
+	if err := readJSONData(filepath.Join(outDir, artifactExecutionFileName), &ledger); err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if ledger.Operations[0].Op != "create_card_column" || ledger.Operations[2].Op != "create_card" {
+		t.Fatalf("ledger operations = %+v", ledger.Operations)
 	}
 }
 

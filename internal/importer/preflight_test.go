@@ -9,9 +9,27 @@ import (
 )
 
 type fakePreflightClient struct {
-	todolists   []ExistingTodolist
-	todos       []ExistingTodo
-	todosByList map[int64][]ExistingTodo
+	todolists     []ExistingTodolist
+	todos         []ExistingTodo
+	todosByList   map[int64][]ExistingTodo
+	cardColumns   []ExistingCardColumn
+	cards         []ExistingCard
+	cardsByColumn map[int64][]ExistingCard
+}
+
+func (f fakePreflightClient) CardTableID(ctx context.Context, projectID int64) (int64, error) {
+	return 888, nil
+}
+
+func (f fakePreflightClient) ExistingCardColumns(ctx context.Context, cardTableID int64) ([]ExistingCardColumn, error) {
+	return f.cardColumns, nil
+}
+
+func (f fakePreflightClient) ExistingCards(ctx context.Context, columnID int64) ([]ExistingCard, error) {
+	if f.cardsByColumn != nil {
+		return f.cardsByColumn[columnID], nil
+	}
+	return f.cards, nil
 }
 
 func (f fakePreflightClient) ExistingTodolists(ctx context.Context, projectID int64) ([]ExistingTodolist, error) {
@@ -89,6 +107,19 @@ func TestPreflightArtifactChecksExistingTodolistTodos(t *testing.T) {
 		t.Fatalf("PreflightArtifact() error = %v", err)
 	}
 	if result.Status != "passed" || !preflightHasCheck(result, "todo_title_collisions", "passed") {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPreflightArtifactBlocksCardColumnNameCollisions(t *testing.T) {
+	outDir := compileSimpleExecutionArtifact(t, &DestinationConfig{SchemaVersion: planSchemaVersion, ResourceType: resourceTypeCards, Mode: "existing_project", ProjectID: "123", CardTableID: "888", ColumnStrategy: "create_from_column"})
+	client := fakePreflightClient{cardColumns: []ExistingCardColumn{{ID: 42, Name: "Backlog"}}}
+
+	result, err := PreflightArtifact(context.Background(), outDir, client)
+	if err != nil {
+		t.Fatalf("PreflightArtifact() error = %v", err)
+	}
+	if result.Status != "blocked" || len(result.ColumnCollisions) != 1 || result.ColumnCollisions[0].Name != "Backlog" {
 		t.Fatalf("result = %+v", result)
 	}
 }

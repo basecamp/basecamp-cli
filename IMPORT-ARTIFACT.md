@@ -1,13 +1,17 @@
 # Basecamp Import Artifact v1
 
-`basecamp-import-csv-v1` is the stable artifact format produced by `basecamp import compile` for CSV-to-Basecamp todo imports. The artifact is a durable checkpoint between CSV inspection and approved Basecamp writes.
+`basecamp-import-csv-v1` is the stable artifact format produced by `basecamp import compile` for CSV-to-Basecamp todo and card imports. The artifact is a durable checkpoint between CSV inspection and approved Basecamp writes.
 
 A compiled artifact contains:
 
 ```text
 basecamp-import/
 ├── import.json
-└── todos.csv
+└── todos.csv     # todo imports
+
+basecamp-import/
+├── import.json
+└── cards.csv     # card imports
 ```
 
 Execution adds a local ledger:
@@ -19,7 +23,7 @@ basecamp-import/
 └── execution.json
 ```
 
-The artifact schema is the same for every CSV import that uses `basecamp-import-csv-v1`. Import-specific values such as source fingerprints, destinations, todo titles, due dates, and preserved metadata live inside the fixed schema.
+The artifact schema is the same for every CSV import that uses `basecamp-import-csv-v1`. Import-specific values such as source fingerprints, destinations, todo or card titles, due dates, and preserved metadata live inside the fixed schema.
 
 ## Lifecycle
 
@@ -88,13 +92,25 @@ Fields:
 | `counts.projects` | integer | Number of projects execution creates. |
 | `counts.todolists` | integer | Number of todolists execution creates. |
 | `counts.todos` | integer | Number of todos execution creates. |
-| `files.todos` | string | Relative path to the canonical todo CSV. v1 uses `todos.csv`. |
+| `counts.card_columns` | integer | Number of card table columns execution creates for card imports. |
+| `counts.cards` | integer | Number of cards execution creates for card imports. |
+| `files.todos` | string | Relative path to the canonical todo CSV. v1 uses `todos.csv` for todo imports. |
+| `files.cards` | string | Relative path to the canonical card CSV. v1 uses `cards.csv` for card imports. |
+
+## Resource type
+
+`destination.resource_type` selects the Basecamp resource type. A blank value means `todos` for compatibility with existing v1 todo artifacts.
+
+| Resource type | Behavior |
+|---|---|
+| `todos` | Creates todolists and todos. |
+| `cards` | Creates card table columns and cards. |
 
 ## Destination modes
 
 ### Existing project
 
-Creates todolists and todos inside an existing Basecamp project.
+Creates todolists and todos, or card table columns and cards, inside an existing Basecamp project.
 
 ```json
 {
@@ -109,7 +125,7 @@ Creates todolists and todos inside an existing Basecamp project.
 
 ### New project
 
-Creates a Basecamp project, then creates todolists and todos inside it.
+Creates a Basecamp project, then creates todolists and todos, or card table columns and cards, inside it.
 
 ```json
 {
@@ -129,6 +145,18 @@ Creates a Basecamp project, then creates todolists and todos inside it.
 | `create_from_column` | Creates one todolist for each distinct mapped todolist value. Blank todolist values use `Imported todos`. |
 | `single_todolist` | Creates one todolist named by `todolist_name`, or `Imported todos` when the name is blank. |
 | `existing_todolist` | Creates todos in the todolist identified by `todolist_id`. |
+
+## Card column strategies
+
+Card imports use `card_table_id` and `column_strategy` in the destination.
+
+| Strategy | Behavior |
+|---|---|
+| `create_from_column` | Creates one card table column for each distinct mapped column value. Blank column values use `Imported cards`. |
+| `single_column` | Creates one card table column named by `column_name`, or `Imported cards` when the name is blank. |
+| `existing_column` | Creates cards in the card table column identified by `column_id`. |
+
+The mapping can use either `column` or `todolist` to identify the source grouping column for cards. `column` is preferred for card imports.
 
 ## `todos.csv`
 
@@ -169,6 +197,24 @@ attachment_urls_json,comments_json,custom_fields_json
 ```
 
 Readers validate these columns as JSON arrays or objects before planning or execution.
+
+## `cards.csv`
+
+`cards.csv` contains one normalized card row per source CSV row selected for import. The header is fixed and validated exactly.
+
+```csv
+source_path,source_row,source_record_id,project_id,project_name,card_table_id,column_id,column_name,title,content,due_on,assignee_emails,assignee_names,status,attachment_urls_json,comments_json,custom_fields_json
+```
+
+Columns follow the same provenance and metadata contract as `todos.csv`. Card-specific columns are:
+
+| Column | Type | Description |
+|---|---:|---|
+| `card_table_id` | integer string | Destination card table ID. Blank means execution resolves the project's card table. |
+| `column_id` | integer string | Destination card table column ID for existing-column imports. Blank means execution creates or resolves the column from the artifact destination. |
+| `column_name` | string | Destination card table column name. Blank values resolve to `Imported cards` for created columns. |
+| `title` | string | Basecamp card title. Compile requires a non-blank title. |
+| `content` | string | Basecamp card content from the mapped source description column plus preserved metadata. |
 
 ## Due dates
 
@@ -229,10 +275,10 @@ Artifact readers validate:
 - supported manifest `schema_version`
 - supported `artifact_format`
 - required artifact files
-- exact `todos.csv` header
-- manifest todo count against CSV row count
-- non-blank todo titles
-- integer fields such as `source_row` and `todolist_id`
+- exact `todos.csv` or `cards.csv` header
+- manifest todo/card count against CSV row count
+- non-blank todo and card titles
+- integer fields such as `source_row`, `todolist_id`, `card_table_id`, and `column_id`
 - JSON array/object columns
 - destination fields required for execution
 

@@ -89,6 +89,31 @@ func TestPlanFromArtifactMatchesCompiledOperations(t *testing.T) {
 	}
 }
 
+func TestCompileArtifactWritesCardsArtifact(t *testing.T) {
+	inspection := inspectTempCSV(t, "id,title,column\n1,First,Backlog\n2,Second,Doing\n")
+	mapping := &MappingConfig{SchemaVersion: planSchemaVersion, RecordID: &ColumnRef{ColumnIndex: 0}, Title: &ColumnRef{ColumnIndex: 1}, Column: &ColumnRef{ColumnIndex: 2}}
+	destination := &DestinationConfig{SchemaVersion: planSchemaVersion, ResourceType: resourceTypeCards, Mode: "existing_project", ProjectID: "123", CardTableID: "888", ColumnStrategy: "create_from_column"}
+	outDir := filepath.Join(t.TempDir(), "artifact")
+
+	result, err := CompileArtifact(inspection, mapping, destination, outDir)
+	if err != nil {
+		t.Fatalf("CompileArtifact() error = %v", err)
+	}
+	if result.Manifest.Counts.Cards != 2 || result.Manifest.Counts.CardColumns != 2 || result.Manifest.Files.Cards != artifactCardsFileName {
+		t.Fatalf("manifest = %+v", result.Manifest)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, artifactCardsFileName)); err != nil {
+		t.Fatalf("cards.csv not written: %v", err)
+	}
+	plan, err := PlanFromArtifact(outDir)
+	if err != nil {
+		t.Fatalf("PlanFromArtifact() error = %v", err)
+	}
+	if plan.Operations[0].Op != "create_card_column" || plan.Operations[2].Op != "create_card" {
+		t.Fatalf("operations = %+v", plan.Operations)
+	}
+}
+
 func TestCompileArtifactRejectsUnconfirmedInputs(t *testing.T) {
 	inspection := inspectTempCSV(t, "id,title\n1,Do the thing\n")
 	mapping := &MappingConfig{SchemaVersion: planSchemaVersion}
