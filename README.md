@@ -119,6 +119,18 @@ basecamp auth login --scope full # Full read+write access (BC3 OAuth only)
 basecamp auth token              # Print token for scripts
 ```
 
+### Multiple Identities
+
+Use named profiles when the same machine or agent gateway needs more than one Basecamp identity. Each profile has its own stored OAuth credentials and can be selected per command:
+
+```bash
+basecamp profile create design-agent
+basecamp profile create ops-agent
+basecamp --profile design-agent todo "Fix bug" --in 12345 --list 67890
+```
+
+Set a default with `basecamp profile set-default <name>`, or set `BASECAMP_PROFILE=<name>` for a process. Actions are posted as the authenticated user for the selected profile.
+
 ### Custom OAuth Credentials
 
 To use your own OAuth app (e.g., a custom Launchpad integration):

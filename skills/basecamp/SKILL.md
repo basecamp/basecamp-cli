@@ -141,6 +141,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 - `--assignee me` resolves to current user
 - `--due tomorrow` / `--due +3` / `--due "next week"` - natural date parsing
 - Project from `.basecamp/config.json` if `--in` not specified
+- Multiple identities use named profiles: `basecamp profile create <name>`, then select one with global `--profile <name>` or `BASECAMP_PROFILE=<name>`.
 
 ## Quick Reference
 
