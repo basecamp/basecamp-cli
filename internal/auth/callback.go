@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-//go:embed callback.html callback_success.html callback_error.html callback_denied.html callback_invalid.html callback_exchange_failed.html
+//go:embed callback.html basecamp_logo.html callback_success.html callback_error.html callback_denied.html callback_invalid.html callback_exchange_failed.html
 var callbackFS embed.FS
 
 var callbackTmpl = template.Must(template.ParseFS(callbackFS, "callback.html"))
@@ -21,9 +21,15 @@ var callbackTmpl = template.Must(template.ParseFS(callbackFS, "callback.html"))
 type callbackData struct{ Content string }
 
 func renderCallback(filename string) string {
-	content, _ := callbackFS.ReadFile(filename)
+	// Parse the content page alongside the shared logo partial so its
+	// {{template "basecamp_logo.html"}} reference resolves, then wrap the
+	// result in the outer shell.
+	contentTmpl := template.Must(template.ParseFS(callbackFS, filename, "basecamp_logo.html"))
+	var content bytes.Buffer
+	_ = contentTmpl.ExecuteTemplate(&content, filename, nil)
+
 	var buf bytes.Buffer
-	_ = callbackTmpl.Execute(&buf, callbackData{Content: string(content)})
+	_ = callbackTmpl.Execute(&buf, callbackData{Content: content.String()})
 	return buf.String()
 }
 
