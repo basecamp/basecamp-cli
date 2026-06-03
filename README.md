@@ -1,4 +1,4 @@
-# <img src="assets/basecamp-badge.svg" height="28" alt="Basecamp"> Basecamp CLI
+# <img src="assets/bc5-snowglobe.png" height="28" alt="Basecamp"> Basecamp CLI
 
 `basecamp` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
