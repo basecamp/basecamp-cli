@@ -6,7 +6,7 @@ project_name: basecamp
 before:
   hooks:
     - sh -c 'mkdir -p completions && go run ./cmd/basecamp completion bash > completions/basecamp.bash && go run ./cmd/basecamp completion zsh > completions/_basecamp && go run ./cmd/basecamp completion fish > completions/basecamp.fish'
-    - scripts/stamp-plugin-version.sh {{ .Version }}
+    - sh -c 'if [ "{{ .Prerelease }}" = "true" ]; then echo "Skipping Claude plugin version stamp for prerelease {{ .Version }}"; else scripts/stamp-plugin-version.sh {{ .Version }}; fi'
 
 builds:
   - id: basecamp
@@ -120,6 +120,7 @@ release:
     name: basecamp-cli
   draft: false
   prerelease: auto
+  make_latest: "{{ if .Prerelease }}false{{ else }}auto{{ end }}"
   replace_existing_artifacts: true
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |

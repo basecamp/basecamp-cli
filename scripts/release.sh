@@ -37,6 +37,10 @@ if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
 fi
 
 TAG="v${VERSION}"
+PRERELEASE=false
+if [[ "${VERSION}" == *-* ]]; then
+  PRERELEASE=true
+fi
 
 if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
   info "Dry run — no tags will be created or pushed"
@@ -76,32 +80,39 @@ fi
 info "Running release checks"
 make release-check
 
-# --- Update Nix flake ---
-info "Updating Nix flake"
-if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
-  echo "  (skipped — dry run)"
+# --- Update stable release metadata ---
+if [[ "${PRERELEASE}" == "true" ]]; then
+  info "Skipping stable release metadata for prerelease"
+  echo "  nix flake: unchanged"
+  echo "  Claude plugin metadata: unchanged"
 else
-  NIX_RC=0
-  scripts/update-nix-flake.sh "${VERSION}" || NIX_RC=$?
-  if [[ "$NIX_RC" -eq 0 ]]; then
-    : # nix flake updated
-  elif [[ "$NIX_RC" -eq 2 ]]; then
-    echo "  nix flake: no changes needed"
+  # --- Update Nix flake ---
+  info "Updating Nix flake"
+  if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
+    echo "  (skipped — dry run)"
   else
-    die "scripts/update-nix-flake.sh failed (exit $NIX_RC)"
+    NIX_RC=0
+    scripts/update-nix-flake.sh "${VERSION}" || NIX_RC=$?
+    if [[ "$NIX_RC" -eq 0 ]]; then
+      : # nix flake updated
+    elif [[ "$NIX_RC" -eq 2 ]]; then
+      echo "  nix flake: no changes needed"
+    else
+      die "scripts/update-nix-flake.sh failed (exit $NIX_RC)"
+    fi
+  fi
+
+  # --- Stamp plugin version ---
+  info "Stamping plugin version"
+  if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
+    echo "  (skipped — dry run)"
+  else
+    scripts/stamp-plugin-version.sh "${VERSION}"
   fi
 fi
 
-# --- Stamp plugin version ---
-info "Stamping plugin version"
-if [[ "${DRY_RUN}" == "true" || "${DRY_RUN}" == "1" ]]; then
-  echo "  (skipped — dry run)"
-else
-  scripts/stamp-plugin-version.sh "${VERSION}"
-fi
-
 # --- Commit release prep ---
-if [[ "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1" ]]; then
+if [[ "${PRERELEASE}" != "true" && "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1" ]]; then
   git add nix/package.nix .claude-plugin/plugin.json
   if ! git diff --cached --quiet; then
     STAGED=$(git diff --cached --name-only)

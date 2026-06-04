@@ -257,6 +257,7 @@ jobs:
           subject-checksums: ./dist/checksums.txt
 
       - name: Publish to AUR
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
         run: |
@@ -325,7 +326,7 @@ jobs:
   nix-verify:
     name: Verify Nix flake
     needs: [release]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -347,7 +348,7 @@ jobs:
   sync-skills:
     name: Sync skills
     needs: [release]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     continue-on-error: true
     concurrency:
       group: sync-skills
