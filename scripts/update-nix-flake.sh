@@ -27,7 +27,9 @@ if [[ "$CURRENT_VERSION" != "$VERSION" ]]; then
 fi
 
 # --- Check if vendorHash needs recomputing ---
-PREV_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
+# Prerelease tags skip Nix metadata updates, so compare dependency changes
+# against the latest stable tag instead of an intervening RC tag.
+PREV_TAG=$(git tag --merged HEAD --sort=-version:refname --list 'v[0-9]*.[0-9]*.[0-9]*' | awk '!/-/ { print; exit }')
 NEED_HASH=false
 if [[ -z "$PREV_TAG" ]]; then
   NEED_HASH=true
