@@ -256,8 +256,20 @@ jobs:
         with:
           subject-checksums: ./dist/checksums.txt
 
-      - name: Publish to AUR
+      - name: Check AUR publishing configuration
+        id: aur-publish
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          if [ -n "$AUR_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to AUR
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && steps.aur-publish.outputs.enabled == 'true'
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
         run: |

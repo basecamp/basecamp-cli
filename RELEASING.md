@@ -22,8 +22,8 @@ make release VERSION=0.2.0 DRY_RUN=1
 
 1. Validates semver format, main branch, clean tree, synced with remote
 2. Checks for `replace` directives in go.mod
-3. Updates stable release metadata (`nix/package.nix` and `.claude-plugin/plugin.json`) for stable versions
-4. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
+3. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
+4. Updates stable release metadata (`nix/package.nix` and `.claude-plugin/plugin.json`) for stable versions
 5. Creates annotated tag `v$VERSION` and pushes to origin
 6. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
    - Security scan + full test suite + CLI surface compatibility check
