@@ -334,7 +334,7 @@ func appendExecutionLedgerOperation(ledger *ExecutionLedger, op ExecutionLedgerO
 
 func beginArtifactExecution(artifactDir string, manifest *ImportArtifactManifest) (*ExecutionLedger, error) {
 	ledgerPath := filepath.Join(artifactDir, artifactExecutionFileName)
-	if data, err := os.ReadFile(ledgerPath); err == nil {
+	if data, err := os.ReadFile(ledgerPath); err == nil { // #nosec G304 -- execution reads the ledger within the selected artifact directory
 		var existing ExecutionLedger
 		if jsonErr := json.Unmarshal(data, &existing); jsonErr != nil {
 			return nil, fmt.Errorf("artifact execution ledger exists at %s and cannot be read; refusing to execute again", ledgerPath)
@@ -381,7 +381,7 @@ func writeExecutionLedger(path string, ledger *ExecutionLedger) error {
 	}
 	data = append(data, '\n')
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // G306: Execution ledgers are user-readable recovery files
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write artifact execution ledger: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

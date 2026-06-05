@@ -9,17 +9,17 @@ type RepairResult struct {
 	Created             ExecuteCounts              `json:"created,omitempty"`
 	CompletedOperations []ExecutionLedgerOperation `json:"completed_operations,omitempty"`
 	FailedOperations    []ExecutionLedgerOperation `json:"failed_operations,omitempty"`
-	PendingTodos        []RepairPendingTodo        `json:"pending_todos,omitempty"`
-	PendingCards        []RepairPendingTodo        `json:"pending_cards,omitempty"`
+	PendingTodos        []RepairPendingRecord      `json:"pending_todos,omitempty"`
+	PendingCards        []RepairPendingRecord      `json:"pending_cards,omitempty"`
 	Guidance            []string                   `json:"guidance"`
 }
 
-// RepairPendingTodo identifies an artifact todo row that has no completed ledger operation.
-type RepairPendingTodo struct {
+// RepairPendingRecord identifies an artifact row that has no completed ledger operation.
+type RepairPendingRecord struct {
 	SourceRow      int    `json:"source_row"`
 	SourceRecordID string `json:"source_record_id,omitempty"`
 	Title          string `json:"title"`
-	TodolistName   string `json:"todolist_name,omitempty"`
+	GroupName      string `json:"group_name,omitempty"`
 }
 
 // RepairArtifact reads local artifact and execution files and summarizes recovery state.
@@ -67,9 +67,13 @@ func RepairArtifact(artifactDir string) (*RepairResult, error) {
 		result.Guidance = []string{"Execution completed. This artifact is closed and cannot be executed again."}
 	case "failed", "started":
 		result.Status = "review_required"
+		pendingField := "pending_todos"
+		if resourceType == resourceTypeCards {
+			pendingField = "pending_cards"
+		}
 		result.Guidance = []string{
 			"Review completed_operations against Basecamp before taking further action.",
-			"Review failed_operations and pending_todos before creating a fresh follow-up artifact.",
+			"Review failed_operations and " + pendingField + " before creating a fresh follow-up artifact.",
 			"Do not remove execution.json to rerun this artifact.",
 		}
 	default:
@@ -93,19 +97,19 @@ func splitLedgerOperations(operations []ExecutionLedgerOperation) ([]ExecutionLe
 	return completed, failed
 }
 
-func pendingRecordsForRepair(rows []artifactTodoRow, operations []ExecutionLedgerOperation, operationName string) []RepairPendingTodo {
+func pendingRecordsForRepair(rows []artifactTodoRow, operations []ExecutionLedgerOperation, operationName string) []RepairPendingRecord {
 	completedRows := make(map[int]struct{})
 	for _, op := range operations {
 		if op.Op == operationName && op.Status == "completed" && op.SourceRow != 0 {
 			completedRows[op.SourceRow] = struct{}{}
 		}
 	}
-	pending := make([]RepairPendingTodo, 0)
+	pending := make([]RepairPendingRecord, 0)
 	for _, row := range rows {
 		if _, ok := completedRows[row.SourceRow]; ok {
 			continue
 		}
-		pending = append(pending, RepairPendingTodo{SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, Title: row.Title, TodolistName: row.TodolistName})
+		pending = append(pending, RepairPendingRecord{SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, Title: row.Title, GroupName: row.TodolistName})
 	}
 	return pending
 }

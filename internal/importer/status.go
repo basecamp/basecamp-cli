@@ -47,7 +47,7 @@ func StatusArtifact(artifactDir string) (*ArtifactStatus, error) {
 		Destination:       manifest.Destination,
 		Counts:            manifest.Counts,
 		Files:             manifest.Files,
-		Checks:            []ArtifactStatusCheck{{Name: "artifact", Status: "passed", Message: "Artifact manifest and todo CSV are valid."}},
+		Checks:            []ArtifactStatusCheck{{Name: "artifact", Status: "passed", Message: artifactStatusCheckMessage(manifest)}},
 		Guidance:          "Run preflight before approved execution.",
 	}
 
@@ -60,7 +60,7 @@ func StatusArtifact(artifactDir string) (*ArtifactStatus, error) {
 		}
 		status.Status = "ledger_unreadable"
 		status.Checks = append(status.Checks, ArtifactStatusCheck{Name: "execution_ledger", Status: "blocked", Message: fmt.Sprintf("Execution ledger cannot be read: %v", err)})
-		status.Guidance = "Review or remove the unreadable execution ledger before using this artifact."
+		status.Guidance = "Execution ledger cannot be read. Inspect execution.json and avoid reusing this artifact for execution."
 		return status, nil
 	}
 
@@ -78,6 +78,13 @@ func StatusArtifact(artifactDir string) (*ArtifactStatus, error) {
 		status.Guidance = "Execution ledger has an unrecognized status. Review the ledger before using this artifact."
 	}
 	return status, nil
+}
+
+func artifactStatusCheckMessage(manifest *ImportArtifactManifest) string {
+	if manifest.Files.Cards != "" {
+		return "Artifact manifest and cards CSV are valid."
+	}
+	return "Artifact manifest and todos CSV are valid."
 }
 
 func readExecutionLedger(path string) (*ExecutionLedger, error) {

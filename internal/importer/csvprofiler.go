@@ -124,7 +124,7 @@ func InspectCSV(path string, opts InspectOptions) (*Inspection, error) {
 		opts.SampleSize = 5
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- inspect reads the CSV path selected by the user
 	if err != nil {
 		return nil, fmt.Errorf("read CSV: %w", err)
 	}

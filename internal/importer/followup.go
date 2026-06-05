@@ -19,8 +19,8 @@ type FollowupArtifactResult struct {
 	Status        string                 `json:"status"`
 	ArtifactPath  string                 `json:"artifact_path"`
 	Manifest      ImportArtifactManifest `json:"manifest"`
-	PendingTodos  []RepairPendingTodo    `json:"pending_todos,omitempty"`
-	PendingCards  []RepairPendingTodo    `json:"pending_cards,omitempty"`
+	PendingTodos  []RepairPendingRecord  `json:"pending_todos,omitempty"`
+	PendingCards  []RepairPendingRecord  `json:"pending_cards,omitempty"`
 	Guidance      []string               `json:"guidance"`
 }
 
@@ -72,7 +72,7 @@ func CreateFollowupArtifact(artifactDir, outDir string, opts FollowupOptions) (*
 	completedRows := completedSourceRows(resourceType, repair.CompletedOperations)
 
 	pendingRows := make([]artifactTodoRow, 0, len(pendingRecords))
-	pendingSummaries := make([]RepairPendingTodo, 0, len(pendingRecords))
+	pendingSummaries := make([]RepairPendingRecord, 0, len(pendingRecords))
 	for _, row := range rows {
 		if _, completed := completedRows[row.SourceRow]; completed {
 			continue
@@ -96,7 +96,7 @@ func CreateFollowupArtifact(artifactDir, outDir string, opts FollowupOptions) (*
 		row.TodolistID = resolvedGroupID
 		row.TodolistName = groupName
 		pendingRows = append(pendingRows, row)
-		pendingSummaries = append(pendingSummaries, RepairPendingTodo{SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, Title: row.Title, TodolistName: groupName})
+		pendingSummaries = append(pendingSummaries, RepairPendingRecord{SourceRow: row.SourceRow, SourceRecordID: row.SourceRecordID, Title: row.Title, GroupName: groupName})
 	}
 	if len(pendingRows) == 0 {
 		return nil, fmt.Errorf("follow-up artifact has no pending rows")
@@ -161,7 +161,7 @@ func followupProject(manifest *ImportArtifactManifest, operations []ExecutionLed
 	return "", "", fmt.Errorf("new_project follow-up requires a completed create_project operation in execution.json")
 }
 
-func pendingSummariesFor(want, got string, summaries []RepairPendingTodo) []RepairPendingTodo {
+func pendingSummariesFor(want, got string, summaries []RepairPendingRecord) []RepairPendingRecord {
 	if want != got {
 		return nil
 	}

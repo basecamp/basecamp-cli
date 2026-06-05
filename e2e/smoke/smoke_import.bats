@@ -27,6 +27,22 @@ JSON
 JSON
 }
 
+inspect_smoke_import_csv() {
+  run_smoke basecamp import inspect tasks.csv --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.status' 'profiled'
+  printf '%s\n' "$output" > inspection.json
+}
+
+compile_smoke_import_artifact() {
+  inspect_smoke_import_csv
+  run_smoke basecamp import compile --inspection inspection.json --mapping mapping.json --destination destination.json --out basecamp-import --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.status' 'compiled'
+}
+
 @test "import inspect profiles local CSV" {
   write_smoke_import_files
   run_smoke basecamp import inspect tasks.csv --json
@@ -37,18 +53,12 @@ JSON
 
 @test "import compile creates local artifact" {
   write_smoke_import_files
-  basecamp import inspect tasks.csv --json > inspection.json
-
-  run_smoke basecamp import compile --inspection inspection.json --mapping mapping.json --destination destination.json --out basecamp-import --json
-  assert_success
-  assert_json_value '.ok' 'true'
-  assert_json_value '.data.status' 'compiled'
+  compile_smoke_import_artifact
 }
 
 @test "import plan reads local artifact" {
   write_smoke_import_files
-  basecamp import inspect tasks.csv --json > inspection.json
-  basecamp import compile --inspection inspection.json --mapping mapping.json --destination destination.json --out basecamp-import --json >/dev/null
+  compile_smoke_import_artifact
 
   run_smoke basecamp import plan --artifact basecamp-import --json
   assert_success
@@ -81,6 +91,9 @@ JSON
 }
 
 @test "import execute requires approval" {
+  write_smoke_import_files
+  compile_smoke_import_artifact
+
   run_smoke basecamp import execute --artifact basecamp-import --json
   assert_failure
   assert_output_contains "--approved required"

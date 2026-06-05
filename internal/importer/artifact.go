@@ -276,10 +276,11 @@ func readArtifact(artifactDir string) (*ImportArtifactManifest, []artifactTodoRo
 		return nil, nil, err
 	}
 	if resourceType == resourceTypeCards {
-		if manifest.Files.Cards == "" {
-			return nil, nil, fmt.Errorf("artifact cards file is required")
+		cardsPath, err := artifactMemberPath(artifactDir, manifest.Files.Cards, artifactCardsFileName)
+		if err != nil {
+			return nil, nil, err
 		}
-		rows, err := readArtifactCards(filepath.Join(artifactDir, manifest.Files.Cards))
+		rows, err := readArtifactCards(cardsPath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -288,10 +289,11 @@ func readArtifact(artifactDir string) (*ImportArtifactManifest, []artifactTodoRo
 		}
 		return &manifest, rows, nil
 	}
-	if manifest.Files.Todos == "" {
-		return nil, nil, fmt.Errorf("artifact todos file is required")
+	todosPath, err := artifactMemberPath(artifactDir, manifest.Files.Todos, artifactTodosFileName)
+	if err != nil {
+		return nil, nil, err
 	}
-	rows, err := readArtifactTodos(filepath.Join(artifactDir, manifest.Files.Todos))
+	rows, err := readArtifactTodos(todosPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -301,8 +303,18 @@ func readArtifact(artifactDir string) (*ImportArtifactManifest, []artifactTodoRo
 	return &manifest, rows, nil
 }
 
+func artifactMemberPath(artifactDir, filename, expected string) (string, error) {
+	if filename == "" {
+		return "", fmt.Errorf("artifact %s file is required", strings.TrimSuffix(expected, ".csv"))
+	}
+	if filename != expected {
+		return "", fmt.Errorf("artifact %s file must be %s", strings.TrimSuffix(expected, ".csv"), expected)
+	}
+	return filepath.Join(artifactDir, expected), nil
+}
+
 func writeArtifact(outDir string, manifest ImportArtifactManifest, rows []artifactTodoRow) error {
-	if err := os.MkdirAll(outDir, 0o755); err != nil { //nolint:gosec // G301: Import artifacts are user-readable project files
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return fmt.Errorf("create artifact directory: %w", err)
 	}
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
@@ -310,7 +322,7 @@ func writeArtifact(outDir string, manifest ImportArtifactManifest, rows []artifa
 		return fmt.Errorf("encode artifact manifest: %w", err)
 	}
 	manifestData = append(manifestData, '\n')
-	if err := os.WriteFile(filepath.Join(outDir, artifactManifestName), manifestData, 0o644); err != nil { //nolint:gosec // G306: Import artifact manifests are not secrets
+	if err := os.WriteFile(filepath.Join(outDir, artifactManifestName), manifestData, 0o600); err != nil {
 		return fmt.Errorf("write artifact manifest: %w", err)
 	}
 	if manifest.Files.Cards != "" {
@@ -326,7 +338,7 @@ func writeArtifact(outDir string, manifest ImportArtifactManifest, rows []artifa
 }
 
 func writeArtifactTodos(path string, rows []artifactTodoRow) error {
-	file, err := os.Create(path)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- artifact file paths are compiled from the selected artifact directory
 	if err != nil {
 		return fmt.Errorf("write artifact todos: %w", err)
 	}
@@ -353,7 +365,7 @@ func writeArtifactTodos(path string, rows []artifactTodoRow) error {
 }
 
 func writeArtifactCards(path string, rows []artifactTodoRow) error {
-	file, err := os.Create(path)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- artifact file paths are compiled from the selected artifact directory
 	if err != nil {
 		return fmt.Errorf("write artifact cards: %w", err)
 	}
@@ -380,7 +392,7 @@ func writeArtifactCards(path string, rows []artifactTodoRow) error {
 }
 
 func readArtifactTodos(path string) ([]artifactTodoRow, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- artifact readers validate user-selected artifact files
 	if err != nil {
 		return nil, fmt.Errorf("read artifact todos: %w", err)
 	}
@@ -413,7 +425,7 @@ func readArtifactTodos(path string) ([]artifactTodoRow, error) {
 }
 
 func readArtifactCards(path string) ([]artifactTodoRow, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- artifact readers validate user-selected artifact files
 	if err != nil {
 		return nil, fmt.Errorf("read artifact cards: %w", err)
 	}

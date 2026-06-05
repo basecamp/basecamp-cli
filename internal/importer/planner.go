@@ -292,7 +292,7 @@ func ReadDestinationFile(path string) (*DestinationConfig, error) {
 }
 
 func recordsForInspection(inspection *Inspection) ([][]string, error) {
-	data, err := os.ReadFile(inspection.ExportPath)
+	data, err := os.ReadFile(inspection.ExportPath) // #nosec G304 -- compile rereads the inspected CSV path and verifies its fingerprint
 	if err != nil {
 		return nil, fmt.Errorf("read inspected CSV: %w", err)
 	}
@@ -682,7 +682,7 @@ func renderDryRunMarkdown(plan *Plan) string {
 }
 
 func readJSONData(path string, target any) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- import commands read user-selected JSON input files
 	if err != nil {
 		return fmt.Errorf("read JSON: %w", err)
 	}
