@@ -35,10 +35,8 @@ func CreateFollowupArtifact(artifactDir, outDir string, opts FollowupOptions) (*
 	if samePath(artifactDir, outDir) {
 		return nil, fmt.Errorf("follow-up artifact output must be different from the source artifact")
 	}
-	if _, err := os.Stat(filepath.Join(outDir, artifactExecutionFileName)); err == nil {
-		return nil, fmt.Errorf("follow-up artifact output already contains execution.json")
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("checking follow-up output: %w", err)
+	if err := ensureFollowupOutputReady(outDir); err != nil {
+		return nil, err
 	}
 
 	manifest, rows, err := readArtifact(artifactDir)
@@ -144,6 +142,20 @@ func CreateFollowupArtifact(artifactDir, outDir string, opts FollowupOptions) (*
 			"The source artifact remains closed and must not be rerun.",
 		},
 	}, nil
+}
+
+func ensureFollowupOutputReady(outDir string) error {
+	entries, err := os.ReadDir(outDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("checking follow-up output: %w", err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("follow-up artifact output directory must be empty or not exist")
+	}
+	return nil
 }
 
 func followupProject(manifest *ImportArtifactManifest, operations []ExecutionLedgerOperation) (string, string, error) {

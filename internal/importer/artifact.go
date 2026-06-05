@@ -344,13 +344,20 @@ func writeArtifact(outDir string, manifest ImportArtifactManifest, rows []artifa
 	return nil
 }
 
-func writeArtifactTodos(path string, rows []artifactTodoRow) error {
+func writeArtifactTodos(path string, rows []artifactTodoRow) (err error) {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- artifact file paths are compiled from the selected artifact directory
 	if err != nil {
 		return fmt.Errorf("write artifact todos: %w", err)
 	}
+	closed := false
+	defer func() {
+		if !closed {
+			if closeErr := file.Close(); closeErr != nil && err == nil {
+				err = fmt.Errorf("write artifact todos: %w", closeErr)
+			}
+		}
+	}()
 	if err := os.Chmod(path, 0o600); err != nil {
-		_ = file.Close()
 		return fmt.Errorf("secure artifact todos permissions: %w", err)
 	}
 
@@ -369,22 +376,30 @@ func writeArtifactTodos(path string, rows []artifactTodoRow) error {
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		_ = file.Close()
 		return fmt.Errorf("write artifact todos: %w", err)
 	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("write artifact todos: %w", err)
+	closeErr := file.Close()
+	closed = true
+	if closeErr != nil {
+		return fmt.Errorf("write artifact todos: %w", closeErr)
 	}
 	return nil
 }
 
-func writeArtifactCards(path string, rows []artifactTodoRow) error {
+func writeArtifactCards(path string, rows []artifactTodoRow) (err error) {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- artifact file paths are compiled from the selected artifact directory
 	if err != nil {
 		return fmt.Errorf("write artifact cards: %w", err)
 	}
+	closed := false
+	defer func() {
+		if !closed {
+			if closeErr := file.Close(); closeErr != nil && err == nil {
+				err = fmt.Errorf("write artifact cards: %w", closeErr)
+			}
+		}
+	}()
 	if err := os.Chmod(path, 0o600); err != nil {
-		_ = file.Close()
 		return fmt.Errorf("secure artifact cards permissions: %w", err)
 	}
 
@@ -403,11 +418,12 @@ func writeArtifactCards(path string, rows []artifactTodoRow) error {
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		_ = file.Close()
 		return fmt.Errorf("write artifact cards: %w", err)
 	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("write artifact cards: %w", err)
+	closeErr := file.Close()
+	closed = true
+	if closeErr != nil {
+		return fmt.Errorf("write artifact cards: %w", closeErr)
 	}
 	return nil
 }

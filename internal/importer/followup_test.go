@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,22 @@ func TestCreateFollowupArtifactRequiresReviewed(t *testing.T) {
 	_, err := CreateFollowupArtifact(outDir, filepath.Join(t.TempDir(), "followup"), FollowupOptions{})
 	if err == nil || !strings.Contains(err.Error(), "--reviewed required") {
 		t.Fatalf("expected reviewed error, got %v", err)
+	}
+}
+
+func TestCreateFollowupArtifactRejectsNonEmptyOutputDirectory(t *testing.T) {
+	artifactDir := failedExecutionArtifact(t)
+	followupDir := filepath.Join(t.TempDir(), "followup")
+	if err := os.MkdirAll(followupDir, 0o755); err != nil {
+		t.Fatalf("mkdir followup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(followupDir, "existing.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatalf("seed followup: %v", err)
+	}
+
+	_, err := CreateFollowupArtifact(artifactDir, followupDir, FollowupOptions{Reviewed: true})
+	if err == nil || !strings.Contains(err.Error(), "empty or not exist") {
+		t.Fatalf("expected non-empty output error, got %v", err)
 	}
 }
 
