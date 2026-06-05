@@ -59,6 +59,43 @@ T-2,Book venue,Call two places,Events,todo,jamie@example.com,2026-06-03,https://
 	}
 }
 
+func TestCompileArtifactEnforcesPrivateArtifactPermissions(t *testing.T) {
+	inspection := inspectTempCSV(t, "id,title\n1,Do the thing\n")
+	mapping := &MappingConfig{SchemaVersion: planSchemaVersion, Title: &ColumnRef{ColumnIndex: 1}}
+	destination := &DestinationConfig{SchemaVersion: planSchemaVersion, Mode: "existing_project", ProjectID: "123"}
+	outDir := filepath.Join(t.TempDir(), "artifact")
+	if err := os.MkdirAll(outDir, 0o777); err != nil {
+		t.Fatalf("mkdir artifact: %v", err)
+	}
+	if err := os.Chmod(outDir, 0o777); err != nil {
+		t.Fatalf("chmod artifact dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, artifactManifestName), []byte("{}"), 0o666); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, artifactTodosFileName), []byte("old"), 0o666); err != nil {
+		t.Fatalf("seed todos: %v", err)
+	}
+
+	if _, err := CompileArtifact(inspection, mapping, destination, outDir); err != nil {
+		t.Fatalf("CompileArtifact() error = %v", err)
+	}
+	assertFileMode(t, outDir, 0o750)
+	assertFileMode(t, filepath.Join(outDir, artifactManifestName), 0o600)
+	assertFileMode(t, filepath.Join(outDir, artifactTodosFileName), 0o600)
+}
+
+func assertFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode %s = %o, want %o", path, got, want)
+	}
+}
+
 func TestPlanFromArtifactMatchesCompiledOperations(t *testing.T) {
 	inspection := inspectTempCSV(t, "id,title,list\n1,First,Backlog\n2,Second,Doing\n")
 	mapping := &MappingConfig{SchemaVersion: planSchemaVersion, RecordID: &ColumnRef{ColumnIndex: 0}, Title: &ColumnRef{ColumnIndex: 1}, Todolist: &ColumnRef{ColumnIndex: 2}}

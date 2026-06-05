@@ -317,13 +317,20 @@ func writeArtifact(outDir string, manifest ImportArtifactManifest, rows []artifa
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return fmt.Errorf("create artifact directory: %w", err)
 	}
+	if err := os.Chmod(outDir, 0o750); err != nil { // #nosec G302 -- artifact directories need owner/group traversal
+		return fmt.Errorf("secure artifact directory permissions: %w", err)
+	}
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode artifact manifest: %w", err)
 	}
 	manifestData = append(manifestData, '\n')
-	if err := os.WriteFile(filepath.Join(outDir, artifactManifestName), manifestData, 0o600); err != nil {
+	manifestPath := filepath.Join(outDir, artifactManifestName)
+	if err := os.WriteFile(manifestPath, manifestData, 0o600); err != nil {
 		return fmt.Errorf("write artifact manifest: %w", err)
+	}
+	if err := os.Chmod(manifestPath, 0o600); err != nil {
+		return fmt.Errorf("secure artifact manifest permissions: %w", err)
 	}
 	if manifest.Files.Cards != "" {
 		if err := writeArtifactCards(filepath.Join(outDir, manifest.Files.Cards), rows); err != nil {
@@ -342,7 +349,10 @@ func writeArtifactTodos(path string, rows []artifactTodoRow) error {
 	if err != nil {
 		return fmt.Errorf("write artifact todos: %w", err)
 	}
-	defer file.Close()
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("secure artifact todos permissions: %w", err)
+	}
 
 	writer := csv.NewWriter(file)
 	if err := writer.Write(artifactTodoHeader); err != nil {
@@ -359,6 +369,10 @@ func writeArtifactTodos(path string, rows []artifactTodoRow) error {
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write artifact todos: %w", err)
+	}
+	if err := file.Close(); err != nil {
 		return fmt.Errorf("write artifact todos: %w", err)
 	}
 	return nil
@@ -369,7 +383,10 @@ func writeArtifactCards(path string, rows []artifactTodoRow) error {
 	if err != nil {
 		return fmt.Errorf("write artifact cards: %w", err)
 	}
-	defer file.Close()
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("secure artifact cards permissions: %w", err)
+	}
 
 	writer := csv.NewWriter(file)
 	if err := writer.Write(artifactCardHeader); err != nil {
@@ -386,6 +403,10 @@ func writeArtifactCards(path string, rows []artifactTodoRow) error {
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write artifact cards: %w", err)
+	}
+	if err := file.Close(); err != nil {
 		return fmt.Errorf("write artifact cards: %w", err)
 	}
 	return nil
