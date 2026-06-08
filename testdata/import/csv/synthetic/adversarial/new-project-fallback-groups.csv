@@ -1,0 +1,4 @@
+ref,title,notes,list,due,email,custom_a,custom_b
+N-001,Create kickoff agenda,"Invite stakeholders and prepare decisions",Planning,2026-09-01,pm@example.com,alpha,one
+N-002,Publish migration FAQ,"Answer support questions",,2026-09-02,support@example.com,beta,two
+N-003,Run pilot import,"Use a small reviewed batch first",Pilot,2026-09-03,ops@example.com,gamma,three

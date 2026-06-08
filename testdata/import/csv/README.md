@@ -6,6 +6,7 @@ CSV fixtures for the generic `basecamp import inspect` profiler and later import
 
 - `canonical/` — redacted, real-shape CSV exports collected from public examples. These are broad profiler regression fixtures and are not source-specific parser contracts.
 - `synthetic/` — deterministic small CSVs used for planning, safety, and LLM eval scenarios.
+- `synthetic/adversarial/` — deterministic stress fixtures for inspect → compile → plan artifact round-trips across wide rows, ragged rows, alternate delimiters, duplicate headers, multiline text, cards, todos, and fallback groups.
 
 ## Canonical fixture counts
 
@@ -14,6 +15,11 @@ CSV fixtures for the generic `basecamp import inspect` profiler and later import
 - `canonical/jira/` — 6 CSVs
 - `canonical/linear/` — 4 CSVs
 - `canonical/trello/` — 1 CSV
+
+## Synthetic fixture counts
+
+- `synthetic/adversarial/` — 5 CSVs
+- `synthetic/random/` — 30 CSVs
 
 ## Privacy and provenance
 

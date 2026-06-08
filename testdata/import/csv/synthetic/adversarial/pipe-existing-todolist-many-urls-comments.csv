@@ -1,0 +1,4 @@
+external_id|todo title|body|due|owner|file url|source url|comment one|comment two|severity
+P-001|Confirm security review|Check dependency report before release|2026-08-01|security@example.com|https://example.com/files/report|https://example.com/source/P-001|Initial review complete|Needs second approval|high
+P-002|Update rollout checklist|Add rollback owner and monitoring link||release@example.com|https://example.com/files/checklist||Rollback owner assigned||medium
+P-003|Validate backups|Run restore drill and record result|2026-08-03T09:00:00Z|infra@example.com||https://example.com/source/P-003|Restore drill scheduled|Include screenshots|critical

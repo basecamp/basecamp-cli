@@ -459,7 +459,7 @@ func scoreRole(role string, st *columnStats, rowCount int) (float64, []string) {
 			add(0.15, "values are title-length text")
 		}
 	case "description":
-		if nameMatches(name, "description", "notes", "content") {
+		if nameMatches(name, "description", "notes", "content", "body", "detail") {
 			add(0.65, "header indicates description")
 		}
 		if nonEmpty > 0 && (averageLength(st.nonEmpty) > 80 || st.multilineCount > 0) {
