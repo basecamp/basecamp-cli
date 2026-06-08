@@ -34,6 +34,26 @@ Recovery review flow with --repair-artifact:
 USAGE
 }
 
+remove_demo_output_dir() {
+  local path="$1"
+  local flag="$2"
+  local trimmed="${path%/}"
+
+  if [[ -z "$trimmed" || "$trimmed" == "/" || "$trimmed" == "." || "$trimmed" == ".." ]]; then
+    echo "$flag must point to a dedicated output directory, not '$path'" >&2
+    exit 2
+  fi
+
+  local resolved
+  resolved="$(realpath -m -- "$path")"
+  if [[ "$resolved" == "/" || "$resolved" == "$PWD" || "$resolved" == "$HOME" ]]; then
+    echo "$flag must point to a dedicated output directory, not '$path'" >&2
+    exit 2
+  fi
+
+  rm -rf -- "$path"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --csv)
@@ -92,7 +112,7 @@ if [[ -n "$repair_artifact" ]]; then
     exit 2
   fi
 
-  rm -rf "$followup_out"
+  remove_demo_output_dir "$followup_out" "--followup-out"
   echo ""
   echo "== Creating follow-up artifact =="
   basecamp import followup --artifact "$repair_artifact" --out "$followup_out" --reviewed --json |
@@ -128,8 +148,7 @@ trap 'rm -rf "$workdir"' EXIT
 inspection="$workdir/inspection.json"
 plan="$workdir/plan.json"
 
-rm -rf "$out"
-
+remove_demo_output_dir "$out" "--out"
 echo "== Inspecting CSV =="
 basecamp import inspect "$csv" --json > "$inspection"
 jq -r '"Rows: \(.data.row_count), Columns: \(.data.columns | length), Status: \(.data.status)"' "$inspection"
