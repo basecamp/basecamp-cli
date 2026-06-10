@@ -463,7 +463,7 @@ basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
 
 # Assign or set a due date. Include the current title when updating metadata.
 basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
-  --data '{"title":"Current subtask title","assignee_ids":[12345],"due_on":"2026-06-10"}' \
+  --data '{"title":"Current subtask title","assignee_ids":[12345],"due_on":"<YYYY-MM-DD>"}' \
   --json
 
 # Complete or reopen a subtask
@@ -474,7 +474,7 @@ basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json
   --data '{"completion":"off"}' \
   --json
 
-# Delete a subtask from the todo UI by trashing the step recording
+# Delete a subtask from the todo UI by trashing the step record (Kanban::Step)
 basecamp recordings trash <step_id> --in <project> --json
 ```
 
