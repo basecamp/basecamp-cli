@@ -723,18 +723,24 @@ func (m *mockStepAssignTransport) RoundTrip(req *http.Request) (*http.Response, 
 
 	switch req.Method {
 	case "GET":
-		body := `{}`
-		if strings.Contains(req.URL.Path, "/card_tables/steps/") {
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/card_tables/steps/"):
 			body = stepJSON
-		} else if strings.Contains(req.URL.Path, "/projects.json") {
+		case strings.Contains(req.URL.Path, "/projects.json"):
 			body = `[{"id": 123, "name": "Test Project"}]`
-		} else if strings.Contains(req.URL.Path, "/projects/") {
+		case strings.Contains(req.URL.Path, "/projects/"):
 			body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 789, "title": "Card Table"}]}`
-		} else if strings.Contains(req.URL.Path, "/people.json") {
+		case strings.Contains(req.URL.Path, "/people.json"):
 			body = `[{"id": 11, "name": "Existing Person"}, {"id": 99, "name": "New Person"}]`
+		default:
+			return nil, fmt.Errorf("unexpected GET path: %s", req.URL.Path)
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
 	case "PUT":
+		if !strings.HasSuffix(req.URL.Path, "/card_tables/steps/456") {
+			return nil, fmt.Errorf("unexpected PUT path: %s", req.URL.Path)
+		}
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
@@ -778,5 +784,5 @@ func TestUnassignStepCarriesTitle(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
 	assert.Equal(t, "Existing step", body["title"])
-	assert.Empty(t, body["assignee_ids"])
+	assert.Equal(t, []any{}, body["assignee_ids"])
 }
