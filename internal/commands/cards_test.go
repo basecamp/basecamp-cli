@@ -190,7 +190,8 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 }
 
 // mockStepUpdateTransport serves the current step on GET and captures the
-// update body on PUT.
+// update body on PUT. It only answers the single-step endpoint so a stray
+// call to the wrong path fails the test instead of passing on stale data.
 type mockStepUpdateTransport struct {
 	getCount    int
 	capturedPut []byte
@@ -200,20 +201,37 @@ func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	stepJSON := `{"id": 456, "title": "Current title", "completed": false, "assignees": []}`
+	if req.URL.Path != "/99999/card_tables/steps/456" {
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
 
 	switch req.Method {
 	case "GET":
 		t.getCount++
 	case "PUT":
-		if req.Body != nil {
-			body, _ := io.ReadAll(req.Body)
-			t.capturedPut = body
-			req.Body.Close()
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		t.capturedPut = body
+		if err := req.Body.Close(); err != nil {
+			return nil, err
 		}
 	default:
-		return nil, errors.New("unexpected request")
+		return nil, fmt.Errorf("unexpected request method: %s", req.Method)
 	}
+
+	// Echo the title back so callers see the effective value, not a constant.
+	title := "Current title"
+	if t.capturedPut != nil {
+		var put struct {
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(t.capturedPut, &put); err == nil && put.Title != "" {
+			title = put.Title
+		}
+	}
+	stepJSON := fmt.Sprintf(`{"id": 456, "title": %q, "completed": false, "assignees": []}`, title)
 
 	return &http.Response{
 		StatusCode: 200,
