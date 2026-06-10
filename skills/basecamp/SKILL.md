@@ -446,8 +446,9 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 
 **Todo Subtasks (checklist steps):** Basecamp to-do subtasks are stored as
 `Kanban::Step` records, even when their parent is a normal `Todo`. The regular
-`todos show` response may not include them; browse `Kanban::Step` recordings
-and filter by `parent.id` to list/check subtasks for a todo.
+`todos show` response may not include them; use
+`basecamp recordings list --type Kanban::Step` and filter by `parent.id` to
+list/check subtasks for a todo.
 
 ```bash
 # Create a subtask under a todo. Use the todo ID in this card-style path.
@@ -479,13 +480,16 @@ basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json
   --data '{"completion":"off"}' \
   --json
 
-# Delete a subtask from the todo UI by trashing the step record (Kanban::Step)
+# Trash a subtask from the todo UI by trashing the step record (Kanban::Step)
 basecamp recordings trash <step_id> --in <project> --json
 ```
 
-Replace numeric placeholders such as `<parent_todo_id>` and `<person_id>` before
-running the examples. For creating todo subtasks, Basecamp accepts the parent
-todo ID in the `/card_tables/cards/<parent_todo_id>/steps.json` path.
+Key points: replace numeric placeholders such as `<parent_todo_id>` and
+`<person_id>` before running the examples. For creating todo subtasks, Basecamp
+accepts the parent todo ID in the `/card_tables/cards/<parent_todo_id>/steps.json`
+path. To list subtasks under a todo, use
+`basecamp recordings list --type Kanban::Step` with the `parent.id` filter shown
+above.
 
 Completed subtasks have `completed: true` and a `completion` object with
 `created_at` and `creator`. Open subtasks have `completed: false` and no
@@ -493,11 +497,8 @@ Completed subtasks have `completed: true` and a `completion` object with
 `status: "trashed"` and `inherits_status: false`, but they no longer appear in
 the todo UI.
 
-Use `basecamp recordings list --type Kanban::Step` with a `parent.id` filter to
-check for subtasks under a todo. The
-`/card_tables/cards/<parent_todo_id>/steps.json` endpoint works for `POST`
-creation. In testing with todo-backed steps, these direct `GET` requests
-returned `not_found`: `/card_tables/cards/<parent_todo_id>/steps.json`,
+In testing with todo-backed steps, these direct `GET` requests returned
+`not_found`: `/card_tables/cards/<parent_todo_id>/steps.json`,
 `/card_tables/cards/<parent_todo_id>.json`, and
 `/todos/<parent_todo_id>/steps.json`. To inspect trashed subtasks, add
 `--status trashed`; archived parents may require `--status archived`.
