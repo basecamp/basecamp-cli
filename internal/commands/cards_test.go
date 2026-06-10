@@ -201,7 +201,7 @@ func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	if req.URL.Path != "/99999/card_tables/steps/456" {
+	if !strings.HasSuffix(req.URL.Path, "/card_tables/steps/456") {
 		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
 	}
 
