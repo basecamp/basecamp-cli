@@ -450,7 +450,7 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 and filter by `parent.id` to list/check subtasks for a todo.
 
 ```bash
-# Create a subtask under a todo
+# Create a subtask under a todo. Use the todo ID in this card-style path.
 basecamp api post /buckets/<project>/card_tables/cards/<todo_id>/steps.json \
   --data '{"title":"Subtask title"}' \
   --json
@@ -483,7 +483,9 @@ basecamp recordings trash <step_id> --in <project> --json
 ```
 
 Replace numeric placeholders such as `<todo_id>` and `<person_id>` before
-running the JSON or `--jq` examples.
+running the JSON or `--jq` examples. For creating todo subtasks, Basecamp
+accepts the parent todo ID in the `/card_tables/cards/<todo_id>/steps.json`
+path.
 
 Completed subtasks have `completed: true` and a `completion` object with
 `created_at` and `creator`. Open subtasks have `completed: false` and no
@@ -492,11 +494,12 @@ Completed subtasks have `completed: true` and a `completion` object with
 the todo UI.
 
 Use `basecamp recordings list --type Kanban::Step` with a `parent.id` filter to
-check for subtasks under a todo. Direct `GET` requests to
-`/card_tables/cards/<todo_id>/steps.json`, `/card_tables/cards/<todo_id>.json`,
-and `/todos/<todo_id>/steps.json` may return `not_found` for todo-backed steps.
-To inspect trashed subtasks, add `--status trashed`; archived parents may
-require `--status archived`.
+check for subtasks under a todo. The `/card_tables/cards/<todo_id>/steps.json`
+endpoint works for `POST` creation, but verified `GET` index requests to that
+same path may return `not_found` for todo-backed steps; direct `GET` requests to
+`/card_tables/cards/<todo_id>.json` and `/todos/<todo_id>/steps.json` may also
+return `not_found`. To inspect trashed subtasks, add `--status trashed`;
+archived parents may require `--status archived`.
 
 When updating a todo subtask with the raw API, include the existing `title` along
 with metadata changes; omitting it may reset the step title to `Untitled`. The
