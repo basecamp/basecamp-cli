@@ -444,6 +444,52 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 
 **Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/incomplete/archived/trashed), `--overdue`, `--list`, `--due`, `--limit`, `--all`
 
+**Todo Subtasks (checklist steps):** Basecamp to-do subtasks are stored as
+`Kanban::Step` records, even when their parent is a normal `Todo`. The regular
+`todos show` response may not include them; use search to discover a step ID, or
+read it directly once you know the ID.
+
+```bash
+# Create a subtask under a todo
+basecamp api post /buckets/<project>/card_tables/cards/<todo_id>/steps.json \
+  --data '{"title":"Subtask title"}' \
+  --json
+
+# Read or edit a subtask
+basecamp api get /buckets/<project>/card_tables/steps/<step_id>.json --json
+basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
+  --data '{"title":"Updated subtask title"}' \
+  --json
+
+# Assign or set a due date. Include the current title when updating metadata.
+basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
+  --data '{"title":"Current subtask title","assignee_ids":[12345],"due_on":"2026-06-10"}' \
+  --json
+
+# Complete or reopen a subtask
+basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json \
+  --data '{"completion":"on"}' \
+  --json
+basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json \
+  --data '{"completion":"off"}' \
+  --json
+
+# Delete a subtask from the todo UI by trashing the step recording
+basecamp recordings trash <step_id> --in <project> --json
+```
+
+Completed subtasks have `completed: true` and a `completion` object with
+`created_at` and `creator`. Open subtasks have `completed: false` and no
+`completion` object. Trashed subtasks may still be readable directly with
+`status: "trashed"` and `inherits_status: false`, but they no longer appear in
+the todo UI.
+
+When updating a todo subtask with the raw API, include the existing `title` along
+with metadata changes; omitting it may reset the step title to `Untitled`. The
+generic `basecamp assign <step_id> --step ...` command is intended for card
+steps and may fail with `Bad Request` for todo-backed steps, so prefer
+`assignee_ids` on the raw step update endpoint for todo subtasks.
+
 ### Todolists
 
 Todolists are containers for todos. Create a todolist before adding todos.
