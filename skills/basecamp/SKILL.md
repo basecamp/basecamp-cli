@@ -461,9 +461,10 @@ basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
   --data '{"title":"Updated subtask title"}' \
   --json
 
-# List active subtasks for a todo
+# List subtasks for a todo
+PARENT_TODO_ID=<parent_todo_id> \
 basecamp recordings list --in <project> --type Kanban::Step --all --json \
-  --jq '.data[] | select(.parent.id==<parent_todo_id>) | {id,title,status,parent:.parent.id,url}'
+  --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
 
 # Assign or set a due date. Include the current title when updating metadata.
 basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
@@ -483,9 +484,8 @@ basecamp recordings trash <step_id> --in <project> --json
 ```
 
 Replace numeric placeholders such as `<parent_todo_id>` and `<person_id>` before
-running the JSON or `--jq` examples. For creating todo subtasks, Basecamp
-accepts the parent todo ID in the
-`/card_tables/cards/<parent_todo_id>/steps.json` path.
+running the examples. For creating todo subtasks, Basecamp accepts the parent
+todo ID in the `/card_tables/cards/<parent_todo_id>/steps.json` path.
 
 Completed subtasks have `completed: true` and a `completion` object with
 `created_at` and `creator`. Open subtasks have `completed: false` and no
@@ -496,10 +496,10 @@ the todo UI.
 Use `basecamp recordings list --type Kanban::Step` with a `parent.id` filter to
 check for subtasks under a todo. The
 `/card_tables/cards/<parent_todo_id>/steps.json` endpoint works for `POST`
-creation, but verified `GET` index requests to that same path may return
+creation, but in testing `GET` index requests to that same path returned
 `not_found` for todo-backed steps; direct `GET` requests to
 `/card_tables/cards/<parent_todo_id>.json` and
-`/todos/<parent_todo_id>/steps.json` may also return `not_found`. To inspect
+`/todos/<parent_todo_id>/steps.json` also returned `not_found`. To inspect
 trashed subtasks, add `--status trashed`; archived parents may require
 `--status archived`.
 
