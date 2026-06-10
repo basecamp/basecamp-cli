@@ -496,12 +496,11 @@ the todo UI.
 Use `basecamp recordings list --type Kanban::Step` with a `parent.id` filter to
 check for subtasks under a todo. The
 `/card_tables/cards/<parent_todo_id>/steps.json` endpoint works for `POST`
-creation, but in testing `GET` index requests to that same path returned
-`not_found` for todo-backed steps; direct `GET` requests to
-`/card_tables/cards/<parent_todo_id>.json` and
-`/todos/<parent_todo_id>/steps.json` also returned `not_found`. To inspect
-trashed subtasks, add `--status trashed`; archived parents may require
-`--status archived`.
+creation. In testing with todo-backed steps, these direct `GET` requests
+returned `not_found`: `/card_tables/cards/<parent_todo_id>/steps.json`,
+`/card_tables/cards/<parent_todo_id>.json`, and
+`/todos/<parent_todo_id>/steps.json`. To inspect trashed subtasks, add
+`--status trashed`; archived parents may require `--status archived`.
 
 When updating a todo subtask with the raw API, include the existing `title` along
 with metadata changes; omitting it may reset the step title to `Untitled`. The
