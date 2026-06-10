@@ -189,6 +189,75 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 	assert.NoError(t, err, "expected help output, not error")
 }
 
+// mockStepUpdateTransport serves the current step on GET and captures the
+// update body on PUT.
+type mockStepUpdateTransport struct {
+	getCount    int
+	capturedPut []byte
+}
+
+func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	stepJSON := `{"id": 456, "title": "Current title", "completed": false, "assignees": []}`
+
+	switch req.Method {
+	case "GET":
+		t.getCount++
+	case "PUT":
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedPut = body
+			req.Body.Close()
+		}
+	default:
+		return nil, errors.New("unexpected request")
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(stepJSON)),
+		Header:     header,
+	}, nil
+}
+
+// TestCardsStepUpdateAssigneesOnlyCarriesTitle verifies that updating only
+// assignees fetches the current step and includes its title in the request —
+// the API rejects step updates without a title.
+func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
+	transport := &mockStepUpdateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := newCardsStepUpdateCmd()
+	err := executeCommand(cmd, app, "456", "--assignees", "789")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, transport.getCount)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "Current title", body["title"])
+	assert.Equal(t, []any{float64(789)}, body["assignee_ids"])
+}
+
+// TestCardsStepUpdateWithTitleSkipsFetch verifies that an explicit title is
+// sent as-is without fetching the current step.
+func TestCardsStepUpdateWithTitleSkipsFetch(t *testing.T) {
+	transport := &mockStepUpdateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := newCardsStepUpdateCmd()
+	err := executeCommand(cmd, app, "456", "New title")
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, transport.getCount)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "New title", body["title"])
+}
+
 // TestCardsStepMoveRequiresCard tests that --card is required for step move.
 func TestCardsStepMoveShowsHelp(t *testing.T) {
 	app, _ := setupTestApp(t)
