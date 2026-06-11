@@ -128,7 +128,7 @@ var reMarkdownPatterns = []*regexp.Regexp{
 
 // mdConverter is the goldmark Markdown-to-HTML converter configured for Trix compatibility.
 var mdConverter = goldmark.New(
-	goldmark.WithExtensions(extension.Strikethrough),
+	goldmark.WithExtensions(extension.Strikethrough, extension.Table),
 	goldmark.WithRendererOptions(gmhtml.WithUnsafe()),
 	goldmark.WithParserOptions(
 		parser.WithInlineParsers(
