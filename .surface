@@ -30,6 +30,8 @@ ARG basecamp campfire delete 00 <id|url>
 ARG basecamp campfire line 00 <id|url>
 ARG basecamp campfire post 00 <message>
 ARG basecamp campfire show 00 <id|url>
+ARG basecamp campfire update 00 <id|url>
+ARG basecamp campfire update 01 [content]
 ARG basecamp campfire upload 00 <file>
 ARG basecamp card 00 <title>
 ARG basecamp card 01 [body]
@@ -66,6 +68,8 @@ ARG basecamp chat delete 00 <id|url>
 ARG basecamp chat line 00 <id|url>
 ARG basecamp chat post 00 <message>
 ARG basecamp chat show 00 <id|url>
+ARG basecamp chat update 00 <id|url>
+ARG basecamp chat update 01 [content]
 ARG basecamp chat upload 00 <file>
 ARG basecamp checkin answer 00 <id|url>
 ARG basecamp checkin answer create 00 <question-id>
@@ -479,6 +483,7 @@ CMD basecamp campfire list
 CMD basecamp campfire messages
 CMD basecamp campfire post
 CMD basecamp campfire show
+CMD basecamp campfire update
 CMD basecamp campfire upload
 CMD basecamp card
 CMD basecamp card move
@@ -520,6 +525,7 @@ CMD basecamp chat list
 CMD basecamp chat messages
 CMD basecamp chat post
 CMD basecamp chat show
+CMD basecamp chat update
 CMD basecamp chat upload
 CMD basecamp checkin
 CMD basecamp checkin answer
@@ -2363,6 +2369,30 @@ FLAG basecamp campfire show --stats type=bool
 FLAG basecamp campfire show --styled type=bool
 FLAG basecamp campfire show --todolist type=string
 FLAG basecamp campfire show --verbose type=count
+FLAG basecamp campfire update --account type=string
+FLAG basecamp campfire update --agent type=bool
+FLAG basecamp campfire update --cache-dir type=string
+FLAG basecamp campfire update --content type=string
+FLAG basecamp campfire update --content-type type=string
+FLAG basecamp campfire update --count type=bool
+FLAG basecamp campfire update --help type=bool
+FLAG basecamp campfire update --hints type=bool
+FLAG basecamp campfire update --ids-only type=bool
+FLAG basecamp campfire update --in type=string
+FLAG basecamp campfire update --jq type=string
+FLAG basecamp campfire update --json type=bool
+FLAG basecamp campfire update --markdown type=bool
+FLAG basecamp campfire update --md type=bool
+FLAG basecamp campfire update --no-hints type=bool
+FLAG basecamp campfire update --no-stats type=bool
+FLAG basecamp campfire update --profile type=string
+FLAG basecamp campfire update --project type=string
+FLAG basecamp campfire update --quiet type=bool
+FLAG basecamp campfire update --room type=string
+FLAG basecamp campfire update --stats type=bool
+FLAG basecamp campfire update --styled type=bool
+FLAG basecamp campfire update --todolist type=string
+FLAG basecamp campfire update --verbose type=count
 FLAG basecamp campfire upload --account type=string
 FLAG basecamp campfire upload --agent type=bool
 FLAG basecamp campfire upload --cache-dir type=string
@@ -3336,6 +3366,30 @@ FLAG basecamp chat show --stats type=bool
 FLAG basecamp chat show --styled type=bool
 FLAG basecamp chat show --todolist type=string
 FLAG basecamp chat show --verbose type=count
+FLAG basecamp chat update --account type=string
+FLAG basecamp chat update --agent type=bool
+FLAG basecamp chat update --cache-dir type=string
+FLAG basecamp chat update --content type=string
+FLAG basecamp chat update --content-type type=string
+FLAG basecamp chat update --count type=bool
+FLAG basecamp chat update --help type=bool
+FLAG basecamp chat update --hints type=bool
+FLAG basecamp chat update --ids-only type=bool
+FLAG basecamp chat update --in type=string
+FLAG basecamp chat update --jq type=string
+FLAG basecamp chat update --json type=bool
+FLAG basecamp chat update --markdown type=bool
+FLAG basecamp chat update --md type=bool
+FLAG basecamp chat update --no-hints type=bool
+FLAG basecamp chat update --no-stats type=bool
+FLAG basecamp chat update --profile type=string
+FLAG basecamp chat update --project type=string
+FLAG basecamp chat update --quiet type=bool
+FLAG basecamp chat update --room type=string
+FLAG basecamp chat update --stats type=bool
+FLAG basecamp chat update --styled type=bool
+FLAG basecamp chat update --todolist type=string
+FLAG basecamp chat update --verbose type=count
 FLAG basecamp chat upload --account type=string
 FLAG basecamp chat upload --agent type=bool
 FLAG basecamp chat upload --cache-dir type=string
@@ -16266,6 +16320,7 @@ SUB basecamp campfire list
 SUB basecamp campfire messages
 SUB basecamp campfire post
 SUB basecamp campfire show
+SUB basecamp campfire update
 SUB basecamp campfire upload
 SUB basecamp card
 SUB basecamp card move
@@ -16307,6 +16362,7 @@ SUB basecamp chat list
 SUB basecamp chat messages
 SUB basecamp chat post
 SUB basecamp chat show
+SUB basecamp chat update
 SUB basecamp chat upload
 SUB basecamp checkin
 SUB basecamp checkin answer
