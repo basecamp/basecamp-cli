@@ -22,8 +22,10 @@ import (
 )
 
 type mockProjectUpdateTransport struct {
-	getCount int
-	putCount int
+	getCount       int
+	putCount       int
+	putName        string
+	putDescription string
 }
 
 func (t *mockProjectUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -46,6 +48,16 @@ func (t *mockProjectUpdateTransport) RoundTrip(req *http.Request) (*http.Respons
 		return jsonResponse(200, fmt.Sprintf(`{"id":123,"name":"Test Project","description":%q,"updated_at":%q}`, description, updatedAt), header), nil
 	case http.MethodPut:
 		t.putCount++
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, fmt.Errorf("decode update body: %w", err)
+		}
+		if name, ok := body["name"].(string); ok {
+			t.putName = name
+		}
+		if description, ok := body["description"].(string); ok {
+			t.putDescription = description
+		}
 		return jsonResponse(200, `{"id":123,"name":"Test Project","description":"Old description","updated_at":"2026-06-01T00:00:00.000Z"}`, header), nil
 	default:
 		return nil, fmt.Errorf("unexpected method: %s", req.Method)
@@ -90,6 +102,8 @@ func TestProjectsUpdateReturnsFreshProjectAfterDescriptionChange(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, transport.putCount)
+	assert.Equal(t, "Test Project", transport.putName)
+	assert.Equal(t, "New description", transport.putDescription)
 	assert.Equal(t, 2, transport.getCount, "description-only update should fetch the current name, then refetch the fresh project after update")
 
 	var envelope struct {
