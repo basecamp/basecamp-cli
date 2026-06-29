@@ -451,14 +451,15 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 list/check subtasks for a todo.
 
 ```bash
-# Create a subtask under a todo. Use the todo ID in this card-style path.
-basecamp api post /buckets/<project>/card_tables/cards/<parent_todo_id>/steps.json \
+# Create a subtask under a todo.
+# Use the numeric project ID and todo ID in this card-style path.
+basecamp api post /buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json \
   --data '{"title":"Subtask title"}' \
   --json
 
 # Read or edit a subtask
-basecamp api get /buckets/<project>/card_tables/steps/<step_id>.json --json
-basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
+basecamp api get /buckets/<project_id>/card_tables/steps/<step_id>.json --json
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
   --data '{"title":"Updated subtask title"}' \
   --json
 
@@ -468,15 +469,15 @@ basecamp recordings list --in <project> --type Kanban::Step --all --json \
   --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
 
 # Assign or set a due date. Include the current title when updating metadata.
-basecamp api put /buckets/<project>/card_tables/steps/<step_id>.json \
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
   --data '{"title":"Current subtask title","assignee_ids":[<person_id>],"due_on":"<YYYY-MM-DD>"}' \
   --json
 
 # Complete or reopen a subtask
-basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json \
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>/completions.json \
   --data '{"completion":"on"}' \
   --json
-basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json \
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>/completions.json \
   --data '{"completion":"off"}' \
   --json
 
@@ -484,12 +485,14 @@ basecamp api put /buckets/<project>/card_tables/steps/<step_id>/completions.json
 basecamp recordings trash <step_id> --in <project> --json
 ```
 
-Key points: replace numeric placeholders such as `<parent_todo_id>` and
-`<person_id>` before running the examples. For creating todo subtasks, Basecamp
-accepts the parent todo ID in the `/card_tables/cards/<parent_todo_id>/steps.json`
-path. To list subtasks under a todo, use
-`basecamp recordings list --type Kanban::Step` with the `parent.id` filter shown
-above.
+Key points: replace numeric placeholders such as `<project_id>`,
+`<parent_todo_id>`, and `<person_id>` before running the examples. Bucket-scoped
+API paths require a numeric project/bucket ID; `--in <project>` can still accept
+a project name where CLI commands support name resolution. For creating todo
+subtasks, Basecamp accepts the parent todo ID in the
+`/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json` path. To
+list subtasks under a todo, use `basecamp recordings list --type Kanban::Step`
+with the `parent.id` filter shown above.
 
 Completed subtasks have `completed: true` and a `completion` object with
 `created_at` and `creator`. Open subtasks have `completed: false` and no
@@ -497,11 +500,13 @@ Completed subtasks have `completed: true` and a `completion` object with
 `status: "trashed"` and `inherits_status: false`, but they no longer appear in
 the todo UI.
 
-In testing with todo-backed steps, these direct `GET` requests returned
-`not_found`: `/card_tables/cards/<parent_todo_id>/steps.json`,
-`/card_tables/cards/<parent_todo_id>.json`, and
-`/todos/<parent_todo_id>/steps.json`. To inspect trashed subtasks, add
-`--status trashed`; archived parents may require `--status archived`.
+In testing with todo-backed steps, these bucket-scoped direct `GET` requests
+returned `not_found`:
+`/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json`,
+`/buckets/<project_id>/card_tables/cards/<parent_todo_id>.json`, and
+`/buckets/<project_id>/todos/<parent_todo_id>/steps.json`. To inspect trashed
+subtasks, add `--status trashed`; archived parents may require
+`--status archived`.
 
 When updating a todo subtask with the raw API, include the existing `title` along
 with metadata changes; omitting it may reset the step title to `Untitled`. The
