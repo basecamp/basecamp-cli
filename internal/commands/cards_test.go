@@ -1597,6 +1597,24 @@ func TestCardsUpdateContentIsHTML(t *testing.T) {
 	assert.Contains(t, content, "<strong>bold</strong>")
 }
 
+func TestCardsUpdatePreservesHTMLBody(t *testing.T) {
+	transport := &mockCardCreateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewCardsCmd()
+	err := executeCommand(cmd, app, "update", "999", "--body", "<p>Hello <code>world</code></p>")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	content, ok := body["content"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "<p>Hello <code>world</code></p>", content)
+}
+
 func TestCardsCreateLocalImageErrors(t *testing.T) {
 	transport := &mockCardCreateTransport{}
 	app := setupCardsMockApp(t, transport)
