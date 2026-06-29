@@ -171,9 +171,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post with @mention | `basecamp messages create "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp messages create "Title" "Body" --no-subscribe --in <project> --json` |
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
-| List pings | `basecamp notifications --json --jq '.data.reads[]? \| select(.section == "pings")'` |
-| Read ping thread | `basecamp api get "/chats/<chat_id>/lines.json" --agent` |
-| Post to ping thread | `basecamp api post "/chats/<chat_id>/lines.json" --data '{"content":"<p>message</p>"}' --json` |
+| List pings | `basecamp notifications --json --jq '.data.reads[]? | select(.section == "pings")'` |
+| Read ping thread | `basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent` |
+| Post to ping thread | `basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" --data '{"content":"<p>message</p>"}' --json` |
 | Add comment | `basecamp comments create <recording_id> "Text" --in <project> --json` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
 | Download attachments | `basecamp attachments download <id> --out /tmp/` |
@@ -842,10 +842,10 @@ basecamp notifications --json \
   --jq '.data.reads[]? | select(.section == "pings") | {bucket_name, app_url, circle_id: (.subscription_url | capture("/buckets/(?<id>[0-9]+)/").id), chat_id: (.subscription_url | capture("/recordings/(?<id>[0-9]+)/").id)}'
 
 # Read a ping thread. Lines are returned newest first.
-basecamp api get "/chats/<chat_id>/lines.json" --agent
+basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent
 
 # Post a ping line.
-basecamp api post "/chats/<chat_id>/lines.json" \
+basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" \
   --data '{"content":"<p>Hey, quick question.</p>"}' --json
 ```
 
