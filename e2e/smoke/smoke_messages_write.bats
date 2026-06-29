@@ -19,14 +19,6 @@ setup_file() {
   echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/message_id"
 }
 
-@test "message shortcut creates a message" {
-  run_smoke basecamp message "Smoke shortcut $(date +%s)" \
-    -p "$QA_PROJECT" --json
-  assert_success
-  assert_json_value '.ok' 'true'
-  assert_json_not_null '.data.id'
-}
-
 @test "messages publish publishes a draft message" {
   run_smoke basecamp messages create "Smoke draft $(date +%s)" \
     "Draft body" --draft -p "$QA_PROJECT" --json

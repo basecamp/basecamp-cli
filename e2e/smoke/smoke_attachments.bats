@@ -18,7 +18,7 @@ setup_file() {
 @test "attachments list on comment with attachment shows results" {
   # Create a todo to comment on
   local todo_out
-  todo_out=$(basecamp todo "Attach test $(date +%s)" --list "$QA_TODOLIST" \
+  todo_out=$(basecamp todos create "Attach test $(date +%s)" --list "$QA_TODOLIST" \
     -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo for attachment test"
     return
@@ -30,7 +30,7 @@ setup_file() {
   # Create a small test file and attach it via comment
   local tmpfile="$BATS_FILE_TMPDIR/test-attachment.txt"
   echo "smoke test content $(date +%s)" > "$tmpfile"
-  basecamp comment "$todo_id" "See attached file" --attach "$tmpfile" \
+  basecamp comments create "$todo_id" "See attached file" --attach "$tmpfile" \
     -p "$QA_PROJECT" --json 2>/dev/null || {
     mark_unverifiable "Cannot create comment with attachment"
     return
@@ -56,7 +56,7 @@ setup_file() {
 @test "attachments list on item with no attachments returns empty" {
   # Create a plain todo with no attachments
   local todo_out
-  todo_out=$(basecamp todo "No attach $(date +%s)" --list "$QA_TODOLIST" \
+  todo_out=$(basecamp todos create "No attach $(date +%s)" --list "$QA_TODOLIST" \
     -p "$QA_PROJECT" --json 2>/dev/null) || {
     mark_unverifiable "Cannot create todo"
     return

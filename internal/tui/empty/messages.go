@@ -47,7 +47,7 @@ func NoTodos(context string) Message {
 	default:
 		msg.Body = "No todos in this project."
 		msg.Hints = []string{
-			"Create a todo with: basecamp todo <text>",
+			"Create a todo with: basecamp todos create <text>",
 		}
 	}
 	return msg
@@ -91,7 +91,7 @@ func NoComments() Message {
 		Title: "No comments",
 		Body:  "This item has no comments yet.",
 		Hints: []string{
-			"Add a comment with: basecamp comment <text> <id>",
+			"Add a comment with: basecamp comments create <id> <text>",
 		},
 	}
 }

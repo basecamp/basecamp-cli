@@ -19,41 +19,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// TestCommentShortcutAcceptsInFlag tests that the top-level 'comment' shortcut
-// accepts --in, matching the 'comments' group. Previously, 'comment' was built
-// directly from newCommentsCreateCmd() and did not inherit the persistent flags
-// registered on NewCommentsCmd().
-func TestCommentShortcutAcceptsInFlag(t *testing.T) {
-	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewCommentCmd()
-
-	// --in should be accepted (not "unknown flag"). The command will proceed
-	// to RunE and hit an API/network error, which is fine — we're testing
-	// flag acceptance, not API behavior.
-	err := executeCommand(cmd, app, "--in", "456", "789", "hello")
-
-	// If there's an error, it must NOT be "unknown flag"
-	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "unknown flag")
-	assert.NotContains(t, err.Error(), "unknown shorthand")
-}
-
-// TestCommentShortcutAcceptsProjectFlag tests the -p shorthand works too.
-func TestCommentShortcutAcceptsProjectFlag(t *testing.T) {
-	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
-
-	cmd := NewCommentCmd()
-
-	err := executeCommand(cmd, app, "-p", "456", "789", "hello")
-
-	require.NotNil(t, err)
-	assert.NotContains(t, err.Error(), "unknown flag")
-	assert.NotContains(t, err.Error(), "unknown shorthand")
-}
-
 // TestCommentsGroupAcceptsInFlag tests the 'comments' group accepts --in.
 func TestCommentsGroupAcceptsInFlag(t *testing.T) {
 	app, _ := setupTestApp(t)
@@ -120,36 +85,6 @@ func TestCommentsUpdateRejectsEmptyDashContent(t *testing.T) {
 	assert.Empty(t, transport.capturedBodies)
 }
 
-func TestCommentCreateReadsContentFromStdin(t *testing.T) {
-	transport := &mockCommentWriteTransport{}
-	app, _ := setupCommentsWriteTestApp(t, transport)
-
-	cmd := NewCommentCmd()
-	cmd.SetIn(strings.NewReader("hello from stdin"))
-	err := executeCommand(cmd, app, "123")
-	require.NoError(t, err)
-	require.Len(t, transport.capturedBodies, 1)
-
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(transport.capturedBodies[0], &body))
-	assert.Equal(t, "<p>hello from stdin</p>", body["content"])
-}
-
-func TestCommentCreatePrefersPositionalContentOverStdin(t *testing.T) {
-	transport := &mockCommentWriteTransport{}
-	app, _ := setupCommentsWriteTestApp(t, transport)
-
-	cmd := NewCommentCmd()
-	cmd.SetIn(strings.NewReader("ignored stdin"))
-	err := executeCommand(cmd, app, "123", "hello from args")
-	require.NoError(t, err)
-	require.Len(t, transport.capturedBodies, 1)
-
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(transport.capturedBodies[0], &body))
-	assert.Equal(t, "<p>hello from args</p>", body["content"])
-}
-
 func TestCommentsCreateReadsContentFromStdin(t *testing.T) {
 	transport := &mockCommentWriteTransport{}
 	app, _ := setupCommentsWriteTestApp(t, transport)
@@ -165,7 +100,22 @@ func TestCommentsCreateReadsContentFromStdin(t *testing.T) {
 	assert.Equal(t, "<p>hello from stdin</p>", body["content"])
 }
 
-func TestCommentCreateMissingContentReturnsUsageBeforeAccountResolution(t *testing.T) {
+func TestCommentsCreatePrefersPositionalContentOverStdin(t *testing.T) {
+	transport := &mockCommentWriteTransport{}
+	app, _ := setupCommentsWriteTestApp(t, transport)
+
+	cmd := NewCommentsCmd()
+	cmd.SetIn(strings.NewReader("ignored stdin"))
+	err := executeCommand(cmd, app, "create", "123", "hello from args")
+	require.NoError(t, err)
+	require.Len(t, transport.capturedBodies, 1)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBodies[0], &body))
+	assert.Equal(t, "<p>hello from args</p>", body["content"])
+}
+
+func TestCommentsCreateMissingContentReturnsUsageBeforeAccountResolution(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.AccountID = ""
 	app.Flags.JSON = true
@@ -179,9 +129,9 @@ func TestCommentCreateMissingContentReturnsUsageBeforeAccountResolution(t *testi
 		devNull.Close()
 	})
 
-	cmd := NewCommentCmd()
+	cmd := NewCommentsCmd()
 	cmd.SetIn(devNull)
-	err = executeCommand(cmd, app, "123")
+	err = executeCommand(cmd, app, "create", "123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "<content> required")
 	assert.NotContains(t, err.Error(), "account")

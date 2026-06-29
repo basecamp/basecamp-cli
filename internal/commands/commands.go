@@ -52,15 +52,8 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Shortcut Commands",
 			Commands: []CommandInfo{
-				{Name: "todo", Category: "shortcut", Description: "Create a to-do"},
-				{Name: "done", Category: "shortcut", Description: "Complete a to-do"},
-				{Name: "reopen", Category: "shortcut", Description: "Uncomplete a to-do"},
-				{Name: "message", Category: "shortcut", Description: "Post a message"},
-				{Name: "card", Category: "shortcut", Description: "Create a card"},
-				{Name: "comment", Category: "shortcut", Description: "Add a comment"},
 				{Name: "assign", Category: "shortcut", Description: "Assign someone to a to-do, card, or step"},
 				{Name: "unassign", Category: "shortcut", Description: "Remove assignment from a to-do, card, or step"},
-				{Name: "react", Category: "shortcut", Description: "React with an emoji"},
 				{Name: "attach", Category: "shortcut", Description: "Upload and stage an attachment"},
 				{Name: "upload", Category: "shortcut", Description: "Upload a file to Docs & Files"},
 			},
