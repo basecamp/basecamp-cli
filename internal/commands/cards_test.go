@@ -259,6 +259,24 @@ func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
 	assert.Equal(t, []any{float64(789)}, body["assignee_ids"])
 }
 
+// TestCardsStepUpdateDueOnlyCarriesTitle verifies that updating only the due
+// date fetches the current step and includes its title in the request.
+func TestCardsStepUpdateDueOnlyCarriesTitle(t *testing.T) {
+	transport := &mockStepUpdateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := newCardsStepUpdateCmd()
+	err := executeCommand(cmd, app, "456", "--due", "2026-07-04")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, transport.getCount)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "Current title", body["title"])
+	assert.Equal(t, "2026-07-04", body["due_on"])
+}
+
 // TestCardsStepUpdateWithTitleSkipsFetch verifies that an explicit title is
 // sent as-is without fetching the current step.
 func TestCardsStepUpdateWithTitleSkipsFetch(t *testing.T) {
