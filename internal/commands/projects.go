@@ -356,6 +356,11 @@ Examples:
 				return convertSDKError(err)
 			}
 
+			project, err = app.Account().Projects().Get(cmd.Context(), projectID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
 			return app.OK(project,
 				output.WithEntity("project"),
 				output.WithSummary("Project updated"),
