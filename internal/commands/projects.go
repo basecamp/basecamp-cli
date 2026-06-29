@@ -351,12 +351,11 @@ Examples:
 				Description: description,
 			}
 
-			project, err := app.Account().Projects().Update(cmd.Context(), projectID, req)
-			if err != nil {
+			if _, err := app.Account().Projects().Update(cmd.Context(), projectID, req); err != nil {
 				return convertSDKError(err)
 			}
 
-			project, err = app.Account().Projects().Get(cmd.Context(), projectID)
+			project, err := app.Account().Projects().Get(cmd.Context(), projectID)
 			if err != nil {
 				return convertSDKError(err)
 			}
