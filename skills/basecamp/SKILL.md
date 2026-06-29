@@ -444,6 +444,80 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 
 **Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/incomplete/archived/trashed), `--overdue`, `--list`, `--due`, `--limit`, `--all`
 
+**Todo Subtasks (checklist steps):** Basecamp to-do subtasks are stored as
+`Kanban::Step` records, even when their parent is a normal `Todo`. The regular
+`basecamp todos show` response may not include them; use
+`basecamp recordings list --in <project> --type Kanban::Step` and filter by
+`parent.id` to list/check subtasks for a todo.
+
+```bash
+# Create a subtask under a todo.
+# Use the numeric project ID and todo ID in this card-style path.
+basecamp api post /buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json \
+  --data '{"title":"Subtask title"}' \
+  --json
+
+# Read or edit a subtask
+basecamp api get /buckets/<project_id>/card_tables/steps/<step_id>.json --json
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
+  --data '{"title":"Updated subtask title"}' \
+  --json
+
+# List subtasks for a todo
+PARENT_TODO_ID=<parent_todo_id> \
+basecamp recordings list --in <project> --type Kanban::Step --all \
+  --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
+
+# Assign or set a due date.
+# Include the current title and every person who should remain assigned.
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
+  --data '{"title":"Current subtask title","assignee_ids":[<person_id>,<existing_person_id>],"due_on":"<YYYY-MM-DD>"}' \
+  --json
+
+# Complete or reopen a subtask
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>/completions.json \
+  --data '{"completion":"on"}' \
+  --json
+basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>/completions.json \
+  --data '{"completion":"off"}' \
+  --json
+
+# Trash a subtask from the todo UI by trashing the step record (Kanban::Step)
+basecamp recordings trash <step_id> --in <project> --json
+```
+
+Key points: replace numeric placeholders such as `<project_id>`,
+`<parent_todo_id>`, and `<person_id>` before running the examples. Bucket-scoped
+API paths require a numeric project/bucket ID; `--in <project>` can still accept
+a project name where CLI commands support name resolution. For creating todo
+subtasks, Basecamp accepts the parent todo ID in the
+`/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json` path. To
+list subtasks under a todo, use
+`basecamp recordings list --in <project> --type Kanban::Step` with the
+`parent.id` filter shown above.
+
+Completed subtasks have `completed: true` and a `completion` object with
+`created_at` and `creator`. Open subtasks have `completed: false` and no
+`completion` object. Trashed subtasks may still be readable directly with
+`status: "trashed"` and `inherits_status: false`, but they no longer appear in
+the todo UI.
+
+In testing with todo-backed steps, these bucket-scoped direct `GET` requests
+returned `not_found`:
+`/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json`,
+`/buckets/<project_id>/card_tables/cards/<parent_todo_id>.json`, and
+`/buckets/<project_id>/todos/<parent_todo_id>/steps.json`. To inspect trashed
+subtasks, add `--status trashed`; archived parents may require
+`--status archived`.
+
+When updating a todo subtask with the raw API, include the existing `title` along
+with metadata changes; omitting it may reset the step title to `Untitled`.
+`assignee_ids` sets the full assignee list for the step, so include every person
+who should remain assigned. The generic
+`basecamp assign <step_id> --step ...` command is intended for card steps and
+may fail with `Bad Request` for todo-backed steps, so prefer `assignee_ids` on
+the raw step update endpoint for todo subtasks.
+
 ### Todolists
 
 Todolists are containers for todos. Create a todolist before adding todos.
