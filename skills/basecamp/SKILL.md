@@ -3,7 +3,7 @@ name: basecamp
 description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
-  subscriptions, lineup, chat, gauges, assignments, notifications, and accounts.
+  subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
   Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
@@ -75,7 +75,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, gauges, assignments, notifications, and accounts.
+Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
 
 ## Agent Invariants
 
@@ -171,6 +171,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post with @mention | `basecamp messages create "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp messages create "Title" "Body" --no-subscribe --in <project> --json` |
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
+| List pings | `basecamp notifications --json --jq '.data.reads[]? \| select(.section == "pings")'` |
+| Read ping thread | `basecamp api get "/chats/<chat_id>/lines.json" --agent` |
+| Post to ping thread | `basecamp api post "/chats/<chat_id>/lines.json" --data '{"content":"<p>message</p>"}' --json` |
 | Add comment | `basecamp comments create <recording_id> "Text" --in <project> --json` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
 | Download attachments | `basecamp attachments download <id> --out /tmp/` |
@@ -825,6 +828,38 @@ basecamp chat post "@Jane.Smith, check this" --in <project>  # With @mention (au
 basecamp chat line <line_id> --in <project>   # Show line
 basecamp chat delete <line_id> --in <project> --force # Delete line (permanent, not trashable)
 ```
+
+### Pings (Direct Messages)
+
+Pings are Basecamp's 1-on-1 and small-group direct messages. They are stored as chat transcripts in `Circle` buckets and use the same line API shape as Campfires.
+
+Use `notifications` to discover active ping threads, then use the generic `api` command to read or post lines.
+
+```bash
+# Find ping threads visible in notifications.
+# circle_id is the Circle bucket ID from the UI URL; chat_id identifies the Chat::Transcript.
+basecamp notifications --json \
+  --jq '.data.reads[]? | select(.section == "pings") | {bucket_name, app_url, circle_id: (.subscription_url | capture("/buckets/(?<id>[0-9]+)/").id), chat_id: (.subscription_url | capture("/recordings/(?<id>[0-9]+)/").id)}'
+
+# Read a ping thread. Lines are returned newest first.
+basecamp api get "/chats/<chat_id>/lines.json" --agent
+
+# Post a ping line.
+basecamp api post "/chats/<chat_id>/lines.json" \
+  --data '{"content":"<p>Hey, quick question.</p>"}' --json
+```
+
+Ping line records include `creator.name`, `created_at`, `content` HTML, `type`, `bucket.type: "Circle"`, and attachment fields when files or voice notes are present.
+
+Ping URLs use `/circles/<circle_id>` and may include a line anchor after `@`:
+
+```bash
+echo "https://app.basecamp.com/<account_id>/circles/44024535@9927050443" \
+  | sed -E 's|.*/circles/([0-9]+)(@([0-9]+))?.*|circle:\1 line:\3|'
+# circle:44024535 line:9927050443
+```
+
+Pings are not returned by `basecamp recordings <type>`. Use `notifications` for discovery and the chat lines API for the conversation.
 
 ### People
 
