@@ -26,6 +26,7 @@ type mockProjectUpdateTransport struct {
 	putCount       int
 	putName        string
 	putDescription string
+	failRefetch    bool
 }
 
 func (t *mockProjectUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -39,6 +40,9 @@ func (t *mockProjectUpdateTransport) RoundTrip(req *http.Request) (*http.Respons
 	switch req.Method {
 	case http.MethodGet:
 		t.getCount++
+		if t.getCount > 1 && t.failRefetch {
+			return jsonResponse(400, `{"error":"boom"}`, header), nil
+		}
 		description := "Old description"
 		updatedAt := "2026-06-01T00:00:00.000Z"
 		if t.getCount > 1 {
@@ -106,19 +110,43 @@ func TestProjectsUpdateReturnsFreshProjectAfterDescriptionChange(t *testing.T) {
 	assert.Equal(t, "New description", transport.putDescription)
 	assert.Equal(t, 2, transport.getCount, "description-only update should fetch the current name, then refetch the fresh project after update")
 
-	var envelope struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			ID          int64  `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			UpdatedAt   string `json:"updated_at"`
-		} `json:"data"`
-	}
+	var envelope projectUpdateEnvelope
 	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
 	assert.True(t, envelope.OK)
 	assert.Equal(t, int64(123), envelope.Data.ID)
 	assert.Equal(t, "Test Project", envelope.Data.Name)
 	assert.Equal(t, "New description", envelope.Data.Description)
 	assert.Equal(t, "2026-06-02T00:00:00Z", envelope.Data.UpdatedAt)
+	assert.Empty(t, envelope.Notice)
+}
+
+func TestProjectsUpdateFallsBackToUpdateResponseWhenRefetchFails(t *testing.T) {
+	transport := &mockProjectUpdateTransport{failRefetch: true}
+	app, out := setupProjectsMockApp(t, transport)
+
+	cmd := NewProjectsCmd()
+	err := executeCommand(cmd, app, "update", "123", "--description", "New description")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, transport.putCount)
+	assert.Equal(t, 2, transport.getCount)
+
+	var envelope projectUpdateEnvelope
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	assert.True(t, envelope.OK)
+	assert.Equal(t, int64(123), envelope.Data.ID)
+	assert.Equal(t, "Test Project", envelope.Data.Name)
+	assert.Equal(t, "Old description", envelope.Data.Description)
+	assert.Contains(t, envelope.Notice, "Project updated, but fetching the latest project state failed")
+}
+
+type projectUpdateEnvelope struct {
+	OK     bool   `json:"ok"`
+	Notice string `json:"notice"`
+	Data   struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		UpdatedAt   string `json:"updated_at"`
+	} `json:"data"`
 }

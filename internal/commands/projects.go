@@ -351,19 +351,23 @@ Examples:
 				Description: description,
 			}
 
-			if _, err := app.Account().Projects().Update(cmd.Context(), projectID, req); err != nil {
-				return convertSDKError(err)
-			}
-
-			project, err := app.Account().Projects().Get(cmd.Context(), projectID)
+			project, err := app.Account().Projects().Update(cmd.Context(), projectID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			return app.OK(project,
+			respOpts := []output.ResponseOption{
 				output.WithEntity("project"),
 				output.WithSummary("Project updated"),
-			)
+			}
+			freshProject, err := app.Account().Projects().Get(cmd.Context(), projectID)
+			if err != nil {
+				respOpts = append(respOpts, output.WithDiagnostic(fmt.Sprintf("Project updated, but fetching the latest project state failed: %v", err)))
+			} else {
+				project = freshProject
+			}
+
+			return app.OK(project, respOpts...)
 		},
 	}
 
