@@ -468,9 +468,10 @@ PARENT_TODO_ID=<parent_todo_id> \
 basecamp recordings list --in <project> --type Kanban::Step --all --json \
   --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
 
-# Assign or set a due date. Include the current title when updating metadata.
+# Assign or set a due date.
+# Include the current title and every person who should remain assigned.
 basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
-  --data '{"title":"Current subtask title","assignee_ids":[<person_id>],"due_on":"<YYYY-MM-DD>"}' \
+  --data '{"title":"Current subtask title","assignee_ids":[<person_id>,<existing_person_id>],"due_on":"<YYYY-MM-DD>"}' \
   --json
 
 # Complete or reopen a subtask
@@ -509,10 +510,12 @@ subtasks, add `--status trashed`; archived parents may require
 `--status archived`.
 
 When updating a todo subtask with the raw API, include the existing `title` along
-with metadata changes; omitting it may reset the step title to `Untitled`. The
-generic `basecamp assign <step_id> --step ...` command is intended for card
-steps and may fail with `Bad Request` for todo-backed steps, so prefer
-`assignee_ids` on the raw step update endpoint for todo subtasks.
+with metadata changes; omitting it may reset the step title to `Untitled`.
+`assignee_ids` sets the full assignee list for the step, so include every person
+who should remain assigned. The generic
+`basecamp assign <step_id> --step ...` command is intended for card steps and
+may fail with `Bad Request` for todo-backed steps, so prefer `assignee_ids` on
+the raw step update endpoint for todo subtasks.
 
 ### Todolists
 
