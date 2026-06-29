@@ -298,6 +298,9 @@ Comma-separated IDs add the same comment to multiple items:
   basecamp comment 789,012,345 "Looks good!"
   basecamp comment https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"
 
+Content can also be piped from stdin:
+  printf 'Looks good!' | basecamp comment 789
+
 Content supports Markdown and @mentions (@Name or @First.Last):
   basecamp comment 789 "Hey @Jane.Smith, **please review**"`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
@@ -328,6 +331,13 @@ Content supports Markdown and @mentions (@Name or @First.Last):
 				content, err = editor.Open("")
 				if err != nil {
 					return output.ErrUsage(err.Error())
+				}
+			}
+
+			if !edit && strings.TrimSpace(content) == "" {
+				stdinContent, hasPipedStdin := readPipedStdin()
+				if hasPipedStdin {
+					content = stdinContent
 				}
 			}
 
