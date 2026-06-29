@@ -15,7 +15,10 @@ fi
 
 # Capture root persistent flags once — these are available on every subcommand
 # but --help --agent only reports them on the root command itself.
-ROOT_FLAGS=$("$BINARY" --help --agent 2>/dev/null | jq -c '[.flags // [] | .[] | {name, type}]')
+# Use a child command's inherited_flags to get only persistent flags, excluding
+# local-only root flags like --version that Cobra does not propagate.
+_first_sub=$("$BINARY" --help --agent 2>/dev/null | jq -r '.subcommands[0].name')
+ROOT_FLAGS=$("$BINARY" "${_first_sub}" --help --agent 2>/dev/null | jq -c '[.inherited_flags // [] | .[] | {name, type}]')
 
 walk_commands() {
   local cmd_path="$1"
