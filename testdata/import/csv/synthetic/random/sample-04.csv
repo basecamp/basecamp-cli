@@ -1,0 +1,13 @@
+project;client;owner;stage;deliverable;due;hours_logged;invoice_ref;portal_url
+acme-rebrand;Acme Co;dana@example.com;active;"Logo, palette; brand guide";2026-06-10;42.5;INV-2026-0012;https://example.com/portal/acme
+nimbus-site;Nimbus Ltd;Rae Donovan;discovery;"Sitemap; wireframes";2026-05-29;8;INV-2026-0013;https://example.com/portal/nimbus
+orchard-app;Orchard Foods;leo@example.org;review;"iOS build; QA notes";2026-06-02;76;INV-2026-0014;https://example.com/portal/orchard
+vela-deck;Vela Partners;dana@example.com;delivered;Pitch deck;2026-05-15;15;INV-2026-0009;https://example.com/portal/vela
+harbor-crm;Harbor Group;Rae Donovan;active;"Data migration; training";2026-06-20;33;INV-2026-0015;https://example.com/portal/harbor
+maple-blog;Maple Studio;leo@example.org;discovery;Content audit;2026-05-31;6;INV-2026-0016;https://example.com/portal/maple
+delta-ads;Delta Retail;dana@example.com;active;"Ad set; landing page";2026-06-05;28;INV-2026-0017;https://example.com/portal/delta
+quartz-ui;Quartz Bank;Rae Donovan;review;"Component library; docs";2026-06-12;54;INV-2026-0018;https://example.com/portal/quartz
+sol-intranet;Sol Energy;leo@example.org;active;Intranet redesign;2026-07-01;19;INV-2026-0019;https://example.com/portal/sol
+ferro-pkg;Ferro Goods;dana@example.com;delivered;"Packaging; print files";2026-05-08;21;INV-2026-0007;https://example.com/portal/ferro
+juno-onboard;Juno Health;Rae Donovan;discovery;Onboarding flow;2026-06-18;4;INV-2026-0020;https://example.com/portal/juno
+pine-report;Pine Trust;leo@example.org;active;"Annual report; charts";2026-06-25;37;INV-2026-0021;https://example.com/portal/pine

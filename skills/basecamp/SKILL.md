@@ -3,7 +3,7 @@ name: basecamp
 description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
-  subscriptions, lineup, chat, gauges, assignments, notifications, and accounts.
+  subscriptions, lineup, chat, gauges, assignments, notifications, imports, and accounts.
   Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
@@ -27,6 +27,7 @@ triggers:
   - basecamp gauge
   - basecamp assignment
   - basecamp notification
+  - basecamp import
   - basecamp account
   # Common actions
   - link to basecamp
@@ -38,6 +39,8 @@ triggers:
   - create todo
   - move card
   - download file
+  - import csv to basecamp
+  - import tasks to basecamp
   # Search and discovery
   - search basecamp
   - find in basecamp
@@ -92,6 +95,7 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges.
+7. **CSV imports use deterministic artifacts** — inspect the CSV, collect user-confirmed mappings, compile a validated artifact, present the artifact dry-run, and execute only after explicit user approval. Never hand-parse CSVs or invent import counts.
 
 ### Output Modes
 
@@ -191,6 +195,10 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Create needle | `basecamp gauges create --position 75 --color green --in <project> --json` |
 | Account details | `basecamp accounts show --json` |
 | Watch timeline | `basecamp timeline --watch` |
+| Inspect CSV import | `basecamp import inspect <csv-path> --json` |
+| Compile import artifact | `basecamp import compile --inspection inspection.json --mapping mapping.json --destination destination.json --out basecamp-import/ --json` |
+| Plan import artifact | `basecamp import plan --artifact basecamp-import/ --json` |
+| Execute approved import | `basecamp import execute --artifact basecamp-import/ --approved --json` |
 
 ## URL Parsing
 
@@ -253,6 +261,12 @@ Want to change something?
 ```
 
 ## Common Workflows
+
+### Import Todos from CSV
+
+Use the `basecamp-import` skill for CSV imports. It owns the full deterministic
+workflow: inspect, confirm mappings, compile a validated artifact, plan, approve,
+and execute.
 
 ### Link Code to Basecamp Todo
 

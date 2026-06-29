@@ -34,26 +34,30 @@ func TestSkillInstallRunE(t *testing.T) {
 		t.Fatalf("RunE() error = %v", err)
 	}
 
-	// Verify SKILL.md was written
-	skillFile := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
-	got, err := os.ReadFile(skillFile)
-	if err != nil {
-		t.Fatalf("skill file not created: %v", err)
-	}
-	embedded, _ := skills.FS.ReadFile("basecamp/SKILL.md")
-	if string(got) != string(embedded) {
-		t.Error("skill file content does not match embedded")
+	// Verify skill files were written
+	for _, name := range embeddedSkillNames {
+		skillFile := filepath.Join(home, ".agents", "skills", name, "SKILL.md")
+		got, err := os.ReadFile(skillFile)
+		if err != nil {
+			t.Fatalf("%s skill file not created: %v", name, err)
+		}
+		embedded, _ := skills.FS.ReadFile(name + "/SKILL.md")
+		if string(got) != string(embedded) {
+			t.Errorf("%s skill file content does not match embedded", name)
+		}
 	}
 
-	// Verify symlink was created with correct relative target
-	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
-	linkTarget, err := os.Readlink(symlinkPath)
-	if err != nil {
-		t.Fatalf("symlink not created: %v", err)
-	}
-	wantTarget := filepath.Join("..", "..", ".agents", "skills", "basecamp")
-	if linkTarget != wantTarget {
-		t.Errorf("symlink target = %q, want %q", linkTarget, wantTarget)
+	// Verify symlinks were created with correct relative targets
+	for _, name := range embeddedSkillNames {
+		symlinkPath := filepath.Join(home, ".claude", "skills", name)
+		linkTarget, err := os.Readlink(symlinkPath)
+		if err != nil {
+			t.Fatalf("%s symlink not created: %v", name, err)
+		}
+		wantTarget := filepath.Join("..", "..", ".agents", "skills", name)
+		if linkTarget != wantTarget {
+			t.Errorf("%s symlink target = %q, want %q", name, linkTarget, wantTarget)
+		}
 	}
 }
 
@@ -76,10 +80,12 @@ func TestSkillInstallIdempotent(t *testing.T) {
 		t.Fatalf("second RunE() error = %v", err)
 	}
 
-	// Symlink still valid after second run
-	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
-	if _, err := os.Readlink(symlinkPath); err != nil {
-		t.Fatalf("symlink broken after second install: %v", err)
+	// Symlinks remain valid after the second run.
+	for _, name := range embeddedSkillNames {
+		symlinkPath := filepath.Join(home, ".claude", "skills", name)
+		if _, err := os.Readlink(symlinkPath); err != nil {
+			t.Fatalf("%s symlink broken after second install: %v", name, err)
+		}
 	}
 }
 
@@ -112,7 +118,7 @@ func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
 		t.Fatalf("RunE() error = %v (fallback should have handled it)", err)
 	}
 
-	// Verify SKILL.md was copied (not symlinked)
+	// Verify SKILL.md was copied for the occupied Basecamp path.
 	copied, err := os.ReadFile(filepath.Join(symlinkPath, "SKILL.md"))
 	if err != nil {
 		t.Fatal("SKILL.md not found in fallback copy location")
@@ -120,6 +126,9 @@ func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
 	embedded, _ := skills.FS.ReadFile("basecamp/SKILL.md")
 	if string(copied) != string(embedded) {
 		t.Error("fallback copy content does not match embedded")
+	}
+	if _, err := os.Readlink(filepath.Join(home, ".claude", "skills", "basecamp-import")); err != nil {
+		t.Fatalf("basecamp-import symlink not created: %v", err)
 	}
 
 	// Output should mention fallback (via stdout since no app context)
@@ -148,14 +157,16 @@ func TestSkillInstallOutputKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedSkillPath := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
-	expectedSymlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
+	for _, name := range embeddedSkillNames {
+		expectedSkillPath := filepath.Join(home, ".agents", "skills", name, "SKILL.md")
+		expectedSymlinkPath := filepath.Join(home, ".claude", "skills", name)
 
-	if _, err := os.Stat(expectedSkillPath); err != nil {
-		t.Errorf("expected skill_path %q to exist", expectedSkillPath)
-	}
-	if _, err := os.Lstat(expectedSymlinkPath); err != nil {
-		t.Errorf("expected symlink_path %q to exist", expectedSymlinkPath)
+		if _, err := os.Stat(expectedSkillPath); err != nil {
+			t.Errorf("expected skill_path %q to exist", expectedSkillPath)
+		}
+		if _, err := os.Lstat(expectedSymlinkPath); err != nil {
+			t.Errorf("expected symlink_path %q to exist", expectedSymlinkPath)
+		}
 	}
 }
 
@@ -315,10 +326,12 @@ func TestSkillInstallNoClaude(t *testing.T) {
 		t.Fatalf("RunE() error = %v", err)
 	}
 
-	// Baseline skill should be installed
-	skillFile := filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md")
-	if _, err := os.Stat(skillFile); err != nil {
-		t.Errorf("skill file should exist: %v", err)
+	// Baseline skills should be installed.
+	for _, name := range embeddedSkillNames {
+		skillFile := filepath.Join(home, ".agents", "skills", name, "SKILL.md")
+		if _, err := os.Stat(skillFile); err != nil {
+			t.Errorf("%s skill file should exist: %v", name, err)
+		}
 	}
 
 	// ~/.claude should NOT have been created
@@ -335,10 +348,12 @@ func TestInstallSkillFilesStampsVersion(t *testing.T) {
 	_, err := installSkillFiles()
 	require.NoError(t, err)
 
-	versionFile := filepath.Join(home, ".agents", "skills", "basecamp", installedVersionFile)
-	got, err := os.ReadFile(versionFile)
-	require.NoError(t, err)
-	assert.Equal(t, version.Version, string(got))
+	for _, name := range embeddedSkillNames {
+		versionFile := filepath.Join(home, ".agents", "skills", name, installedVersionFile)
+		got, err := os.ReadFile(versionFile)
+		require.NoError(t, err)
+		assert.Equal(t, version.Version, string(got))
+	}
 }
 
 func TestInstalledSkillVersion(t *testing.T) {
@@ -482,9 +497,6 @@ func TestRefreshAllInstalledSkills_MultipleLocations(t *testing.T) {
 	version.Version = "5.0.0"
 	defer func() { version.Version = origVersion }()
 
-	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
-	require.NoError(t, err)
-
 	// Pre-install skill at baseline and Claude global locations
 	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(baseline, 0o755))
@@ -501,19 +513,23 @@ func TestRefreshAllInstalledSkills_MultipleLocations(t *testing.T) {
 	refreshed := refreshAllInstalledSkills()
 	assert.True(t, refreshed)
 
-	// All three should be updated
-	for _, path := range []string{
-		filepath.Join(baseline, "SKILL.md"),
-		filepath.Join(claudeSkill, "SKILL.md"),
-		filepath.Join(opencode, "SKILL.md"),
-	} {
-		got, readErr := os.ReadFile(path)
-		require.NoError(t, readErr, "reading %s", path)
-		assert.Equal(t, string(embedded), string(got), "content mismatch at %s", path)
+	// All configured roots should contain refreshed skill files.
+	for _, root := range []string{filepath.Dir(baseline), filepath.Dir(claudeSkill), filepath.Dir(opencode)} {
+		for _, name := range embeddedSkillNames {
+			path := filepath.Join(root, name, "SKILL.md")
+			got, readErr := os.ReadFile(path)
+			require.NoError(t, readErr, "reading %s", path)
+			want, readEmbeddedErr := skills.FS.ReadFile(name + "/SKILL.md")
+			require.NoError(t, readEmbeddedErr)
+			assert.Equal(t, string(want), string(got), "content mismatch at %s", path)
+		}
 	}
 
-	// Version stamp should be updated
+	// Version stamps should be updated.
 	assert.Equal(t, "5.0.0", installedSkillVersion())
+	got, err := os.ReadFile(filepath.Join(home, ".agents", "skills", "basecamp-import", installedVersionFile))
+	require.NoError(t, err)
+	assert.Equal(t, "5.0.0", string(got))
 }
 
 func TestRefreshAllInstalledSkills_SkipsAbsentLocations(t *testing.T) {

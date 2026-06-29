@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "record_id": { "column_index": 0, "column_name": "Card ID" },
+  "title": { "column_index": 1, "column_name": "Card Name" },
+  "description": { "column_index": 3, "column_name": "Card Description" },
+  "column": { "column_index": 15, "column_name": "List Name" },
+  "status": { "column_index": 18, "column_name": "Archived" },
+  "due_on": { "column_index": 6, "column_name": "Due Date" },
+  "attachment_urls": [
+    { "column_index": 2, "column_name": "Card URL" },
+    { "column_index": 8, "column_name": "Attachment Links" }
+  ],
+  "custom_fields": "all_unmapped_columns"
+}

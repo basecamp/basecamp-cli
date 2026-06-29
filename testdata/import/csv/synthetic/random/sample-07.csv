@@ -1,0 +1,13 @@
+id	task	track	owner	deadline	status	vendor	cost
+1	Book venue	logistics	Hannah Cole	22.05.2026	confirmed	Riverside Hall	2400
+2	Order catering	catering	leo@example.com	05.06.2026	pending	Green Fork Catering	3800
+3	Hire AV crew	production	Hannah Cole	29.05.2026	confirmed	SoundWorks	1500
+4	Send invites	comms	mira@example.org	18.05.2026	done	Printly	320
+5	Arrange parking	logistics	leo@example.com	10.06.2026	open	City Lot Co	600
+6	Build run sheet	production	Hannah Cole	12.06.2026	in progress	,	0
+7	Confirm speakers	program	mira@example.org	01.06.2026	pending	,	0
+8	Set up registration	logistics	leo@example.com	14.06.2026	open	EventReg	450
+9	Order signage	production	Hannah Cole	08.06.2026	confirmed	Printly	280
+10	Coordinate photographer	production	mira@example.org	15.06.2026	pending	Lens & Light	900
+11	Plan after-party	social	leo@example.com	16.06.2026	open	Rooftop Bar	1100
+12	Final walkthrough	logistics	Hannah Cole	19.06.2026	open	Riverside Hall	0

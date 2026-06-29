@@ -1,0 +1,14 @@
+chore_id,chore,room,frequency,assigned,tag,tag,last_done,supplies_needed,reward_points
+H1,Vacuum living room,living room,weekly,Alex,floors,quick,2026-05-18,vacuum bags,5
+H2,Clean fridge,kitchen,monthly,Jordan,deep-clean,kitchen,2026-04-30,baking soda,15
+H3,Mow lawn,yard,biweekly,Alex,outdoor,seasonal,2026-05-10,gas for mower,20
+H4,Wipe bathroom mirrors,bathroom,weekly,Casey,quick,glass,2026-05-19,glass cleaner,3
+H5,Change HVAC filter,hallway,quarterly,Jordan,maintenance,air,2026-03-15,20x25 filter,10
+H6,Water plants,living room,daily,Casey,plants,quick,2026-05-21,,2
+H7,Take out recycling,kitchen,weekly,Alex,trash,outdoor,2026-05-20,blue bags,3
+H8,Dust shelves,office,weekly,Jordan,dusting,quick,2026-05-17,microfiber cloth,4
+H9,Scrub shower grout,bathroom,monthly,Casey,deep-clean,bathroom,2026-04-28,grout brush,18
+H10,Organize garage,garage,quarterly,Alex,big-project,outdoor,2026-02-14,storage bins,40
+H11,Wash car,driveway,monthly,Jordan,outdoor,car,2026-05-02,car soap,12
+H12,Sweep porch,porch,weekly,Casey,outdoor,quick,2026-05-19,broom,3
+H13,Clean oven,kitchen,quarterly,Alex,deep-clean,kitchen,2026-03-01,oven cleaner,25

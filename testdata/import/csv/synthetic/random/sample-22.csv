@@ -1,0 +1,15 @@
+id,item,task,category,owner,status,stage,date,deadline,vendor_notes,budget
+W01,Venue,Book ceremony venue,venue,bride,booked,confirmed,03-12-2025,05-22-2026,"Garden Pavilion, deposit paid, balance due 30 days before",8000
+W02,Catering,Finalize menu,food,groom,in progress,tasting,05-22-2026,06-15-2026,"Tasting scheduled, vegetarian and gluten-free options needed",6500
+W03,Photography,Sign photographer,media,bride,booked,confirmed,02-28-2026,07-01-2026,"8 hour package, engagement shoot included",3200
+W04,Flowers,Choose arrangements,decor,planner,in progress,proposal,05-20-2026,06-20-2026,"Seasonal blooms, centerpieces for 12 tables",2400
+W05,Music,Hire band,entertainment,groom,not started,research,,07-10-2026,"Comparing band vs DJ, need quotes",2800
+W06,Invitations,Send invites,stationery,bride,done,sent,04-10-2026,04-30-2026,"Printed and mailed, RSVP via website",900
+W07,Cake,Order cake,food,planner,in progress,tasting,05-22-2026,07-15-2026,"Three tiers, lemon and vanilla, fondant",750
+W08,Attire,Final dress fitting,attire,bride,in progress,fitting,06-01-2026,07-20-2026,"Second fitting booked, alterations underway",2200
+W09,Transport,Arrange shuttle,logistics,groom,not started,research,,07-25-2026,"Shuttle for out-of-town guests, two trips",1100
+W10,Officiant,Confirm officiant,ceremony,planner,booked,confirmed,03-15-2026,07-30-2026,"Rehearsal included, custom vows discussed",500
+W11,Rentals,Reserve tables and chairs,decor,planner,in progress,proposal,05-18-2026,07-05-2026,"Chiavari chairs, linens in ivory",1800
+W12,Hotel block,Reserve room block,logistics,bride,done,confirmed,04-05-2026,06-05-2026,"20 rooms held, group rate confirmed",0
+W13,Favors,Order guest favors,decor,groom,not started,research,,07-12-2026,"Local honey jars idea, need supplier",600
+W14,Day-of timeline,Build schedule,planning,planner,in progress,draft,05-21-2026,08-01-2026,"Coordinating with all vendors, buffer time added",0

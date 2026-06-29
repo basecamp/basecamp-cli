@@ -1,0 +1,15 @@
+step,procedure,system,owner,trigger,upstream_step,severity,owner,runbook_note
+1,Acknowledge page,pagerduty,oncall@example.com,alert fires,,sev2,Priya N.,Check the dashboard first
+2,Verify scope,grafana,,,1,sev2,,
+3,Failover database,postgres,dba@example.org,,2,sev1,Marco Reyes,Promote the replica
+4,Drain traffic,nginx,,manual,3,sev1,,
+5,Notify stakeholders,statuspage,comms@example.com,,3,sev3,Priya N.,
+6,Scale workers,k8s,sre@example.org,queue depth high,,sev2,,Bump replicas to 8
+7,Clear cache,redis,,,6,sev3,Marco Reyes,
+8,Rotate credentials,vault,security@example.com,,,sev1,,Only if breach suspected
+9,Restore from backup,s3,dba@example.org,data loss,3,sev1,Priya N.,
+10,Confirm recovery,grafana,oncall@example.com,,4,sev2,,Watch for 30 minutes
+11,Write incident report,confluence,,resolved,10,sev3,Marco Reyes,
+12,Schedule postmortem,calendar,comms@example.com,,11,sev3,,Within 5 business days
+13,Close incident,pagerduty,oncall@example.com,,12,sev3,Priya N.,
+14,Update runbook,git,sre@example.org,,11,sev3,,Capture lessons learned

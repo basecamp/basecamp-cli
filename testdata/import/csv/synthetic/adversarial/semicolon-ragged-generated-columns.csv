@@ -1,0 +1,5 @@
+key;summary;bucket;due;owner;detail
+R-001;Import legacy contract;Legal;18/06/2026;legal@example.com;Has an extra source field;orphan custom value
+R-002;Review renewal language;Legal;19/06/2026;;Missing owner but valid title
+R-003;Schedule vendor call;;20/06/2026;ops@example.com;Blank bucket uses fallback;generated one;generated two
+R-004;Close procurement loop;Procurement;21/06/2026;procurement@example.com;

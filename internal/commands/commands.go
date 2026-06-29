@@ -134,6 +134,7 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Additional Commands",
 			Commands: []CommandInfo{
+				{Name: "import", Category: "additional", Description: "Inspect and import external CSV data", Actions: []string{"inspect", "compile", "plan", "status", "repair", "followup", "preflight", "execute"}},
 				{Name: "commands", Category: "additional", Description: "List all commands"},
 				{Name: "completion", Category: "additional", Description: "Generate shell completions", Actions: []string{"bash", "zsh", "fish", "powershell", "refresh", "status"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition"}},

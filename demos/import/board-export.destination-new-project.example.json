@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "resource_type": "cards",
+  "mode": "new_project",
+  "project_name": "Imported board",
+  "card_table_id": "67890",
+  "column_strategy": "create_from_column"
+}

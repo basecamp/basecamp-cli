@@ -1,0 +1,15 @@
+bug,title,component,severity,status,reporter,assignee,blocked_by,blocks,label,label,steps
+BUG-3001,Crash on export,reporting,critical,open,qa@example.com,maya@example.org,,BUG-3005,regression,p0,Open report > click export > app crashes
+BUG-3002,Wrong total in cart,checkout,high,in progress,user@example.org,Tom Becker,BUG-3001,,frontend,p1,Add 3 items > totals show 2 items only
+BUG-3003,Slow search,search,medium,open,qa@example.com,priya@example.com,,,backend,p2,Search any term > 6s response time
+BUG-3004,Broken link in email,notifications,low,open,user@example.org,maya@example.org,,,content,p3,Click reset link in email > 404 page
+BUG-3005,Login loop,auth,critical,in progress,qa@example.com,Tom Becker,BUG-3001,BUG-3008,regression,p0,Login > redirected to login again
+BUG-3006,Image not loading,profile,medium,closed,user@example.org,priya@example.com,,,frontend,p2,Upload avatar > shows broken image icon
+BUG-3007,Timezone off by one,calendar,high,open,qa@example.com,maya@example.org,,,backend,p1,Create event 3pm > shows 2pm for others
+BUG-3008,Duplicate notifications,notifications,medium,open,user@example.org,Tom Becker,BUG-3005,,backend,p2,Trigger action once > two emails sent
+BUG-3009,Form loses data,forms,high,in progress,qa@example.com,priya@example.com,,,frontend,p1,Fill form > navigate back > fields empty
+BUG-3010,Memory leak,worker,critical,open,user@example.org,maya@example.org,,,performance,p0,Run import > memory grows unbounded
+BUG-3011,Tooltip cut off,ui,low,closed,qa@example.com,Tom Becker,,,frontend,p3,Hover icon near edge > tooltip clipped
+BUG-3012,API returns 500,api,critical,open,user@example.org,priya@example.com,BUG-3010,,backend,p0,POST to /v2/items with empty body > 500
+BUG-3013,Sort order wrong,reporting,medium,open,qa@example.com,maya@example.org,,,frontend,p2,Sort by date > order is reversed
+BUG-3014,Password reset fails,auth,high,in progress,user@example.org,Tom Becker,BUG-3005,,backend,p1,Request reset > email never arrives

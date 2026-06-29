@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "resource_type": "cards",
+  "mode": "existing_project",
+  "project_id": "12345",
+  "card_table_id": "67890",
+  "column_strategy": "create_from_column"
+}

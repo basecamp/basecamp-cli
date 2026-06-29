@@ -1,0 +1,14 @@
+record,patient_ref,visit_reason,concern,provider,status,phase,date,follow_up,note,note
+REC-001,PT-0091,Annual physical,routine check,Dr. Mensah,open,intake,2026-05-22,2027-05-22,BP slightly elevated,recheck in 6 months
+REC-002,PT-0102,Knee pain,mobility,Dr. Lowe,active,treatment,2026-05-18,2026-06-01,Referred to PT,ice and rest
+REC-003,PT-0078,Follow-up,medication review,Dr. Mensah,closed,complete,2026-05-10,,Dosage adjusted,tolerating well
+REC-004,PT-0115,Headaches,neurological,Dr. Lowe,active,diagnostics,2026-05-20,2026-05-27,Ordered imaging,track frequency
+REC-005,PT-0091,Lab results,follow-up,Dr. Mensah,open,review,2026-05-21,2026-05-28,Cholesterol borderline,discuss diet
+REC-006,PT-0133,Skin rash,dermatology,Dr. Lowe,closed,complete,2026-05-12,,Prescribed cream,resolved
+REC-007,PT-0102,Physical therapy,mobility,Dr. Mensah,active,treatment,2026-05-19,2026-06-09,Progressing well,3 of 8 sessions
+REC-008,PT-0149,Allergy testing,respiratory,Dr. Lowe,open,intake,2026-05-23,2026-06-06,Panel ordered,avoid known triggers
+REC-009,PT-0078,Vaccination,preventive,Dr. Mensah,closed,complete,2026-05-08,,Flu shot given,no reaction
+REC-010,PT-0115,Imaging review,neurological,Dr. Lowe,active,review,2026-05-27,2026-06-03,Results normal,reassuring
+REC-011,PT-0160,Sleep issues,wellness,Dr. Mensah,open,intake,2026-05-22,2026-06-05,Sleep log requested,limit caffeine
+REC-012,PT-0133,Wellness visit,routine check,Dr. Lowe,active,intake,2026-05-24,2026-11-24,All normal,annual reminder set
+REC-013,PT-0149,Diet consult,nutrition,Dr. Mensah,open,treatment,2026-05-25,2026-06-15,Meal plan drafted,follow up monthly

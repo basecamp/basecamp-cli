@@ -1,0 +1,13 @@
+ref,action,context,context,due,status,waiting_on,note,note
+GTD-001,Renew passport,@errand,personal,2026-06-01,next,,Photos taken already,Bring old passport
+GTD-002,Reply to landlord,@home,admin,2026-05-23,next,dana@example.com,,Ask about parking spot
+GTD-003,Draft Q3 goals,@computer,work,2026-05-30,waiting,Sam Whitfield,Outline lives in notes app,Share with team after review
+GTD-004,Fix leaky faucet,@home,household,2026-05-25,todo,,Need washer kit,
+GTD-005,Schedule dentist,@phone,health,2026-05-22,done,,Booked for 9am,Cleaning only
+GTD-006,Cancel gym trial,@phone,admin,2026-05-24,next,,,Do before billing date
+GTD-007,Read tax letter,@home,finance,2026-05-28,waiting,accountant@example.org,Scanned to drive,
+GTD-008,Plan weekend hike,@computer,personal,2026-06-06,someday,Dana Reyes,Check weather first,Invite Sam along
+GTD-009,Backup laptop,@computer,admin,2026-05-26,todo,,External drive in drawer,
+GTD-010,Return library books,@errand,personal,2026-05-27,next,,Two are overdue,
+GTD-011,Update resume,@computer,career,2026-06-15,someday,,,Add the recent project
+GTD-012,Buy birthday gift,@errand,personal,2026-05-29,next,jamie@example.com,Ideas: book or plant,Wrap before Friday

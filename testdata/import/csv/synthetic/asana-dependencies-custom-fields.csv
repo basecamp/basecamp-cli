@@ -1,0 +1,3 @@
+Task ID,Created At,Completed At,Last Modified,Name,Section/Column,Assignee,Assignee Email,Start Date,Due Date,Tags,Notes,Projects,Parent task,Blocked By (Dependencies),Blocking (Dependencies),Team,Priority,Type,Domain,Size,Status,OLD TASK,Shipped,Stakeholder_Visible
+1200000000000001,2026-01-01,"",2026-01-02,Draft migration plan,Planning,Person 1,user1@example.com,2026-01-05,2026-01-10,migration,Write the first migration plan.,Basecamp Import,"","",1200000000000002,"",High,"","","",At risk,"","",""
+1200000000000002,2026-01-02,2026-01-08,2026-01-08,Review project mapping,Review,Person 2,user2@example.com,"",2026-01-12,mapping,Confirm todolist mapping.,Basecamp Import,1200000000000001,1200000000000001,"","",Medium,"","","",On track,"","",""

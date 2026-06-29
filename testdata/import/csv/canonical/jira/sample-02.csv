@@ -1,0 +1,102 @@
+Summary,Issue key,Issue id,Issue Type,Status,Project key,Project name,Project type,Project lead,Project lead id,Project description,Priority,Resolution,Assignee,Assignee Id,Reporter,Reporter Id,Creator,Creator Id,Created,Updated,Last Viewed,Resolved,Due date,Votes,Description,Environment,Watchers,Watchers Id,Original estimate,Remaining Estimate,Time Spent,Work Ratio,Σ Original Estimate,Σ Remaining Estimate,Σ Time Spent,Security Level,Custom field (Development),Custom field (Issue color),Custom field (Rank),Sprint,Custom field (Start date),Custom field (Story point estimate),Custom field (Team),Custom field (Vulnerability),Custom field (Vulnerability),Status Category,Status Category Changed
+Create Comprehensive Project Documentation,SCRUM-5,10004,Task,Done,SCRUM,Todo project,software,Person 20,account-id-2,Your first project,Medium,Done,Person 20,account-id-2,Person 20,account-id-2,Person 20,account-id-2,25/Oct/25 12:53 PM,25/Oct/25 12:55 PM,25/Oct/25 12:55 PM,25/Oct/25 12:55 PM,,0,"Write clear, comprehensive README documentation to help users understand,
+install, and run the project. Include all necessary setup instructions and
+API reference.
+
+Acceptance Criteria:
+✅ Add project description and feature list with emojis
+✅ Document tech stack (FastAPI, Poetry, pytest)
+✅ Show project structure with file tree
+✅ List all API endpoints with HTTP methods
+✅ Provide step-by-step installation instructions
+✅ Include commands to run the application
+✅ Include commands to run tests with options
+✅ Add usage instructions for the UI
+✅ Explain in-memory storage limitation
+✅ Suggest future enhancements (database persistence)
+✅ Note which endpoints are tested vs untested
+
+Technical Details:
+
+* Markdown format for GitHub compatibility
+* Clear sections with headings
+* Code blocks for commands
+* Links to Poetry documentation
+* MIT License mentioned",,Person 20,account-id-2,,,,,,,,,,,0|i0000v:,SCRUM Sprint 1,,,,,,Done,25/Oct/25 12:55 PM
+Write Automated Test Suite for API Endpoints,SCRUM-4,10003,Task,Done,SCRUM,Todo project,software,Person 20,account-id-2,Your first project,Medium,Done,Person 20,account-id-2,Person 20,account-id-2,Person 20,account-id-2,25/Oct/25 12:53 PM,25/Oct/25 12:55 PM,25/Oct/25 12:54 PM,25/Oct/25 12:55 PM,,0,"Develop pytest-based test suite covering core API functionality. Include tests
+for happy paths and edge cases. Intentionally exclude some endpoints from
+testing to demonstrate selective test coverage.
+
+Acceptance Criteria:
+✅ Set up pytest with FastAPI TestClient
+✅ Create fixture to clear database before each test
+✅ Test health check endpoint returns correct status
+✅ Test getting empty todos list returns []
+✅ Test creating todo with full data (title, description, completed)
+✅ Test creating todo with minimal data (title only)
+✅ Test getting todos after creating multiple items
+✅ Test updating existing todo (title and completed status)
+✅ Verify proper status codes (200, 201, etc.)
+❌ DELETE endpoint intentionally not tested (per project requirements)
+
+Technical Details:
+
+* pytest fixtures for test isolation
+* TestClient for making API requests
+* Clear database state between tests for reliability",,Person 20,account-id-2,,,,,,,,,,,0|i0000n:,SCRUM Sprint 1,,,,,,Done,25/Oct/25 12:55 PM
+Design and Develop Modern Frontend UI,SCRUM-3,10002,Task,Done,SCRUM,Todo project,software,Person 20,account-id-2,Your first project,Medium,Done,Person 20,account-id-2,Person 20,account-id-2,Person 20,account-id-2,25/Oct/25 12:53 PM,25/Oct/25 12:54 PM,25/Oct/25 12:54 PM,25/Oct/25 12:54 PM,,0,"Create a beautiful, responsive single-page application for the todo list with
+modern UX patterns and smooth animations. No framework dependencies - pure
+vanilla JavaScript for simplicity.
+
+Acceptance Criteria:
+✅ Design gradient purple-themed UI with modern aesthetics
+✅ Create form with title input and optional description textarea
+✅ Display todos list with checkboxes for completion toggle
+✅ Add delete button for each todo item
+✅ Show empty state when no todos exist
+✅ Display statistics showing completed vs total todos
+✅ Implement smooth hover animations and transitions
+✅ Add visual feedback for completed items (strikethrough, opacity)
+✅ Make UI responsive and mobile-friendly
+✅ Add keyboard support (Enter key to submit)
+
+Technical Details:
+
+* Vanilla JavaScript with fetch API for backend communication
+* CSS Grid and Flexbox for layout
+* Linear gradient background (purple theme)
+* XSS protection with HTML escaping
+* Async/await for cleaner promise handling",,Person 20,account-id-2,,,,,,,,,,,0|i0000f:,SCRUM Sprint 1,,,,,,Done,25/Oct/25 12:54 PM
+Implement RESTful API Backend with Todo CRUD Operations,SCRUM-2,10001,Task,Done,SCRUM,Todo project,software,Person 20,account-id-2,Your first project,Medium,Done,Person 20,account-id-2,Person 20,account-id-2,Person 20,account-id-2,25/Oct/25 12:53 PM,25/Oct/25 12:54 PM,25/Oct/25 12:54 PM,25/Oct/25 12:54 PM,,0,"Build a FastAPI backend with RESTful endpoints for managing todos. Implement
+full CRUD (Create, Read, Update, Delete) operations with proper HTTP methods
+and status codes.
+
+Acceptance Criteria:
+✅ Create Pydantic models for Todo and TodoCreate with validation
+✅ Implement GET /api/todos endpoint to retrieve all todos
+✅ Implement POST /api/todos endpoint to create new todos (201 status)
+✅ Implement PUT /api/todos/{todo_id} endpoint to update existing todos
+✅ Implement DELETE /api/todos/{todo_id} endpoint (204 status)
+✅ Add GET /api/health endpoint for health monitoring
+✅ Return proper 404 errors when todo not found
+✅ Use in-memory storage with dictionary for simplicity
+
+Technical Details:
+
+* UUID generation for unique todo IDs
+* Optional description field with None default
+* Boolean completed flag for todo status tracking",,Person 20,account-id-2,,,,,,,,,,,0|i00007:,SCRUM Sprint 1,,,,,,Done,25/Oct/25 12:54 PM
+Setup Project Infrastructure and Dependencies,SCRUM-1,10000,Task,Done,SCRUM,Todo project,software,Person 20,account-id-2,Your first project,Medium,Done,Person 20,account-id-2,Person 20,account-id-2,Person 20,account-id-2,25/Oct/25 12:53 PM,25/Oct/25 12:54 PM,25/Oct/25 12:53 PM,25/Oct/25 12:54 PM,,0,"Set up the project foundation with proper dependency management and configuration.
+
+Acceptance Criteria:
+✅ Create pyproject.toml with Poetry for dependency management
+✅ Add FastAPI, Uvicorn, pytest, and httpx as dependencies
+✅ Configure package-mode = false for dependency-only management
+✅ Create .gitignore file with Python and IDE exclusions
+✅ Ensure project can be installed with {{poetry install}}
+
+Technical Details:
+
+* Poetry package manager chosen for modern dependency management
+* FastAPI selected as web framework for speed and type safety
+* Uvicorn with standard extras for production-ready ASGI server",,Person 20,account-id-2,,,,,,,,,,,0|hzzzzz:,SCRUM Sprint 1,,,,,,Done,25/Oct/25 12:54 PM

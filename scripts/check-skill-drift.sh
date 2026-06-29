@@ -3,7 +3,20 @@
 # Catches stale skill references: renamed commands, removed flags, etc.
 set -euo pipefail
 
-SKILL="${1:-skills/basecamp/SKILL.md}"
+if [ "$#" -eq 0 ]; then
+  status=0
+  found=0
+  for skill in skills/*/SKILL.md; do
+    [ -f "$skill" ] || continue
+    found=1
+    echo "Checking $skill"
+    "$0" "$skill" ".surface" ".surface-skill-drift" || status=$?
+  done
+  [ "$found" -eq 1 ] || { echo "ERROR: no skill files found under skills/*/SKILL.md" >&2; exit 1; }
+  exit "$status"
+fi
+
+SKILL="$1"
 SURFACE="${2:-.surface}"
 BASELINE="${3:-.surface-skill-drift}"
 

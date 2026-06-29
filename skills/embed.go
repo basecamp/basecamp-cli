@@ -3,5 +3,5 @@ package skills
 
 import "embed"
 
-//go:embed basecamp
+//go:embed basecamp basecamp-import
 var FS embed.FS

@@ -317,6 +317,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewGaugesCmd())
 	cmd.AddCommand(commands.NewAssignmentsCmd())
 	cmd.AddCommand(commands.NewNotificationsCmd())
+	cmd.AddCommand(commands.NewImportCmd())
 	cmd.AddCommand(commands.NewTUICmd())
 	cmd.AddCommand(commands.NewBonfireCmd())
 

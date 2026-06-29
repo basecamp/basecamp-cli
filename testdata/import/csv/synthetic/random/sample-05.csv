@@ -1,0 +1,13 @@
+study_id,hypothesis,phase,lead,depends_on,target_date,status,protocol_url,notes
+r-9f3a2,Sleep affects recall,pilot,Dr. Okafor,,"May 22, 2026",active,https://example.org/protocols/r-9f3a2,"Recruiting 24 participants, ages 18-35"
+r-1c7e8,Caffeine and reaction time,design,nguyen@example.org,r-9f3a2,"June 3, 2026",active,https://example.org/protocols/r-1c7e8,"Double-blind, placebo control planned"
+r-44b0d,Light exposure and mood,analysis,Dr. Okafor,r-9f3a2,"April 15, 2026",complete,https://example.org/protocols/r-44b0d,"Data collected, writing results section now"
+r-8de21,Exercise and focus,pilot,patel@example.com,,"July 10, 2026",queued,https://example.org/protocols/r-8de21,Waiting on IRB approval
+r-23ff9,Diet and inflammation,design,Dr. Okafor,r-44b0d,"June 20, 2026",active,https://example.org/protocols/r-23ff9,"Need lab access, coordinating with the clinic"
+r-6a0c1,Music and productivity,analysis,nguyen@example.org,,"May 1, 2026",complete,https://example.org/protocols/r-6a0c1,"Mixed results, see appendix"
+r-77e3b,Screen time and stress,pilot,patel@example.com,r-8de21,"August 5, 2026",queued,https://example.org/protocols/r-77e3b,"Survey instrument drafted, needs review"
+r-90ab4,Hydration and headaches,design,Dr. Okafor,,"June 12, 2026",active,https://example.org/protocols/r-90ab4,"Tracking daily logs, 6 week window"
+r-31cd6,Posture and back pain,pilot,nguyen@example.org,r-23ff9,"September 1, 2026",blocked,https://example.org/protocols/r-31cd6,"Equipment delayed, vendor issue"
+r-5b8f0,Nature walks and anxiety,analysis,patel@example.com,r-44b0d,"April 30, 2026",complete,https://example.org/protocols/r-5b8f0,"Strong effect, prepping for submission"
+r-12a9c,Reading and vocabulary,design,Dr. Okafor,,"July 22, 2026",queued,https://example.org/protocols/r-12a9c,Pending funding decision
+r-0fe72,Naps and creativity,pilot,nguyen@example.org,r-9f3a2,"June 28, 2026",active,https://example.org/protocols/r-0fe72,"Counterbalanced design, two sessions each"

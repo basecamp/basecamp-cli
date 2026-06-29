@@ -1,0 +1,15 @@
+item,type,list,started,finished,rating,status,tags,source
+The Long Game,book,reading,15 May 2026,,,reading,strategy;career,library
+How Trees Talk,article,reading,20 May 2026,21 May 2026,4,done,nature,blog
+Intro to Rust,course,learn,01 May 2026,,,reading,programming;rust,online
+The Quiet Sea,book,reading,,,,queued,fiction,bookstore
+Mindful Mornings,book,reading,10 May 2026,18 May 2026,5,done,wellness;habits,gift
+Async Patterns,article,learn,22 May 2026,,,reading,programming,newsletter
+Salt and Stone,book,reading,,,,queued,fiction,
+Negotiation 101,course,learn,05 May 2026,19 May 2026,3,done,career,online
+The Map of Time,book,reading,12 May 2026,,,reading,scifi,library
+Better Sleep Guide,article,reading,08 May 2026,08 May 2026,4,done,health,blog
+Garden Design,book,learn,,,,queued,hobby;home,
+Deep Work,book,reading,03 May 2026,16 May 2026,5,done,productivity,gift
+Watercolor Basics,course,learn,18 May 2026,,,reading,art;hobby,online
+The Ancient City,book,reading,,,,abandoned,history,library

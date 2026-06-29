@@ -1,0 +1,16 @@
+key,summary,type,assignee,reporter,sprint,points,status,blocked_by,link,description
+SPRINT-101,Login throttling,story,maya@example.com,Lead Dev,Sprint 14,5,in progress,SPRINT-099,https://example.com/tickets/101,"Add rate limiting to login.
+Threshold: 5 attempts, then a 15 minute lockout."
+SPRINT-102,Fix avatar upload,bug,Tom Becker,maya@example.com,Sprint 14,3,todo,,https://example.com/tickets/102,"Uploads over 2MB fail, returning a 500 error"
+SPRINT-103,Onboarding tour,story,priya@example.org,Tom Becker,Sprint 14,8,todo,SPRINT-101,https://example.com/tickets/103,"Multi-step tour for new users, dismissible at any point"
+SPRINT-104,Audit log export,task,Lead Dev,priya@example.org,Sprint 15,5,backlog,,https://example.com/tickets/104,"Export to CSV, JSON, and PDF formats"
+SPRINT-105,Dark mode toggle,story,maya@example.com,Tom Becker,Sprint 14,3,done,,https://example.com/tickets/105,Persist preference across sessions
+SPRINT-106,Slow dashboard query,bug,priya@example.org,maya@example.com,Sprint 14,5,in progress,SPRINT-104,https://example.com/tickets/106,"Dashboard takes 8s to load.
+Suspect missing index on events table."
+SPRINT-107,Add 2FA,story,Tom Becker,Lead Dev,Sprint 15,13,backlog,SPRINT-101,https://example.com/tickets/107,"Support TOTP apps, with backup codes"
+SPRINT-108,Email digest opt-out,task,maya@example.com,priya@example.org,Sprint 14,2,review,,https://example.com/tickets/108,One-click unsubscribe link in footer
+SPRINT-109,Mobile nav overlap,bug,priya@example.org,Tom Becker,Sprint 14,2,done,,https://example.com/tickets/109,"On small screens, menu overlaps the logo"
+SPRINT-110,API rate limit docs,task,Lead Dev,maya@example.com,Sprint 15,1,todo,SPRINT-101,https://example.com/tickets/110,Document the new limits in the public docs
+SPRINT-111,Bulk archive,story,Tom Becker,priya@example.org,Sprint 15,5,backlog,,https://example.com/tickets/111,"Select many items, archive in one action"
+SPRINT-112,Session timeout warning,story,maya@example.com,Lead Dev,Sprint 14,3,in progress,SPRINT-112,https://example.com/tickets/112,"Warn at 2 minutes left, offer to extend"
+SPRINT-113,Fix typo on billing page,bug,priya@example.org,Tom Becker,Sprint 14,1,done,,https://example.com/tickets/113,"""Recieve"" should be ""Receive"""

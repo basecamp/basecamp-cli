@@ -1,0 +1,4 @@
+Task ID,Created At,Completed At,Last Modified,Name,Section/Column,Assignee,Assignee Email,Start Date,Due Date,Tags,Notes,Projects,Parent task,Blocked By (Dependencies),Blocking (Dependencies),Team,Priority,Type,Domain,Size,Status,OLD TASK,Shipped,Stakeholder_Visible
+1210195246380032,2025-05-08,,2025-05-08,Improve recommendations,Ready,Person 1,,,,,Here are more details about this ticket,MonoBacklog,,,,AI,P1,,,,,,,Yes
+1210183850312776,2025-05-07,2025-05-07,2025-05-07,Add new feature to the voice library,In Development,,,,,,,MonoBacklog,,,,IO,P3,,,,,,2025-05-07,Yes
+1210172728188995,2025-05-06,,2025-05-06,Improve user experience of audio editing,Design needed,,,,,,Here are more details about this ticket,MonoBacklog,,,,Workflows,P2,,,,,,,Yes

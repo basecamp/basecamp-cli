@@ -1,0 +1,14 @@
+post_id,title,channel,author,publish_date,status,brief,asset_url,utm
+post-spring-sale,Spring Sale Launch,instagram,social@example.com,2026-05-24,scheduled,"Carousel of 5 products, bright colors, end with a CTA to shop",https://example.com/assets/spring-sale.png,https://example.com/?utm_source=ig&utm_campaign=spring
+post-howto-thread,How-To Thread,twitter,Mara Quill,2026-05-22,published,"7-tweet thread, one tip per tweet, link to blog at the end",https://example.com/assets/howto.png,https://example.com/?utm_source=tw&utm_campaign=howto
+post-team-spotlight,Team Spotlight,linkedin,social@example.com,2026-05-26,draft,"Profile of an engineer, quote pulled from the interview, headshot",https://example.com/assets/spotlight.jpg,https://example.com/?utm_source=li&utm_campaign=team
+post-recipe-reel,Recipe Reel,instagram,Mara Quill,2026-05-28,scheduled,"30s cooking reel, captions on, trending audio",https://example.com/assets/recipe.mp4,https://example.com/?utm_source=ig&utm_campaign=recipe
+post-blog-promo,Blog Promo,facebook,social@example.com,2026-05-23,published,"Link post, hook in first line, image from the article",https://example.com/assets/blog-promo.png,https://example.com/?utm_source=fb&utm_campaign=blog
+post-poll-question,Audience Poll,twitter,Mara Quill,2026-05-25,scheduled,"Single poll, 4 options, ask which feature they want next",https://example.com/assets/poll.png,https://example.com/?utm_source=tw&utm_campaign=poll
+post-case-study,Case Study,linkedin,social@example.com,2026-05-30,draft,"Customer results, 3 key metrics, quote and logo",https://example.com/assets/case.jpg,https://example.com/?utm_source=li&utm_campaign=case
+post-behind-scenes,Behind the Scenes,instagram,Mara Quill,2026-05-27,scheduled,"Stories set, office tour, 6 frames with stickers",https://example.com/assets/bts.mp4,https://example.com/?utm_source=ig&utm_campaign=bts
+post-faq-thread,FAQ Thread,twitter,social@example.com,2026-05-29,draft,"Answer top 5 questions, link to help center",https://example.com/assets/faq.png,https://example.com/?utm_source=tw&utm_campaign=faq
+post-event-invite,Event Invite,facebook,Mara Quill,2026-05-31,scheduled,"Event graphic, date and time clear, RSVP link",https://example.com/assets/event.png,https://example.com/?utm_source=fb&utm_campaign=event
+post-product-tip,Product Tip,linkedin,social@example.com,2026-05-22,published,"Short tip with a GIF, one practical takeaway",https://example.com/assets/tip.gif,https://example.com/?utm_source=li&utm_campaign=tip
+post-quote-card,Quote Card,instagram,Mara Quill,2026-05-26,draft,"Single image, founder quote, branded template",https://example.com/assets/quote.png,https://example.com/?utm_source=ig&utm_campaign=quote
+post-newsletter,Newsletter Teaser,twitter,social@example.com,2026-05-24,scheduled,"Tease the issue, 3 bullet highlights, subscribe link",https://example.com/assets/news.png,https://example.com/?utm_source=tw&utm_campaign=news

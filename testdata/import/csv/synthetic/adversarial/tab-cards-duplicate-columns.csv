@@ -1,0 +1,4 @@
+card_id	title	description	column	status	owner	due	link	comment	rank	rank
+C-001	Triage billing bug	Customer sees duplicate charge	Backlog	new	billing@example.com	2026-07-01	https://example.com/cards/billing	Escalated by support	P1	customer
+C-002	Draft launch post	Prepare announcement copy	Doing	active	marketing@example.com	2026-07-02	https://example.com/cards/launch	Needs legal review	P2	launch
+C-003	Archive stale board	Move completed work to archive	Backlog	ready	ops@example.com	2026-07-03	https://example.com/cards/archive	Keep audit notes	P3	cleanup

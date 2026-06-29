@@ -1,0 +1,6 @@
+ID,Title,Description,List,Status,Assignee Emails,Due Date,Attachment URL,Comment,Label,Label,Priority,Estimate Hours,Empty Mostly,Parent ID
+W-001,"Paint lobby, phase 2","Use low-VOC paint.
+Protect the floor and note the ""wet paint"" signs.",Facilities,todo,"alex@example.com; jamie@example.com",2026-06-01,https://example.com/files/paint-spec,"First comment line
+second comment line",renovation,Q2,High,3.5,,
+W-002,"Repair café door","Hinge squeaks; includes unicode café and emoji ✅",Facilities,doing,sam@example.com,2026-06-02T15:30:00Z,https://example.com/files/door,"Vendor said ""parts arrive Friday""",maintenance,Q2,Medium,1.25,,W-001
+W-003,"Book all-hands venue","Call two places; ask about A/V, catering, and accessibility",Events,todo,,"June 4, 2026",https://example.com/files/venue,,planning,Q2,Low,2,,

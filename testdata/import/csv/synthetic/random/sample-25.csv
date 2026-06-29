@@ -1,0 +1,14 @@
+campaign,donor,ask_amount,pledged,status,owner,follow_up,notes,channel
+Spring Appeal,Anonymous,5000,5000,closed,grants@example.org,,"Wired in full, send thank-you letter",mail
+Spring Appeal,Brightwave Foundation,25000,10000,pledged,Mara Quill,2026-06-01,"Partial pledge, rest pending board vote",email
+Capital Campaign,Cobalt Labs,50000,,prospect,grants@example.org,2026-05-30,"Intro call went well, sending proposal",phone
+Spring Appeal,J. Rivera,1000,1000,closed,Mara Quill,,Recurring monthly donor,online
+Capital Campaign,Lumen Group,100000,,prospect,grants@example.org,2026-06-10,"Major gift potential, multiple meetings needed",in person
+Spring Appeal,Anonymous,500,500,closed,Mara Quill,,,online
+Year-End Drive,Harbor Realty,15000,15000,pledged,grants@example.org,2026-12-01,"Annual gift, matched by employer",email
+Capital Campaign,K. Osei,75000,25000,pledged,Mara Quill,2026-07-01,"Generous first gift, cultivating for more",in person
+Spring Appeal,Nova Media,3000,,prospect,grants@example.org,2026-05-28,"Sponsorship interest, send packet",email
+Year-End Drive,Anonymous,2000,2000,closed,Mara Quill,,,mail
+Capital Campaign,Pinnacle Supply,40000,,declined,grants@example.org,,"Not this cycle, revisit next year",phone
+Spring Appeal,Forge Advisors,8000,8000,closed,Mara Quill,,Quick yes after one call,email
+Year-End Drive,Vela Partners,12000,6000,pledged,grants@example.org,2026-11-15,"Half now, half in December",in person
