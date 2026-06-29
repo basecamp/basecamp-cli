@@ -446,9 +446,9 @@ basecamp todos sweep --overdue --complete --comment "Done" --in <project>
 
 **Todo Subtasks (checklist steps):** Basecamp to-do subtasks are stored as
 `Kanban::Step` records, even when their parent is a normal `Todo`. The regular
-`todos show` response may not include them; use
-`basecamp recordings list --type Kanban::Step` and filter by `parent.id` to
-list/check subtasks for a todo.
+`basecamp todos show` response may not include them; use
+`basecamp recordings list --in <project> --type Kanban::Step` and filter by
+`parent.id` to list/check subtasks for a todo.
 
 ```bash
 # Create a subtask under a todo.
@@ -465,7 +465,7 @@ basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
 
 # List subtasks for a todo
 PARENT_TODO_ID=<parent_todo_id> \
-basecamp recordings list --in <project> --type Kanban::Step --all --json \
+basecamp recordings list --in <project> --type Kanban::Step --all \
   --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
 
 # Assign or set a due date.
@@ -492,8 +492,9 @@ API paths require a numeric project/bucket ID; `--in <project>` can still accept
 a project name where CLI commands support name resolution. For creating todo
 subtasks, Basecamp accepts the parent todo ID in the
 `/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json` path. To
-list subtasks under a todo, use `basecamp recordings list --type Kanban::Step`
-with the `parent.id` filter shown above.
+list subtasks under a todo, use
+`basecamp recordings list --in <project> --type Kanban::Step` with the
+`parent.id` filter shown above.
 
 Completed subtasks have `completed: true` and a `completion` object with
 `created_at` and `creator`. Open subtasks have `completed: false` and no
