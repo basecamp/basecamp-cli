@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -705,4 +706,83 @@ func TestAssignBatchAllFailNeverResolvesAssignee(t *testing.T) {
 		assert.NotContains(t, entry, "/my/profile.json",
 			"person resolution should not be attempted when all items fail validation")
 	}
+}
+
+// mockStepAssignTransport serves the current step on GET and captures the
+// PUT body so the assign/unassign step paths can be checked for the
+// carried-over title the API requires.
+type mockStepAssignTransport struct {
+	capturedPut []byte
+}
+
+func (m *mockStepAssignTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	stepJSON := `{"id": 456, "title": "Existing step", "completed": false, "assignees": [{"id": 11, "name": "Existing Person"}]}`
+
+	switch req.Method {
+	case "GET":
+		var body string
+		switch {
+		case strings.Contains(req.URL.Path, "/card_tables/steps/"):
+			body = stepJSON
+		case strings.Contains(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/"):
+			body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 789, "title": "Card Table"}]}`
+		case strings.Contains(req.URL.Path, "/people.json"):
+			body = `[{"id": 11, "name": "Existing Person"}, {"id": 99, "name": "New Person"}]`
+		default:
+			return nil, fmt.Errorf("unexpected GET path: %s", req.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	case "PUT":
+		if !strings.HasSuffix(req.URL.Path, "/card_tables/steps/456") {
+			return nil, fmt.Errorf("unexpected PUT path: %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		m.capturedPut = body
+		if err := req.Body.Close(); err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(stepJSON)), Header: header}, nil
+	default:
+		return nil, fmt.Errorf("unexpected request method: %s", req.Method)
+	}
+}
+
+// TestAssignStepCarriesTitle verifies that assigning a person to a step sends
+// the current title in the update, which the API requires.
+func TestAssignStepCarriesTitle(t *testing.T) {
+	transport := &mockStepAssignTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewAssignCmd()
+	err := executeAssignCommand(cmd, app, "456", "--step", "--to", "99")
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "Existing step", body["title"])
+	assert.Equal(t, []any{float64(11), float64(99)}, body["assignee_ids"])
+}
+
+// TestUnassignStepCarriesTitle verifies that removing a person from a step
+// also sends the current title in the update.
+func TestUnassignStepCarriesTitle(t *testing.T) {
+	transport := &mockStepAssignTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := NewUnassignCmd()
+	err := executeAssignCommand(cmd, app, "456", "--step", "--from", "11")
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "Existing step", body["title"])
+	assert.Equal(t, []any{}, body["assignee_ids"])
 }

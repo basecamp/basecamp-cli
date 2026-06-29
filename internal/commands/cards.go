@@ -1917,6 +1917,14 @@ You can pass either a step ID or a Basecamp URL:
 			req := &basecamp.UpdateStepRequest{}
 			if title != "" {
 				req.Title = title
+			} else {
+				// The API rejects step updates without a title, so carry
+				// over the current one when only other fields change.
+				current, err := app.Account().CardSteps().Get(cmd.Context(), stepID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				req.Title = current.Title
 			}
 			if dueOn != "" {
 				req.DueOn = dateparse.Parse(dueOn)

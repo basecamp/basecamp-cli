@@ -189,6 +189,111 @@ func TestCardsStepUpdateRequiresFields(t *testing.T) {
 	assert.NoError(t, err, "expected help output, not error")
 }
 
+// mockStepUpdateTransport serves the current step on GET and captures the
+// update body on PUT. It only answers the single-step endpoint so a stray
+// call to the wrong path fails the test instead of passing on stale data.
+type mockStepUpdateTransport struct {
+	getCount    int
+	capturedPut []byte
+}
+
+func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if !strings.HasSuffix(req.URL.Path, "/card_tables/steps/456") {
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	switch req.Method {
+	case "GET":
+		t.getCount++
+	case "PUT":
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		t.capturedPut = body
+		if err := req.Body.Close(); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unexpected request method: %s", req.Method)
+	}
+
+	// Echo the title back so callers see the effective value, not a constant.
+	title := "Current title"
+	if t.capturedPut != nil {
+		var put struct {
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(t.capturedPut, &put); err == nil && put.Title != "" {
+			title = put.Title
+		}
+	}
+	stepJSON := fmt.Sprintf(`{"id": 456, "title": %q, "completed": false, "assignees": []}`, title)
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(stepJSON)),
+		Header:     header,
+	}, nil
+}
+
+// TestCardsStepUpdateAssigneesOnlyCarriesTitle verifies that updating only
+// assignees fetches the current step and includes its title in the request —
+// the API rejects step updates without a title.
+func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
+	transport := &mockStepUpdateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := newCardsStepUpdateCmd()
+	err := executeCommand(cmd, app, "456", "--assignees", "789")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, transport.getCount)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "Current title", body["title"])
+	assert.Equal(t, []any{float64(789)}, body["assignee_ids"])
+}
+
+// TestCardsStepUpdateDueOnlyCarriesTitle verifies that updating only the due
+// date fetches the current step and includes its title in the request.
+func TestCardsStepUpdateDueOnlyCarriesTitle(t *testing.T) {
+	transport := &mockStepUpdateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := newCardsStepUpdateCmd()
+	err := executeCommand(cmd, app, "456", "--due", "2026-07-04")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, transport.getCount)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "Current title", body["title"])
+	assert.Equal(t, "2026-07-04", body["due_on"])
+}
+
+// TestCardsStepUpdateWithTitleSkipsFetch verifies that an explicit title is
+// sent as-is without fetching the current step.
+func TestCardsStepUpdateWithTitleSkipsFetch(t *testing.T) {
+	transport := &mockStepUpdateTransport{}
+	app := setupCardsMockApp(t, transport)
+
+	cmd := newCardsStepUpdateCmd()
+	err := executeCommand(cmd, app, "456", "New title")
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, transport.getCount)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
+	assert.Equal(t, "New title", body["title"])
+}
+
 // TestCardsStepMoveRequiresCard tests that --card is required for step move.
 func TestCardsStepMoveShowsHelp(t *testing.T) {
 	app, _ := setupTestApp(t)
