@@ -215,6 +215,9 @@ Use - as the content argument to read the updated content from stdin:
 			if err != nil {
 				return err
 			}
+			if strings.TrimSpace(content) == "" {
+				return missingArg(cmd, "<content>")
+			}
 
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -349,7 +352,10 @@ Use - as the content argument to read content from stdin:
 			}
 
 			if !edit && strings.TrimSpace(content) == "" {
-				stdinContent, hasPipedStdin := readPipedStdin()
+				stdinContent, hasPipedStdin, err := readPipedStdin(cmd)
+				if err != nil {
+					return err
+				}
 				if hasPipedStdin {
 					content = stdinContent
 				}

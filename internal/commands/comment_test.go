@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/names"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // TestCommentShortcutAcceptsInFlag tests that the top-level 'comment' shortcut
@@ -89,10 +91,10 @@ func TestCommentsUpdateReadsDashContentFromStdin(t *testing.T) {
 	transport := &mockCommentWriteTransport{}
 	app, _ := setupCommentsWriteTestApp(t, transport)
 
-	cmd := NewCommentsCmd()
+	cmd := newCommentsUpdateCmd()
 	cmd.SetIn(strings.NewReader("Updated from stdin\n"))
 
-	err := executeCommand(cmd, app, "update", "1234", "-")
+	err := executeCommand(cmd, app, "1234", "-")
 	require.NoError(t, err)
 	require.Len(t, transport.capturedBodies, 1)
 
@@ -101,25 +103,30 @@ func TestCommentsUpdateReadsDashContentFromStdin(t *testing.T) {
 	assert.Equal(t, "<p>Updated from stdin</p>", body["content"])
 }
 
+func TestCommentsUpdateRejectsEmptyDashContent(t *testing.T) {
+	transport := &mockCommentWriteTransport{}
+	app, _ := setupCommentsWriteTestApp(t, transport)
+	app.Flags.JSON = true
+
+	cmd := newCommentsUpdateCmd()
+	cmd.SetIn(strings.NewReader("  \n"))
+
+	err := executeCommand(cmd, app, "1234", "-")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Equal(t, "<content> required", outErr.Message)
+	assert.Empty(t, transport.capturedBodies)
+}
+
 func TestCommentCreateReadsContentFromStdin(t *testing.T) {
 	transport := &mockCommentWriteTransport{}
 	app, _ := setupCommentsWriteTestApp(t, transport)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	_, err = io.WriteString(w, "hello from stdin")
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-
-	origStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = origStdin
-		r.Close()
-	})
-
 	cmd := NewCommentCmd()
-	err = executeCommand(cmd, app, "123")
+	cmd.SetIn(strings.NewReader("hello from stdin"))
+	err := executeCommand(cmd, app, "123")
 	require.NoError(t, err)
 	require.Len(t, transport.capturedBodies, 1)
 
@@ -132,21 +139,9 @@ func TestCommentCreatePrefersPositionalContentOverStdin(t *testing.T) {
 	transport := &mockCommentWriteTransport{}
 	app, _ := setupCommentsWriteTestApp(t, transport)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	_, err = io.WriteString(w, "ignored stdin")
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-
-	origStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = origStdin
-		r.Close()
-	})
-
 	cmd := NewCommentCmd()
-	err = executeCommand(cmd, app, "123", "hello from args")
+	cmd.SetIn(strings.NewReader("ignored stdin"))
+	err := executeCommand(cmd, app, "123", "hello from args")
 	require.NoError(t, err)
 	require.Len(t, transport.capturedBodies, 1)
 
@@ -159,21 +154,9 @@ func TestCommentsCreateReadsContentFromStdin(t *testing.T) {
 	transport := &mockCommentWriteTransport{}
 	app, _ := setupCommentsWriteTestApp(t, transport)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	_, err = io.WriteString(w, "hello from stdin")
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-
-	origStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = origStdin
-		r.Close()
-	})
-
 	cmd := NewCommentsCmd()
-	err = executeCommand(cmd, app, "create", "123")
+	cmd.SetIn(strings.NewReader("hello from stdin"))
+	err := executeCommand(cmd, app, "create", "123")
 	require.NoError(t, err)
 	require.Len(t, transport.capturedBodies, 1)
 
@@ -192,14 +175,12 @@ func TestCommentCreateMissingContentReturnsUsageBeforeAccountResolution(t *testi
 		t.Skip("dev null not available")
 	}
 
-	origStdin := os.Stdin
-	os.Stdin = devNull
 	t.Cleanup(func() {
-		os.Stdin = origStdin
 		devNull.Close()
 	})
 
 	cmd := NewCommentCmd()
+	cmd.SetIn(devNull)
 	err = executeCommand(cmd, app, "123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "<content> required")
@@ -212,13 +193,10 @@ func TestReadPipedStdinIgnoresUnreadableStdin(t *testing.T) {
 	require.NoError(t, r.Close())
 	require.NoError(t, w.Close())
 
-	origStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = origStdin
-	})
-
-	content, hasPipedStdin := readPipedStdin()
+	cmd := newCommentsCreateCmd()
+	cmd.SetIn(r)
+	content, hasPipedStdin, err := readPipedStdin(cmd)
+	require.NoError(t, err)
 	assert.Empty(t, content)
 	assert.False(t, hasPipedStdin)
 }
