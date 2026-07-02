@@ -1549,11 +1549,17 @@ func fetchSubscriptionState(sub *basecamp.Subscription, err error) bool {
 
 // formatDueDate converts an ISO date string to a human-friendly label.
 func formatDueDate(iso string) string {
+	return formatDueDateAt(iso, time.Now())
+}
+
+// formatDueDateAt formats a due date relative to a caller-supplied now, so the
+// relative labels ("Today"/"Tomorrow"/same-year) are deterministic and testable
+// without depending on the wall clock. formatDueDate passes time.Now().
+func formatDueDateAt(iso string, now time.Time) string {
 	t, err := time.ParseInLocation("2006-01-02", iso, time.Local)
 	if err != nil {
 		return iso
 	}
-	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	switch {
 	case t.Equal(today):

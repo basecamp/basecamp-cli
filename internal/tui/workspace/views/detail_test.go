@@ -800,29 +800,34 @@ func TestDetail_EditingCallsRelayout(t *testing.T) {
 }
 
 func TestFormatDueDate(t *testing.T) {
-	now := time.Now()
+	// Fixed reference time so the test is fully deterministic — it never reads
+	// the wall clock, so there's no midnight/New-Year race between the test's
+	// now and the one formatDueDate would compute internally.
+	now := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.Local)
+	format := func(iso string) string { return formatDueDateAt(iso, now) }
+
 	today := now.Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
 	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 
-	assert.Equal(t, "Today", formatDueDate(today))
-	assert.Equal(t, "Tomorrow", formatDueDate(tomorrow))
-	assert.Equal(t, "Yesterday", formatDueDate(yesterday))
+	assert.Equal(t, "Today", format(today))
+	assert.Equal(t, "Tomorrow", format(tomorrow))
+	assert.Equal(t, "Yesterday", format(yesterday))
 
-	// Same year, far enough from today to avoid collisions
-	farDate := now.AddDate(0, 6, 0) // 6 months ahead
-	farISO := farDate.Format("2006-01-02")
-	result := formatDueDate(farISO)
-	assert.Contains(t, result, farDate.Format("Jan 2"))
-	assert.NotContains(t, result, farDate.Format("2006"), "same-year dates should omit year")
+	// Same calendar year as now, comfortably away from the today/tomorrow/
+	// yesterday window.
+	sameYear := time.Date(now.Year(), time.February, 15, 0, 0, 0, 0, now.Location())
+	result := format(sameYear.Format("2006-01-02"))
+	assert.Contains(t, result, sameYear.Format("Jan 2"))
+	assert.NotContains(t, result, sameYear.Format("2006"), "same-year dates should omit year")
 
-	// Different year: includes year
-	otherYear := now.AddDate(-2, 0, 0).Format("2006-01-02")
-	result = formatDueDate(otherYear)
-	assert.Contains(t, result, now.AddDate(-2, 0, 0).Format("2006"))
+	// Different year: includes year.
+	otherYear := now.AddDate(-2, 0, 0)
+	result = format(otherYear.Format("2006-01-02"))
+	assert.Contains(t, result, otherYear.Format("2006"))
 
-	// Invalid input: pass through
-	assert.Equal(t, "not-a-date", formatDueDate("not-a-date"))
+	// Invalid input: pass through.
+	assert.Equal(t, "not-a-date", format("not-a-date"))
 }
 
 func TestDetail_SyncPreview_DueDateFormatted(t *testing.T) {
