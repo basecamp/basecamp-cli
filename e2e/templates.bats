@@ -133,13 +133,22 @@ load test_helper
 
 # Flag parsing
 
-@test "templates --status without value shows error" {
+@test "templates list --status without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates --status
+  run basecamp templates list --status
   assert_failure
   assert_output_contains "--status requires a value"
+}
+
+@test "templates list --status with invalid value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates list --status bogus
+  assert_failure
+  assert_output_contains "unknown --status value"
 }
 
 
