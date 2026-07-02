@@ -15,8 +15,6 @@ import (
 
 // NewTemplatesCmd creates the templates command for managing project templates.
 func NewTemplatesCmd() *cobra.Command {
-	var status string
-
 	cmd := &cobra.Command{
 		Use:   "templates",
 		Short: "Manage project templates",
@@ -27,10 +25,8 @@ tools, and content.`,
 		Annotations: map[string]string{"agent_notes": "Construction from template is asynchronous — poll construction until status=completed to get the new project ID"},
 	}
 
-	cmd.PersistentFlags().StringVar(&status, "status", "active", "Filter: active, archived, trashed")
-
 	cmd.AddCommand(
-		newTemplatesListCmd(&status),
+		newTemplatesListCmd(),
 		newTemplatesShowCmd(),
 		newTemplatesCreateCmd(),
 		newTemplatesUpdateCmd(),
@@ -42,15 +38,21 @@ tools, and content.`,
 	return cmd
 }
 
-func newTemplatesListCmd(status *string) *cobra.Command {
-	return &cobra.Command{
+func newTemplatesListCmd() *cobra.Command {
+	var status string
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List templates",
 		Long:  "List all project templates.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTemplatesList(cmd, *status)
+			return runTemplatesList(cmd, status)
 		},
 	}
+
+	cmd.Flags().StringVar(&status, "status", "active", "Filter: active, archived, trashed")
+
+	return cmd
 }
 
 func runTemplatesList(cmd *cobra.Command, status string) error {
