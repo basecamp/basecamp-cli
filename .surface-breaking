@@ -1054,3 +1054,10 @@ SUB basecamp uploads vault list
 SUB basecamp uploads vaults
 SUB basecamp uploads vaults create
 SUB basecamp uploads vaults list
+FLAG basecamp templates --status type=string
+FLAG basecamp templates construct --status type=string
+FLAG basecamp templates construction --status type=string
+FLAG basecamp templates create --status type=string
+FLAG basecamp templates delete --status type=string
+FLAG basecamp templates show --status type=string
+FLAG basecamp templates update --status type=string
