@@ -56,6 +56,15 @@ func newTemplatesListCmd() *cobra.Command {
 }
 
 func runTemplatesList(cmd *cobra.Command, status string) error {
+	// Validate before the value reaches the request URL — only the lifecycle
+	// filters the API understands are allowed.
+	switch status {
+	case "", "active", "archived", "trashed":
+	default:
+		return output.ErrUsage(
+			fmt.Sprintf("unknown --status value %q (expected active, archived, or trashed)", status))
+	}
+
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
