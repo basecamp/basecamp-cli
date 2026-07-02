@@ -157,3 +157,24 @@ basecamp auth logout && basecamp auth login
 ```bash
 basecamp auth login --scope full
 ```
+
+**Termux / Android (`SIGSYS: bad system call` on startup):**
+
+On Termux, the prebuilt binaries and
+`go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest` crash
+immediately — even `basecamp --help` — with `SIGSYS: bad system call`. A transitive
+dependency probes for clipboard tools in its package initializer, and Android's
+seccomp policy kills the resulting `faccessat2` syscall before the program
+starts. Building from source with Termux's own Go toolchain avoids the blocked
+syscall:
+
+```bash
+pkg install golang git
+git clone https://github.com/basecamp/basecamp-cli
+cd basecamp-cli
+go build -o basecamp ./cmd/basecamp   # or: make build → bin/basecamp
+```
+
+Then move the `basecamp` binary onto your PATH. Requires Go 1.26+; if your
+Termux Go is an earlier patch release, lower the `go` line in `go.mod` to
+match the version you have installed.
