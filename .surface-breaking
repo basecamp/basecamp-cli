@@ -669,6 +669,13 @@ FLAG basecamp reopen --styled type=bool
 FLAG basecamp reopen --todolist type=string
 FLAG basecamp reopen --verbose type=count
 FLAG basecamp reopen --version type=bool
+FLAG basecamp templates --status type=string
+FLAG basecamp templates construct --status type=string
+FLAG basecamp templates construction --status type=string
+FLAG basecamp templates create --status type=string
+FLAG basecamp templates delete --status type=string
+FLAG basecamp templates show --status type=string
+FLAG basecamp templates update --status type=string
 FLAG basecamp tlgroup create --name type=string
 FLAG basecamp tlgroup rename --name type=string
 FLAG basecamp tlgroup update --name type=string
@@ -1054,10 +1061,3 @@ SUB basecamp uploads vault list
 SUB basecamp uploads vaults
 SUB basecamp uploads vaults create
 SUB basecamp uploads vaults list
-FLAG basecamp templates --status type=string
-FLAG basecamp templates construct --status type=string
-FLAG basecamp templates construction --status type=string
-FLAG basecamp templates create --status type=string
-FLAG basecamp templates delete --status type=string
-FLAG basecamp templates show --status type=string
-FLAG basecamp templates update --status type=string
