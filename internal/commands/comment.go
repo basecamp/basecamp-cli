@@ -202,7 +202,11 @@ You can pass either a comment ID or a Basecamp URL:
   basecamp comments update https://3.basecamp.com/123/buckets/456/todos/111#__recording_789 "new text"
 
 Use - as the content argument to read the updated content from stdin:
-  basecamp comments update 789 - < body.md`,
+  basecamp comments update 789 - < body.md
+
+For multiline or non-ASCII content, prefer stdin over bash ANSI-C quoting
+($'...') — under a POSIX /bin/sh it posts a literal leading $ and keeps \n
+as backslash-n.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>")
@@ -301,7 +305,12 @@ Content supports Markdown and @mentions (@Name or @First.Last):
   basecamp comments create 789 "Hey @Jane.Smith, **please review**"
 
 Use - as the content argument to read content from stdin:
-  basecamp comments create 789 - < body.md`,
+  basecamp comments create 789 - < body.md
+
+For multiline or non-ASCII content, prefer stdin over bash ANSI-C quoting
+($'...'). $'...' is a bash/zsh extension; under a POSIX /bin/sh (dash,
+busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
+  printf '%s\n' 'First line' '' '<bc-attachment ...>' | basecamp comments create 789 -`,
 		Annotations: map[string]string{"agent_notes": "Comments are flat — reply to parent item, not to other comments\nURL fragments (#__recording_456) are comment IDs — comment on the parent recording_id, not the comment_id\nComments are on items (todos, messages, cards, etc.) — not on other comments"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
