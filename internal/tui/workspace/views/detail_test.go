@@ -809,12 +809,18 @@ func TestFormatDueDate(t *testing.T) {
 	assert.Equal(t, "Tomorrow", formatDueDate(tomorrow))
 	assert.Equal(t, "Yesterday", formatDueDate(yesterday))
 
-	// Same year, far enough from today to avoid collisions
-	farDate := now.AddDate(0, 6, 0) // 6 months ahead
-	farISO := farDate.Format("2006-01-02")
-	result := formatDueDate(farISO)
-	assert.Contains(t, result, farDate.Format("Jan 2"))
-	assert.NotContains(t, result, farDate.Format("2006"), "same-year dates should omit year")
+	// A date in the same calendar year as today, comfortably away from today.
+	// Pick the opposite half of the year so it stays same-year and clear of the
+	// today/tomorrow/yesterday window no matter when in the year this runs —
+	// AddDate(0, 6, 0) would cross into next year for any date after June.
+	sameYearMonth := time.November
+	if now.Month() >= time.July {
+		sameYearMonth = time.February
+	}
+	sameYear := time.Date(now.Year(), sameYearMonth, 15, 0, 0, 0, 0, now.Location())
+	result := formatDueDate(sameYear.Format("2006-01-02"))
+	assert.Contains(t, result, sameYear.Format("Jan 2"))
+	assert.NotContains(t, result, sameYear.Format("2006"), "same-year dates should omit year")
 
 	// Different year: includes year
 	otherYear := now.AddDate(-2, 0, 0).Format("2006-01-02")
