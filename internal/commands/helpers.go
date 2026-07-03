@@ -13,18 +13,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
-// missingArg shows help in interactive TTY mode, returns a structured
-// usage error naming the missing argument in machine/agent mode.
+// missingArg shows help in interactive TTY mode, returns a structured usage
+// error naming the missing argument in non-interactive command mode.
 // The hint includes both the usage pattern and a concrete example
 // (if cmd.Example is set).
 func missingArg(cmd *cobra.Command, arg string) error {
-	if isMachineOutput(cmd) {
+	if isNonInteractiveCommand(cmd) {
 		hint := "Usage: " + cmd.UseLine()
 		if cmd.Example != "" {
 			if first, _, ok := strings.Cut(cmd.Example, "\n"); ok {
@@ -38,10 +39,10 @@ func missingArg(cmd *cobra.Command, arg string) error {
 	return cmd.Help()
 }
 
-// noChanges shows help in interactive TTY mode, returns a structured
-// usage error in machine/agent mode when an update command has no fields.
+// noChanges shows help in interactive TTY mode, returns a structured usage
+// error in non-interactive command mode when an update command has no fields.
 func noChanges(cmd *cobra.Command) error {
-	if isMachineOutput(cmd) {
+	if isNonInteractiveCommand(cmd) {
 		hint := "Usage: " + cmd.UseLine()
 		if cmd.Example != "" {
 			if first, _, ok := strings.Cut(cmd.Example, "\n"); ok {
@@ -55,8 +56,14 @@ func noChanges(cmd *cobra.Command) error {
 	return cmd.Help()
 }
 
-// isMachineOutput returns true when the command is running in a non-interactive
-// context: --agent, --json, --quiet, piped stdout, etc.
+// isNonInteractiveCommand returns true when command-level flows should avoid
+// human prompts or help screens, without implying a machine output format.
+func isNonInteractiveCommand(cmd *cobra.Command) bool {
+	return config.NonInteractiveEnv() || isMachineOutput(cmd)
+}
+
+// isMachineOutput returns true when the command output is intended for machine
+// consumption: --agent, --json, --quiet, piped stdout, etc.
 func isMachineOutput(cmd *cobra.Command) bool {
 	if app := appctx.FromContext(cmd.Context()); app != nil {
 		if app.IsMachineOutput() {

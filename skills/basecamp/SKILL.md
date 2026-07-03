@@ -112,6 +112,8 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
 
 Always pass `--json` or `--md` explicitly — auto-detection depends on config and may not produce the format you expect. Use `--md` when composing reports, summarizing data, or displaying results inline. `--agent` is for headless integration scripts.
 
+**Avoiding interactive prompts.** The flags `--agent`/`--json`/`--quiet`/`--ids-only`/`--count` and the environment variable `BASECAMP_NONINTERACTIVE=1` suppress interactive selection prompts. `--md` does **not** — if a required target is ambiguous (e.g. a project with multiple todosets and no `--todoset`), and the CLI is attached to a terminal, it will show a blocking picker. When you need Markdown output *and* no prompts, either pass the flag that names whatever is ambiguous (`--todoset <id>` for the todoset case above, or `--in <project>` / `--list <id>` when the project or list is ambiguous) or set `BASECAMP_NONINTERACTIVE=1` in the environment. `BASECAMP_NONINTERACTIVE` disables all prompts (they become actionable errors instead) without changing the output format — an escape hatch for agents running under a PTY.
+
 **Other modes:** `--quiet` (success: raw JSON, no envelope; errors: `{ok:false,...}`), `--ids-only`, `--count`, `--stats` (session statistics), `--styled` (force ANSI), `-v` / `-vv` (verbose/trace), `--jq '<expr>'` (built-in jq filter — see below).
 
 ### CLI Introspection

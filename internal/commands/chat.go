@@ -798,7 +798,7 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Confirm destructive action in interactive mode
-			if !force && !isMachineOutput(cmd) {
+			if !force && !isNonInteractiveCommand(cmd) {
 				confirmed, err := tui.ConfirmDangerous("Permanently delete this chat line?")
 				if err != nil {
 					return nil //nolint:nilerr // user canceled prompt

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -136,6 +137,25 @@ func isolateRootTest(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+}
+
+func TestIsInteractiveTTYWithNonInteractiveEnv(t *testing.T) {
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(os.DevNull + " not available")
+	}
+	origStdout := os.Stdout
+	os.Stdout = devNull
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+		devNull.Close()
+	})
+
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}))
+
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	assert.False(t, isInteractiveTTY(appctx.GlobalFlags{}))
 }
 
 func TestJQInvalidExpressionRejectedBeforeRunE(t *testing.T) {
