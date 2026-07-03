@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,87 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockCheckinsAnswersByPersonTransport struct {
+	recordedPath string
+}
+
+func (m *mockCheckinsAnswersByPersonTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":123,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/people.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Alice Smith","email_address":"alice@example.com"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == "GET" && req.URL.Path == "/99999/questions/789/answers/by/456":
+		m.recordedPath = req.URL.Path
+		return &http.Response{
+			StatusCode: 200,
+			Body: io.NopCloser(strings.NewReader(`[{
+				"id": 1001,
+				"content": "<div>Alice's answer</div>",
+				"group_on": "2026-04-21",
+				"creator": {"id": 456, "name": "Alice Smith"},
+				"parent": {"id": 789, "title": "What did you work on?", "type": "Question", "url": "https://example.test/questions/789", "app_url": "https://example.test/questions/789"},
+				"bucket": {"id": 123, "name": "Test Project", "type": "Project"},
+				"status": "active",
+				"type": "Question::Answer",
+				"title": "What did you work on?"
+			}]`)),
+			Header: header,
+		}, nil
+	default:
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"Not Found"}`)),
+			Header:     header,
+		}, nil
+	}
+}
+
+func TestCheckinsAnswersByPersonFlag(t *testing.T) {
+	transport := &mockCheckinsAnswersByPersonTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newCheckinsAnswersCmd(&project)
+
+	err := executeCommand(cmd, app, "789", "--by", "Alice Smith")
+	require.NoError(t, err)
+	assert.Equal(t, "/99999/questions/789/answers/by/456", transport.recordedPath)
+}
+
+// TestCheckinsAnswersByBlankValue verifies that an explicitly provided but blank
+// --by value is rejected (empty or whitespace), rather than silently falling back
+// to the unfiltered endpoint.
+func TestCheckinsAnswersByBlankValue(t *testing.T) {
+	for _, blank := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("%q", blank), func(t *testing.T) {
+			transport := &mockCheckinsAnswersByPersonTransport{}
+			app, _ := newTestAppWithTransport(t, transport)
+			app.Config.ProjectID = "123"
+
+			project := ""
+			cmd := newCheckinsAnswersCmd(&project)
+
+			err := executeCommand(cmd, app, "789", "--by", blank)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot be blank")
+			assert.Empty(t, transport.recordedPath, "must not call the per-person endpoint")
+		})
+	}
+}
 
 type mockCheckinsAnswerCreateTransport struct {
 	recordedPath string
