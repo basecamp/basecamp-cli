@@ -274,7 +274,7 @@ func sanitizeRequestID(requestID string) string {
 
 func escapeMarkdownText(s string) string {
 	replacer := strings.NewReplacer(
-		`\\`, `\\`,
+		`\`, `\\`,
 		"`", "\\`",
 		"*", "\\*",
 		"_", "\\_",

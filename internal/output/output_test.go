@@ -2287,12 +2287,12 @@ func TestWriterMarkdownErrorIncludesRequestID(t *testing.T) {
 		Code:       basecamp.CodeAPI,
 		Message:    "server error",
 		HTTPStatus: 500,
-		RequestID:  "req*cli`123\x1b[31m",
+		RequestID:  "req*cli`123\\x\x1b[31m",
 	})
 	require.NoError(t, writeErr, "Err() failed")
 
 	output := buf.String()
-	assert.Contains(t, output, "Request ID: req\\*cli\\`123")
+	assert.Contains(t, output, "Request ID: req\\*cli\\`123\\\\x")
 	assert.NotContains(t, output, "\x1b")
 }
 
