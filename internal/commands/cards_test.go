@@ -1783,3 +1783,148 @@ func TestResolveAssigneeIDAcceptsPositive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(42), id)
 }
+
+// mockCardColumnTransport serves the endpoints used by the column color/on-hold
+// commands. columnType controls the type returned by the column GET (which the
+// type guard inspects); getStatus lets a test simulate a missing column. It
+// records the method and path of any color/on-hold mutation so tests can assert
+// the correct bucket-scoped endpoint was called — or that no mutation happened.
+type mockCardColumnTransport struct {
+	columnType string
+	getStatus  int
+
+	mutateMethod string
+	mutatePath   string
+}
+
+func (m *mockCardColumnTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	respond := func(status int, body string) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+	column := func(colType string) string {
+		return fmt.Sprintf(`{"id":789,"type":%q,"title":"In progress","status":"active",`+
+			`"inherits_status":true,"visible_to_clients":false,`+
+			`"created_at":"2026-07-03T00:00:00Z","updated_at":"2026-07-03T00:00:00Z",`+
+			`"url":"https://example.test/columns/789","app_url":"https://example.test/columns/789",`+
+			`"cards_count":0,"comment_count":0}`, colType)
+	}
+
+	path := req.URL.Path
+	switch {
+	case req.Method == "GET" && strings.Contains(path, "/projects.json"):
+		return respond(200, `[{"id":123,"name":"Test Project"},{"id":999,"name":"Other Project"}]`)
+	case strings.Contains(path, "/on_hold.json"), strings.Contains(path, "/color.json"):
+		m.mutateMethod = req.Method
+		m.mutatePath = path
+		return respond(200, column(standardColumnType))
+	case req.Method == "GET" && strings.Contains(path, "/card_tables/columns/"):
+		status := m.getStatus
+		if status == 0 {
+			status = 200
+		}
+		if status != 200 {
+			return respond(status, `{"error":"Not Found"}`)
+		}
+		return respond(200, column(m.columnType))
+	default:
+		return respond(404, `{"error":"Not Found"}`)
+	}
+}
+
+func TestCardsColumnOnHoldStandardColumn(t *testing.T) {
+	tr := &mockCardColumnTransport{columnType: standardColumnType}
+	app, _ := newTestAppWithTransport(t, tr)
+
+	project := ""
+	err := executeCommand(newCardsColumnOnHoldCmd(&project), app, "789")
+	require.NoError(t, err)
+	assert.Equal(t, "POST", tr.mutateMethod)
+	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/on_hold.json")
+}
+
+func TestCardsColumnNoOnHoldStandardColumn(t *testing.T) {
+	tr := &mockCardColumnTransport{columnType: standardColumnType}
+	app, _ := newTestAppWithTransport(t, tr)
+
+	project := ""
+	err := executeCommand(newCardsColumnNoOnHoldCmd(&project), app, "789")
+	require.NoError(t, err)
+	assert.Equal(t, "DELETE", tr.mutateMethod)
+	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/on_hold.json")
+}
+
+func TestCardsColumnColorStandardColumn(t *testing.T) {
+	tr := &mockCardColumnTransport{columnType: standardColumnType}
+	app, _ := newTestAppWithTransport(t, tr)
+
+	project := ""
+	err := executeCommand(newCardsColumnColorCmd(&project), app, "789", "--color", "blue")
+	require.NoError(t, err)
+	assert.Equal(t, "PUT", tr.mutateMethod)
+	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/color.json")
+}
+
+// TestCardsColumnActionsRejectNonStandardColumns verifies the type guard: on
+// Triage, Not now, and Done columns the on-hold and color commands return a
+// friendly usage error and never call the mutating endpoint (which the API would
+// answer with a bare 404).
+func TestCardsColumnActionsRejectNonStandardColumns(t *testing.T) {
+	for _, colType := range []string{"Kanban::Triage", "Kanban::NotNowColumn", "Kanban::DoneColumn"} {
+		t.Run(colType, func(t *testing.T) {
+			cases := []struct {
+				name string
+				cmd  func(*string) *cobra.Command
+				args []string
+			}{
+				{"on-hold", newCardsColumnOnHoldCmd, []string{"789"}},
+				{"no-on-hold", newCardsColumnNoOnHoldCmd, []string{"789"}},
+				{"color", newCardsColumnColorCmd, []string{"789", "--color", "blue"}},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					tr := &mockCardColumnTransport{columnType: colType}
+					app, _ := newTestAppWithTransport(t, tr)
+
+					project := ""
+					err := executeCommand(tc.cmd(&project), app, tc.args...)
+					require.Error(t, err)
+
+					var e *output.Error
+					require.True(t, errors.As(err, &e))
+					assert.Contains(t, e.Message, "standard columns")
+					assert.Empty(t, tr.mutatePath, "mutation endpoint must not be called for a non-standard column")
+				})
+			}
+		})
+	}
+}
+
+func TestCardsColumnOnHoldColumnNotFound(t *testing.T) {
+	tr := &mockCardColumnTransport{columnType: standardColumnType, getStatus: 404}
+	app, _ := newTestAppWithTransport(t, tr)
+
+	project := ""
+	err := executeCommand(newCardsColumnOnHoldCmd(&project), app, "789")
+	require.Error(t, err)
+	assert.Empty(t, tr.mutatePath, "mutation must not be attempted when the column lookup fails")
+}
+
+// TestCardsColumnColorResolvesProjectFromURL verifies the bucket ID is taken from
+// the URL (123) over the configured project (999) and threaded into the endpoint.
+func TestCardsColumnColorResolvesProjectFromURL(t *testing.T) {
+	tr := &mockCardColumnTransport{columnType: standardColumnType}
+	app, _ := newTestAppWithTransport(t, tr)
+	app.Config.ProjectID = "999"
+
+	project := ""
+	url := "https://3.basecamp.com/99999/buckets/123/card_tables/columns/789"
+	err := executeCommand(newCardsColumnColorCmd(&project), app, url, "--color", "blue")
+	require.NoError(t, err)
+	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/color.json")
+}

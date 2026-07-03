@@ -1584,6 +1584,10 @@ You can pass either a column ID or a Basecamp URL:
 				return output.ErrUsage("Invalid column ID")
 			}
 
+			if err := requireStandardColumn(cmd, app, columnID, "Enabling on-hold"); err != nil {
+				return err
+			}
+
 			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
 			if err != nil {
 				return err
@@ -1624,6 +1628,10 @@ You can pass either a column ID or a Basecamp URL:
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
+			}
+
+			if err := requireStandardColumn(cmd, app, columnID, "Disabling on-hold"); err != nil {
+				return err
 			}
 
 			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
@@ -1673,6 +1681,10 @@ You can pass either a column ID or a Basecamp URL:
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
+			}
+
+			if err := requireStandardColumn(cmd, app, columnID, "Setting a column color"); err != nil {
+				return err
 			}
 
 			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
@@ -2211,6 +2223,30 @@ func resolveColumnBucketID(cmd *cobra.Command, app *appctx.App, project, urlProj
 		return 0, output.ErrUsage("Project ID must be numeric")
 	}
 	return bucketID, nil
+}
+
+// standardColumnType is the only card column type that supports color and
+// on-hold sections. The API rejects these actions on Triage, Not now, and Done
+// columns with a bare 404, so we check the type up front and return a clearer
+// error.
+const standardColumnType = "Kanban::Column"
+
+// requireStandardColumn verifies the column supports color/on-hold actions.
+// Triage, Not now, and Done columns don't, so it returns a friendly usage error
+// instead of the API's bare 404. action names the attempted operation, e.g.
+// "Enabling on-hold".
+func requireStandardColumn(cmd *cobra.Command, app *appctx.App, columnID int64, action string) error {
+	col, err := app.Account().CardColumns().Get(cmd.Context(), columnID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	if col.Type != standardColumnType {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%s is only available on standard columns", action),
+			fmt.Sprintf("%q is not a standard column — color and on-hold sections apply only to regular columns, not Triage, Not now, or Done", col.Title),
+		)
+	}
+	return nil
 }
 
 func listProjectCardTables(cmd *cobra.Command, app *appctx.App, projectID string) ([]projectCardTable, error) {
