@@ -618,7 +618,7 @@ Use --by to filter answers by a specific person (name, email, ID, or "me"):
 				if err != nil {
 					return output.ErrUsage("Invalid person ID")
 				}
-				answersResult, err := app.Account().Checkins().ListAnswersByUser(cmd.Context(), questionID, personID, opts)
+				answersResult, err := app.Account().Checkins().ListAnswersByPerson(cmd.Context(), questionID, personID, opts)
 				if err != nil {
 					return convertSDKError(err)
 				}
