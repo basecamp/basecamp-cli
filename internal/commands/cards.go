@@ -2193,12 +2193,13 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 }
 
 // resolveColumnBucketID resolves the numeric project (bucket) ID for a column
-// command that takes a column ID or URL plus the --in/--project flag. It follows
-// the same precedence as other card commands: URL > flag > config > interactive.
+// command that takes a column ID or URL plus the --in/--project flag.
+//
+// Precedence: URL > flag > config > interactive. This intentionally differs from
+// most card commands, which seed from the flag first: a column URL encodes the
+// column's actual bucket, so honoring it over a mismatched --in avoids targeting
+// the wrong bucket (a guaranteed 404).
 func resolveColumnBucketID(cmd *cobra.Command, app *appctx.App, project, urlProjectID string) (int64, error) {
-	// A URL encodes the column's actual bucket, so it wins over the flag — passing
-	// --in for a different project than the URL would otherwise target the wrong
-	// bucket and 404.
 	projectID := urlProjectID
 	if projectID == "" {
 		projectID = project
