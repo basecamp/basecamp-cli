@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -169,11 +170,30 @@ func TestIsInteractiveWithCountMode(t *testing.T) {
 }
 
 func TestIsInteractiveWithNonInteractiveEnv(t *testing.T) {
-	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	// Swap os.Stdout to /dev/null — a char device that passes the ModeCharDevice
+	// guard — so IsInteractive() would otherwise return true. Without this, go
+	// test's piped stdout makes IsInteractive() false regardless of the env var,
+	// and the assertion would pass even if the short-circuit were removed.
+	devNull, err := os.Open("/dev/null")
+	if err != nil {
+		t.Skip("/dev/null not available")
+	}
+	origStdout := os.Stdout
+	os.Stdout = devNull
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+		devNull.Close()
+	})
+
 	cfg := &config.Config{}
 	app := NewApp(cfg)
 
-	// No machine-output flag set, but the env escape hatch forces non-interactive.
+	// Baseline: char-device stdout, no env/flags → interactive.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+	require.True(t, app.IsInteractive(), "char-device stdout should be interactive without the escape hatch")
+
+	// The env escape hatch forces non-interactive even with an interactive stdout.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
 	assert.False(t, app.IsInteractive(), "BASECAMP_NONINTERACTIVE should force non-interactive")
 	// Output format is untouched — the escape hatch only disables prompts.
 	assert.False(t, app.IsMachineOutput(), "escape hatch must not change output mode")

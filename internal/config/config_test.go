@@ -1078,11 +1078,10 @@ func TestNonInteractiveEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.value, func(t *testing.T) {
-			if tt.value == "" {
-				os.Unsetenv("BASECAMP_NONINTERACTIVE")
-			} else {
-				t.Setenv("BASECAMP_NONINTERACTIVE", tt.value)
-			}
+			// t.Setenv restores the prior value automatically. NonInteractiveEnv
+			// treats an empty value as unset, so "" covers the unset case without
+			// os.Unsetenv (which would bypass testing.T's restoration).
+			t.Setenv("BASECAMP_NONINTERACTIVE", tt.value)
 			assert.Equal(t, tt.want, NonInteractiveEnv())
 		})
 	}
