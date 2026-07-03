@@ -1928,3 +1928,17 @@ func TestCardsColumnColorResolvesProjectFromURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/color.json")
 }
+
+// TestCardsColumnColorURLBucketBeatsFlag verifies the URL's bucket (123) wins over
+// an explicit --in/--project flag pointing elsewhere (999): the URL identifies the
+// column's real bucket, so targeting the flag project would 404.
+func TestCardsColumnColorURLBucketBeatsFlag(t *testing.T) {
+	tr := &mockCardColumnTransport{columnType: standardColumnType}
+	app, _ := newTestAppWithTransport(t, tr)
+
+	project := "999" // explicit --in/--project pointing at a different bucket
+	url := "https://3.basecamp.com/99999/buckets/123/card_tables/columns/789"
+	err := executeCommand(newCardsColumnColorCmd(&project), app, url, "--color", "blue")
+	require.NoError(t, err)
+	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/color.json")
+}
