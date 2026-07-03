@@ -209,6 +209,14 @@ func TestIsMachineOutput_JSONFlag(t *testing.T) {
 	assert.True(t, isMachineOutput(cmd))
 }
 
+func TestIsNonInteractiveCommand_NonInteractiveEnv(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+
+	cmd := newTestCmd(false, "")
+	assert.True(t, isNonInteractiveCommand(cmd))
+	assert.False(t, isMachineOutput(cmd))
+}
+
 func TestMissingArg_MultiLineExample(t *testing.T) {
 	cmd := newTestCmd(true, "  basecamp test \"first\"\n  basecamp test \"second\"")
 
