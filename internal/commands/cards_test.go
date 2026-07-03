@@ -127,7 +127,8 @@ func TestCardsColumnColorShowsHelp(t *testing.T) {
 	// Configure app with project
 	app.Config.ProjectID = "123"
 
-	cmd := newCardsColumnColorCmd()
+	project := ""
+	cmd := newCardsColumnColorCmd(&project)
 
 	err := executeCommand(cmd, app, "456") // column ID but no --color
 	assert.NoError(t, err, "expected help output, not error")

@@ -1177,9 +1177,9 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 		newCardsColumnMoveCmd(project, cardTable),
 		newCardsColumnWatchCmd(),
 		newCardsColumnUnwatchCmd(),
-		newCardsColumnOnHoldCmd(),
-		newCardsColumnNoOnHoldCmd(),
-		newCardsColumnColorCmd(),
+		newCardsColumnOnHoldCmd(project),
+		newCardsColumnNoOnHoldCmd(project),
+		newCardsColumnColorCmd(project),
 	)
 
 	return cmd
@@ -1560,7 +1560,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnOnHoldCmd() *cobra.Command {
+func newCardsColumnOnHoldCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "on-hold <id|url>",
 		Short: "Enable on-hold section",
@@ -1577,14 +1577,19 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			col, err := app.Account().CardColumns().EnableOnHold(cmd.Context(), columnID)
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			col, err := app.Account().CardColumns().EnableOnHold(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1597,7 +1602,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnNoOnHoldCmd() *cobra.Command {
+func newCardsColumnNoOnHoldCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "no-on-hold <id|url>",
 		Short: "Disable on-hold section",
@@ -1614,14 +1619,19 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			col, err := app.Account().CardColumns().DisableOnHold(cmd.Context(), columnID)
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			col, err := app.Account().CardColumns().DisableOnHold(cmd.Context(), bucketID, columnID)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1634,7 +1644,7 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
-func newCardsColumnColorCmd() *cobra.Command {
+func newCardsColumnColorCmd(project *string) *cobra.Command {
 	var color string
 
 	cmd := &cobra.Command{
@@ -1658,14 +1668,19 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			// Extract ID and project from URL if provided
+			columnIDStr, urlProjectID := extractWithProject(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
 			}
 
-			col, err := app.Account().CardColumns().SetColor(cmd.Context(), columnID, color)
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			col, err := app.Account().CardColumns().SetColor(cmd.Context(), bucketID, columnID, color)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -2163,6 +2178,39 @@ func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCard
 	}
 
 	return "", ambiguousCardTablesError(cardTables)
+}
+
+// resolveColumnBucketID resolves the numeric project (bucket) ID for a column
+// command that takes a column ID or URL plus the --in/--project flag. It follows
+// the same precedence as other card commands: URL > flag > config > interactive.
+func resolveColumnBucketID(cmd *cobra.Command, app *appctx.App, project, urlProjectID string) (int64, error) {
+	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return 0, err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return 0, err
+	}
+
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Project ID must be numeric")
+	}
+	return bucketID, nil
 }
 
 func listProjectCardTables(cmd *cobra.Command, app *appctx.App, projectID string) ([]projectCardTable, error) {
