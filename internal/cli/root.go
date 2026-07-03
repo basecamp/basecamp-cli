@@ -481,8 +481,8 @@ func isInteractiveTTY(flags appctx.GlobalFlags) bool {
 		return false
 	}
 
-	// Not interactive if any machine-output mode is set
-	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count {
+	// Not interactive if any machine-output mode is set (--jq implies --json)
+	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count || flags.JQFilter != "" {
 		return false
 	}
 

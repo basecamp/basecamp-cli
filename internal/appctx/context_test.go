@@ -170,13 +170,14 @@ func TestIsInteractiveWithCountMode(t *testing.T) {
 }
 
 func TestIsInteractiveWithNonInteractiveEnv(t *testing.T) {
-	// Swap os.Stdout to /dev/null — a char device that passes the ModeCharDevice
-	// guard — so IsInteractive() would otherwise return true. Without this, go
-	// test's piped stdout makes IsInteractive() false regardless of the env var,
-	// and the assertion would pass even if the short-circuit were removed.
-	devNull, err := os.Open("/dev/null")
+	// Swap os.Stdout to the null device — a char device that passes the
+	// ModeCharDevice guard — so IsInteractive() would otherwise return true.
+	// Without this, go test's piped stdout makes IsInteractive() false regardless
+	// of the env var, and the assertion would pass even if the short-circuit were
+	// removed.
+	devNull, err := os.Open(os.DevNull)
 	if err != nil {
-		t.Skip("/dev/null not available")
+		t.Skip(os.DevNull + " not available")
 	}
 	origStdout := os.Stdout
 	os.Stdout = devNull

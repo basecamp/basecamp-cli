@@ -140,9 +140,9 @@ func isolateRootTest(t *testing.T) {
 }
 
 func TestIsInteractiveTTYWithNonInteractiveEnv(t *testing.T) {
-	devNull, err := os.Open("/dev/null")
+	devNull, err := os.Open(os.DevNull)
 	if err != nil {
-		t.Skip("/dev/null not available")
+		t.Skip(os.DevNull + " not available")
 	}
 	origStdout := os.Stdout
 	os.Stdout = devNull
