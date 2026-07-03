@@ -474,8 +474,13 @@ func profileNames(cfg *config.Config) string {
 	return strings.Join(names, ", ")
 }
 
-// isInteractiveTTY returns true if stdout is a terminal and no machine-output mode is set.
+// isInteractiveTTY returns true if stdout is a terminal and no noninteractive
+// mode is set.
 func isInteractiveTTY(flags appctx.GlobalFlags) bool {
+	if config.NonInteractiveEnv() {
+		return false
+	}
+
 	// Not interactive if any machine-output mode is set
 	if flags.Agent || flags.JSON || flags.Quiet || flags.IDsOnly || flags.Count {
 		return false
