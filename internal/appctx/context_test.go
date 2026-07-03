@@ -168,6 +168,17 @@ func TestIsInteractiveWithCountMode(t *testing.T) {
 	assert.False(t, app.IsInteractive(), "should not be interactive in count mode")
 }
 
+func TestIsInteractiveWithNonInteractiveEnv(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	cfg := &config.Config{}
+	app := NewApp(cfg)
+
+	// No machine-output flag set, but the env escape hatch forces non-interactive.
+	assert.False(t, app.IsInteractive(), "BASECAMP_NONINTERACTIVE should force non-interactive")
+	// Output format is untouched — the escape hatch only disables prompts.
+	assert.False(t, app.IsMachineOutput(), "escape hatch must not change output mode")
+}
+
 func TestNewAppWithFormatConfig(t *testing.T) {
 	tests := []struct {
 		format string

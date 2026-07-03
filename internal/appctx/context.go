@@ -340,6 +340,12 @@ func (a *App) printStatsToStderr(stats *observability.SessionMetrics) {
 
 // IsInteractive returns true if the terminal supports interactive TUI.
 func (a *App) IsInteractive() bool {
+	// Explicit escape hatch: BASECAMP_NONINTERACTIVE forces non-interactive mode
+	// even under a PTY, without changing the output format.
+	if config.NonInteractiveEnv() {
+		return false
+	}
+
 	// Not interactive if any non-interactive output mode is set
 	if a.Flags.Agent || a.Flags.JSON || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count || a.Flags.JQFilter != "" {
 		return false

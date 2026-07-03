@@ -1061,3 +1061,29 @@ func TestPreferencesUnsetInFile(t *testing.T) {
 	assert.Nil(t, cfg.Stats)
 	assert.Nil(t, cfg.Verbose)
 }
+
+func TestNonInteractiveEnv(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{"1", true},
+		{"true", true},
+		{"TRUE", true},
+		{"0", false},
+		{"false", false},
+		{"banana", false}, // unrecognized values are ignored
+		{"", false},       // unset
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			if tt.value == "" {
+				os.Unsetenv("BASECAMP_NONINTERACTIVE")
+			} else {
+				t.Setenv("BASECAMP_NONINTERACTIVE", tt.value)
+			}
+			assert.Equal(t, tt.want, NonInteractiveEnv())
+		})
+	}
+}

@@ -390,6 +390,21 @@ func LoadFromEnv(cfg *Config) {
 	}
 }
 
+// NonInteractiveEnv reports whether BASECAMP_NONINTERACTIVE is set to a truthy
+// value. When true, the CLI must not show interactive prompts regardless of TTY
+// detection. This is an escape hatch for agents and harnesses that run the CLI
+// under an allocated PTY (where stdout looks like a terminal) and want to avoid
+// a selection prompt wedging the session — without forcing a machine output
+// format the way --agent does.
+func NonInteractiveEnv() bool {
+	if v := os.Getenv("BASECAMP_NONINTERACTIVE"); v != "" {
+		if b, ok := parseEnvBool(v); ok {
+			return b
+		}
+	}
+	return false
+}
+
 // parseEnvBool parses a boolean environment variable strictly.
 // Returns (value, true) for recognized values, (false, false) for unrecognized.
 // Unrecognized values are ignored to preserve three-state pointer semantics.
