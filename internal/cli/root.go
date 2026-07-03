@@ -474,8 +474,8 @@ func profileNames(cfg *config.Config) string {
 	return strings.Join(names, ", ")
 }
 
-// isInteractiveTTY returns true if stdout is a terminal and no noninteractive
-// mode is set.
+// isInteractiveTTY returns true if stdout is a character device (e.g. a
+// terminal) and no noninteractive mode is set.
 func isInteractiveTTY(flags appctx.GlobalFlags) bool {
 	if config.NonInteractiveEnv() {
 		return false
@@ -486,7 +486,7 @@ func isInteractiveTTY(flags appctx.GlobalFlags) bool {
 		return false
 	}
 
-	// Check if stdout is a terminal
+	// Check if stdout is a character device (e.g. a terminal)
 	fi, err := os.Stdout.Stat()
 	if err != nil {
 		return false

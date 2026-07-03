@@ -101,9 +101,11 @@ func (r *Resolver) Flags() *Flags {
 }
 
 // IsInteractive returns true if interactive prompts can be shown.
-// This checks both TTY status and machine-output flags.
+// This checks both stdout and machine-output flags.
 // Returns false if BASECAMP_NONINTERACTIVE is set, if any machine-output flag is
-// set (--agent, --json, --quiet, --ids-only, --count), or if stdout is not a terminal.
+// set (--agent, --json, --quiet, --ids-only, --count), or if stdout is not a
+// character device (the guard treats any char device — a terminal, /dev/null,
+// etc. — as interactive-capable).
 func (r *Resolver) IsInteractive() bool {
 	// Explicit escape hatch: BASECAMP_NONINTERACTIVE forces non-interactive mode
 	// even under a PTY, without changing the output format.
@@ -118,7 +120,7 @@ func (r *Resolver) IsInteractive() bool {
 		}
 	}
 
-	// Check if stdout is a terminal
+	// Check if stdout is a character device (e.g. a terminal)
 	fi, err := os.Stdout.Stat()
 	if err != nil {
 		return false
