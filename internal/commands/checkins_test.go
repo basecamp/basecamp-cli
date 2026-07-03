@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -33,7 +34,7 @@ func (m *mockCheckinsAnswersByPersonTransport) RoundTrip(req *http.Request) (*ht
 			Body:       io.NopCloser(strings.NewReader(`[{"id":456,"name":"Alice Smith","email_address":"alice@example.com"}]`)),
 			Header:     header,
 		}, nil
-	case req.Method == "GET" && strings.Contains(req.URL.Path, "/questions/789/answers/by/456"):
+	case req.Method == "GET" && req.URL.Path == "/99999/questions/789/answers/by/456":
 		m.recordedPath = req.URL.Path
 		return &http.Response{
 			StatusCode: 200,
@@ -69,7 +70,28 @@ func TestCheckinsAnswersByPersonFlag(t *testing.T) {
 
 	err := executeCommand(cmd, app, "789", "--by", "Alice Smith")
 	require.NoError(t, err)
-	assert.Contains(t, transport.recordedPath, "/questions/789/answers/by/456")
+	assert.Equal(t, "/99999/questions/789/answers/by/456", transport.recordedPath)
+}
+
+// TestCheckinsAnswersByBlankValue verifies that an explicitly provided but blank
+// --by value is rejected (empty or whitespace), rather than silently falling back
+// to the unfiltered endpoint.
+func TestCheckinsAnswersByBlankValue(t *testing.T) {
+	for _, blank := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("%q", blank), func(t *testing.T) {
+			transport := &mockCheckinsAnswersByPersonTransport{}
+			app, _ := newTestAppWithTransport(t, transport)
+			app.Config.ProjectID = "123"
+
+			project := ""
+			cmd := newCheckinsAnswersCmd(&project)
+
+			err := executeCommand(cmd, app, "789", "--by", blank)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot be blank")
+			assert.Empty(t, transport.recordedPath, "must not call the per-person endpoint")
+		})
+	}
 }
 
 type mockCheckinsAnswerCreateTransport struct {

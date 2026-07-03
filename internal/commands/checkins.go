@@ -604,7 +604,7 @@ Use --by to filter answers by a specific person (name, email, ID, or "me"):
 			}
 
 			trimmedBy := strings.TrimSpace(by)
-			if by != "" && trimmedBy == "" {
+			if cmd.Flags().Changed("by") && trimmedBy == "" {
 				return output.ErrUsage("--by value cannot be blank")
 			}
 
