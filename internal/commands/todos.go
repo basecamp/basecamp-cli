@@ -568,14 +568,19 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 // The Recordings status is lifecycle-only (active/archived/trashed) and does not
 // distinguish completed from incomplete, so that split is applied client-side.
 //
-// limit bounds how many listless todos are kept, matching the per-list limit the
-// todolist path uses (0 = SDK default of 100, -1 = all, positive = cap) so
-// ordinary `todos list` / `--limit N` runs don't hydrate and emit every
-// Todoset-level todo. The cap is applied to listless todos *after* filtering by
-// parent — not to the raw recordings, which also include Todolist-parented todos
-// that would otherwise consume the budget and hide listless todos sorted behind
-// them. Listing recordings is a paginated metadata call; the per-todo hydration
-// is the expensive part, and that is what the cap actually bounds.
+// limit mirrors the per-list limit the todolist path uses (0 = SDK default of
+// 100, -1 = all, positive = cap) and governs how many *listless* todos are kept.
+// The cap is applied after filtering by parent — not to the raw recordings,
+// which also include Todolist-parented todos that would otherwise consume the
+// budget and hide listless todos sorted behind them.
+//
+// The recordings endpoint has no parent-type filter, so listless todos can only
+// be found by scanning Todo recordings. To avoid a full-project traversal on
+// ordinary runs, the scan itself is bounded: --all scans everything for an
+// exhaustive result, while limited/default runs scan only a window of the most
+// recent Todo recordings (at least DefaultRecordingLimit, more when --limit asks
+// for more). Listless todos outside that window require --all — the same
+// best-effort tradeoff the aggregate path already documents for per-list limits.
 //
 // Errors are non-fatal: the caller still gets the todolist todos.
 func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, todosetID int64, sdkStatus string, completed bool, limit int) []basecamp.Todo {
@@ -584,24 +589,32 @@ func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, tod
 		recStatus = "active"
 	}
 
-	// Fetch all Todo recording metadata for the project (Limit -1). The cap
-	// governs listless todos specifically, so it can only be applied after the
-	// parent filter below — hence we cannot delegate it to the recordings fetch.
+	// Cap on kept listless todos: 0 → SDK default of 100, negative (--all) →
+	// unlimited, positive → explicit cap.
+	maxKept := limit
+	if maxKept == 0 {
+		maxKept = basecamp.DefaultRecordingLimit
+	}
+
+	// Bound how many recordings we scan. --all (limit < 0) scans everything;
+	// otherwise scan a window sized to what we might keep, with a floor so a
+	// small --limit still scans a useful slice rather than stopping at the first
+	// few recordings (which could all be Todolist-parented).
+	recScan := -1 // unlimited
+	if limit >= 0 {
+		recScan = maxKept
+		if recScan < basecamp.DefaultRecordingLimit {
+			recScan = basecamp.DefaultRecordingLimit
+		}
+	}
+
 	result, err := app.Account().Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
 		Bucket: []int64{projectID},
 		Status: recStatus,
-		Limit:  -1,
+		Limit:  recScan,
 	})
 	if err != nil {
 		return nil
-	}
-
-	// Translate the per-list limit into a cap on kept listless todos: 0 falls
-	// back to the SDK default of 100, a negative value means unlimited (--all),
-	// and a positive value is an explicit cap.
-	maxKept := limit
-	if maxKept == 0 {
-		maxKept = 100
 	}
 
 	var todos []basecamp.Todo
