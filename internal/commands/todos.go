@@ -478,6 +478,15 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		allTodos = append(allTodos, todos...)
 	}
 
+	// Basecamp 5 lets todos live directly under the Todoset without a
+	// Todolist. Those "listless" todos are invisible to the per-todolist
+	// enumeration above, so fetch them via the Recordings API and merge them
+	// in. Assignee/overdue filters below apply to them too.
+	if projectID, perr := strconv.ParseInt(project, 10, 64); perr == nil {
+		allTodos = append(allTodos,
+			fetchTodosetLevelTodos(cmd.Context(), app, projectID, todosetID, sdkStatus, sdkCompleted)...)
+	}
+
 	// Apply filters
 	var result []basecamp.Todo
 	for _, todo := range allTodos {
@@ -543,6 +552,61 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// because limit is applied per-list, not globally. Use --list for accurate notices.
 
 	return app.OK(result, respOpts...)
+}
+
+// fetchTodosetLevelTodos returns todos that live directly under the project's
+// Todoset rather than inside a Todolist. Basecamp 5 allows creating such
+// "listless" todos; the /todolists/{id}/todos.json index endpoint the SDK uses
+// to enumerate a todoset's lists cannot see them (it 404s when handed a Todoset
+// ID). They are only reachable via the Recordings API, which returns every Todo
+// in the bucket regardless of parent. We fetch those recordings, keep the ones
+// parented directly to this todoset, and hydrate each into a full Todo — the
+// Recording payload the SDK exposes lacks the completion/assignee/due fields the
+// list output and its filters need.
+//
+// completed mirrors the server-side completion filter applied to todolist todos.
+// The Recordings status is lifecycle-only (active/archived/trashed) and does not
+// distinguish completed from incomplete, so that split is applied client-side.
+//
+// Errors are non-fatal: the caller still gets the todolist todos.
+func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, todosetID int64, sdkStatus string, completed bool) []basecamp.Todo {
+	recStatus := sdkStatus
+	if recStatus == "" {
+		recStatus = "active"
+	}
+
+	result, err := app.Account().Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
+		Bucket: []int64{projectID},
+		Status: recStatus,
+		Limit:  -1,
+	})
+	if err != nil {
+		return nil
+	}
+
+	var todos []basecamp.Todo
+	for _, rec := range result.Recordings {
+		if rec.Parent == nil || rec.Parent.Type != "Todoset" || rec.Parent.ID != todosetID {
+			continue
+		}
+
+		todo, err := app.Account().Todos().Get(ctx, rec.ID)
+		if err != nil {
+			continue // Skip todos we can't hydrate.
+		}
+
+		// Recordings' lifecycle status can't express completed vs incomplete,
+		// so apply that split here to match the todolist path. Only do so for
+		// the active view (sdkStatus == ""); archived/trashed views return all
+		// matching todos regardless of completion, just like the todolist path.
+		if sdkStatus == "" && todo.Completed != completed {
+			continue
+		}
+
+		todos = append(todos, *todo)
+	}
+
+	return todos
 }
 
 func newTodosShowCmd() *cobra.Command {

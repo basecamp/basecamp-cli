@@ -2192,3 +2192,163 @@ func TestTodosListInListAssigneeNoGroupsLimitAfterFilter(t *testing.T) {
 	require.Len(t, resp.Data, 1)
 	assert.Equal(t, int64(2), resp.Data[0].ID, "should be Alice's first match via no-groups path")
 }
+
+// listlessTodoTransport serves a project whose todos live both inside a
+// Todolist and directly under the Todoset (Basecamp 5 "listless" todos). The
+// per-todolist enumeration only sees the Todolist todo; the Todoset-level todo
+// is reachable only via the Recordings API, then hydrated with Todos().Get.
+type listlessTodoTransport struct {
+	getTodoCalls int
+}
+
+func (s *listlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		// Two Todos in the bucket: one under a Todolist (must be ignored here,
+		// it's already covered by the todolist enumeration) and one directly
+		// under the Todoset (the listless todo we must surface).
+		body = `[` +
+			`{"id": 500, "title": "Listless todo", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}},` +
+			`{"id": 111, "title": "List todo", "type": "Todo", "status": "active", "parent": {"id": 10, "type": "Todolist"}}` +
+			`]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[{"id": 10, "title": "General", "name": "General"}]`
+	case strings.Contains(path, "/todolists/10/groups.json"):
+		body = `[]`
+	case strings.Contains(path, "/todolists/10/todos.json"):
+		body = `[{"id": 111, "content": "List todo", "position": 1, "status": "active", "completed": false, "parent": {"id": 10, "type": "Todolist"}}]`
+	case strings.HasSuffix(path, "/todos/500"):
+		s.getTodoCalls++
+		body = `{"id": 500, "content": "Listless todo", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func setupListlessTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999", ProjectID: "123"}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}, buf
+}
+
+// TestTodosListIncludesTodosetLevelTodos covers issue #474: todos that live
+// directly under the Todoset (no Todolist) must appear in `todos list`.
+func TestTodosListIncludesTodosetLevelTodos(t *testing.T) {
+	transport := &listlessTodoTransport{}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID     int64 `json:"id"`
+			Parent struct {
+				Type string `json:"type"`
+			} `json:"parent"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+
+	ids := map[int64]string{}
+	for _, td := range resp.Data {
+		ids[td.ID] = td.Parent.Type
+	}
+	require.Len(t, resp.Data, 2, "expected the todolist todo plus the listless todoset todo")
+	assert.Equal(t, "Todolist", ids[111], "todolist todo should still be present")
+	assert.Equal(t, "Todoset", ids[500], "listless todoset todo should be surfaced")
+	assert.Equal(t, 1, transport.getTodoCalls, "listless todo should be hydrated exactly once")
+}
+
+// completedListlessTodoTransport serves a completed Todoset-level todo. The
+// Recordings API reports it as lifecycle "active" (completion is not a
+// recordings status), so the completed/incomplete split must be applied
+// client-side after hydration.
+type completedListlessTodoTransport struct{}
+
+func (completedListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		body = `[{"id": 500, "title": "Done listless", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.HasSuffix(path, "/todos/500"):
+		body = `{"id": 500, "content": "Done listless", "status": "active", "completed": true, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func TestTodosListTodosetLevelCompletionFilter(t *testing.T) {
+	decode := func(buf *bytes.Buffer) []int64 {
+		var resp struct {
+			Data []struct {
+				ID int64 `json:"id"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+		ids := make([]int64, 0, len(resp.Data))
+		for _, d := range resp.Data {
+			ids = append(ids, d.ID)
+		}
+		return ids
+	}
+
+	// Default (incomplete): the completed listless todo must be excluded.
+	app, buf := setupListlessTodoApp(t, completedListlessTodoTransport{})
+	require.NoError(t, executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123"))
+	assert.Empty(t, decode(buf), "completed listless todo must not appear in the default incomplete view")
+
+	// --completed: the completed listless todo must be included.
+	app, buf = setupListlessTodoApp(t, completedListlessTodoTransport{})
+	require.NoError(t, executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123", "--completed"))
+	assert.Equal(t, []int64{500}, decode(buf), "completed listless todo should appear with --completed")
+}
