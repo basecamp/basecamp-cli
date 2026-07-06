@@ -2565,3 +2565,79 @@ func TestTodosListTodosetLevelScanIsBounded(t *testing.T) {
 	assert.Equal(t, 150, countTodos(t, bufAll), "--all should return every listless todo")
 	assert.Equal(t, 150, transportAll.getTodoCalls, "--all should hydrate every listless todo")
 }
+
+// assigneeListlessTodoTransport serves many listless todos where only the last
+// one (well beyond the default scan window) is assigned to the target person.
+// With --assignee, the scan must not be capped before the client-side assignee
+// filter runs, or that match is silently dropped (issue #474 review follow-up).
+type assigneeListlessTodoTransport struct {
+	total    int   // number of listless recordings
+	matchID  int64 // the todo assigned to the target person
+	assignee int64 // target person ID
+}
+
+func (s *assigneeListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		items := make([]string, 0, s.total)
+		for i := 0; i < s.total; i++ {
+			id := int64(1000 + i)
+			items = append(items, fmt.Sprintf(
+				`{"id": %d, "title": "L%d", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}`, id, i))
+		}
+		body = "[" + strings.Join(items, ",") + "]"
+	case strings.Contains(path, "/people.json") || strings.Contains(path, "/my/profile.json"):
+		body = fmt.Sprintf(`[{"id": %d, "name": "Alice", "email_address": "alice@example.com"}]`, s.assignee)
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.Contains(path, "/todos/"):
+		idStr := path[strings.LastIndex(path, "/")+1:]
+		assignees := "[]"
+		if idStr == fmt.Sprintf("%d", s.matchID) {
+			assignees = fmt.Sprintf(`[{"id": %d, "name": "Alice"}]`, s.assignee)
+		}
+		body = fmt.Sprintf(`{"id": %s, "content": "listless", "status": "active", "completed": false, "assignees": %s, "parent": {"id": 100, "type": "Todoset"}}`, idStr, assignees)
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosListTodosetLevelAssigneeNotStarvedByCap ensures --assignee surfaces a
+// listless todo assigned to the target person even when it sits beyond the
+// default scan window, by fetching all candidates before filtering.
+func TestTodosListTodosetLevelAssigneeNotStarvedByCap(t *testing.T) {
+	const target int64 = 42
+	// 150 listless todos; only the last (id 1149, index 149) is Alice's — well
+	// past the default cap of 100.
+	transport := &assigneeListlessTodoTransport{total: 150, matchID: 1149, assignee: target}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123", "--assignee", "Alice")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1, "only Alice's listless todo should match")
+	assert.Equal(t, int64(1149), resp.Data[0].ID,
+		"Alice's listless todo beyond the default window must still be found")
+}

@@ -458,9 +458,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		return convertSDKError(err)
 	}
 
-	// Determine per-list limit to pass through to each fetch.
+	// Determine per-list limit to pass through to each fetch (todolists and the
+	// listless-todo recordings scan alike). When a client-side filter
+	// (assignee/overdue) is active, fetch everything so the post-fetch filter
+	// doesn't miss matches beyond the default cap — mirroring the single-list
+	// path. Any explicit --limit is then applied after filtering, below.
 	sdkLimit := 0 // SDK default
-	if all {
+	if all || assignee != "" || overdue {
 		sdkLimit = -1
 	} else if limit > 0 {
 		sdkLimit = limit
@@ -517,6 +521,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		}
 
 		result = append(result, todo)
+	}
+
+	// When a client-side filter forced an unlimited fetch above, apply the
+	// explicit --limit after filtering so the cap reflects the filtered set
+	// rather than the pre-filter fetch (mirrors the single-list path).
+	if (assignee != "" || overdue) && !all && limit > 0 && len(result) > limit {
+		result = result[:limit]
 	}
 
 	// Apply client-side sort when requested (field validated early in runTodosList,
