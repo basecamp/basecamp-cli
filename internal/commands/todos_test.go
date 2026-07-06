@@ -2192,3 +2192,469 @@ func TestTodosListInListAssigneeNoGroupsLimitAfterFilter(t *testing.T) {
 	require.Len(t, resp.Data, 1)
 	assert.Equal(t, int64(2), resp.Data[0].ID, "should be Alice's first match via no-groups path")
 }
+
+// listlessTodoTransport serves a project whose todos live both inside a
+// Todolist and directly under the Todoset (Basecamp 5 "listless" todos). The
+// per-todolist enumeration only sees the Todolist todo; the Todoset-level todo
+// is reachable only via the Recordings API, then hydrated with Todos().Get.
+type listlessTodoTransport struct {
+	getTodoCalls int
+}
+
+func (s *listlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		// Two Todos in the bucket: one under a Todolist (must be ignored here,
+		// it's already covered by the todolist enumeration) and one directly
+		// under the Todoset (the listless todo we must surface).
+		body = `[` +
+			`{"id": 500, "title": "Listless todo", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}},` +
+			`{"id": 111, "title": "List todo", "type": "Todo", "status": "active", "parent": {"id": 10, "type": "Todolist"}}` +
+			`]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[{"id": 10, "title": "General", "name": "General"}]`
+	case strings.Contains(path, "/todolists/10/groups.json"):
+		body = `[]`
+	case strings.Contains(path, "/todolists/10/todos.json"):
+		body = `[{"id": 111, "content": "List todo", "position": 1, "status": "active", "completed": false, "parent": {"id": 10, "type": "Todolist"}}]`
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
+		s.getTodoCalls++
+		body = `{"id": 500, "content": "Listless todo", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func setupListlessTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	buf := &bytes.Buffer{}
+	cfg := &config.Config{AccountID: "99999", ProjectID: "123"}
+
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
+
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  nameResolver,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}, buf
+}
+
+// TestTodosListIncludesTodosetLevelTodos covers issue #474: todos that live
+// directly under the Todoset (no Todolist) must appear in `todos list`.
+func TestTodosListIncludesTodosetLevelTodos(t *testing.T) {
+	transport := &listlessTodoTransport{}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID     int64 `json:"id"`
+			Parent struct {
+				Type string `json:"type"`
+			} `json:"parent"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+
+	ids := map[int64]string{}
+	for _, td := range resp.Data {
+		ids[td.ID] = td.Parent.Type
+	}
+	require.Len(t, resp.Data, 2, "expected the todolist todo plus the listless todoset todo")
+	assert.Equal(t, "Todolist", ids[111], "todolist todo should still be present")
+	assert.Equal(t, "Todoset", ids[500], "listless todoset todo should be surfaced")
+	assert.Equal(t, 1, transport.getTodoCalls, "listless todo should be hydrated exactly once")
+}
+
+// completedListlessTodoTransport serves a completed Todoset-level todo. The
+// Recordings API reports it as lifecycle "active" (completion is not a
+// recordings status), so the completed/incomplete split must be applied
+// client-side after hydration.
+type completedListlessTodoTransport struct{}
+
+func (completedListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		body = `[{"id": 500, "title": "Done listless", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
+		body = `{"id": 500, "content": "Done listless", "status": "active", "completed": true, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func TestTodosListTodosetLevelCompletionFilter(t *testing.T) {
+	decode := func(buf *bytes.Buffer) []int64 {
+		var resp struct {
+			Data []struct {
+				ID int64 `json:"id"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+		ids := make([]int64, 0, len(resp.Data))
+		for _, d := range resp.Data {
+			ids = append(ids, d.ID)
+		}
+		return ids
+	}
+
+	// Default (incomplete): the completed listless todo must be excluded.
+	app, buf := setupListlessTodoApp(t, completedListlessTodoTransport{})
+	require.NoError(t, executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123"))
+	assert.Empty(t, decode(buf), "completed listless todo must not appear in the default incomplete view")
+
+	// --completed: the completed listless todo must be included.
+	app, buf = setupListlessTodoApp(t, completedListlessTodoTransport{})
+	require.NoError(t, executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123", "--completed"))
+	assert.Equal(t, []int64{500}, decode(buf), "completed listless todo should appear with --completed")
+}
+
+// manyListlessTodoTransport serves two Todoset-level todos so limit handling
+// can be exercised. Todolists are empty; both listless todos are active and
+// incomplete.
+type manyListlessTodoTransport struct {
+	getTodoCalls int
+}
+
+func (s *manyListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		body = `[` +
+			`{"id": 500, "title": "Listless A", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}},` +
+			`{"id": 501, "title": "Listless B", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}` +
+			`]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
+		s.getTodoCalls++
+		body = `{"id": 500, "content": "Listless A", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/501"):
+		s.getTodoCalls++
+		body = `{"id": 501, "content": "Listless B", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosListTodosetLevelRespectsLimit ensures --limit caps how many listless
+// todos are fetched and hydrated, matching the per-list limit semantics (issue
+// #474 review follow-up).
+func TestTodosListTodosetLevelRespectsLimit(t *testing.T) {
+	transport := &manyListlessTodoTransport{}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1, "--limit 1 should cap listless todos to one")
+	assert.Equal(t, 1, transport.getTodoCalls, "only the capped listless todo should be hydrated")
+}
+
+// mixedRecordingOrderTransport returns a Todolist-parented Todo recording
+// BEFORE the listless one. A cap applied to the raw recordings (instead of to
+// listless todos after parent filtering) would drop the listless todo under
+// --limit 1 — this reproduces the issue #474 review follow-up.
+type mixedRecordingOrderTransport struct {
+	getTodoCalls int
+}
+
+func (s *mixedRecordingOrderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		body = `[` +
+			`{"id": 111, "title": "List todo", "type": "Todo", "status": "active", "parent": {"id": 10, "type": "Todolist"}},` +
+			`{"id": 500, "title": "Listless todo", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}` +
+			`]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[{"id": 10, "title": "General", "name": "General"}]`
+	case strings.Contains(path, "/todolists/10/groups.json"):
+		body = `[]`
+	case strings.Contains(path, "/todolists/10/todos.json"):
+		body = `[{"id": 111, "content": "List todo", "position": 1, "status": "active", "completed": false, "parent": {"id": 10, "type": "Todolist"}}]`
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
+		s.getTodoCalls++
+		body = `{"id": 500, "content": "Listless todo", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosListTodosetLevelLimitCountsAfterParentFilter ensures the per-list
+// limit counts listless todos specifically: a Todolist-parented recording
+// sorting ahead of the listless one must not consume the limit budget.
+func TestTodosListTodosetLevelLimitCountsAfterParentFilter(t *testing.T) {
+	transport := &mixedRecordingOrderTransport{}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID     int64 `json:"id"`
+			Parent struct {
+				Type string `json:"type"`
+			} `json:"parent"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+
+	found := false
+	for _, td := range resp.Data {
+		if td.ID == 500 && td.Parent.Type == "Todoset" {
+			found = true
+		}
+	}
+	assert.True(t, found, "listless todo must be surfaced even though a Todolist recording sorts first under --limit 1")
+	assert.Equal(t, 1, transport.getTodoCalls, "only the listless todo should be hydrated")
+}
+
+// bulkListlessTodoTransport serves many Todoset-level todos in a single page so
+// scan-window behavior can be asserted: a default run keeps at most the default
+// cap, while --all keeps everything. It hydrates each /todos/{id} on demand.
+type bulkListlessTodoTransport struct {
+	count        int // number of listless recordings to serve
+	getTodoCalls int
+}
+
+func (s *bulkListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		items := make([]string, 0, s.count)
+		for i := 0; i < s.count; i++ {
+			id := 1000 + i
+			items = append(items, fmt.Sprintf(
+				`{"id": %d, "title": "L%d", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}`, id, i))
+		}
+		body = "[" + strings.Join(items, ",") + "]"
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.Contains(path, "/todos/"):
+		s.getTodoCalls++
+		idStr := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".json")
+		body = fmt.Sprintf(`{"id": %s, "content": "listless", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`, idStr)
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+func countTodos(t *testing.T, buf *bytes.Buffer) int {
+	t.Helper()
+	var resp struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	return len(resp.Data)
+}
+
+// TestTodosListTodosetLevelScanIsBounded verifies that an ordinary run does not
+// hydrate/emit every listless todo (default cap applies), while --all is
+// exhaustive (issue #474 review follow-up: no forced unlimited scan on ordinary
+// runs).
+func TestTodosListTodosetLevelScanIsBounded(t *testing.T) {
+	// Default run: 150 listless todos available, but only the default 100 kept.
+	transport := &bulkListlessTodoTransport{count: 150}
+	app, buf := setupListlessTodoApp(t, transport)
+	require.NoError(t, executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123"))
+	assert.Equal(t, basecamp.DefaultRecordingLimit, countTodos(t, buf),
+		"default run should cap listless todos at the default limit")
+	assert.Equal(t, basecamp.DefaultRecordingLimit, transport.getTodoCalls,
+		"default run should hydrate only up to the default limit, not every listless todo")
+
+	// --all: exhaustive.
+	transportAll := &bulkListlessTodoTransport{count: 150}
+	appAll, bufAll := setupListlessTodoApp(t, transportAll)
+	require.NoError(t, executeTodosCommand(NewTodosCmd(), appAll, "list", "--in", "123", "--all"))
+	assert.Equal(t, 150, countTodos(t, bufAll), "--all should return every listless todo")
+	assert.Equal(t, 150, transportAll.getTodoCalls, "--all should hydrate every listless todo")
+}
+
+// assigneeListlessTodoTransport serves many listless todos where only the last
+// one (well beyond the default scan window) is assigned to the target person.
+// With --assignee, the scan must not be capped before the client-side assignee
+// filter runs, or that match is silently dropped (issue #474 review follow-up).
+type assigneeListlessTodoTransport struct {
+	total    int   // number of listless recordings
+	matchID  int64 // the todo assigned to the target person
+	assignee int64 // target person ID
+}
+
+func (s *assigneeListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		items := make([]string, 0, s.total)
+		for i := 0; i < s.total; i++ {
+			id := int64(1000 + i)
+			items = append(items, fmt.Sprintf(
+				`{"id": %d, "title": "L%d", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}`, id, i))
+		}
+		body = "[" + strings.Join(items, ",") + "]"
+	case strings.Contains(path, "/people.json") || strings.Contains(path, "/my/profile.json"):
+		body = fmt.Sprintf(`[{"id": %d, "name": "Alice", "email_address": "alice@example.com"}]`, s.assignee)
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.Contains(path, "/todos/"):
+		idStr := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".json")
+		assignees := "[]"
+		if idStr == fmt.Sprintf("%d", s.matchID) {
+			assignees = fmt.Sprintf(`[{"id": %d, "name": "Alice"}]`, s.assignee)
+		}
+		body = fmt.Sprintf(`{"id": %s, "content": "listless", "status": "active", "completed": false, "assignees": %s, "parent": {"id": 100, "type": "Todoset"}}`, idStr, assignees)
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosListTodosetLevelAssigneeNotStarvedByCap ensures --assignee surfaces a
+// listless todo assigned to the target person even when it sits beyond the
+// default scan window, by fetching all candidates before filtering.
+func TestTodosListTodosetLevelAssigneeNotStarvedByCap(t *testing.T) {
+	const target int64 = 42
+	// 150 listless todos; only the last (id 1149, index 149) is Alice's — well
+	// past the default cap of 100.
+	transport := &assigneeListlessTodoTransport{total: 150, matchID: 1149, assignee: target}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123", "--assignee", "Alice")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1, "only Alice's listless todo should match")
+	assert.Equal(t, int64(1149), resp.Data[0].ID,
+		"Alice's listless todo beyond the default window must still be found")
+}
+
+// TestTodosListAggregateSortGuard verifies --sort is rejected in the aggregate
+// path when results would be sampled per-list, but allowed once a client-side
+// filter (--assignee/--overdue) forces a full fetch.
+func TestTodosListAggregateSortGuard(t *testing.T) {
+	// No --all and no client-side filter: results are sampled, so --sort errors.
+	app, _ := setupListlessTodoApp(t, &listlessTodoTransport{})
+	err := executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123", "--sort", "title")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires --all")
+
+	// --assignee forces an unlimited fetch, so --sort is meaningful and allowed.
+	transport := &assigneeListlessTodoTransport{total: 3, matchID: 1002, assignee: 42}
+	appA, _ := setupListlessTodoApp(t, transport)
+	errA := executeTodosCommand(NewTodosCmd(), appA, "list", "--in", "123", "--assignee", "Alice", "--sort", "title")
+	require.NoError(t, errA)
+}

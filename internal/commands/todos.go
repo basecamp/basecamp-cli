@@ -427,10 +427,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	if sortField == "position" {
 		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
-	// Sorting the aggregate path without --all is misleading because results
-	// are silently sampled per-todolist using default SDK paging.
-	if sortField != "" && !all {
-		return output.ErrUsage("--sort requires --all when listing across todolists (results are sampled per list without it)")
+	// Sorting the aggregate path is only meaningful when the full set is
+	// fetched. That happens with --all, or when a client-side filter
+	// (assignee/overdue) forces an unlimited per-list fetch below. Otherwise
+	// results are sampled per-todolist using default SDK paging and a sort
+	// would be misleading.
+	if sortField != "" && !all && assignee == "" && !overdue {
+		return output.ErrUsage("--sort requires --all (or --assignee/--overdue) when listing across todolists (results are otherwise sampled per list)")
 	}
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
@@ -458,9 +461,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		return convertSDKError(err)
 	}
 
-	// Determine per-list limit to pass through to each fetch.
+	// Determine per-list limit to pass through to each fetch (todolists and the
+	// listless-todo recordings scan alike). When a client-side filter
+	// (assignee/overdue) is active, fetch everything so the post-fetch filter
+	// doesn't miss matches beyond the default cap — mirroring the single-list
+	// path. Any explicit --limit is then applied after filtering, below.
 	sdkLimit := 0 // SDK default
-	if all {
+	if all || assignee != "" || overdue {
 		sdkLimit = -1
 	} else if limit > 0 {
 		sdkLimit = limit
@@ -477,6 +484,19 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		}
 		allTodos = append(allTodos, todos...)
 	}
+
+	// Basecamp 5 lets todos live directly under the Todoset without a
+	// Todolist. Those "listless" todos are invisible to the per-todolist
+	// enumeration above, so fetch them via the Recordings API and merge them
+	// in. Assignee/overdue filters below apply to them too. project is already
+	// resolved to a numeric ID by this point, so a parse failure signals a bug
+	// rather than user input — error out instead of silently dropping them.
+	projectID, err := strconv.ParseInt(project, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+	allTodos = append(allTodos,
+		fetchTodosetLevelTodos(cmd.Context(), app, projectID, todosetID, sdkStatus, sdkCompleted, sdkLimit)...)
 
 	// Apply filters
 	var result []basecamp.Todo
@@ -508,6 +528,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 		}
 
 		result = append(result, todo)
+	}
+
+	// When a client-side filter forced an unlimited fetch above, apply the
+	// explicit --limit after filtering so the cap reflects the filtered set
+	// rather than the pre-filter fetch (mirrors the single-list path).
+	if (assignee != "" || overdue) && !all && limit > 0 && len(result) > limit {
+		result = result[:limit]
 	}
 
 	// Apply client-side sort when requested (field validated early in runTodosList,
@@ -543,6 +570,101 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// because limit is applied per-list, not globally. Use --list for accurate notices.
 
 	return app.OK(result, respOpts...)
+}
+
+// fetchTodosetLevelTodos returns todos that live directly under the project's
+// Todoset rather than inside a Todolist. Basecamp 5 allows creating such
+// "listless" todos; the /todolists/{id}/todos.json index endpoint the SDK uses
+// to enumerate a todoset's lists cannot see them (it 404s when handed a Todoset
+// ID). They are only reachable via the Recordings API, which returns every Todo
+// in the bucket regardless of parent. We fetch those recordings, keep the ones
+// parented directly to this todoset, and hydrate each into a full Todo — the
+// Recording payload the SDK exposes lacks the completion/assignee/due fields the
+// list output and its filters need.
+//
+// completed mirrors the server-side completion filter applied to todolist todos.
+// The Recordings status is lifecycle-only (active/archived/trashed) and does not
+// distinguish completed from incomplete, so that split is applied client-side.
+//
+// limit mirrors the per-list limit the todolist path uses (0 = SDK default of
+// 100, -1 = all, positive = cap) and governs how many *listless* todos are kept.
+// The cap is applied after filtering by parent — not to the raw recordings,
+// which also include Todolist-parented todos that would otherwise consume the
+// budget and hide listless todos sorted behind them.
+//
+// The recordings endpoint has no parent-type filter, so listless todos can only
+// be found by scanning Todo recordings. To avoid a full-project traversal on
+// ordinary runs, the scan itself is bounded: --all scans everything for an
+// exhaustive result, while limited/default runs scan only a window of the most
+// recent Todo recordings (at least DefaultRecordingLimit, more when --limit asks
+// for more). Listless todos outside that window require --all — the same
+// best-effort tradeoff the aggregate path already documents for per-list limits.
+//
+// Errors are non-fatal: the caller still gets the todolist todos.
+func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, todosetID int64, sdkStatus string, completed bool, limit int) []basecamp.Todo {
+	recStatus := sdkStatus
+	if recStatus == "" {
+		recStatus = "active"
+	}
+
+	// Cap on kept listless todos: 0 → SDK default of 100, negative (--all) →
+	// unlimited, positive → explicit cap.
+	maxKept := limit
+	if maxKept == 0 {
+		maxKept = basecamp.DefaultRecordingLimit
+	}
+
+	// Bound how many recordings we scan. --all (limit < 0) scans everything;
+	// otherwise scan a window sized to what we might keep, with a floor so a
+	// small --limit still scans a useful slice rather than stopping at the first
+	// few recordings (which could all be Todolist-parented).
+	recScan := -1 // unlimited
+	if limit >= 0 {
+		recScan = maxKept
+		if recScan < basecamp.DefaultRecordingLimit {
+			recScan = basecamp.DefaultRecordingLimit
+		}
+	}
+
+	// Sort/Direction are set explicitly so the bounded scan window is a stable
+	// "most recently created first" slice rather than relying on SDK defaults.
+	result, err := app.Account().Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
+		Bucket:    []int64{projectID},
+		Status:    recStatus,
+		Sort:      "created_at",
+		Direction: "desc",
+		Limit:     recScan,
+	})
+	if err != nil {
+		return nil
+	}
+
+	var todos []basecamp.Todo
+	for _, rec := range result.Recordings {
+		if rec.Parent == nil || rec.Parent.Type != "Todoset" || rec.Parent.ID != todosetID {
+			continue
+		}
+		if maxKept >= 0 && len(todos) >= maxKept {
+			break
+		}
+
+		todo, err := app.Account().Todos().Get(ctx, rec.ID)
+		if err != nil {
+			continue // Skip todos we can't hydrate.
+		}
+
+		// Recordings' lifecycle status can't express completed vs incomplete,
+		// so apply that split here to match the todolist path. Only do so for
+		// the active view (sdkStatus == ""); archived/trashed views return all
+		// matching todos regardless of completion, just like the todolist path.
+		if sdkStatus == "" && todo.Completed != completed {
+			continue
+		}
+
+		todos = append(todos, *todo)
+	}
+
+	return todos
 }
 
 func newTodosShowCmd() *cobra.Command {
