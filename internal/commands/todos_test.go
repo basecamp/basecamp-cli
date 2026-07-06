@@ -2352,3 +2352,66 @@ func TestTodosListTodosetLevelCompletionFilter(t *testing.T) {
 	require.NoError(t, executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123", "--completed"))
 	assert.Equal(t, []int64{500}, decode(buf), "completed listless todo should appear with --completed")
 }
+
+// manyListlessTodoTransport serves two Todoset-level todos so limit handling
+// can be exercised. Todolists are empty; both listless todos are active and
+// incomplete.
+type manyListlessTodoTransport struct {
+	getTodoCalls int
+}
+
+func (s *manyListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		body = `[` +
+			`{"id": 500, "title": "Listless A", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}},` +
+			`{"id": 501, "title": "Listless B", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}` +
+			`]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[]`
+	case strings.HasSuffix(path, "/todos/500"):
+		s.getTodoCalls++
+		body = `{"id": 500, "content": "Listless A", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.HasSuffix(path, "/todos/501"):
+		s.getTodoCalls++
+		body = `{"id": 501, "content": "Listless B", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosListTodosetLevelRespectsLimit ensures --limit caps how many listless
+// todos are fetched and hydrated, matching the per-list limit semantics (issue
+// #474 review follow-up).
+func TestTodosListTodosetLevelRespectsLimit(t *testing.T) {
+	transport := &manyListlessTodoTransport{}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Data, 1, "--limit 1 should cap listless todos to one")
+	assert.Equal(t, 1, transport.getTodoCalls, "only the capped listless todo should be hydrated")
+}

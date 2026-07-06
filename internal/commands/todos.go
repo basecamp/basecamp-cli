@@ -484,7 +484,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// in. Assignee/overdue filters below apply to them too.
 	if projectID, perr := strconv.ParseInt(project, 10, 64); perr == nil {
 		allTodos = append(allTodos,
-			fetchTodosetLevelTodos(cmd.Context(), app, projectID, todosetID, sdkStatus, sdkCompleted)...)
+			fetchTodosetLevelTodos(cmd.Context(), app, projectID, todosetID, sdkStatus, sdkCompleted, sdkLimit)...)
 	}
 
 	// Apply filters
@@ -568,8 +568,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 // The Recordings status is lifecycle-only (active/archived/trashed) and does not
 // distinguish completed from incomplete, so that split is applied client-side.
 //
+// limit bounds how many listless todos are fetched and hydrated, matching the
+// per-list limit the todolist path uses (0 = SDK default, -1 = all, positive =
+// cap) so ordinary `todos list` / `--limit N` runs don't hydrate and emit every
+// Todoset-level todo. RecordingsListOptions.Limit shares these exact semantics.
+//
 // Errors are non-fatal: the caller still gets the todolist todos.
-func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, todosetID int64, sdkStatus string, completed bool) []basecamp.Todo {
+func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, todosetID int64, sdkStatus string, completed bool, limit int) []basecamp.Todo {
 	recStatus := sdkStatus
 	if recStatus == "" {
 		recStatus = "active"
@@ -578,7 +583,7 @@ func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, tod
 	result, err := app.Account().Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
 		Bucket: []int64{projectID},
 		Status: recStatus,
-		Limit:  -1,
+		Limit:  limit,
 	})
 	if err != nil {
 		return nil
