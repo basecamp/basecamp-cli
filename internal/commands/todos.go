@@ -619,10 +619,14 @@ func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, tod
 		}
 	}
 
+	// Sort/Direction are set explicitly so the bounded scan window is a stable
+	// "most recently created first" slice rather than relying on SDK defaults.
 	result, err := app.Account().Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
-		Bucket: []int64{projectID},
-		Status: recStatus,
-		Limit:  recScan,
+		Bucket:    []int64{projectID},
+		Status:    recStatus,
+		Sort:      "created_at",
+		Direction: "desc",
+		Limit:     recScan,
 	})
 	if err != nil {
 		return nil

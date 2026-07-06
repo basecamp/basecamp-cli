@@ -2224,7 +2224,7 @@ func (s *listlessTodoTransport) RoundTrip(req *http.Request) (*http.Response, er
 		body = `[]`
 	case strings.Contains(path, "/todolists/10/todos.json"):
 		body = `[{"id": 111, "content": "List todo", "position": 1, "status": "active", "completed": false, "parent": {"id": 10, "type": "Todolist"}}]`
-	case strings.HasSuffix(path, "/todos/500"):
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
 		s.getTodoCalls++
 		body = `{"id": 500, "content": "Listless todo", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
 	case strings.Contains(path, "/projects/123"):
@@ -2312,7 +2312,7 @@ func (completedListlessTodoTransport) RoundTrip(req *http.Request) (*http.Respon
 		body = `[{"id": 123, "name": "Test"}]`
 	case strings.Contains(path, "/todosets/100/todolists.json"):
 		body = `[]`
-	case strings.HasSuffix(path, "/todos/500"):
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
 		body = `{"id": 500, "content": "Done listless", "status": "active", "completed": true, "parent": {"id": 100, "type": "Todoset"}}`
 	case strings.Contains(path, "/projects/123"):
 		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
@@ -2376,10 +2376,10 @@ func (s *manyListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response
 		body = `[{"id": 123, "name": "Test"}]`
 	case strings.Contains(path, "/todosets/100/todolists.json"):
 		body = `[]`
-	case strings.HasSuffix(path, "/todos/500"):
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
 		s.getTodoCalls++
 		body = `{"id": 500, "content": "Listless A", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
-	case strings.HasSuffix(path, "/todos/501"):
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/501"):
 		s.getTodoCalls++
 		body = `{"id": 501, "content": "Listless B", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
 	case strings.Contains(path, "/projects/123"):
@@ -2444,7 +2444,7 @@ func (s *mixedRecordingOrderTransport) RoundTrip(req *http.Request) (*http.Respo
 		body = `[]`
 	case strings.Contains(path, "/todolists/10/todos.json"):
 		body = `[{"id": 111, "content": "List todo", "position": 1, "status": "active", "completed": false, "parent": {"id": 10, "type": "Todolist"}}]`
-	case strings.HasSuffix(path, "/todos/500"):
+	case strings.HasSuffix(strings.TrimSuffix(path, ".json"), "/todos/500"):
 		s.getTodoCalls++
 		body = `{"id": 500, "content": "Listless todo", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
 	case strings.Contains(path, "/projects/123"):
@@ -2520,7 +2520,7 @@ func (s *bulkListlessTodoTransport) RoundTrip(req *http.Request) (*http.Response
 		body = `[]`
 	case strings.Contains(path, "/todos/"):
 		s.getTodoCalls++
-		idStr := path[strings.LastIndex(path, "/")+1:]
+		idStr := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".json")
 		body = fmt.Sprintf(`{"id": %s, "content": "listless", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`, idStr)
 	case strings.Contains(path, "/projects/123"):
 		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
@@ -2598,7 +2598,7 @@ func (s *assigneeListlessTodoTransport) RoundTrip(req *http.Request) (*http.Resp
 	case strings.Contains(path, "/todosets/100/todolists.json"):
 		body = `[]`
 	case strings.Contains(path, "/todos/"):
-		idStr := path[strings.LastIndex(path, "/")+1:]
+		idStr := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".json")
 		assignees := "[]"
 		if idStr == fmt.Sprintf("%d", s.matchID) {
 			assignees = fmt.Sprintf(`[{"id": %d, "name": "Alice"}]`, s.assignee)
