@@ -568,10 +568,14 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 // The Recordings status is lifecycle-only (active/archived/trashed) and does not
 // distinguish completed from incomplete, so that split is applied client-side.
 //
-// limit bounds how many listless todos are fetched and hydrated, matching the
-// per-list limit the todolist path uses (0 = SDK default, -1 = all, positive =
-// cap) so ordinary `todos list` / `--limit N` runs don't hydrate and emit every
-// Todoset-level todo. RecordingsListOptions.Limit shares these exact semantics.
+// limit bounds how many listless todos are kept, matching the per-list limit the
+// todolist path uses (0 = SDK default of 100, -1 = all, positive = cap) so
+// ordinary `todos list` / `--limit N` runs don't hydrate and emit every
+// Todoset-level todo. The cap is applied to listless todos *after* filtering by
+// parent — not to the raw recordings, which also include Todolist-parented todos
+// that would otherwise consume the budget and hide listless todos sorted behind
+// them. Listing recordings is a paginated metadata call; the per-todo hydration
+// is the expensive part, and that is what the cap actually bounds.
 //
 // Errors are non-fatal: the caller still gets the todolist todos.
 func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, todosetID int64, sdkStatus string, completed bool, limit int) []basecamp.Todo {
@@ -580,19 +584,33 @@ func fetchTodosetLevelTodos(ctx context.Context, app *appctx.App, projectID, tod
 		recStatus = "active"
 	}
 
+	// Fetch all Todo recording metadata for the project (Limit -1). The cap
+	// governs listless todos specifically, so it can only be applied after the
+	// parent filter below — hence we cannot delegate it to the recordings fetch.
 	result, err := app.Account().Recordings().List(ctx, basecamp.RecordingTypeTodo, &basecamp.RecordingsListOptions{
 		Bucket: []int64{projectID},
 		Status: recStatus,
-		Limit:  limit,
+		Limit:  -1,
 	})
 	if err != nil {
 		return nil
+	}
+
+	// Translate the per-list limit into a cap on kept listless todos: 0 falls
+	// back to the SDK default of 100, a negative value means unlimited (--all),
+	// and a positive value is an explicit cap.
+	maxKept := limit
+	if maxKept == 0 {
+		maxKept = 100
 	}
 
 	var todos []basecamp.Todo
 	for _, rec := range result.Recordings {
 		if rec.Parent == nil || rec.Parent.Type != "Todoset" || rec.Parent.ID != todosetID {
 			continue
+		}
+		if maxKept >= 0 && len(todos) >= maxKept {
+			break
 		}
 
 		todo, err := app.Account().Todos().Get(ctx, rec.ID)

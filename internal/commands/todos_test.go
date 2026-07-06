@@ -2415,3 +2415,78 @@ func TestTodosListTodosetLevelRespectsLimit(t *testing.T) {
 	require.Len(t, resp.Data, 1, "--limit 1 should cap listless todos to one")
 	assert.Equal(t, 1, transport.getTodoCalls, "only the capped listless todo should be hydrated")
 }
+
+// mixedRecordingOrderTransport returns a Todolist-parented Todo recording
+// BEFORE the listless one. A cap applied to the raw recordings (instead of to
+// listless todos after parent filtering) would drop the listless todo under
+// --limit 1 — this reproduces the issue #474 review follow-up.
+type mixedRecordingOrderTransport struct {
+	getTodoCalls int
+}
+
+func (s *mixedRecordingOrderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	path := req.URL.Path
+	var body string
+	switch {
+	case strings.Contains(path, "/projects/recordings.json"):
+		body = `[` +
+			`{"id": 111, "title": "List todo", "type": "Todo", "status": "active", "parent": {"id": 10, "type": "Todolist"}},` +
+			`{"id": 500, "title": "Listless todo", "type": "Todo", "status": "active", "parent": {"id": 100, "type": "Todoset"}}` +
+			`]`
+	case strings.Contains(path, "/projects.json"):
+		body = `[{"id": 123, "name": "Test"}]`
+	case strings.Contains(path, "/todosets/100/todolists.json"):
+		body = `[{"id": 10, "title": "General", "name": "General"}]`
+	case strings.Contains(path, "/todolists/10/groups.json"):
+		body = `[]`
+	case strings.Contains(path, "/todolists/10/todos.json"):
+		body = `[{"id": 111, "content": "List todo", "position": 1, "status": "active", "completed": false, "parent": {"id": 10, "type": "Todolist"}}]`
+	case strings.HasSuffix(path, "/todos/500"):
+		s.getTodoCalls++
+		body = `{"id": 500, "content": "Listless todo", "status": "active", "completed": false, "parent": {"id": 100, "type": "Todoset"}}`
+	case strings.Contains(path, "/projects/123"):
+		body = `{"id": 123, "dock": [{"name": "todoset", "id": 100, "title": "To-dos", "enabled": true}]}`
+	default:
+		body = `{}`
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosListTodosetLevelLimitCountsAfterParentFilter ensures the per-list
+// limit counts listless todos specifically: a Todolist-parented recording
+// sorting ahead of the listless one must not consume the limit budget.
+func TestTodosListTodosetLevelLimitCountsAfterParentFilter(t *testing.T) {
+	transport := &mixedRecordingOrderTransport{}
+	app, buf := setupListlessTodoApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "list", "--in", "123", "--limit", "1")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data []struct {
+			ID     int64 `json:"id"`
+			Parent struct {
+				Type string `json:"type"`
+			} `json:"parent"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+
+	found := false
+	for _, td := range resp.Data {
+		if td.ID == 500 && td.Parent.Type == "Todoset" {
+			found = true
+		}
+	}
+	assert.True(t, found, "listless todo must be surfaced even though a Todolist recording sorts first under --limit 1")
+	assert.Equal(t, 1, transport.getTodoCalls, "only the listless todo should be hydrated")
+}
