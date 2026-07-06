@@ -427,10 +427,13 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	if sortField == "position" {
 		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
-	// Sorting the aggregate path without --all is misleading because results
-	// are silently sampled per-todolist using default SDK paging.
-	if sortField != "" && !all {
-		return output.ErrUsage("--sort requires --all when listing across todolists (results are sampled per list without it)")
+	// Sorting the aggregate path is only meaningful when the full set is
+	// fetched. That happens with --all, or when a client-side filter
+	// (assignee/overdue) forces an unlimited per-list fetch below. Otherwise
+	// results are sampled per-todolist using default SDK paging and a sort
+	// would be misleading.
+	if sortField != "" && !all && assignee == "" && !overdue {
+		return output.ErrUsage("--sort requires --all (or --assignee/--overdue) when listing across todolists (results are otherwise sampled per list)")
 	}
 	// Resolve assignee name to ID if provided
 	var assigneeID int64
@@ -485,11 +488,15 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// Basecamp 5 lets todos live directly under the Todoset without a
 	// Todolist. Those "listless" todos are invisible to the per-todolist
 	// enumeration above, so fetch them via the Recordings API and merge them
-	// in. Assignee/overdue filters below apply to them too.
-	if projectID, perr := strconv.ParseInt(project, 10, 64); perr == nil {
-		allTodos = append(allTodos,
-			fetchTodosetLevelTodos(cmd.Context(), app, projectID, todosetID, sdkStatus, sdkCompleted, sdkLimit)...)
+	// in. Assignee/overdue filters below apply to them too. project is already
+	// resolved to a numeric ID by this point, so a parse failure signals a bug
+	// rather than user input — error out instead of silently dropping them.
+	projectID, err := strconv.ParseInt(project, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
 	}
+	allTodos = append(allTodos,
+		fetchTodosetLevelTodos(cmd.Context(), app, projectID, todosetID, sdkStatus, sdkCompleted, sdkLimit)...)
 
 	// Apply filters
 	var result []basecamp.Todo

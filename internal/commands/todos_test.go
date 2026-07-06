@@ -2641,3 +2641,20 @@ func TestTodosListTodosetLevelAssigneeNotStarvedByCap(t *testing.T) {
 	assert.Equal(t, int64(1149), resp.Data[0].ID,
 		"Alice's listless todo beyond the default window must still be found")
 }
+
+// TestTodosListAggregateSortGuard verifies --sort is rejected in the aggregate
+// path when results would be sampled per-list, but allowed once a client-side
+// filter (--assignee/--overdue) forces a full fetch.
+func TestTodosListAggregateSortGuard(t *testing.T) {
+	// No --all and no client-side filter: results are sampled, so --sort errors.
+	app, _ := setupListlessTodoApp(t, &listlessTodoTransport{})
+	err := executeTodosCommand(NewTodosCmd(), app, "list", "--in", "123", "--sort", "title")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires --all")
+
+	// --assignee forces an unlimited fetch, so --sort is meaningful and allowed.
+	transport := &assigneeListlessTodoTransport{total: 3, matchID: 1002, assignee: 42}
+	appA, _ := setupListlessTodoApp(t, transport)
+	errA := executeTodosCommand(NewTodosCmd(), appA, "list", "--in", "123", "--assignee", "Alice", "--sort", "title")
+	require.NoError(t, errA)
+}
