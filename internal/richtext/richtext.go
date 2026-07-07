@@ -49,6 +49,9 @@ var (
 	reP  = regexp.MustCompile(`(?is)<p(?:\s[^>]*)?>(.*?)</p>`)
 	reBR = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
 	reHR = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
+	// reNbsp matches non-breaking-space entities used as visual filler in
+	// otherwise-empty paragraphs (&nbsp;, &#160;, &#xa0; / &#xA0;).
+	reNbsp = regexp.MustCompile(`(?i)&nbsp;|&#160;|&#xa0;`)
 )
 
 // Pre-compiled regexes for HTMLToMarkdown inline elements
@@ -344,14 +347,16 @@ func (r *trixRenderer) renderEscapedAt(w util.BufWriter, _ []byte, _ ast.Node, e
 
 // MarkdownToHTML converts Markdown text to HTML suitable for Basecamp's rich text fields.
 // It uses goldmark with custom AST transformations for Trix editor compatibility.
-// If the input already appears to be HTML, it is returned unchanged to preserve existing formatting.
+// If the input already appears to be HTML, it is passed through with existing
+// formatting preserved, except that a <br> separator is inserted between
+// directly adjacent paragraph blocks (see insertParagraphSeparators).
 func MarkdownToHTML(md string) string {
 	if md == "" {
 		return ""
 	}
 
 	if IsHTML(md) {
-		return md
+		return insertParagraphSeparators(md)
 	}
 
 	md = strings.ReplaceAll(md, "\r\n", "\n")
@@ -363,6 +368,77 @@ func MarkdownToHTML(md string) string {
 	}
 
 	return strings.TrimSpace(buf.String())
+}
+
+// insertParagraphSeparators inserts a <br> between directly adjacent, non-empty
+// paragraph blocks so that HTML supplied to the CLI renders with visible
+// paragraph spacing.
+//
+// Basecamp's rich text relies on explicit separator nodes for paragraph
+// spacing, not CSS margins: contiguous <p>A</p><p>B</p> renders squished. The
+// Markdown pipeline already inserts a separator between blank-line-separated
+// paragraphs (via TrixBreak), so this brings the raw-HTML passthrough into line
+// with that behavior. Unlike Basecamp's editor, the CLI has no concept of an
+// intentionally-tight single-line-break paragraph (its edit loop collapses that
+// distinction), so contiguous paragraphs from HTML input are treated as
+// separate paragraphs.
+//
+// The transform is byte-preserving apart from the inserted separators and is
+// idempotent: a boundary that already carries a separator — a bare <br> between
+// the paragraphs, or an empty separator paragraph (<p><br></p> or <p></p>) on
+// either side — is left untouched, so running it on already-separated content
+// (including Basecamp editor output) is a no-op. Only directly adjacent <p>
+// blocks are separated; anything between them (whitespace excepted), such as a
+// heading, list, or attachment, already provides its own break and is left
+// alone.
+func insertParagraphSeparators(s string) string {
+	locs := reP.FindAllStringIndex(s, -1)
+	if len(locs) < 2 {
+		return s
+	}
+
+	empty := make([]bool, len(locs))
+	for i, loc := range locs {
+		empty[i] = isEmptyParagraph(s[loc[0]:loc[1]])
+	}
+
+	var b strings.Builder
+	b.Grow(len(s) + len(locs)*4)
+	cursor := 0
+	for i := 0; i < len(locs); i++ {
+		end := locs[i][1]
+		b.WriteString(s[cursor:end])
+		cursor = end
+
+		if i+1 == len(locs) {
+			break
+		}
+
+		nextStart := locs[i+1][0]
+		gap := s[end:nextStart]
+		if !empty[i] && !empty[i+1] && strings.TrimSpace(gap) == "" {
+			b.WriteString(gap)
+			b.WriteString("<br>")
+			cursor = nextStart
+		}
+	}
+	b.WriteString(s[cursor:])
+	return b.String()
+}
+
+// isEmptyParagraph reports whether a <p>...</p> block has no visible content —
+// i.e. it is empty or contains only <br> tags and whitespace, including
+// non-breaking-space entities (&nbsp;, &#160;, &#xa0;) that rich text editors
+// commonly use for blank separator lines. Such paragraphs act as separators, so
+// no additional <br> is inserted adjacent to them.
+func isEmptyParagraph(block string) bool {
+	m := reP.FindStringSubmatch(block)
+	if m == nil {
+		return false
+	}
+	inner := reBR.ReplaceAllString(m[1], "")
+	inner = reNbsp.ReplaceAllString(inner, "")
+	return strings.TrimSpace(inner) == ""
 }
 
 // escapeHTML escapes special HTML characters.

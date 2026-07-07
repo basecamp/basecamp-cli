@@ -2213,3 +2213,142 @@ func TestParsedAttachmentDisplayURL(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "two contiguous paragraphs get a separator",
+			input:    "<p>Line 1</p><p>Line 2</p>",
+			expected: "<p>Line 1</p><br><p>Line 2</p>",
+		},
+		{
+			name:     "three contiguous paragraphs get separators between each",
+			input:    "<p>A</p><p>B</p><p>C</p>",
+			expected: "<p>A</p><br><p>B</p><br><p>C</p>",
+		},
+		{
+			name:     "paragraphs with attributes are separated",
+			input:    `<p dir="auto">A</p><p dir="auto">B</p>`,
+			expected: `<p dir="auto">A</p><br><p dir="auto">B</p>`,
+		},
+		{
+			name:     "whitespace-only gap is preserved and separator added",
+			input:    "<p>A</p>\n<p>B</p>",
+			expected: "<p>A</p>\n<br><p>B</p>",
+		},
+		{
+			name:     "existing bare br separator is left untouched (idempotent)",
+			input:    "<p>A</p><br><p>B</p>",
+			expected: "<p>A</p><br><p>B</p>",
+		},
+		{
+			name:     "empty separator paragraph is left untouched (Lexxy canonical)",
+			input:    "<p>A</p><p><br></p><p>B</p>",
+			expected: "<p>A</p><p><br></p><p>B</p>",
+		},
+		{
+			name:     "empty paragraph separator is left untouched",
+			input:    "<p>A</p><p></p><p>B</p>",
+			expected: "<p>A</p><p></p><p>B</p>",
+		},
+		{
+			name:     "nbsp entity separator paragraph is left untouched",
+			input:    "<p>A</p><p>&nbsp;</p><p>B</p>",
+			expected: "<p>A</p><p>&nbsp;</p><p>B</p>",
+		},
+		{
+			name:     "numeric nbsp separator paragraph is left untouched",
+			input:    "<p>A</p><p>&#160;</p><p>B</p>",
+			expected: "<p>A</p><p>&#160;</p><p>B</p>",
+		},
+		{
+			name:     "hex nbsp separator paragraph is left untouched",
+			input:    "<p>A</p><p>&#xa0;</p><p>B</p>",
+			expected: "<p>A</p><p>&#xa0;</p><p>B</p>",
+		},
+		{
+			name:     "single paragraph is unchanged",
+			input:    "<p>Only one</p>",
+			expected: "<p>Only one</p>",
+		},
+		{
+			name:     "heading between paragraphs is left alone",
+			input:    "<p>A</p><h3>H</h3><p>B</p>",
+			expected: "<p>A</p><h3>H</h3><p>B</p>",
+		},
+		{
+			name:     "list between paragraphs is left alone",
+			input:    "<p>A</p><ul><li>x</li></ul><p>B</p>",
+			expected: "<p>A</p><ul><li>x</li></ul><p>B</p>",
+		},
+		{
+			name:     "non-paragraph HTML is unchanged",
+			input:    "<div><strong>Hi</strong></div>",
+			expected: "<div><strong>Hi</strong></div>",
+		},
+		{
+			name:     "paragraph with inline br is still non-empty and separated",
+			input:    "<p>A<br>C</p><p>B</p>",
+			expected: "<p>A<br>C</p><br><p>B</p>",
+		},
+		{
+			name:     "leading empty paragraph is left alone",
+			input:    "<p></p><p>A</p>",
+			expected: "<p></p><p>A</p>",
+		},
+		{
+			name:     "mix of separated and contiguous only fills the gap that lacks a separator",
+			input:    "<p>A</p><p>B</p><br><p>C</p>",
+			expected: "<p>A</p><br><p>B</p><br><p>C</p>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// Running the separator insertion on its own output must be a no-op.
+func TestMarkdownToHTMLParagraphSeparatorsIdempotent(t *testing.T) {
+	inputs := []string{
+		"<p>Line 1</p><p>Line 2</p>",
+		"<p>A</p><p>B</p><p>C</p>",
+		`<p dir="auto">A</p><p dir="auto">B</p>`,
+		"<p>A</p>\n<p>B</p>",
+		"<p>A</p><p><br></p><p>B</p>",
+		"<p>A</p><h3>H</h3><p>B</p>",
+	}
+
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			once := MarkdownToHTML(in)
+			twice := MarkdownToHTML(once)
+			if once != twice {
+				t.Errorf("not idempotent for %q\nonce:  %q\ntwice: %q", in, once, twice)
+			}
+		})
+	}
+}
+
+// A blank-line Markdown paragraph break and the equivalent contiguous-<p> HTML
+// must converge on the same separated shape.
+func TestMarkdownToHTMLParagraphSeparatorsMatchMarkdownPath(t *testing.T) {
+	fromMarkdown := MarkdownToHTML("Line 1\n\nLine 2")
+	fromHTML := MarkdownToHTML("<p>Line 1</p><p>Line 2</p>")
+
+	if !strings.Contains(fromMarkdown, "<br>") {
+		t.Fatalf("markdown path unexpectedly produced no <br>: %q", fromMarkdown)
+	}
+	if fromHTML != "<p>Line 1</p><br><p>Line 2</p>" {
+		t.Errorf("HTML path = %q, want %q", fromHTML, "<p>Line 1</p><br><p>Line 2</p>")
+	}
+}
