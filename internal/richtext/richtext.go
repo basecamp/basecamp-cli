@@ -49,6 +49,9 @@ var (
 	reP  = regexp.MustCompile(`(?is)<p(?:\s[^>]*)?>(.*?)</p>`)
 	reBR = regexp.MustCompile(`(?i)<br\s*/?\s*>`)
 	reHR = regexp.MustCompile(`(?i)<hr\s*/?\s*>`)
+	// reNbsp matches non-breaking-space entities used as visual filler in
+	// otherwise-empty paragraphs (&nbsp;, &#160;, &#xa0; / &#xA0;).
+	reNbsp = regexp.MustCompile(`(?i)&nbsp;|&#160;|&#xa0;`)
 )
 
 // Pre-compiled regexes for HTMLToMarkdown inline elements
@@ -344,7 +347,9 @@ func (r *trixRenderer) renderEscapedAt(w util.BufWriter, _ []byte, _ ast.Node, e
 
 // MarkdownToHTML converts Markdown text to HTML suitable for Basecamp's rich text fields.
 // It uses goldmark with custom AST transformations for Trix editor compatibility.
-// If the input already appears to be HTML, it is returned unchanged to preserve existing formatting.
+// If the input already appears to be HTML, it is passed through with existing
+// formatting preserved, except that a <br> separator is inserted between
+// directly adjacent paragraph blocks (see insertParagraphSeparators).
 func MarkdownToHTML(md string) string {
 	if md == "" {
 		return ""
@@ -422,14 +427,17 @@ func insertParagraphSeparators(s string) string {
 }
 
 // isEmptyParagraph reports whether a <p>...</p> block has no visible content —
-// i.e. it is empty or contains only <br> tags and whitespace. Such paragraphs
-// act as separators, so no additional <br> is inserted adjacent to them.
+// i.e. it is empty or contains only <br> tags and whitespace, including
+// non-breaking-space entities (&nbsp;, &#160;, &#xa0;) that rich text editors
+// commonly use for blank separator lines. Such paragraphs act as separators, so
+// no additional <br> is inserted adjacent to them.
 func isEmptyParagraph(block string) bool {
 	m := reP.FindStringSubmatch(block)
 	if m == nil {
 		return false
 	}
 	inner := reBR.ReplaceAllString(m[1], "")
+	inner = reNbsp.ReplaceAllString(inner, "")
 	return strings.TrimSpace(inner) == ""
 }
 

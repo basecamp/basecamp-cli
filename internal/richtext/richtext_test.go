@@ -2256,6 +2256,21 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 			expected: "<p>A</p><p></p><p>B</p>",
 		},
 		{
+			name:     "nbsp entity separator paragraph is left untouched",
+			input:    "<p>A</p><p>&nbsp;</p><p>B</p>",
+			expected: "<p>A</p><p>&nbsp;</p><p>B</p>",
+		},
+		{
+			name:     "numeric nbsp separator paragraph is left untouched",
+			input:    "<p>A</p><p>&#160;</p><p>B</p>",
+			expected: "<p>A</p><p>&#160;</p><p>B</p>",
+		},
+		{
+			name:     "hex nbsp separator paragraph is left untouched",
+			input:    "<p>A</p><p>&#xa0;</p><p>B</p>",
+			expected: "<p>A</p><p>&#xa0;</p><p>B</p>",
+		},
+		{
 			name:     "single paragraph is unchanged",
 			input:    "<p>Only one</p>",
 			expected: "<p>Only one</p>",
