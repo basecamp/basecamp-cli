@@ -91,6 +91,15 @@ var reMentionInput = regexp.MustCompile(`(^|[\s>(\["'])(@[\pL\pN_]+(?:\.[\pL\pN_
 // Group 3: display text (may include leading @).
 var reMentionAnchor = regexp.MustCompile(`<a href="(mention|person):([^"]+)">([^<]*)</a>`)
 
+// reMentionMarkdownLink matches a literal Markdown mention link that was never
+// converted to an <a> anchor — this happens when the link was embedded inside an
+// author-supplied HTML block, which MarkdownToHTML passes through verbatim.
+// Group 1: display text including the leading @.
+// Group 2: scheme (mention or person).
+// Group 3: value (SGID for mention:, person ID for person:).
+// SGIDs and person IDs never contain ')', so [^)]+ is a safe value terminator.
+var reMentionMarkdownLink = regexp.MustCompile(`\[(@[^\]]+)\]\((mention|person):([^)]+)\)`)
+
 // reSGIDMention matches inline @sgid:VALUE syntax.
 // Group 1: prefix character.
 // Group 2: the full @sgid:VALUE token.
@@ -969,10 +978,12 @@ func MentionToHTML(sgid, name string) string {
 		escapeHTML(name) + `</bc-attachment>`
 }
 
-// ResolveMentions processes mention syntax in HTML in three passes:
+// ResolveMentions processes mention syntax in HTML in four passes:
 //  1. Markdown mention anchors: <a href="mention:SGID">@Name</a> and <a href="person:ID">@Name</a>
-//  2. Inline @sgid:VALUE syntax
-//  3. Fuzzy @Name and @First.Last patterns
+//  2. Literal Markdown mention links [@Name](mention:SGID) / [@Name](person:ID) that were
+//     never converted to anchors (e.g. embedded inside an author-supplied HTML block)
+//  3. Inline @sgid:VALUE syntax
+//  4. Fuzzy @Name and @First.Last patterns
 //
 // Each pass replaces matches with <bc-attachment> tags. Subsequent passes skip regions
 // already converted by earlier passes via isInsideBcAttachment.
@@ -987,10 +998,16 @@ func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByI
 		return MentionResult{}, err
 	}
 
-	// Pass 2: @sgid:VALUE
+	// Pass 2: literal Markdown mention links that were not converted to anchors
+	html, err = resolveMentionMarkdownLinks(html, lookupByID)
+	if err != nil {
+		return MentionResult{}, err
+	}
+
+	// Pass 3: @sgid:VALUE
 	html = resolveSGIDMentions(html)
 
-	// Pass 3: fuzzy @Name (skip when no lookup function provided)
+	// Pass 4: fuzzy @Name (skip when no lookup function provided)
 	var unresolved []string
 	if lookup != nil {
 		html, unresolved, err = resolveNameMentions(html, lookup)
@@ -1036,6 +1053,64 @@ func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, erro
 
 		case "person":
 			// One API lookup — ID → SGID via pingable set
+			if lookupByID == nil {
+				return "", fmt.Errorf("person:%s syntax requires a person lookup function", value)
+			}
+			sgid, canonicalName, err := lookupByID(value)
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve person:%s: %w", value, err)
+			}
+			tag = MentionToHTML(sgid, canonicalName)
+		}
+
+		result = result[:fullStart] + tag + result[fullEnd:]
+	}
+
+	return result, nil
+}
+
+// resolveMentionMarkdownLinks converts literal [@Name](mention:SGID) and
+// [@Name](person:ID) Markdown links into <bc-attachment> mention tags.
+//
+// These survive as literal text when the link was authored inside an HTML block:
+// MarkdownToHTML detects the input as HTML and passes it through verbatim, so
+// goldmark never turns the link into an <a> anchor and resolveMentionAnchors
+// cannot match it. Without this pass the fuzzy @Name matcher would match only the
+// first name token (it stops at the first space) and leave the remainder — e.g.
+// " Manrubia](mention:SGID)" — as garbage text next to a half-formed chip.
+//
+// Matches inside code blocks, existing bc-attachments, or HTML tags are skipped:
+// those are documentation or already-resolved content, not live mentions.
+func resolveMentionMarkdownLinks(html string, lookupByID PersonByIDFunc) (string, error) {
+	matches := reMentionMarkdownLink.FindAllStringSubmatchIndex(html, -1)
+	if len(matches) == 0 {
+		return html, nil
+	}
+
+	htmlLower := strings.ToLower(html)
+	result := html
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		fullStart, fullEnd := m[0], m[1]
+
+		if isInsideHTMLTag(html, fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
+			continue
+		}
+
+		displayText := html[m[2]:m[3]]
+		scheme := html[m[4]:m[5]]
+		value := html[m[6]:m[7]]
+
+		var tag string
+		switch scheme {
+		case "mention":
+			// Zero API calls — value is the SGID, link text is the display name.
+			// Unescape because the HTML-block passthrough leaves author entities
+			// intact and MentionToHTML re-escapes — without this we'd double-encode.
+			name := unescapeHTML(strings.TrimPrefix(displayText, "@"))
+			tag = MentionToHTML(value, name)
+
+		case "person":
 			if lookupByID == nil {
 				return "", fmt.Errorf("person:%s syntax requires a person lookup function", value)
 			}

@@ -2352,3 +2352,99 @@ func TestMarkdownToHTMLParagraphSeparatorsMatchMarkdownPath(t *testing.T) {
 		t.Errorf("HTML path = %q, want %q", fromHTML, "<p>Line 1</p><br><p>Line 2</p>")
 	}
 }
+
+// TestResolveMentions_MarkdownLinkInHTMLBlock covers the regression from the
+// "broken @mention rendering" report: a [@Name](mention:SGID) link authored
+// inside an HTML block is passed through verbatim by MarkdownToHTML (never
+// becoming an anchor), and must be converted to a single clean mention chip
+// rather than being mangled by the fuzzy @Name matcher.
+func TestResolveMentions_MarkdownLinkInHTMLBlock(t *testing.T) {
+	lookup := func(name string) (sgid, displayName string, err error) {
+		// "Jorge" resolves — this is what the fuzzy pass would latch onto if the
+		// literal link were not handled first, producing the reported garbage.
+		if name == "Jorge" || name == "Jorge Manrubia" {
+			return "sgid-jorge", "Jorge Manrubia", nil
+		}
+		return "", "", fmt.Errorf("%w: not found: %s", ErrMentionSkip, name)
+	}
+	lookupByID := func(id string) (sgid, canonicalName string, err error) {
+		if id == "42" {
+			return "sgid-jorge", "Jorge Manrubia", nil
+		}
+		return "", "", fmt.Errorf("not found: %s", id)
+	}
+
+	sgid := "BAh7CEkiCG9pZA__c122645233a25510b54af45164e6002c0f99e870"
+	mentionChip := MentionToHTML(sgid, "Jorge Manrubia")
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "mention scheme inside div block",
+			input:    `<div dir="auto">Ready for your review. [@Jorge Manrubia](mention:` + sgid + `)</div>`,
+			expected: `<div dir="auto">Ready for your review. ` + mentionChip + `</div>`,
+		},
+		{
+			name:     "person scheme inside div block",
+			input:    `<div dir="auto">cc [@Jorge Manrubia](person:42)</div>`,
+			expected: `<div dir="auto">cc ` + MentionToHTML("sgid-jorge", "Jorge Manrubia") + `</div>`,
+		},
+		{
+			name:     "literal link inside code is documentation, left untouched",
+			input:    `<p>Use <code>[@Name](mention:SGID)</code> for mentions</p>`,
+			expected: `<p>Use <code>[@Name](mention:SGID)</code> for mentions</p>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveMentions(tt.input, lookup, lookupByID)
+			if err != nil {
+				t.Fatalf("ResolveMentions() error = %v", err)
+			}
+			if result.HTML != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, tt.expected)
+			}
+			// No half-formed chip: the raw markdown-link residue must be gone.
+			if strings.Contains(result.HTML, "](mention:") || strings.Contains(result.HTML, "](person:") {
+				if !strings.Contains(tt.input, "<code>") {
+					t.Errorf("residual markdown mention link left in output: %q", result.HTML)
+				}
+			}
+		})
+	}
+}
+
+// TestMentionInHTMLBlock_FullPipeline exercises the exact production sequence
+// (MarkdownToHTML then ResolveMentions) against the reported card payload and
+// asserts the output carries exactly one mention chip and no literal residue.
+func TestMentionInHTMLBlock_FullPipeline(t *testing.T) {
+	lookup := func(name string) (sgid, displayName string, err error) {
+		if name == "Jorge" || name == "Jorge Manrubia" {
+			return "sgid-jorge", "Jorge Manrubia", nil
+		}
+		return "", "", fmt.Errorf("%w: not found: %s", ErrMentionSkip, name)
+	}
+
+	sgid := "BAh7CEkiCG9pZA__c122645233a25510b54af45164e6002c0f99e870"
+	input := `<div dir="auto">Ready for your review. [@Jorge Manrubia](mention:` + sgid + `)</div>`
+
+	html := MarkdownToHTML(input)
+	res, err := ResolveMentions(html, lookup, nil)
+	if err != nil {
+		t.Fatalf("pipeline error = %v", err)
+	}
+
+	if n := strings.Count(res.HTML, "<bc-attachment"); n != 1 {
+		t.Errorf("want exactly 1 mention chip, got %d: %q", n, res.HTML)
+	}
+	if strings.Contains(res.HTML, "Manrubia](mention:") {
+		t.Errorf("literal mention-link residue survived: %q", res.HTML)
+	}
+	if !strings.Contains(res.HTML, `sgid="`+sgid+`"`) {
+		t.Errorf("chip does not carry the supplied SGID: %q", res.HTML)
+	}
+}
