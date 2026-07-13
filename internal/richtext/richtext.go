@@ -97,8 +97,9 @@ var reMentionAnchor = regexp.MustCompile(`<a href="(mention|person):([^"]+)">([^
 // Group 1: display text including the leading @.
 // Group 2: scheme (mention or person).
 // Group 3: value (SGID for mention:, person ID for person:).
-// SGIDs and person IDs never contain ')', so [^)]+ is a safe value terminator.
-var reMentionMarkdownLink = regexp.MustCompile(`\[(@[^\]]+)\]\((mention|person):([^)]+)\)`)
+// SGIDs and person IDs use the same base64-safe character set as inline SGIDs.
+// Excluding '<' from display text prevents a match from spanning HTML elements.
+var reMentionMarkdownLink = regexp.MustCompile(`\[(@[^\]<]+)\]\((mention|person):([\w+=/-]+)\)`)
 
 // reSGIDMention matches inline @sgid:VALUE syntax.
 // Group 1: prefix character.
@@ -988,8 +989,8 @@ func MentionToHTML(sgid, name string) string {
 // Each pass replaces matches with <bc-attachment> tags. Subsequent passes skip regions
 // already converted by earlier passes via isInsideBcAttachment.
 //
-// lookupByID may be nil if person:ID syntax is not needed; encountering a person:ID
-// anchor with a nil lookupByID returns an error.
+// lookupByID may be nil if person:ID syntax is not needed; encountering any
+// person:ID syntax with a nil lookupByID returns an error.
 func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByIDFunc) (MentionResult, error) {
 	// Pass 1: Markdown mention anchors
 	var err error
@@ -1213,16 +1214,35 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 
 // isInsideHTMLTag checks if position pos is inside an HTML tag (between < and >).
 func isInsideHTMLTag(s string, pos int) bool {
-	// Walk backwards from pos looking for < or >
-	for i := pos - 1; i >= 0; i-- {
-		if s[i] == '>' {
-			return false // closed tag before us
+	if pos > len(s) {
+		pos = len(s)
+	}
+
+	inTag := false
+	var quote byte
+	for i := 0; i < pos; i++ {
+		if !inTag {
+			if s[i] == '<' {
+				inTag = true
+			}
+			continue
 		}
-		if s[i] == '<' {
-			return true // inside a tag
+
+		if quote != 0 {
+			if s[i] == quote {
+				quote = 0
+			}
+			continue
+		}
+
+		switch s[i] {
+		case '\'', '"':
+			quote = s[i]
+		case '>':
+			inTag = false
 		}
 	}
-	return false
+	return inTag
 }
 
 // isInsideCodeBlock checks if position pos is inside a <code> or <pre> element.
