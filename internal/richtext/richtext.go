@@ -1023,7 +1023,41 @@ func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByI
 // resolveMentionAnchors processes <a href="mention:SGID">@Name</a> and
 // <a href="person:ID">@Name</a> anchors produced by MarkdownToHTML.
 func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, error) {
-	matches := reMentionAnchor.FindAllStringSubmatchIndex(html, -1)
+	return resolveDeterministicMentions(html, reMentionAnchor, mentionMatchGroups{
+		scheme:  1,
+		value:   2,
+		display: 3,
+	}, lookupByID)
+}
+
+// resolveMentionMarkdownLinks converts literal [@Name](mention:SGID) and
+// [@Name](person:ID) Markdown links into <bc-attachment> mention tags.
+//
+// These survive as literal text when the link was authored inside an HTML block:
+// MarkdownToHTML detects the input as HTML and passes it through verbatim, so
+// goldmark never turns the link into an <a> anchor and resolveMentionAnchors
+// cannot match it. Without this pass the fuzzy @Name matcher would match only the
+// first name token (it stops at the first space) and leave the remainder — e.g.
+// " Manrubia](mention:SGID)" — as garbage text next to a half-formed chip.
+//
+// Matches inside code blocks, existing bc-attachments, or HTML tags are skipped:
+// those are documentation or already-resolved content, not live mentions.
+func resolveMentionMarkdownLinks(html string, lookupByID PersonByIDFunc) (string, error) {
+	return resolveDeterministicMentions(html, reMentionMarkdownLink, mentionMatchGroups{
+		scheme:  2,
+		value:   3,
+		display: 1,
+	}, lookupByID)
+}
+
+type mentionMatchGroups struct {
+	scheme  int
+	value   int
+	display int
+}
+
+func resolveDeterministicMentions(html string, pattern *regexp.Regexp, groups mentionMatchGroups, lookupByID PersonByIDFunc) (string, error) {
+	matches := pattern.FindAllStringSubmatchIndex(html, -1)
 	if len(matches) == 0 {
 		return html, nil
 	}
@@ -1034,26 +1068,22 @@ func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, erro
 		m := matches[i]
 		fullStart, fullEnd := m[0], m[1]
 
-		// Skip anchors inside code blocks, existing bc-attachments, or HTML tags
 		if isInsideHTMLTag(html, fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
 			continue
 		}
 
-		scheme := html[m[2]:m[3]]
-		value := html[m[4]:m[5]]
-		displayText := html[m[6]:m[7]]
+		scheme := submatch(html, m, groups.scheme)
+		value := submatch(html, m, groups.value)
+		displayText := submatch(html, m, groups.display)
 
 		var tag string
 		switch scheme {
 		case "mention":
-			// Zero API calls — use value as SGID, link text as display name (caller-trusted).
-			// Unescape HTML because goldmark already escaped the link text (e.g. & → &amp;)
-			// and MentionToHTML will re-escape — without this we'd double-encode.
+			// Both goldmark output and HTML-block passthrough may contain entities.
 			name := unescapeHTML(strings.TrimPrefix(displayText, "@"))
 			tag = MentionToHTML(value, name)
 
 		case "person":
-			// One API lookup — ID → SGID via pingable set
 			if lookupByID == nil {
 				return "", fmt.Errorf("person:%s syntax requires a person lookup function", value)
 			}
@@ -1070,62 +1100,10 @@ func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, erro
 	return result, nil
 }
 
-// resolveMentionMarkdownLinks converts literal [@Name](mention:SGID) and
-// [@Name](person:ID) Markdown links into <bc-attachment> mention tags.
-//
-// These survive as literal text when the link was authored inside an HTML block:
-// MarkdownToHTML detects the input as HTML and passes it through verbatim, so
-// goldmark never turns the link into an <a> anchor and resolveMentionAnchors
-// cannot match it. Without this pass the fuzzy @Name matcher would match only the
-// first name token (it stops at the first space) and leave the remainder — e.g.
-// " Manrubia](mention:SGID)" — as garbage text next to a half-formed chip.
-//
-// Matches inside code blocks, existing bc-attachments, or HTML tags are skipped:
-// those are documentation or already-resolved content, not live mentions.
-func resolveMentionMarkdownLinks(html string, lookupByID PersonByIDFunc) (string, error) {
-	matches := reMentionMarkdownLink.FindAllStringSubmatchIndex(html, -1)
-	if len(matches) == 0 {
-		return html, nil
-	}
-
-	htmlLower := strings.ToLower(html)
-	result := html
-	for i := len(matches) - 1; i >= 0; i-- {
-		m := matches[i]
-		fullStart, fullEnd := m[0], m[1]
-
-		if isInsideHTMLTag(html, fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
-			continue
-		}
-
-		displayText := html[m[2]:m[3]]
-		scheme := html[m[4]:m[5]]
-		value := html[m[6]:m[7]]
-
-		var tag string
-		switch scheme {
-		case "mention":
-			// Zero API calls — value is the SGID, link text is the display name.
-			// Unescape because the HTML-block passthrough leaves author entities
-			// intact and MentionToHTML re-escapes — without this we'd double-encode.
-			name := unescapeHTML(strings.TrimPrefix(displayText, "@"))
-			tag = MentionToHTML(value, name)
-
-		case "person":
-			if lookupByID == nil {
-				return "", fmt.Errorf("person:%s syntax requires a person lookup function", value)
-			}
-			sgid, canonicalName, err := lookupByID(value)
-			if err != nil {
-				return "", fmt.Errorf("failed to resolve person:%s: %w", value, err)
-			}
-			tag = MentionToHTML(sgid, canonicalName)
-		}
-
-		result = result[:fullStart] + tag + result[fullEnd:]
-	}
-
-	return result, nil
+func submatch(input string, indexes []int, group int) string {
+	start := indexes[group*2]
+	end := indexes[group*2+1]
+	return input[start:end]
 }
 
 // resolveSGIDMentions processes inline @sgid:VALUE syntax.
