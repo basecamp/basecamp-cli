@@ -9,6 +9,7 @@ import (
 	"html"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1063,12 +1064,13 @@ func resolveDeterministicMentions(html string, pattern *regexp.Regexp, groups me
 	}
 
 	htmlLower := strings.ToLower(html)
+	tagIndex := buildHTMLTagIndex(html)
 	result := html
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		fullStart, fullEnd := m[0], m[1]
 
-		if isInsideHTMLTag(html, fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
+		if tagIndex.contains(fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
 			continue
 		}
 
@@ -1114,6 +1116,7 @@ func resolveSGIDMentions(html string) string {
 	}
 
 	htmlLower := strings.ToLower(html)
+	tagIndex := buildHTMLTagIndex(html)
 	result := html
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
@@ -1122,7 +1125,7 @@ func resolveSGIDMentions(html string) string {
 		// Group 3: SGID value
 		sgid := html[m[6]:m[7]]
 
-		if isInsideHTMLTag(html, tokenStart) || isInsideCodeBlock(htmlLower, tokenStart) || isInsideBcAttachment(htmlLower, tokenStart) {
+		if tagIndex.contains(tokenStart) || isInsideCodeBlock(htmlLower, tokenStart) || isInsideBcAttachment(htmlLower, tokenStart) {
 			continue
 		}
 
@@ -1144,13 +1147,14 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 
 	result := html
 	htmlLower := strings.ToLower(html)
+	tagIndex := buildHTMLTagIndex(html)
 	var unresolved []string
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		mentionStart, mentionEnd := m[4], m[5]
 
 		// Skip mentions inside HTML tags, code blocks, or existing <bc-attachment> elements
-		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(htmlLower, mentionStart) {
+		if tagIndex.contains(mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(htmlLower, mentionStart) {
 			continue
 		}
 
@@ -1190,18 +1194,25 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 	return result, unresolved, nil
 }
 
-// isInsideHTMLTag checks if position pos is inside an HTML tag (between < and >).
-func isInsideHTMLTag(s string, pos int) bool {
-	if pos > len(s) {
-		pos = len(s)
-	}
+type htmlTagSpan struct {
+	start int
+	end   int
+}
 
+type htmlTagIndex []htmlTagSpan
+
+// buildHTMLTagIndex records tag spans in one pass so mention checks do not
+// repeatedly scan the full HTML prefix. Quoted > characters do not end a tag.
+func buildHTMLTagIndex(s string) htmlTagIndex {
+	var index htmlTagIndex
 	inTag := false
+	tagStart := 0
 	var quote byte
-	for i := 0; i < pos; i++ {
+	for i := 0; i < len(s); i++ {
 		if !inTag {
 			if s[i] == '<' {
 				inTag = true
+				tagStart = i + 1
 			}
 			continue
 		}
@@ -1217,10 +1228,21 @@ func isInsideHTMLTag(s string, pos int) bool {
 		case '\'', '"':
 			quote = s[i]
 		case '>':
+			index = append(index, htmlTagSpan{start: tagStart, end: i + 1})
 			inTag = false
 		}
 	}
-	return inTag
+	if inTag {
+		index = append(index, htmlTagSpan{start: tagStart, end: len(s) + 1})
+	}
+	return index
+}
+
+func (index htmlTagIndex) contains(pos int) bool {
+	i := sort.Search(len(index), func(i int) bool {
+		return index[i].end > pos
+	})
+	return i < len(index) && index[i].start <= pos
 }
 
 // isInsideCodeBlock checks if position pos is inside a <code> or <pre> element.

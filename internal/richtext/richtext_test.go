@@ -2413,6 +2413,11 @@ func TestResolveMentions_MarkdownLinkInHTMLBlock(t *testing.T) {
 			expected: `<div data-example="> [@Name](mention:SGID)">body</div>`,
 		},
 		{
+			name:     "literal link after quoted less-than resolves",
+			input:    `<div data-example="<sample">body</div>[@Jorge](person:42)`,
+			expected: `<div data-example="<sample">body</div>` + MentionToHTML("sgid-jorge", "Jorge Manrubia"),
+		},
+		{
 			name:     "entity-bearing display name is not double encoded",
 			input:    `<div>[@AT&amp;T](mention:` + sgid + `)</div>`,
 			expected: `<div>` + MentionToHTML(sgid, "AT&T") + `</div>`,
