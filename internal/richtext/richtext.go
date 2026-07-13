@@ -988,7 +988,7 @@ func MentionToHTML(sgid, name string) string {
 //  4. Fuzzy @Name and @First.Last patterns
 //
 // Each pass replaces matches with <bc-attachment> tags. Subsequent passes skip regions
-// already converted by earlier passes via isInsideBcAttachment.
+// already converted by earlier passes via the mention exclusion index.
 //
 // lookupByID may be nil if person:ID syntax is not needed; encountering any
 // person:ID syntax with a nil lookupByID returns an error.
@@ -1063,14 +1063,13 @@ func resolveDeterministicMentions(html string, pattern *regexp.Regexp, groups me
 		return html, nil
 	}
 
-	htmlLower := strings.ToLower(html)
-	tagIndex := buildHTMLTagIndex(html)
+	exclusions := buildMentionExclusionIndex(html)
 	result := html
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		fullStart, fullEnd := m[0], m[1]
 
-		if tagIndex.contains(fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
+		if exclusions.contains(fullStart) {
 			continue
 		}
 
@@ -1115,8 +1114,7 @@ func resolveSGIDMentions(html string) string {
 		return html
 	}
 
-	htmlLower := strings.ToLower(html)
-	tagIndex := buildHTMLTagIndex(html)
+	exclusions := buildMentionExclusionIndex(html)
 	result := html
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
@@ -1125,7 +1123,7 @@ func resolveSGIDMentions(html string) string {
 		// Group 3: SGID value
 		sgid := html[m[6]:m[7]]
 
-		if tagIndex.contains(tokenStart) || isInsideCodeBlock(htmlLower, tokenStart) || isInsideBcAttachment(htmlLower, tokenStart) {
+		if exclusions.contains(tokenStart) {
 			continue
 		}
 
@@ -1146,15 +1144,14 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 	}
 
 	result := html
-	htmlLower := strings.ToLower(html)
-	tagIndex := buildHTMLTagIndex(html)
+	exclusions := buildMentionExclusionIndex(html)
 	var unresolved []string
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		mentionStart, mentionEnd := m[4], m[5]
 
 		// Skip mentions inside HTML tags, code blocks, or existing <bc-attachment> elements
-		if tagIndex.contains(mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(htmlLower, mentionStart) {
+		if exclusions.contains(mentionStart) {
 			continue
 		}
 
@@ -1194,17 +1191,34 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 	return result, unresolved, nil
 }
 
-type htmlTagSpan struct {
+type textSpan struct {
 	start int
 	end   int
 }
 
-type htmlTagIndex []htmlTagSpan
+type textSpanIndex []textSpan
+
+type mentionExclusionIndex struct {
+	tags      textSpanIndex
+	protected textSpanIndex
+}
+
+func buildMentionExclusionIndex(s string) mentionExclusionIndex {
+	tags := buildHTMLTagIndex(s)
+	return mentionExclusionIndex{
+		tags:      tags,
+		protected: buildProtectedElementIndex(s, tags),
+	}
+}
+
+func (index mentionExclusionIndex) contains(pos int) bool {
+	return index.tags.contains(pos) || index.protected.contains(pos)
+}
 
 // buildHTMLTagIndex records tag spans in one pass so mention checks do not
 // repeatedly scan the full HTML prefix. Quoted > characters do not end a tag.
-func buildHTMLTagIndex(s string) htmlTagIndex {
-	var index htmlTagIndex
+func buildHTMLTagIndex(s string) textSpanIndex {
+	var index textSpanIndex
 	inTag := false
 	tagStart := 0
 	var quote byte
@@ -1228,72 +1242,85 @@ func buildHTMLTagIndex(s string) htmlTagIndex {
 		case '\'', '"':
 			quote = s[i]
 		case '>':
-			index = append(index, htmlTagSpan{start: tagStart, end: i + 1})
+			index = append(index, textSpan{start: tagStart, end: i + 1})
 			inTag = false
 		}
 	}
 	if inTag {
-		index = append(index, htmlTagSpan{start: tagStart, end: len(s) + 1})
+		index = append(index, textSpan{start: tagStart, end: len(s) + 1})
 	}
 	return index
 }
 
-func (index htmlTagIndex) contains(pos int) bool {
+func buildProtectedElementIndex(s string, tags textSpanIndex) textSpanIndex {
+	var index textSpanIndex
+	var depths [3]int
+	depth := 0
+	protectedStart := 0
+
+	for _, tag := range tags {
+		tagEnd := min(tag.end-1, len(s))
+		contents := strings.TrimSpace(s[tag.start:tagEnd])
+		closing := strings.HasPrefix(contents, "/")
+		if closing {
+			contents = strings.TrimSpace(strings.TrimPrefix(contents, "/"))
+		}
+
+		nameEnd := strings.IndexAny(contents, " \t\r\n/")
+		if nameEnd == -1 {
+			nameEnd = len(contents)
+		}
+		kind := protectedElementKind(contents[:nameEnd])
+		if kind == -1 {
+			continue
+		}
+
+		if closing {
+			if depths[kind] == 0 {
+				continue
+			}
+			depths[kind]--
+			depth--
+			if depth == 0 {
+				index = append(index, textSpan{start: protectedStart, end: tag.start})
+			}
+			continue
+		}
+
+		if strings.HasSuffix(contents, "/") {
+			continue
+		}
+		if depth == 0 {
+			protectedStart = tag.end
+		}
+		depths[kind]++
+		depth++
+	}
+
+	if depth > 0 {
+		index = append(index, textSpan{start: protectedStart, end: len(s) + 1})
+	}
+	return index
+}
+
+func protectedElementKind(name string) int {
+	switch {
+	case strings.EqualFold(name, "code"):
+		return 0
+	case strings.EqualFold(name, "pre"):
+		return 1
+	case strings.EqualFold(name, "bc-attachment"):
+		return 2
+	default:
+		return -1
+	}
+}
+
+func (index textSpanIndex) contains(pos int) bool {
 	i := sort.Search(len(index), func(i int) bool {
 		return index[i].end > pos
 	})
 	return i < len(index) && index[i].start <= pos
-}
-
-// isInsideCodeBlock checks if position pos is inside a <code> or <pre> element.
-// s must be pre-lowercased by the caller.
-func isInsideCodeBlock(s string, pos int) bool {
-	prefix := s[:pos]
-	for _, tag := range []string{"code", "pre"} {
-		open := "<" + tag
-		searchIn := prefix
-		for {
-			openIdx := strings.LastIndex(searchIn, open)
-			if openIdx == -1 {
-				break
-			}
-			// Verify tag boundary: next char must be '>', ' ', tab, or newline
-			// to avoid matching partial names like <preview> for <pre>
-			nextPos := openIdx + len(open)
-			if nextPos < len(prefix) && prefix[nextPos] != '>' && prefix[nextPos] != ' ' && prefix[nextPos] != '\t' && prefix[nextPos] != '\n' {
-				// Not a real tag, keep searching earlier in the string
-				searchIn = prefix[:openIdx]
-				continue
-			}
-			between := prefix[openIdx:]
-			if !strings.Contains(between, "</"+tag+">") {
-				return true
-			}
-			break
-		}
-	}
-	return false
-}
-
-// isInsideBcAttachment checks if position pos is inside a <bc-attachment>...</bc-attachment> element.
-// s must be pre-lowercased by the caller for case-insensitive matching.
-func isInsideBcAttachment(s string, pos int) bool {
-	// Find the last <bc-attachment before pos
-	prefix := s[:pos]
-	openIdx := strings.LastIndex(prefix, "<bc-attachment")
-	if openIdx == -1 {
-		return false
-	}
-	between := s[openIdx:pos]
-	// Self-closing tag (e.g., <bc-attachment ... />) — mention is after it, not inside
-	if strings.Contains(between, "/>") {
-		return false
-	}
-	// Check for closing tag between the open and pos
-	if strings.Contains(between, "</bc-attachment>") {
-		return false
-	}
-	return true
 }
 
 // IsHTML attempts to detect if the input string contains HTML.

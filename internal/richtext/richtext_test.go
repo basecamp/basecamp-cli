@@ -1594,6 +1594,16 @@ func TestResolveMentions(t *testing.T) {
 			expected: `<pre>@John example</pre>`,
 		},
 		{
+			name:     "mention after closed code block is resolved",
+			input:    `<code>@John</code> @John`,
+			expected: `<code>@John</code> ` + MentionToHTML("sgid-john", "John Doe"),
+		},
+		{
+			name:     "mention after closed attachment is resolved",
+			input:    `<bc-attachment sgid="x">@John</bc-attachment> @John`,
+			expected: `<bc-attachment sgid="x">@John</bc-attachment> ` + MentionToHTML("sgid-john", "John Doe"),
+		},
+		{
 			name:     "mention after self-closing bc-attachment is resolved",
 			input:    `<bc-attachment sgid="x" content-type="image/png"/> @John check this`,
 			expected: `<bc-attachment sgid="x" content-type="image/png"/> ` + MentionToHTML("sgid-john", "John Doe") + ` check this`,
