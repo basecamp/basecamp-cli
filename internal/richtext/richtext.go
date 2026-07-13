@@ -9,6 +9,7 @@ import (
 	"html"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,6 +91,16 @@ var reMentionInput = regexp.MustCompile(`(^|[\s>(\["'])(@[\pL\pN_]+(?:\.[\pL\pN_
 // Group 2: value (SGID for mention:, person ID for person:).
 // Group 3: display text (may include leading @).
 var reMentionAnchor = regexp.MustCompile(`<a href="(mention|person):([^"]+)">([^<]*)</a>`)
+
+// reMentionMarkdownLink matches a literal Markdown mention link that was never
+// converted to an <a> anchor — this happens when the link was embedded inside an
+// author-supplied HTML block, which MarkdownToHTML passes through verbatim.
+// Group 1: display text including the leading @.
+// Group 2: scheme (mention or person).
+// Group 3: value (SGID for mention:, person ID for person:).
+// SGIDs and person IDs use the same base64-safe character set as inline SGIDs.
+// Excluding '<' from display text prevents a match from spanning HTML elements.
+var reMentionMarkdownLink = regexp.MustCompile(`\[(@[^\]<]+)\]\((mention|person):([\w+=/-]+)\)`)
 
 // reSGIDMention matches inline @sgid:VALUE syntax.
 // Group 1: prefix character.
@@ -969,16 +980,18 @@ func MentionToHTML(sgid, name string) string {
 		escapeHTML(name) + `</bc-attachment>`
 }
 
-// ResolveMentions processes mention syntax in HTML in three passes:
+// ResolveMentions processes mention syntax in HTML in four passes:
 //  1. Markdown mention anchors: <a href="mention:SGID">@Name</a> and <a href="person:ID">@Name</a>
-//  2. Inline @sgid:VALUE syntax
-//  3. Fuzzy @Name and @First.Last patterns
+//  2. Literal Markdown mention links [@Name](mention:SGID) / [@Name](person:ID) that were
+//     never converted to anchors (e.g. embedded inside an author-supplied HTML block)
+//  3. Inline @sgid:VALUE syntax
+//  4. Fuzzy @Name and @First.Last patterns
 //
 // Each pass replaces matches with <bc-attachment> tags. Subsequent passes skip regions
-// already converted by earlier passes via isInsideBcAttachment.
+// already converted by earlier passes via the mention exclusion index.
 //
-// lookupByID may be nil if person:ID syntax is not needed; encountering a person:ID
-// anchor with a nil lookupByID returns an error.
+// lookupByID may be nil if person:ID syntax is not needed; encountering any
+// person:ID syntax with a nil lookupByID returns an error.
 func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByIDFunc) (MentionResult, error) {
 	// Pass 1: Markdown mention anchors
 	var err error
@@ -987,10 +1000,16 @@ func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByI
 		return MentionResult{}, err
 	}
 
-	// Pass 2: @sgid:VALUE
+	// Pass 2: literal Markdown mention links that were not converted to anchors
+	html, err = resolveMentionMarkdownLinks(html, lookupByID)
+	if err != nil {
+		return MentionResult{}, err
+	}
+
+	// Pass 3: @sgid:VALUE
 	html = resolveSGIDMentions(html)
 
-	// Pass 3: fuzzy @Name (skip when no lookup function provided)
+	// Pass 4: fuzzy @Name (skip when no lookup function provided)
 	var unresolved []string
 	if lookup != nil {
 		html, unresolved, err = resolveNameMentions(html, lookup)
@@ -1005,37 +1024,67 @@ func ResolveMentions(html string, lookup MentionLookupFunc, lookupByID PersonByI
 // resolveMentionAnchors processes <a href="mention:SGID">@Name</a> and
 // <a href="person:ID">@Name</a> anchors produced by MarkdownToHTML.
 func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, error) {
-	matches := reMentionAnchor.FindAllStringSubmatchIndex(html, -1)
+	return resolveDeterministicMentions(html, reMentionAnchor, mentionMatchGroups{
+		scheme:  1,
+		value:   2,
+		display: 3,
+	}, lookupByID)
+}
+
+// resolveMentionMarkdownLinks converts literal [@Name](mention:SGID) and
+// [@Name](person:ID) Markdown links into <bc-attachment> mention tags.
+//
+// These survive as literal text when the link was authored inside an HTML block:
+// MarkdownToHTML detects the input as HTML and passes it through verbatim, so
+// goldmark never turns the link into an <a> anchor and resolveMentionAnchors
+// cannot match it. Without this pass the fuzzy @Name matcher would match only the
+// first name token (it stops at the first space) and leave the remainder — e.g.
+// " Manrubia](mention:SGID)" — as garbage text next to a half-formed chip.
+//
+// Matches inside code blocks, existing bc-attachments, or HTML tags are skipped:
+// those are documentation or already-resolved content, not live mentions.
+func resolveMentionMarkdownLinks(html string, lookupByID PersonByIDFunc) (string, error) {
+	return resolveDeterministicMentions(html, reMentionMarkdownLink, mentionMatchGroups{
+		scheme:  2,
+		value:   3,
+		display: 1,
+	}, lookupByID)
+}
+
+type mentionMatchGroups struct {
+	scheme  int
+	value   int
+	display int
+}
+
+func resolveDeterministicMentions(html string, pattern *regexp.Regexp, groups mentionMatchGroups, lookupByID PersonByIDFunc) (string, error) {
+	matches := pattern.FindAllStringSubmatchIndex(html, -1)
 	if len(matches) == 0 {
 		return html, nil
 	}
 
-	htmlLower := strings.ToLower(html)
+	exclusions := buildMentionExclusionIndex(html)
 	result := html
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		fullStart, fullEnd := m[0], m[1]
 
-		// Skip anchors inside code blocks, existing bc-attachments, or HTML tags
-		if isInsideHTMLTag(html, fullStart) || isInsideCodeBlock(htmlLower, fullStart) || isInsideBcAttachment(htmlLower, fullStart) {
+		if exclusions.contains(fullStart) {
 			continue
 		}
 
-		scheme := html[m[2]:m[3]]
-		value := html[m[4]:m[5]]
-		displayText := html[m[6]:m[7]]
+		scheme := submatch(html, m, groups.scheme)
+		value := submatch(html, m, groups.value)
+		displayText := submatch(html, m, groups.display)
 
 		var tag string
 		switch scheme {
 		case "mention":
-			// Zero API calls — use value as SGID, link text as display name (caller-trusted).
-			// Unescape HTML because goldmark already escaped the link text (e.g. & → &amp;)
-			// and MentionToHTML will re-escape — without this we'd double-encode.
+			// Both goldmark output and HTML-block passthrough may contain entities.
 			name := unescapeHTML(strings.TrimPrefix(displayText, "@"))
 			tag = MentionToHTML(value, name)
 
 		case "person":
-			// One API lookup — ID → SGID via pingable set
 			if lookupByID == nil {
 				return "", fmt.Errorf("person:%s syntax requires a person lookup function", value)
 			}
@@ -1052,6 +1101,12 @@ func resolveMentionAnchors(html string, lookupByID PersonByIDFunc) (string, erro
 	return result, nil
 }
 
+func submatch(input string, indexes []int, group int) string {
+	start := indexes[group*2]
+	end := indexes[group*2+1]
+	return input[start:end]
+}
+
 // resolveSGIDMentions processes inline @sgid:VALUE syntax.
 func resolveSGIDMentions(html string) string {
 	matches := reSGIDMention.FindAllStringSubmatchIndex(html, -1)
@@ -1059,7 +1114,7 @@ func resolveSGIDMentions(html string) string {
 		return html
 	}
 
-	htmlLower := strings.ToLower(html)
+	exclusions := buildMentionExclusionIndex(html)
 	result := html
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
@@ -1068,7 +1123,7 @@ func resolveSGIDMentions(html string) string {
 		// Group 3: SGID value
 		sgid := html[m[6]:m[7]]
 
-		if isInsideHTMLTag(html, tokenStart) || isInsideCodeBlock(htmlLower, tokenStart) || isInsideBcAttachment(htmlLower, tokenStart) {
+		if exclusions.contains(tokenStart) {
 			continue
 		}
 
@@ -1089,14 +1144,14 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 	}
 
 	result := html
-	htmlLower := strings.ToLower(html)
+	exclusions := buildMentionExclusionIndex(html)
 	var unresolved []string
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		mentionStart, mentionEnd := m[4], m[5]
 
 		// Skip mentions inside HTML tags, code blocks, or existing <bc-attachment> elements
-		if isInsideHTMLTag(html, mentionStart) || isInsideCodeBlock(htmlLower, mentionStart) || isInsideBcAttachment(htmlLower, mentionStart) {
+		if exclusions.contains(mentionStart) {
 			continue
 		}
 
@@ -1136,69 +1191,136 @@ func resolveNameMentions(html string, lookup MentionLookupFunc) (string, []strin
 	return result, unresolved, nil
 }
 
-// isInsideHTMLTag checks if position pos is inside an HTML tag (between < and >).
-func isInsideHTMLTag(s string, pos int) bool {
-	// Walk backwards from pos looking for < or >
-	for i := pos - 1; i >= 0; i-- {
-		if s[i] == '>' {
-			return false // closed tag before us
-		}
-		if s[i] == '<' {
-			return true // inside a tag
-		}
-	}
-	return false
+type textSpan struct {
+	start int
+	end   int
 }
 
-// isInsideCodeBlock checks if position pos is inside a <code> or <pre> element.
-// s must be pre-lowercased by the caller.
-func isInsideCodeBlock(s string, pos int) bool {
-	prefix := s[:pos]
-	for _, tag := range []string{"code", "pre"} {
-		open := "<" + tag
-		searchIn := prefix
-		for {
-			openIdx := strings.LastIndex(searchIn, open)
-			if openIdx == -1 {
-				break
+type textSpanIndex []textSpan
+
+type mentionExclusionIndex struct {
+	tags      textSpanIndex
+	protected textSpanIndex
+}
+
+func buildMentionExclusionIndex(s string) mentionExclusionIndex {
+	tags := buildHTMLTagIndex(s)
+	return mentionExclusionIndex{
+		tags:      tags,
+		protected: buildProtectedElementIndex(s, tags),
+	}
+}
+
+func (index mentionExclusionIndex) contains(pos int) bool {
+	return index.tags.contains(pos) || index.protected.contains(pos)
+}
+
+// buildHTMLTagIndex records tag spans in one pass so mention checks do not
+// repeatedly scan the full HTML prefix. Quoted > characters do not end a tag.
+func buildHTMLTagIndex(s string) textSpanIndex {
+	var index textSpanIndex
+	inTag := false
+	tagStart := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		if !inTag {
+			if s[i] == '<' {
+				inTag = true
+				tagStart = i + 1
 			}
-			// Verify tag boundary: next char must be '>', ' ', tab, or newline
-			// to avoid matching partial names like <preview> for <pre>
-			nextPos := openIdx + len(open)
-			if nextPos < len(prefix) && prefix[nextPos] != '>' && prefix[nextPos] != ' ' && prefix[nextPos] != '\t' && prefix[nextPos] != '\n' {
-				// Not a real tag, keep searching earlier in the string
-				searchIn = prefix[:openIdx]
+			continue
+		}
+
+		if quote != 0 {
+			if s[i] == quote {
+				quote = 0
+			}
+			continue
+		}
+
+		switch s[i] {
+		case '\'', '"':
+			quote = s[i]
+		case '>':
+			index = append(index, textSpan{start: tagStart, end: i + 1})
+			inTag = false
+		}
+	}
+	if inTag {
+		index = append(index, textSpan{start: tagStart, end: len(s) + 1})
+	}
+	return index
+}
+
+func buildProtectedElementIndex(s string, tags textSpanIndex) textSpanIndex {
+	var index textSpanIndex
+	var depths [3]int
+	depth := 0
+	protectedStart := 0
+
+	for _, tag := range tags {
+		tagEnd := min(tag.end-1, len(s))
+		contents := strings.TrimSpace(s[tag.start:tagEnd])
+		closing := strings.HasPrefix(contents, "/")
+		if closing {
+			contents = strings.TrimSpace(strings.TrimPrefix(contents, "/"))
+		}
+
+		nameEnd := strings.IndexAny(contents, " \t\r\n/")
+		if nameEnd == -1 {
+			nameEnd = len(contents)
+		}
+		kind := protectedElementKind(contents[:nameEnd])
+		if kind == -1 {
+			continue
+		}
+
+		if closing {
+			if depths[kind] == 0 {
 				continue
 			}
-			between := prefix[openIdx:]
-			if !strings.Contains(between, "</"+tag+">") {
-				return true
+			depths[kind]--
+			depth--
+			if depth == 0 {
+				index = append(index, textSpan{start: protectedStart, end: tag.start})
 			}
-			break
+			continue
 		}
+
+		if strings.HasSuffix(contents, "/") {
+			continue
+		}
+		if depth == 0 {
+			protectedStart = tag.end
+		}
+		depths[kind]++
+		depth++
 	}
-	return false
+
+	if depth > 0 {
+		index = append(index, textSpan{start: protectedStart, end: len(s) + 1})
+	}
+	return index
 }
 
-// isInsideBcAttachment checks if position pos is inside a <bc-attachment>...</bc-attachment> element.
-// s must be pre-lowercased by the caller for case-insensitive matching.
-func isInsideBcAttachment(s string, pos int) bool {
-	// Find the last <bc-attachment before pos
-	prefix := s[:pos]
-	openIdx := strings.LastIndex(prefix, "<bc-attachment")
-	if openIdx == -1 {
-		return false
+func protectedElementKind(name string) int {
+	switch {
+	case strings.EqualFold(name, "code"):
+		return 0
+	case strings.EqualFold(name, "pre"):
+		return 1
+	case strings.EqualFold(name, "bc-attachment"):
+		return 2
+	default:
+		return -1
 	}
-	between := s[openIdx:pos]
-	// Self-closing tag (e.g., <bc-attachment ... />) — mention is after it, not inside
-	if strings.Contains(between, "/>") {
-		return false
-	}
-	// Check for closing tag between the open and pos
-	if strings.Contains(between, "</bc-attachment>") {
-		return false
-	}
-	return true
+}
+
+func (index textSpanIndex) contains(pos int) bool {
+	i := sort.Search(len(index), func(i int) bool {
+		return index[i].end > pos
+	})
+	return i < len(index) && index[i].start <= pos
 }
 
 // IsHTML attempts to detect if the input string contains HTML.
