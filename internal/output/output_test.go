@@ -3903,28 +3903,27 @@ func TestPluralNoun(t *testing.T) {
 // injection in every styled/markdown sink.
 func TestWithSummaryStripsANSI(t *testing.T) {
 	// OSC 8 hyperlink + CSI color sequence wrapping a hostile payload.
+	// The equality against a clean literal proves no C0/C1/DEL controls survive.
 	payload := "\x1b]8;;http://evil\x07click\x1b]8;;\x07\x1b[31mpwn\x1b[0m"
+	want := "clickpwn"
 
 	t.Run("WithSummary", func(t *testing.T) {
 		r := &Response{}
 		WithSummary(payload)(r)
-		assert.Equal(t, ansi.Strip(payload), r.Summary)
-		assert.NotContains(t, r.Summary, "\x1b")
+		assert.Equal(t, want, r.Summary)
 	})
 
 	t.Run("WithNotice", func(t *testing.T) {
 		r := &Response{}
 		WithNotice(payload)(r)
-		assert.Equal(t, ansi.Strip(payload), r.Notice)
-		assert.NotContains(t, r.Notice, "\x1b")
+		assert.Equal(t, want, r.Notice)
 		assert.False(t, r.noticeDiagnostic)
 	})
 
 	t.Run("WithDiagnostic", func(t *testing.T) {
 		r := &Response{}
 		WithDiagnostic(payload)(r)
-		assert.Equal(t, ansi.Strip(payload), r.Notice)
-		assert.NotContains(t, r.Notice, "\x1b")
+		assert.Equal(t, want, r.Notice)
 		assert.True(t, r.noticeDiagnostic)
 	})
 }
