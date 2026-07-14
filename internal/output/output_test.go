@@ -3332,16 +3332,49 @@ func TestWriterJQFilterCompoundStripsC1Controls(t *testing.T) {
 	assert.NotContains(t, out, "\u009d")
 	assert.NotContains(t, out, "\u0090")
 
-	// Legitimate content survives with structure intact.
+	// Legitimate content survives with structure intact. Keys containing
+	// controls are visibly escaped rather than stripped, so they can never
+	// collide with a clean key.
 	var result []map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	require.Len(t, result, 3)
 	assert.Equal(t, "31mRed alert0m", result[0]["title"])
-	assert.Equal(t, "nested", result[1]["title"], "sanitized map key")
+	assert.Equal(t, "nested", result[1]["ti\\u009dtle"], "escaped map key")
 	assert.Equal(t, "clean", result[1]["note"])
 	nested, ok := result[2]["nested"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "payload", nested["deep"])
+}
+
+// TestWriterJQFilterCompoundKeyCollision verifies that a hostile map key
+// that sanitizes to the same string as a legitimate key cannot replace or
+// hide it: the clean key keeps its slot and value, and the hostile key is
+// preserved under a visibly-escaped name instead of being dropped.
+func TestWriterJQFilterCompoundKeyCollision(t *testing.T) {
+	forceTTY(t)
+	var buf bytes.Buffer
+	w := New(Options{
+		Format:   FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".data",
+	})
+
+	data := map[string]any{
+		"title":          "legit",
+		"\x1b[31mtitle":  "impostor",
+		"\u009b31mtitle": "c1 impostor",
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result, 3, "no entry silently dropped")
+	assert.Equal(t, "legit", result["title"], "clean key keeps its slot")
+	assert.Equal(t, "impostor", result["\\x1b[31mtitle"])
+	assert.Equal(t, "c1 impostor", result["\\u009b31mtitle"])
+	assert.NotContains(t, buf.String(), "\x1b")
+	assert.NotContains(t, buf.String(), "\u009b")
 }
 
 // TestWriterJQFilterStringVerbatimWhenPiped verifies that jq string results

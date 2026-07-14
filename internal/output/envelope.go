@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/itchyny/gojq"
@@ -343,12 +344,25 @@ func sanitizeJSONValue(v any) any {
 	case map[string]any:
 		out := make(map[string]any, len(val))
 		for k, elem := range val {
-			out[richtext.SanitizeTerminal(k)] = sanitizeJSONValue(elem)
+			out[sanitizeJSONKey(k)] = sanitizeJSONValue(elem)
 		}
 		return out
 	default:
 		return v
 	}
+}
+
+// sanitizeJSONKey makes a map key terminal-safe while keeping distinct keys
+// distinct. Stripping would let a hostile key like "\x1b[31mtitle" collapse
+// onto a legitimate "title" and silently replace or hide that field, so keys
+// containing escapes or controls are visibly escaped instead: they can never
+// claim a clean key's slot, and no entry is dropped.
+func sanitizeJSONKey(k string) string {
+	if richtext.SanitizeTerminal(k) == k {
+		return k
+	}
+	quoted := strconv.Quote(k)
+	return quoted[1 : len(quoted)-1]
 }
 
 // isTTY checks if the writer is a terminal. It is a package variable so tests

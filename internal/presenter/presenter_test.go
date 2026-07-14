@@ -1708,8 +1708,8 @@ func TestRenderListMarkdownStripsANSIInGroupHeading(t *testing.T) {
 
 func TestRenderListMarkdownGroupHeadingAllEscapeFallsBackToOther(t *testing.T) {
 	// A group name that is entirely ESC/OSC sequences strips to "". The
-	// empty-check must run AFTER ansi.Strip so it falls back to "Other"
-	// instead of emitting a blank "## " heading.
+	// empty-check must run AFTER richtext.SanitizeTerminal so it falls back
+	// to "Other" instead of emitting a blank "## " heading.
 	schema := LookupByName("todo")
 	if schema == nil {
 		t.Fatal("Expected todo schema")
