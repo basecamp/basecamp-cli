@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -193,6 +194,19 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	}
 
 	tokenEndpoint := creds.TokenEndpoint
+
+	// The token endpoint here is a persisted (possibly migrated) value from
+	// the credential store and receives the refresh token plus client
+	// credentials. The SDK's RequireSecureEndpoint only checks scheme==https,
+	// so a poisoned store could still carry userinfo (https://user@evil/),
+	// empty-host, or opaque/malformed https forms that it would let through.
+	// Apply the same strict check used for the other OAuth endpoints before
+	// any POST.
+	if u, err := url.Parse(tokenEndpoint); err != nil {
+		return output.ErrAuth(fmt.Sprintf("invalid token endpoint %q: %v", tokenEndpoint, err))
+	} else if !isSecureEndpointURL(u) {
+		return output.ErrAuth(fmt.Sprintf("invalid token endpoint %q: must be an absolute https URL (or http on loopback)", tokenEndpoint))
+	}
 
 	// Resolve client credentials for the refresh request
 	var clientID, clientSecret string
@@ -621,7 +635,43 @@ func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
 	return &creds, nil
 }
 
+// isSecureEndpointURL reports whether u uses a scheme safe for OAuth endpoints
+// derived from the server-controlled discovery document: https, or http only on
+// loopback for local development. The URL must also be absolute with a hostname —
+// url.Parse accepts opaque forms like "https:foo" and port-only authorities like
+// "https://:3000/" that carry the right scheme but no hostname, which would
+// otherwise slip through to the transport or browser launcher. URLs carrying
+// userinfo (user:pass@host) are rejected outright: they enable phishing
+// displays in browsers and net/http synthesizes a Basic Authorization header
+// from them. Centralizing the rule keeps the registration, authorization, and
+// redirect-following checks consistent.
+func isSecureEndpointURL(u *url.URL) bool {
+	if u.Hostname() == "" {
+		return false
+	}
+	// Userinfo enables phishing display in browsers ("evil.example@real.host")
+	// and Basic-auth synthesis in net/http requests.
+	if u.User != nil {
+		return false
+	}
+	// IsLocalhost takes the host:port form and strips the port itself.
+	return u.Scheme == "https" || (u.Scheme == "http" && hostutil.IsLocalhost(u.Host))
+}
+
 func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
+	// The registration endpoint comes from the server-controlled discovery
+	// document. Restrict it to https (or http on loopback for local
+	// development) so a hostile discovery doc can't hand the DCR POST a
+	// file:// (or other) scheme that RequireSecureURL would let through.
+	// Mirrors buildAuthURL's scheme whitelist.
+	u, err := url.Parse(registrationEndpoint)
+	if err != nil {
+		return nil, output.ErrAuth(fmt.Sprintf("invalid registration endpoint %q: %v", registrationEndpoint, err))
+	}
+	if !isSecureEndpointURL(u) {
+		return nil, output.ErrAuth(fmt.Sprintf("invalid registration endpoint %q: must be an absolute https URL (or http on loopback)", registrationEndpoint))
+	}
+
 	customRedirect := opts.RedirectURI != defaultRedirectURI
 	regReq := map[string]any{
 		"client_name":                "basecamp-cli",
@@ -643,8 +693,51 @@ func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint st
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := m.httpClient.Do(req)
+	// Use a dedicated client with its own CheckRedirect guard. The DCR POST body
+	// carries only client metadata (no auth code or refresh token), so following a
+	// proxy-canonicalized 3xx redirect is safe — and necessary, since the manager's
+	// guarded client would silently fail first-time login on such redirects. But Go
+	// replays the POST body on 307/308, so re-validate EACH hop's target with the
+	// same scheme rule applied to the registration endpoint; otherwise a hostile
+	// server could 307 the body to a file:// or non-loopback http:// URL, escaping
+	// the whitelist that only covered the original endpoint.
+	checkRedirect := func(req *http.Request, via []*http.Request) error {
+		if !isSecureEndpointURL(req.URL) {
+			return output.ErrAuth(fmt.Sprintf("refusing DCR redirect to %q: must be an absolute https URL (or http on loopback)", req.URL.String()))
+		}
+		// Only 307/308 preserve the POST method and body. On 301/302/303 Go
+		// downgrades the upcoming request (req here) to a body-less GET, so the
+		// registration would silently arrive empty and first-time login would
+		// fail confusingly. Refuse instead of resending as GET.
+		if req.Method != http.MethodPost {
+			return output.ErrAuth(fmt.Sprintf("refusing DCR redirect to %q: redirect downgraded the registration POST to %s, dropping the request body; the endpoint must redirect with 307/308", req.URL.String(), req.Method))
+		}
+		// A redirect loop is a deterministic endpoint misconfiguration, not a
+		// transient network failure: return an auth-class error so the
+		// errors.As unwrap below surfaces it directly instead of masking it
+		// as a retryable output.ErrNetwork.
+		if len(via) >= 10 {
+			return output.ErrAuth(fmt.Sprintf("registration endpoint redirect loop: stopped after 10 redirects at %q", req.URL.String()))
+		}
+		return nil
+	}
+	var dcrClient *http.Client
+	if m.httpClient != nil {
+		c := *m.httpClient // http.Client has no locks; value copy is safe
+		c.CheckRedirect = checkRedirect
+		dcrClient = &c
+	} else {
+		dcrClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
+	}
+	resp, err := dcrClient.Do(req)
 	if err != nil {
+		// A CheckRedirect rejection surfaces as a *url.Error wrapping our
+		// output.ErrAuth. Surface it directly rather than masking the security
+		// failure as a retryable network error.
+		var outErr *output.Error
+		if errors.As(err, &outErr) {
+			return nil, outErr
+		}
 		return nil, output.ErrNetwork(err)
 	}
 	defer resp.Body.Close()
@@ -701,7 +794,15 @@ func (m *Manager) saveBC3Client(creds *ClientCredentials) error {
 func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeChallenge, clientID string, opts *LoginOptions) (string, error) {
 	u, err := url.Parse(cfg.AuthorizationEndpoint)
 	if err != nil {
-		return "", err
+		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: %v", cfg.AuthorizationEndpoint, err))
+	}
+
+	// The authorization endpoint comes from the server-controlled discovery
+	// document and is later dispatched to the OS browser handler (xdg-open /
+	// open). Restrict it to https (or http on loopback for local development)
+	// so a hostile discovery doc can't hand the OS a file:// (or other) URL.
+	if !isSecureEndpointURL(u) {
+		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: must be an absolute https URL (or http on loopback)", cfg.AuthorizationEndpoint))
 	}
 
 	q := u.Query()
@@ -725,6 +826,19 @@ func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeC
 }
 
 func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType, code, codeVerifier string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
+	// The token endpoint comes from the server-controlled discovery document
+	// and receives the authorization code plus client credentials. The SDK's
+	// RequireSecureEndpoint only checks scheme==https, which lets userinfo
+	// (https://legit@evil.com/token) and empty-host forms through. Apply the
+	// same strict check used for the registration and authorization endpoints.
+	u, err := url.Parse(cfg.TokenEndpoint)
+	if err != nil {
+		return nil, output.ErrAuth(fmt.Sprintf("invalid token endpoint %q: %v", cfg.TokenEndpoint, err))
+	}
+	if !isSecureEndpointURL(u) {
+		return nil, output.ErrAuth(fmt.Sprintf("invalid token endpoint %q: must be an absolute https URL (or http on loopback)", cfg.TokenEndpoint))
+	}
+
 	exchanger := oauth.NewExchanger(m.httpClient)
 
 	req := oauth.ExchangeRequest{
