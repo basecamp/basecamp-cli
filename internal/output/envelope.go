@@ -1,10 +1,13 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/itchyny/gojq"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/presenter"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NormalizeData converts json.RawMessage and other types to standard Go types.
@@ -202,7 +206,13 @@ func (w *Writer) write(v any) error {
 	// early-return so that --agent --jq still emits the diagnostic.
 	if w.opts.Format == FormatQuiet {
 		if resp, ok := v.(*Response); ok && resp.noticeDiagnostic && resp.Notice != "" {
-			fmt.Fprintf(w.opts.ErrWriter, "notice: %s\n", resp.Notice)
+			// The notice may interpolate API-controlled strings and stderr is
+			// a terminal sink; sanitize and keep the diagnostic to one line.
+			// Sanitize first, then gate: an all-escape notice collapses to ""
+			// and must not emit a blank "notice: " line.
+			if notice := sanitizeText(resp.Notice, true, false); notice != "" {
+				fmt.Fprintf(w.opts.ErrWriter, "notice: %s\n", notice)
+			}
 		}
 	}
 
@@ -282,6 +292,12 @@ func (w *Writer) writeJQ(v any) error {
 		return ErrJQRuntime(fmt.Errorf("unmarshal: %w", err))
 	}
 
+	// Sanitization is TTY-gated: --jq to a terminal strips escape sequences
+	// and control characters to prevent terminal injection, while piped or
+	// redirected output is the machine-consumption contract (matching
+	// writeJSON) and passes bytes through verbatim.
+	tty := isTTY(w.opts.Writer)
+
 	iter := code.Run(input)
 	for {
 		result, ok := iter.Next()
@@ -291,10 +307,24 @@ func (w *Writer) writeJQ(v any) error {
 		if err, ok := result.(error); ok {
 			return ErrJQRuntime(err)
 		}
-		// Print strings without JSON encoding for cleaner output
+		// Print strings without JSON encoding for cleaner output.
+		// On a TTY, SanitizeTerminal guards against terminal injection: --jq
+		// can select API-controlled strings, and unlike JSON marshaling (which
+		// escapes control bytes) this path would otherwise emit raw OSC/CSI
+		// sequences.
 		if s, ok := result.(string); ok {
+			if tty {
+				s = richtext.SanitizeTerminal(s)
+			}
 			fmt.Fprintln(w.opts.Writer, s)
 		} else {
+			// Compound results (arrays/objects) are marshaled, but Go's JSON
+			// encoder only escapes C0 controls — UTF-8-encoded C1 controls
+			// (U+0080–U+009F) pass through raw and execute on C1-honoring
+			// terminals. On a TTY, sanitize every string leaf (and key) first.
+			if tty {
+				result = sanitizeJSONValue(result)
+			}
 			raw, err := json.Marshal(result)
 			if err != nil {
 				return ErrJQRuntime(fmt.Errorf("result not serializable: %w", err))
@@ -305,8 +335,64 @@ func (w *Writer) writeJQ(v any) error {
 	return nil
 }
 
-// isTTY checks if the writer is a terminal.
-func isTTY(w io.Writer) bool {
+// sanitizeJSONValue recursively strips terminal escape sequences and control
+// characters from every string in a jq result — map keys, map values, and
+// slice elements — before it is marshaled for a TTY-bound --jq sink.
+// Non-string leaves (numbers, bools, nil, and gojq's numeric types) pass
+// through unchanged.
+func sanitizeJSONValue(v any) any {
+	switch val := v.(type) {
+	case string:
+		return richtext.SanitizeTerminal(val)
+	case []any:
+		for i, elem := range val {
+			val[i] = sanitizeJSONValue(elem)
+		}
+		return val
+	case map[string]any:
+		return sanitizeJSONMap(val)
+	default:
+		return v
+	}
+}
+
+// sanitizeJSONMap rebuilds a map with terminal-safe keys without ever
+// dropping an entry. Stripping keys would let a hostile "\x1b[31mtitle"
+// collapse onto a legitimate "title" and silently replace or hide that
+// field. Instead, keys already free of escapes and controls keep their name
+// — a hostile key can never displace one — and keys changed by sanitization
+// are visibly escaped (strconv.Quote), re-quoting with delimiters until the
+// name is unique so even a literal key that mimics escape notation cannot
+// be overwritten. Escaped keys are processed in sorted order so the
+// resulting names are deterministic.
+func sanitizeJSONMap(val map[string]any) map[string]any {
+	out := make(map[string]any, len(val))
+	var escaped []string
+	for k, elem := range val {
+		if richtext.SanitizeTerminal(k) == k {
+			out[k] = sanitizeJSONValue(elem)
+		} else {
+			escaped = append(escaped, k)
+		}
+	}
+	sort.Strings(escaped)
+	for _, k := range escaped {
+		quoted := strconv.Quote(k)
+		name := quoted[1 : len(quoted)-1]
+		for {
+			if _, taken := out[name]; !taken {
+				break
+			}
+			name = strconv.Quote(name)
+		}
+		out[name] = sanitizeJSONValue(val[k])
+	}
+	return out
+}
+
+// isTTY checks if the writer is a terminal. It is a package variable so tests
+// can simulate a TTY for in-memory writers.
+var isTTY = func(w io.Writer) bool {
 	if f, ok := w.(*os.File); ok {
 		fi, err := f.Stat()
 		if err != nil {
@@ -317,6 +403,15 @@ func isTTY(w io.Writer) bool {
 	return false
 }
 
+// writeJSON emits the full envelope as JSON. Sanitization is TTY-gated,
+// matching writeJQ: when the target is a pipe or file, JSON is the
+// machine-consumption contract and every byte passes through verbatim so
+// data fidelity is preserved for programmatic consumers (FormatAuto only
+// selects JSON when stdout is not a TTY, so this is the common case). When
+// the target is a terminal — forced --json/--agent on an interactive TTY —
+// string leaves are C1/escape-sanitized (via sanitizeJSONValue) so raw C1
+// controls cannot execute on a C1-honoring terminal. Other terminal-facing
+// sinks (styled, markdown, --ids, and --jq on a TTY) sanitize the same way.
 func (w *Writer) writeJSON(v any) error {
 	toEncode := v
 	if resp, ok := v.(*Response); ok {
@@ -324,6 +419,29 @@ func (w *Writer) writeJSON(v any) error {
 		respCopy := *resp
 		respCopy.Data = NormalizeData(resp.Data)
 		toEncode = &respCopy
+	}
+	// On a TTY, sanitize string leaves to strip C1/escape controls: Go's JSON
+	// encoder escapes C0 controls but passes UTF-8-encoded C1 controls
+	// (U+0080–U+009F) through raw. Piped/redirected output stays verbatim.
+	if isTTY(w.opts.Writer) {
+		raw, err := json.Marshal(toEncode)
+		if err != nil {
+			return err
+		}
+		// Decode with UseNumber so JSON numbers stay json.Number (a named
+		// string type) instead of float64. Large Basecamp IDs (>2^53) would
+		// otherwise lose precision or render in exponent form. json.Number
+		// passes through sanitizeJSONValue untouched (its `case string:` does
+		// not match a named type), so the exact numeric text is preserved.
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		var decoded any
+		if err := dec.Decode(&decoded); err != nil {
+			return err
+		}
+		enc := json.NewEncoder(w.opts.Writer)
+		enc.SetIndent("", "  ")
+		return enc.Encode(sanitizeJSONValue(decoded))
 	}
 	enc := json.NewEncoder(w.opts.Writer)
 	enc.SetIndent("", "  ")
@@ -350,15 +468,27 @@ func (w *Writer) writeIDs(v any) error {
 	case []map[string]any:
 		for _, item := range d {
 			if id, ok := item["id"]; ok {
-				fmt.Fprintln(w.opts.Writer, id)
+				fmt.Fprintln(w.opts.Writer, stripIfString(id))
 			}
 		}
 	case map[string]any:
 		if id, ok := d["id"]; ok {
-			fmt.Fprintln(w.opts.Writer, id)
+			fmt.Fprintln(w.opts.Writer, stripIfString(id))
 		}
 	}
 	return nil
+}
+
+// stripIfString makes a string value safe for the line-oriented IDs sink:
+// escape sequences and control characters are stripped, and remaining
+// whitespace (including the newlines and tabs SanitizeTerminal preserves)
+// collapses to single spaces so one value cannot span or inject extra
+// lines. Non-string values (json.Number ids, etc.) pass through unchanged.
+func stripIfString(v any) any {
+	if s, ok := v.(string); ok {
+		return sanitizeText(s, true, false)
+	}
+	return v
 }
 
 func (w *Writer) writeCount(v any) error {
@@ -427,12 +557,16 @@ func (w *Writer) writeLiteralMarkdown(v any) error {
 type ResponseOption func(*Response)
 
 // WithSummary adds a summary to the response.
+// The value is stored verbatim so machine (JSON) output preserves the
+// original content; terminal sinks (styled/markdown renderers, quiet-mode
+// stderr diagnostics) sanitize at render time.
 func WithSummary(s string) ResponseOption {
 	return func(r *Response) { r.Summary = s }
 }
 
 // WithNotice adds an informational notice to the response.
 // Use this for non-error messages like truncation warnings.
+// Like WithSummary, the value is stored verbatim; terminal sinks sanitize.
 func WithNotice(s string) ResponseOption {
 	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = false }
 }
@@ -536,17 +670,25 @@ func (w *Writer) presentStyledEntity(resp *Response) bool {
 	var out strings.Builder
 	r := NewRenderer(w.opts.Writer, true)
 
-	if resp.Summary != "" {
-		out.WriteString(r.Summary.Render(resp.Summary))
+	// sanitizeText (single-line) defends against terminal injection from
+	// API-controlled summary/notice content and keeps each value on one line.
+	// Sanitization happens only here at the render sink — machine (JSON)
+	// output carries these verbatim.
+	// Sanitize first, then gate: an all-escape summary/notice collapses to ""
+	// and must emit no blank styled line or trailing spacer.
+	summary := sanitizeText(resp.Summary, true, false)
+	if summary != "" {
+		out.WriteString(r.Summary.Render(summary))
 		out.WriteString("\n")
 	}
 
-	if resp.Notice != "" {
-		out.WriteString(r.Hint.Render(resp.Notice))
+	notice := sanitizeText(resp.Notice, true, false)
+	if notice != "" {
+		out.WriteString(r.Hint.Render(notice))
 		out.WriteString("\n")
 	}
 
-	if resp.Summary != "" || resp.Notice != "" {
+	if summary != "" || notice != "" {
 		out.WriteString("\n")
 	}
 
@@ -595,15 +737,20 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 	var out strings.Builder
 	mr := NewMarkdownRenderer(w.opts.Writer)
 
-	if resp.Summary != "" {
-		out.WriteString("## " + resp.Summary + "\n")
+	// Sink-level ANSI stripping (see presentStyledEntity). Sanitize first, then
+	// gate: an all-escape summary/notice collapses to "" and must not emit an
+	// empty "## " heading or "*...*" line.
+	summary := sanitizeText(resp.Summary, true, false)
+	if summary != "" {
+		out.WriteString("## " + summary + "\n")
 	}
 
-	if resp.Notice != "" {
-		out.WriteString("*" + resp.Notice + "*\n")
+	notice := sanitizeText(resp.Notice, true, false)
+	if notice != "" {
+		out.WriteString("*" + notice + "*\n")
 	}
 
-	if resp.Summary != "" || resp.Notice != "" {
+	if summary != "" || notice != "" {
 		out.WriteString("\n")
 	}
 
@@ -620,9 +767,9 @@ func (w *Writer) presentMarkdownEntity(resp *Response) bool {
 	if len(resp.Breadcrumbs) > 0 {
 		out.WriteString("\n### Hints\n\n")
 		for _, bc := range resp.Breadcrumbs {
-			line := "- `" + bc.Cmd + "`"
+			line := "- `" + sanitizeText(bc.Cmd, true, false) + "`"
 			if bc.Description != "" {
-				line += " — " + bc.Description
+				line += " — " + sanitizeText(bc.Description, true, false)
 			}
 			out.WriteString(line + "\n")
 		}

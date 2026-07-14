@@ -335,6 +335,8 @@ func renderAffordances(b *strings.Builder, schema *EntitySchema, data map[string
 	b.WriteString("\n")
 
 	// Find max command width for alignment
+	// RenderTemplate strips terminal escapes from the interpolated, API-controlled
+	// command (centralized in template.go).
 	maxCmd := 0
 	renderedCmds := make([]string, len(visible))
 	for i, a := range visible {
@@ -548,7 +550,12 @@ func renderTaskListMarkdown(w io.Writer, schema *EntitySchema, data []map[string
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			heading := g.name
+			// Group headings come from a raw API string (e.g. bucket.name via
+			// extractDotPath) that never passes through formatText. Sanitize for
+			// a single-line sink before the empty-check so an all-escape-sequence
+			// name falls back to "Other" instead of emitting a blank "## ", and
+			// so an embedded CR/newline/tab can't break the heading across lines.
+			heading := richtext.SanitizeSingleLine(g.name)
 			if heading == "" {
 				heading = "Other"
 			}
@@ -559,7 +566,11 @@ func renderTaskListMarkdown(w io.Writer, schema *EntitySchema, data []map[string
 		}
 	}
 
-	_, err := io.WriteString(w, b.String())
+	// Defense-in-depth: this is the literal-markdown chokepoint. Output is plain
+	// generated markdown that never legitimately carries ANSI escape bytes
+	// (styling lives on the separate lipgloss path), so a final strip closes any
+	// future API-controlled sink without harming legitimate content.
+	_, err := io.WriteString(w, richtext.SanitizeTerminal(b.String()))
 	return err
 }
 
@@ -645,7 +656,9 @@ func extractPeopleNames(val any) []string {
 	for _, item := range arr {
 		if m, ok := item.(map[string]any); ok {
 			if name, ok := m["name"].(string); ok && name != "" {
-				names = append(names, name)
+				if s := richtext.SanitizeSingleLine(name); s != "" {
+					names = append(names, s)
+				}
 			}
 		}
 	}
