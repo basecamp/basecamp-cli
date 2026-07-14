@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -39,7 +40,20 @@ type Session struct {
 }
 
 // NewSession creates a session from the fully-initialized App.
-func NewSession(app *appctx.App) *Session {
+// It fails closed when llm_endpoint is invalid for the configured provider:
+// this is the only path that consumes llm_endpoint (via DetectProvider), so
+// validation happens here rather than in root command setup, where it would
+// brick unrelated commands over a value they never use.
+func NewSession(app *appctx.App) (*Session, error) {
+	if err := summarize.ValidateEndpoint(
+		app.Config.LLMEndpoint, app.Config.LLMProvider, app.Config.LLMAPIKey,
+	); err != nil {
+		source := app.Config.Sources["llm_endpoint"]
+		if source == "" {
+			source = "unknown"
+		}
+		return nil, fmt.Errorf("llm_endpoint (%s): %w\nFix with: basecamp config unset llm_endpoint", source, err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ms := data.NewMultiStore(app.SDK)
 	s := &Session{
@@ -87,7 +101,7 @@ func NewSession(app *appctx.App) *Session {
 	}
 	s.summarizer = summarize.NewSummarizer(provider, cache, maxConc)
 
-	return s
+	return s, nil
 }
 
 // App returns the underlying appctx.App.

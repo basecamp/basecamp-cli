@@ -98,7 +98,13 @@ func NewRootCmd() *cobra.Command {
 					return err
 				}
 				// Re-apply env and flag overrides (they take precedence over profile values)
-				config.LoadFromEnv(cfg)
+				if err := config.LoadFromEnv(cfg); err != nil {
+					if bareRoot {
+						initBareRootApp(cfg)
+						return nil
+					}
+					return err
+				}
 				config.ApplyOverrides(cfg, config.FlagOverrides{
 					Account:  flags.Account,
 					Project:  flags.Project,
@@ -127,6 +133,12 @@ func NewRootCmd() *cobra.Command {
 					return fmt.Errorf("base_url (%s): %w\nFix with: basecamp config unset base_url", source, err)
 				}
 			}
+
+			// Note: llm_endpoint is deliberately NOT validated here. It is
+			// consumed only by the dev-gated TUI's summarize path, which
+			// fail-closes via summarize.ValidateEndpoint in
+			// workspace.NewSession — validating it at startup would brick
+			// unrelated commands over a value they never use.
 
 			// Resolve behavior preferences: explicit flag > config > version.IsDev()
 			resolvePreferences(cmd, cfg, &flags)

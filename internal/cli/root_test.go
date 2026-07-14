@@ -15,6 +15,31 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
+// TestBadLLMEndpointDoesNotBlockUnrelatedCommands is a regression test for
+// the startup-validation lockout: llm_endpoint is consumed only by the
+// dev-gated TUI's summarize path (which fail-closes via
+// summarize.ValidateEndpoint in workspace.NewSession — see TestValidateEndpoint
+// there), so PersistentPreRunE must not reject an endpoint that would fail
+// that validation. Here the openai provider + API key + plain-http remote
+// endpoint is the worst case, and an ordinary command still runs.
+func TestBadLLMEndpointDoesNotBlockUnrelatedCommands(t *testing.T) {
+	isolateRootTest(t)
+	t.Setenv("BASECAMP_LLM_PROVIDER", "openai")
+	t.Setenv("BASECAMP_LLM_API_KEY", "secret")
+	t.Setenv("BASECAMP_LLM_ENDPOINT", "http://remote-host:1234")
+
+	root := NewRootCmd()
+	root.AddCommand(&cobra.Command{
+		Use:  "noop",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"noop"})
+
+	require.NoError(t, root.Execute())
+}
+
 func TestResolvePreferences(t *testing.T) {
 	boolPtr := func(b bool) *bool { return &b }
 	intPtr := func(i int) *int { return &i }
