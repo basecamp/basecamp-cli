@@ -26,9 +26,18 @@ jobs:
           persist-credentials: false
 
       - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+          # SHA-256 of gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz from the
+          # release checksums.txt — update alongside GITLEAKS_VERSION. Pinning
+          # the artifact hash prevents a tampered or swapped release tarball
+          # from running in CI (supply-chain guard).
+          GITLEAKS_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz
-          sudo mv gitleaks /usr/local/bin/
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
 
       - name: Run gitleaks
         run: make secrets
@@ -85,6 +94,14 @@ jobs:
       - name: Run gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
+          # Advisory scan: full SARIF uploaded to the Security tab for visibility
+          # (-no-fail). The enforcing gosec gate is golangci-lint (make lint),
+          # which honors the repo's //nolint:gosec suppressions per-site; the
+          # standalone binary can't read those, so making it hard-fail would
+          # require either re-annotating every accepted site or excluding rule
+          # IDs globally — and a global exclude (e.g. G101/G204) would create
+          # real blind spots for new hard-coded creds / unsafe exec, including in
+          # release scans. Keep the full advisory scan instead.
           gosec -tags dev -no-fail -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload gosec scan results to GitHub Security tab
