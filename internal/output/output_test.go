@@ -3348,8 +3348,9 @@ func TestWriterJQFilterCompoundStripsC1Controls(t *testing.T) {
 
 // TestWriterJQFilterCompoundKeyCollision verifies that a hostile map key
 // that sanitizes to the same string as a legitimate key cannot replace or
-// hide it: the clean key keeps its slot and value, and the hostile key is
-// preserved under a visibly-escaped name instead of being dropped.
+// hide it: clean keys keep their slots and values \u2014 including a literal key
+// that mimics escape notation \u2014 and hostile keys are preserved under
+// visibly-escaped names, re-quoted until unique, instead of being dropped.
 func TestWriterJQFilterCompoundKeyCollision(t *testing.T) {
 	forceTTY(t)
 	var buf bytes.Buffer
@@ -3363,15 +3364,17 @@ func TestWriterJQFilterCompoundKeyCollision(t *testing.T) {
 		"title":          "legit",
 		"\x1b[31mtitle":  "impostor",
 		"\u009b31mtitle": "c1 impostor",
+		"\\x1b[31mtitle": "lookalike", // literal text matching the ESC key's escaped form
 	}
 	err := w.OK(data)
 	require.NoError(t, err)
 
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	require.Len(t, result, 3, "no entry silently dropped")
+	require.Len(t, result, 4, "no entry silently dropped")
 	assert.Equal(t, "legit", result["title"], "clean key keeps its slot")
-	assert.Equal(t, "impostor", result["\\x1b[31mtitle"])
+	assert.Equal(t, "lookalike", result["\\x1b[31mtitle"], "clean lookalike keeps its slot")
+	assert.Equal(t, "impostor", result["\"\\\\x1b[31mtitle\""], "colliding hostile key re-quoted")
 	assert.Equal(t, "c1 impostor", result["\\u009b31mtitle"])
 	assert.NotContains(t, buf.String(), "\x1b")
 	assert.NotContains(t, buf.String(), "\u009b")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -342,27 +343,44 @@ func sanitizeJSONValue(v any) any {
 		}
 		return val
 	case map[string]any:
-		out := make(map[string]any, len(val))
-		for k, elem := range val {
-			out[sanitizeJSONKey(k)] = sanitizeJSONValue(elem)
-		}
-		return out
+		return sanitizeJSONMap(val)
 	default:
 		return v
 	}
 }
 
-// sanitizeJSONKey makes a map key terminal-safe while keeping distinct keys
-// distinct. Stripping would let a hostile key like "\x1b[31mtitle" collapse
-// onto a legitimate "title" and silently replace or hide that field, so keys
-// containing escapes or controls are visibly escaped instead: they can never
-// claim a clean key's slot, and no entry is dropped.
-func sanitizeJSONKey(k string) string {
-	if richtext.SanitizeTerminal(k) == k {
-		return k
+// sanitizeJSONMap rebuilds a map with terminal-safe keys without ever
+// dropping an entry. Stripping keys would let a hostile "\x1b[31mtitle"
+// collapse onto a legitimate "title" and silently replace or hide that
+// field. Instead, keys already free of escapes and controls keep their name
+// — a hostile key can never displace one — and keys changed by sanitization
+// are visibly escaped (strconv.Quote), re-quoting with delimiters until the
+// name is unique so even a literal key that mimics escape notation cannot
+// be overwritten. Escaped keys are processed in sorted order so the
+// resulting names are deterministic.
+func sanitizeJSONMap(val map[string]any) map[string]any {
+	out := make(map[string]any, len(val))
+	var escaped []string
+	for k, elem := range val {
+		if richtext.SanitizeTerminal(k) == k {
+			out[k] = sanitizeJSONValue(elem)
+		} else {
+			escaped = append(escaped, k)
+		}
 	}
-	quoted := strconv.Quote(k)
-	return quoted[1 : len(quoted)-1]
+	sort.Strings(escaped)
+	for _, k := range escaped {
+		quoted := strconv.Quote(k)
+		name := quoted[1 : len(quoted)-1]
+		for {
+			if _, taken := out[name]; !taken {
+				break
+			}
+			name = strconv.Quote(name)
+		}
+		out[name] = sanitizeJSONValue(val[k])
+	}
+	return out
 }
 
 // isTTY checks if the writer is a terminal. It is a package variable so tests
