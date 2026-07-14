@@ -1,0 +1,34 @@
+internal/output/envelope.go
+  s_b25e2961bc784d::t_f99a95b687e0b1 8
+  s_b25e2961bc784d::t_d6ef38d0850e28 347,355-365
+  s_66424b03c53332::t_817fcc2d1d198f 366-367
+internal/output/output_test.go
+  s_b25e2961bc784d::t_e72e8983e02b0b 3335-3337,3342,3349-3377
+  s_b25e2961bc784d::t_d285506f8bbd87 3378-3379
+internal/presenter/presenter_test.go
+  s_b25e2961bc784d::t_2e7b5171f326e1 1711-1712
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "eb9506b52c439cd4244b234bbaffa8b3e53989b5",
+  "prompts": {},
+  "sessions": {
+    "s_66424b03c53332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cff37c54-3a8f-4ef8-ae46-58bd17e22dae",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_b25e2961bc784d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "32835c6c-5be2-49c0-89f6-1e91d6493db0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
