@@ -112,21 +112,27 @@ func terminalInfo(w io.Writer) (width int, isTTY bool) {
 func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 	var b strings.Builder
 
-	// Summary line. SanitizeTerminal guards against terminal injection from
-	// API-controlled summary/notice content (defense-in-depth: also sanitized
-	// at the WithSummary/WithNotice source).
-	if resp.Summary != "" {
-		b.WriteString(r.Summary.Render(richtext.SanitizeTerminal(resp.Summary)))
+	// Summary line. sanitizeText (single-line) guards against terminal
+	// injection from API-controlled summary/notice content and keeps the
+	// value on one line: CR is normalized to a separator so words don't glue,
+	// and embedded newlines/tabs are collapsed. Sanitization happens only here
+	// at the terminal sink — machine (JSON) output carries these verbatim.
+	// Sanitize first, then gate on the sanitized value: an all-escape summary
+	// collapses to "" and must emit no blank styled line or trailing spacer.
+	summary := sanitizeText(resp.Summary, true, false)
+	if summary != "" {
+		b.WriteString(r.Summary.Render(summary))
 		b.WriteString("\n")
 	}
 
 	// Notice (e.g., truncation warning)
-	if resp.Notice != "" {
-		b.WriteString(r.Hint.Render(richtext.SanitizeTerminal(resp.Notice)))
+	notice := sanitizeText(resp.Notice, true, false)
+	if notice != "" {
+		b.WriteString(r.Hint.Render(notice))
 		b.WriteString("\n")
 	}
 
-	if resp.Summary != "" || resp.Notice != "" {
+	if summary != "" || notice != "" {
 		b.WriteString("\n")
 	}
 
@@ -160,6 +166,13 @@ func (r *Renderer) RenderResponse(w io.Writer, resp *Response) error {
 func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 	var b strings.Builder
 
+	// Error and hint frequently interpolate API-controlled strings
+	// (project/person names, server messages), so sanitize them for the
+	// terminal before rendering. sanitizeText normalizes CR first so word
+	// boundaries survive SanitizeTerminal.
+	errMsg := sanitizeText(resp.Error, false, true)
+	hint := sanitizeText(resp.Hint, false, true)
+
 	if r.styled {
 		// Create a styled error box with border
 		errorIcon := "✗"
@@ -170,7 +183,7 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 			// border (2) + padding (2)
 			r.width-4, 40)
 
-		errorMsg := wrapText(resp.Error, maxWidth)
+		errorMsg := wrapText(errMsg, maxWidth)
 
 		// Build content lines
 		var contentLines []string
@@ -180,9 +193,9 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 			contentLines = append(contentLines, r.Data.Render(line))
 		}
 
-		if resp.Hint != "" {
+		if hint != "" {
 			contentLines = append(contentLines, "")
-			hintMsg := wrapText(resp.Hint, maxWidth)
+			hintMsg := wrapText(hint, maxWidth)
 			for i, line := range strings.Split(hintMsg, "\n") {
 				if i == 0 {
 					contentLines = append(contentLines, r.Hint.Render("→ "+line))
@@ -209,11 +222,11 @@ func (r *Renderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 		b.WriteString("\n")
 	} else {
 		// Plain text output (no styling)
-		b.WriteString("Error: " + resp.Error)
+		b.WriteString("Error: " + errMsg)
 		b.WriteString("\n")
 
-		if resp.Hint != "" {
-			b.WriteString("Hint: " + resp.Hint)
+		if hint != "" {
+			b.WriteString("Hint: " + hint)
 			b.WriteString("\n")
 		}
 		if requestID := errorRequestID(resp); requestID != "" {
@@ -259,26 +272,28 @@ func wrappedRequestIDLines(requestID string, width int) []string {
 }
 
 func sanitizeRequestID(requestID string) string {
-	// SanitizeTerminal strips escape sequences plus C0/C1/DEL controls,
-	// keeping only newline and tab, which Fields then collapses to spaces.
-	requestID = richtext.SanitizeTerminal(requestID)
-	return strings.Join(strings.Fields(requestID), " ")
+	return sanitizeText(requestID, true, false)
 }
 
-// sanitizeRichText prepares an API-controlled rich-text string for terminal
-// rendering: carriage returns are normalized to newlines (SanitizeTerminal
-// would otherwise delete them, joining adjacent words), HTML is converted to
-// markdown, and the result is stripped of escape sequences and control
-// characters. Sanitization runs after the HTML conversion because entity
-// decoding (e.g. &#x9b;) can reintroduce C1 controls that were not present
-// in the raw input.
-func sanitizeRichText(s string) string {
+// sanitizeText prepares an API-controlled string for a terminal sink.
+// CR/CRLF are normalized to newlines first — SanitizeTerminal deletes bare
+// CR, which would join adjacent words instead of separating them. When
+// convertHTML is set, HTML is converted to markdown before sanitization
+// because entity decoding (e.g. &#x9b;) can reintroduce C1 controls that
+// were not present in the raw input; SanitizeTerminal therefore always runs
+// last. When singleLine is set, remaining whitespace is collapsed to single
+// spaces so the value occupies exactly one output line.
+func sanitizeText(s string, singleLine, convertHTML bool) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
-	if richtext.IsHTML(s) {
+	if convertHTML && richtext.IsHTML(s) {
 		s = richtext.HTMLToMarkdown(s)
 	}
-	return richtext.SanitizeTerminal(s)
+	s = richtext.SanitizeTerminal(s)
+	if singleLine {
+		s = strings.Join(strings.Fields(s), " ")
+	}
+	return s
 }
 
 func escapeMarkdownText(s string) string {
@@ -784,19 +799,19 @@ func attachmentDisplayName(att map[string]any) string {
 func attachmentDisplayMeta(att map[string]any) string {
 	var parts []string
 	if contentType, ok := att["content_type"].(string); ok && contentType != "" {
-		parts = append(parts, contentType)
+		parts = append(parts, sanitizeText(contentType, true, false))
 	}
 	if filesize, ok := att["filesize"].(string); ok && filesize != "" {
-		parts = append(parts, filesize+" bytes")
+		parts = append(parts, sanitizeText(filesize, true, false)+" bytes")
 	}
 	if path, ok := att["path"].(string); ok && path != "" {
-		parts = append(parts, "saved to "+path)
+		parts = append(parts, "saved to "+sanitizeText(path, true, false))
 	}
 	if status, ok := att["download_status"].(string); ok && status != "" {
-		parts = append(parts, status)
+		parts = append(parts, sanitizeText(status, true, false))
 	}
 	if errText, ok := att["download_error"].(string); ok && errText != "" {
-		parts = append(parts, "error: "+errText)
+		parts = append(parts, "error: "+sanitizeText(errText, true, false))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -819,7 +834,7 @@ func commentTimestamp(comment map[string]any) string {
 
 func commentBody(comment map[string]any) string {
 	content, _ := comment["content"].(string)
-	return strings.TrimSpace(sanitizeRichText(content))
+	return strings.TrimSpace(sanitizeText(content, false, true))
 }
 
 func (r *Renderer) renderCommentsSection(b *strings.Builder, comments []map[string]any) {
@@ -965,9 +980,9 @@ func (r *Renderer) renderBreadcrumbs(b *strings.Builder, crumbs []Breadcrumb) {
 	b.WriteString(r.Muted.Render("Hints:"))
 	b.WriteString("\n")
 	for _, bc := range crumbs {
-		line := r.Data.Render("  " + bc.Cmd)
+		line := r.Data.Render("  " + sanitizeText(bc.Cmd, true, false))
 		if bc.Description != "" {
-			line += r.Subtle.Render("  # " + bc.Description)
+			line += r.Subtle.Render("  # " + sanitizeText(bc.Description, true, false))
 		}
 		b.WriteString(line + "\n")
 	}
@@ -984,6 +999,11 @@ func (r *Renderer) renderStats(b *strings.Builder, stats map[string]any) {
 }
 
 func formatHeader(key string) string {
+	// Keys can be API-controlled response/field keys (see detectColumns and
+	// renderObject callers), so strip terminal escapes before they reach a
+	// styled or markdown header/label. sanitizeText (single-line) mirrors the
+	// treatment of cell values; literal, clean keys are unchanged.
+	key = sanitizeText(key, true, false)
 	key = strings.ReplaceAll(key, "_", " ")
 	key = strings.TrimSuffix(key, " on")
 	key = strings.TrimSuffix(key, " at")
@@ -1002,7 +1022,7 @@ func formatCell(val any) string {
 	case nil:
 		return ""
 	case string:
-		v = sanitizeRichText(v)
+		v = sanitizeText(v, false, true)
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
@@ -1068,7 +1088,14 @@ func formatCell(val any) string {
 				} else if path, ok := elem["path"].(string); ok && path != "" {
 					items = append(items, richtext.SanitizeTerminal(path))
 				} else if id, ok := elem["id"]; ok {
-					items = append(items, fmt.Sprintf("%v", id))
+					// String ids are API-controlled and reach a terminal sink,
+					// so sanitize them like the sibling arms. Non-string ids
+					// (e.g. json.Number) carry no escape bytes and are safe.
+					if s, ok := id.(string); ok {
+						items = append(items, richtext.SanitizeTerminal(s))
+					} else {
+						items = append(items, fmt.Sprintf("%v", id))
+					}
 				}
 			default:
 				items = append(items, richtext.SanitizeTerminal(fmt.Sprintf("%v", item)))
@@ -1103,7 +1130,7 @@ func formatDetailValue(key string, val any) string {
 	case nil:
 		return ""
 	case string:
-		v = sanitizeRichText(v)
+		v = sanitizeText(v, false, true)
 		if strings.ContainsAny(v, "\n\r") {
 			v = strings.Join(strings.Fields(v), " ")
 		}
@@ -1192,18 +1219,24 @@ func NewMarkdownRenderer(w io.Writer) *MarkdownRenderer {
 func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 	var b strings.Builder
 
-	// Summary as heading. SanitizeTerminal guards against terminal injection
-	// (defense-in-depth; also sanitized at the WithSummary/WithNotice source).
-	if resp.Summary != "" {
-		b.WriteString("## " + richtext.SanitizeTerminal(resp.Summary) + "\n")
+	// Summary as heading. sanitizeText (single-line) guards against terminal
+	// injection and keeps the heading/notice on one line. Sanitization happens
+	// only at terminal sinks like this one — machine (JSON) output carries
+	// summary/notice verbatim.
+	// Sanitize first, then gate: an all-escape summary/notice collapses to ""
+	// and must not emit an empty "## " heading or "*...*" line.
+	summary := sanitizeText(resp.Summary, true, false)
+	if summary != "" {
+		b.WriteString("## " + summary + "\n")
 	}
 
 	// Notice (e.g., truncation warning)
-	if resp.Notice != "" {
-		b.WriteString("*" + richtext.SanitizeTerminal(resp.Notice) + "*\n")
+	notice := sanitizeText(resp.Notice, true, false)
+	if notice != "" {
+		b.WriteString("*" + notice + "*\n")
 	}
 
-	if resp.Summary != "" || resp.Notice != "" {
+	if summary != "" || notice != "" {
 		b.WriteString("\n")
 	}
 
@@ -1215,9 +1248,9 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 	if len(resp.Breadcrumbs) > 0 {
 		b.WriteString("\n### Hints\n\n")
 		for _, bc := range resp.Breadcrumbs {
-			line := "- `" + bc.Cmd + "`"
+			line := "- `" + sanitizeText(bc.Cmd, true, false) + "`"
 			if bc.Description != "" {
-				line += " — " + bc.Description
+				line += " — " + sanitizeText(bc.Description, true, false)
 			}
 			b.WriteString(line + "\n")
 		}
@@ -1237,9 +1270,11 @@ func (r *MarkdownRenderer) RenderResponse(w io.Writer, resp *Response) error {
 func (r *MarkdownRenderer) RenderError(w io.Writer, resp *ErrorResponse) error {
 	var b strings.Builder
 
-	b.WriteString("**Error:** " + resp.Error + "\n")
-	if resp.Hint != "" {
-		b.WriteString("\n*Hint: " + resp.Hint + "*\n")
+	// Error and hint interpolate API-controlled strings; sanitize for the
+	// terminal (see (*Renderer).RenderError).
+	b.WriteString("**Error:** " + sanitizeText(resp.Error, false, true) + "\n")
+	if hint := sanitizeText(resp.Hint, false, true); hint != "" {
+		b.WriteString("\n*Hint: " + hint + "*\n")
 	}
 	if requestID := sanitizeRequestID(errorRequestID(resp)); requestID != "" {
 		b.WriteString("\nRequest ID: " + escapeMarkdownText(requestID) + "\n")

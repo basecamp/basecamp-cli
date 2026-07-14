@@ -614,6 +614,27 @@ func TestWriterIDsFormatStripsANSI(t *testing.T) {
 	assert.NotContains(t, buf.String(), "\x1b")
 }
 
+// TestWriterIDsFormatSingleLine verifies that a string id cannot span or
+// inject extra lines into the line-oriented IDs sink: newlines, tabs, and
+// carriage returns collapse to single spaces, keeping one id per line.
+func TestWriterIDsFormatSingleLine(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatIDs,
+		Writer: &buf,
+	})
+
+	data := []map[string]any{
+		{"id": "abc\n999\ndef"},
+		{"id": "tab\there"},
+		{"id": "cr\rjoined"},
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "abc 999 def\ntab here\ncr joined\n", buf.String())
+}
+
 func TestWriterCountFormat(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{
@@ -2288,12 +2309,13 @@ func TestWriterStyledErrorIncludesRequestID(t *testing.T) {
 		Code:       basecamp.CodeAPI,
 		Message:    "server error",
 		HTTPStatus: 500,
-		RequestID:  "req-cli-123\x1b[31m\nnext",
+		RequestID:  "req-cli-123\x1b[31m\nnext\rword",
 	})
 	require.NoError(t, writeErr, "Err() failed")
 
 	output := ansi.Strip(buf.String())
-	assert.Contains(t, output, "Request ID: req-cli-123 next")
+	assert.Contains(t, output, "Request ID: req-cli-123 next word",
+		"CR separates words instead of joining them")
 	assert.NotContains(t, output, "[31m")
 }
 
@@ -2569,6 +2591,27 @@ func TestFormatCellStripsANSIFromArrayElements(t *testing.T) {
 		}
 		result := formatCell(input)
 		assert.Equal(t, "Task One", result)
+	})
+
+	t.Run("map elements whose only field is an escaped string id", func(t *testing.T) {
+		// The id arm is the last fallback; a hostile string id must be
+		// sanitized like its sibling arms rather than printed raw.
+		input := []any{
+			map[string]any{"id": "12\x1b]0;pwned\x07\u009b31m3\x7f"},
+		}
+		result := formatCell(input)
+		assert.NotContains(t, result, "\x1b", "ESC leaked from string id")
+		assertNoC1OrDEL(t, result, "formatCell string id")
+		assert.Contains(t, result, "123", "sanitized id digits should survive")
+	})
+
+	t.Run("map elements with non-string id are unaffected", func(t *testing.T) {
+		input := []any{
+			map[string]any{"id": json.Number("456")},
+			map[string]any{"id": float64(789)},
+		}
+		result := formatCell(input)
+		assert.Equal(t, "456, 789", result)
 	})
 }
 
@@ -3431,6 +3474,186 @@ func TestWriterJQFilterCompoundVerbatimWhenPiped(t *testing.T) {
 		"C1 bytes must round-trip through --jq when piped")
 }
 
+// TestWriterMarkdownEntityBreadcrumbsStripEscapes verifies that the entity
+// Markdown sink (presentMarkdownEntity) sanitizes API-controlled breadcrumb
+// Cmd/Description before writing them, matching the generic Markdown renderer.
+// Markdown output carries no legitimate ANSI, so no escape or C1 byte may
+// survive.
+func TestWriterMarkdownEntityBreadcrumbsStripEscapes(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":        float64(12345),
+		"content":   "Fix the login bug",
+		"completed": false,
+	}
+	err := w.OK(data,
+		WithEntity("todo"), // routes through presentMarkdownEntity
+		WithBreadcrumbs(Breadcrumb{
+			Action:      "show",
+			Cmd:         "basecamp \x1b]0;pwncmd\x07show \u009b31m1", // ESC OSC + C1 CSI
+			Description: "View details and \x1b[31mmore",             // ESC CSI
+		}),
+	)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "Hints", "entity sink should render breadcrumbs")
+	assert.NotContains(t, out, "\x1b")
+	assert.NotContains(t, out, "\u009b")
+	assert.NotContains(t, out, "\u009d")
+	assert.NotContains(t, out, "\x7f")
+	assert.NotContains(t, out, "pwncmd", "OSC payload must be stripped")
+}
+
+// TestWriterStyledFormatHeaderStripsControlsInKey verifies that an
+// API-controlled DATA map KEY (rendered as a styled header/label via
+// formatHeader) cannot smuggle C1 controls, DEL, or an OSC payload to the
+// terminal. Styled output legitimately contains ESC-prefixed SGR codes, so
+// this asserts on the injection classes that never appear in legitimate
+// styling.
+func TestWriterStyledFormatHeaderStripsControlsInKey(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatStyled,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"na\x1b]0;pwnosc\x07me": "value-osc", // ESC OSC injection in key
+		"ti\u009b31mtle":        "value-c1",  // C1 CSI in key
+		"de\x7fl":               "value-del", // DEL in key
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "value-osc", "cell values still render")
+	assert.NotContains(t, out, "pwnosc", "OSC payload must be stripped from header")
+	assert.NotContains(t, out, "\u009b")
+	assert.NotContains(t, out, "\x7f")
+}
+
+// TestWriterMarkdownFormatHeaderStripsEscapesInKey verifies the same
+// formatHeader choke point for the Markdown sink. Markdown carries no
+// legitimate ANSI, so neither ESC-prefixed sequences nor C1 controls in a
+// map key may reach the rendered label.
+func TestWriterMarkdownFormatHeaderStripsEscapesInKey(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatMarkdown,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"na\x1b[31mme":                "value-esc", // ESC CSI in key
+		"ti\u009b31mtle":              "value-c1",  // C1 CSI in key
+		"de\x7fscr\x1b]0;pwnosc\x07r": "value-osc", // DEL + ESC OSC in key
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "value-esc", "cell values still render")
+	assert.NotContains(t, out, "\x1b")
+	assert.NotContains(t, out, "\u009b")
+	assert.NotContains(t, out, "\x7f")
+	assert.NotContains(t, out, "pwnosc")
+}
+
+// TestWriterJSONStripsC1OnTTY verifies that forced --json/--agent output to an
+// interactive terminal has string leaves sanitized of C1/escape controls: the
+// Go JSON encoder escapes C0 controls but emits UTF-8-encoded C1 controls
+// (U+0080-U+009F) raw, so a hostile value would otherwise execute on a
+// C1-honoring terminal.
+func TestWriterJSONStripsC1OnTTY(t *testing.T) {
+	forceTTY(t)
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"title": "\u009b31mRed alert\u009b0m", // C1 CSI
+		"note":  "De\x7fleted",                // DEL
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.NotContains(t, out, "\u009b", "C1 CSI must be stripped on a TTY")
+	assert.NotContains(t, out, "\x7f", "DEL must be stripped on a TTY")
+
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Equal(t, "31mRed alert0m", resp.Data["title"])
+	assert.Equal(t, "Deleted", resp.Data["note"])
+}
+
+// TestWriterJSONPreservesLargeIntOnTTY verifies that the TTY-sanitize path
+// preserves large integer IDs exactly. The path round-trips through
+// json.Marshal → json.Decoder, and decoding must use UseNumber so numbers stay
+// json.Number rather than float64 — otherwise IDs above 2^53 would lose
+// precision or render in exponent form (e.g. 9.007...e+15). json.Number is a
+// named string type, so it does NOT match sanitizeJSONValue's `case string:`
+// arm (a type switch matches only the exact string type); it falls through to
+// the default case and is returned unchanged, so its exact numeric text survives.
+func TestWriterJSONPreservesLargeIntOnTTY(t *testing.T) {
+	forceTTY(t)
+	var buf bytes.Buffer
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"id":    9007199254740993, // 2^53 + 1: not exactly representable as float64
+		"title": "\u009b31mRed\u009b0m",
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "9007199254740993",
+		"large integer ID must survive the TTY round-trip with exact digits")
+	assert.NotContains(t, out, "9.007", "ID must not render in exponent/float form")
+	assert.NotContains(t, out, "9007199254740992", "ID must not lose precision")
+}
+
+// TestWriterJSONVerbatimWhenPiped verifies that JSON written to a non-TTY sink
+// (pipes, files, the default in tests) preserves every byte verbatim: piped
+// JSON is the machine-consumption contract, and sanitizing would silently
+// corrupt data fidelity for programmatic consumers.
+func TestWriterJSONVerbatimWhenPiped(t *testing.T) {
+	var buf bytes.Buffer // bytes.Buffer is not a TTY
+	w := New(Options{
+		Format: FormatJSON,
+		Writer: &buf,
+	})
+
+	data := map[string]any{
+		"title": "\u009b31mRed alert\u009b0m", // C1 CSI
+		"note":  "De\x7fleted",                // DEL
+	}
+	err := w.OK(data)
+	require.NoError(t, err)
+
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Equal(t, "\u009b31mRed alert\u009b0m", resp.Data["title"],
+		"C1 bytes must round-trip when piped")
+	assert.Equal(t, "De\x7fleted", resp.Data["note"], "DEL must round-trip when piped")
+}
+
 func TestWriterJQFilterSelect(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{
@@ -3934,60 +4157,327 @@ func TestPluralNoun(t *testing.T) {
 	}
 }
 
-// TestWithSummaryStripsANSI verifies that API-controlled summary/notice content
-// is sanitized of terminal escape sequences at the source, preventing terminal
-// injection in every styled/markdown sink.
-func TestWithSummaryStripsANSI(t *testing.T) {
-	// OSC 8 hyperlink + CSI color sequence wrapping a hostile payload.
-	// The equality against a clean literal proves no C0/C1/DEL controls survive.
-	payload := "\x1b]8;;http://evil\x07click\x1b]8;;\x07\x1b[31mpwn\x1b[0m"
-	want := "clickpwn"
+// hostileText exercises every terminal-injection payload class the renderers
+// must neutralize: an ESC-based OSC title set, a UTF-8-encoded C1 CSI color
+// pair (survives ansi.Strip), a bare CR (must separate words, not glue them),
+// and DEL.
+const hostileText = "Evil\x1b]0;pwned\x07 \u009b31mProject\u009b0m\rna\u007fme"
 
+// allEscapeText is composed entirely of ESC-based escape sequences and bare
+// C0/DEL control characters — no printable runes survive sanitization, so
+// sanitizeText collapses it to the empty string. Sinks must gate on the
+// sanitized value so this emits no blank line, heading, or marker.
+const allEscapeText = "\x1b[2J\x1b[0m\x1b]0;x\x07\x08\x7f"
+
+// TestWithSummaryNoticeVerbatim verifies that summary/notice values are
+// stored verbatim — consistent with error/hint/data, the JSON machine
+// contract carries original content and sanitization happens only at
+// terminal sinks.
+func TestWithSummaryNoticeVerbatim(t *testing.T) {
 	t.Run("WithSummary", func(t *testing.T) {
 		r := &Response{}
-		WithSummary(payload)(r)
-		assert.Equal(t, want, r.Summary)
+		WithSummary(hostileText)(r)
+		assert.Equal(t, hostileText, r.Summary)
 	})
 
 	t.Run("WithNotice", func(t *testing.T) {
 		r := &Response{}
-		WithNotice(payload)(r)
-		assert.Equal(t, want, r.Notice)
+		WithNotice(hostileText)(r)
+		assert.Equal(t, hostileText, r.Notice)
 		assert.False(t, r.noticeDiagnostic)
 	})
 
 	t.Run("WithDiagnostic", func(t *testing.T) {
 		r := &Response{}
-		WithDiagnostic(payload)(r)
-		assert.Equal(t, want, r.Notice)
+		WithDiagnostic(hostileText)(r)
+		assert.Equal(t, hostileText, r.Notice)
 		assert.True(t, r.noticeDiagnostic)
 	})
 }
 
-// TestWithSummaryStripsC1Controls verifies that UTF-8-encoded Unicode C1
-// controls (U+0080-U+009F) and DEL are stripped too: they survive ansi.Strip
-// but are executed directly by C1-honoring terminals.
-func TestWithSummaryStripsC1Controls(t *testing.T) {
-	// C1 CSI color + C1 OSC title-set + DEL wrapping a hostile payload.
-	payload := "\u009b31mpwn\u009b0m \u009d0;evil\a pe\u007fek"
-	want := "31mpwn0m 0;evil peek"
+// TestJSONEnvelopeSummaryNoticeVerbatim verifies the machine contract
+// end-to-end: the JSON envelope carries summary and notice byte-for-byte.
+func TestJSONEnvelopeSummaryNoticeVerbatim(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
 
-	t.Run("WithSummary", func(t *testing.T) {
-		r := &Response{}
-		WithSummary(payload)(r)
-		assert.Equal(t, want, r.Summary)
-	})
+	err := w.OK(map[string]string{"id": "1"}, WithSummary(hostileText), WithNotice(hostileText))
+	require.NoError(t, err)
 
-	t.Run("WithNotice", func(t *testing.T) {
-		r := &Response{}
-		WithNotice(payload)(r)
-		assert.Equal(t, want, r.Notice)
-	})
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded))
+	assert.Equal(t, hostileText, decoded["summary"])
+	assert.Equal(t, hostileText, decoded["notice"])
+}
 
-	t.Run("WithDiagnostic", func(t *testing.T) {
-		r := &Response{}
-		WithDiagnostic(payload)(r)
-		assert.Equal(t, want, r.Notice)
-		assert.True(t, r.noticeDiagnostic)
-	})
+// TestQuietDiagnosticStderrSanitized verifies the quiet-mode stderr
+// diagnostic — a terminal sink outside the renderers — strips escape
+// sequences and keeps the notice to a single line.
+func TestQuietDiagnosticStderrSanitized(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{Format: FormatQuiet, Writer: &stdout, ErrWriter: &stderr})
+
+	err := w.OK(map[string]string{"id": "1"}, WithDiagnostic(hostileText))
+	require.NoError(t, err)
+
+	assert.Equal(t, "notice: Evil 31mProject0m name\n", stderr.String())
+}
+
+// TestQuietDiagnosticStderrEmptyAfterSanitize verifies that a diagnostic notice
+// that collapses to "" after sanitization (all-escape content) emits nothing on
+// stderr — no blank "notice: " line.
+func TestQuietDiagnosticStderrEmptyAfterSanitize(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{Format: FormatQuiet, Writer: &stdout, ErrWriter: &stderr})
+
+	require.NoError(t, w.OK(map[string]string{"id": "1"}, WithDiagnostic(allEscapeText)))
+
+	assert.Empty(t, stderr.String(), "all-escape diagnostic must not emit a blank notice line")
+}
+
+// TestSummaryNoticeEmptyAfterSanitizeSinks verifies that summary/notice values
+// that collapse to "" after sanitization (all-escape content) leave the four
+// single-line sinks — styled and markdown, generic and entity — byte-identical
+// to rendering with no summary/notice at all. This pins the sanitize-first,
+// gate-on-non-empty rule: no blank styled line, no empty "## " heading or
+// "*...*" marker, and no trailing spacer newline.
+func TestSummaryNoticeEmptyAfterSanitizeSinks(t *testing.T) {
+	render := func(format Format, entity bool, withSummaryNotice bool) string {
+		var buf bytes.Buffer
+		w := New(Options{Format: format, Writer: &buf})
+		var opts []ResponseOption
+		if withSummaryNotice {
+			opts = append(opts, WithSummary(allEscapeText), WithNotice(allEscapeText))
+		}
+		var data any = map[string]string{"id": "1"}
+		if entity {
+			data = map[string]any{
+				"id":         float64(100),
+				"subject":    "Weekly update",
+				"content":    "Body",
+				"creator":    map[string]any{"name": "Bob"},
+				"created_at": "2026-03-01T09:00:00Z",
+			}
+			opts = append(opts, WithEntity("message"))
+		}
+		require.NoError(t, w.OK(data, opts...))
+		return buf.String()
+	}
+
+	cases := []struct {
+		name   string
+		format Format
+		entity bool
+	}{
+		{"styled generic", FormatStyled, false},
+		{"markdown generic", FormatMarkdown, false},
+		{"styled entity", FormatStyled, true},
+		{"markdown entity", FormatMarkdown, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseline := render(tc.format, tc.entity, false)
+			hostile := render(tc.format, tc.entity, true)
+			// Byte-identical output proves no empty styled line, "## " heading,
+			// "*...*" marker, or trailing spacer newline was emitted for the
+			// collapsed summary/notice.
+			assert.Equal(t, baseline, hostile,
+				"all-escape summary/notice must render identically to no summary/notice")
+			assertNoC1OrDEL(t, hostile, tc.name)
+		})
+	}
+}
+
+// assertNoC1OrDEL fails if any C1 control (U+0080-U+009F) or DEL leaked into
+// output. C1 controls survive ansi.Strip but are executed directly by
+// C1-honoring terminals.
+func assertNoC1OrDEL(t *testing.T, out, sink string) {
+	t.Helper()
+	for _, r := range out {
+		if (r >= 0x80 && r <= 0x9f) || r == 0x7f {
+			t.Fatalf("terminal control %U leaked into %s output", r, sink)
+		}
+	}
+}
+
+// assertErrorSinksSanitized renders err through the styled, markdown, and
+// plain RenderError sinks and asserts no injection payload survives in any
+// of them, while the neutralized text (wantFragment) still renders.
+func assertErrorSinksSanitized(t *testing.T, err error, wantFragment string) {
+	t.Helper()
+
+	var styledBuf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &styledBuf})
+	require.NoError(t, w.Err(err))
+	styled := styledBuf.String()
+
+	var mdBuf bytes.Buffer
+	w = New(Options{Format: FormatMarkdown, Writer: &mdBuf})
+	require.NoError(t, w.Err(err))
+	markdown := mdBuf.String()
+
+	// The plain branch is unreachable through Writer formats (FormatStyled
+	// forces styling), so drive the renderer directly.
+	e := AsError(err)
+	var plainBuf bytes.Buffer
+	renderErr := NewRenderer(&plainBuf, false).RenderError(&plainBuf, &ErrorResponse{Error: e.Message, Hint: e.Hint})
+	require.NoError(t, renderErr)
+	plain := plainBuf.String()
+
+	// Styled output legitimately carries the renderer's own SGR codes, so
+	// assert on the hostile payload classes: no OSC introducer, no CR, no
+	// C1/DEL controls.
+	assert.Contains(t, styled, "\x1b[", "styled output should be styled")
+	assert.NotContains(t, styled, "\x1b]", "OSC leaked into styled output")
+	assert.NotContains(t, styled, "\r", "CR leaked into styled output")
+	assertNoC1OrDEL(t, styled, "styled")
+	assert.Contains(t, ansi.Strip(styled), wantFragment)
+
+	for sink, out := range map[string]string{"markdown": markdown, "plain": plain} {
+		assert.NotContains(t, out, "\x1b", "ESC leaked into %s output", sink)
+		assert.NotContains(t, out, "\r", "CR leaked into %s output", sink)
+		assertNoC1OrDEL(t, out, sink)
+		assert.Contains(t, out, wantFragment, sink)
+	}
+}
+
+// TestRenderErrorSanitizesAmbiguousMatches drives C1/CSI-laden project names
+// through an ambiguous-match error, which interpolates them into the hint.
+func TestRenderErrorSanitizesAmbiguousMatches(t *testing.T) {
+	err := ErrAmbiguous("project", []string{hostileText, "Second " + hostileText})
+	assertErrorSinksSanitized(t, err, "31mProject0m")
+}
+
+// TestRenderErrorSanitizesNotFoundHint drives hostile person names through a
+// not-found error, which interpolates them into both message and hint.
+func TestRenderErrorSanitizesNotFoundHint(t *testing.T) {
+	err := ErrNotFoundHint("Person", hostileText, "Use 'basecamp people' to find "+hostileText)
+	assertErrorSinksSanitized(t, err, "31mProject0m")
+}
+
+// TestRenderErrorSanitizesSDKErrorMessage drives a hostile server-supplied
+// message through an SDK error.
+func TestRenderErrorSanitizesSDKErrorMessage(t *testing.T) {
+	err := &basecamp.Error{
+		Code:       basecamp.CodeAPI,
+		Message:    "server error: " + hostileText,
+		HTTPStatus: 500,
+	}
+	assertErrorSinksSanitized(t, err, "31mProject0m")
+}
+
+// assertSinkNeutralized asserts a rendered terminal sink neither leaks a
+// terminal-control payload class nor glues CR-separated words, while the
+// neutralized hostileText still renders on a single line. Styled output
+// legitimately carries the renderer's own SGR codes, so it is checked for the
+// hostile payload classes (OSC, CR, C1/DEL) rather than a blanket ESC ban.
+func assertSinkNeutralized(t *testing.T, out, sink string, styled bool) {
+	t.Helper()
+	if styled {
+		assert.NotContains(t, out, "\x1b]", "OSC leaked into %s output", sink)
+	} else {
+		assert.NotContains(t, out, "\x1b", "ESC leaked into %s output", sink)
+	}
+	assert.NotContains(t, out, "\r", "CR leaked into %s output", sink)
+	assertNoC1OrDEL(t, out, sink)
+	// The bare CR in hostileText must separate "0m" and "name" with a space
+	// (not glue them) and must not break the value across lines.
+	assert.Contains(t, ansi.Strip(out), "31mProject0m name",
+		"%s: neutralized hostile text must render single-line and un-glued", sink)
+}
+
+// TestSummaryNoticeSinksSanitized drives hostile summary/notice content through
+// all four single-line summary/notice sinks — styled and markdown, generic and
+// entity presenters — asserting escape/C1/CR payloads are neutralized and that
+// a bare CR between words keeps them space-separated on a single line.
+func TestSummaryNoticeSinksSanitized(t *testing.T) {
+	// Notice carries a pure CR-between-words payload to pin the no-glue rule.
+	const notice = "before\rafter"
+
+	render := func(format Format, entity bool) string {
+		var buf bytes.Buffer
+		w := New(Options{Format: format, Writer: &buf})
+		opts := []ResponseOption{WithSummary(hostileText), WithNotice(notice)}
+		var data any = map[string]string{"id": "1"}
+		if entity {
+			data = map[string]any{
+				"id":         float64(100),
+				"subject":    "Weekly update",
+				"content":    "Body",
+				"creator":    map[string]any{"name": "Bob"},
+				"created_at": "2026-03-01T09:00:00Z",
+			}
+			opts = append(opts, WithEntity("message"))
+		}
+		require.NoError(t, w.OK(data, opts...))
+		return buf.String()
+	}
+
+	cases := []struct {
+		name   string
+		format Format
+		entity bool
+		styled bool
+	}{
+		{"styled generic", FormatStyled, false, true},
+		{"markdown generic", FormatMarkdown, false, false},
+		{"styled entity", FormatStyled, true, true},
+		{"markdown entity", FormatMarkdown, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := render(tc.format, tc.entity)
+			assertSinkNeutralized(t, out, tc.name, tc.styled)
+
+			stripped := ansi.Strip(out)
+			assert.Contains(t, stripped, "before after",
+				"CR-separated notice words must stay space-separated")
+			assert.NotContains(t, stripped, "beforeafter",
+				"CR must not glue notice words together")
+			assert.NotContains(t, out, "before\nafter",
+				"single-line notice must not break across lines")
+		})
+	}
+}
+
+// TestBreadcrumbSinksSanitized drives hostile breadcrumb Cmd/Description (a
+// previously uncovered sink) through the styled and markdown renderers.
+func TestBreadcrumbSinksSanitized(t *testing.T) {
+	render := func(format Format) string {
+		var buf bytes.Buffer
+		w := New(Options{Format: format, Writer: &buf})
+		require.NoError(t, w.OK(
+			map[string]string{"id": "1"},
+			WithBreadcrumbs(Breadcrumb{Action: "act", Cmd: hostileText, Description: hostileText}),
+		))
+		return buf.String()
+	}
+
+	assertSinkNeutralized(t, render(FormatStyled), "styled breadcrumb", true)
+	assertSinkNeutralized(t, render(FormatMarkdown), "markdown breadcrumb", false)
+}
+
+// TestAttachmentMetaSinksSanitized drives hostile attachment metadata
+// (content_type/filesize — a previously uncovered sink) through the styled and
+// markdown renderers.
+func TestAttachmentMetaSinksSanitized(t *testing.T) {
+	render := func(format Format) string {
+		var buf bytes.Buffer
+		w := New(Options{Format: format, Writer: &buf})
+		data := map[string]any{
+			"id": float64(1),
+			"content_attachments": []any{
+				map[string]any{
+					"filename":     "file.bin",
+					"content_type": hostileText,
+					"filesize":     hostileText,
+				},
+			},
+		}
+		require.NoError(t, w.OK(data))
+		return buf.String()
+	}
+
+	assertSinkNeutralized(t, render(FormatStyled), "styled attachment meta", true)
+	assertSinkNeutralized(t, render(FormatMarkdown), "markdown attachment meta", false)
 }

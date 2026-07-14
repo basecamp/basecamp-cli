@@ -30,3 +30,31 @@ func TestSanitizeTerminalPreservesNewlineTabAndText(t *testing.T) {
 	assert.Equal(t, "héllo — wörld", SanitizeTerminal("héllo — wörld"))
 	assert.Equal(t, "", SanitizeTerminal(""))
 }
+
+func TestSanitizeSingleLineCollapsesWhitespace(t *testing.T) {
+	// Bare CR between words becomes a separator, not a glue.
+	assert.Equal(t, "a b", SanitizeSingleLine("a\rb"))
+	assert.Equal(t, "a b", SanitizeSingleLine("a\r\nb"))
+	// Embedded newlines and tabs can no longer break a single line.
+	assert.Equal(t, "a b c", SanitizeSingleLine("a\nb\tc"))
+	assert.Equal(t, "one two three", SanitizeSingleLine("  one   two\tthree  "))
+}
+
+func TestSanitizeSingleLineStripsEscapesAndControls(t *testing.T) {
+	out := SanitizeSingleLine("\x1b[31mred\x1b[0m\ntext")
+	assert.Equal(t, "red text", out)
+	assert.Equal(t, "31mred", SanitizeSingleLine("\u009b31mred"))
+	// Combined: CR-separated words + newline + tab + C1/ESC sequences.
+	out = SanitizeSingleLine("evil\u009b31m\rname\ttitle\n\x1b]8;;u\x07link")
+	assert.NotContains(t, out, "\n")
+	assert.NotContains(t, out, "\r")
+	assert.NotContains(t, out, "\t")
+	assert.NotContains(t, out, "\x1b")
+	assert.NotContains(t, out, "\u009b")
+}
+
+func TestSanitizeSingleLineEmptyForAllControl(t *testing.T) {
+	assert.Equal(t, "", SanitizeSingleLine(""))
+	assert.Equal(t, "", SanitizeSingleLine("\r\n\t   "))
+	assert.Equal(t, "", SanitizeSingleLine("\x1b[0m\u009b"))
+}

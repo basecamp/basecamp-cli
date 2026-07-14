@@ -34,11 +34,13 @@ func RenderTemplate(tmpl string, data map[string]any) string {
 	if err := t.Execute(&buf, sanitizeNumericValues(data)); err != nil {
 		return "<template error>"
 	}
-	// Strip terminal escape sequences: templates interpolate API-controlled
+	// Sanitize for a single-line sink: templates interpolate API-controlled
 	// data (names, subjects, content) and the result reaches lipgloss.Render
-	// via headlines and affordance commands. Centralizing here covers every
-	// RenderTemplate caller (terminal-injection defense).
-	return richtext.SanitizeTerminal(buf.String())
+	// via headlines and affordance commands, which are single-line. Centralizing
+	// here covers every RenderTemplate caller (terminal-injection defense).
+	// SanitizeSingleLine also collapses embedded CR/newlines/tabs to spaces so a
+	// bare CR can't glue words together and a stray newline can't break layout.
+	return richtext.SanitizeSingleLine(buf.String())
 }
 
 // EvalCondition evaluates a template condition (from affordance "when" field).
@@ -77,9 +79,12 @@ func sanitizeNumericValues(data map[string]any) map[string]any {
 // or an outer **...** wrapper), so nested markers would produce visual noise
 // like ****word****.
 func RenderHeadline(schema *EntitySchema, data map[string]any) string {
-	// Strip here too: the identity-label fallback in renderHeadlineRaw formats
-	// a raw data value without going through RenderTemplate.
-	raw := richtext.SanitizeTerminal(renderHeadlineRaw(schema, data))
+	// Sanitize for a single-line sink here too: headlines render on one line,
+	// and the identity-label fallback in renderHeadlineRaw formats a raw data
+	// value without going through RenderTemplate (which already single-lines).
+	// Collapsing embedded CR/newlines/tabs keeps that fallback path from
+	// breaking the headline across lines or gluing words together.
+	raw := richtext.SanitizeSingleLine(renderHeadlineRaw(schema, data))
 	if richtext.IsHTML(raw) {
 		// Strip again on the generated markdown: defense-in-depth before this
 		// reaches the styled (styles.Primary.Render) sink. Generated markdown

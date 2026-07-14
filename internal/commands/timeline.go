@@ -403,19 +403,19 @@ func formatEvent(e basecamp.TimelineEvent) string {
 	// still falls back to the placeholder rather than rendering blank.
 	creatorName := "Someone"
 	if e.Creator != nil {
-		if name := richtext.SanitizeTerminal(e.Creator.Name); name != "" {
+		if name := richtext.SanitizeSingleLine(e.Creator.Name); name != "" {
 			creatorName = name
 		}
 	}
 
-	action := richtext.SanitizeTerminal(e.Action)
+	action := richtext.SanitizeSingleLine(e.Action)
 	if action == "" {
 		action = "updated"
 	}
 
-	title := richtext.SanitizeTerminal(e.Title)
+	title := richtext.SanitizeSingleLine(e.Title)
 	if title == "" {
-		title = richtext.SanitizeTerminal(e.SummaryExcerpt)
+		title = richtext.SanitizeSingleLine(e.SummaryExcerpt)
 	}
 	// Truncate at rune boundary for proper Unicode handling
 	if len([]rune(title)) > 40 {
@@ -428,6 +428,19 @@ func formatEvent(e basecamp.TimelineEvent) string {
 		actionStyle.Render(action),
 		title,
 	)
+}
+
+// watchLabel builds a watch-status label from an API-controlled name,
+// sanitizing it for the single-line terminal sink. An all-escape name collapses
+// to "" after sanitization, which would render a blank trailing value (e.g.
+// "activity for "); in that case fall back to the already-resolved ID so the
+// label always names something concrete.
+func watchLabel(format, name, fallbackID string) string {
+	safeName := richtext.SanitizeSingleLine(name)
+	if safeName == "" {
+		safeName = fallbackID
+	}
+	return fmt.Sprintf(format, safeName)
 }
 
 func runTimelineWatch(cmd *cobra.Command, args []string, project, person string, interval time.Duration, limit, page int, all bool) error {
@@ -515,7 +528,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if err != nil {
 			return output.ErrUsage("Invalid person ID")
 		}
-		description = fmt.Sprintf("activity for %s", richtext.SanitizeTerminal(personName))
+		description = watchLabel("activity for %s", personName, resolvedPersonID)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			result, err := app.Account().Timeline().PersonProgress(ctx, personID, opts)
 			if err != nil {
@@ -533,7 +546,7 @@ func runTimelineWatch(cmd *cobra.Command, args []string, project, person string,
 		if err != nil {
 			return output.ErrUsage("Invalid project ID")
 		}
-		description = fmt.Sprintf("activity in %s", richtext.SanitizeTerminal(projectName))
+		description = watchLabel("activity in %s", projectName, resolvedProjectID)
 		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
 			r, err := app.Account().Timeline().ProjectTimeline(ctx, projectIDInt, opts)
 			if err != nil {

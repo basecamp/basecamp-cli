@@ -551,10 +551,11 @@ func renderTaskListMarkdown(w io.Writer, schema *EntitySchema, data []map[string
 				b.WriteString("\n")
 			}
 			// Group headings come from a raw API string (e.g. bucket.name via
-			// extractDotPath) that never passes through formatText. Strip
-			// terminal escapes before the empty-check so an all-escape-sequence
-			// name falls back to "Other" instead of emitting a blank "## ".
-			heading := richtext.SanitizeTerminal(g.name)
+			// extractDotPath) that never passes through formatText. Sanitize for
+			// a single-line sink before the empty-check so an all-escape-sequence
+			// name falls back to "Other" instead of emitting a blank "## ", and
+			// so an embedded CR/newline/tab can't break the heading across lines.
+			heading := richtext.SanitizeSingleLine(g.name)
 			if heading == "" {
 				heading = "Other"
 			}
@@ -655,7 +656,7 @@ func extractPeopleNames(val any) []string {
 	for _, item := range arr {
 		if m, ok := item.(map[string]any); ok {
 			if name, ok := m["name"].(string); ok && name != "" {
-				if s := richtext.SanitizeTerminal(name); s != "" {
+				if s := richtext.SanitizeSingleLine(name); s != "" {
 					names = append(names, s)
 				}
 			}

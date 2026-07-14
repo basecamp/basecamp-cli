@@ -281,3 +281,86 @@ func TestFormatPeopleDropsAllEscapeName(t *testing.T) {
 		t.Errorf("formatPeople(all-escape name dropped) = %q, want %q", got, want)
 	}
 }
+
+// assertSingleLine fails if s contains a newline, carriage return, or tab —
+// i.e. if a single-line sink leaked whitespace that could break its row.
+func assertSingleLine(t *testing.T, label, s string) {
+	t.Helper()
+	if strings.ContainsAny(s, "\n\r\t") {
+		t.Errorf("%s = %q, want single line (no \\n/\\r/\\t)", label, s)
+	}
+}
+
+// formatPeople feeds a single-line detail row (e.g. todo.assignees), so a name
+// with a bare CR plus embedded newline/tab must collapse to one line with the
+// CR acting as a word separator rather than gluing words together.
+func TestFormatPeopleCollapsesWhitespace(t *testing.T) {
+	people := []any{
+		map[string]any{"name": "Ann\rBob"},
+		map[string]any{"name": "Carol\nDave\tErin"},
+	}
+
+	got := formatPeople(people)
+	want := "Ann Bob, Carol Dave Erin"
+	if got != want {
+		t.Errorf("formatPeople(embedded whitespace) = %q, want %q", got, want)
+	}
+	assertSingleLine(t, "formatPeople", got)
+}
+
+// formatPerson is a single key/value detail row value, so embedded
+// CR/newlines/tabs collapse to spaces.
+func TestFormatPersonCollapsesWhitespace(t *testing.T) {
+	got := formatPerson(map[string]any{"name": "Ann\rBob\nCarol\tDave"})
+	want := "Ann Bob Carol Dave"
+	if got != want {
+		t.Errorf("formatPerson(embedded whitespace) = %q, want %q", got, want)
+	}
+	assertSingleLine(t, "formatPerson", got)
+}
+
+// A dock title/name occupies one line of the dock listing, so embedded
+// CR/newlines/tabs must collapse rather than break the row layout.
+func TestFormatDockCollapsesWhitespaceInTitleAndName(t *testing.T) {
+	dock := []any{
+		map[string]any{
+			"title":   "To\rdos\nList",
+			"name":    "todo\tset",
+			"enabled": true,
+			"id":      float64(1),
+		},
+	}
+
+	got := formatDock(dock)
+	want := "1  To dos List (todo set)"
+	if got != want {
+		t.Errorf("formatDock(embedded whitespace) = %q, want %q", got, want)
+	}
+	assertSingleLine(t, "formatDock", got)
+}
+
+// A date value renders in a single-line detail field; an unparseable value with
+// embedded CR/newlines/tabs falls back to the sanitized string, which must stay
+// on one line.
+func TestFormatDateCollapsesWhitespaceInUnparseableInput(t *testing.T) {
+	locale := NewLocale("")
+	got := formatDate("not-a-date\rmore\nstuff\there", locale)
+	want := "not-a-date more stuff here"
+	if got != want {
+		t.Errorf("formatDate(embedded whitespace) = %q, want %q", got, want)
+	}
+	assertSingleLine(t, "formatDate", got)
+}
+
+// A relative-time value renders in a single-line detail field; an unparseable
+// value with embedded CR/newlines/tabs falls back to the sanitized string,
+// which must stay on one line.
+func TestFormatRelativeTimeCollapsesWhitespaceInUnparseableInput(t *testing.T) {
+	locale := NewLocale("")
+	got := formatRelativeTime("not-a-date\rmore\nstuff\there", locale)
+	want := "not-a-date more stuff here"
+	if got != want {
+		t.Errorf("formatRelativeTime(embedded whitespace) = %q, want %q", got, want)
+	}
+	assertSingleLine(t, "formatRelativeTime", got)
+}

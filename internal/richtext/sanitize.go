@@ -31,3 +31,19 @@ func SanitizeTerminal(s string) string {
 		}
 	}, s)
 }
+
+// SanitizeSingleLine sanitizes API-controlled text for a single-line terminal
+// sink. It normalizes CR/CRLF to newlines, strips terminal escape sequences and
+// control characters via SanitizeTerminal, then collapses all remaining
+// whitespace (newlines, tabs, runs of spaces) to single spaces so the value
+// occupies exactly one line. Bare CR between words becomes a space separator
+// rather than gluing words together, and embedded newlines/tabs can no longer
+// break a single-line layout. This mirrors the canonical ordering used by
+// output.sanitizeText with singleLine=true. All-whitespace or all-control input
+// collapses to the empty string.
+func SanitizeSingleLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = SanitizeTerminal(s)
+	return strings.Join(strings.Fields(s), " ")
+}

@@ -53,8 +53,10 @@ func formatDate(val any, locale Locale) string {
 		return ""
 	}
 	// Strip terminal escape sequences up front so a timestamp with embedded
-	// escapes still parses, and the fallback below is already sanitized.
-	str = richtext.SanitizeTerminal(str)
+	// escapes still parses, and the fallback below is already sanitized. A date
+	// value renders in a single-line detail field, so collapse embedded
+	// CR/newlines/tabs too — a malformed value can't break the row.
+	str = richtext.SanitizeSingleLine(str)
 
 	// Try ISO8601 full timestamp
 	if t, err := time.Parse(time.RFC3339, str); err == nil {
@@ -75,8 +77,10 @@ func formatRelativeTime(val any, locale Locale) string {
 		return ""
 	}
 	// Strip terminal escape sequences up front so a timestamp with embedded
-	// escapes still parses, and the fallback below is already sanitized.
-	str = richtext.SanitizeTerminal(str)
+	// escapes still parses, and the fallback below is already sanitized. A
+	// relative-time value renders in a single-line detail field, so collapse
+	// embedded CR/newlines/tabs too — a malformed value can't break the row.
+	str = richtext.SanitizeSingleLine(str)
 
 	t, err := time.Parse(time.RFC3339, str)
 	if err != nil {
@@ -135,7 +139,10 @@ func formatPeople(val any) string {
 	for _, item := range arr {
 		if m, ok := item.(map[string]any); ok {
 			if name, ok := m["name"].(string); ok {
-				if stripped := richtext.SanitizeTerminal(name); stripped != "" {
+				// Names render in a single-line detail row (e.g. todo.assignees),
+				// so collapse embedded CR/newlines/tabs to spaces rather than
+				// letting a crafted name break the row or glue words together.
+				if stripped := richtext.SanitizeSingleLine(name); stripped != "" {
 					names = append(names, stripped)
 				}
 			}
@@ -176,9 +183,11 @@ func parseDockItems(val any) []dockItem {
 	result := make([]dockItem, len(items))
 	for i, m := range items {
 		title, _ := m["title"].(string)
-		title = richtext.SanitizeTerminal(title)
+		// A dock title/name occupies one line of the dock listing, so collapse
+		// embedded CR/newlines/tabs to spaces to keep each row intact.
+		title = richtext.SanitizeSingleLine(title)
 		name, _ := m["name"].(string)
-		name = richtext.SanitizeTerminal(name)
+		name = richtext.SanitizeSingleLine(name)
 		if title == "" {
 			title = name
 		}
@@ -273,7 +282,9 @@ func dockPosition(m map[string]any) int {
 func formatPerson(val any) string {
 	if m, ok := val.(map[string]any); ok {
 		if name, ok := m["name"].(string); ok {
-			return richtext.SanitizeTerminal(name)
+			// A person name is a single key/value detail row value, so collapse
+			// embedded CR/newlines/tabs to spaces to keep the row on one line.
+			return richtext.SanitizeSingleLine(name)
 		}
 	}
 	return ""
