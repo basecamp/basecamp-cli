@@ -1,0 +1,24 @@
+internal/output/render.go
+  s_b25e2961bc784d::t_5cda3e731d3c68 262-274
+internal/output/envelope.go
+  s_b25e2961bc784d::t_0eb6f5ad8cb6af 449-453,456
+internal/output/output_test.go
+  s_b25e2961bc784d::t_d69b769f1746d2 617-637
+  s_b25e2961bc784d::t_fe59e6786ae397 2312,2317-2318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "bc5eeabe8b13b9aed697515064aedffca7a5fe9c",
+  "prompts": {},
+  "sessions": {
+    "s_b25e2961bc784d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "32835c6c-5be2-49c0-89f6-1e91d6493db0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
