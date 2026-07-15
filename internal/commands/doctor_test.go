@@ -662,6 +662,45 @@ func TestBuildDoctorBreadcrumbs_SkillVersionWarn(t *testing.T) {
 	assert.Equal(t, "basecamp skill install", breadcrumbs[0].Cmd)
 }
 
+func TestCheckCodexIntegrationIncludesVersion(t *testing.T) {
+	installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+
+	agent := harness.FindAgent("codex")
+	require.NotNil(t, agent, "codex agent should be registered")
+	require.NotNil(t, agent.Checks)
+
+	checks := agent.Checks()
+	require.Len(t, checks, 2)
+	assert.Equal(t, "Codex Plugin", checks[0].Name)
+	assert.Equal(t, "pass", checks[0].Status)
+	assert.Equal(t, "Codex Plugin Version", checks[1].Name)
+}
+
+func TestCheckCodexIntegrationWarnsOnVersionMismatch(t *testing.T) {
+	installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+	original := version.Version
+	version.Version = "0.8.0"
+	t.Cleanup(func() { version.Version = original })
+
+	checks := harness.FindAgent("codex").Checks()
+
+	require.Len(t, checks, 2)
+	assert.Equal(t, "warn", checks[1].Status)
+	assert.Contains(t, checks[1].Hint, "basecamp setup codex")
+}
+
+func TestBuildDoctorBreadcrumbs_Codex(t *testing.T) {
+	checks := []Check{
+		{Name: "Codex Plugin", Status: "fail"},
+		{Name: "Codex Plugin Version", Status: "warn"},
+	}
+
+	breadcrumbs := buildDoctorBreadcrumbs(checks)
+
+	require.Len(t, breadcrumbs, 1)
+	assert.Equal(t, "basecamp setup codex", breadcrumbs[0].Cmd)
+}
+
 func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

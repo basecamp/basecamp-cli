@@ -985,6 +985,12 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 				Cmd:         "basecamp skill install",
 				Description: "Update installed skill",
 			})
+		case "Codex Plugin", "Codex Plugin Version":
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "setup_codex",
+				Cmd:         "basecamp setup codex",
+				Description: "Install or update the Codex plugin",
+			})
 		}
 	}
 
