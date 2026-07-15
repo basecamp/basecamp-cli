@@ -118,13 +118,101 @@ func codexHookRanCommit(raw json.RawMessage) bool {
 	if command == "" {
 		command = input.Cmd
 	}
-	fields := strings.Fields(command)
-	for i := 0; i+1 < len(fields); i++ {
-		if fields[i] == "git" && strings.Trim(fields[i+1], ";|&") == "commit" {
+	segments, ok := shellCommandSegments(command)
+	if !ok {
+		return false
+	}
+	for _, segment := range segments {
+		if codexGitSubcommand(strings.Fields(segment)) == "commit" {
 			return true
 		}
 	}
 	return false
+}
+
+func shellCommandSegments(command string) ([]string, bool) {
+	segments := make([]string, 0, 2)
+	start := 0
+	var quote byte
+	escaped := false
+	for index := 0; index < len(command); index++ {
+		char := command[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		if char == '\'' || char == '"' {
+			quote = char
+			continue
+		}
+		if char == ';' || char == '\n' || char == '&' || char == '|' {
+			if segment := strings.TrimSpace(command[start:index]); segment != "" {
+				segments = append(segments, segment)
+			}
+			start = index + 1
+		}
+	}
+	if quote != 0 || escaped {
+		return nil, false
+	}
+	if segment := strings.TrimSpace(command[start:]); segment != "" {
+		segments = append(segments, segment)
+	}
+	return segments, true
+}
+
+func codexGitSubcommand(fields []string) string {
+	if len(fields) < 2 || !isGitExecutable(fields[0]) {
+		return ""
+	}
+	for index := 1; index < len(fields); {
+		argument := strings.Trim(fields[index], `"'`)
+		switch argument {
+		case "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path":
+			if index+1 >= len(fields) {
+				return ""
+			}
+			index += 2
+		case "--no-pager", "--paginate", "-p", "-P", "--bare", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs":
+			index++
+		case "--":
+			if index+1 >= len(fields) {
+				return ""
+			}
+			return strings.Trim(fields[index+1], `"'`)
+		default:
+			if strings.HasPrefix(argument, "-C") || strings.HasPrefix(argument, "-c") ||
+				strings.HasPrefix(argument, "--git-dir=") || strings.HasPrefix(argument, "--work-tree=") ||
+				strings.HasPrefix(argument, "--namespace=") || strings.HasPrefix(argument, "--config-env=") ||
+				strings.HasPrefix(argument, "--exec-path=") {
+				index++
+				continue
+			}
+			if strings.HasPrefix(argument, "-") {
+				return ""
+			}
+			return argument
+		}
+	}
+	return ""
+}
+
+func isGitExecutable(field string) bool {
+	executable := strings.Trim(field, `"'`)
+	if separator := strings.LastIndexAny(executable, `/\`); separator >= 0 {
+		executable = executable[separator+1:]
+	}
+	return executable == "git" || strings.EqualFold(executable, "git.exe")
 }
 
 func codexHookSucceeded(input codexHookInput) bool {
@@ -141,7 +229,7 @@ func codexHookSucceeded(input codexHookInput) bool {
 		if json.Valid([]byte(nested)) {
 			raw = []byte(nested)
 		} else {
-			return nested != ""
+			return false
 		}
 	}
 
@@ -155,20 +243,27 @@ func codexHookSucceeded(input codexHookInput) bool {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return false
 	}
-	if result.ExitCode != nil && *result.ExitCode != 0 {
+	if result.IsError || result.Error != "" {
 		return false
 	}
 	if result.Success != nil && !*result.Success {
 		return false
 	}
-	if result.IsError || result.Error != "" {
-		return false
-	}
 	switch strings.ToLower(result.Status) {
 	case "error", "failed", "failure", "canceled", codexAlternateCanceledState, "timed-out", "timeout":
 		return false
-	default:
+	}
+	if result.ExitCode != nil {
+		return *result.ExitCode == 0
+	}
+	if result.Success != nil {
+		return *result.Success
+	}
+	switch strings.ToLower(result.Status) {
+	case "completed", "success", "succeeded":
 		return true
+	default:
+		return false
 	}
 }
 

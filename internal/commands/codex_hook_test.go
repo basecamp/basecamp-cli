@@ -65,6 +65,43 @@ func TestCodexPostCommitCheckIgnoresFailedCommit(t *testing.T) {
 	assert.Empty(t, runCodexHook(t, "post-commit-check", input, repo))
 }
 
+func TestCodexPostCommitCheckIgnoresUnrecognizedSuccessPayloads(t *testing.T) {
+	repo := newGitRepo(t, "main", "BC-123 initial")
+	inputs := []string{
+		`{"tool_name":"Bash","tool_input":{"command":"git commit -m ship"},"tool_output":"command output"}`,
+		`{"tool_name":"Bash","tool_input":{"command":"git commit -m ship"},"tool_output":{}}`,
+		`{"tool_name":"Bash","tool_input":{"command":"git commit -m ship"},"tool_response":{"status":"unknown"}}`,
+		`{"tool_name":"Bash","tool_input":{"command":"git commit -m ship"},"tool_response":{"exit_code":0,"success":false}}`,
+	}
+
+	for _, input := range inputs {
+		assert.Empty(t, runCodexHook(t, "post-commit-check", input, repo))
+	}
+}
+
+func TestCodexHookCommitDetection(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{name: "direct", command: "git commit -m ship", want: true},
+		{name: "chained", command: "git add . && git commit -m ship", want: true},
+		{name: "git options", command: "git -C . --no-pager commit -m ship", want: true},
+		{name: "mere mention", command: "echo git commit", want: false},
+		{name: "quoted mention", command: `echo "git commit"`, want: false},
+		{name: "different subcommand", command: "git status # git commit", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]string{"command": tt.command})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, codexHookRanCommit(raw))
+		})
+	}
+}
+
 func TestCodexPostCommitCheckIgnoresSuccessfulCommitWithoutReference(t *testing.T) {
 	repo := newGitRepo(t, "main", "ship native plugin")
 	input := `{"tool_name":"Bash","tool_input":{"command":"git commit -m ship"},"tool_output":{"exit_code":0}}`
