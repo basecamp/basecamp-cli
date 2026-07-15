@@ -138,21 +138,16 @@ func TestCheckCodexPluginUsesSupportedJSONCommand(t *testing.T) {
 }
 
 func TestCodexAgentInfoWiring(t *testing.T) {
-	resetRegistry()
-	defer resetRegistry()
-
-	RegisterAgent(AgentInfo{
-		Name:   "Codex",
-		ID:     "codex",
-		Detect: DetectCodex,
-		Checks: func() []*StatusCheck { return []*StatusCheck{CheckCodexPlugin(), CheckCodexPluginVersion()} },
-	})
+	stubCodexList(t, codexListFixture("0.7.2", true, true), nil)
 
 	found := FindAgent("codex")
 	require.NotNil(t, found)
 	assert.Equal(t, "Codex", found.Name)
 	assert.NotNil(t, found.Detect)
 	assert.NotNil(t, found.Checks)
+	checks := found.Checks()
+	require.Len(t, checks, 1)
+	assert.Equal(t, "Codex Plugin", checks[0].Name)
 }
 
 func stubCodexLookPath(t *testing.T, path string, err error) {

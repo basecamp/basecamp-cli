@@ -230,6 +230,18 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
+	// 14. Codex plugin version (doctor-only, not part of generic agent checks
+	//     which gate setup wizard behavior)
+	if harness.DetectCodex() {
+		pvc := harness.CheckCodexPluginVersionContext(ctx)
+		checks = append(checks, Check{
+			Name:    pvc.Name,
+			Status:  pvc.Status,
+			Message: pvc.Message,
+			Hint:    pvc.Hint,
+		})
+	}
+
 	return checks
 }
 

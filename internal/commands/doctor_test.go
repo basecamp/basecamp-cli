@@ -664,29 +664,34 @@ func TestBuildDoctorBreadcrumbs_SkillVersionWarn(t *testing.T) {
 
 func TestCheckCodexIntegrationIncludesVersion(t *testing.T) {
 	installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+	app, _ := setupDoctorTestApp(t, "")
 
-	agent := harness.FindAgent("codex")
-	require.NotNil(t, agent, "codex agent should be registered")
-	require.NotNil(t, agent.Checks)
-
-	checks := agent.Checks()
-	require.Len(t, checks, 2)
-	assert.Equal(t, "Codex Plugin", checks[0].Name)
-	assert.Equal(t, "pass", checks[0].Status)
-	assert.Equal(t, "Codex Plugin Version", checks[1].Name)
+	checks := runDoctorChecks(context.Background(), app, false)
+	var names []string
+	for _, check := range checks {
+		if check.Name == "Codex Plugin" || check.Name == "Codex Plugin Version" {
+			names = append(names, check.Name)
+		}
+	}
+	require.Equal(t, []string{"Codex Plugin", "Codex Plugin Version"}, names)
 }
 
 func TestCheckCodexIntegrationWarnsOnVersionMismatch(t *testing.T) {
 	installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+	app, _ := setupDoctorTestApp(t, "")
 	original := version.Version
 	version.Version = "0.8.0"
 	t.Cleanup(func() { version.Version = original })
 
-	checks := harness.FindAgent("codex").Checks()
-
-	require.Len(t, checks, 2)
-	assert.Equal(t, "warn", checks[1].Status)
-	assert.Contains(t, checks[1].Hint, "basecamp setup codex")
+	checks := runDoctorChecks(context.Background(), app, false)
+	for _, check := range checks {
+		if check.Name == "Codex Plugin Version" {
+			assert.Equal(t, "warn", check.Status)
+			assert.Contains(t, check.Hint, "basecamp setup codex")
+			return
+		}
+	}
+	t.Fatal("Codex Plugin Version check not found")
 }
 
 func TestBuildDoctorBreadcrumbs_Codex(t *testing.T) {

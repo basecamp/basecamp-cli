@@ -49,7 +49,7 @@ func init() {
 		ID:     "codex",
 		Detect: DetectCodex,
 		Checks: func() []*StatusCheck {
-			return []*StatusCheck{CheckCodexPlugin(), CheckCodexPluginVersion()}
+			return []*StatusCheck{CheckCodexPlugin()}
 		},
 	})
 }
@@ -118,7 +118,12 @@ func CheckCodexPluginContext(ctx context.Context) *StatusCheck {
 
 // CheckCodexPluginVersion compares the installed plugin and CLI versions.
 func CheckCodexPluginVersion() *StatusCheck {
-	state, found, err := queryCodexPlugin(context.Background())
+	return CheckCodexPluginVersionContext(context.Background())
+}
+
+// CheckCodexPluginVersionContext compares plugin and CLI versions using the caller's context.
+func CheckCodexPluginVersionContext(ctx context.Context) *StatusCheck {
+	state, found, err := queryCodexPlugin(ctx)
 	if err != nil {
 		return codexQueryFailure("Codex Plugin Version", err)
 	}
