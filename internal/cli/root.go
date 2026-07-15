@@ -342,6 +342,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewNotificationsCmd())
 	cmd.AddCommand(commands.NewTUICmd())
 	cmd.AddCommand(commands.NewBonfireCmd())
+	cmd.AddCommand(commands.NewCodexHookCmd())
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
