@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -663,7 +664,7 @@ func TestBuildDoctorBreadcrumbs_SkillVersionWarn(t *testing.T) {
 }
 
 func TestCheckCodexIntegrationIncludesVersion(t *testing.T) {
-	installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+	logPath := installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
 	app, _ := setupDoctorTestApp(t, "")
 
 	checks := runDoctorChecks(context.Background(), app, false)
@@ -674,6 +675,7 @@ func TestCheckCodexIntegrationIncludesVersion(t *testing.T) {
 		}
 	}
 	require.Equal(t, []string{"Codex Plugin", "Codex Plugin Version"}, names)
+	assert.Equal(t, 1, strings.Count(readCodexSetupCalls(t, logPath), "plugin list --available --json"))
 }
 
 func TestCheckCodexIntegrationWarnsOnVersionMismatch(t *testing.T) {

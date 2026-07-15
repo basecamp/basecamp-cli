@@ -118,6 +118,16 @@ func TestCheckCodexPluginVersionMismatch(t *testing.T) {
 	assert.Equal(t, "Run: basecamp setup codex", check.Hint)
 }
 
+func TestCheckCodexPluginVersionSkipsMissingPlugin(t *testing.T) {
+	stubCodexList(t, `{"installed":[],"available":[]}`, nil)
+
+	check := CheckCodexPluginVersion()
+
+	assert.Equal(t, "skip", check.Status)
+	assert.Equal(t, "Skipped (plugin not installed)", check.Message)
+	assert.Empty(t, check.Hint)
+}
+
 func TestCheckCodexPluginUsesSupportedJSONCommand(t *testing.T) {
 	stubCodexLookPath(t, "/usr/local/bin/codex", nil)
 	var gotPath string
@@ -138,7 +148,16 @@ func TestCheckCodexPluginUsesSupportedJSONCommand(t *testing.T) {
 }
 
 func TestCodexAgentInfoWiring(t *testing.T) {
+	resetRegistry()
+	defer resetRegistry()
+
 	stubCodexList(t, codexListFixture("0.7.2", true, true), nil)
+	RegisterAgent(AgentInfo{
+		Name:   "Codex",
+		ID:     "codex",
+		Detect: DetectCodex,
+		Checks: func() []*StatusCheck { return []*StatusCheck{CheckCodexPlugin()} },
+	})
 
 	found := FindAgent("codex")
 	require.NotNil(t, found)

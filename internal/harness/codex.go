@@ -90,6 +90,19 @@ func CheckCodexPlugin() *StatusCheck {
 // CheckCodexPluginContext verifies the plugin using the caller's context.
 func CheckCodexPluginContext(ctx context.Context) *StatusCheck {
 	state, found, err := queryCodexPlugin(ctx)
+	return codexPluginCheck(state, found, err)
+}
+
+// CheckCodexPluginDiagnosticsContext checks plugin health and version from one Codex query.
+func CheckCodexPluginDiagnosticsContext(ctx context.Context) []*StatusCheck {
+	state, found, err := queryCodexPlugin(ctx)
+	return []*StatusCheck{
+		codexPluginCheck(state, found, err),
+		codexPluginVersionCheck(state, found, err),
+	}
+}
+
+func codexPluginCheck(state codexPluginState, found bool, err error) *StatusCheck {
 	if err != nil {
 		return codexQueryFailure("Codex Plugin", err)
 	}
@@ -124,10 +137,21 @@ func CheckCodexPluginVersion() *StatusCheck {
 // CheckCodexPluginVersionContext compares plugin and CLI versions using the caller's context.
 func CheckCodexPluginVersionContext(ctx context.Context) *StatusCheck {
 	state, found, err := queryCodexPlugin(ctx)
+	return codexPluginVersionCheck(state, found, err)
+}
+
+func codexPluginVersionCheck(state codexPluginState, found bool, err error) *StatusCheck {
 	if err != nil {
 		return codexQueryFailure("Codex Plugin Version", err)
 	}
-	if !found || !state.Installed || state.Version == "" {
+	if !found || !state.Installed {
+		return &StatusCheck{
+			Name:    "Codex Plugin Version",
+			Status:  "skip",
+			Message: "Skipped (plugin not installed)",
+		}
+	}
+	if state.Version == "" {
 		return &StatusCheck{
 			Name:    "Codex Plugin Version",
 			Status:  "fail",

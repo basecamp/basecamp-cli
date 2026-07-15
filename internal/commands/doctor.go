@@ -206,15 +206,19 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		checks = append(checks, checkSkillVersion())
 	}
 	for _, agent := range harness.DetectedAgents() {
-		if agent.Checks != nil {
-			for _, c := range agent.Checks() {
-				checks = append(checks, Check{
-					Name:    c.Name,
-					Status:  c.Status,
-					Message: c.Message,
-					Hint:    c.Hint,
-				})
-			}
+		var agentChecks []*harness.StatusCheck
+		if agent.ID == "codex" {
+			agentChecks = harness.CheckCodexPluginDiagnosticsContext(ctx)
+		} else if agent.Checks != nil {
+			agentChecks = agent.Checks()
+		}
+		for _, c := range agentChecks {
+			checks = append(checks, Check{
+				Name:    c.Name,
+				Status:  c.Status,
+				Message: c.Message,
+				Hint:    c.Hint,
+			})
 		}
 	}
 
@@ -222,18 +226,6 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	//     which gate setup wizard behavior)
 	if harness.DetectClaude() {
 		pvc := harness.CheckClaudePluginVersion()
-		checks = append(checks, Check{
-			Name:    pvc.Name,
-			Status:  pvc.Status,
-			Message: pvc.Message,
-			Hint:    pvc.Hint,
-		})
-	}
-
-	// 14. Codex plugin version (doctor-only, not part of generic agent checks
-	//     which gate setup wizard behavior)
-	if harness.DetectCodex() {
-		pvc := harness.CheckCodexPluginVersionContext(ctx)
 		checks = append(checks, Check{
 			Name:    pvc.Name,
 			Status:  pvc.Status,
