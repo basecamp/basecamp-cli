@@ -53,6 +53,20 @@ func TestSetupCodexAlreadyAddedRefreshesMarketplace(t *testing.T) {
 	)
 }
 
+func TestSetupCodexIdempotentAddRefreshesMarketplace(t *testing.T) {
+	logPath := installCodexStub(t, codexStubOptions{marketplaceAlreadyAddedSuccess: true})
+
+	envelope := runSetupCodexJSON(t)
+
+	assert.True(t, envelope.Data.PluginInstalled)
+	calls := readCodexSetupCalls(t, logPath)
+	assertCallOrder(t, calls,
+		"plugin marketplace add basecamp/claude-plugins --json",
+		"plugin marketplace upgrade 37signals --json",
+		"plugin add basecamp@37signals --json",
+	)
+}
+
 func TestSetupCodexAlreadyInstalledIsIdempotent(t *testing.T) {
 	logPath := installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
 
@@ -151,11 +165,12 @@ func runSetupCodexJSON(t *testing.T) setupCodexEnvelope {
 }
 
 type codexStubOptions struct {
-	marketplaceAlreadyAdded bool
-	marketplaceFailure      bool
-	pluginAlreadyInstalled  bool
-	pluginFailure           bool
-	verificationMissing     bool
+	marketplaceAlreadyAdded        bool
+	marketplaceAlreadyAddedSuccess bool
+	marketplaceFailure             bool
+	pluginAlreadyInstalled         bool
+	pluginFailure                  bool
+	verificationMissing            bool
 }
 
 func installCodexStub(t *testing.T, options codexStubOptions) string {
@@ -180,6 +195,7 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 		"  \"plugin marketplace add basecamp/claude-plugins --json\")\n" +
 		"    if [ " + boolShell(options.marketplaceFailure) + " = 1 ]; then echo 'network failure' >&2; exit 1; fi\n" +
 		"    if [ " + boolShell(options.marketplaceAlreadyAdded) + " = 1 ]; then echo 'marketplace 37signals already registered' >&2; exit 1; fi\n" +
+		"    if [ " + boolShell(options.marketplaceAlreadyAddedSuccess) + " = 1 ]; then echo '{\"marketplaceName\":\"37signals\",\"alreadyAdded\":true}'; exit 0; fi\n" +
 		"    echo '{\"name\":\"37signals\"}'; exit 0 ;;\n" +
 		"  \"plugin marketplace upgrade 37signals --json\") echo '{\"name\":\"37signals\"}'; exit 0 ;;\n" +
 		"  \"plugin add basecamp@37signals --json\")\n" +

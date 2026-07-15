@@ -155,7 +155,8 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 Manual Codex installation uses the same marketplace:
 
 ```bash
-codex plugin marketplace add basecamp/claude-plugins --json
+codex plugin marketplace add basecamp/claude-plugins --json || \
+  codex plugin marketplace upgrade 37signals --json
 codex plugin add basecamp@37signals --json
 ```
 

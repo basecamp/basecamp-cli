@@ -18,7 +18,7 @@ Interpret every check by status:
 - `skip`: not run because it is unauthenticated or not applicable.
 - `fail`: broken and needs attention.
 
-Report failures and warnings with their `hint` fields. Use these common remediations when relevant:
+Report failures and warnings with their `hint` fields. Also inspect the top-level `breadcrumbs` array and preserve its structured `cmd` next steps, because a breadcrumb can provide a more specific action than a check hint. Use these common remediations when relevant:
 
 - Basecamp authentication: `basecamp auth login`
 - Codex plugin installation or version: `basecamp setup codex`

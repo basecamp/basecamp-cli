@@ -131,7 +131,8 @@ This installs the shared Basecamp skill, registers the 37signals Codex marketpla
 For a manual install:
 
 ```bash
-codex plugin marketplace add basecamp/claude-plugins --json
+codex plugin marketplace add basecamp/claude-plugins --json || \
+  codex plugin marketplace upgrade 37signals --json
 codex plugin add basecamp@37signals --json
 ```
 

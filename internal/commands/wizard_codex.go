@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -56,14 +57,14 @@ func installCodexPlugin(parent context.Context) error {
 	defer cancel()
 
 	output, err := runCodexSetupCommand(ctx, codexPath, "plugin", "marketplace", "add", harness.CodexMarketplaceSource, "--json")
-	if err != nil {
-		if codexMarketplaceAlreadyAdded(output) {
-			upgradeOutput, upgradeErr := runCodexSetupCommand(ctx, codexPath, "plugin", "marketplace", "upgrade", harness.CodexMarketplaceName, "--json")
-			if upgradeErr != nil {
-				return codexSetupError("marketplace upgrade failed: " + codexCommandFailure(upgradeOutput, upgradeErr))
-			}
-		} else {
-			return codexSetupError("marketplace add failed: " + codexCommandFailure(output, err))
+	alreadyAdded := codexMarketplaceAlreadyAdded(output)
+	if err != nil && !alreadyAdded {
+		return codexSetupError("marketplace add failed: " + codexCommandFailure(output, err))
+	}
+	if alreadyAdded {
+		upgradeOutput, upgradeErr := runCodexSetupCommand(ctx, codexPath, "plugin", "marketplace", "upgrade", harness.CodexMarketplaceName, "--json")
+		if upgradeErr != nil {
+			return codexSetupError("marketplace upgrade failed: " + codexCommandFailure(upgradeOutput, upgradeErr))
 		}
 	}
 
@@ -84,6 +85,12 @@ func installCodexPlugin(parent context.Context) error {
 }
 
 func codexMarketplaceAlreadyAdded(output []byte) bool {
+	var result struct {
+		AlreadyAdded bool `json:"alreadyAdded"`
+	}
+	if json.Unmarshal(output, &result) == nil && result.AlreadyAdded {
+		return true
+	}
 	message := strings.ToLower(string(output))
 	return strings.Contains(message, "already") &&
 		(strings.Contains(message, "registered") || strings.Contains(message, "configured") || strings.Contains(message, "exists"))
