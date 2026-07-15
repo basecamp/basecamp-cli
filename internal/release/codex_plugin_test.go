@@ -150,6 +150,38 @@ func TestCodexPluginCheckerDoesNotDuplicateUnreadableSourceErrors(t *testing.T) 
 	assert.NotContains(t, string(output), "Codex hook command is not registered")
 }
 
+func TestCodexPluginCheckerReportsInvalidUTF8(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	for _, relative := range []string{
+		".codex-plugin/plugin.json",
+		".claude-plugin/plugin.json",
+		"hooks/hooks.json",
+		"skills/basecamp/SKILL.md",
+		"skills/basecamp-doctor/SKILL.md",
+		"assets/bc5-snowglobe.png",
+		"internal/commands/codex_hook.go",
+		"internal/cli/root.go",
+	} {
+		copyFixtureFile(t, root, fixture, relative)
+	}
+	for _, relative := range []string{
+		".codex-plugin/plugin.json",
+		"internal/commands/codex_hook.go",
+		"internal/cli/root.go",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(fixture, relative), []byte{0xff}, 0o644))
+	}
+
+	cmd := exec.CommandContext(context.Background(), requirePython3(t), filepath.Join(root, "scripts", "check-codex-plugin.py"), fixture)
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(output), "cannot read JSON")
+	assert.Contains(t, string(output), "cannot read hidden command source")
+	assert.Contains(t, string(output), "cannot read command registration")
+	assert.NotContains(t, string(output), "Traceback")
+}
+
 func TestReleaseWiringStampsBothStableManifests(t *testing.T) {
 	root := repositoryRoot(t)
 	goreleaser := readFile(t, filepath.Join(root, ".goreleaser.yaml"))

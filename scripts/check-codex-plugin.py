@@ -25,7 +25,7 @@ def load_json(path: Path, errors: list[str]) -> dict[str, Any] | None:
     except FileNotFoundError:
         errors.append(f"missing required file: {path}")
         return None
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         errors.append(f"cannot read JSON {path}: {exc}")
         return None
     if not isinstance(value, dict):
@@ -172,14 +172,14 @@ def validate_repository_contract(root: Path, errors: list[str]) -> None:
     command_read = True
     try:
         command_source = command_file.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         errors.append(f"cannot read hidden command source: {exc}")
         command_source = ""
         command_read = False
     root_read = True
     try:
         root_source = root_file.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         errors.append(f"cannot read command registration: {exc}")
         root_source = ""
         root_read = False
