@@ -118,60 +118,89 @@ func codexHookRanCommit(raw json.RawMessage) bool {
 	if command == "" {
 		command = input.Cmd
 	}
-	segments, ok := shellCommandSegments(command)
+	segments, ok := shellCommandFields(command)
 	if !ok {
 		return false
 	}
-	for _, segment := range segments {
-		if codexGitSubcommand(strings.Fields(segment)) == "commit" {
+	for _, fields := range segments {
+		if codexGitSubcommand(fields) == "commit" {
 			return true
 		}
 	}
 	return false
 }
 
-func shellCommandSegments(command string) ([]string, bool) {
-	segments := make([]string, 0, 2)
-	start := 0
+func shellCommandFields(command string) ([][]string, bool) {
+	segments := make([][]string, 0, 2)
+	fields := make([]string, 0, 4)
+	var word strings.Builder
 	var quote byte
 	escaped := false
+	started := false
+	flushWord := func() {
+		if !started {
+			return
+		}
+		fields = append(fields, word.String())
+		word.Reset()
+		started = false
+	}
+	flushSegment := func() {
+		flushWord()
+		if len(fields) == 0 {
+			return
+		}
+		segments = append(segments, fields)
+		fields = make([]string, 0, 4)
+	}
+
 	for index := 0; index < len(command); index++ {
 		char := command[index]
 		if escaped {
+			word.WriteByte(char)
+			started = true
 			escaped = false
 			continue
 		}
 		if char == '\\' && quote != '\'' {
 			escaped = true
+			started = true
 			continue
 		}
 		if quote != 0 {
 			if char == quote {
 				quote = 0
+			} else {
+				word.WriteByte(char)
 			}
+			started = true
 			continue
 		}
 		if char == '\'' || char == '"' {
 			quote = char
+			started = true
+			continue
+		}
+		if char == ' ' || char == '\t' || char == '\r' {
+			flushWord()
 			continue
 		}
 		if char == ';' || char == '\n' || char == '&' || char == '|' {
-			if segment := strings.TrimSpace(command[start:index]); segment != "" {
-				segments = append(segments, segment)
-			}
-			start = index + 1
+			flushSegment()
+			continue
 		}
+		word.WriteByte(char)
+		started = true
 	}
 	if quote != 0 || escaped {
 		return nil, false
 	}
-	if segment := strings.TrimSpace(command[start:]); segment != "" {
-		segments = append(segments, segment)
-	}
+	flushSegment()
 	return segments, true
 }
 
 func codexGitSubcommand(fields []string) string {
+	fields = shellCommandExecutable(fields)
 	if len(fields) < 2 || !isGitExecutable(fields[0]) {
 		return ""
 	}
@@ -207,12 +236,46 @@ func codexGitSubcommand(fields []string) string {
 	return ""
 }
 
+func shellCommandExecutable(fields []string) []string {
+	for len(fields) > 0 && isShellAssignment(fields[0]) {
+		fields = fields[1:]
+	}
+	if len(fields) == 0 || !isNamedExecutable(fields[0], "env") {
+		return fields
+	}
+
+	fields = fields[1:]
+	for len(fields) > 0 && isShellAssignment(fields[0]) {
+		fields = fields[1:]
+	}
+	return fields
+}
+
+func isShellAssignment(field string) bool {
+	separator := strings.IndexByte(field, '=')
+	if separator < 1 {
+		return false
+	}
+	for index := 0; index < separator; index++ {
+		char := field[index]
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && char != '_' &&
+			(index == 0 || char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func isGitExecutable(field string) bool {
-	executable := strings.Trim(field, `"'`)
+	return isNamedExecutable(field, "git")
+}
+
+func isNamedExecutable(field, name string) bool {
+	executable := field
 	if separator := strings.LastIndexAny(executable, `/\`); separator >= 0 {
 		executable = executable[separator+1:]
 	}
-	return executable == "git" || strings.EqualFold(executable, "git.exe")
+	return executable == name || strings.EqualFold(executable, name+".exe")
 }
 
 func codexHookSucceeded(input codexHookInput) bool {

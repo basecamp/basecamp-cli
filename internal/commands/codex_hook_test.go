@@ -88,7 +88,12 @@ func TestCodexHookCommitDetection(t *testing.T) {
 		{name: "direct", command: "git commit -m ship", want: true},
 		{name: "chained", command: "git add . && git commit -m ship", want: true},
 		{name: "git options", command: "git -C . --no-pager commit -m ship", want: true},
+		{name: "quoted git option", command: `git -C "repo with spaces" commit -m ship`, want: true},
+		{name: "environment assignment", command: "GIT_AUTHOR_NAME=Bot git commit -m ship", want: true},
+		{name: "quoted environment assignment", command: `GIT_AUTHOR_NAME="Build Bot" git commit -m ship`, want: true},
+		{name: "env wrapper", command: "env GIT_AUTHOR_NAME=Bot git commit -m ship", want: true},
 		{name: "mere mention", command: "echo git commit", want: false},
+		{name: "assignment before mention", command: "MODE=test echo git commit", want: false},
 		{name: "quoted mention", command: `echo "git commit"`, want: false},
 		{name: "different subcommand", command: "git status # git commit", want: false},
 	}
