@@ -5,7 +5,7 @@
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
 - JSON output with breadcrumbs for easy navigation
 - OAuth authentication with automatic token refresh
-- Includes agent skill and Claude plugin
+- Includes agent skills plus native Claude Code and Codex plugins
 
 ## Quick Start
 
@@ -150,6 +150,15 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 
 **Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. Start a new Codex thread afterward, then review and trust the hooks with `/hooks`.
+
+Manual Codex installation uses the same marketplace:
+
+```bash
+codex plugin marketplace add basecamp/claude-plugins --json
+codex plugin add basecamp@37signals --json
+```
+
 **Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 
 **Agent discovery:** Every command supports `--help --agent` for structured JSON output (flags, gotchas, subcommands). Use `basecamp commands --json` for the full catalog.
@@ -180,6 +189,7 @@ See [install.md](install.md) for step-by-step setup instructions.
 ```bash
 basecamp doctor              # Check CLI health and diagnose issues
 basecamp doctor --verbose    # Verbose output with details
+basecamp doctor --json       # Structured checks, including Claude and Codex
 ```
 
 ## Development

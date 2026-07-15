@@ -120,6 +120,27 @@ basecamp setup claude
 
 This registers the marketplace and installs the plugin with skills, hooks, and agent workflow support.
 
+### Codex
+
+```bash
+basecamp setup codex
+```
+
+This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. Start a new Codex thread after setup, then review and trust the plugin hooks with `/hooks`.
+
+For a manual install:
+
+```bash
+codex plugin marketplace add basecamp/claude-plugins --json
+codex plugin add basecamp@37signals --json
+```
+
+Verify either agent integration with structured diagnostics:
+
+```bash
+basecamp doctor --json
+```
+
 ### Other Agents
 
 Point your agent at the skill file for full Basecamp workflow coverage:
