@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"mvdan.cc/sh/v3/syntax"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 )
@@ -27,11 +28,6 @@ type codexHookInput struct {
 	ToolInput    json.RawMessage `json:"tool_input"`
 	ToolOutput   json.RawMessage `json:"tool_output"`
 	ToolResponse json.RawMessage `json:"tool_response"`
-}
-
-type shellCommandSegment struct {
-	fields          []string
-	separatorBefore string
 }
 
 // NewCodexHookCmd creates the hidden command group used by Codex plugin hooks.
@@ -123,129 +119,62 @@ func codexHookRanCommit(raw json.RawMessage) bool {
 	if command == "" {
 		command = input.Cmd
 	}
-	segments, ok := shellCommandFields(command)
-	if !ok {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
+	if err != nil || len(file.Stmts) == 0 {
 		return false
 	}
-	commitProven := false
-	for _, segment := range segments {
-		if segment.separatorBefore != "&&" {
-			commitProven = false
-		}
-		if codexGitSubcommand(segment.fields) == "commit" {
-			commitProven = true
-		}
-	}
-	return commitProven
+	return codexStatementProvesCommit(file.Stmts[len(file.Stmts)-1])
 }
 
-func shellCommandFields(command string) ([]shellCommandSegment, bool) {
-	segments := make([]shellCommandSegment, 0, 2)
-	fields := make([]string, 0, 4)
-	var word strings.Builder
-	var quote byte
-	separator := ""
-	escaped := false
-	started := false
-	flushWord := func() {
-		if !started {
-			return
-		}
-		fields = append(fields, word.String())
-		word.Reset()
-		started = false
+func codexStatementProvesCommit(statement *syntax.Stmt) bool {
+	if statement == nil || statement.Negated || statement.Background || statement.Coprocess || statement.Disown {
+		return false
 	}
-	flushSegment := func() bool {
-		flushWord()
-		if len(fields) == 0 {
+	switch command := statement.Cmd.(type) {
+	case *syntax.CallExpr:
+		fields, ok := staticShellWords(command.Args)
+		return ok && codexGitSubcommand(fields) == "commit"
+	case *syntax.BinaryCmd:
+		if command.Op != syntax.AndStmt {
 			return false
 		}
-		segments = append(segments, shellCommandSegment{fields: fields, separatorBefore: separator})
-		fields = make([]string, 0, 4)
-		return true
+		return codexStatementProvesCommit(command.X) || codexStatementProvesCommit(command.Y)
+	default:
+		return false
 	}
+}
 
-	for index := 0; index < len(command); index++ {
-		char := command[index]
-		if escaped {
-			word.WriteByte(char)
-			started = true
-			escaped = false
-			continue
-		}
-		if char == '\\' && quote != '\'' {
-			if quote == '"' && index+1 < len(command) {
-				next := command[index+1]
-				if next != '$' && next != '`' && next != '"' && next != '\\' && next != '\n' {
-					word.WriteByte(char)
-					started = true
-					continue
-				}
-			}
-			escaped = true
-			started = true
-			continue
-		}
-		if quote != 0 {
-			if char == quote {
-				quote = 0
-			} else {
-				word.WriteByte(char)
-			}
-			started = true
-			continue
-		}
-		if char == '\'' || char == '"' {
-			quote = char
-			started = true
-			continue
-		}
-		if char == ' ' || char == '\t' || char == '\r' {
-			flushWord()
-			continue
-		}
-		if char == '|' {
+func staticShellWords(words []*syntax.Word) ([]string, bool) {
+	fields := make([]string, 0, len(words))
+	for _, word := range words {
+		var value strings.Builder
+		if !appendStaticShellParts(&value, word.Parts) {
 			return nil, false
 		}
-		if char == '&' {
-			if (index > 0 && command[index-1] == '>') || (index+1 < len(command) && command[index+1] == '>') {
-				word.WriteByte(char)
-				started = true
-				continue
-			}
-			if index+1 >= len(command) || command[index+1] != '&' || !flushSegment() {
-				return nil, false
-			}
-			separator = "&&"
-			index++
-			continue
-		}
-		if char == ';' {
-			if !flushSegment() {
-				return nil, false
-			}
-			separator = ";"
-			continue
-		}
-		if char == '\n' {
-			if flushSegment() {
-				separator = "\n"
-			}
-			continue
-		}
-		word.WriteByte(char)
-		started = true
+		fields = append(fields, value.String())
 	}
-	if quote != 0 || escaped {
-		return nil, false
+	return fields, true
+}
+
+func appendStaticShellParts(value *strings.Builder, parts []syntax.WordPart) bool {
+	for _, part := range parts {
+		switch part := part.(type) {
+		case *syntax.Lit:
+			value.WriteString(part.Value)
+		case *syntax.SglQuoted:
+			if part.Dollar {
+				return false
+			}
+			value.WriteString(part.Value)
+		case *syntax.DblQuoted:
+			if part.Dollar || !appendStaticShellParts(value, part.Parts) {
+				return false
+			}
+		default:
+			return false
+		}
 	}
-	flushWord()
-	if len(fields) > 0 {
-		segments = append(segments, shellCommandSegment{fields: fields, separatorBefore: separator})
-	} else if separator == "&&" {
-		return nil, false
-	}
-	return segments, true
+	return true
 }
 
 func codexGitSubcommand(fields []string) string {

@@ -99,6 +99,7 @@ func TestCodexHookCommitDetection(t *testing.T) {
 		{name: "commit after sequential command", command: "echo ready; git commit -m ship", want: true},
 		{name: "stderr redirection", command: "git commit -m ship 2>&1", want: true},
 		{name: "combined redirection", command: "git commit -m ship &>/dev/null", want: true},
+		{name: "comment after and", command: "git commit -m ship && # note\necho done", want: true},
 		{name: "mere mention", command: "echo git commit", want: false},
 		{name: "assignment before mention", command: "MODE=test echo git commit", want: false},
 		{name: "quoted mention", command: `echo "git commit"`, want: false},
@@ -107,6 +108,7 @@ func TestCodexHookCommitDetection(t *testing.T) {
 		{name: "commit before sequential command", command: "git commit -m ship; echo done", want: false},
 		{name: "ambiguous pipeline", command: "git commit -m ship | cat", want: false},
 		{name: "background commit", command: "git commit -m ship &", want: false},
+		{name: "escaped redirection before background", command: `git commit -m ship foo\>& true`, want: false},
 		{name: "unknown env option", command: "env --unknown git commit -m ship", want: false},
 	}
 
