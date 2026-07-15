@@ -127,6 +127,29 @@ func TestCodexPluginCheckerAcceptsWhitespaceIndependentCommands(t *testing.T) {
 	require.NoError(t, err, string(output))
 }
 
+func TestCodexPluginCheckerDoesNotDuplicateUnreadableSourceErrors(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	for _, relative := range []string{
+		".codex-plugin/plugin.json",
+		".claude-plugin/plugin.json",
+		"hooks/hooks.json",
+		"skills/basecamp/SKILL.md",
+		"skills/basecamp-doctor/SKILL.md",
+		"assets/bc5-snowglobe.png",
+	} {
+		copyFixtureFile(t, root, fixture, relative)
+	}
+
+	cmd := exec.CommandContext(context.Background(), requirePython3(t), filepath.Join(root, "scripts", "check-codex-plugin.py"), fixture)
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(output), "cannot read hidden command source")
+	assert.Contains(t, string(output), "cannot read command registration")
+	assert.NotContains(t, string(output), "hidden command source missing")
+	assert.NotContains(t, string(output), "Codex hook command is not registered")
+}
+
 func TestReleaseWiringStampsBothStableManifests(t *testing.T) {
 	root := repositoryRoot(t)
 	goreleaser := readFile(t, filepath.Join(root, ".goreleaser.yaml"))

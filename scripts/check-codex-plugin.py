@@ -169,26 +169,31 @@ def validate_repository_contract(root: Path, errors: list[str]) -> None:
 
     command_file = root / "internal" / "commands" / "codex_hook.go"
     root_file = root / "internal" / "cli" / "root.go"
+    command_read = True
     try:
         command_source = command_file.read_text(encoding="utf-8")
     except OSError as exc:
         errors.append(f"cannot read hidden command source: {exc}")
         command_source = ""
+        command_read = False
+    root_read = True
     try:
         root_source = root_file.read_text(encoding="utf-8")
     except OSError as exc:
         errors.append(f"cannot read command registration: {exc}")
         root_source = ""
+        root_read = False
     command_patterns = {
         r'\bUse\s*:\s*"codex-hook"': 'Use: "codex-hook"',
         r"\bHidden\s*:\s*true\b": "Hidden: true",
         r'\bUse\s*:\s*"session-start"': 'Use: "session-start"',
         r'\bUse\s*:\s*"post-commit-check"': 'Use: "post-commit-check"',
     }
-    for pattern, description in command_patterns.items():
-        if re.search(pattern, command_source) is None:
-            errors.append(f"hidden command source missing {description!r}")
-    if re.search(r"\bcommands\s*\.\s*NewCodexHookCmd\s*\(\s*\)", root_source) is None:
+    if command_read:
+        for pattern, description in command_patterns.items():
+            if re.search(pattern, command_source) is None:
+                errors.append(f"hidden command source missing {description!r}")
+    if root_read and re.search(r"\bcommands\s*\.\s*NewCodexHookCmd\s*\(\s*\)", root_source) is None:
         errors.append("Codex hook command is not registered in internal/cli/root.go")
 
 
