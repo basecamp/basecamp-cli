@@ -15,6 +15,9 @@ import (
 )
 
 func TestStampCodexPluginVersionDoesNotChangeClaudeManifest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release scripts require a POSIX shell")
+	}
 	root := repositoryRoot(t)
 	fixture := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(fixture, ".codex-plugin"), 0o755))
@@ -36,6 +39,9 @@ func TestStampCodexPluginVersionDoesNotChangeClaudeManifest(t *testing.T) {
 }
 
 func TestStampCodexPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release scripts require a POSIX shell")
+	}
 	root := repositoryRoot(t)
 	fixture := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(fixture, ".codex-plugin"), 0o755))
@@ -52,7 +58,7 @@ func TestStampCodexPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
 
 func TestCodexPluginCheckPassesRepositoryPayload(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), root)
+	cmd := exec.CommandContext(context.Background(), requirePython3(t), filepath.Join(root, "scripts", "check-codex-plugin.py"), root)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	assert.Contains(t, string(output), "Codex plugin check passed")
@@ -60,7 +66,7 @@ func TestCodexPluginCheckPassesRepositoryPayload(t *testing.T) {
 
 func TestCodexPluginCheckRejectsMissingManifest(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), t.TempDir())
+	cmd := exec.CommandContext(context.Background(), requirePython3(t), filepath.Join(root, "scripts", "check-codex-plugin.py"), t.TempDir())
 	output, err := cmd.CombinedOutput()
 	require.Error(t, err)
 	assert.Contains(t, string(output), ".codex-plugin/plugin.json")
@@ -68,6 +74,7 @@ func TestCodexPluginCheckRejectsMissingManifest(t *testing.T) {
 
 func TestCodexPluginCheckUsesStrictSemver(t *testing.T) {
 	root := repositoryRoot(t)
+	python := requirePython3(t)
 	checker := filepath.Join(root, "scripts", "check-codex-plugin.py")
 	probe := `import importlib.util, sys; spec = importlib.util.spec_from_file_location("checker", sys.argv[1]); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); raise SystemExit(0 if module.SEMVER.fullmatch(sys.argv[2]) else 1)`
 	tests := []struct {
@@ -84,7 +91,7 @@ func TestCodexPluginCheckUsesStrictSemver(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.version, func(t *testing.T) {
-			cmd := exec.CommandContext(context.Background(), "python3", "-c", probe, checker, tt.version)
+			cmd := exec.CommandContext(context.Background(), python, "-c", probe, checker, tt.version)
 			err := cmd.Run()
 			assert.Equal(t, tt.valid, err == nil)
 		})
@@ -93,6 +100,7 @@ func TestCodexPluginCheckUsesStrictSemver(t *testing.T) {
 
 func TestCodexPluginCheckerAcceptsWhitespaceIndependentCommands(t *testing.T) {
 	root := repositoryRoot(t)
+	python := requirePython3(t)
 	fixture := t.TempDir()
 	for _, relative := range []string{
 		".codex-plugin/plugin.json",
@@ -114,7 +122,7 @@ func TestCodexPluginCheckerAcceptsWhitespaceIndependentCommands(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(rootPath), 0o755))
 	require.NoError(t, os.WriteFile(rootPath, []byte("package cli\n\nvar _ = commands . NewCodexHookCmd ( )\n"), 0o644))
 
-	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), fixture)
+	cmd := exec.CommandContext(context.Background(), python, filepath.Join(root, "scripts", "check-codex-plugin.py"), fixture)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 }
@@ -165,6 +173,15 @@ func repositoryRoot(t *testing.T) string {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func requirePython3(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is required for the Codex plugin checker")
+	}
+	return path
 }
 
 func manifestVersion(t *testing.T, path string) string {
