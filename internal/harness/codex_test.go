@@ -34,6 +34,7 @@ func TestDetectCodexBinary(t *testing.T) {
 }
 
 func TestCheckCodexPluginMissingBinary(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	stubCodexLookPath(t, "", exec.ErrNotFound)
 
 	check := CheckCodexPlugin()
