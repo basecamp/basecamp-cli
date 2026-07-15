@@ -6,7 +6,7 @@ project_name: basecamp
 before:
   hooks:
     - sh -c 'mkdir -p completions && go run ./cmd/basecamp completion bash > completions/basecamp.bash && go run ./cmd/basecamp completion zsh > completions/_basecamp && go run ./cmd/basecamp completion fish > completions/basecamp.fish'
-    - sh -c '{{ if .Prerelease }}echo "Skipping Claude plugin version stamp for prerelease {{ .Version }}"{{ else }}scripts/stamp-plugin-version.sh {{ .Version }}{{ end }}'
+    - sh -c '{{ if .Prerelease }}echo "Skipping plugin version stamps for prerelease {{ .Version }}"{{ else }}scripts/stamp-plugin-version.sh {{ .Version }} && scripts/stamp-codex-plugin-version.sh {{ .Version }}{{ end }}'
 
 builds:
   - id: basecamp
