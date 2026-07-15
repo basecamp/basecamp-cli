@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 
+SEMVER_IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
 SEMVER = re.compile(
-    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    rf"(?:-{SEMVER_IDENTIFIER}(?:\.{SEMVER_IDENTIFIER})*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 UNSUPPORTED_MANIFEST_FIELDS = {"apps", "mcpServers", "hooks"}
@@ -178,10 +179,16 @@ def validate_repository_contract(root: Path, errors: list[str]) -> None:
     except OSError as exc:
         errors.append(f"cannot read command registration: {exc}")
         root_source = ""
-    for token in ('Use:    "codex-hook"', "Hidden: true", 'Use:   "session-start"', 'Use:   "post-commit-check"'):
-        if token not in command_source:
-            errors.append(f"hidden command source missing {token!r}")
-    if "commands.NewCodexHookCmd()" not in root_source:
+    command_patterns = {
+        r'\bUse\s*:\s*"codex-hook"': 'Use: "codex-hook"',
+        r"\bHidden\s*:\s*true\b": "Hidden: true",
+        r'\bUse\s*:\s*"session-start"': 'Use: "session-start"',
+        r'\bUse\s*:\s*"post-commit-check"': 'Use: "post-commit-check"',
+    }
+    for pattern, description in command_patterns.items():
+        if re.search(pattern, command_source) is None:
+            errors.append(f"hidden command source missing {description!r}")
+    if re.search(r"\bcommands\s*\.\s*NewCodexHookCmd\s*\(\s*\)", root_source) is None:
         errors.append("Codex hook command is not registered in internal/cli/root.go")
 
 

@@ -35,6 +35,21 @@ func TestStampCodexPluginVersionDoesNotChangeClaudeManifest(t *testing.T) {
 	assert.Equal(t, claudeBefore, claudeAfter)
 }
 
+func TestStampCodexPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture, ".codex-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, ".codex-plugin", "plugin.json"), []byte("not json\n"), 0o644))
+
+	cmd := exec.CommandContext(context.Background(), filepath.Join(root, "scripts", "stamp-codex-plugin-version.sh"), "1.2.3")
+	cmd.Dir = fixture
+	require.Error(t, cmd.Run())
+
+	temporaryFiles, err := filepath.Glob(filepath.Join(fixture, ".codex-plugin", "plugin.json.tmp*"))
+	require.NoError(t, err)
+	assert.Empty(t, temporaryFiles)
+}
+
 func TestCodexPluginCheckPassesRepositoryPayload(t *testing.T) {
 	root := repositoryRoot(t)
 	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), root)
@@ -49,6 +64,59 @@ func TestCodexPluginCheckRejectsMissingManifest(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	require.Error(t, err)
 	assert.Contains(t, string(output), ".codex-plugin/plugin.json")
+}
+
+func TestCodexPluginCheckUsesStrictSemver(t *testing.T) {
+	root := repositoryRoot(t)
+	checker := filepath.Join(root, "scripts", "check-codex-plugin.py")
+	probe := `import importlib.util, sys; spec = importlib.util.spec_from_file_location("checker", sys.argv[1]); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); raise SystemExit(0 if module.SEMVER.fullmatch(sys.argv[2]) else 1)`
+	tests := []struct {
+		version string
+		valid   bool
+	}{
+		{version: "1.2.3", valid: true},
+		{version: "1.2.3-alpha.1+build.5", valid: true},
+		{version: "1.2.3-0", valid: true},
+		{version: "1.2.3-01", valid: false},
+		{version: "1.2.3-alpha..1", valid: false},
+		{version: "1.2.3\u0660", valid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			cmd := exec.CommandContext(context.Background(), "python3", "-c", probe, checker, tt.version)
+			err := cmd.Run()
+			assert.Equal(t, tt.valid, err == nil)
+		})
+	}
+}
+
+func TestCodexPluginCheckerAcceptsWhitespaceIndependentCommands(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	for _, relative := range []string{
+		".codex-plugin/plugin.json",
+		".claude-plugin/plugin.json",
+		"hooks/hooks.json",
+		"skills/basecamp/SKILL.md",
+		"skills/basecamp-doctor/SKILL.md",
+		"assets/bc5-snowglobe.png",
+		"internal/commands/codex_hook.go",
+	} {
+		copyFixtureFile(t, root, fixture, relative)
+	}
+	commandPath := filepath.Join(fixture, "internal", "commands", "codex_hook.go")
+	commandSource := readFile(t, commandPath)
+	commandSource = strings.ReplaceAll(commandSource, "Use:    \"codex-hook\"", "Use:\t\"codex-hook\"")
+	commandSource = strings.ReplaceAll(commandSource, "Use:   \"session-start\"", "Use:\t\t\"session-start\"")
+	require.NoError(t, os.WriteFile(commandPath, []byte(commandSource), 0o644))
+	rootPath := filepath.Join(fixture, "internal", "cli", "root.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(rootPath), 0o755))
+	require.NoError(t, os.WriteFile(rootPath, []byte("package cli\n\nvar _ = commands . NewCodexHookCmd ( )\n"), 0o644))
+
+	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), fixture)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
 }
 
 func TestReleaseWiringStampsBothStableManifests(t *testing.T) {
@@ -70,12 +138,18 @@ func TestReleaseWiringSkipsPluginStampsForPrereleases(t *testing.T) {
 
 	assert.Contains(t, goreleaser, "if .Prerelease")
 	assert.Contains(t, goreleaser, "Skipping plugin version stamps for prerelease")
-	prereleaseBranch := strings.Index(releaseScript, `if [[ "${PRERELEASE}" == "true" ]]`)
-	claudeStamp := strings.Index(releaseScript, `scripts/stamp-plugin-version.sh "${VERSION}"`)
-	codexStamp := strings.Index(releaseScript, `scripts/stamp-codex-plugin-version.sh "${VERSION}"`)
-	require.NotEqual(t, -1, prereleaseBranch)
-	require.Greater(t, claudeStamp, prereleaseBranch)
-	require.Greater(t, codexStamp, prereleaseBranch)
+	prereleaseStart := strings.Index(releaseScript, `if [[ "${PRERELEASE}" == "true" ]]`)
+	require.NotEqual(t, -1, prereleaseStart)
+	stableStart := strings.Index(releaseScript[prereleaseStart:], "\nelse\n  # --- Update Nix flake ---")
+	require.NotEqual(t, -1, stableStart)
+	stableEnd := strings.Index(releaseScript[prereleaseStart+stableStart:], "\nfi\n\n# --- Commit release prep ---")
+	require.NotEqual(t, -1, stableEnd)
+	prereleaseBlock := releaseScript[prereleaseStart : prereleaseStart+stableStart]
+	stableBlock := releaseScript[prereleaseStart+stableStart : prereleaseStart+stableStart+stableEnd]
+	assert.NotContains(t, prereleaseBlock, "stamp-plugin-version.sh")
+	assert.NotContains(t, prereleaseBlock, "stamp-codex-plugin-version.sh")
+	assert.Contains(t, stableBlock, `scripts/stamp-plugin-version.sh "${VERSION}"`)
+	assert.Contains(t, stableBlock, `scripts/stamp-codex-plugin-version.sh "${VERSION}"`)
 }
 
 func TestClaudeAndCodexManifestVersionsMatch(t *testing.T) {
@@ -107,6 +181,13 @@ func copyFile(t *testing.T, source, destination string) {
 	data, err := os.ReadFile(source)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(destination, data, 0o644))
+}
+
+func copyFixtureFile(t *testing.T, sourceRoot, destinationRoot, relative string) {
+	t.Helper()
+	destination := filepath.Join(destinationRoot, relative)
+	require.NoError(t, os.MkdirAll(filepath.Dir(destination), 0o755))
+	copyFile(t, filepath.Join(sourceRoot, relative), destination)
 }
 
 func readFile(t *testing.T, path string) string {
