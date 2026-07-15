@@ -29,6 +29,11 @@ type codexHookInput struct {
 	ToolResponse json.RawMessage `json:"tool_response"`
 }
 
+type shellCommandSegment struct {
+	fields          []string
+	separatorBefore string
+}
+
 // NewCodexHookCmd creates the hidden command group used by Codex plugin hooks.
 func NewCodexHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -122,19 +127,24 @@ func codexHookRanCommit(raw json.RawMessage) bool {
 	if !ok {
 		return false
 	}
-	for _, fields := range segments {
-		if codexGitSubcommand(fields) == "commit" {
-			return true
+	commitProven := false
+	for _, segment := range segments {
+		if segment.separatorBefore != "&&" {
+			commitProven = false
+		}
+		if codexGitSubcommand(segment.fields) == "commit" {
+			commitProven = true
 		}
 	}
-	return false
+	return commitProven
 }
 
-func shellCommandFields(command string) ([][]string, bool) {
-	segments := make([][]string, 0, 2)
+func shellCommandFields(command string) ([]shellCommandSegment, bool) {
+	segments := make([]shellCommandSegment, 0, 2)
 	fields := make([]string, 0, 4)
 	var word strings.Builder
 	var quote byte
+	separator := ""
 	escaped := false
 	started := false
 	flushWord := func() {
@@ -145,13 +155,14 @@ func shellCommandFields(command string) ([][]string, bool) {
 		word.Reset()
 		started = false
 	}
-	flushSegment := func() {
+	flushSegment := func() bool {
 		flushWord()
 		if len(fields) == 0 {
-			return
+			return false
 		}
-		segments = append(segments, fields)
+		segments = append(segments, shellCommandSegment{fields: fields, separatorBefore: separator})
 		fields = make([]string, 0, 4)
+		return true
 	}
 
 	for index := 0; index < len(command); index++ {
@@ -163,6 +174,14 @@ func shellCommandFields(command string) ([][]string, bool) {
 			continue
 		}
 		if char == '\\' && quote != '\'' {
+			if quote == '"' && index+1 < len(command) {
+				next := command[index+1]
+				if next != '$' && next != '`' && next != '"' && next != '\\' && next != '\n' {
+					word.WriteByte(char)
+					started = true
+					continue
+				}
+			}
 			escaped = true
 			started = true
 			continue
@@ -185,8 +204,33 @@ func shellCommandFields(command string) ([][]string, bool) {
 			flushWord()
 			continue
 		}
-		if char == ';' || char == '\n' || char == '&' || char == '|' {
-			flushSegment()
+		if char == '|' {
+			return nil, false
+		}
+		if char == '&' {
+			if (index > 0 && command[index-1] == '>') || (index+1 < len(command) && command[index+1] == '>') {
+				word.WriteByte(char)
+				started = true
+				continue
+			}
+			if index+1 >= len(command) || command[index+1] != '&' || !flushSegment() {
+				return nil, false
+			}
+			separator = "&&"
+			index++
+			continue
+		}
+		if char == ';' {
+			if !flushSegment() {
+				return nil, false
+			}
+			separator = ";"
+			continue
+		}
+		if char == '\n' {
+			if flushSegment() {
+				separator = "\n"
+			}
 			continue
 		}
 		word.WriteByte(char)
@@ -195,7 +239,12 @@ func shellCommandFields(command string) ([][]string, bool) {
 	if quote != 0 || escaped {
 		return nil, false
 	}
-	flushSegment()
+	flushWord()
+	if len(fields) > 0 {
+		segments = append(segments, shellCommandSegment{fields: fields, separatorBefore: separator})
+	} else if separator == "&&" {
+		return nil, false
+	}
 	return segments, true
 }
 
@@ -245,10 +294,30 @@ func shellCommandExecutable(fields []string) []string {
 	}
 
 	fields = fields[1:]
-	for len(fields) > 0 && isShellAssignment(fields[0]) {
-		fields = fields[1:]
+	for len(fields) > 0 {
+		switch argument := fields[0]; {
+		case isShellAssignment(argument), argument == "-i", argument == "--ignore-environment":
+			fields = fields[1:]
+		case argument == "-u", argument == "--unset", argument == "-C", argument == "--chdir":
+			if len(fields) < 2 {
+				return nil
+			}
+			fields = fields[2:]
+		case strings.HasPrefix(argument, "--unset="), strings.HasPrefix(argument, "--chdir="):
+			fields = fields[1:]
+		case argument == "--":
+			fields = fields[1:]
+			for len(fields) > 0 && isShellAssignment(fields[0]) {
+				fields = fields[1:]
+			}
+			return fields
+		case strings.HasPrefix(argument, "-"):
+			return nil
+		default:
+			return fields
+		}
 	}
-	return fields
+	return nil
 }
 
 func isShellAssignment(field string) bool {

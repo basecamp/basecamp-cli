@@ -92,10 +92,22 @@ func TestCodexHookCommitDetection(t *testing.T) {
 		{name: "environment assignment", command: "GIT_AUTHOR_NAME=Bot git commit -m ship", want: true},
 		{name: "quoted environment assignment", command: `GIT_AUTHOR_NAME="Build Bot" git commit -m ship`, want: true},
 		{name: "env wrapper", command: "env GIT_AUTHOR_NAME=Bot git commit -m ship", want: true},
+		{name: "env flag", command: "env -i git commit -m ship", want: true},
+		{name: "env option value", command: "env -u TOKEN git commit -m ship", want: true},
+		{name: "env chdir", command: `env -C "repo with spaces" git commit -m ship`, want: true},
+		{name: "Windows executable", command: `"C:\Program Files\Git\bin\git.exe" commit -m ship`, want: true},
+		{name: "commit after sequential command", command: "echo ready; git commit -m ship", want: true},
+		{name: "stderr redirection", command: "git commit -m ship 2>&1", want: true},
+		{name: "combined redirection", command: "git commit -m ship &>/dev/null", want: true},
 		{name: "mere mention", command: "echo git commit", want: false},
 		{name: "assignment before mention", command: "MODE=test echo git commit", want: false},
 		{name: "quoted mention", command: `echo "git commit"`, want: false},
 		{name: "different subcommand", command: "git status # git commit", want: false},
+		{name: "skipped or branch", command: "git diff --quiet || git commit -m ship", want: false},
+		{name: "commit before sequential command", command: "git commit -m ship; echo done", want: false},
+		{name: "ambiguous pipeline", command: "git commit -m ship | cat", want: false},
+		{name: "background commit", command: "git commit -m ship &", want: false},
+		{name: "unknown env option", command: "env --unknown git commit -m ship", want: false},
 	}
 
 	for _, tt := range tests {
