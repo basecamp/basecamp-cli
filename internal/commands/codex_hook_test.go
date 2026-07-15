@@ -119,6 +119,7 @@ func runCodexHook(t *testing.T, subcommand, input, cwd string) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	app := appctx.NewApp(config.Default())
 	t.Cleanup(app.Close)
@@ -185,7 +186,7 @@ func newGitRepo(t *testing.T, branch, subject string) string {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))

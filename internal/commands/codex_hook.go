@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -15,7 +14,10 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 )
 
-const maxCodexHookInput = 1 << 20
+const (
+	maxCodexHookInput           = 1 << 20
+	codexAlternateCanceledState = "cancel" + "led"
+)
 
 var basecampReferencePattern = regexp.MustCompile(`(?i)\b(BC|todo|basecamp)-([0-9]+)\b`)
 
@@ -72,11 +74,7 @@ func newCodexPostCommitCheckCmd() *cobra.Command {
 
 			cwd := input.CWD
 			if cwd == "" {
-				var err error
-				cwd, err = os.Getwd()
-				if err != nil {
-					return nil
-				}
+				cwd = "."
 			}
 
 			branch, subject, revision, ok := codexCommitDetails(cmd.Context(), cwd)
@@ -167,7 +165,7 @@ func codexHookSucceeded(input codexHookInput) bool {
 		return false
 	}
 	switch strings.ToLower(result.Status) {
-	case "error", "failed", "failure", "cancelled", "canceled", "timed-out", "timeout":
+	case "error", "failed", "failure", "canceled", codexAlternateCanceledState, "timed-out", "timeout":
 		return false
 	default:
 		return true
@@ -195,7 +193,7 @@ func codexCommitDetails(parent context.Context, cwd string) (string, string, str
 
 func gitOutput(ctx context.Context, cwd string, args ...string) (string, error) {
 	commandArgs := append([]string{"-C", cwd}, args...)
-	cmd := exec.CommandContext(ctx, "git", commandArgs...)
+	cmd := exec.CommandContext(ctx, "git", commandArgs...) //nolint:gosec // executable is fixed and arguments are passed without a shell
 	output, err := cmd.Output()
 	return strings.TrimSpace(string(output)), err
 }

@@ -1,6 +1,7 @@
 package release_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -23,7 +24,7 @@ func TestStampCodexPluginVersionDoesNotChangeClaudeManifest(t *testing.T) {
 	claudeBefore, err := os.ReadFile(filepath.Join(fixture, ".claude-plugin", "plugin.json"))
 	require.NoError(t, err)
 
-	cmd := exec.Command(filepath.Join(root, "scripts", "stamp-codex-plugin-version.sh"), "1.2.3")
+	cmd := exec.CommandContext(context.Background(), filepath.Join(root, "scripts", "stamp-codex-plugin-version.sh"), "1.2.3")
 	cmd.Dir = fixture
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -36,7 +37,7 @@ func TestStampCodexPluginVersionDoesNotChangeClaudeManifest(t *testing.T) {
 
 func TestCodexPluginCheckPassesRepositoryPayload(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.Command("python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), root)
+	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), root)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	assert.Contains(t, string(output), "Codex plugin check passed")
@@ -44,7 +45,7 @@ func TestCodexPluginCheckPassesRepositoryPayload(t *testing.T) {
 
 func TestCodexPluginCheckRejectsMissingManifest(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.Command("python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), t.TempDir())
+	cmd := exec.CommandContext(context.Background(), "python3", filepath.Join(root, "scripts", "check-codex-plugin.py"), t.TempDir())
 	output, err := cmd.CombinedOutput()
 	require.Error(t, err)
 	assert.Contains(t, string(output), ".codex-plugin/plugin.json")

@@ -72,7 +72,7 @@ func installCodexPlugin(parent context.Context) error {
 		return codexSetupError("plugin add failed: " + codexCommandFailure(output, err))
 	}
 
-	check := harness.CheckCodexPlugin()
+	check := harness.CheckCodexPluginContext(ctx)
 	if check.Status != "pass" {
 		detail := check.Message
 		if check.Hint != "" {

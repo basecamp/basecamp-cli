@@ -32,7 +32,7 @@ var (
 	}
 )
 
-var errCodexBinaryMissing = errors.New("Codex executable not found")
+var errCodexBinaryMissing = errors.New("codex executable not found")
 
 type codexPluginState struct {
 	PluginID    string `json:"pluginId"`
@@ -84,7 +84,12 @@ func FindCodexBinary() string {
 
 // CheckCodexPlugin verifies that Basecamp is installed and enabled in Codex.
 func CheckCodexPlugin() *StatusCheck {
-	state, found, err := queryCodexPlugin()
+	return CheckCodexPluginContext(context.Background())
+}
+
+// CheckCodexPluginContext verifies the plugin using the caller's context.
+func CheckCodexPluginContext(ctx context.Context) *StatusCheck {
+	state, found, err := queryCodexPlugin(ctx)
 	if err != nil {
 		return codexQueryFailure("Codex Plugin", err)
 	}
@@ -113,7 +118,7 @@ func CheckCodexPlugin() *StatusCheck {
 
 // CheckCodexPluginVersion compares the installed plugin and CLI versions.
 func CheckCodexPluginVersion() *StatusCheck {
-	state, found, err := queryCodexPlugin()
+	state, found, err := queryCodexPlugin(context.Background())
 	if err != nil {
 		return codexQueryFailure("Codex Plugin Version", err)
 	}
@@ -147,12 +152,12 @@ func CheckCodexPluginVersion() *StatusCheck {
 	}
 }
 
-func queryCodexPlugin() (codexPluginState, bool, error) {
+func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	path := FindCodexBinary()
 	if path == "" {
 		return codexPluginState{}, false, errCodexBinaryMissing
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	data, err := runCodexCommand(ctx, path, "plugin", "list", "--available", "--json")
 	if err != nil {
