@@ -566,9 +566,12 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		}
 
 		// The command logger prints raw to the terminal, so strip
-		// ANSI/OSC/control sequences from everything displayed.
-		userCode := richtext.SanitizeSingleLine(devAuth.UserCode)
-		shownURI := richtext.SanitizeSingleLine(target)
+		// ANSI/OSC/control sequences from everything displayed. Trim after
+		// sanitizing: a code that reduces to whitespace is as unusable as an
+		// empty one — without the trim it would be displayed and polled until
+		// expiry.
+		userCode := strings.TrimSpace(richtext.SanitizeSingleLine(devAuth.UserCode))
+		shownURI := strings.TrimSpace(richtext.SanitizeSingleLine(target))
 		if target == "" || userCode == "" || shownURI == "" {
 			displayErr = output.ErrAPI(0, "authorization server returned malformed device authorization")
 			cancelDev()
@@ -810,6 +813,13 @@ func isSecureEndpointURL(u *url.URL) bool {
 	// and Basic-auth synthesis in net/http requests.
 	if u.User != nil {
 		return false
+	}
+	// url.Parse requires a numeric port but does not range-check it, so
+	// https://host:70000/ parses cleanly yet is undialable and unlaunchable.
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return false
+		}
 	}
 	// IsLocalhost takes the host:port form and strips the port itself.
 	return u.Scheme == "https" || (u.Scheme == "http" && hostutil.IsLocalhost(u.Host))

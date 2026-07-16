@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -227,6 +230,61 @@ func TestProfileCreateDeviceCodeLocalExclusive(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "device-code")
 	assert.Contains(t, err.Error(), "local")
+}
+
+// TestProfileCreateDeviceCodeForcesRemoteMode is the regression test for the
+// --device-code → Remote flag mapping duplicated in profile create (auth login
+// has its own copy, covered by TestAuthLoginDeviceCodeForcesRemoteMode).
+// Remote mode reads the pasted callback URL from stdin, so an immediate EOF
+// there proves the remote paste-callback flow was selected — local mode would
+// instead wait on the loopback callback listener.
+func TestProfileCreateDeviceCodeForcesRemoteMode(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	// Pin SSH auto-detection off so only the flag can select remote mode.
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	// No protected-resource metadata (404) → Launchpad fallback, pointed at
+	// this server. The token endpoint is never reached.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+
+	// Remote mode reads the pasted callback URL from os.Stdin. Swap in an
+	// immediate EOF so the prompt fails fast instead of blocking.
+	devNull, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	defer devNull.Close()
+	origStdin := os.Stdin
+	os.Stdin = devNull
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	cfg := &config.Config{BaseURL: srv.URL, CacheDir: t.TempDir(), Sources: make(map[string]string)}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	authMgr.SetStore(auth.NewStore(tmpDir))
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+
+	// Safety net: if the mapping regresses to local mode, the loopback
+	// listener would otherwise wait out its full five-minute timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	root := &cobra.Command{Use: "basecamp"}
+	root.AddCommand(NewProfileCmd())
+	root.SetArgs([]string{"profile", "create", "test-profile", "--base-url", srv.URL, "--device-code"})
+	root.SetContext(appctx.WithApp(ctx, app))
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	err = root.Execute()
+	require.Error(t, err, "EOF on the paste prompt must abort the login")
+	assert.Contains(t, err.Error(), "no input received",
+		"--device-code must select the remote paste-callback flow")
 }
 
 func TestProfileCreateRejectsDuplicateName(t *testing.T) {

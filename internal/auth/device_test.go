@@ -269,7 +269,7 @@ func TestLoginDevice_FlagMatrix(t *testing.T) {
 }
 
 func TestLoginDevice_InvalidURICompleteFallsBackToPlainURI(t *testing.T) {
-	for _, evil := range []string{"file:///etc/passwd", "https://user@evil.example/verify"} {
+	for _, evil := range []string{"file:///etc/passwd", "https://user@evil.example/verify", "https://evil.example:70000/verify"} {
 		t.Run(evil, func(t *testing.T) {
 			as := startDeviceAS(t)
 			as.deviceAuth = func() (int, string) {
@@ -302,6 +302,7 @@ func TestLoginDevice_MalformedDisplayDataAbortsBeforePolling(t *testing.T) {
 			`{"device_code":"dc","user_code":"ABCD-EFGH","verification_uri":%q,"verification_uri_complete":%q,"expires_in":600,"interval":1}`,
 			"file:///etc/passwd", "javascript:alert(1)"),
 		"user code sanitizes to empty": `{"device_code":"dc","user_code":"\u001b[31m","verification_uri":"URI","expires_in":600,"interval":1}`,
+		"user code is whitespace only": `{"device_code":"dc","user_code":"   ","verification_uri":"URI","expires_in":600,"interval":1}`,
 	}
 
 	for name, body := range cases {
@@ -656,6 +657,28 @@ func TestLoginDevice_RejectsPoisonedEndpointsBeforePOST(t *testing.T) {
 					"issuer": %q,
 					"token_endpoint": %q,
 					"device_authorization_endpoint": "https://user@evil.example/device",
+					"grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code"]
+				}`, as.srv.URL, as.srv.URL+"/oauth/token")
+			},
+			wantMsg: "invalid device authorization endpoint",
+		},
+		"token endpoint with out-of-range port": {
+			metadata: func(as *deviceAS) string {
+				return fmt.Sprintf(`{
+					"issuer": %q,
+					"token_endpoint": "https://evil.example:70000/token",
+					"device_authorization_endpoint": %q,
+					"grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code"]
+				}`, as.srv.URL, as.srv.URL+"/oauth/device")
+			},
+			wantMsg: "invalid token endpoint",
+		},
+		"device authorization endpoint with out-of-range port": {
+			metadata: func(as *deviceAS) string {
+				return fmt.Sprintf(`{
+					"issuer": %q,
+					"token_endpoint": %q,
+					"device_authorization_endpoint": "https://evil.example:70000/device",
 					"grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code"]
 				}`, as.srv.URL, as.srv.URL+"/oauth/token")
 			},
