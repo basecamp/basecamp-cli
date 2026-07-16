@@ -297,11 +297,11 @@ func buildLoginCmd(use string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (BC3 only)")
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (ignored by Launchpad)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
-	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless mode: display auth URL and paste callback (alias for --remote)")
+	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 

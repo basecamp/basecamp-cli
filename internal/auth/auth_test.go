@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,7 +25,7 @@ import (
 
 // syncLogger is a thread-safe log collector for remote-mode login tests.
 // It captures all log messages under a mutex and signals authReady when it
-// sees the auth URL (a line starting with "http" containing "/authorize").
+// sees the auth URL (a line starting with "http" containing "/authorization/new").
 type syncLogger struct {
 	mu        sync.Mutex
 	logs      []string
@@ -45,7 +44,7 @@ func (sl *syncLogger) log(msg string) {
 
 	if !sl.signaled {
 		trimmed := strings.TrimSpace(msg)
-		if strings.HasPrefix(trimmed, "http") && strings.Contains(trimmed, "/authorize") {
+		if strings.HasPrefix(trimmed, "http") && strings.Contains(trimmed, "/authorization/new") {
 			sl.signaled = true
 			sl.authReady <- trimmed
 		}
@@ -58,11 +57,6 @@ func (sl *syncLogger) snapshot() []string {
 	cp := make([]string, len(sl.logs))
 	copy(cp, sl.logs)
 	return cp
-}
-
-// strPtr returns a pointer to s, for oauth.Config optional endpoint fields.
-func strPtr(s string) *string {
-	return &s
 }
 
 // newTestStore creates a file-backed credential store for testing.
@@ -344,11 +338,12 @@ func TestCredentialsJSON(t *testing.T) {
 }
 
 func TestOAuthConfigJSON(t *testing.T) {
+	authz := "https://auth.example.com/authorize"
 	cfg := &oauth.Config{
 		Issuer:                "https://issuer.example.com",
-		AuthorizationEndpoint: strPtr("https://auth.example.com/authorize"),
+		AuthorizationEndpoint: &authz,
 		TokenEndpoint:         "https://auth.example.com/token",
-		RegistrationEndpoint:  strPtr("https://auth.example.com/register"),
+		RegistrationEndpoint:  "https://auth.example.com/register",
 		ScopesSupported:       []string{"read", "write"},
 	}
 
@@ -363,22 +358,6 @@ func TestOAuthConfigJSON(t *testing.T) {
 	assert.Equal(t, cfg.TokenEndpoint, loaded.TokenEndpoint, "TokenEndpoint mismatch")
 	assert.Equal(t, cfg.RegistrationEndpoint, loaded.RegistrationEndpoint, "RegistrationEndpoint mismatch")
 	assert.Len(t, loaded.ScopesSupported, 2, "ScopesSupported length mismatch")
-}
-
-func TestClientCredentialsJSON(t *testing.T) {
-	creds := &ClientCredentials{
-		ClientID:     "client-id-123",
-		ClientSecret: "client-secret-456",
-	}
-
-	data, err := json.Marshal(creds)
-	require.NoError(t, err, "Marshal failed")
-
-	var loaded ClientCredentials
-	require.NoError(t, json.Unmarshal(data, &loaded), "Unmarshal failed")
-
-	assert.Equal(t, creds.ClientID, loaded.ClientID)
-	assert.Equal(t, creds.ClientSecret, loaded.ClientSecret)
 }
 
 func TestUsingKeyring(t *testing.T) {
@@ -432,43 +411,9 @@ func TestDiscoverOAuth_PropagatesInsecureLaunchpadError(t *testing.T) {
 	t.Setenv("BASECAMP_LAUNCHPAD_URL", "http://evil.example.com")
 
 	noop := func(string) {}
-	_, _, err := m.discoverOAuth(context.Background(), noop)
+	_, err := m.discoverOAuth(context.Background(), noop)
 	require.Error(t, err, "insecure launchpad URL error must propagate through discoverOAuth")
 	assert.Contains(t, err.Error(), "BASECAMP_LAUNCHPAD_URL")
-}
-
-// TestDiscoverOAuth_NormalizesTrailingSlash guards the issuer binding: the
-// SDK binds the discovered issuer to the requested base URL code-point exact
-// (RFC 8414), so a configured BaseURL with a trailing slash must be
-// normalized before discovery — otherwise BC3 discovery mismatches the
-// server's issuer and incorrectly falls back to Launchpad.
-func TestDiscoverOAuth_NormalizesTrailingSlash(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/oauth-authorization-server" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		base := "http://" + r.Host
-		fmt.Fprintf(w, `{
-			"issuer": "%s",
-			"authorization_endpoint": "%s/authorize",
-			"token_endpoint": "%s/token"
-		}`, base, base, base)
-	}))
-	defer srv.Close()
-
-	cfg := config.Default()
-	cfg.BaseURL = srv.URL + "/"
-
-	m := &Manager{cfg: cfg, httpClient: srv.Client()}
-
-	noop := func(string) {}
-	oauthCfg, oauthType, err := m.discoverOAuth(context.Background(), noop)
-	require.NoError(t, err)
-	assert.Equal(t, "bc3", oauthType, "trailing-slash BaseURL must not fall back to Launchpad")
-	require.NotNil(t, oauthCfg.AuthorizationEndpoint)
-	assert.Equal(t, srv.URL+"/authorize", *oauthCfg.AuthorizationEndpoint)
 }
 
 func TestResolveOAuthCallback(t *testing.T) {
@@ -622,12 +567,9 @@ func TestResolveClientCredentials(t *testing.T) {
 
 func TestBuildAuthURL_UsesResolvedRedirectURI(t *testing.T) {
 	m := &Manager{cfg: config.Default(), httpClient: http.DefaultClient}
-	oauthCfg := &oauth.Config{
-		AuthorizationEndpoint: strPtr("https://auth.example.com/authorize"),
-	}
 	opts := &LoginOptions{RedirectURI: "http://localhost:9999/my-callback"}
 
-	authURL, err := m.buildAuthURL(oauthCfg, "launchpad", "", "state123", "", "client-id", opts)
+	authURL, err := m.buildAuthURL("https://auth.example.com/authorize", "state123", "client-id", opts)
 	require.NoError(t, err)
 	assert.Contains(t, authURL, "redirect_uri=http%3A%2F%2Flocalhost%3A9999%2Fmy-callback")
 }
@@ -647,8 +589,7 @@ func TestBuildAuthURL_RejectsUnsafeScheme(t *testing.T) {
 	}
 	for _, endpoint := range accepted {
 		t.Run("accepts "+endpoint, func(t *testing.T) {
-			oauthCfg := &oauth.Config{AuthorizationEndpoint: strPtr(endpoint)}
-			_, err := m.buildAuthURL(oauthCfg, "bc3", "read", "state", "challenge", "cid", opts)
+			_, err := m.buildAuthURL(endpoint, "state", "cid", opts)
 			require.NoError(t, err)
 		})
 	}
@@ -666,8 +607,7 @@ func TestBuildAuthURL_RejectsUnsafeScheme(t *testing.T) {
 	}
 	for _, endpoint := range rejected {
 		t.Run("rejects "+endpoint, func(t *testing.T) {
-			oauthCfg := &oauth.Config{AuthorizationEndpoint: strPtr(endpoint)}
-			_, err := m.buildAuthURL(oauthCfg, "bc3", "read", "state", "challenge", "cid", opts)
+			_, err := m.buildAuthURL(endpoint, "state", "cid", opts)
 			require.Error(t, err)
 		})
 	}
@@ -688,8 +628,7 @@ func TestBuildAuthURL_RejectsMalformedEndpoint(t *testing.T) {
 	}
 	for _, endpoint := range malformed {
 		t.Run("rejects "+endpoint, func(t *testing.T) {
-			oauthCfg := &oauth.Config{AuthorizationEndpoint: strPtr(endpoint)}
-			_, err := m.buildAuthURL(oauthCfg, "bc3", "read", "state", "challenge", "cid", opts)
+			_, err := m.buildAuthURL(endpoint, "state", "cid", opts)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "invalid authorization endpoint")
 
@@ -716,7 +655,7 @@ func TestExchangeCode_UsesResolvedRedirectURI(t *testing.T) {
 	clientCreds := &ClientCredentials{ClientID: "cid", ClientSecret: "csecret"}
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
 
-	_, err := m.exchangeCode(context.Background(), oauthCfg, "launchpad", "code123", "", clientCreds, opts)
+	_, err := m.exchangeCode(context.Background(), oauthCfg, "code123", clientCreds, opts)
 	require.NoError(t, err)
 	// Body is URL-encoded form data
 	assert.Contains(t, receivedBody, "redirect_uri=http%3A%2F%2Flocalhost%3A7777%2Fcb")
@@ -750,7 +689,7 @@ func TestExchangeCode_RejectsUnsafeTokenEndpoint(t *testing.T) {
 			transport := &recordingTransport{}
 			m := &Manager{cfg: config.Default(), httpClient: &http.Client{Transport: transport}}
 			oauthCfg := &oauth.Config{TokenEndpoint: endpoint}
-			_, err := m.exchangeCode(context.Background(), oauthCfg, "launchpad", "code123", "", clientCreds, opts)
+			_, err := m.exchangeCode(context.Background(), oauthCfg, "code123", clientCreds, opts)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "invalid token endpoint")
 			assert.False(t, transport.attempted.Load(), "must reject before any network POST")
@@ -782,344 +721,6 @@ func TestRefreshLocked_RejectsUnsafeTokenEndpoint(t *testing.T) {
 			assert.False(t, transport.attempted.Load(), "must reject before any network POST")
 		})
 	}
-}
-
-func TestRegisterBC3Client_UsesResolvedRedirectURI(t *testing.T) {
-	var receivedBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&receivedBody)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: srv.Client(),
-		store:      newTestStore(t, tmpDir),
-	}
-	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-	creds, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-	require.NoError(t, err)
-	assert.Equal(t, "dcr-id", creds.ClientID)
-
-	// Verify the redirect URI was sent in the DCR request
-	redirectURIs, ok := receivedBody["redirect_uris"].([]any)
-	require.True(t, ok)
-	assert.Equal(t, "http://localhost:7777/cb", redirectURIs[0])
-}
-
-func TestRegisterBC3Client_CustomRedirectNotPersisted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	// Override XDG_CONFIG_HOME so saveBC3Client would write to tmpDir (but shouldn't)
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: srv.Client(),
-		store:      newTestStore(t, tmpDir),
-	}
-	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-	// Custom redirect: should NOT persist
-	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-	require.NoError(t, err)
-
-	clientFile := filepath.Join(tmpDir, "basecamp", "client.json")
-	_, statErr := os.Stat(clientFile)
-	assert.True(t, os.IsNotExist(statErr), "client.json should not be written for custom redirect URI")
-}
-
-func TestRegisterBC3Client_DefaultRedirectPersisted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	// Override XDG_CONFIG_HOME so saveBC3Client writes to tmpDir
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: srv.Client(),
-		store:      newTestStore(t, tmpDir),
-	}
-	opts := &LoginOptions{RedirectURI: defaultRedirectURI}
-
-	// Default redirect: should persist
-	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-	require.NoError(t, err)
-
-	clientFile := filepath.Join(tmpDir, "basecamp", "client.json")
-	_, statErr := os.Stat(clientFile)
-	assert.NoError(t, statErr, "client.json should be written for default redirect URI")
-}
-
-// TestRegisterBC3Client_RejectsUnsafeScheme guards against a hostile discovery
-// document handing the DCR POST a non-https registration endpoint (e.g.
-// file://). https and http-on-loopback are accepted; everything else must error
-// before any request is made. Mirrors buildAuthURL's scheme whitelist.
-func TestRegisterBC3Client_RejectsUnsafeScheme(t *testing.T) {
-	m := &Manager{cfg: config.Default(), httpClient: http.DefaultClient}
-	opts := &LoginOptions{RedirectURI: defaultRedirectURI}
-
-	rejected := []string{
-		"file:///etc/passwd",
-		"http://evil.example.com/register",
-		"ftp://evil.example.com/register",
-		"javascript:alert(1)",
-		"data:text/html,foo",
-		"https:foo",                                      // opaque form: right scheme, no host
-		"https://",                                       // absolute form with empty host
-		"https://:3000/register",                         // non-empty Host (":3000") but empty hostname
-		"http://:8080/register",                          // port-only authority is not loopback
-		"https://evil.example@auth.example.com/register", // userinfo enables phishing display and Basic-auth synthesis
-	}
-	for _, endpoint := range rejected {
-		t.Run("rejects "+endpoint, func(t *testing.T) {
-			_, err := m.registerBC3Client(context.Background(), endpoint, opts)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "registration endpoint")
-		})
-	}
-}
-
-// TestRegisterBC3Client_FollowsRedirect verifies the DCR POST follows a
-// proxy-canonicalized 3xx on the registration endpoint (rather than silently
-// failing under the manager's GET-only guard) when the redirect target stays
-// within the secure-endpoint whitelist — here a loopback http:// hop. The DCR
-// body carries only client metadata, so following such a redirect is safe.
-func TestRegisterBC3Client_FollowsRedirect(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/register-canonical", http.StatusTemporaryRedirect)
-	})
-	mux.HandleFunc("/register-canonical", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	// Manager carries a guarded client (as appctx wires it) to prove the DCR
-	// path uses its own unguarded client rather than m.httpClient.
-	guarded := srv.Client()
-	guarded.CheckRedirect = func(_ *http.Request, via []*http.Request) error {
-		if len(via) > 0 && via[0].Method != http.MethodGet && via[0].Method != http.MethodHead {
-			return http.ErrUseLastResponse
-		}
-		return nil
-	}
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: guarded,
-		store:      newTestStore(t, tmpDir),
-	}
-	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-	creds, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-	require.NoError(t, err)
-	assert.Equal(t, "dcr-id", creds.ClientID)
-}
-
-// TestRegisterBC3Client_FollowsHTTPSRedirect verifies an https redirect hop is
-// followed: the scheme stays within the secure-endpoint whitelist, so the
-// re-validation in CheckRedirect must not reject it.
-func TestRegisterBC3Client_FollowsHTTPSRedirect(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/register-canonical", http.StatusTemporaryRedirect)
-	})
-	mux.HandleFunc("/register-canonical", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"client_id":"dcr-id","client_secret":"dcr-secret"}`)
-	})
-	srv := httptest.NewTLSServer(mux)
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: srv.Client(), // trusts the test server's TLS cert
-		store:      newTestStore(t, tmpDir),
-	}
-	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-	creds, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-	require.NoError(t, err)
-	assert.Equal(t, "dcr-id", creds.ClientID)
-}
-
-// TestRegisterBC3Client_RejectsUnsafeRedirect guards against a hostile server
-// 307/308-redirecting the DCR POST (body and all) to a scheme/host outside the
-// secure-endpoint whitelist that was only enforced on the original endpoint.
-// Each redirect hop must be re-validated, so file:// and non-loopback http://
-// targets are rejected before the body is replayed.
-func TestRegisterBC3Client_RejectsUnsafeRedirect(t *testing.T) {
-	targets := map[string]string{
-		"file scheme":       "file:///etc/passwd",
-		"non-loopback http": "http://evil.example.com/register",
-		"other scheme":      "ftp://evil.example.com/register",
-	}
-	for name, target := range targets {
-		t.Run(name, func(t *testing.T) {
-			mux := http.NewServeMux()
-			mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, target, http.StatusTemporaryRedirect)
-			})
-			srv := httptest.NewServer(mux)
-			defer srv.Close()
-
-			tmpDir := t.TempDir()
-			t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-			m := &Manager{
-				cfg:        config.Default(),
-				httpClient: srv.Client(),
-				store:      newTestStore(t, tmpDir),
-			}
-			opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-			_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "redirect")
-
-			// The rejection is a security failure, not a transient network
-			// error: it must surface as an auth-class error (with its exit
-			// code and re-auth hint), not be masked as a retryable ErrNetwork.
-			var outErr *output.Error
-			require.ErrorAs(t, err, &outErr)
-			assert.Equal(t, output.CodeAuth, outErr.Code)
-		})
-	}
-}
-
-// TestRegisterBC3Client_RejectsMethodDowngradeRedirect guards against a
-// 301/302/303 on the registration endpoint: Go follows those by downgrading
-// the POST to a body-less GET, so the DCR registration would silently arrive
-// empty at the target. The guard must reject the downgraded hop with an
-// auth-class error, and the redirect target must never see the GET.
-func TestRegisterBC3Client_RejectsMethodDowngradeRedirect(t *testing.T) {
-	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			var targetHits atomic.Int32
-			mux := http.NewServeMux()
-			mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, "/register-canonical", status)
-			})
-			mux.HandleFunc("/register-canonical", func(w http.ResponseWriter, r *http.Request) {
-				targetHits.Add(1)
-			})
-			srv := httptest.NewServer(mux)
-			defer srv.Close()
-
-			tmpDir := t.TempDir()
-			t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-			m := &Manager{
-				cfg:        config.Default(),
-				httpClient: srv.Client(),
-				store:      newTestStore(t, tmpDir),
-			}
-			opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-			_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "downgraded the registration POST")
-
-			// Security failure, not a transient network error: must surface as
-			// an auth-class error, same as the unsafe-redirect rejections.
-			var outErr *output.Error
-			require.ErrorAs(t, err, &outErr)
-			assert.Equal(t, output.CodeAuth, outErr.Code)
-
-			assert.Zero(t, targetHits.Load(), "redirect target must never receive the body-less GET")
-		})
-	}
-}
-
-// TestRegisterBC3Client_StopsRedirectLoop guards against a looping endpoint that
-// keeps issuing same-scheme (loopback http) redirects: each hop passes the
-// secure-endpoint re-validation, so without a hop cap the DCR client would spin
-// until the 30s timeout. The cap must fail fast after 10 redirects.
-func TestRegisterBC3Client_StopsRedirectLoop(t *testing.T) {
-	var hops atomic.Int32
-	mux := http.NewServeMux()
-	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		hops.Add(1)
-		http.Redirect(w, r, "/register", http.StatusTemporaryRedirect)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: srv.Client(),
-		store:      newTestStore(t, tmpDir),
-	}
-	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-
-	_, err := m.registerBC3Client(context.Background(), srv.URL+"/register", opts)
-	require.Error(t, err, "redirect loop must fail rather than hang")
-	assert.Contains(t, err.Error(), "stopped after 10 redirects")
-	assert.LessOrEqual(t, hops.Load(), int32(11), "client must give up around the 10-redirect cap")
-
-	// A redirect loop is a deterministic endpoint misconfiguration, not a
-	// transient network failure: it must surface as an auth-class error, not
-	// be masked as a retryable ErrNetwork.
-	var outErr *output.Error
-	require.ErrorAs(t, err, &outErr)
-	assert.Equal(t, output.CodeAuth, outErr.Code)
-}
-
-func TestLoadClientCredentials_BC3_CustomRedirect_SkipsStoredClient(t *testing.T) {
-	// DCR server
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"client_id":"dcr-fresh","client_secret":"dcr-secret"}`)
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	m := &Manager{
-		cfg:        config.Default(),
-		httpClient: srv.Client(),
-		store:      newTestStore(t, tmpDir),
-	}
-
-	// Pre-populate client.json
-	storedCreds := &ClientCredentials{ClientID: "stored-id", ClientSecret: "stored-secret"}
-	require.NoError(t, m.saveBC3Client(storedCreds))
-
-	oauthCfg := &oauth.Config{RegistrationEndpoint: strPtr(srv.URL + "/register")}
-
-	// Custom redirect: should skip stored client and do DCR
-	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
-	creds, err := m.loadClientCredentials(context.Background(), oauthCfg, "bc3", opts)
-	require.NoError(t, err)
-	assert.Equal(t, "dcr-fresh", creds.ClientID, "should use DCR result, not stored client")
 }
 
 func TestParseCallbackURL(t *testing.T) {
@@ -1236,22 +837,11 @@ func TestLoginRemoteAndLocalMutuallyExclusive(t *testing.T) {
 }
 
 func TestLoginRemoteMode(t *testing.T) {
-	// Set up httptest server that handles discovery + token exchange
+	// No protected-resource metadata (404) => Launchpad fallback, pointed
+	// at this server via BASECAMP_LAUNCHPAD_URL.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/authorize",
-				"token_endpoint": "%s/token",
-				"registration_endpoint": "%s/register"
-			}`, base, base, base, base)
-		case "/register":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"client_id":"test-client","client_secret":"test-secret"}`)
-		case "/token":
+		case "/authorization/token":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"access_token":"remote-tok","token_type":"bearer","refresh_token":"remote-refresh"}`)
 		default:
@@ -1262,6 +852,7 @@ func TestLoginRemoteMode(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
 
 	cfg := &config.Config{BaseURL: srv.URL}
 	m := NewManager(cfg, srv.Client())
@@ -1327,19 +918,7 @@ func TestLoginRemoteMode(t *testing.T) {
 func TestLoginRemoteMode_PromptWording(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/authorize",
-				"token_endpoint": "%s/token",
-				"registration_endpoint": "%s/register"
-			}`, base, base, base, base)
-		case "/register":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"client_id":"test-client","client_secret":"test-secret"}`)
-		case "/token":
+		case "/authorization/token":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"access_token":"tok","token_type":"bearer","refresh_token":"ref"}`)
 		default:
@@ -1350,6 +929,7 @@ func TestLoginRemoteMode_PromptWording(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
 
 	cfg := &config.Config{BaseURL: srv.URL}
 	m := NewManager(cfg, srv.Client())
@@ -1403,27 +983,13 @@ func TestLoginRemoteMode_PromptWording(t *testing.T) {
 
 func TestLoginRemoteMode_StateMismatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/authorize",
-				"token_endpoint": "%s/token",
-				"registration_endpoint": "%s/register"
-			}`, base, base, base, base)
-		case "/register":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"client_id":"test-client"}`)
-		default:
-			http.NotFound(w, r)
-		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
 
 	cfg := &config.Config{BaseURL: srv.URL}
 	m := NewManager(cfg, srv.Client())
@@ -1465,27 +1031,13 @@ func TestLoginRemoteMode_StateMismatch(t *testing.T) {
 
 func TestLoginRemoteMode_EmptyInput(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/authorize",
-				"token_endpoint": "%s/token",
-				"registration_endpoint": "%s/register"
-			}`, base, base, base, base)
-		case "/register":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"client_id":"test-client"}`)
-		default:
-			http.NotFound(w, r)
-		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
 
 	cfg := &config.Config{BaseURL: srv.URL}
 	m := NewManager(cfg, srv.Client())
@@ -1526,19 +1078,7 @@ func TestLoginRemoteMode_EmptyInput(t *testing.T) {
 func TestLoginRemoteMode_CustomRedirectURI(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/authorize",
-				"token_endpoint": "%s/token",
-				"registration_endpoint": "%s/register"
-			}`, base, base, base, base)
-		case "/register":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"client_id":"test-client"}`)
-		case "/token":
+		case "/authorization/token":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"access_token":"tok","token_type":"bearer"}`)
 		default:
@@ -1549,6 +1089,7 @@ func TestLoginRemoteMode_CustomRedirectURI(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
 
 	cfg := &config.Config{BaseURL: srv.URL}
 	m := NewManager(cfg, srv.Client())
@@ -1743,82 +1284,6 @@ func TestLoginLaunchpadClearsScope(t *testing.T) {
 	assert.Equal(t, "", creds.Scope, "stored scope should be empty for Launchpad")
 }
 
-func TestLoginBC3DefaultsToRead(t *testing.T) {
-	// BC3 mock server with successful discovery
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"authorization_endpoint": "%s/authorize",
-				"token_endpoint": "%s/token",
-				"registration_endpoint": "%s/register"
-			}`, base, base, base, base)
-		case "/register":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"client_id":"test-client"}`)
-		case "/token":
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"access_token":"bc3-tok","token_type":"bearer","refresh_token":"bc3-ref"}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	cfg := &config.Config{BaseURL: srv.URL}
-	m := NewManager(cfg, srv.Client())
-	m.store = newTestStore(t, tmpDir)
-
-	sl := newSyncLogger()
-	pr, pw := io.Pipe()
-	defer pr.Close()
-
-	type loginOut struct {
-		result *LoginResult
-		err    error
-	}
-	ch := make(chan loginOut, 1)
-	go func() {
-		result, err := m.Login(context.Background(), LoginOptions{
-			// No scope specified — should default to "read" for BC3
-			Remote:      true,
-			Logger:      sl.log,
-			InputReader: pr,
-		})
-		ch <- loginOut{result, err}
-	}()
-
-	var authURL string
-	select {
-	case authURL = <-sl.authReady:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for auth URL")
-	}
-
-	u, err := url.Parse(authURL)
-	require.NoError(t, err)
-	state := u.Query().Get("state")
-
-	callbackURL := fmt.Sprintf("http://127.0.0.1:8976/callback?code=test-code&state=%s\n", state)
-	_, _ = pw.Write([]byte(callbackURL))
-	pw.Close()
-
-	out := <-ch
-	require.NoError(t, out.err)
-	assert.Equal(t, "read", out.result.Scope, "BC3 should default to read scope")
-	assert.Equal(t, "bc3", out.result.OAuthType)
-
-	creds, err := m.store.Load(srv.URL)
-	require.NoError(t, err)
-	assert.Equal(t, "read", creds.Scope, "stored scope should be 'read' for BC3 default")
-}
-
 func TestRefreshLocked_LaunchpadSendsClientID(t *testing.T) {
 	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
 	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
@@ -1936,81 +1401,6 @@ func TestRefreshLocked_GuardBlocksCredentialPOSTRedirect(t *testing.T) {
 	}
 }
 
-func TestRefreshLocked_BC3SendsClientID(t *testing.T) {
-	var mu sync.Mutex
-	var capturedBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		capturedBody = string(body)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"new-refresh","expires_in":3600}`)
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	cfg := config.Default()
-	cfg.BaseURL = srv.URL
-
-	m := &Manager{
-		cfg:        cfg,
-		httpClient: srv.Client(),
-		store:      newTestStore(t, tmpDir),
-	}
-
-	// Pre-populate client.json
-	require.NoError(t, m.saveBC3Client(&ClientCredentials{
-		ClientID:     "bc3-client-id",
-		ClientSecret: "bc3-client-secret",
-	}))
-
-	creds := &Credentials{
-		AccessToken:   "old-token",
-		RefreshToken:  "old-refresh",
-		OAuthType:     "bc3",
-		TokenEndpoint: srv.URL + "/token",
-		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
-	}
-	require.NoError(t, m.store.Save(srv.URL, creds))
-
-	err := m.refreshLocked(context.Background(), srv.URL, creds)
-	require.NoError(t, err)
-
-	mu.Lock()
-	body := capturedBody
-	mu.Unlock()
-	assert.Contains(t, body, "client_id=bc3-client-id")
-	assert.Contains(t, body, "client_secret=bc3-client-secret")
-}
-
-func TestRefreshLocked_BC3WithoutClientJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	cfg := config.Default()
-	m := &Manager{
-		cfg:        cfg,
-		httpClient: http.DefaultClient,
-		store:      newTestStore(t, tmpDir),
-	}
-
-	creds := &Credentials{
-		AccessToken:   "old-token",
-		RefreshToken:  "old-refresh",
-		OAuthType:     "bc3",
-		TokenEndpoint: "https://example.com/token",
-		ExpiresAt:     time.Now().Add(-1 * time.Hour).Unix(),
-	}
-
-	err := m.refreshLocked(context.Background(), "test", creds)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Cannot load BC3 client credentials")
-	assert.Contains(t, err.Error(), "custom-redirect")
-}
-
 func TestRefreshLocked_ClearsExpiresAtWhenServerOmits(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2092,54 +1482,6 @@ func TestRefreshLocked_EmptyOAuthTypeDefaultsToLaunchpad(t *testing.T) {
 	// Should have used launchpad legacy format (type=refresh, not grant_type=refresh_token)
 	assert.Contains(t, body, "type=refresh")
 	assert.Contains(t, body, "client_id="+launchpadClientID)
-}
-
-// TestLoginDeviceOnlyServerFailsBeforeRegistration asserts the
-// authorization-code capability check fires immediately after discovery: a
-// device-only server (no authorization_endpoint) fails Login with an auth
-// error before Dynamic Client Registration is attempted.
-func TestLoginDeviceOnlyServerFailsBeforeRegistration(t *testing.T) {
-	var mu sync.Mutex
-	var requests []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requests = append(requests, r.URL.Path)
-		mu.Unlock()
-		switch r.URL.Path {
-		case "/.well-known/oauth-authorization-server":
-			w.Header().Set("Content-Type", "application/json")
-			base := "http://" + r.Host
-			fmt.Fprintf(w, `{
-				"issuer": "%s",
-				"token_endpoint": "%s/token",
-				"device_authorization_endpoint": "%s/device",
-				"registration_endpoint": "%s/register",
-				"grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code"]
-			}`, base, base, base, base)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	cfg := &config.Config{BaseURL: srv.URL}
-	m := NewManager(cfg, srv.Client())
-	m.store = newTestStore(t, tmpDir)
-
-	_, err := m.Login(context.Background(), LoginOptions{Logger: func(string) {}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "does not advertise an authorization endpoint")
-
-	var outErr *output.Error
-	require.ErrorAs(t, err, &outErr)
-	assert.Equal(t, output.CodeAuth, outErr.Code)
-
-	mu.Lock()
-	defer mu.Unlock()
-	assert.NotContains(t, requests, "/register", "capability check must fire before Dynamic Client Registration")
 }
 
 func TestLoginRejectsInvalidScope(t *testing.T) {

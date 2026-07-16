@@ -31,6 +31,7 @@ func newTestAccountClient(t *testing.T) *basecamp.AccountClient {
 	t.Helper()
 
 	cfg := &basecamp.Config{
+		BaseURL:      "https://3.basecampapi.com",
 		CacheEnabled: false,
 	}
 	client := basecamp.NewClient(cfg, &mockTokenProvider{},

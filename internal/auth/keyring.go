@@ -17,7 +17,7 @@ type Credentials struct {
 	RefreshToken  string `json:"refresh_token"`
 	ExpiresAt     int64  `json:"expires_at"`
 	Scope         string `json:"scope"`
-	OAuthType     string `json:"oauth_type"` // "bc3" or "launchpad"
+	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", or legacy "bc3"
 	TokenEndpoint string `json:"token_endpoint"`
 	UserID        string `json:"user_id,omitempty"`
 	UserEmail     string `json:"user_email,omitempty"`
