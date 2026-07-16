@@ -1,0 +1,23 @@
+internal/auth/auth.go
+  s_d32e62340bb1a3::t_ada92dbd754010 585-589
+internal/auth/device_test.go
+  s_d32e62340bb1a3::t_120b7ea77902c7 143-146
+  s_d32e62340bb1a3::t_2ffa79fdca0f0b 304,339
+  s_d32e62340bb1a3::t_239e7eb020bd2b 1-142,147-303,305-338,340-795
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "997f2ccccc3c63824842fabbd0dc408b0fbee7a2",
+  "prompts": {},
+  "sessions": {
+    "s_d32e62340bb1a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31f4b5f9-808e-4d60-8f6e-5939f9b39469",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
