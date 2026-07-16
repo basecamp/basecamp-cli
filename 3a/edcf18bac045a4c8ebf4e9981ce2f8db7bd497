@@ -1,0 +1,82 @@
+internal/auth/keyring.go
+  s_d32e62340bb1a3::t_006a2a3ea1a244 18
+internal/auth/auth_test.go
+  s_d32e62340bb1a3::t_e810fc4fee3e35 28,47,341,344,414,572,592,610,631,658,692,840-841,844,855,921,932,986,992,1034,1040,1081,1092
+internal/tui/workspace/data/hub_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 79
+internal/commands/todos_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 58,386,542,635,751,1009,1215,1465,1507,1581,2023,2251
+go.mod
+  s_d32e62340bb1a3::t_2cbd04c4706cc0 9
+internal/commands/cards_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 90,1545
+internal/completion/refresh_test.go
+  s_d32e62340bb1a3::t_02b0473bfcfeee 34
+internal/commands/comment_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 158
+internal/commands/show_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 184
+e2e/auth.bats
+  s_d32e62340bb1a3::t_ca2ba2c24cd342 77-90
+internal/commands/profile_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 50
+internal/commands/messages_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 56,396
+internal/tui/resolve/dock_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 43
+internal/commands/helpers_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 259
+internal/commands/people_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 60,170
+internal/commands/chat_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 132,185,241,285,376,810,1359
+internal/commands/hillcharts_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 167
+internal/auth/auth.go
+  s_d32e62340bb1a3::t_f7a84253952187 728-730
+  s_d32e62340bb1a3::t_02cc3c43a2b422 585-589
+  s_d32e62340bb1a3::t_4c5dd8ed0eb108 13,24,40-50,192,197,211-215,222-227,248,275-276,312-315,379-381,394-410,412,423-424,427,435-438,440,511,516,518,525-584,590-632,634-646,655-672,674,676-684,687,689,691,694-695,697-727,731-743,756-759,803-804,818-822,824,827,829,832-833,835,843,851,857,862-864,875,1001,1003,1018
+  s_d32e62340bb1a3::t_3641246fcc8095 633,1017
+internal/version/sdk-provenance.json
+  s_d32e62340bb1a3::t_1e9ea5d883bba7 4-6,10
+internal/commands/assign_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 347,457,581
+internal/commands/search_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 84
+internal/commands/profile.go
+  s_d32e62340bb1a3::t_96bf77749697e4 340,345
+go.sum
+  s_d32e62340bb1a3::t_cfd39c9d8c48de 26-27
+internal/commands/auth.go
+  s_d32e62340bb1a3::t_fd00ff698a1a5e 299,303
+internal/tui/resolve/account_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 100
+internal/commands/boost_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 100
+internal/commands/projects_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 84
+internal/commands/recordings_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 33
+internal/sdk/store.go
+  s_d32e62340bb1a3::t_b05ec37e9744bf 9
+internal/commands/quickstart_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 51
+internal/commands/doctor_test.go
+  s_d32e62340bb1a3::t_acf6426a003e02 346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3aedcf18bac045a4c8ebf4e9981ce2f8db7bd497",
+  "prompts": {},
+  "sessions": {
+    "s_d32e62340bb1a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31f4b5f9-808e-4d60-8f6e-5939f9b39469",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}
