@@ -1037,7 +1037,7 @@ The CLI uses two directory namespaces: `basecamp` for your Basecamp identity and
 ```
 ~/.config/basecamp/           # Basecamp identity (DO NOT read credentials)
 ├── credentials.json          #   OAuth tokens — NEVER read or log
-├── client.json               #   DCR client registration
+├── client.json               #   Obsolete (former dev-only client registration; safe to delete)
 └── config.json               #   Global preferences (account_id, base_url, format)
 
 ~/.cache/basecamp/            # Tool cache (ephemeral, auto-managed)
@@ -1105,8 +1105,8 @@ leave the skill only and surface the per-agent `basecamp setup <id>` commands.
 ```bash
 basecamp auth status                              # Check auth
 basecamp auth login                               # Re-authenticate
-basecamp auth login --scope full                  # Full access (BC3 OAuth only)
-basecamp auth login --device-code                 # Headless: display URL, paste callback
+basecamp auth login --scope full                  # Full access (ignored by Launchpad)
+basecamp auth login --device-code                 # Headless authentication with manual browser instructions
 ```
 
 **Network errors / localhost URLs:**

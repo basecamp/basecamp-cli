@@ -111,12 +111,15 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 
 ## Authentication
 
-OAuth 2.1 with automatic token refresh. First login opens your browser:
+OAuth 2.1 with automatic token refresh. First login opens your browser.
+When the server supports it, login uses the OAuth device flow automatically:
+you approve a short code in the browser instead of a redirect. Otherwise
+login falls back to Launchpad's authorization-code flow.
 
 ```bash
 basecamp auth login              # Authenticate with Basecamp
-basecamp auth login --scope read # Read-only access (BC3 OAuth only, default)
-basecamp auth login --scope full # Full read+write access (BC3 OAuth only)
+basecamp auth login --scope read # Read-only access (default; ignored by Launchpad)
+basecamp auth login --scope full # Full read+write access (ignored by Launchpad)
 basecamp auth token              # Print token for scripts
 ```
 
@@ -175,7 +178,6 @@ See [install.md](install.md) for step-by-step setup instructions.
 ```
 ~/.config/basecamp/           # Your Basecamp identity
 ├── credentials.json          #   OAuth tokens (fallback when keyring unavailable)
-├── client.json               #   DCR client registration
 └── config.json               #   Global preferences
 
 ~/.config/basecamp/theme/     # Tool display (optional)
@@ -188,6 +190,9 @@ See [install.md](install.md) for step-by-step setup instructions.
 .basecamp/                    # Per-repo (committed to git)
 └── config.json               #   Project, account defaults
 ```
+
+A leftover `~/.config/basecamp/client.json` (from the removed development
+client-registration flow) is obsolete and safe to delete.
 
 ## Troubleshooting
 
