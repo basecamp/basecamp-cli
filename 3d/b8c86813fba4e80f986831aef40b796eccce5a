@@ -1,0 +1,19 @@
+internal/cli/root_unix_test.go
+  s_9a22f8d5f3caf8::t_fb74c491d5c29e 21-32,48,66,97,113,138,168,189,217,237,263,273,282,327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3db8c86813fba4e80f986831aef40b796eccce5a",
+  "prompts": {},
+  "sessions": {
+    "s_9a22f8d5f3caf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6350c98a-0c9a-4531-93be-07e27720acff",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
