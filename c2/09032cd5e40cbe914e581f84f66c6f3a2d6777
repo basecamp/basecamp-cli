@@ -1,0 +1,25 @@
+internal/commands/surface_test.go
+  s_dfc7d7dd404d11::t_9846542fcd07aa 4,11-12,18-27,121
+  s_dfc7d7dd404d11::t_3e2f6baf49bbe7 28
+  s_dfc7d7dd404d11::t_ef0d54d8e2560b 118-120
+  s_dfc7d7dd404d11::t_7b5c317f010e8a 122-124
+  s_dfc7d7dd404d11::t_2a9d85787919b3 112,125-137
+Makefile
+  s_dfc7d7dd404d11::t_1645792c8070e0 552-553
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c209032cd5e40cbe914e581f84f66c6f3a2d6777",
+  "prompts": {},
+  "sessions": {
+    "s_dfc7d7dd404d11": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d36b5e4-caa6-4f85-9835-5237a03c98fe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
