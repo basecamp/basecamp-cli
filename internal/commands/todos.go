@@ -1297,7 +1297,7 @@ func resolveCompletionSubscriberIDs(ctx context.Context, app *appctx.App, input 
 func completionSubscriberIDs(ctx context.Context, app *appctx.App, todoID int64) ([]int64, error) {
 	resp, err := app.Account().Get(ctx, fmt.Sprintf("/todos/%d.json", todoID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read current completion subscribers for todo %d: %w", todoID, err)
+		return nil, fmt.Errorf("failed to read current completion subscribers for todo %d: %w", todoID, convertSDKError(err))
 	}
 
 	var raw struct {

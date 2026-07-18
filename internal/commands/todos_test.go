@@ -1555,8 +1555,9 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	if req.Method == "GET" && strings.HasSuffix(req.URL.Path, "/todos/999.json") {
-		// Raw preservation GET of the flat /todos/{id}.json route.
+	if req.Method == "GET" && req.URL.Path == "/99999/todos/999.json" {
+		// Raw preservation GET of the flat account-scoped /todos/{id}.json
+		// route — exact match so bucket-scoped paths can never satisfy it.
 		status := t.rawGetStatus
 		if status == 0 {
 			status = 200
