@@ -532,6 +532,34 @@ func TestAgentHelpOmitsArgsWhenEmpty(t *testing.T) {
 	assert.NotContains(t, out, `"args"`)
 }
 
+// Hidden flags (e.g. recordings --assignee, MarkHidden'd as "Not supported")
+// must not leak into agent help — pflag's VisitAll visits hidden flags, so
+// emitAgentHelp filters them to match text --help, which never lists them.
+func TestAgentHelpOmitsHiddenFlags(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewRecordingsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"recordings", "list", "--help", "--agent"})
+	_ = cmd.Execute()
+
+	var info struct {
+		Flags []struct {
+			Name string `json:"name"`
+		} `json:"flags"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+
+	names := make([]string, len(info.Flags))
+	for i, f := range info.Flags {
+		names[i] = f.Name
+	}
+	assert.NotContains(t, names, "assignee", "hidden flag leaked into agent help")
+	assert.Contains(t, names, "limit", "visible flag should still be present")
+}
+
 func TestLeafCommandHelpShowsArguments(t *testing.T) {
 	isolateHelpTest(t)
 

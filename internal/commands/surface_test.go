@@ -15,7 +15,9 @@ var updateSurface = flag.Bool("update-surface", false, "Update .surface baseline
 func TestSurfaceSnapshot(t *testing.T) {
 	root := buildRootWithAllCommands()
 
-	current := surface.SnapshotString(root)
+	// Trailing newline so -update-surface writes a POSIX-clean file; the
+	// comparisons below TrimSpace, so it does not affect drift detection.
+	current := surface.SnapshotString(root) + "\n"
 
 	baselinePath := "../../.surface"
 
