@@ -26,6 +26,16 @@ func shouldWriteBaseline(update bool, unacknowledgedRemovals int, baseline, curr
 	return update && unacknowledgedRemovals == 0 && !bytes.Equal(baseline, current)
 }
 
+// baselineNeedsRegen reports whether a committed baseline is stale in a way the
+// additions/removals checks do not already surface: the bytes differ from the
+// generated surface, yet there are no unacknowledged removals and no additions.
+// The prime case is a removal acknowledged in .surface-breaking but never
+// regenerated — check-surface would otherwise pass while .surface still carries
+// the removed lines that check-skill-drift and check-smoke-coverage read.
+func baselineNeedsRegen(baseline, current []byte, unacknowledgedRemovals, additions int) bool {
+	return !bytes.Equal(baseline, current) && unacknowledgedRemovals == 0 && additions == 0
+}
+
 func TestSurfaceSnapshot(t *testing.T) {
 	root := buildRootWithAllCommands()
 
@@ -109,6 +119,13 @@ func TestSurfaceSnapshot(t *testing.T) {
 		}
 	}
 
+	// Catch acknowledged-removal staleness (and any other byte drift the checks
+	// above don't flag): the baseline no longer matches the generated surface,
+	// so it must be regenerated to stay canonical for downstream consumers.
+	if !*updateSurface && baselineNeedsRegen(baseline, []byte(current), len(removals), len(additions)) {
+		t.Errorf("committed .surface is stale (differs from the generated surface with no additions or unacknowledged removals — e.g. an acknowledged removal was never regenerated); run make update-surface")
+	}
+
 	if shouldWriteBaseline(*updateSurface, len(removals), baseline, []byte(current)) {
 		if err := os.WriteFile(baselinePath, []byte(current), 0o644); err != nil {
 			t.Fatalf("writing .surface: %v", err)
@@ -134,4 +151,22 @@ func TestShouldWriteBaseline(t *testing.T) {
 
 	// Not in update mode — never writes.
 	assert.False(t, shouldWriteBaseline(false, 0, base, []byte("A\nC\n")))
+}
+
+func TestBaselineNeedsRegen(t *testing.T) {
+	base := []byte("A\nB\nC\n")
+
+	// Acknowledged removal never regenerated: baseline still has B, current
+	// dropped it, 0 unacknowledged removals, 0 additions — stale, must flag.
+	assert.True(t, baselineNeedsRegen(base, []byte("A\nC\n"), 0, 0))
+
+	// Identical — not stale.
+	assert.False(t, baselineNeedsRegen(base, base, 0, 0))
+
+	// Additions present — already reported by the additions check, don't
+	// double-flag here.
+	assert.False(t, baselineNeedsRegen(base, []byte("A\nB\nC\nD\n"), 0, 1))
+
+	// Unacknowledged removal — already reported by the removals check.
+	assert.False(t, baselineNeedsRegen(base, []byte("A\nC\n"), 1, 0))
 }

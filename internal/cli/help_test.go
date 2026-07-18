@@ -543,21 +543,31 @@ func TestAgentHelpOmitsHiddenFlags(t *testing.T) {
 	cmd.AddCommand(commands.NewRecordingsCmd())
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"recordings", "list", "--help", "--agent"})
-	_ = cmd.Execute()
+	require.NoError(t, cmd.Execute())
 
 	var info struct {
 		Flags []struct {
 			Name string `json:"name"`
 		} `json:"flags"`
+		InheritedFlags []struct {
+			Name string `json:"name"`
+		} `json:"inherited_flags"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
 
-	names := make([]string, len(info.Flags))
-	for i, f := range info.Flags {
-		names[i] = f.Name
+	// Hidden flags must not leak via any emission path — local/parent-scoped
+	// (flags) or inherited (inherited_flags).
+	everywhere := make([]string, 0, len(info.Flags)+len(info.InheritedFlags))
+	localNames := make([]string, 0, len(info.Flags))
+	for _, f := range info.Flags {
+		everywhere = append(everywhere, f.Name)
+		localNames = append(localNames, f.Name)
 	}
-	assert.NotContains(t, names, "assignee", "hidden flag leaked into agent help")
-	assert.Contains(t, names, "limit", "visible flag should still be present")
+	for _, f := range info.InheritedFlags {
+		everywhere = append(everywhere, f.Name)
+	}
+	assert.NotContains(t, everywhere, "assignee", "hidden flag leaked into agent help (flags or inherited_flags)")
+	assert.Contains(t, localNames, "limit", "visible flag should still be present")
 }
 
 func TestLeafCommandHelpShowsArguments(t *testing.T) {

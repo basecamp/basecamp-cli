@@ -360,7 +360,7 @@ test-release:
 .PHONY: check-surface
 check-surface: check-toolchain
 	@BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) ./internal/commands/ -run TestSurfaceSnapshot -count=1 || { \
-		echo; echo "CLI surface drift: committed .surface is stale. Run: make update-surface"; \
+		echo; echo "TestSurfaceSnapshot failed — if the committed .surface is stale, run: make update-surface"; \
 		exit 1; \
 	}
 	@echo "CLI surface snapshot up to date ($$(wc -l < .surface) entries)"
