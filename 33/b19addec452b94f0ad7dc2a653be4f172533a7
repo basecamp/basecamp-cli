@@ -1,0 +1,30 @@
+internal/commands/todos_test.go
+  s_51beb2e50f5eb3::t_2acfd42379fc78 2133-2143
+  s_51beb2e50f5eb3::t_a7fe01edae7754 1558,1575-1579
+  s_51beb2e50f5eb3::t_ddf5fda04d7f96 2033,2052
+  s_990f5f77b89772::t_4d07a476623bc9 1580-1583
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "33b19addec452b94f0ad7dc2a653be4f172533a7",
+  "prompts": {},
+  "sessions": {
+    "s_51beb2e50f5eb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db971ebf-bf33-4d8b-ab84-76538037bf15",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_990f5f77b89772": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f73c1-7fbc-7843-bffb-df7aecca4ef8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
