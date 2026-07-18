@@ -1,0 +1,21 @@
+internal/commands/todos_test.go
+  s_51beb2e50f5eb3::t_1e35688fb94ceb 1558-1560
+internal/commands/todos.go
+  s_51beb2e50f5eb3::t_a4913f5e578598 1300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "5e0a46ec71bc8196d192e1a7644c3463d44d1b60",
+  "prompts": {},
+  "sessions": {
+    "s_51beb2e50f5eb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db971ebf-bf33-4d8b-ab84-76538037bf15",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
