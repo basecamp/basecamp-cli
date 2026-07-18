@@ -1537,16 +1537,15 @@ func TestSweepCommentLocalImageErrors(t *testing.T) {
 
 // mockTodoUpdateTransport handles GET and PUT for todo update tests. It
 // records every request as "METHOD path" so tests can assert which routes
-// were hit and in what order. The raw preservation GET (flat route
-// /todos/{id}.json, distinct from the typed generated route /todos/{id})
+// were hit and in what order. The typed todo GET (Edit's read-before-write)
 // serves a configurable body/status so tests can exercise the fail-closed
 // contract.
 type mockTodoUpdateTransport struct {
 	capturedBody []byte
 	requests     []string
 
-	rawGetStatus int    // 0 → 200
-	rawGetBody   string // "" → default with completion_subscribers [7, 8]
+	todoGetStatus int    // 0 → 200
+	todoGetBody   string // "" → default with completion_subscribers [7, 8]
 }
 
 func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -1555,16 +1554,15 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	if req.Method == "GET" && req.URL.Path == "/99999/todos/999.json" {
-		// Raw preservation GET of the flat account-scoped /todos/{id}.json
-		// route — exact match so bucket-scoped paths can never satisfy it.
-		status := t.rawGetStatus
+	if req.Method == "GET" && req.URL.Path == "/99999/todos/999" {
+		// Typed todo GET — exact match so no other route can satisfy it.
+		status := t.todoGetStatus
 		if status == 0 {
 			status = 200
 		}
-		body := t.rawGetBody
+		body := t.todoGetBody
 		if body == "" {
-			body = `{"id": 999, "completion_subscribers": [{"id": 7}, {"id": 8}]}`
+			body = `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}], "completion_subscribers": [{"id": 7}, {"id": 8}]}`
 		}
 		return &http.Response{
 			StatusCode: status,
@@ -1578,15 +1576,6 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 		return &http.Response{
 			StatusCode: 200,
 			Body:       io.NopCloser(strings.NewReader(`[]`)),
-			Header:     header,
-		}, nil
-	}
-
-	if req.Method == "GET" {
-		mockTodo := `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}]}`
-		return &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(mockTodo)),
 			Header:     header,
 		}, nil
 	}
@@ -1608,7 +1597,7 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 		}, nil
 	}
 
-	return nil, errors.New("unexpected request")
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 }
 
 // hasRequest reports whether any recorded request matches the given method
@@ -1746,6 +1735,8 @@ func TestTodosUpdateLocalImageErrors(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "update", "999", "--description", "![alt](./missing.png)")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
+	assert.False(t, transport.hasRequest("PUT", "/"),
+		"upload failure inside the Edit closure must abort before the PUT, got: %v", transport.requests)
 }
 
 func TestTodosUpdateNoDueOmitsField(t *testing.T) {
@@ -1772,7 +1763,7 @@ func TestTodosUpdateNoDueOmitsField(t *testing.T) {
 	assert.False(t, startsExists, "starts_on must also be omitted when clearing due")
 }
 
-func TestTodosUpdateNoDescriptionOmitsField(t *testing.T) {
+func TestTodosUpdateNoDescriptionSendsEmpty(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1785,8 +1776,9 @@ func TestTodosUpdateNoDescriptionOmitsField(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	_, exists := body["description"]
-	assert.False(t, exists, "description must be omitted to clear")
+	desc, exists := body["description"]
+	require.True(t, exists, "description must be present as empty string to clear")
+	assert.Equal(t, "", desc)
 
 	// Other fields preserved
 	assert.Equal(t, "2026-04-01", body["due_on"])
@@ -1848,7 +1840,7 @@ func TestTodosUpdateEmptyStartsOnClearsField(t *testing.T) {
 	assert.False(t, exists, "starts_on must be omitted when --starts-on is empty")
 }
 
-func TestTodosUpdateEmptyDescriptionClearsField(t *testing.T) {
+func TestTodosUpdateEmptyDescriptionSendsEmpty(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1861,8 +1853,9 @@ func TestTodosUpdateEmptyDescriptionClearsField(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	_, exists := body["description"]
-	assert.False(t, exists, "description must be omitted when --description is empty")
+	desc, exists := body["description"]
+	require.True(t, exists, "description must be present as empty string when --description is empty")
+	assert.Equal(t, "", desc)
 }
 
 func TestTodosUpdateConflictingNoDueAndDue(t *testing.T) {
@@ -2002,7 +1995,10 @@ func TestTodosUpdateTitlePreservesExistingFields(t *testing.T) {
 		"completion subscribers must be preserved")
 }
 
-func TestTodosUpdatePreservationReadUsesFlatRoute(t *testing.T) {
+func TestTodosUpdateSingleTypedRoundTrip(t *testing.T) {
+	// The collapse onto Edit means exactly one typed GET followed by one
+	// typed PUT — no raw flat-route preservation read, no raw bucket PUT,
+	// no post-PUT re-Get.
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -2010,14 +2006,10 @@ func TestTodosUpdatePreservationReadUsesFlatRoute(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "update", "999", "New title")
 	require.NoError(t, err)
 
-	assert.True(t, transport.hasRequest("GET", "/todos/999.json"),
-		"preservation read must hit the flat /todos/{id}.json route, got: %v", transport.requests)
-	for _, r := range transport.requests {
-		assert.NotContains(t, r, "/buckets/", "no bucket-scoped request expected")
-	}
+	assert.Equal(t, []string{"GET /99999/todos/999", "PUT /99999/todos/999"}, transport.requests)
 }
 
-func TestTodosUpdateExplicitSubscribersSkipsPreservationRead(t *testing.T) {
+func TestTodosUpdateExplicitSubscribersSendsResolvedIDs(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -2031,8 +2023,6 @@ func TestTodosUpdateExplicitSubscribersSkipsPreservationRead(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []any{float64(42)}, body["completion_subscriber_ids"])
-	assert.False(t, transport.hasRequest("GET", "/todos/999.json"),
-		"explicit --notify-on-completion must not trigger a preservation read, got: %v", transport.requests)
 }
 
 func TestTodosUpdateNoNotifyOnCompletionClearsSubscribers(t *testing.T) {
@@ -2048,10 +2038,9 @@ func TestTodosUpdateNoNotifyOnCompletionClearsSubscribers(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	_, exists := body["completion_subscriber_ids"]
-	assert.False(t, exists, "completion_subscriber_ids must be omitted to clear")
-	assert.False(t, transport.hasRequest("GET", "/todos/999.json"),
-		"clearing subscribers must not trigger a preservation read, got: %v", transport.requests)
+	ids, exists := body["completion_subscriber_ids"]
+	require.True(t, exists, "completion_subscriber_ids must be present as an empty list to clear")
+	assert.Equal(t, []any{}, ids)
 }
 
 func TestTodosUpdateNoDuePreservesSubscribers(t *testing.T) {
@@ -2072,40 +2061,106 @@ func TestTodosUpdateNoDuePreservesSubscribers(t *testing.T) {
 }
 
 func TestTodosUpdateSubscriberReadFailsClosed(t *testing.T) {
-	// A preservation read that fails — or succeeds without an unambiguous
-	// completion_subscribers key — must abort the update before any PUT.
+	// Edit's read failing — or succeeding with subscriber state the CLI
+	// can't trust — must abort the update before any PUT. A missing
+	// completion_subscribers key is deliberately not a case here: field
+	// presence is the server/SDK contract (BC3 always serializes it and
+	// the SDK model pins nil-vs-empty); the CLI guard covers invalid IDs.
 	cases := map[string]struct {
-		rawGetStatus int
-		rawGetBody   string
+		todoGetStatus  int
+		todoGetBody    string
+		wantSubscriber bool // error mentions completion subscribers (CLI closure guard)
 	}{
-		"missing key":           {rawGetBody: `{"id": 999}`},
-		"malformed json":        {rawGetBody: `{not json`},
-		"http error":            {rawGetStatus: 500, rawGetBody: `{}`},
-		"invalid subscriber id": {rawGetBody: `{"id": 999, "completion_subscribers": [{"name": "No ID"}]}`},
+		"http error":            {todoGetStatus: 500, todoGetBody: `{}`},
+		"malformed json":        {todoGetBody: `{not json`},
+		"invalid subscriber id": {todoGetBody: `{"id": 999, "content": "Test todo", "completion_subscribers": [{"name": "No ID"}]}`, wantSubscriber: true},
 	}
-	branches := map[string][]string{
-		"merge branch": {"update", "999", "New title"},
-		"clear branch": {"update", "999", "--no-due"},
+	argSets := map[string][]string{
+		"title update": {"update", "999", "New title"},
+		"clear due":    {"update", "999", "--no-due"},
 	}
 
-	for branchName, cmdArgs := range branches {
+	for argsName, cmdArgs := range argSets {
 		for caseName, tc := range cases {
-			t.Run(branchName+"/"+caseName, func(t *testing.T) {
+			t.Run(argsName+"/"+caseName, func(t *testing.T) {
 				transport := &mockTodoUpdateTransport{
-					rawGetStatus: tc.rawGetStatus,
-					rawGetBody:   tc.rawGetBody,
+					todoGetStatus: tc.todoGetStatus,
+					todoGetBody:   tc.todoGetBody,
 				}
 				app := setupTodoUpdateApp(t, transport)
 
 				cmd := NewTodosCmd()
 				err := executeTodosCommand(cmd, app, cmdArgs...)
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "completion subscribers")
+				if tc.wantSubscriber {
+					assert.Contains(t, err.Error(), "completion subscribers")
+				}
 				assert.False(t, transport.hasRequest("PUT", "/"),
-					"no PUT may occur when the preservation read fails, got: %v", transport.requests)
+					"no PUT may occur when the Edit read fails, got: %v", transport.requests)
 			})
 		}
 	}
+}
+
+func TestTodosUpdateInvalidDateFailsWithoutHTTP(t *testing.T) {
+	// Date validation happens before any HTTP: dateparse passes
+	// unrecognized input through as-is, so without pre-validation garbage
+	// (or an impossible calendar date) would reach the server.
+	cases := map[string][]string{
+		"due unrecognized":       {"update", "999", "--due", "garbage"},
+		"due impossible":         {"update", "999", "--due", "2026-99-99"},
+		"starts-on unrecognized": {"update", "999", "--starts-on", "garbage"},
+		"starts-on impossible":   {"update", "999", "--starts-on", "2026-99-99"},
+	}
+
+	for name, cmdArgs := range cases {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoUpdateTransport{}
+			app := setupTodoUpdateApp(t, transport)
+
+			cmd := NewTodosCmd()
+			err := executeTodosCommand(cmd, app, cmdArgs...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "Invalid")
+
+			var outErr *output.Error
+			require.ErrorAs(t, err, &outErr)
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+
+			assert.Empty(t, transport.requests, "invalid date must fail before any HTTP")
+		})
+	}
+}
+
+func TestTodosUpdateNotifySendsNotify(t *testing.T) {
+	t.Run("with --notify", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "New title", "--notify")
+		require.NoError(t, err)
+		require.NotEmpty(t, transport.capturedBody)
+
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+		assert.Equal(t, true, body["notify"])
+	})
+
+	t.Run("without --notify", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "New title")
+		require.NoError(t, err)
+		require.NotEmpty(t, transport.capturedBody)
+
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+		_, exists := body["notify"]
+		assert.False(t, exists, "notify must be absent unless requested")
+	})
 }
 
 func TestTodosUpdateSubscriberErrorsUseSubscriberWording(t *testing.T) {
