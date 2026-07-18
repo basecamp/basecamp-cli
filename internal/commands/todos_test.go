@@ -1555,7 +1555,7 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	if req.Method == "GET" && strings.HasSuffix(req.URL.Path, ".json") {
+	if req.Method == "GET" && strings.HasSuffix(req.URL.Path, "/todos/999.json") {
 		// Raw preservation GET of the flat /todos/{id}.json route.
 		status := t.rawGetStatus
 		if status == 0 {
@@ -1568,6 +1568,15 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 		return &http.Response{
 			StatusCode: status,
 			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "GET" && strings.Contains(req.URL.Path, "/people") {
+		// Empty people directory so name resolution deterministically misses.
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[]`)),
 			Header:     header,
 		}, nil
 	}
@@ -2021,7 +2030,7 @@ func TestTodosUpdateExplicitSubscribersSkipsPreservationRead(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []any{float64(42)}, body["completion_subscriber_ids"])
-	assert.False(t, transport.hasRequest("GET", ".json"),
+	assert.False(t, transport.hasRequest("GET", "/todos/999.json"),
 		"explicit --notify-on-completion must not trigger a preservation read, got: %v", transport.requests)
 }
 
@@ -2040,7 +2049,7 @@ func TestTodosUpdateNoNotifyOnCompletionClearsSubscribers(t *testing.T) {
 
 	_, exists := body["completion_subscriber_ids"]
 	assert.False(t, exists, "completion_subscriber_ids must be omitted to clear")
-	assert.False(t, transport.hasRequest("GET", ".json"),
+	assert.False(t, transport.hasRequest("GET", "/todos/999.json"),
 		"clearing subscribers must not trigger a preservation read, got: %v", transport.requests)
 }
 
@@ -2119,6 +2128,17 @@ func TestTodosUpdateSubscriberErrorsUseSubscriberWording(t *testing.T) {
 		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", ",")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No valid completion subscribers provided")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+
+	t.Run("unresolvable name", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to resolve completion subscriber 'nonexistent'")
 		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
 	})
 }
