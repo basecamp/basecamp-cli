@@ -1,0 +1,34 @@
+internal/commands/todos.go
+  s_51beb2e50f5eb3::t_9c4a784d815cdb 1282-1286
+  s_51beb2e50f5eb3::t_7e9ad061b958c8 886,1131,1217
+  s_ae5784113b5029::t_154468e2fb1e8f 1281
+internal/commands/todos_test.go
+  s_51beb2e50f5eb3::t_8e548985b08cc1 2100-2125
+internal/commands/cards.go
+  s_51beb2e50f5eb3::t_74b9fdefc02ba1 350-356,359,364,370,377
+  s_51beb2e50f5eb3::t_3f2b2bd53f5ffd 2470-2475,2485,2493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "6aa92c1fb4d000a34015546a98d0e17aaec66926",
+  "prompts": {},
+  "sessions": {
+    "s_51beb2e50f5eb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db971ebf-bf33-4d8b-ab84-76538037bf15",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_ae5784113b5029": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1161e73-3fdf-41e9-9102-d403163e1f84",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
