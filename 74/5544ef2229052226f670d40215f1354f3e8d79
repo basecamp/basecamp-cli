@@ -1,0 +1,19 @@
+internal/commands/surface_test.go
+  s_dfc7d7dd404d11::t_dbb66abd88934b 98-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "745544ef2229052226f670d40215f1354f3e8d79",
+  "prompts": {},
+  "sessions": {
+    "s_dfc7d7dd404d11": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d36b5e4-caa6-4f85-9835-5237a03c98fe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
