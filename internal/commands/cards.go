@@ -347,27 +347,34 @@ You can pass either a card ID or a Basecamp URL:
 }
 
 func resolveAssigneeID(ctx context.Context, app *appctx.App, input string) (int64, error) {
+	return resolvePersonRoleID(ctx, app, input, "Assignee")
+}
+
+// resolvePersonRoleID resolves a single person name or ID. The role label
+// ("Assignee", "Completion subscriber", …) names the person's role in error
+// messages so callers surface the flag the user actually passed.
+func resolvePersonRoleID(ctx context.Context, app *appctx.App, input, role string) (int64, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return 0, output.ErrUsage("Assignee cannot be empty")
+		return 0, output.ErrUsage(fmt.Sprintf("%s cannot be empty", role))
 	}
 
 	if id, err := strconv.ParseInt(input, 10, 64); err == nil {
 		if id <= 0 {
-			return 0, output.ErrUsage("Assignee ID must be a positive number")
+			return 0, output.ErrUsage(fmt.Sprintf("%s ID must be a positive number", role))
 		}
 		return id, nil
 	}
 	resolvedID, _, err := app.Names.ResolvePerson(ctx, input)
 	if err != nil {
-		return 0, fmt.Errorf("failed to resolve assignee '%s': %w", input, err)
+		return 0, fmt.Errorf("failed to resolve %s '%s': %w", strings.ToLower(role), input, err)
 	}
 	id, err := strconv.ParseInt(resolvedID, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid resolved ID '%s': %w", resolvedID, err)
 	}
 	if id <= 0 {
-		return 0, fmt.Errorf("resolved assignee ID for '%s' is not valid: %d", input, id)
+		return 0, fmt.Errorf("resolved %s ID for '%s' is not valid: %d", strings.ToLower(role), input, id)
 	}
 	return id, nil
 }
@@ -2460,6 +2467,12 @@ func resolveColumn(columns []basecamp.CardColumn, identifier string) int64 {
 }
 
 func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]int64, error) {
+	return resolvePersonRoleIDs(ctx, app, input, "Assignee")
+}
+
+// resolvePersonRoleIDs resolves a comma-separated list of person names or IDs,
+// labeling errors with the given role (see resolvePersonRoleID).
+func resolvePersonRoleIDs(ctx context.Context, app *appctx.App, input, role string) ([]int64, error) {
 	parts := strings.Split(input, ",")
 	ids := make([]int64, 0, len(parts))
 
@@ -2469,7 +2482,7 @@ func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]i
 			continue
 		}
 
-		id, err := resolveAssigneeID(ctx, app, part)
+		id, err := resolvePersonRoleID(ctx, app, part, role)
 		if err != nil {
 			return nil, err
 		}
@@ -2477,7 +2490,7 @@ func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]i
 	}
 
 	if len(ids) == 0 {
-		return nil, output.ErrUsage("No valid assignees provided")
+		return nil, output.ErrUsage(fmt.Sprintf("No valid %ss provided", strings.ToLower(role)))
 	}
 
 	return ids, nil

@@ -2097,6 +2097,32 @@ func TestTodosUpdateSubscriberReadFailsClosed(t *testing.T) {
 	}
 }
 
+func TestTodosUpdateSubscriberErrorsUseSubscriberWording(t *testing.T) {
+	// Resolution failures for --notify-on-completion must talk about
+	// completion subscribers, not assignees.
+	t.Run("invalid id", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "0")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Completion subscriber ID must be a positive number")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+
+	t.Run("no valid people", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", ",")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "No valid completion subscribers provided")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+}
+
 func TestTodosUpdateConflictingNotifyOnCompletionFlags(t *testing.T) {
 	app, _ := setupTodosTestApp(t)
 

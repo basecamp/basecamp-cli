@@ -883,7 +883,7 @@ func newTodosCreateCmd() *cobra.Command {
 				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
 			if strings.TrimSpace(notifyOnCompletion) != "" {
-				subscriberIDs, err := resolveAssigneeIDs(cmd.Context(), app, notifyOnCompletion)
+				subscriberIDs, err := resolveCompletionSubscriberIDs(cmd.Context(), app, notifyOnCompletion)
 				if err != nil {
 					return err
 				}
@@ -1128,7 +1128,7 @@ Set or clear the people notified when the todo is completed:
 				// omission, or preserve via a raw read that must succeed
 				// before any PUT (fail closed).
 				if subscribersChanged {
-					subscriberIDs, err := resolveAssigneeIDs(cmd.Context(), app, notifyOnCompletion)
+					subscriberIDs, err := resolveCompletionSubscriberIDs(cmd.Context(), app, notifyOnCompletion)
 					if err != nil {
 						return err
 					}
@@ -1214,7 +1214,7 @@ Set or clear the people notified when the todo is completed:
 				// omission (nil), or preserve via a raw read that must succeed
 				// before any PUT (fail closed).
 				if subscribersChanged {
-					subscriberIDs, err := resolveAssigneeIDs(cmd.Context(), app, notifyOnCompletion)
+					subscriberIDs, err := resolveCompletionSubscriberIDs(cmd.Context(), app, notifyOnCompletion)
 					if err != nil {
 						return err
 					}
@@ -1277,6 +1277,12 @@ Set or clear the people notified when the todo is completed:
 	_ = cmd.RegisterFlagCompletionFunc("notify-on-completion", completer.PeopleNameCompletion())
 
 	return cmd
+}
+
+// resolveCompletionSubscriberIDs resolves --notify-on-completion values
+// (comma-separated names or IDs) with completion-subscriber wording in errors.
+func resolveCompletionSubscriberIDs(ctx context.Context, app *appctx.App, input string) ([]int64, error) {
+	return resolvePersonRoleIDs(ctx, app, input, "Completion subscriber")
 }
 
 // completionSubscriberIDs reads the current completion subscriber ids via a raw
