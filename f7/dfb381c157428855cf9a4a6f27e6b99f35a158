@@ -1,0 +1,88 @@
+internal/commands/people_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 60,170
+internal/commands/comment_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 158
+internal/tui/resolve/dock_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 43
+internal/commands/cards_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 90,1545
+internal/commands/recordings_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 33
+internal/tui/resolve/account_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 100
+go.mod
+  s_81aeec3762efe9::t_10a0a66f4fc345 9
+internal/commands/todos.go
+  s_81aeec3762efe9::t_d1d4fc249df0e3 1003-1005,1007
+internal/commands/show_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 184
+internal/version/sdk-provenance.json
+  s_81aeec3762efe9::t_10a0a66f4fc345 4-6,10-11
+internal/tui/workspace/data/hub_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 79
+internal/commands/boost_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 100
+internal/commands/messages_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 56,396
+internal/commands/profile_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 50
+internal/commands/hillcharts_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 167
+internal/commands/quickstart_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 51
+scripts/bump-sdk.sh
+  s_81aeec3762efe9::t_546e4d7bfa2ca4 133
+  s_81aeec3762efe9::t_a9a9227ba3151c 146
+internal/auth/auth_test.go
+  s_81aeec3762efe9::t_64e855434732ff 349,351
+  s_81aeec3762efe9::t_89551d04f6081d 1212,1216,1300,1304,1377,1381,1439,1443,1499,1503,1720,1724
+  s_81aeec3762efe9::t_30f9a9c5119bcb 2079,2084
+  s_81aeec3762efe9::t_b5b73f93787431 2063-2078,2080-2083,2085-2110
+  s_81aeec3762efe9::t_1e55e70b2ff984 616,635,657
+  s_81aeec3762efe9::t_5847e922f55266 63-67
+  s_81aeec3762efe9::t_db1f64da3409f8 592
+  s_81aeec3762efe9::t_5cbcf9e6ebf84a 1082
+internal/commands/assign_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 347,457,581
+  s_81aeec3762efe9::t_885b22e3c2664a 548
+  s_81aeec3762efe9::t_dc2f87dbb66660 669-670,675-676,678-681,683-684,687,689-692
+internal/commands/todos_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 58,386
+  s_81aeec3762efe9::t_11052e334aaf6b 545,638,754,1012,1218,1468,1510,1633,2232,2460
+internal/commands/chat_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 376,1359
+  s_81aeec3762efe9::t_7705303e7e314e 132,185,241,285,810
+internal/commands/projects_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 84
+internal/commands/search_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 84
+internal/commands/helpers_test.go
+  s_81aeec3762efe9::t_11052e334aaf6b 259
+internal/commands/doctor_test.go
+  s_81aeec3762efe9::t_7705303e7e314e 346
+internal/auth/auth.go
+  s_81aeec3762efe9::t_4fb9f54876b5e3 811-816,818
+  s_81aeec3762efe9::t_8cbed432a8ed79 409-415
+  s_81aeec3762efe9::t_65b1013962be85 826
+  s_81aeec3762efe9::t_6d9993c5538f73 592,595
+  s_81aeec3762efe9::t_dc90b24e5c47b4 551,553,556,559
+  s_81aeec3762efe9::t_2e082ada9d5666 563-570
+go.sum
+  s_81aeec3762efe9::t_c4e4f408ca38f3 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f7dfb381c157428855cf9a4a6f27e6b99f35a158",
+  "prompts": {},
+  "sessions": {
+    "s_81aeec3762efe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06955599-266e-4e88-a16c-5ab01f0bbc3e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
