@@ -2078,9 +2078,10 @@ func TestTodosUpdateSubscriberReadFailsClosed(t *testing.T) {
 		rawGetStatus int
 		rawGetBody   string
 	}{
-		"missing key":    {rawGetBody: `{"id": 999}`},
-		"malformed json": {rawGetBody: `{not json`},
-		"http error":     {rawGetStatus: 500, rawGetBody: `{}`},
+		"missing key":           {rawGetBody: `{"id": 999}`},
+		"malformed json":        {rawGetBody: `{not json`},
+		"http error":            {rawGetStatus: 500, rawGetBody: `{}`},
+		"invalid subscriber id": {rawGetBody: `{"id": 999, "completion_subscribers": [{"name": "No ID"}]}`},
 	}
 	branches := map[string][]string{
 		"merge branch": {"update", "999", "New title"},

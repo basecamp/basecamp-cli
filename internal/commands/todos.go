@@ -1314,6 +1314,9 @@ func completionSubscriberIDs(ctx context.Context, app *appctx.App, todoID int64)
 
 	ids := make([]int64, len(*raw.CompletionSubscribers))
 	for i, s := range *raw.CompletionSubscribers {
+		if s.ID <= 0 {
+			return nil, fmt.Errorf("cannot verify current completion subscribers for todo %d: subscriber with missing or invalid id", todoID)
+		}
 		ids[i] = s.ID
 	}
 	return ids, nil
