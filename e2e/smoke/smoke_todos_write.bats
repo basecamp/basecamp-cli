@@ -138,6 +138,55 @@ setup_file() {
   run_smoke basecamp todos trash "$todo_id" -p "$QA_PROJECT" --json
 }
 
+@test "todos update preserves completion subscribers" {
+  # Own person ID for use as a completion subscriber
+  run_smoke basecamp api get /my/profile.json --json
+  assert_success
+  local person_id
+  person_id=$(echo "$output" | jq -r '.data.id')
+  [[ -n "$person_id" && "$person_id" != "null" ]] || mark_unverifiable "Cannot resolve own person ID"
+
+  # Create with a due date and a completion subscriber
+  run_smoke basecamp todos create "Subscriber preservation test $(date +%s)" \
+    --list "$QA_TODOLIST" -p "$QA_PROJECT" \
+    --due "2026-08-15" \
+    --notify-on-completion "$person_id" --json
+  assert_success
+  local todo_id
+  todo_id=$(echo "$output" | jq -r '.data.id')
+
+  # Title-only update (typed merge branch) must preserve the subscriber
+  run_smoke basecamp todos update "$todo_id" --title "Renamed, subscriber kept" --json
+  assert_success
+
+  run_smoke basecamp api get "/todos/$todo_id.json" --json
+  assert_success
+  local subs
+  subs=$(echo "$output" | jq -r '[.data.completion_subscribers[].id] | join(",")')
+  [[ "$subs" == "$person_id" ]] || { echo "subscriber lost after title update: [$subs]"; return 1; }
+
+  # --no-due (raw clear branch) must also preserve the subscriber
+  run_smoke basecamp todos update "$todo_id" --no-due --json
+  assert_success
+
+  run_smoke basecamp api get "/todos/$todo_id.json" --json
+  assert_success
+  subs=$(echo "$output" | jq -r '[.data.completion_subscribers[].id] | join(",")')
+  [[ "$subs" == "$person_id" ]] || { echo "subscriber lost after --no-due: [$subs]"; return 1; }
+
+  # --no-notify-on-completion clears the subscribers
+  run_smoke basecamp todos update "$todo_id" --no-notify-on-completion --json
+  assert_success
+
+  run_smoke basecamp api get "/todos/$todo_id.json" --json
+  assert_success
+  subs=$(echo "$output" | jq -r '.data.completion_subscribers | length')
+  [[ "$subs" == "0" ]] || { echo "subscribers not cleared: $subs remain"; return 1; }
+
+  # Clean up
+  run_smoke basecamp todos trash "$todo_id" -p "$QA_PROJECT" --json
+}
+
 @test "todos trash trashes a todo" {
   local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"

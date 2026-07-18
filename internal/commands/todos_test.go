@@ -405,7 +405,7 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 	cmd := NewTodosCmd()
 	plainTextContent := "Fix the authentication bug"
 
-	err := executeTodosCommand(cmd, app, "create", plainTextContent)
+	err := executeTodosCommand(cmd, app, "create", plainTextContent, "--notify-on-completion", "7,8")
 	require.NoError(t, err, "command should succeed with mock transport")
 	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
 
@@ -419,6 +419,9 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 	// The content should be exactly what was passed in - plain text, no HTML wrapping
 	assert.Equal(t, plainTextContent, content,
 		"Todo content should be plain text, not HTML-wrapped")
+
+	assert.Equal(t, []any{float64(7), float64(8)}, requestBody["completion_subscriber_ids"],
+		"--notify-on-completion must map to completion_subscriber_ids")
 }
 
 func TestTodosListAssigneeWithoutProjectErrors(t *testing.T) {
@@ -1532,14 +1535,52 @@ func TestSweepCommentLocalImageErrors(t *testing.T) {
 // Todos Update Tests
 // =============================================================================
 
-// mockTodoUpdateTransport handles GET and PUT for todo update tests.
+// mockTodoUpdateTransport handles GET and PUT for todo update tests. It
+// records every request as "METHOD path" so tests can assert which routes
+// were hit and in what order. The raw preservation GET (flat route
+// /todos/{id}.json, distinct from the typed generated route /todos/{id})
+// serves a configurable body/status so tests can exercise the fail-closed
+// contract.
 type mockTodoUpdateTransport struct {
 	capturedBody []byte
+	requests     []string
+
+	rawGetStatus int    // 0 → 200
+	rawGetBody   string // "" → default with completion_subscribers [7, 8]
 }
 
 func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests = append(t.requests, req.Method+" "+req.URL.Path)
+
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" && req.URL.Path == "/99999/todos/999.json" {
+		// Raw preservation GET of the flat account-scoped /todos/{id}.json
+		// route — exact match so bucket-scoped paths can never satisfy it.
+		status := t.rawGetStatus
+		if status == 0 {
+			status = 200
+		}
+		body := t.rawGetBody
+		if body == "" {
+			body = `{"id": 999, "completion_subscribers": [{"id": 7}, {"id": 8}]}`
+		}
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "GET" && strings.Contains(req.URL.Path, "/people") {
+		// Empty people directory so name resolution deterministically misses.
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[]`)),
+			Header:     header,
+		}, nil
+	}
 
 	if req.Method == "GET" {
 		mockTodo := `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}]}`
@@ -1568,6 +1609,17 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 
 	return nil, errors.New("unexpected request")
+}
+
+// hasRequest reports whether any recorded request matches the given method
+// and path predicate.
+func (t *mockTodoUpdateTransport) hasRequest(method, pathSubstr string) bool {
+	for _, r := range t.requests {
+		if strings.HasPrefix(r, method+" ") && strings.Contains(r, pathSubstr) {
+			return true
+		}
+	}
+	return false
 }
 
 func setupTodoUpdateApp(t *testing.T, transport http.RoundTripper) *appctx.App {
@@ -1924,6 +1976,9 @@ func TestTodosUpdateDueDatePreservesExistingFields(t *testing.T) {
 	require.True(t, ok, "assignee_ids must be preserved")
 	require.Len(t, ids, 1)
 	assert.Equal(t, float64(42), ids[0])
+
+	assert.Equal(t, []any{float64(7), float64(8)}, body["completion_subscriber_ids"],
+		"completion subscribers must be preserved")
 }
 
 func TestTodosUpdateTitlePreservesExistingFields(t *testing.T) {
@@ -1943,6 +1998,160 @@ func TestTodosUpdateTitlePreservesExistingFields(t *testing.T) {
 	assert.Equal(t, "Existing desc", body["description"])
 	assert.Equal(t, "2026-04-01", body["due_on"])
 	assert.Equal(t, "2026-03-25", body["starts_on"])
+	assert.Equal(t, []any{float64(7), float64(8)}, body["completion_subscriber_ids"],
+		"completion subscribers must be preserved")
+}
+
+func TestTodosUpdatePreservationReadUsesFlatRoute(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "New title")
+	require.NoError(t, err)
+
+	assert.True(t, transport.hasRequest("GET", "/todos/999.json"),
+		"preservation read must hit the flat /todos/{id}.json route, got: %v", transport.requests)
+	for _, r := range transport.requests {
+		assert.NotContains(t, r, "/buckets/", "no bucket-scoped request expected")
+	}
+}
+
+func TestTodosUpdateExplicitSubscribersSkipsPreservationRead(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "42")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{float64(42)}, body["completion_subscriber_ids"])
+	assert.False(t, transport.hasRequest("GET", "/todos/999.json"),
+		"explicit --notify-on-completion must not trigger a preservation read, got: %v", transport.requests)
+}
+
+func TestTodosUpdateNoNotifyOnCompletionClearsSubscribers(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-notify-on-completion")
+	require.NoError(t, err, "--no-notify-on-completion alone must pass the no-op guard")
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	_, exists := body["completion_subscriber_ids"]
+	assert.False(t, exists, "completion_subscriber_ids must be omitted to clear")
+	assert.False(t, transport.hasRequest("GET", "/todos/999.json"),
+		"clearing subscribers must not trigger a preservation read, got: %v", transport.requests)
+}
+
+func TestTodosUpdateNoDuePreservesSubscribers(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{float64(7), float64(8)}, body["completion_subscriber_ids"],
+		"completion subscribers must be preserved in the clear branch")
+}
+
+func TestTodosUpdateSubscriberReadFailsClosed(t *testing.T) {
+	// A preservation read that fails — or succeeds without an unambiguous
+	// completion_subscribers key — must abort the update before any PUT.
+	cases := map[string]struct {
+		rawGetStatus int
+		rawGetBody   string
+	}{
+		"missing key":           {rawGetBody: `{"id": 999}`},
+		"malformed json":        {rawGetBody: `{not json`},
+		"http error":            {rawGetStatus: 500, rawGetBody: `{}`},
+		"invalid subscriber id": {rawGetBody: `{"id": 999, "completion_subscribers": [{"name": "No ID"}]}`},
+	}
+	branches := map[string][]string{
+		"merge branch": {"update", "999", "New title"},
+		"clear branch": {"update", "999", "--no-due"},
+	}
+
+	for branchName, cmdArgs := range branches {
+		for caseName, tc := range cases {
+			t.Run(branchName+"/"+caseName, func(t *testing.T) {
+				transport := &mockTodoUpdateTransport{
+					rawGetStatus: tc.rawGetStatus,
+					rawGetBody:   tc.rawGetBody,
+				}
+				app := setupTodoUpdateApp(t, transport)
+
+				cmd := NewTodosCmd()
+				err := executeTodosCommand(cmd, app, cmdArgs...)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "completion subscribers")
+				assert.False(t, transport.hasRequest("PUT", "/"),
+					"no PUT may occur when the preservation read fails, got: %v", transport.requests)
+			})
+		}
+	}
+}
+
+func TestTodosUpdateSubscriberErrorsUseSubscriberWording(t *testing.T) {
+	// Resolution failures for --notify-on-completion must talk about
+	// completion subscribers, not assignees.
+	t.Run("invalid id", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "0")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Completion subscriber ID must be a positive number")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+
+	t.Run("no valid people", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", ",")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "No valid completion subscribers provided")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+
+	t.Run("unresolvable name", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to resolve completion subscriber 'nonexistent'")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+}
+
+func TestTodosUpdateConflictingNotifyOnCompletionFlags(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-notify-on-completion", "--notify-on-completion", "42")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-notify-on-completion and --notify-on-completion cannot be used together")
 }
 
 // =============================================================================
