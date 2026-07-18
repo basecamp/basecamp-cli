@@ -95,8 +95,11 @@ func TestSurfaceSnapshot(t *testing.T) {
 		}
 	}
 
-	// Write updated baseline only when -update-surface is set and no removals were found
-	if *updateSurface && len(removals) == 0 && len(additions) > 0 {
+	// Write updated baseline whenever -update-surface is set and there are no
+	// unacknowledged removals. Gating only on additions would skip removal-only
+	// updates (removals acknowledged via .surface-breaking), leaving stale
+	// removed lines in .surface for consumers like check-skill-drift.
+	if *updateSurface && len(removals) == 0 {
 		if err := os.WriteFile(baselinePath, []byte(current), 0o644); err != nil {
 			t.Fatalf("writing .surface: %v", err)
 		}
