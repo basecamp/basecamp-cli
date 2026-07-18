@@ -1,16 +1,30 @@
 package commands_test
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/basecamp/cli/surface"
 )
 
 var updateSurface = flag.Bool("update-surface", false, "Update .surface baseline file")
+
+// shouldWriteBaseline reports whether -update-surface should rewrite .surface:
+// only in update mode, only when no unacknowledged removals remain, and only
+// when the baseline actually differs from the freshly generated surface. The
+// last condition matters for removal-only changes — removals acknowledged in
+// .surface-breaking leave zero additions, so gating on additions alone would
+// skip the write and leave stale removed lines in .surface — while still
+// leaving an unchanged surface untouched.
+func shouldWriteBaseline(update bool, unacknowledgedRemovals int, baseline, current []byte) bool {
+	return update && unacknowledgedRemovals == 0 && !bytes.Equal(baseline, current)
+}
 
 func TestSurfaceSnapshot(t *testing.T) {
 	root := buildRootWithAllCommands()
@@ -95,13 +109,29 @@ func TestSurfaceSnapshot(t *testing.T) {
 		}
 	}
 
-	// Write updated baseline whenever -update-surface is set and there are no
-	// unacknowledged removals. Gating only on additions would skip removal-only
-	// updates (removals acknowledged via .surface-breaking), leaving stale
-	// removed lines in .surface for consumers like check-skill-drift.
-	if *updateSurface && len(removals) == 0 {
+	if shouldWriteBaseline(*updateSurface, len(removals), baseline, []byte(current)) {
 		if err := os.WriteFile(baselinePath, []byte(current), 0o644); err != nil {
 			t.Fatalf("writing .surface: %v", err)
 		}
 	}
+}
+
+func TestShouldWriteBaseline(t *testing.T) {
+	base := []byte("A\nB\nC\n")
+
+	// Removal-only: current dropped B, acknowledged (0 unacknowledged removals),
+	// no additions — must still write so the removed line leaves .surface.
+	assert.True(t, shouldWriteBaseline(true, 0, base, []byte("A\nC\n")))
+
+	// Addition: current gained D — writes.
+	assert.True(t, shouldWriteBaseline(true, 0, base, []byte("A\nB\nC\nD\n")))
+
+	// No change — must not write (avoids needless churn).
+	assert.False(t, shouldWriteBaseline(true, 0, base, base))
+
+	// Unacknowledged removal present — must not write (drift is a failure).
+	assert.False(t, shouldWriteBaseline(true, 1, base, []byte("A\nC\n")))
+
+	// Not in update mode — never writes.
+	assert.False(t, shouldWriteBaseline(false, 0, base, []byte("A\nC\n")))
 }
