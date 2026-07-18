@@ -406,6 +406,13 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		return nil, err
 	}
 
+	// Device-only authorization servers omit the authorization endpoint.
+	// Assert authorization-code capability before scope handling and client
+	// registration so an unsupported flow can't trigger DCR side effects.
+	if oauthCfg.AuthorizationEndpoint == nil || *oauthCfg.AuthorizationEndpoint == "" {
+		return nil, output.ErrAuth("OAuth server does not advertise an authorization endpoint (authorization-code flow unsupported)")
+	}
+
 	// Apply provider-aware scope rules
 	effectiveScope := opts.Scope
 	if oauthType == "launchpad" {
@@ -541,15 +548,24 @@ func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*oauth.C
 		if lpErr != nil {
 			return nil, "", lpErr
 		}
+		authzEndpoint := lpURL + "/authorization/new"
 		fallbackCfg := &oauth.Config{
-			AuthorizationEndpoint: lpURL + "/authorization/new",
+			AuthorizationEndpoint: &authzEndpoint,
 			TokenEndpoint:         lpURL + "/authorization/token",
 		}
-		log(fmt.Sprintf("Authenticating via launchpad (%s)", fallbackCfg.AuthorizationEndpoint))
+		log(fmt.Sprintf("Authenticating via launchpad (%s)", authzEndpoint))
 		return fallbackCfg, "launchpad", nil
 	}
-	log(fmt.Sprintf("Authenticating via bc3 (%s)", cfg.AuthorizationEndpoint))
+	log(fmt.Sprintf("Authenticating via bc3 (%s)", strOrEmpty(cfg.AuthorizationEndpoint)))
 	return cfg, "bc3", nil
+}
+
+// strOrEmpty returns the value of p, or "" when p is nil.
+func strOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (m *Manager) launchpadURL() (string, error) {
@@ -573,10 +589,10 @@ func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Con
 		}
 
 		// Register new client via DCR
-		if oauthCfg.RegistrationEndpoint == "" {
+		if oauthCfg.RegistrationEndpoint == nil || *oauthCfg.RegistrationEndpoint == "" {
 			return nil, output.ErrAuth("OAuth server does not support Dynamic Client Registration")
 		}
-		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, opts)
+		return m.registerBC3Client(ctx, *oauthCfg.RegistrationEndpoint, opts)
 	}
 
 	// Launchpad: resolve client credentials from env vars
@@ -792,9 +808,14 @@ func (m *Manager) saveBC3Client(creds *ClientCredentials) error {
 }
 
 func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeChallenge, clientID string, opts *LoginOptions) (string, error) {
-	u, err := url.Parse(cfg.AuthorizationEndpoint)
+	// Login asserts this before any side effects; kept as a defensive check
+	// for other callers.
+	if cfg.AuthorizationEndpoint == nil || *cfg.AuthorizationEndpoint == "" {
+		return "", output.ErrAuth("OAuth server does not advertise an authorization endpoint (authorization-code flow unsupported)")
+	}
+	u, err := url.Parse(*cfg.AuthorizationEndpoint)
 	if err != nil {
-		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: %v", cfg.AuthorizationEndpoint, err))
+		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: %v", *cfg.AuthorizationEndpoint, err))
 	}
 
 	// The authorization endpoint comes from the server-controlled discovery
@@ -802,7 +823,7 @@ func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeC
 	// open). Restrict it to https (or http on loopback for local development)
 	// so a hostile discovery doc can't hand the OS a file:// (or other) URL.
 	if !isSecureEndpointURL(u) {
-		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: must be an absolute https URL (or http on loopback)", cfg.AuthorizationEndpoint))
+		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: must be an absolute https URL (or http on loopback)", *cfg.AuthorizationEndpoint))
 	}
 
 	q := u.Query()

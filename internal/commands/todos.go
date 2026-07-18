@@ -1000,10 +1000,11 @@ Set or clear the people notified when the todo is completed:
 			clearDue := noDue || (cmd.Flags().Changed("due") && strings.TrimSpace(due) == "")
 			clearStarts := noStartsOn || (cmd.Flags().Changed("starts-on") && strings.TrimSpace(startsOn) == "")
 			clearDescription := noDescription || (cmd.Flags().Changed("description") && strings.TrimSpace(description) == "")
-			needsClear := clearDue || clearStarts || clearDescription
-			// Subscriber clearing works by omission in both branches, so it
-			// doesn't force the raw-PUT clear branch.
+			// Subscriber clearing must use the raw-PUT branch: the SDK's
+			// merge-safe Update always sends completion_subscriber_ids, so a
+			// sparse update can no longer clear by omission.
 			clearSubscribers := noNotifyOnCompletion || (cmd.Flags().Changed("notify-on-completion") && strings.TrimSpace(notifyOnCompletion) == "")
+			needsClear := clearDue || clearStarts || clearDescription || clearSubscribers
 
 			// Clearing due while setting starts is contradictory (Basecamp enforces starts <= due)
 			if clearDue && strings.TrimSpace(startsOn) != "" {

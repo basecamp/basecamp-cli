@@ -97,7 +97,7 @@ func TestFetchAccounts_LaunchpadToken(t *testing.T) {
 	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
 	authMgr := auth.NewManager(cfg, nil)
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, accountTestTokenProvider{token: "some-launchpad-token"},
 		basecamp.WithMaxRetries(1),
 	)

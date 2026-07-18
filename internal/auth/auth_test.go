@@ -60,6 +60,11 @@ func (sl *syncLogger) snapshot() []string {
 	return cp
 }
 
+// strPtr returns a pointer to s, for oauth.Config optional endpoint fields.
+func strPtr(s string) *string {
+	return &s
+}
+
 // newTestStore creates a file-backed credential store for testing.
 func newTestStore(t *testing.T, dir string) *Store {
 	t.Helper()
@@ -341,9 +346,9 @@ func TestCredentialsJSON(t *testing.T) {
 func TestOAuthConfigJSON(t *testing.T) {
 	cfg := &oauth.Config{
 		Issuer:                "https://issuer.example.com",
-		AuthorizationEndpoint: "https://auth.example.com/authorize",
+		AuthorizationEndpoint: strPtr("https://auth.example.com/authorize"),
 		TokenEndpoint:         "https://auth.example.com/token",
-		RegistrationEndpoint:  "https://auth.example.com/register",
+		RegistrationEndpoint:  strPtr("https://auth.example.com/register"),
 		ScopesSupported:       []string{"read", "write"},
 	}
 
@@ -584,7 +589,7 @@ func TestResolveClientCredentials(t *testing.T) {
 func TestBuildAuthURL_UsesResolvedRedirectURI(t *testing.T) {
 	m := &Manager{cfg: config.Default(), httpClient: http.DefaultClient}
 	oauthCfg := &oauth.Config{
-		AuthorizationEndpoint: "https://auth.example.com/authorize",
+		AuthorizationEndpoint: strPtr("https://auth.example.com/authorize"),
 	}
 	opts := &LoginOptions{RedirectURI: "http://localhost:9999/my-callback"}
 
@@ -608,7 +613,7 @@ func TestBuildAuthURL_RejectsUnsafeScheme(t *testing.T) {
 	}
 	for _, endpoint := range accepted {
 		t.Run("accepts "+endpoint, func(t *testing.T) {
-			oauthCfg := &oauth.Config{AuthorizationEndpoint: endpoint}
+			oauthCfg := &oauth.Config{AuthorizationEndpoint: strPtr(endpoint)}
 			_, err := m.buildAuthURL(oauthCfg, "bc3", "read", "state", "challenge", "cid", opts)
 			require.NoError(t, err)
 		})
@@ -627,7 +632,7 @@ func TestBuildAuthURL_RejectsUnsafeScheme(t *testing.T) {
 	}
 	for _, endpoint := range rejected {
 		t.Run("rejects "+endpoint, func(t *testing.T) {
-			oauthCfg := &oauth.Config{AuthorizationEndpoint: endpoint}
+			oauthCfg := &oauth.Config{AuthorizationEndpoint: strPtr(endpoint)}
 			_, err := m.buildAuthURL(oauthCfg, "bc3", "read", "state", "challenge", "cid", opts)
 			require.Error(t, err)
 		})
@@ -649,7 +654,7 @@ func TestBuildAuthURL_RejectsMalformedEndpoint(t *testing.T) {
 	}
 	for _, endpoint := range malformed {
 		t.Run("rejects "+endpoint, func(t *testing.T) {
-			oauthCfg := &oauth.Config{AuthorizationEndpoint: endpoint}
+			oauthCfg := &oauth.Config{AuthorizationEndpoint: strPtr(endpoint)}
 			_, err := m.buildAuthURL(oauthCfg, "bc3", "read", "state", "challenge", "cid", opts)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "invalid authorization endpoint")
@@ -1074,7 +1079,7 @@ func TestLoadClientCredentials_BC3_CustomRedirect_SkipsStoredClient(t *testing.T
 	storedCreds := &ClientCredentials{ClientID: "stored-id", ClientSecret: "stored-secret"}
 	require.NoError(t, m.saveBC3Client(storedCreds))
 
-	oauthCfg := &oauth.Config{RegistrationEndpoint: srv.URL + "/register"}
+	oauthCfg := &oauth.Config{RegistrationEndpoint: strPtr(srv.URL + "/register")}
 
 	// Custom redirect: should skip stored client and do DCR
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}
@@ -1204,10 +1209,11 @@ func TestLoginRemoteMode(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			base := "http://" + r.Host
 			fmt.Fprintf(w, `{
+				"issuer": "%s",
 				"authorization_endpoint": "%s/authorize",
 				"token_endpoint": "%s/token",
 				"registration_endpoint": "%s/register"
-			}`, base, base, base)
+			}`, base, base, base, base)
 		case "/register":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"client_id":"test-client","client_secret":"test-secret"}`)
@@ -1291,10 +1297,11 @@ func TestLoginRemoteMode_PromptWording(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			base := "http://" + r.Host
 			fmt.Fprintf(w, `{
+				"issuer": "%s",
 				"authorization_endpoint": "%s/authorize",
 				"token_endpoint": "%s/token",
 				"registration_endpoint": "%s/register"
-			}`, base, base, base)
+			}`, base, base, base, base)
 		case "/register":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"client_id":"test-client","client_secret":"test-secret"}`)
@@ -1367,10 +1374,11 @@ func TestLoginRemoteMode_StateMismatch(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			base := "http://" + r.Host
 			fmt.Fprintf(w, `{
+				"issuer": "%s",
 				"authorization_endpoint": "%s/authorize",
 				"token_endpoint": "%s/token",
 				"registration_endpoint": "%s/register"
-			}`, base, base, base)
+			}`, base, base, base, base)
 		case "/register":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"client_id":"test-client"}`)
@@ -1428,10 +1436,11 @@ func TestLoginRemoteMode_EmptyInput(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			base := "http://" + r.Host
 			fmt.Fprintf(w, `{
+				"issuer": "%s",
 				"authorization_endpoint": "%s/authorize",
 				"token_endpoint": "%s/token",
 				"registration_endpoint": "%s/register"
-			}`, base, base, base)
+			}`, base, base, base, base)
 		case "/register":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"client_id":"test-client"}`)
@@ -1487,10 +1496,11 @@ func TestLoginRemoteMode_CustomRedirectURI(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			base := "http://" + r.Host
 			fmt.Fprintf(w, `{
+				"issuer": "%s",
 				"authorization_endpoint": "%s/authorize",
 				"token_endpoint": "%s/token",
 				"registration_endpoint": "%s/register"
-			}`, base, base, base)
+			}`, base, base, base, base)
 		case "/register":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"client_id":"test-client"}`)
@@ -1707,10 +1717,11 @@ func TestLoginBC3DefaultsToRead(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			base := "http://" + r.Host
 			fmt.Fprintf(w, `{
+				"issuer": "%s",
 				"authorization_endpoint": "%s/authorize",
 				"token_endpoint": "%s/token",
 				"registration_endpoint": "%s/register"
-			}`, base, base, base)
+			}`, base, base, base, base)
 		case "/register":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"client_id":"test-client"}`)
@@ -2047,6 +2058,54 @@ func TestRefreshLocked_EmptyOAuthTypeDefaultsToLaunchpad(t *testing.T) {
 	// Should have used launchpad legacy format (type=refresh, not grant_type=refresh_token)
 	assert.Contains(t, body, "type=refresh")
 	assert.Contains(t, body, "client_id="+launchpadClientID)
+}
+
+// TestLoginDeviceOnlyServerFailsBeforeRegistration asserts the
+// authorization-code capability check fires immediately after discovery: a
+// device-only server (no authorization_endpoint) fails Login with an auth
+// error before Dynamic Client Registration is attempted.
+func TestLoginDeviceOnlyServerFailsBeforeRegistration(t *testing.T) {
+	var mu sync.Mutex
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.URL.Path)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			base := "http://" + r.Host
+			fmt.Fprintf(w, `{
+				"issuer": "%s",
+				"token_endpoint": "%s/token",
+				"device_authorization_endpoint": "%s/device",
+				"registration_endpoint": "%s/register",
+				"grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code"]
+			}`, base, base, base, base)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	_, err := m.Login(context.Background(), LoginOptions{Logger: func(string) {}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not advertise an authorization endpoint")
+
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Equal(t, output.CodeAuth, outErr.Code)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.NotContains(t, requests, "/register", "capability check must fire before Dynamic Client Registration")
 }
 
 func TestLoginRejectsInvalidScope(t *testing.T) {

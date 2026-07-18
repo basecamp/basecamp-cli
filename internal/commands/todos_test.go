@@ -55,7 +55,7 @@ func setupTodosTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	// Create SDK client with mock token provider and no-network transport
 	// The transport prevents real HTTP calls - fails instantly instead of timing out
 	authMgr := auth.NewManager(cfg, nil)
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(todosNoNetworkTransport{}),
 		basecamp.WithMaxRetries(1), // Disable retries for instant failure
@@ -383,7 +383,7 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 		TodolistID: "456",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -542,7 +542,7 @@ func setupMultiTodosetApp(t *testing.T) *appctx.App {
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(multiTodosetTransport{}),
 		basecamp.WithMaxRetries(1),
 	)
@@ -635,7 +635,7 @@ func setupTodos404App(t *testing.T) *appctx.App {
 
 	cfg := &config.Config{AccountID: "99999"}
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(todos404Transport{}),
 	)
 
@@ -751,7 +751,7 @@ func setupScopedTodosetApp(t *testing.T, transport *scopedTodosetTransport) *app
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1009,7 +1009,7 @@ func setupGroupTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.App, 
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1215,7 +1215,7 @@ func setupStatusTestApp(t *testing.T, transport *statusCapturingTransport) (*app
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1465,7 +1465,7 @@ func TestSweepCommentContentIsHTML(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1507,7 +1507,7 @@ func TestSweepCommentLocalImageErrors(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1630,7 +1630,7 @@ func setupTodoUpdateApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 		AccountID: "99999",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -2229,7 +2229,7 @@ func setupAssigneeTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.Ap
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -2457,7 +2457,7 @@ func setupListlessTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.Ap
 	cfg := &config.Config{AccountID: "99999", ProjectID: "123"}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)

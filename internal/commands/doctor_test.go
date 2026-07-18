@@ -343,7 +343,7 @@ func setupDoctorTestApp(t *testing.T, accountID string) (*appctx.App, *bytes.Buf
 
 	authMgr := auth.NewManager(cfg, nil)
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, nil,
 		basecamp.WithMaxRetries(1),
 	)

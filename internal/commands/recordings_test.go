@@ -30,7 +30,7 @@ func setupRecordingsTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(todosNoNetworkTransport{}),
 		basecamp.WithMaxRetries(1),

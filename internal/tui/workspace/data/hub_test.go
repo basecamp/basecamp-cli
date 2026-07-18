@@ -76,7 +76,7 @@ func TestHubCreateCheckinAnswerDefaultsDateToToday(t *testing.T) {
 	})
 
 	transport := &mockHubCheckinsTransport{}
-	sdk := basecamp.NewClient(&basecamp.Config{}, hubCheckinsTestTokenProvider{},
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, hubCheckinsTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
