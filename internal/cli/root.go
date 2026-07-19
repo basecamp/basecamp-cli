@@ -771,8 +771,12 @@ func emitAgentHelp(cmd *cobra.Command) {
 		}
 	}
 
-	// Local flags
+	// Local flags. Hidden flags are skipped to match text --help, which never
+	// lists them — pflag's VisitAll visits hidden flags, so filter explicitly.
 	cmd.NonInheritedFlags().VisitAll(func(f *pflag.Flag) {
+		if f.Hidden {
+			return
+		}
 		info.Flags = append(info.Flags, agentFlag{
 			Name:      f.Name,
 			Shorthand: f.Shorthand,
@@ -785,6 +789,9 @@ func emitAgentHelp(cmd *cobra.Command) {
 	// Parent-scoped flags (e.g. --room on chat subcommands) — promoted into
 	// flags to match text help's parentScopedFlags promotion.
 	parentScopedFlags(cmd).VisitAll(func(f *pflag.Flag) {
+		if f.Hidden {
+			return
+		}
 		info.Flags = append(info.Flags, agentFlag{
 			Name:      f.Name,
 			Shorthand: f.Shorthand,
@@ -796,6 +803,9 @@ func emitAgentHelp(cmd *cobra.Command) {
 
 	// Inherited flags — shared logic with filterInheritedFlags (text help)
 	curatedInheritedFlags(cmd).VisitAll(func(f *pflag.Flag) {
+		if f.Hidden {
+			return
+		}
 		info.InheritedFlags = append(info.InheritedFlags, agentFlag{
 			Name:      f.Name,
 			Shorthand: f.Shorthand,

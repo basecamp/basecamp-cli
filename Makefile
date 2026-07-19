@@ -354,16 +354,23 @@ test-release:
 	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
 	goreleaser release --snapshot --skip=publish,sign --clean
 
-# Generate CLI surface snapshot (validates binary produces valid output)
+# Verify the committed CLI surface snapshot (.surface) matches the command tree.
+# TestSurfaceSnapshot is the authority: it diffs .surface against surface.Snapshot
+# and fails on any drift, pointing here for regeneration.
 .PHONY: check-surface
-check-surface: build
-	@command -v jq >/dev/null 2>&1 || { \
-		echo "ERROR: jq is required for check-surface but was not found."; \
-		echo "Install with: brew install jq (macOS), apt-get install jq (Debian/Ubuntu)"; \
+check-surface: check-toolchain
+	@BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) ./internal/commands/ -run TestSurfaceSnapshot -count=1 || { \
+		echo; echo "TestSurfaceSnapshot failed — if the committed .surface is stale, run: make update-surface"; \
 		exit 1; \
 	}
-	scripts/check-cli-surface.sh $(BUILD_DIR)/$(BINARY) /tmp/cli-surface.txt
-	@echo "CLI surface snapshot generated ($$(wc -l < /tmp/cli-surface.txt) entries)"
+	@echo "CLI surface snapshot up to date ($$(wc -l < .surface) entries)"
+
+# Regenerate the committed CLI surface snapshot (.surface) from the command tree.
+# Accepts additions; removals must be acknowledged in .surface-breaking.
+.PHONY: update-surface
+update-surface: check-toolchain
+	@BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) ./internal/commands/ -run TestSurfaceSnapshot -update-surface -count=1
+	@echo "CLI surface snapshot regenerated ($$(wc -l < .surface) entries)"
 
 # Compare CLI surface against baseline (fails on removals)
 .PHONY: check-surface-diff
@@ -542,7 +549,8 @@ help:
 	@echo "  lint-actions   Lint GitHub Actions workflows (actionlint + zizmor)"
 	@echo "  tidy-check     Verify go.mod/go.sum are tidy"
 	@echo "  check          Run all checks (local CI gate)"
-	@echo "  check-surface  Generate CLI surface snapshot (validates --help --agent output)"
+	@echo "  check-surface  Verify committed .surface matches the command tree (TestSurfaceSnapshot)"
+	@echo "  update-surface  Regenerate committed .surface from the command tree"
 	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
 	@echo "  check-skill-drift  Verify skill references match CLI surface"
 	@echo ""
