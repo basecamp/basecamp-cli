@@ -539,10 +539,14 @@ func (m *Manager) Logout() error {
 }
 
 func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*oauth.Config, string, error) {
+	// The SDK binds the discovered issuer to this string code-point exact
+	// (RFC 8414), so a trailing slash in the configured base URL would
+	// mismatch the server's issuer and incorrectly fall back to Launchpad.
+	baseURL := config.NormalizeBaseURL(m.cfg.BaseURL)
 	discoverer := oauth.NewDiscoverer(m.httpClient)
-	cfg, err := discoverer.Discover(ctx, m.cfg.BaseURL)
+	cfg, err := discoverer.Discover(ctx, baseURL)
 	if err != nil {
-		log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", m.cfg.BaseURL))
+		log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", baseURL))
 		// Fallback to Launchpad
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {

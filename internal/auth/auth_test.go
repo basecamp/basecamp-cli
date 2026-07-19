@@ -437,6 +437,40 @@ func TestDiscoverOAuth_PropagatesInsecureLaunchpadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "BASECAMP_LAUNCHPAD_URL")
 }
 
+// TestDiscoverOAuth_NormalizesTrailingSlash guards the issuer binding: the
+// SDK binds the discovered issuer to the requested base URL code-point exact
+// (RFC 8414), so a configured BaseURL with a trailing slash must be
+// normalized before discovery — otherwise BC3 discovery mismatches the
+// server's issuer and incorrectly falls back to Launchpad.
+func TestDiscoverOAuth_NormalizesTrailingSlash(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/oauth-authorization-server" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		base := "http://" + r.Host
+		fmt.Fprintf(w, `{
+			"issuer": "%s",
+			"authorization_endpoint": "%s/authorize",
+			"token_endpoint": "%s/token"
+		}`, base, base, base)
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL + "/"
+
+	m := &Manager{cfg: cfg, httpClient: srv.Client()}
+
+	noop := func(string) {}
+	oauthCfg, oauthType, err := m.discoverOAuth(context.Background(), noop)
+	require.NoError(t, err)
+	assert.Equal(t, "bc3", oauthType, "trailing-slash BaseURL must not fall back to Launchpad")
+	require.NotNil(t, oauthCfg.AuthorizationEndpoint)
+	assert.Equal(t, srv.URL+"/authorize", *oauthCfg.AuthorizationEndpoint)
+}
+
 func TestResolveOAuthCallback(t *testing.T) {
 	tests := []struct {
 		name       string
