@@ -129,7 +129,7 @@ func newChatDeleteTestApp(transport http.RoundTripper) (*appctx.App, *bytes.Buff
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &chatTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -182,7 +182,7 @@ func TestChatPostContentIsPlainText(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &chatTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -238,7 +238,7 @@ func TestChatPostContentTypeSentInPayload(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &chatTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -282,7 +282,7 @@ func TestChatPostDefaultOmitsContentType(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &chatTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -373,7 +373,7 @@ func newTestAppWithTransport(t *testing.T, transport http.RoundTripper) (*appctx
 		ProjectID: "123",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &chatTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &chatTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -807,7 +807,7 @@ func TestChatPostViaSubcommandWithRoomFlag(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &chatTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -1356,7 +1356,7 @@ func TestChatUploadStyledOutputIncludesFileSize(t *testing.T) {
 		AccountID: "99999",
 		ProjectID: "123",
 	}
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &chatTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &chatTestTokenProvider{},
 		basecamp.WithTransport(&mockChatUploadTransport{}),
 		basecamp.WithMaxRetries(1),
 	)

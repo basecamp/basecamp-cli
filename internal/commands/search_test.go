@@ -81,7 +81,7 @@ func setupSearchTestApp(t *testing.T, transport http.RoundTripper) (*appctx.App,
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)

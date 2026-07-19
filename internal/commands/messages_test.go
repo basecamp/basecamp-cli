@@ -53,7 +53,7 @@ func setupMessagesTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	// Create SDK client with mock token provider and no-network transport
 	// The transport prevents real HTTP calls - fails instantly instead of timing out
 	authMgr := auth.NewManager(cfg, nil)
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &messagesTestTokenProvider{},
 		basecamp.WithTransport(messagesNoNetworkTransport{}),
 		basecamp.WithMaxRetries(1), // Disable retries for instant failure
@@ -393,7 +393,7 @@ func setupMessagesMockApp(t *testing.T, transport http.RoundTripper) (*appctx.Ap
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &messagesTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),

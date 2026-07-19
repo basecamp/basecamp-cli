@@ -47,7 +47,7 @@ func setupProfileTestApp(t *testing.T, cfg *config.Config) (*appctx.App, *bytes.
 	buf := &bytes.Buffer{}
 	authMgr := auth.NewManager(cfg, nil)
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, nil, basecamp.WithMaxRetries(1))
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 

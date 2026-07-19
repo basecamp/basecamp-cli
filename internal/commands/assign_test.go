@@ -344,7 +344,7 @@ func setupAssignGuardTestApp(t *testing.T) *appctx.App {
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(assignGuardTransport{}),
 		basecamp.WithMaxRetries(1),
 	)
@@ -454,7 +454,7 @@ func setupStepPathTestApp(t *testing.T, transport *stepPathTransport) *appctx.Ap
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -545,7 +545,7 @@ func (t *assignBatchTransport) RoundTrip(req *http.Request) (*http.Response, err
 		for id, valid := range t.validTodoIDs {
 			if strings.Contains(path, "/todos/"+id) {
 				if valid {
-					body := fmt.Sprintf(`{"id": %s, "title": "Test Todo %s", "assignees": []}`, id, id)
+					body := fmt.Sprintf(`{"id": %s, "title": "Test Todo %s", "content": "Test Todo %s", "assignees": []}`, id, id, id)
 					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
 				}
 				break
@@ -578,7 +578,7 @@ func setupAssignBatchTestApp(t *testing.T, transport *assignBatchTransport) (*ap
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -666,23 +666,30 @@ func TestAssignBatchLazyResolution(t *testing.T) {
 	err := executeAssignCommand(cmd, app, "111", "222", "--to", "me", "-p", "123")
 	require.NoError(t, err)
 
-	// Verify request ordering: todo/111 (404), todo/222 (200), THEN profile (me resolution), THEN update
+	// Verify request ordering: todo/111 (404), todo/222 validation GET,
+	// THEN profile (me resolution), THEN the SDK's merge GET, THEN update.
 	transport.mu.Lock()
 	log := transport.requestLog
 	transport.mu.Unlock()
 
-	todoGetIdx, profileIdx := -1, -1
+	var todoGets []int
+	profileIdx, putIdx := -1, -1
 	for i, entry := range log {
-		if strings.Contains(entry, "/todos/222") && strings.HasPrefix(entry, "GET") {
-			todoGetIdx = i
-		}
-		if strings.Contains(entry, "/my/profile.json") {
+		switch {
+		case strings.HasPrefix(entry, "GET") && strings.Contains(entry, "/todos/222"):
+			todoGets = append(todoGets, i)
+		case strings.Contains(entry, "/my/profile.json"):
 			profileIdx = i
+		case strings.HasPrefix(entry, "PUT") && strings.Contains(entry, "/todos/222"):
+			putIdx = i
 		}
 	}
-	require.NotEqual(t, -1, todoGetIdx, "expected GET /todos/222 in request log")
+	require.Len(t, todoGets, 2, "expected a validation GET and an SDK merge GET for /todos/222, got: %v", log)
 	require.NotEqual(t, -1, profileIdx, "expected GET /my/profile.json in request log")
-	assert.Greater(t, profileIdx, todoGetIdx, "person resolution should happen after the valid todo is fetched")
+	require.NotEqual(t, -1, putIdx, "expected PUT for /todos/222 in request log")
+	assert.Greater(t, profileIdx, todoGets[0], "person resolution should happen after the valid todo is fetched")
+	assert.Greater(t, todoGets[1], profileIdx, "SDK merge GET should follow person resolution")
+	assert.Greater(t, putIdx, todoGets[1], "update PUT should follow the SDK merge GET")
 }
 
 func TestAssignBatchAllFailNeverResolvesAssignee(t *testing.T) {
