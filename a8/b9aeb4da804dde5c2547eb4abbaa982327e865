@@ -1,0 +1,29 @@
+internal/commands/todos.go
+  s_81aeec3762efe9::t_a111ef5c04175d 1027
+  s_81aeec3762efe9::t_3fc190058a9318 1047-1053,1055-1059,1061-1066,1068,1070-1073,1075-1079,1081,1083-1091,1096,1098-1103,1107,1109-1114,1116-1119,1122,1125-1127,1130,1132-1135
+internal/commands/todos_test.go
+  s_81aeec3762efe9::t_99b2f563fa4b0e 1540,1547-1548,1557-1559,1563,1565
+  s_81aeec3762efe9::t_a09f5fc744711f 1738-1739
+  s_81aeec3762efe9::t_284a1615e7234d 1998-2001,2009,2012,2041-2043
+  s_81aeec3762efe9::t_eda77178fa6e7a 2064-2068,2070-2072,2074-2076,2078-2080,2083,2085,2087-2088,2095-2097,2099,2105-2164
+  s_81aeec3762efe9::t_97469d3b6c011a 1600
+  s_81aeec3762efe9::t_9dd3b35d0620ba 1766,1779-1781
+  s_81aeec3762efe9::t_65ad3e9f57c3e2 1843,1856-1858
+  s_81aeec3762efe9::t_850bc1a2bc86ba 2165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a8b9aeb4da804dde5c2547eb4abbaa982327e865",
+  "prompts": {},
+  "sessions": {
+    "s_81aeec3762efe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06955599-266e-4e88-a16c-5ab01f0bbc3e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
