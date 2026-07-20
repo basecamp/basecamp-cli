@@ -1,0 +1,25 @@
+internal/commands/wizard_codex_test.go
+  s_9ed1364f524f72::t_bc68a2a76c5a2d 100-103,108,111
+internal/release/manifests_test.go
+  s_9ed1364f524f72::t_6df1c6f12524b5 247-248,251-256,260
+internal/commands/wizard_codex.go
+  s_9ed1364f524f72::t_57b07593a96499 123,129,133,136,141-142,146-147
+  s_9ed1364f524f72::t_d077f176a0a66a 28-31,40-41
+  s_9ed1364f524f72::t_7e3b4c5cad60e8 79-83,87,89,91,95,98,103,105-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "369e77b4ea9218b4e4a84fab2f1d8a88b45740ab",
+  "prompts": {},
+  "sessions": {
+    "s_9ed1364f524f72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70a8485a-17d2-4231-9d1d-a69a30c2c142",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
