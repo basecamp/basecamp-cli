@@ -1,0 +1,29 @@
+internal/harness/claude.go
+  s_9ed1364f524f72::t_4f9009cce4ea40 4,19-21,26-35
+  s_9ed1364f524f72::t_25b442ea11bc6a 36-37
+internal/harness/codex.go
+  s_9ed1364f524f72::t_65b45b95b57693 34-37
+  s_9ed1364f524f72::t_7f05582541d458 56
+  s_9ed1364f524f72::t_1eacbd85a0365f 244
+  s_9ed1364f524f72::t_5177c3b8574f06 204,207
+internal/commands/doctor.go
+  s_9ed1364f524f72::t_98053b78c47ef5 210-211
+internal/harness/agent.go
+  s_9ed1364f524f72::t_942eb257feb6bd 3-6,13-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "affdc84241a2415152e71930b8796fc9d9b99089",
+  "prompts": {},
+  "sessions": {
+    "s_9ed1364f524f72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70a8485a-17d2-4231-9d1d-a69a30c2c142",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
