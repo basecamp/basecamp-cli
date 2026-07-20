@@ -1,0 +1,19 @@
+internal/release/manifests_test.go
+  s_9ed1364f524f72::t_a8d36d90052180 1-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7966aa89ae556c3c8ac527a1801ca48f9f9df925",
+  "prompts": {},
+  "sessions": {
+    "s_9ed1364f524f72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70a8485a-17d2-4231-9d1d-a69a30c2c142",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
