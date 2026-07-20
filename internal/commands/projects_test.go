@@ -81,7 +81,7 @@ func setupProjectsMockApp(t *testing.T, transport http.RoundTripper) (*appctx.Ap
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
 	cfg := &config.Config{AccountID: "99999"}
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &testTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &testTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)

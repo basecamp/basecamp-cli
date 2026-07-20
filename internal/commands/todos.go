@@ -766,6 +766,7 @@ func newTodosCreateCmd() *cobra.Command {
 	var due string
 	var description string
 	var attachFiles []string
+	var notifyOnCompletion string
 
 	cmd := &cobra.Command{
 		Use:   "create <content>",
@@ -881,6 +882,13 @@ func newTodosCreateCmd() *cobra.Command {
 				assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
 				req.AssigneeIDs = []int64{assigneeIDInt}
 			}
+			if strings.TrimSpace(notifyOnCompletion) != "" {
+				subscriberIDs, err := resolveCompletionSubscriberIDs(cmd.Context(), app, notifyOnCompletion)
+				if err != nil {
+					return err
+				}
+				req.CompletionSubscriberIDs = subscriberIDs
+			}
 
 			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
 			if err != nil {
@@ -925,6 +933,7 @@ func newTodosCreateCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().StringVar(&notifyOnCompletion, "notify-on-completion", "", "People to notify when done (names or IDs, comma-separated)")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -932,6 +941,7 @@ func newTodosCreateCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("notify-on-completion", completer.PeopleNameCompletion())
 
 	return cmd
 }
@@ -946,6 +956,8 @@ func newTodosUpdateCmd() *cobra.Command {
 	var noDue bool
 	var noStartsOn bool
 	var noDescription bool
+	var notifyOnCompletion string
+	var noNotifyOnCompletion bool
 
 	cmd := &cobra.Command{
 		Use:   "update <id|url> [title]",
@@ -961,7 +973,11 @@ You can pass either a todo ID or a Basecamp URL:
 Clear a field by passing its --no- flag or an empty value:
   basecamp todos update 789 --no-due
   basecamp todos update 789 --due ""
-  basecamp todos update 789 --no-description`,
+  basecamp todos update 789 --no-description
+
+Set or clear the people notified when the todo is completed:
+  basecamp todos update 789 --notify-on-completion "Jane Smith,Bob"
+  basecamp todos update 789 --no-notify-on-completion`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return missingArg(cmd, "<id|url>")
@@ -977,11 +993,14 @@ Clear a field by passing its --no- flag or an empty value:
 			if noDescription && strings.TrimSpace(description) != "" {
 				return output.ErrUsage("--no-description and --description cannot be used together")
 			}
+			if noNotifyOnCompletion && strings.TrimSpace(notifyOnCompletion) != "" {
+				return output.ErrUsage("--no-notify-on-completion and --notify-on-completion cannot be used together")
+			}
 			// Detect clear intent: explicit --no-X flag or empty value via --X ""
 			clearDue := noDue || (cmd.Flags().Changed("due") && strings.TrimSpace(due) == "")
 			clearStarts := noStartsOn || (cmd.Flags().Changed("starts-on") && strings.TrimSpace(startsOn) == "")
 			clearDescription := noDescription || (cmd.Flags().Changed("description") && strings.TrimSpace(description) == "")
-			needsClear := clearDue || clearStarts || clearDescription
+			clearSubscribers := noNotifyOnCompletion || (cmd.Flags().Changed("notify-on-completion") && strings.TrimSpace(notifyOnCompletion) == "")
 
 			// Clearing due while setting starts is contradictory (Basecamp enforces starts <= due)
 			if clearDue && strings.TrimSpace(startsOn) != "" {
@@ -999,12 +1018,13 @@ Clear a field by passing its --no- flag or an empty value:
 
 			// No-op guard: at least one effective field required
 			assigneeChanged := (cmd.Flags().Changed("assignee") || cmd.Flags().Changed("to")) && strings.TrimSpace(assignee) != ""
+			subscribersChanged := cmd.Flags().Changed("notify-on-completion") && strings.TrimSpace(notifyOnCompletion) != ""
 			if strings.TrimSpace(effectiveTitle) == "" &&
 				strings.TrimSpace(description) == "" &&
 				strings.TrimSpace(due) == "" && strings.TrimSpace(startsOn) == "" &&
-				!assigneeChanged &&
+				!assigneeChanged && !subscribersChanged &&
 				(!cmd.Flags().Changed("notify") || !notify) &&
-				!needsClear {
+				!clearDue && !clearStarts && !clearDescription && !clearSubscribers {
 				return noChanges(cmd)
 			}
 
@@ -1024,156 +1044,95 @@ Clear a field by passing its --no- flag or an empty value:
 				return output.ErrUsage("Invalid todo ID")
 			}
 
-			var todo *basecamp.Todo
+			// Pre-Edit validation and resolution — no todo HTTP happens here.
+			// Image uploads are deferred into the Edit closure so a missing
+			// todo can't orphan uploaded attachments.
+			var descHTML string
+			if !clearDescription && description != "" {
+				descHTML = richtext.MarkdownToHTML(description)
+			}
 
-			if needsClear {
-				// The BC3 API clears fields by omission: include all fields you
-				// want to keep, omit those you want to clear. The SDK's typed
-				// UpdateTodoRequest always includes all fields, so we use a raw
-				// PUT with a hand-built body instead.
-				existingTodo, err := app.Account().Todos().Get(cmd.Context(), todoID)
-				if err != nil {
-					return convertSDKError(err)
+			var parsedDue string
+			if !clearDue && strings.TrimSpace(due) != "" {
+				parsedDue = dateparse.Parse(due)
+				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
 				}
-				if existingTodo.Bucket == nil {
-					return fmt.Errorf("todo %d has no associated project", todoID)
+			}
+			var parsedStarts string
+			if !clearStarts && !clearDue && strings.TrimSpace(startsOn) != "" {
+				parsedStarts = dateparse.Parse(startsOn)
+				if _, err := time.Parse("2006-01-02", parsedStarts); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid start date: %q", startsOn))
 				}
+			}
 
-				// Start with content (required). User-provided title overrides.
-				body := map[string]any{}
+			var assigneeIDs []int64
+			if assigneeChanged {
+				if assigneeIDs, err = resolveAssigneeIDs(cmd.Context(), app, assignee); err != nil {
+					return err
+				}
+			}
+			var subscriberIDs []int64
+			if subscribersChanged {
+				if subscriberIDs, err = resolveCompletionSubscriberIDs(cmd.Context(), app, notifyOnCompletion); err != nil {
+					return err
+				}
+			}
+
+			todo, err := app.Account().Todos().Edit(cmd.Context(), todoID, func(f *basecamp.TodoFields) error {
+				// Fail closed on unverifiable preserved subscriber state
+				// (#538): field presence is the server/SDK contract, but the
+				// CLI still refuses to write back subscriber IDs it can't
+				// trust.
+				if !subscribersChanged && !clearSubscribers {
+					for _, id := range f.CompletionSubscriberIDs {
+						if id <= 0 {
+							return fmt.Errorf("cannot verify current completion subscribers for todo %d: subscriber with missing or invalid id", todoID)
+						}
+					}
+				}
 				if effectiveTitle != "" {
-					body["content"] = effectiveTitle
-				} else {
-					body["content"] = existingTodo.Content
+					f.Content = effectiveTitle
 				}
-
-				// Description: omit to clear, include new or existing to preserve.
-				if !clearDescription {
-					if description != "" {
-						descHTML := richtext.MarkdownToHTML(description)
-						descHTML, err = resolveLocalImages(cmd, app, descHTML)
-						if err != nil {
-							return err
-						}
-						body["description"] = descHTML
-					} else {
-						body["description"] = existingTodo.Description
-					}
-				}
-
-				// Due date: omit to clear, include new or existing to preserve.
-				// Clearing due also clears starts (Basecamp enforces starts <= due).
-				if !clearDue {
-					if strings.TrimSpace(due) != "" {
-						if parsed := dateparse.Parse(due); parsed != "" {
-							body["due_on"] = parsed
-						}
-					} else if existingTodo.DueOn != "" {
-						body["due_on"] = existingTodo.DueOn
-					}
-				}
-
-				// Start date: omit to clear, include new or existing to preserve.
-				// Also omitted when clearing due (see above).
-				if !clearStarts && !clearDue {
-					if strings.TrimSpace(startsOn) != "" {
-						if parsed := dateparse.Parse(startsOn); parsed != "" {
-							body["starts_on"] = parsed
-						}
-					} else if existingTodo.StartsOn != "" {
-						body["starts_on"] = existingTodo.StartsOn
-					}
-				}
-
-				// Assignees: preserve existing unless explicitly changed.
-				if assigneeChanged {
-					assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
+				if clearDescription {
+					f.Description = ""
+				} else if descHTML != "" {
+					// Uploads happen here, after Edit's GET confirmed the
+					// todo exists.
+					resolved, err := resolveLocalImages(cmd, app, descHTML)
 					if err != nil {
 						return err
 					}
-					body["assignee_ids"] = assigneeIDs
-				} else if len(existingTodo.Assignees) > 0 {
-					ids := make([]int64, len(existingTodo.Assignees))
-					for i, a := range existingTodo.Assignees {
-						ids[i] = a.ID
-					}
-					body["assignee_ids"] = ids
+					f.Description = resolved
 				}
-
-				if cmd.Flags().Changed("notify") && notify {
-					body["notify"] = true
+				// Clearing due also clears starts (Basecamp enforces
+				// starts <= due).
+				if clearDue {
+					f.DueOn, f.StartsOn = "", ""
+				} else if parsedDue != "" {
+					f.DueOn = parsedDue
 				}
-
-				path := fmt.Sprintf("/buckets/%d/todos/%d.json", existingTodo.Bucket.ID, todoID)
-				_, err = app.Account().Put(cmd.Context(), path, body)
-				if err != nil {
-					return convertSDKError(err)
-				}
-
-				todo, err = app.Account().Todos().Get(cmd.Context(), todoID)
-				if err != nil {
-					return convertSDKError(err)
-				}
-			} else {
-				// Fetch existing todo so we can preserve fields the user
-				// didn't change. The BC3 API clears fields by omission,
-				// so a partial PUT would wipe untouched fields.
-				existingTodo, err := app.Account().Todos().Get(cmd.Context(), todoID)
-				if err != nil {
-					return convertSDKError(err)
-				}
-
-				req := &basecamp.UpdateTodoRequest{
-					Content:     existingTodo.Content,
-					Description: existingTodo.Description,
-					DueOn:       existingTodo.DueOn,
-					StartsOn:    existingTodo.StartsOn,
-				}
-				if len(existingTodo.Assignees) > 0 {
-					ids := make([]int64, len(existingTodo.Assignees))
-					for i, a := range existingTodo.Assignees {
-						ids[i] = a.ID
-					}
-					req.AssigneeIDs = ids
-				}
-
-				// Override with user-provided values.
-				if effectiveTitle != "" {
-					req.Content = effectiveTitle
-				}
-				if description != "" {
-					descHTML := richtext.MarkdownToHTML(description)
-					descHTML, err = resolveLocalImages(cmd, app, descHTML)
-					if err != nil {
-						return err
-					}
-					req.Description = descHTML
-				}
-				if strings.TrimSpace(due) != "" {
-					if parsed := dateparse.Parse(due); parsed != "" {
-						req.DueOn = parsed
-					}
-				}
-				if strings.TrimSpace(startsOn) != "" {
-					if parsed := dateparse.Parse(startsOn); parsed != "" {
-						req.StartsOn = parsed
-					}
+				if clearStarts {
+					f.StartsOn = ""
+				} else if !clearDue && parsedStarts != "" {
+					f.StartsOn = parsedStarts
 				}
 				if assigneeChanged {
-					assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignee)
-					if err != nil {
-						return err
-					}
-					req.AssigneeIDs = assigneeIDs
+					f.AssigneeIDs = assigneeIDs
+				}
+				if subscribersChanged {
+					f.CompletionSubscriberIDs = subscriberIDs
+				} else if clearSubscribers {
+					f.CompletionSubscriberIDs = []int64{}
 				}
 				if cmd.Flags().Changed("notify") && notify {
-					req.Notify = true
+					f.Notify = true
 				}
-
-				todo, err = app.Account().Todos().Update(cmd.Context(), todoID, req)
-				if err != nil {
-					return convertSDKError(err)
-				}
+				return nil
+			})
+			if err != nil {
+				return convertSDKError(err)
 			}
 
 			return app.OK(todo,
@@ -1205,13 +1164,22 @@ Clear a field by passing its --no- flag or an empty value:
 	cmd.Flags().BoolVar(&noDue, "no-due", false, "Clear the due date")
 	cmd.Flags().BoolVar(&noStartsOn, "no-starts-on", false, "Clear the start date")
 	cmd.Flags().BoolVar(&noDescription, "no-description", false, "Clear the description")
+	cmd.Flags().StringVar(&notifyOnCompletion, "notify-on-completion", "", "People to notify when done (names or IDs, comma-separated)")
+	cmd.Flags().BoolVar(&noNotifyOnCompletion, "no-notify-on-completion", false, "Clear the people notified when done")
 
-	// Register tab completion for assignee flags
+	// Register tab completion for people flags
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("notify-on-completion", completer.PeopleNameCompletion())
 
 	return cmd
+}
+
+// resolveCompletionSubscriberIDs resolves --notify-on-completion values
+// (comma-separated names or IDs) with completion-subscriber wording in errors.
+func resolveCompletionSubscriberIDs(ctx context.Context, app *appctx.App, input string) ([]int64, error) {
+	return resolvePersonRoleIDs(ctx, app, input, "Completion subscriber")
 }
 
 func newTodosCompleteCmd() *cobra.Command {

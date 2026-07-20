@@ -455,9 +455,17 @@ basecamp unassign <id> [id...] --step --from <person> --in <project> # Remove st
 basecamp todos position <id> --to 1                     # Move to top
 basecamp todos position <id> --to 1 --list <id|name|url> # Move to different list
 basecamp todos sweep --overdue --complete --comment "Done" --in <project>
+basecamp todos create "Task" --in <project> --list <list> --notify-on-completion "Jane,Bob"  # Notify when done
+basecamp todos update <id> --notify-on-completion "Jane"  # Set who's notified on completion
+basecamp todos update <id> --no-notify-on-completion      # Clear completion notifications
 ```
 
 **Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/incomplete/archived/trashed), `--overdue`, `--list`, `--due`, `--limit`, `--all`
+
+**Completion subscribers** ("When done, notify…"): set with
+`--notify-on-completion <names or IDs, comma-separated>` on `todos create` and
+`todos update`; clear with `--no-notify-on-completion` on `todos update`.
+Plain updates (title, due date, etc.) preserve existing completion subscribers.
 
 **Todo Subtasks (checklist steps):** Basecamp to-do subtasks are stored as
 `Kanban::Step` records, even when their parent is a normal `Todo`. The regular

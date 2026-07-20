@@ -97,7 +97,7 @@ func newBoostTestApp(transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &boostTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),

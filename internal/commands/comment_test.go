@@ -155,7 +155,7 @@ func setupCommentsWriteTestApp(t *testing.T, transport http.RoundTripper) (*appc
 	t.Helper()
 
 	app, buf := setupTestApp(t)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &testTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &testTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)

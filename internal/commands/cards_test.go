@@ -87,7 +87,7 @@ func setupTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	// Create SDK client with mock token provider and no-network transport
 	// The transport prevents real HTTP calls - fails instantly instead of timing out
 	authMgr := auth.NewManager(cfg, nil)
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{},
 		basecamp.WithTransport(noNetworkTransport{}),
 		basecamp.WithMaxRetries(1), // Disable retries for instant failure
@@ -1542,7 +1542,7 @@ func setupCardsMockApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),

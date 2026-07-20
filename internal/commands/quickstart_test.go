@@ -48,7 +48,7 @@ func setupQuickstartTestApp(t *testing.T, accountID, projectID string) (*appctx.
 
 	authMgr := auth.NewManager(cfg, nil)
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &quickstartTestTokenProvider{},
 		basecamp.WithTransport(quickstartNoNetworkTransport{}),
 		basecamp.WithMaxRetries(1),

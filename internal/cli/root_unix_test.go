@@ -18,6 +18,18 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
+// hardenTempDir returns t.TempDir() with symlinks resolved. On macOS the
+// default TMPDIR lives under /var -> private/var, and hardenConfigDir's
+// per-component O_NOFOLLOW descent (correctly) refuses the symlinked ancestor
+// — which would silently no-op every positive-case assertion below and let the
+// negative cases pass vacuously.
+func hardenTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return resolved
+}
+
 // TestHardenConfigDir exercises the step-by-step openat descent that hardens
 // the global config dir (open "/", Openat each component with O_NOFOLLOW,
 // then fstat -> fchmod the final fd). Refusing a symlink at every component
@@ -33,7 +45,7 @@ func TestHardenConfigDir(t *testing.T) {
 	}
 
 	t.Run("tightens a normal config dir to 0700", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "basecamp")
+		dir := filepath.Join(hardenTempDir(t), "basecamp")
 		require.NoError(t, os.Mkdir(dir, 0o755))
 		require.NoError(t, os.Chmod(dir, 0o755))
 
@@ -51,7 +63,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// is a normal 0755 euid-owned temp dir (safe), so only the target's own mode
 		// is in play.
 		for _, targetMode := range []os.FileMode{0o775, 0o777} {
-			parent := t.TempDir() // default 0700-ish, euid-owned, non-writable by others
+			parent := hardenTempDir(t) // default 0700-ish, euid-owned, non-writable by others
 			require.NoError(t, os.Chmod(parent, 0o755))
 			dir := filepath.Join(parent, "basecamp")
 			require.NoError(t, os.Mkdir(dir, targetMode))
@@ -82,7 +94,7 @@ func TestHardenConfigDir(t *testing.T) {
 			t.Skip("owner-unreadable target open relies on O_PATH, Linux-only; O_RDONLY fallback elsewhere still needs read")
 		}
 		for _, targetMode := range []os.FileMode{0o333, 0o377} {
-			parent := t.TempDir()
+			parent := hardenTempDir(t)
 			require.NoError(t, os.Chmod(parent, 0o755))
 			dir := filepath.Join(parent, "basecamp")
 			require.NoError(t, os.Mkdir(dir, 0o700))
@@ -98,7 +110,7 @@ func TestHardenConfigDir(t *testing.T) {
 	})
 
 	t.Run("symlinked final component is not followed", func(t *testing.T) {
-		base := t.TempDir()
+		base := hardenTempDir(t)
 		target := filepath.Join(base, "real-cfg")
 		require.NoError(t, os.Mkdir(target, 0o755))
 		require.NoError(t, os.Chmod(target, 0o755))
@@ -123,7 +135,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// follow link -> real and chmod base/real/child to 0700. The
 		// per-component O_NOFOLLOW descent refuses `link` (ELOOP) and chmods
 		// nothing.
-		base := t.TempDir()
+		base := hardenTempDir(t)
 		realDir := filepath.Join(base, "realDir")
 		require.NoError(t, os.Mkdir(realDir, 0o755))
 		victim := filepath.Join(realDir, "child")
@@ -153,7 +165,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// Previously the ancestor walk skipped any dir under a world-writable
 		// parent (e.g. a config dir under /tmp), leaving it loose. The fd-based
 		// sequence is race-free regardless of ancestry, so it hardens it.
-		parent := filepath.Join(t.TempDir(), "tmp-style")
+		parent := filepath.Join(hardenTempDir(t), "tmp-style")
 		require.NoError(t, os.Mkdir(parent, 0o777))
 		require.NoError(t, os.Chmod(parent, 0o777|os.ModeSticky))
 		dir := filepath.Join(parent, "basecamp")
@@ -174,7 +186,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// fd-based ancestor-safety check aborts on the writable non-sticky parent
 		// before any chmod. The target itself is euid-owned; only the parent is
 		// unsafe.
-		parent := filepath.Join(t.TempDir(), "shared")
+		parent := filepath.Join(hardenTempDir(t), "shared")
 		require.NoError(t, os.Mkdir(parent, 0o777))
 		require.NoError(t, os.Chmod(parent, 0o777)) // world-writable, NO sticky bit
 		dir := filepath.Join(parent, "basecamp")
@@ -202,7 +214,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// path end-to-end (the parent carries no group/world read or write) and
 		// asserts hardening completes; a genuinely read-denied ancestor would
 		// require a second uid.
-		grandparent := filepath.Join(t.TempDir(), "traverse-only")
+		grandparent := filepath.Join(hardenTempDir(t), "traverse-only")
 		require.NoError(t, os.Mkdir(grandparent, 0o711))
 		require.NoError(t, os.Chmod(grandparent, 0o711)) // execute-only for group/other
 		dir := filepath.Join(grandparent, "basecamp")
@@ -222,7 +234,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// advance (skipping the fchmod means no ctime bump). Timestamp granularity
 		// on some runners can make the ctime check flaky, so it only fails when the
 		// ctime clearly moved forward after a short spin.
-		dir := filepath.Join(t.TempDir(), "basecamp")
+		dir := filepath.Join(hardenTempDir(t), "basecamp")
 		require.NoError(t, os.Mkdir(dir, 0o700))
 		require.NoError(t, os.Chmod(dir, 0o700))
 
@@ -248,7 +260,7 @@ func TestHardenConfigDir(t *testing.T) {
 	})
 
 	t.Run("regular file is not chmod'd", func(t *testing.T) {
-		file := filepath.Join(t.TempDir(), "not-a-dir")
+		file := filepath.Join(hardenTempDir(t), "not-a-dir")
 		require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
 
 		hardenConfigDir(file)
@@ -258,7 +270,7 @@ func TestHardenConfigDir(t *testing.T) {
 
 	t.Run("missing dir is a no-op", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			hardenConfigDir(filepath.Join(t.TempDir(), "does-not-exist"))
+			hardenConfigDir(filepath.Join(hardenTempDir(t), "does-not-exist"))
 		})
 	})
 
@@ -267,7 +279,7 @@ func TestHardenConfigDir(t *testing.T) {
 		// a writer appeared (blocking every command). O_NONBLOCK|O_DIRECTORY
 		// make the open return immediately and fail on the non-directory, so
 		// nothing is chmod'd.
-		fifo := filepath.Join(t.TempDir(), "basecamp")
+		fifo := filepath.Join(hardenTempDir(t), "basecamp")
 		if err := syscall.Mkfifo(fifo, 0o644); err != nil {
 			t.Skipf("mkfifo unavailable in this environment: %v", err)
 		}
@@ -312,7 +324,7 @@ func TestHardenConfigDir(t *testing.T) {
 		if os.Geteuid() != 0 {
 			t.Skip("need root to chown a dir to a foreign uid; ownership logic covered by TestOwnedByUID")
 		}
-		dir := filepath.Join(t.TempDir(), "foreign")
+		dir := filepath.Join(hardenTempDir(t), "foreign")
 		require.NoError(t, os.Mkdir(dir, 0o755))
 		require.NoError(t, os.Chmod(dir, 0o755))
 		const foreignUID = 65534 // conventionally "nobody"

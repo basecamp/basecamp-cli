@@ -40,7 +40,7 @@ func (testTokenProvider) AccessToken(_ context.Context) (string, error) {
 }
 
 func newTestResolver(transport http.RoundTripper, flags *Flags) *Resolver {
-	sdk := basecamp.NewClient(&basecamp.Config{}, testTokenProvider{},
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, testTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
