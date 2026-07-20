@@ -1,13 +1,21 @@
 package harness
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // AgentInfo describes a coding agent integration.
 type AgentInfo struct {
 	Name   string                // "Claude Code"
 	ID     string                // "claude"
 	Detect func() bool           // returns true if the agent is installed
-	Checks func() []*StatusCheck // health checks for doctor
+	Checks func() []*StatusCheck // cheap health checks gating setup wizard behavior
+
+	// Diagnostics returns the full doctor check suite, including checks that
+	// are too slow or noisy for the wizard (e.g. version comparisons).
+	// When nil, doctor falls back to Checks.
+	Diagnostics func(ctx context.Context) []*StatusCheck
 }
 
 var (

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -32,7 +31,10 @@ var (
 	}
 )
 
-var errCodexBinaryMissing = errors.New("codex executable not found")
+var (
+	errCodexBinaryMissing = errors.New("codex executable not found")
+	errCodexParse         = errors.New("parse Codex plugin list")
+)
 
 type codexPluginState struct {
 	PluginID    string `json:"pluginId"`
@@ -51,6 +53,7 @@ func init() {
 		Checks: func() []*StatusCheck {
 			return []*StatusCheck{CheckCodexPlugin()}
 		},
+		Diagnostics: CheckCodexPluginDiagnosticsContext,
 	})
 }
 
@@ -198,10 +201,10 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 		Available *[]codexPluginState `json:"available"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		return codexPluginState{}, false, fmt.Errorf("parse Codex plugin list: %w", err)
+		return codexPluginState{}, false, fmt.Errorf("%w: %w", errCodexParse, err)
 	}
 	if envelope.Installed == nil && envelope.Available == nil {
-		return codexPluginState{}, false, errors.New("parse Codex plugin list: missing installed and available fields")
+		return codexPluginState{}, false, fmt.Errorf("%w: missing installed and available fields", errCodexParse)
 	}
 	if envelope.Installed != nil {
 		for _, plugin := range *envelope.Installed {
@@ -238,7 +241,7 @@ func codexQueryFailure(name string, err error) *StatusCheck {
 		}
 	}
 	message := "Cannot query Codex plugins"
-	if strings.HasPrefix(err.Error(), "parse ") {
+	if errors.Is(err, errCodexParse) {
 		message = "Cannot parse Codex plugin list"
 	}
 	return &StatusCheck{
