@@ -112,13 +112,38 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 
 **Do not execute this section unless explicitly requested.** The core installation is complete when DONE WHEN passes.
 
+Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
+
 ### Claude Code
 
 ```bash
 basecamp setup claude
 ```
 
-This registers the marketplace and installs the plugin with skills, hooks, and agent workflow support.
+This registers the marketplace and installs the plugin with skills and agent workflow support.
+
+### Codex
+
+```bash
+basecamp setup codex
+```
+
+This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. Start a new Codex thread after setup to load the skills.
+
+For a manual install:
+
+```bash
+codex plugin marketplace add basecamp/claude-plugins
+codex plugin add basecamp@37signals
+```
+
+To pick up a newer plugin version later, refresh with `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
+
+Verify either agent integration with structured diagnostics:
+
+```bash
+basecamp doctor --json
+```
 
 ### Other Agents
 

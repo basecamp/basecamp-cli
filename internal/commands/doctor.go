@@ -206,28 +206,20 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		checks = append(checks, checkSkillVersion())
 	}
 	for _, agent := range harness.DetectedAgents() {
-		if agent.Checks != nil {
-			for _, c := range agent.Checks() {
-				checks = append(checks, Check{
-					Name:    c.Name,
-					Status:  c.Status,
-					Message: c.Message,
-					Hint:    c.Hint,
-				})
-			}
+		var agentChecks []*harness.StatusCheck
+		if agent.Diagnostics != nil {
+			agentChecks = agent.Diagnostics(ctx)
+		} else if agent.Checks != nil {
+			agentChecks = agent.Checks()
 		}
-	}
-
-	// 13. Claude plugin version (doctor-only, not part of generic agent checks
-	//     which gate setup wizard behavior)
-	if harness.DetectClaude() {
-		pvc := harness.CheckClaudePluginVersion()
-		checks = append(checks, Check{
-			Name:    pvc.Name,
-			Status:  pvc.Status,
-			Message: pvc.Message,
-			Hint:    pvc.Hint,
-		})
+		for _, c := range agentChecks {
+			checks = append(checks, Check{
+				Name:    c.Name,
+				Status:  c.Status,
+				Message: c.Message,
+				Hint:    c.Hint,
+			})
+		}
 	}
 
 	return checks
@@ -984,6 +976,12 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 				Action:      "install",
 				Cmd:         "basecamp skill install",
 				Description: "Update installed skill",
+			})
+		case "Codex Plugin", "Codex Plugin Version":
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "setup_codex",
+				Cmd:         "basecamp setup codex",
+				Description: "Install or update the Codex plugin",
 			})
 		}
 	}

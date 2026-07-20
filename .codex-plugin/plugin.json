@@ -1,0 +1,34 @@
+{
+  "name": "basecamp",
+  "version": "0.7.2",
+  "description": "Use Basecamp from Codex to find work, create todos, and keep projects up to date.",
+  "author": {
+    "name": "37signals",
+    "email": "support@37signals.com",
+    "url": "https://37signals.com"
+  },
+  "homepage": "https://basecamp.com/cli",
+  "repository": "https://github.com/basecamp/basecamp-cli",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Basecamp",
+    "shortDescription": "Work with Basecamp from Codex.",
+    "longDescription": "Find assignments, create and update Basecamp work, and diagnose the integration. Requires the Basecamp CLI (basecamp) installed and on your PATH.",
+    "developerName": "37signals",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://basecamp.com/cli",
+    "defaultPrompt": [
+      "Show my assigned Basecamp work and highlight anything overdue.",
+      "Create a Basecamp todo from this task and assign it to me.",
+      "Summarize recent activity in the current Basecamp project."
+    ],
+    "composerIcon": "./assets/bc5-snowglobe.png",
+    "logo": "./assets/bc5-snowglobe.png"
+  }
+}

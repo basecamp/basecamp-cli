@@ -23,7 +23,7 @@ make release VERSION=0.2.0 DRY_RUN=1
 1. Validates semver format, main branch, clean tree, synced with remote
 2. Checks for `replace` directives in go.mod
 3. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
-4. Updates stable release metadata (`nix/package.nix` and `.claude-plugin/plugin.json`) for stable versions
+4. Updates stable release metadata (`nix/package.nix`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`) for stable versions
 5. Creates annotated tag `v$VERSION` and pushes to origin
 6. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
    - Security scan + full test suite + CLI surface compatibility check
@@ -58,6 +58,7 @@ manager channels and agent distribution metadata on the latest stable version.
 | AUR | Updates the `basecamp-cli` package when `AUR_KEY` is configured. | The stable AUR package remains active. |
 | Nix flake | Updates `nix/package.nix` and verifies the flake. | Nix metadata remains on the latest stable version. |
 | Claude plugin metadata | Updates `.claude-plugin/plugin.json`. | Plugin metadata remains on the latest stable version. |
+| Codex plugin metadata | Updates `.codex-plugin/plugin.json`. | Plugin metadata remains on the latest stable version. |
 | Skills distribution | Syncs skills to the distribution repo. | Uses the skill embedded in the prerelease binary. |
 
 The prerelease binary embeds the matching `skills/basecamp/SKILL.md`. Testers can

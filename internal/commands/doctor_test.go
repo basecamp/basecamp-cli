@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -660,6 +661,51 @@ func TestBuildDoctorBreadcrumbs_SkillVersionWarn(t *testing.T) {
 	breadcrumbs := buildDoctorBreadcrumbs(checks)
 	require.Len(t, breadcrumbs, 1)
 	assert.Equal(t, "basecamp skill install", breadcrumbs[0].Cmd)
+}
+
+func TestCheckCodexIntegrationIncludesVersion(t *testing.T) {
+	logPath := installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+	app, _ := setupDoctorTestApp(t, "")
+
+	checks := runDoctorChecks(context.Background(), app, false)
+	var names []string
+	for _, check := range checks {
+		if check.Name == "Codex Plugin" || check.Name == "Codex Plugin Version" {
+			names = append(names, check.Name)
+		}
+	}
+	require.Equal(t, []string{"Codex Plugin", "Codex Plugin Version"}, names)
+	assert.Equal(t, 1, strings.Count(readCodexSetupCalls(t, logPath), "plugin list --available --json"))
+}
+
+func TestCheckCodexIntegrationWarnsOnVersionMismatch(t *testing.T) {
+	installCodexStub(t, codexStubOptions{pluginAlreadyInstalled: true})
+	app, _ := setupDoctorTestApp(t, "")
+	original := version.Version
+	version.Version = "0.8.0"
+	t.Cleanup(func() { version.Version = original })
+
+	checks := runDoctorChecks(context.Background(), app, false)
+	for _, check := range checks {
+		if check.Name == "Codex Plugin Version" {
+			assert.Equal(t, "warn", check.Status)
+			assert.Contains(t, check.Hint, "basecamp setup codex")
+			return
+		}
+	}
+	t.Fatal("Codex Plugin Version check not found")
+}
+
+func TestBuildDoctorBreadcrumbs_Codex(t *testing.T) {
+	checks := []Check{
+		{Name: "Codex Plugin", Status: "fail"},
+		{Name: "Codex Plugin Version", Status: "warn"},
+	}
+
+	breadcrumbs := buildDoctorBreadcrumbs(checks)
+
+	require.Len(t, breadcrumbs, 1)
+	assert.Equal(t, "basecamp setup codex", breadcrumbs[0].Cmd)
 }
 
 func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
