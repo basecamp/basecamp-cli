@@ -1,0 +1,29 @@
+skills/basecamp-doctor/SKILL.md
+  s_9ed1364f524f72::t_d894d8b2737a75 3,24-26,28
+install.md
+  s_9ed1364f524f72::t_816958e8e370a1 115-116,123,131,136-137,140
+  s_9ed1364f524f72::t_b7c0bfd469715c 141
+.codex-plugin/plugin.json
+  s_9ed1364f524f72::t_6391e458d40c10 17
+README.md
+  s_9ed1364f524f72::t_4294fc4b6a7db1 151,153-155,160-161,164-165
+  s_9ed1364f524f72::t_8b0309f903d2ce 166
+Makefile
+  s_9ed1364f524f72::t_9003901ee6243e 397
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "cb13972688c3a567dd068d31093ffb9ff80034ba",
+  "prompts": {},
+  "sessions": {
+    "s_9ed1364f524f72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70a8485a-17d2-4231-9d1d-a69a30c2c142",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
