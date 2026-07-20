@@ -25,9 +25,10 @@ const (
 
 // runCodexSetupCommand runs a codex subcommand, capturing stdout for --json
 // parsing while streaming stderr (progress, prompts, errors) to the given
-// writer. The returned bytes append captured stderr after stdout so failure
-// sniffing sees everything the command said.
-var runCodexSetupCommand = func(ctx context.Context, stderr io.Writer, path string, args ...string) ([]byte, error) {
+// writer. Captured stderr is returned separately so structured stdout parsing
+// is never defeated by stderr noise, while failure sniffing still sees
+// everything the command said.
+var runCodexSetupCommand = func(ctx context.Context, stderr io.Writer, path string, args ...string) (stdoutOutput, stderrOutput []byte, err error) {
 	command := exec.CommandContext(ctx, path, args...) //nolint:gosec // path comes from FindCodexBinary
 	var stdout, captured bytes.Buffer
 	command.Stdout = &stdout
@@ -36,8 +37,8 @@ var runCodexSetupCommand = func(ctx context.Context, stderr io.Writer, path stri
 	} else {
 		command.Stderr = &captured
 	}
-	err := command.Run()
-	return append(stdout.Bytes(), captured.Bytes()...), err
+	err = command.Run()
+	return stdout.Bytes(), captured.Bytes(), err
 }
 
 // runCodexSetup performs the Codex setup steps for the interactive wizard.
@@ -75,30 +76,34 @@ func runCodexSetupNonInteractive(cmd *cobra.Command) error {
 func installCodexPlugin(parent context.Context, stderr io.Writer, progress func(string)) error {
 	codexPath := harness.FindCodexBinary()
 	if codexPath == "" {
-		return codexSetupError("Codex executable not found")
+		// No Codex subcommands here — they would be impossible to run.
+		return &agentSetupError{
+			Summary: "Codex executable not found — install Codex, then re-run setup",
+			Manual:  []string{"basecamp setup codex"},
+		}
 	}
 
 	progress("Registering 37signals marketplace…")
-	output, err := runCodexStep(parent, stderr, codexMarketplaceTimeout, codexPath,
+	stdout, stderrOutput, err := runCodexStep(parent, stderr, codexMarketplaceTimeout, codexPath,
 		"plugin", "marketplace", "add", harness.CodexMarketplaceSource, "--json")
-	alreadyAdded := codexMarketplaceAlreadyAdded(output)
+	alreadyAdded := codexMarketplaceAlreadyAdded(stdout, stderrOutput)
 	if err != nil && !alreadyAdded {
-		return codexSetupError("marketplace add failed: " + codexCommandFailure(output, err))
+		return codexSetupError("marketplace add failed: " + codexCommandFailure(stdout, stderrOutput, err))
 	}
 	if alreadyAdded {
 		progress("Refreshing 37signals marketplace…")
-		upgradeOutput, upgradeErr := runCodexStep(parent, stderr, codexMarketplaceTimeout, codexPath,
+		upgradeStdout, upgradeStderr, upgradeErr := runCodexStep(parent, stderr, codexMarketplaceTimeout, codexPath,
 			"plugin", "marketplace", "upgrade", harness.CodexMarketplaceName, "--json")
 		if upgradeErr != nil {
-			return codexSetupError("marketplace upgrade failed: " + codexCommandFailure(upgradeOutput, upgradeErr))
+			return codexSetupError("marketplace upgrade failed: " + codexCommandFailure(upgradeStdout, upgradeStderr, upgradeErr))
 		}
 	}
 
 	progress("Installing basecamp plugin…")
-	output, err = runCodexStep(parent, stderr, codexInstallTimeout, codexPath,
+	stdout, stderrOutput, err = runCodexStep(parent, stderr, codexInstallTimeout, codexPath,
 		"plugin", "add", harness.CodexExpectedPluginKey, "--json")
-	if err != nil && !codexPluginAlreadyInstalled(output) {
-		return codexSetupError("plugin add failed: " + codexCommandFailure(output, err))
+	if err != nil && !codexPluginAlreadyInstalled(stdout, stderrOutput) {
+		return codexSetupError("plugin add failed: " + codexCommandFailure(stdout, stderrOutput, err))
 	}
 
 	progress("Verifying installation…")
@@ -115,31 +120,31 @@ func installCodexPlugin(parent context.Context, stderr io.Writer, progress func(
 	return nil
 }
 
-func runCodexStep(parent context.Context, stderr io.Writer, timeout time.Duration, path string, args ...string) ([]byte, error) {
+func runCodexStep(parent context.Context, stderr io.Writer, timeout time.Duration, path string, args ...string) (stdoutOutput, stderrOutput []byte, err error) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	return runCodexSetupCommand(ctx, stderr, path, args...)
 }
 
-func codexMarketplaceAlreadyAdded(output []byte) bool {
+func codexMarketplaceAlreadyAdded(stdout, stderr []byte) bool {
 	var result struct {
 		AlreadyAdded bool `json:"alreadyAdded"`
 	}
-	if json.Unmarshal(output, &result) == nil && result.AlreadyAdded {
+	if json.Unmarshal(stdout, &result) == nil && result.AlreadyAdded {
 		return true
 	}
-	message := strings.ToLower(string(output))
+	message := strings.ToLower(string(stdout) + " " + string(stderr))
 	return strings.Contains(message, "already") &&
 		(strings.Contains(message, "registered") || strings.Contains(message, "configured") || strings.Contains(message, "exists"))
 }
 
-func codexPluginAlreadyInstalled(output []byte) bool {
-	message := strings.ToLower(string(output))
+func codexPluginAlreadyInstalled(stdout, stderr []byte) bool {
+	message := strings.ToLower(string(stdout) + " " + string(stderr))
 	return strings.Contains(message, "already") && strings.Contains(message, "installed")
 }
 
-func codexCommandFailure(output []byte, err error) string {
-	message := strings.TrimSpace(string(output))
+func codexCommandFailure(stdout, stderr []byte, err error) string {
+	message := strings.TrimSpace(strings.TrimSpace(string(stdout)) + "\n" + strings.TrimSpace(string(stderr)))
 	if len(message) > 500 {
 		message = message[:500]
 	}

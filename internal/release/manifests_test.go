@@ -244,15 +244,20 @@ func readManifest(t *testing.T, path string) pluginManifest {
 }
 
 // requireRepoRelative resolves a manifest path against the repository root and
-// fails if it escapes it.
+// fails if it escapes it. Symlinks are resolved first so a link pointing
+// outside the repository cannot pass a purely lexical containment check.
 func requireRepoRelative(t *testing.T, root, path string) string {
 	t.Helper()
-	resolved := filepath.Clean(filepath.Join(root, filepath.FromSlash(path)))
-	rel, err := filepath.Rel(root, resolved)
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	joined := filepath.Join(root, filepath.FromSlash(path))
+	resolved, err := filepath.EvalSymlinks(joined)
+	require.NoError(t, err, "manifest path must exist: %s", path)
+	rel, err := filepath.Rel(resolvedRoot, resolved)
 	require.NoError(t, err)
 	require.False(t, rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)),
 		"manifest path escapes repository root: %s", path)
-	return resolved
+	return joined
 }
 
 func copyFile(t *testing.T, source, destination string) {

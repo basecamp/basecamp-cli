@@ -97,20 +97,18 @@ func TestSetupCodexMissingBinaryReturnsManualCommands(t *testing.T) {
 	assert.False(t, envelope.Data.PluginInstalled)
 	require.NotEmpty(t, envelope.Data.Errors)
 	assert.Contains(t, envelope.Data.Errors[0], "Codex executable not found")
-	assert.Equal(t, []string{
-		"codex plugin marketplace add basecamp/claude-plugins",
-		"codex plugin marketplace upgrade 37signals",
-		"codex plugin add basecamp@37signals",
-	}, envelope.Data.ManualCommands)
+	assert.Contains(t, envelope.Data.Errors[0], "install Codex")
+	// Without a codex binary, codex subcommands are impossible — remediation
+	// must not suggest them.
+	assert.Equal(t, []string{"basecamp setup codex"}, envelope.Data.ManualCommands)
 
 	breadcrumbCmds := make([]string, 0, len(envelope.Breadcrumbs))
 	for _, breadcrumb := range envelope.Breadcrumbs {
 		breadcrumbCmds = append(breadcrumbCmds, breadcrumb.Cmd)
+		assert.NotContains(t, breadcrumb.Cmd, "codex plugin")
 	}
 	assert.Contains(t, breadcrumbCmds, "basecamp doctor")
-	for _, manual := range envelope.Data.ManualCommands {
-		assert.Contains(t, breadcrumbCmds, manual)
-	}
+	assert.Contains(t, breadcrumbCmds, "basecamp setup codex")
 }
 
 func TestSetupCodexMarketplaceFailureStopsInstall(t *testing.T) {
