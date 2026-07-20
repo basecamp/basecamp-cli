@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Basecamp",
     "shortDescription": "Work with Basecamp from Codex.",
-    "longDescription": "Find assignments, create and update Basecamp work, diagnose the CLI, and connect Git commits to Basecamp todos.",
+    "longDescription": "Find assignments, create and update Basecamp work, and diagnose the integration. Requires the Basecamp CLI (basecamp) installed and on your PATH.",
     "developerName": "37signals",
     "category": "Productivity",
     "capabilities": [

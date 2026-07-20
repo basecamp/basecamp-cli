@@ -35,7 +35,6 @@ basecamp-cli/
 │   └── version/      # Version info
 ├── e2e/              # BATS integration tests
 ├── skills/           # Agent skills
-├── hooks/            # Codex-native lifecycle hooks
 ├── .claude-plugin/   # Claude Code integration
 └── .codex-plugin/    # Codex plugin manifest
 ```

@@ -148,17 +148,21 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 
 `basecamp` works with any AI agent that can run shell commands.
 
-**Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
+Both plugins require the `basecamp` CLI installed and on your PATH.
 
-**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. Start a new Codex thread afterward, then review and trust the hooks with `/hooks`.
+**Claude Code:** `basecamp setup claude` — installs the plugin with skills and agent workflow support.
+
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills and diagnostics. Start a new Codex thread afterward to load the skills.
 
 Manual Codex installation uses the same marketplace:
 
 ```bash
-codex plugin marketplace add basecamp/claude-plugins --json || \
-  codex plugin marketplace upgrade 37signals --json
-codex plugin add basecamp@37signals --json
+codex plugin marketplace add basecamp/claude-plugins
+codex plugin add basecamp@37signals
 ```
+
+To pick up a newer plugin version later, refresh the marketplace with
+`codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
 
 **Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 

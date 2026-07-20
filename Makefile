@@ -394,6 +394,7 @@ check-surface-compat: build
 .PHONY: check-skill-drift
 check-skill-drift:
 	@scripts/check-skill-drift.sh
+	@scripts/check-skill-drift.sh skills/basecamp-doctor/SKILL.md
 
 # Verify group commands show help bare (no RunE on parents with subcommands)
 .PHONY: check-bare-groups
