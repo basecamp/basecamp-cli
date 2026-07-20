@@ -23,6 +23,15 @@ func TestNewSetupCmdHasCodexSubcommand(t *testing.T) {
 	assert.NotNil(t, findSubcommand(cmd, "codex"))
 }
 
+func findSubcommand(cmd interface{ Commands() []*cobra.Command }, name string) *cobra.Command {
+	for _, child := range cmd.Commands() {
+		if child.Name() == name {
+			return child
+		}
+	}
+	return nil
+}
+
 func TestSetupCodexFreshInstallCommandOrder(t *testing.T) {
 	logPath := installCodexStub(t, codexStubOptions{})
 
@@ -87,8 +96,21 @@ func TestSetupCodexMissingBinaryReturnsManualCommands(t *testing.T) {
 	assert.False(t, envelope.Data.AgentDetected)
 	assert.False(t, envelope.Data.PluginInstalled)
 	require.NotEmpty(t, envelope.Data.Errors)
-	assert.Contains(t, envelope.Data.Errors[0], "codex plugin marketplace add basecamp/claude-plugins --json")
-	assert.Contains(t, envelope.Data.Errors[0], "codex plugin add basecamp@37signals --json")
+	assert.Contains(t, envelope.Data.Errors[0], "Codex executable not found")
+	assert.Equal(t, []string{
+		"codex plugin marketplace add basecamp/claude-plugins",
+		"codex plugin marketplace upgrade 37signals",
+		"codex plugin add basecamp@37signals",
+	}, envelope.Data.ManualCommands)
+
+	breadcrumbCmds := make([]string, 0, len(envelope.Breadcrumbs))
+	for _, breadcrumb := range envelope.Breadcrumbs {
+		breadcrumbCmds = append(breadcrumbCmds, breadcrumb.Cmd)
+	}
+	assert.Contains(t, breadcrumbCmds, "basecamp doctor")
+	for _, manual := range envelope.Data.ManualCommands {
+		assert.Contains(t, breadcrumbCmds, manual)
+	}
 }
 
 func TestSetupCodexMarketplaceFailureStopsInstall(t *testing.T) {
@@ -99,6 +121,7 @@ func TestSetupCodexMarketplaceFailureStopsInstall(t *testing.T) {
 	assert.False(t, envelope.Data.PluginInstalled)
 	require.NotEmpty(t, envelope.Data.Errors)
 	assert.Contains(t, envelope.Data.Errors[0], "marketplace add")
+	assert.NotEmpty(t, envelope.Data.ManualCommands)
 	assert.NotContains(t, readCodexSetupCalls(t, logPath), "plugin add basecamp@37signals --json")
 }
 
@@ -122,7 +145,7 @@ func TestSetupCodexFailedVerificationReturnsStructuredError(t *testing.T) {
 	assert.Contains(t, envelope.Data.Errors[0], "verification")
 }
 
-func TestRunCodexSetupInteractiveExplainsThreadAndHookTrust(t *testing.T) {
+func TestRunCodexSetupInteractiveExplainsNextSteps(t *testing.T) {
 	installCodexStub(t, codexStubOptions{})
 	cmd := &cobra.Command{}
 	var output bytes.Buffer
@@ -133,8 +156,43 @@ func TestRunCodexSetupInteractiveExplainsThreadAndHookTrust(t *testing.T) {
 
 	require.NoError(t, runCodexSetup(cmd, styles))
 
+	assert.Contains(t, output.String(), "Registering 37signals marketplace")
+	assert.Contains(t, output.String(), "Installing basecamp plugin")
 	assert.Contains(t, output.String(), "Start a new Codex thread")
-	assert.Contains(t, output.String(), "/hooks")
+	// No hooks ship yet — setup must not point users at /hooks trust.
+	assert.NotContains(t, output.String(), "/hooks")
+}
+
+func TestRunCodexSetupInteractiveFailureWarnsAndContinues(t *testing.T) {
+	installCodexStub(t, codexStubOptions{marketplaceFailure: true})
+	cmd := &cobra.Command{}
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetContext(context.Background())
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+
+	require.NoError(t, runCodexSetup(cmd, styles), "codex setup failure must not abort the wizard")
+
+	assert.Contains(t, output.String(), "Codex plugin setup failed")
+	assert.Contains(t, output.String(), "codex plugin marketplace add basecamp/claude-plugins")
+	assert.Contains(t, output.String(), "codex plugin add basecamp@37signals")
+	assert.Contains(t, output.String(), "basecamp doctor")
+}
+
+func TestInstallCodexPluginReturnsStructuredError(t *testing.T) {
+	installCodexStub(t, codexStubOptions{marketplaceFailure: true})
+
+	err := installCodexPlugin(context.Background(), nil, func(string) {})
+
+	var setupErr *agentSetupError
+	require.ErrorAs(t, err, &setupErr)
+	assert.Contains(t, setupErr.Summary, "marketplace add failed")
+	assert.Equal(t, []string{
+		"codex plugin marketplace add basecamp/claude-plugins",
+		"codex plugin marketplace upgrade 37signals",
+		"codex plugin add basecamp@37signals",
+	}, setupErr.Manual)
 }
 
 type setupCodexEnvelope struct {
@@ -143,13 +201,19 @@ type setupCodexEnvelope struct {
 		PluginInstalled bool     `json:"plugin_installed"`
 		AgentDetected   bool     `json:"agent_detected"`
 		Errors          []string `json:"errors"`
+		ManualCommands  []string `json:"manual_commands"`
 	} `json:"data"`
+	Breadcrumbs []struct {
+		Action string `json:"action"`
+		Cmd    string `json:"cmd"`
+	} `json:"breadcrumbs"`
 }
 
 func runSetupCodexJSON(t *testing.T) setupCodexEnvelope {
 	t.Helper()
 	app, output := setupQuickstartTestApp(t, "", "")
 	app.Flags.JSON = true
+	app.Flags.Hints = true
 	t.Cleanup(app.Close)
 
 	cmd := NewSetupCmd()

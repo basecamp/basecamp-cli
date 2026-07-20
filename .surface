@@ -845,6 +845,7 @@ CMD basecamp search metadata
 CMD basecamp search types
 CMD basecamp setup
 CMD basecamp setup claude
+CMD basecamp setup codex
 CMD basecamp show
 CMD basecamp skill
 CMD basecamp skill install
@@ -11394,6 +11395,27 @@ FLAG basecamp setup claude --stats type=bool
 FLAG basecamp setup claude --styled type=bool
 FLAG basecamp setup claude --todolist type=string
 FLAG basecamp setup claude --verbose type=count
+FLAG basecamp setup codex --account type=string
+FLAG basecamp setup codex --agent type=bool
+FLAG basecamp setup codex --cache-dir type=string
+FLAG basecamp setup codex --count type=bool
+FLAG basecamp setup codex --help type=bool
+FLAG basecamp setup codex --hints type=bool
+FLAG basecamp setup codex --ids-only type=bool
+FLAG basecamp setup codex --in type=string
+FLAG basecamp setup codex --jq type=string
+FLAG basecamp setup codex --json type=bool
+FLAG basecamp setup codex --markdown type=bool
+FLAG basecamp setup codex --md type=bool
+FLAG basecamp setup codex --no-hints type=bool
+FLAG basecamp setup codex --no-stats type=bool
+FLAG basecamp setup codex --profile type=string
+FLAG basecamp setup codex --project type=string
+FLAG basecamp setup codex --quiet type=bool
+FLAG basecamp setup codex --stats type=bool
+FLAG basecamp setup codex --styled type=bool
+FLAG basecamp setup codex --todolist type=string
+FLAG basecamp setup codex --verbose type=count
 FLAG basecamp show --account type=string
 FLAG basecamp show --agent type=bool
 FLAG basecamp show --all-comments type=bool
@@ -16391,6 +16413,7 @@ SUB basecamp search metadata
 SUB basecamp search types
 SUB basecamp setup
 SUB basecamp setup claude
+SUB basecamp setup codex
 SUB basecamp show
 SUB basecamp skill
 SUB basecamp skill install

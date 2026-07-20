@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,10 +20,18 @@ import (
 // agentSetupHandler describes what a single agent's setup step does and how to run it.
 type agentSetupHandler struct {
 	Labels            []string                                           // what this will do
-	Confirm           string                                             // confirmation prompt
 	Run               func(cmd *cobra.Command, styles *tui.Styles) error // interactive setup
 	RunNonInteractive func(cmd *cobra.Command) error                     // non-interactive setup
 }
+
+// agentSetupError is a setup failure with manual remediation commands the
+// user (or agent) can run themselves.
+type agentSetupError struct {
+	Summary string
+	Manual  []string
+}
+
+func (e *agentSetupError) Error() string { return e.Summary }
 
 // agentSetupHandlers maps agent ID → setup handler.
 var agentSetupHandlers = map[string]agentSetupHandler{
@@ -31,9 +40,16 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 			"Add basecamp/claude-plugins marketplace to Claude Code",
 			"Install the basecamp plugin for Claude Code",
 		},
-		Confirm:           "Set up Basecamp for your coding agents?",
 		Run:               runClaudeSetup,
 		RunNonInteractive: runClaudeSetupNonInteractive,
+	},
+	"codex": {
+		Labels: []string{
+			"Add the 37signals marketplace to Codex",
+			"Install the basecamp plugin for Codex",
+		},
+		Run:               runCodexSetup,
+		RunNonInteractive: runCodexSetupNonInteractive,
 	},
 }
 
@@ -438,6 +454,7 @@ func newSetupAgentCmds() []*cobra.Command {
 				_, skillErr := installSkillFiles()
 
 				var setupErrors []string
+				var manualCommands []string
 				if skillErr != nil {
 					setupErrors = append(setupErrors, fmt.Sprintf("skill install: %s", skillErr))
 				}
@@ -446,6 +463,10 @@ func newSetupAgentCmds() []*cobra.Command {
 					if h.RunNonInteractive != nil {
 						if err := h.RunNonInteractive(cmd); err != nil {
 							setupErrors = append(setupErrors, err.Error())
+							var setupErr *agentSetupError
+							if errors.As(err, &setupErr) {
+								manualCommands = setupErr.Manual
+							}
 						}
 					}
 				} else {
@@ -498,12 +519,24 @@ func newSetupAgentCmds() []*cobra.Command {
 						summary = agent.Name + " plugin not installed"
 					}
 				}
+				if len(manualCommands) > 0 {
+					result["manual_commands"] = manualCommands
+				}
+
+				breadcrumbs := []output.Breadcrumb{
+					{Action: "doctor", Cmd: "basecamp doctor", Description: "Check CLI health"},
+				}
+				for i, manual := range manualCommands {
+					breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+						Action:      fmt.Sprintf("manual_step_%d", i+1),
+						Cmd:         manual,
+						Description: "Manual setup step",
+					})
+				}
 
 				return app.OK(result,
 					output.WithSummary(summary),
-					output.WithBreadcrumbs(
-						output.Breadcrumb{Action: "doctor", Cmd: "basecamp doctor", Description: "Check CLI health"},
-					),
+					output.WithBreadcrumbs(breadcrumbs...),
 				)
 			},
 		})
