@@ -1,0 +1,35 @@
+.surface
+  s_9ed1364f524f72::t_2a2f5e4a5888e4 848,11398-11418,16416,16609
+internal/commands/wizard_codex.go
+  s_9ed1364f524f72::t_f98e5f75188d21 4,7,9,20-24,26-37,39-40,43-44,47-63,72,75,81-83,89-91,97-99,104-107,118-123,152-160
+internal/commands/wizard_codex_test.go
+  s_9ed1364f524f72::t_521f8a61a0fb79 148,159-160,162-195
+  s_9ed1364f524f72::t_45d492e2640212 99-105,107-113
+  s_9ed1364f524f72::t_dc6fa3fb152982 204,206-209
+  s_9ed1364f524f72::t_f6671a8e39532f 124
+  s_9ed1364f524f72::t_0daf4895054378 26-34
+  s_9ed1364f524f72::t_4168a63837cb23 106
+  s_9ed1364f524f72::t_8d57a1d9054d61 216
+internal/commands/wizard_agents.go
+  s_9ed1364f524f72::t_ea7cccca2a2b40 522-535,539
+  s_9ed1364f524f72::t_dc226077ccf55c 27-35,46-52
+  s_9ed1364f524f72::t_d445adc93d9f81 457,466-469
+  s_9ed1364f524f72::t_6649daa5caefb1 5
+  s_9ed1364f524f72::t_37211b62f5575f 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "43ab709cdef30408031a6da673b6d0b87c8b6988",
+  "prompts": {},
+  "sessions": {
+    "s_9ed1364f524f72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70a8485a-17d2-4231-9d1d-a69a30c2c142",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
