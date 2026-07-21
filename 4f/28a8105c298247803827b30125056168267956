@@ -1,0 +1,32 @@
+AGENTS.md
+  s_5e51cc5fce0c0c::t_52dfc412a37876 38
+README.md
+  s_5e51cc5fce0c0c::t_a870b82abc5cb5 153,155
+internal/commands/wizard_codex.go
+  s_5e51cc5fce0c0c::t_f25095066a883b 69
+install.md
+  s_5e51cc5fce0c0c::t_315eb1583ab2e3 131
+  s_5e51cc5fce0c0c::t_55ff7450e1032b 123
+hooks/hooks.json
+  s_5e51cc5fce0c0c::t_99a236ab6b469f 1-54
+.codex-plugin/plugin.json
+  s_5e51cc5fce0c0c::t_a65607f3c14c0b 17
+internal/commands/wizard_codex_test.go
+  s_5e51cc5fce0c0c::t_961bacb530203d 160-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4f28a8105c298247803827b30125056168267956",
+  "prompts": {},
+  "sessions": {
+    "s_5e51cc5fce0c0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e59bd3a-435a-4dd5-b738-4933cdf28d49",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
