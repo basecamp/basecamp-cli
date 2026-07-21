@@ -150,9 +150,9 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 
 Both plugins require the `basecamp` CLI installed and on your PATH.
 
-**Claude Code:** `basecamp setup claude` — installs the plugin with skills and agent workflow support.
+**Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
-**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills and diagnostics. Start a new Codex thread afterward to load the skills.
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks.
 
 Manual Codex installation uses the same marketplace:
 

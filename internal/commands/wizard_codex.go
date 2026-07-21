@@ -65,7 +65,10 @@ func runCodexSetup(cmd *cobra.Command, styles *tui.Styles) error {
 	fmt.Fprintln(w, styles.RenderStatus(true, "37signals marketplace ready"))
 	fmt.Fprintln(w, styles.RenderStatus(true, "Codex plugin installed and enabled"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, styles.Muted.Render("  Start a new Codex thread to load the Basecamp skills."))
+	// Trust must come first: an untrusted SessionStart hook is silently
+	// skipped, so a thread started before trusting gets no hook context.
+	fmt.Fprintln(w, styles.Muted.Render("  Review and trust the plugin hooks with /hooks."))
+	fmt.Fprintln(w, styles.Muted.Render("  Then start a new Codex thread to load the Basecamp skills."))
 	return nil
 }
 
