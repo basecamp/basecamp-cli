@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
-	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
@@ -102,10 +102,12 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	configScope := wizardSaveConfig(cmd.OutOrStdout(), styles, accountID, projectID)
 	result.ConfigScope = configScope
 
-	// Step 6: Coding agent integration
-	if err := wizardAgents(cmd, styles); err != nil {
+	// Coding agent integration
+	agentOutcome, err := wizardAgents(cmd, styles)
+	if err != nil {
 		return err
 	}
+	result.Status = statusFromOutcome(agentOutcome)
 
 	// Persist onboarded flag (always global so it applies everywhere)
 	if err := resolve.PersistValue("onboarded", "true", "global"); err != nil {
@@ -116,7 +118,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	// Interactive mode shows the rich checklist directly; non-interactive
 	// or machine-output mode delegates to app.OK which renders the structured envelope.
 	if app.IsInteractive() && !app.IsMachineOutput() {
-		showSuccess(cmd.OutOrStdout(), styles, result)
+		showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues, agentOutcome.Skipped)
 		return nil
 	}
 
@@ -309,12 +311,36 @@ func wizardSaveConfig(w io.Writer, styles *tui.Styles, accountID, projectID stri
 	return scope
 }
 
-// showSuccess displays the completion summary with example commands.
-func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult) {
+// successHeadline returns the completion banner. When the agent-setup step left
+// unresolved issues, the banner is honest about it rather than claiming
+// "Setup complete!".
+func successHeadline(status string, issueCount int) string {
+	if status != "incomplete" {
+		return "Setup complete!"
+	}
+	if issueCount == 1 {
+		return "Setup finished — 1 step needs attention"
+	}
+	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
+}
+
+// showSuccess displays the completion summary with example commands. checks is
+// the agent-health snapshot rendered as the checklist; issues holds every
+// unresolved problem — snapshot failures plus standalone setup failures such as
+// the baseline skill install or surviving stale entries — and drives the
+// headline and remediation. When the user skipped agent setup the checks are
+// reported as skipped rather than as failures, so the summary never shows red
+// checks under a "complete" headline.
+func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []agentCheck, issues []agentIssue, skipped bool) {
 	divider := styles.Muted.Render("─────────────────────────────────")
 
+	headlineStyle := styles.Success
+	if result.Status == "incomplete" {
+		headlineStyle = styles.Warning
+	}
+
 	fmt.Fprintln(w, divider)
-	fmt.Fprintln(w, styles.Success.Render("  Setup complete!"))
+	fmt.Fprintln(w, headlineStyle.Render("  "+successHeadline(result.Status, len(issues))))
 	fmt.Fprintln(w, divider)
 	fmt.Fprintln(w)
 
@@ -333,15 +359,37 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult) {
 	if result.ConfigScope != "" {
 		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Config saved (%s)", result.ConfigScope)))
 	}
-	for _, agent := range harness.DetectedAgents() {
-		if agent.Checks == nil {
-			continue
-		}
-		for _, check := range agent.Checks() {
+	if skipped {
+		fmt.Fprintln(w, styles.Muted.Render("  Coding agent setup skipped — run: basecamp setup"))
+	} else {
+		for _, check := range checks {
 			fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
 		}
 	}
 	fmt.Fprintln(w)
+
+	// Remediation for anything that did not complete. Each issue carries its own
+	// check's hint, so guidance stays specific to the failing agent instead of
+	// hardcoding one agent's commands.
+	if len(issues) > 0 {
+		fmt.Fprintln(w, styles.Body.Render("  Some steps need attention:"))
+		for _, issue := range issues {
+			// Check names usually already carry the agent (e.g. "Claude Code
+			// Plugin"); only prefix when they don't, to avoid "Claude Code —
+			// Claude Code Plugin".
+			label := issue.Check
+			if issue.Agent != "" && !strings.HasPrefix(issue.Check, issue.Agent) {
+				label = issue.Agent + " — " + issue.Check
+			}
+			line := "    " + label
+			if issue.Hint != "" {
+				line += ": " + issue.Hint
+			}
+			fmt.Fprintln(w, styles.Warning.Render(line))
+		}
+		fmt.Fprintln(w, styles.Muted.Render("    Then verify with: basecamp doctor"))
+		fmt.Fprintln(w)
+	}
 
 	// Example commands
 	fmt.Fprintln(w, styles.Body.Render("  Try these commands:"))
@@ -400,10 +448,14 @@ func fetchProjectName(cmd *cobra.Command, app *appctx.App, projectID string) str
 
 // wizardSummaryLine builds a concise summary for the output envelope.
 func wizardSummaryLine(result WizardResult) string {
-	if result.AccountName != "" {
-		return fmt.Sprintf("Setup complete - %s", result.AccountName)
+	headline := "Setup complete"
+	if result.Status == "incomplete" {
+		headline = "Setup finished with issues"
 	}
-	return "Setup complete"
+	if result.AccountName != "" {
+		return fmt.Sprintf("%s - %s", headline, result.AccountName)
+	}
+	return headline
 }
 
 // wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
