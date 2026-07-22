@@ -91,18 +91,31 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Run gosec
+      # SARIF comes from golangci-lint (gosec linter only), not the standalone
+      # gosec binary, so the Security tab reflects exactly what the required
+      # Lint gate enforces: the standalone binary can't read `//nolint:gosec`
+      # suppressions or .golangci.yml gosec excludes, so it perpetually
+      # reported every accepted site and turned the code-scanning "gosec"
+      # check red on any PR touching an annotated line. One suppression
+      # convention, one source of truth. To audit accepted findings:
+      # `grep -rn 'nolint:gosec'` — justifications are inline at each site.
+      # --issues-exit-code 0 keeps this job advisory; a real escape still
+      # fails the required Lint check, and code scanning still alerts on it.
+      - name: Run gosec (via golangci-lint)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.11.1  # keep in lockstep with test.yml Lint
+          args: --enable-only gosec --build-tags dev --issues-exit-code 0 --output.sarif.path gosec-results.sarif
+
+      - name: Keep code-scanning tool continuity
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
-          # Advisory scan: full SARIF uploaded to the Security tab for visibility
-          # (-no-fail). The enforcing gosec gate is golangci-lint (make lint),
-          # which honors the repo's //nolint:gosec suppressions per-site; the
-          # standalone binary can't read those, so making it hard-fail would
-          # require either re-annotating every accepted site or excluding rule
-          # IDs globally — and a global exclude (e.g. G101/G204) would create
-          # real blind spots for new hard-coded creds / unsafe exec, including in
-          # release scans. Keep the full advisory scan instead.
-          gosec -tags dev -no-fail -fmt sarif -out gosec-results.sarif ./...
+          # Rewrite the driver name so this upload supersedes the historical
+          # standalone-gosec analyses (first main upload closes their alerts as
+          # "fixed"), and restore per-rule identity: golangci-lint flattens every
+          # finding to ruleId "gosec", but the G### code leads each message.
+          jq '.runs[].tool.driver.name = "Golang security checks by gosec"
+              | .runs[].results[] |= (.ruleId = ((.message.text // "" | capture("^(?<g>G[0-9]{3}):").g) // .ruleId))' \
+            gosec-results.sarif > tmp.sarif && mv tmp.sarif gosec-results.sarif
 
       - name: Upload gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
