@@ -972,6 +972,16 @@ cat .basecamp/config.json 2>/dev/null || echo "No project configured"
 basecamp doctor --json                            # Check CLI health, auth, connectivity
 ```
 
+**Coding agent setup (non-interactive):**
+```bash
+basecamp setup agents                             # Install skill + connect detected agent(s)
+basecamp setup agents --json                      # Structured result envelope
+```
+`setup agents` installs the baseline skill and connects coding agents without
+prompting. Selection is driven by `BASECAMP_SETUP_AGENT` (`claude`, `codex`,
+`all`, or `none`); unset auto-detects — one detected agent is connected, several
+leave the skill only and surface the per-agent `basecamp setup <id>` commands.
+
 **Rate limiting (429):** The CLI handles backoff automatically. If you see 429 errors, reduce request frequency.
 
 **Authentication errors:**

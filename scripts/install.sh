@@ -477,12 +477,40 @@ main() {
   fi
 }
 
+# binary_supports_setup_agents reports whether the installed binary exposes the
+# `setup agents` subcommand (added after v0.7.2). The hosted install.sh from main
+# can outrun the latest release, so we probe rather than assume.
+binary_supports_setup_agents() {
+  "$1" setup --help 2>/dev/null | grep -qE '^[[:space:]]+agents[[:space:]]'
+}
+
 # post_install_setup installs the baseline skill and connects coding agents
 # without prompting. It honors BASECAMP_SETUP_AGENT (claude|codex|all|none;
 # unset = auto-detect). Never runs the interactive wizard.
+#
+# Cross-version: newer binaries get the intent-neutral `setup agents`. Older
+# release binaries (no `setup agents`) fall back WITHOUT reintroducing the
+# Claude-first bug — only an explicitly selected agent is connected; an unset,
+# auto, or ambiguous selector installs the shared skill only (`skill install`).
 post_install_setup() {
   local binary_name="$1"
-  "$BIN_DIR/$binary_name" setup agents || true
+  local bin="$BIN_DIR/$binary_name"
+
+  if binary_supports_setup_agents "$bin"; then
+    "$bin" setup agents || true
+    return 0
+  fi
+
+  case "${BASECAMP_SETUP_AGENT:-}" in
+    claude|codex)
+      "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
+      ;;
+    *)
+      # Intent-neutral on old binaries: install the shared skill, never pick an
+      # agent. The user connects one via the printed "Next steps".
+      "$bin" skill install || true
+      ;;
+  esac
 }
 
 # Guard so sourcing the script (e.g. from tests) doesn't run the installer.

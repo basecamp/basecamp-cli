@@ -208,6 +208,33 @@ function Test-InteractiveSession {
   }
 }
 
+# Invoke-PostInstallSetup installs the baseline skill and connects coding agents
+# without prompting, honoring BASECAMP_SETUP_AGENT (claude|codex|all|none;
+# unset = auto-detect). It is strictly best-effort: agent setup must never fail
+# an otherwise-successful install, so every native call is wrapped so a nonzero
+# exit (amplified by $ErrorActionPreference='Stop' +
+# $PSNativeCommandUseErrorActionPreference) cannot terminate the installer.
+#
+# Cross-version: newer binaries expose the intent-neutral `setup agents`. Older
+# release binaries (the hosted install.ps1 from main can outrun the latest
+# release) fall back WITHOUT reintroducing the Claude-first bug — only an
+# explicitly selected agent is connected; unset/auto/ambiguous installs the
+# shared skill only.
+function Invoke-PostInstallSetup([string]$Binary) {
+  try {
+    $help = & $Binary setup --help 2>$null
+    if ($help -match '(?m)^\s+agents\s') {
+      & $Binary setup agents
+    } elseif ($env:BASECAMP_SETUP_AGENT -in @('claude', 'codex')) {
+      & $Binary setup $env:BASECAMP_SETUP_AGENT
+    } else {
+      & $Binary skill install
+    }
+  } catch {
+    # Best-effort — swallow any failure from the agent/skill setup step.
+  }
+}
+
 function Main {
   $arch = Get-PlatformArch
   if (-not $BinDir) {
@@ -269,9 +296,8 @@ function Main {
     Write-Host ''
     if ($SkipSetup -eq '1') {
       Step 'Skipping setup wizard (BASECAMP_SKIP_SETUP=1)'
-      # Still install the baseline skill and connect coding agents (never prompts).
-      # Honors BASECAMP_SETUP_AGENT (claude|codex|all|none; unset = auto-detect).
-      & $installedBinary setup agents
+      # Still install the baseline skill and connect coding agents (best-effort).
+      Invoke-PostInstallSetup $installedBinary
       Write-Host ''
       Write-Host '  Next steps:'
       Write-Host '    basecamp auth login        Authenticate with Basecamp'
@@ -285,9 +311,8 @@ function Main {
       Write-Host ''
     } else {
       Info 'Skipping interactive setup because PowerShell is running non-interactively.'
-      # Install the baseline skill and connect coding agents (never prompts).
-      # Honors BASECAMP_SETUP_AGENT (claude|codex|all|none; unset = auto-detect).
-      & $installedBinary setup agents
+      # Install the baseline skill and connect coding agents (best-effort).
+      Invoke-PostInstallSetup $installedBinary
       Write-Host ''
       Write-Host '  Installed executable:'
       Write-Host "    $installedBinary"
