@@ -13,8 +13,8 @@ document is the design communiqué behind that SDK issue.
 That issue, not this file, is the durable record.
 
 **Lifecycle:** this file is a transient handoff artifact. It is deleted in the
-same commit that wires the feature once the SDK unblocks; the SDK issue and PR
-#554 remain the durable record.
+same commit that wires the feature once the SDK unblocks; the SDK issue and this
+PR remain the durable record.
 
 ## What the CLI needs
 
@@ -66,14 +66,19 @@ that have a CLI create command:
 | Document          | `documents_controller.rb`         | `CreateDocumentInput`        | **deferred** (see below) |
 | Upload            | `uploads_controller.rb`, `vaults/uploads_controller.rb` | `CreateUploadInput` | **deferred** (see below) |
 
-**Documents and uploads are deferred, not silently included.** The CLI's `docs
-create` and `uploads create` accept an arbitrary target folder via
-`--vault`/`--folder` (`internal/commands/files.go:623`,
-`internal/commands/files.go:923`). For a **nested** vault, BC3 ignores the
-explicit `visible_to_clients` param and inherits the folder's visibility — so the
-flag would be a silent no-op there, which is unacceptable. Before these two
-commands carry the flag, the CLI must first verify the target is the docked/root
-vault (or reject the flag for nested folders). Tracked as follow-up.
+**Documents and uploads are deferred at the CLI layer, not silently included.**
+The CLI's `docs create` and `uploads create` (`newDocsCreateCmd` /
+`newUploadsCreateCmd` in `internal/commands/files.go`) accept an arbitrary target
+folder via `--vault`/`--folder`. For a **nested** vault, BC3 ignores the explicit
+`visible_to_clients` param and inherits the folder's visibility — so the flag
+would be a silent no-op there, which is unacceptable. Before these two commands
+carry the flag, the CLI must first verify the target is the docked/root vault (or
+reject the flag for nested folders). Tracked in basecamp-cli **#556**.
+
+Note this is a **CLI-UX** constraint, not an SDK one: the SDK should still expose
+`visible_to_clients` on `CreateDocumentInput` / `CreateUploadInput` for
+completeness (the server accepts it), and #395 covers all six inputs. The CLI
+just withholds the *flag* on those two commands until #556 adds the gating.
 
 (The server also accepts the param for cloud files, google documents, and doors —
 out of scope for #457; no CLI create commands.)
@@ -109,8 +114,8 @@ states: absent (`nil` → inherit from parent), explicit `true`, and explicit
 `false` (team-only). `bool,omitempty` cannot represent explicit `false` — it
 would be dropped from the body and silently inherit.
 
-This mirrors the SDK's existing precedent for `AllDay`
-(`pkg/basecamp/schedules.go:97,123` — `AllDay *bool
+This mirrors the SDK's existing precedent for `AllDay` on the schedule-entry
+request structs in `pkg/basecamp/schedules.go` (`AllDay *bool
 \`json:"all_day,omitempty"\``; see `TestSchedulesService_UpdateEntryAllDay`,
 which asserts that setting it to `false` sends `false` rather than omitting it).
 
@@ -131,6 +136,15 @@ which asserts that setting it to `false` sends `false` rather than omitting it).
 
 Messages is the priority (the issue's core use case); todolists, check-in
 questions, and schedule entries can land in the same SDK change or follow.
+Documents and uploads are in scope for the SDK (completeness) even though the CLI
+defers their flag — see #556.
+
+**#457 closure:** the intent is a single CLI PR wiring the four initial commands
+(messages, todolists, check-in questions, schedule) once their SDK inputs land,
+closing #457; docs/uploads follow via #556. Because #395 prioritizes messages, if
+the message input lands well ahead of the others we may instead ship messages
+first and close #457, moving the remaining three to a follow-up — a sequencing
+call to make when the SDK unblocks, not now.
 
 ## CLI wiring that follows (after SDK bump)
 
@@ -151,4 +165,4 @@ single atomic create call — no follow-up, no partial-success path, no 403
 handling, since the unsupported types don't get the flag. Then: tests asserting
 the create body carries `visible_to_clients` for nil/true/false, regenerate
 `.surface`, update `skills/basecamp/SKILL.md`, `bin/ci` green. Delete this file in
-that commit and flip PR #554 to ready (`Refs #457` → `Fixes #457`).
+that commit and flip this PR to ready (`Refs #457` → `Fixes #457`).
