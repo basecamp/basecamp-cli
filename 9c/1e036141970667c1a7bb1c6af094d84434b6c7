@@ -1,0 +1,84 @@
+e2e/agent_hook.bats
+  s_5e51cc5fce0c0c::t_6047102b0642f3 1-8,12-28,39-48,81-94,98-107
+  s_5e51cc5fce0c0c::t_1f4937fc4c79b0 10-11
+  s_5e51cc5fce0c0c::t_5e3fce292e03fb 9,29-38,49-54,64-80,95-97
+  s_5e51cc5fce0c0c::t_6469200c3f7cca 55-63
+internal/commands/agent_hook.go
+  s_5e51cc5fce0c0c::t_6047102b0642f3 1-7,9,11-21,24-47,56-60,74-78,144-167,170-190,192-197,201,208,210,211-261,263-268,275,291-295,297-299,301-342,351-389,392-394,397-399,401-408,410-414,421-425
+  s_5e51cc5fce0c0c::t_19a8218d86c506 415-420
+  s_5e51cc5fce0c0c::t_d22535ba088830 262
+  s_5e51cc5fce0c0c::t_38ea46fb97dce2 296
+  s_5e51cc5fce0c0c::t_f7a2fb2844a874 83-87,90-94
+  s_5e51cc5fce0c0c::t_0b658015879ff0 22
+  s_5e51cc5fce0c0c::t_6827b2c5f1162c 23
+  s_5e51cc5fce0c0c::t_ce79a10555b280 198-200,202-207,209
+  s_5e51cc5fce0c0c::t_c8ad1570599a68 48-55,61-64,66-73
+  s_5e51cc5fce0c0c::t_beba16c43ce13d 65
+  s_5e51cc5fce0c0c::t_54d5b25be0eb6c 269-272
+  s_5e51cc5fce0c0c::t_6d011d2c26abe0 273-275,290
+  s_5e51cc5fce0c0c::t_1ca40f1efd4cf7 300
+  s_5e51cc5fce0c0c::t_c7d12769b1bf01 390-391,395-396,400,409
+  s_5e51cc5fce0c0c::t_4cb9711d232a94 8
+  s_5e51cc5fce0c0c::t_9d77fa39f663f7 191
+  s_5e51cc5fce0c0c::t_168e15eb731187 168-169
+  s_5e51cc5fce0c0c::t_b400f87125e7c3 88,117-141
+  s_5e51cc5fce0c0c::t_8d87c34fdbcb18 276-288
+  s_5e51cc5fce0c0c::t_3275127be33488 142,343-350
+  s_c9b7cecf44b5ed::t_46e288ae2fb585 143
+  s_c9b7cecf44b5ed::t_dc2ff2000cba38 10,79-82,89,95-116
+internal/commands/agent_hook_test.go
+  s_5e51cc5fce0c0c::t_6047102b0642f3 1-12,14-20,22-273,432-487,492-549,558-560
+  s_5e51cc5fce0c0c::t_068341f8dcc09e 334-337
+  s_5e51cc5fce0c0c::t_1c9e1d16b69fe5 297-299,302-304,313
+  s_5e51cc5fce0c0c::t_042971c0725a76 550-557
+  s_5e51cc5fce0c0c::t_51b3ccb51f1d29 13
+  s_5e51cc5fce0c0c::t_c5a1667cef57d9 274-296,300-301,305-312,314-333,338-350
+  s_5e51cc5fce0c0c::t_132c0b0a07065e 21
+  s_5e51cc5fce0c0c::t_620b010f608533 351-431
+  s_5e51cc5fce0c0c::t_b6167f44b1c5ce 488-491
+internal/cli/root.go
+  s_5e51cc5fce0c0c::t_304f7e1bae144c 345
+scripts/check-bare-groups.sh
+  s_5e51cc5fce0c0c::t_ab0a07eab08a36 45-48
+hooks/hooks.json
+  s_5e51cc5fce0c0c::t_99a236ab6b469f 1-54
+AGENTS.md
+  s_5e51cc5fce0c0c::t_52dfc412a37876 38
+install.md
+  s_5e51cc5fce0c0c::t_55ff7450e1032b 123
+  s_5e51cc5fce0c0c::t_4e2e952be81500 131
+internal/commands/wizard_codex.go
+  s_5e51cc5fce0c0c::t_a05017f8377ea9 68-69,71
+  s_5e51cc5fce0c0c::t_f25095066a883b 70
+internal/commands/wizard_codex_test.go
+  s_5e51cc5fce0c0c::t_3b62dba61d279b 159-166
+.codex-plugin/plugin.json
+  s_5e51cc5fce0c0c::t_a65607f3c14c0b 17
+README.md
+  s_5e51cc5fce0c0c::t_4699ea5c237758 155
+  s_5e51cc5fce0c0c::t_a870b82abc5cb5 153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9c1e036141970667c1a7bb1c6af094d84434b6c7",
+  "prompts": {},
+  "sessions": {
+    "s_5e51cc5fce0c0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e59bd3a-435a-4dd5-b738-4933cdf28d49",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_c9b7cecf44b5ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab562d91-3cc7-47e1-bd7b-46f572409e16",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
