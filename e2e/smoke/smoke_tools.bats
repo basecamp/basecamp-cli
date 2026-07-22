@@ -17,10 +17,8 @@ setup_file() {
 }
 
 @test "tools create creates a tool" {
-  ensure_messageboard || return 0
-
   run_smoke basecamp tools create "Smoke tool $(date +%s)" \
-    --source "$QA_MESSAGEBOARD" -p "$QA_PROJECT" --json
+    --type message_board -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'

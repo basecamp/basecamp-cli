@@ -8,38 +8,58 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// TestToolsCreateAcceptsCloneAlias tests that --clone works as an alias for --source.
-// Previously, MarkFlagRequired("source") caused Cobra to reject --clone before RunE ran.
-func TestToolsCreateAcceptsCloneAlias(t *testing.T) {
-	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
-
-	project := ""
-	cmd := newToolsCreateCmd(&project)
-
-	// --clone should reach the RunE guard, not fail with "required flag not set"
-	err := executeCommand(cmd, app, "--clone", "999", "My Tool")
-
-	// Expect an API/network error — NOT "required flag" and NOT the RunE usage guard
-	require.NotNil(t, err)
-	var e *output.Error
-	if errors.As(err, &e) {
-		assert.NotEqual(t, "--source or --clone is required (ID of tool to clone)", e.Message)
-	}
-	assert.NotContains(t, err.Error(), "required flag")
+// mockToolCreateTransport captures the create request and returns a 201 Tool.
+// Project resolution is served so bucket resolution reaches the create call.
+type mockToolCreateTransport struct {
+	createCalled bool
+	capturedPath string
+	capturedBody map[string]any
 }
 
-// TestToolsCreateRequiresSourceOrClone tests that omitting both --source and --clone
-// produces a usage error from the RunE guard.
-func TestToolsCreateRequiresSourceOrClone(t *testing.T) {
-	app, _ := setupTestApp(t)
-	app.Config.ProjectID = "123"
+func (t *mockToolCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/dock/tools.json") {
+		t.createCalled = true
+		t.capturedPath = req.URL.Path
+		if req.Body != nil {
+			data, _ := io.ReadAll(req.Body)
+			_ = json.Unmarshal(data, &t.capturedBody)
+		}
+		body := `{"id": 777, "title": "Intervention Log", "name": "message_board", "enabled": true,` +
+			`"position": 3, "status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	body := `{}`
+	if strings.Contains(req.URL.Path, "/projects.json") {
+		body = `[{"id": 123, "name": "Test Project"}, {"id": 456, "name": "Other Project"}]`
+	}
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestToolsCreateRequiresType verifies that omitting --type produces a usage
+// error naming the flag and issues no create request.
+func TestToolsCreateRequiresType(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
 
 	project := ""
 	cmd := newToolsCreateCmd(&project)
@@ -49,7 +69,192 @@ func TestToolsCreateRequiresSourceOrClone(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
-	assert.Equal(t, "--source or --clone is required (ID of tool to clone)", e.Message)
+	assert.Equal(t, "--type is required", e.Message)
+	assert.False(t, transport.createCalled, "no create request should be issued")
+}
+
+// TestToolsCreateRejectsUnknownType verifies that an unrecognized --type errors
+// with the friendly nouns in stable slice order, and issues no create request.
+func TestToolsCreateRejectsUnknownType(t *testing.T) {
+	for _, unknown := range []string{"board", "nope"} {
+		transport := &mockToolCreateTransport{}
+		app, _ := newTestAppWithTransport(t, transport)
+
+		project := ""
+		cmd := newToolsCreateCmd(&project)
+
+		err := executeCommand(cmd, app, "--type", unknown)
+		require.NotNil(t, err, "type %q should be rejected", unknown)
+
+		var e *output.Error
+		require.True(t, errors.As(err, &e))
+		assert.Contains(t, e.Message, "chat, inbox, kanban_board, message_board, questionnaire, schedule, todoset, vault")
+		assert.False(t, transport.createCalled, "no create request should be issued for %q", unknown)
+	}
+}
+
+// TestNormalizeToolType covers the closed 8-set: each friendly noun, a
+// degenerate spelling, and the canonical class-name all map to the right
+// tool_type; bare "board" is rejected as ambiguous.
+func TestNormalizeToolType(t *testing.T) {
+	cases := []struct {
+		input     string
+		canonical string
+	}{
+		{"chat", "Chat::Transcript"},
+		{"campfire", "Chat::Transcript"},
+		{"Chat::Transcript", "Chat::Transcript"},
+		{"inbox", "Inbox"},
+		{"email", "Inbox"},
+		{"Inbox", "Inbox"},
+		{"kanban_board", "Kanban::Board"},
+		{"cardtable", "Kanban::Board"},
+		{"Kanban::Board", "Kanban::Board"},
+		{"message_board", "Message::Board"},
+		{"message-board", "Message::Board"},
+		{"messages", "Message::Board"},
+		{"Message::Board", "Message::Board"},
+		{"questionnaire", "Questionnaire"},
+		{"checkins", "Questionnaire"},
+		{"Questionnaire", "Questionnaire"},
+		{"schedule", "Schedule"},
+		{"calendar", "Schedule"},
+		{"Schedule", "Schedule"},
+		{"todoset", "Todoset"},
+		{"todos", "Todoset"},
+		{"Todoset", "Todoset"},
+		{"vault", "Vault"},
+		{"docs", "Vault"},
+		{"Vault", "Vault"},
+	}
+	for _, tc := range cases {
+		got, ok := normalizeToolType(tc.input)
+		assert.True(t, ok, "input %q should normalize", tc.input)
+		assert.Equal(t, tc.canonical, got, "input %q", tc.input)
+	}
+
+	for _, bad := range []string{"board", "", "nope", "widget"} {
+		_, ok := normalizeToolType(bad)
+		assert.False(t, ok, "input %q should be rejected", bad)
+	}
+}
+
+// TestToolsCreateRejectsExtraPositional verifies MaximumNArgs(1): a stray second
+// positional errors instead of being silently dropped.
+func TestToolsCreateRejectsExtraPositional(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "chat", "Title A", "Title B")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "accepts at most 1 arg")
+}
+
+// TestToolsCreateExplicitProjectWinsAndIsSent verifies that an explicit
+// --in/--project beats the global flag and config default, and the resolved
+// bucket is the one posted to.
+func TestToolsCreateExplicitProjectWinsAndIsSent(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Flags.Project = "123"
+	app.Config.ProjectID = "123"
+
+	project := "456" // explicit --in wins over flag/config
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "message_board")
+	require.NoError(t, err)
+
+	require.True(t, transport.createCalled)
+	assert.True(t, strings.HasSuffix(transport.capturedPath, "/99999/buckets/456/dock/tools.json"),
+		"create path = %s", transport.capturedPath)
+	assert.Equal(t, "Message::Board", transport.capturedBody["tool_type"])
+}
+
+// TestToolsCreateRequiresResolvableProject verifies that with nothing resolvable
+// (no flag, no config, non-interactive) create errors before any request.
+func TestToolsCreateRequiresResolvableProject(t *testing.T) {
+	app, _ := setupTestApp(t)
+	// No ProjectID configured — nothing to resolve, non-interactive.
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "chat")
+	require.NotNil(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "Project ID required", e.Message)
+}
+
+// TestToolsCreateSendsTitle verifies a valid title reaches the request body.
+func TestToolsCreateSendsTitle(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "message_board", "Intervention Log")
+	require.NoError(t, err)
+
+	require.True(t, transport.createCalled)
+	assert.Equal(t, "Intervention Log", transport.capturedBody["title"])
+	assert.Equal(t, "Message::Board", transport.capturedBody["tool_type"])
+}
+
+// TestToolsCreateHappyPath verifies the full request path and 201 payload
+// handling for a title-less create.
+func TestToolsCreateHappyPath(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "todos")
+	require.NoError(t, err)
+
+	require.True(t, transport.createCalled)
+	assert.True(t, strings.HasSuffix(transport.capturedPath, "/99999/buckets/123/dock/tools.json"),
+		"create path = %s", transport.capturedPath)
+	assert.Equal(t, "Todoset", transport.capturedBody["tool_type"])
+	_, hasTitle := transport.capturedBody["title"]
+	assert.False(t, hasTitle, "title should be omitted when not provided")
+
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.True(t, envelope.OK)
+	assert.Equal(t, int64(777), envelope.Data.ID)
+}
+
+// TestToolsCreateTypeCompletion verifies the registered --type completion
+// returns the eight friendly nouns in stable slice order.
+func TestToolsCreateTypeCompletion(t *testing.T) {
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	fn, ok := cmd.GetFlagCompletionFunc("type")
+	require.True(t, ok)
+	require.NotNil(t, fn)
+
+	comps, directive := fn(cmd, nil, "")
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+	assert.Equal(t, []string{
+		"chat", "inbox", "kanban_board", "message_board",
+		"questionnaire", "schedule", "todoset", "vault",
+	}, comps)
 }
 
 // TestToolsRepositionAcceptsPosAlias tests that --pos works as an alias for --position.
@@ -132,7 +337,7 @@ func TestToolsCreateRejectsLongTitle(t *testing.T) {
 	cmd := newToolsCreateCmd(&project)
 
 	longTitle := strings.Repeat("x", 65)
-	err := executeCommand(cmd, app, "--source", "999", longTitle)
+	err := executeCommand(cmd, app, "--type", "chat", longTitle)
 	require.NotNil(t, err)
 
 	var e *output.Error
@@ -149,7 +354,7 @@ func TestToolsCreateAcceptsMaxTitle(t *testing.T) {
 	cmd := newToolsCreateCmd(&project)
 
 	maxTitle := strings.Repeat("x", 64)
-	err := executeCommand(cmd, app, "--source", "999", maxTitle)
+	err := executeCommand(cmd, app, "--type", "chat", maxTitle)
 	require.NotNil(t, err) // fails at network, not validation
 
 	var e *output.Error
