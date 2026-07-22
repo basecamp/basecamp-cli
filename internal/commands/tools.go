@@ -28,7 +28,11 @@ Chat, Schedule, etc. Tool IDs can be found in the project's dock array
 
 Tools are created by type (e.g., add a second chat with --type chat).
 Disabling a tool hides it from the dock but preserves its content.`,
-		Annotations: map[string]string{"agent_notes": "Dock tools are the sidebar navigation items in a project\nEnable/disable controls visibility without deleting\nCreate by type with --type: chat, inbox, kanban_board, message_board, questionnaire, schedule, todoset, vault (create-by-type is BC5-only)"},
+		Annotations: map[string]string{"agent_notes": fmt.Sprintf(
+			"Dock tools are the sidebar navigation items in a project\n"+
+				"Enable/disable controls visibility without deleting\n"+
+				"Create by type with --type: %s (create-by-type is BC5-only)",
+			strings.Join(toolTypeFriendlyNames(), ", "))},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name (for breadcrumbs)")
@@ -257,14 +261,14 @@ func newToolsCreateCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create [title]",
 		Short: "Create a new dock tool by type",
-		Long: `Create a new dock tool by type in a project's dock.
+		Long: fmt.Sprintf(`Create a new dock tool by type in a project's dock.
 
 For example, add a second chat with --type chat, or a Message Board with
 --type message_board. An optional title may be given; without one, Basecamp
 assigns the default title for the type.
 
-Accepted types: chat, inbox, kanban_board, message_board, questionnaire,
-schedule, todoset, vault. Create-by-type is BC5-only.`,
+Accepted types: %s. Create-by-type is BC5-only.`,
+			strings.Join(toolTypeFriendlyNames(), ", ")),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if toolType == "" {
