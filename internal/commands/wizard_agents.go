@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +33,62 @@ type agentSetupError struct {
 }
 
 func (e *agentSetupError) Error() string { return e.Summary }
+
+// agentIssue is a single unresolved problem after agent setup ran. Hint carries
+// the failing check's own remediation so reporting stays agent-specific.
+type agentIssue struct {
+	Agent string
+	Check string
+	Hint  string
+}
+
+// agentSetupOutcome reports what happened during the agent-setup step so the
+// wizard can tell a deliberate skip (still "complete") apart from a real
+// failure ("incomplete").
+type agentSetupOutcome struct {
+	Skipped bool
+	Issues  []agentIssue
+}
+
+// collectAgentIssues returns one issue per non-passing check across the given
+// agents. It takes agents as a parameter (rather than reading the global
+// registry) so it stays pure and testable without RegisterAgent side effects.
+func collectAgentIssues(agents []harness.AgentInfo) []agentIssue {
+	var issues []agentIssue
+	for _, a := range agents {
+		if a.Checks == nil {
+			continue
+		}
+		for _, c := range a.Checks() {
+			if c.Status != "pass" {
+				issues = append(issues, agentIssue{Agent: a.Name, Check: c.Name, Hint: c.Hint})
+			}
+		}
+	}
+	return issues
+}
+
+// statusFromOutcome maps an agent-setup outcome to a WizardResult status. A
+// deliberate skip is not a failure, so it stays "complete".
+func statusFromOutcome(o agentSetupOutcome) string {
+	if !o.Skipped && len(o.Issues) > 0 {
+		return "incomplete"
+	}
+	return "complete"
+}
+
+// refreshClaudeMarketplace refreshes the 37signals marketplace cache from source
+// before an install. `claude plugin marketplace add` no-ops on an
+// already-registered marketplace, so a pre-existing entry that still declares the
+// SSH `source: github` shorthand would otherwise strand `claude plugin install`
+// on an SSH clone. `marketplace update` re-clones and picks up the current HTTPS
+// `source: url`. Best-effort: install still proceeds if the refresh fails.
+func refreshClaudeMarketplace(ctx context.Context, claudePath string, stdout, stderr io.Writer) {
+	cmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "update", harness.ClaudeMarketplaceName) //nolint:gosec // G204: claudePath from FindClaudeBinary
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	_ = cmd.Run()
+}
 
 // agentSetupHandlers maps agent ID → setup handler.
 var agentSetupHandlers = map[string]agentSetupHandler{
@@ -78,6 +135,7 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 			mktCmd.Stdout = w
 			mktCmd.Stderr = cmd.ErrOrStderr()
 			_ = mktCmd.Run()
+			refreshClaudeMarketplace(ctx, claudePath, w, cmd.ErrOrStderr())
 
 			var scopeErrors []string
 			for _, scope := range reinstallScopes {
@@ -120,6 +178,10 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 				fmt.Fprintln(w, styles.RenderStatus(true, "Marketplace registered"))
 			}
 
+			// Refresh the cache so a stale SSH-shorthand entry is replaced with
+			// the current HTTPS source before installing.
+			refreshClaudeMarketplace(ctx, claudePath, w, cmd.ErrOrStderr())
+
 			// Install the plugin
 			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudeExpectedPluginKey) //nolint:gosec // G204: claudePath from exec.LookPath
 			installCmd.Stdout = w
@@ -159,10 +221,10 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 
 // wizardAgents offers to set up detected coding agents.
 // Replaces the old wizardClaude() — works for any registered agent.
-func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
+func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, error) {
 	agents := harness.DetectedAgents()
 	if len(agents) == 0 {
-		return nil
+		return agentSetupOutcome{}, nil
 	}
 
 	w := cmd.OutOrStdout()
@@ -192,7 +254,7 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 			fmt.Fprintln(w, styles.RenderStatus(true, a.Name+" plugin installed"))
 		}
 		fmt.Fprintln(w)
-		return nil
+		return agentSetupOutcome{}, nil
 	}
 
 	fmt.Fprintln(w, styles.Heading.Render("  Step 5: Coding Agent Setup"))
@@ -233,14 +295,17 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 			}
 		}
 		fmt.Fprintln(w)
-		return nil //nolint:nilerr // Treat confirm error as skip (user canceled)
+		return agentSetupOutcome{Skipped: true}, nil //nolint:nilerr // Treat confirm error as skip (user canceled)
 	}
 
 	fmt.Fprintln(w)
 
+	var issues []agentIssue
+
 	// Install baseline skill (always, for any agent)
 	if _, err := installSkillFiles(); err != nil {
 		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Skill install failed: %s", err)))
+		issues = append(issues, agentIssue{Check: "Agent skill", Hint: "Run: basecamp setup"})
 	} else {
 		fmt.Fprintln(w, styles.RenderStatus(true, "Agent skill installed"))
 	}
@@ -252,12 +317,16 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) error {
 			continue
 		}
 		if err := handler.Run(cmd, styles); err != nil {
-			return err
+			return agentSetupOutcome{}, err
 		}
 	}
 
+	// Re-check the agents after setup ran so failed installs (e.g. a plugin that
+	// could not be cloned) surface as issues rather than a silent "complete".
+	issues = append(issues, collectAgentIssues(agents)...)
+
 	fmt.Fprintln(w)
-	return nil
+	return agentSetupOutcome{Issues: issues}, nil
 }
 
 // runClaudeSetupNonInteractive attempts plugin install without prompts (for --json/--agent mode).
@@ -280,6 +349,7 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 			mktCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from FindClaudeBinary
 			mktCmd.Stderr = w
 			_ = mktCmd.Run()
+			refreshClaudeMarketplace(ctx, claudePath, nil, w)
 
 			for _, scope := range reinstallScopes {
 				args := []string{"plugin", "install", harness.ClaudeExpectedPluginKey, "--scope", scope}
@@ -305,6 +375,7 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 			marketplaceCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from exec.LookPath
 			marketplaceCmd.Stderr = w
 			_ = marketplaceCmd.Run()
+			refreshClaudeMarketplace(ctx, claudePath, nil, w)
 
 			// Install the plugin
 			installCmd := exec.CommandContext(ctx, claudePath, "plugin", "install", harness.ClaudeExpectedPluginKey) //nolint:gosec // G204: claudePath from exec.LookPath

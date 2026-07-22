@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/skills"
@@ -92,6 +93,63 @@ func TestWizardSummaryLine(t *testing.T) {
 			assert.Equal(t, tt.expected, wizardSummaryLine(tt.result))
 		})
 	}
+}
+
+// TestWizardSummaryLineIncomplete verifies the summary reflects an unhealthy
+// agent-setup outcome instead of claiming completion.
+func TestWizardSummaryLineIncomplete(t *testing.T) {
+	assert.Equal(t, "Setup finished with issues",
+		wizardSummaryLine(WizardResult{Status: "incomplete"}))
+	assert.Equal(t, "Setup finished with issues - Test Co",
+		wizardSummaryLine(WizardResult{Status: "incomplete", AccountName: "Test Co"}))
+}
+
+// TestSuccessHeadline verifies the completion banner is honest when the
+// agent-setup step left unresolved issues.
+func TestSuccessHeadline(t *testing.T) {
+	assert.Equal(t, "Setup complete!", successHeadline("complete", 0))
+	assert.Equal(t, "Setup complete!", successHeadline("", 0))
+	assert.Equal(t, "Setup finished — 1 step needs attention", successHeadline("incomplete", 1))
+	assert.Equal(t, "Setup finished — 2 steps need attention", successHeadline("incomplete", 2))
+}
+
+// TestStatusFromOutcome verifies a deliberate skip stays complete while real
+// issues mark the run incomplete.
+func TestStatusFromOutcome(t *testing.T) {
+	assert.Equal(t, "complete", statusFromOutcome(agentSetupOutcome{}))
+	assert.Equal(t, "complete", statusFromOutcome(agentSetupOutcome{Skipped: true}))
+	assert.Equal(t, "complete",
+		statusFromOutcome(agentSetupOutcome{Skipped: true, Issues: []agentIssue{{Check: "x"}}}))
+	assert.Equal(t, "incomplete",
+		statusFromOutcome(agentSetupOutcome{Issues: []agentIssue{{Check: "Claude Code Plugin"}}}))
+}
+
+// TestCollectAgentIssues verifies non-passing checks become issues carrying the
+// agent name and the check's own hint, and passing checks are ignored. Agents
+// are supplied directly so the test never mutates the global registry.
+func TestCollectAgentIssues(t *testing.T) {
+	agents := []harness.AgentInfo{
+		{
+			Name: "Claude Code",
+			Checks: func() []*harness.StatusCheck {
+				return []*harness.StatusCheck{
+					{Name: "Claude Code Skill", Status: "pass"},
+					{Name: "Claude Code Plugin", Status: "fail", Hint: "Run: basecamp setup claude"},
+				}
+			},
+		},
+		{
+			Name:   "Codex",
+			Checks: func() []*harness.StatusCheck { return []*harness.StatusCheck{{Name: "Codex Plugin", Status: "pass"}} },
+		},
+		{Name: "NoChecks", Checks: nil},
+	}
+
+	issues := collectAgentIssues(agents)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Claude Code", issues[0].Agent)
+	assert.Equal(t, "Claude Code Plugin", issues[0].Check)
+	assert.Equal(t, "Run: basecamp setup claude", issues[0].Hint)
 }
 
 // TestWizardBreadcrumbs verifies breadcrumb generation based on wizard outcome.
@@ -471,6 +529,48 @@ func TestSetupClaudeNonInteractiveScopeAwareReinstall(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope user")
 	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope project")
+	// Refresh the marketplace cache before reinstalling so a stale SSH-shorthand
+	// entry is replaced with the current HTTPS source (issue #417).
+	assert.Contains(t, string(calls), "plugin marketplace update 37signals")
+}
+
+// TestSetupClaudeNonInteractiveRefreshesMarketplace verifies the fresh-install
+// path refreshes the marketplace cache before `plugin install`, so a stale
+// `source: github` entry (which would clone over SSH) is replaced with the
+// current HTTPS `source: url` first (issue #417).
+func TestSetupClaudeNonInteractiveRefreshesMarketplace(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// ~/.claude exists (Claude detected) but no plugin installed → fresh install.
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+
+	binDir := filepath.Join(home, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	logFile := filepath.Join(home, "claude-calls.log")
+	stubScript := "#!/bin/sh\n" +
+		"echo \"$*\" >> \"" + logFile + "\"\n" +
+		"exit 0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(stubScript), 0o755)) //nolint:gosec // G306: test helper
+	t.Setenv("PATH", binDir)
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	require.NoError(t, cmd.Execute())
+
+	calls, readErr := os.ReadFile(logFile)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(calls), "plugin marketplace update 37signals",
+		"fresh install should refresh the marketplace cache before installing")
+	assert.Contains(t, string(calls), "plugin install basecamp@37signals")
 }
 
 // TestJoinNames verifies name joining with commas and "and".
