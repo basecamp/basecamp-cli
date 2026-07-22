@@ -114,7 +114,7 @@ jobs:
           # "fixed"), and restore per-rule identity: golangci-lint flattens every
           # finding to ruleId "gosec", but the G### code leads each message.
           jq '.runs[].tool.driver.name = "Golang security checks by gosec"
-              | .runs[].results[] |= (.ruleId = ((.message.text // "" | capture("^(?<g>G[0-9]{3}):").g) // .ruleId))' \
+              | .runs[].results[]? |= (.ruleId = ((.message.text // "" | capture("^(?<g>G[0-9]{3}):").g)? // .ruleId))' \
             gosec-results.sarif > tmp.sarif && mv tmp.sarif gosec-results.sarif
 
       - name: Upload gosec scan results to GitHub Security tab
